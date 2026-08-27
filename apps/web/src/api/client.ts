@@ -5,6 +5,7 @@ import type {
   TaskPriority,
   TaskStatus,
   TodayStats,
+  UpdateTaskInput,
 } from "../types/models";
 
 const DEV_TOKEN =
@@ -260,6 +261,14 @@ export async function getTasks(): Promise<Task[]> {
   return unwrapTaskList(payload).map(normalizeTask);
 }
 
+export async function getTask(id: string): Promise<Task> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeTask(body);
+}
+
 export async function createTask(input: NewTaskInput): Promise<Task> {
   const payload = await apiRequest<unknown>("/api/v1/tasks", {
     method: "POST",
@@ -292,6 +301,37 @@ export async function updateTaskStatus(
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeTask(body);
+}
+
+export async function updateTask(
+  id: string,
+  input: UpdateTaskInput,
+): Promise<Task> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        ...(input.projectId === undefined
+          ? {}
+          : { project_id: input.projectId }),
+        due_date: input.dueDate,
+        planned_date: input.plannedDate,
+        estimated_minutes: input.estimatedMinutes,
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeTask(body);
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  await apiRequest<void>(`/api/v1/tasks/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function getTodayStats(date: string): Promise<TodayStats> {

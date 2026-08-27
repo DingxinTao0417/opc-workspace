@@ -1,5 +1,6 @@
 import { Check, Circle, CircleDotDashed, Clock3 } from "lucide-react";
 import { useUpdateTaskStatus } from "../api/hooks";
+import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
 
 function formatMinutes(minutes: number | null): string {
@@ -30,6 +31,7 @@ export function TaskList({
   compact?: boolean;
 }) {
   const updateStatus = useUpdateTaskStatus();
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
 
   return (
     <div className={compact ? "task-list task-list-compact" : "task-list"}>
@@ -54,32 +56,39 @@ export function TaskList({
           >
             {statusIcon(task.status)}
           </button>
-          <div className="task-copy min-w-0 flex-1">
-            <div className="task-title">{task.title}</div>
-            {compact ? null : (
-              <div className="task-tags">
-                {(task.tags ?? []).slice(0, 3).map((tag) => (
-                  <span className="tag" key={tag}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="task-meta">
-            <span className="task-project">
-              {task.projectName ?? "未归项目"}
+          <button
+            aria-label={`查看任务：${task.title}`}
+            className="task-open"
+            onClick={() => setTaskDetailId(task.id)}
+            type="button"
+          >
+            <span className="task-copy min-w-0 flex-1">
+              <span className="task-title">{task.title}</span>
+              {compact ? null : (
+                <span className="task-tags">
+                  {(task.tags ?? []).slice(0, 3).map((tag) => (
+                    <span className="tag" key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
-            <span
-              className={`priority priority-${task.priority.toLowerCase()}`}
-            >
-              {task.priority}
+            <span className="task-meta">
+              <span className="task-project">
+                {task.projectName ?? "未归项目"}
+              </span>
+              <span
+                className={`priority priority-${task.priority.toLowerCase()}`}
+              >
+                {task.priority}
+              </span>
+              <span className="duration">
+                <Clock3 size={12} />
+                {formatMinutes(task.estimatedMinutes)}
+              </span>
             </span>
-            <span className="duration">
-              <Clock3 size={12} />
-              {formatMinutes(task.estimatedMinutes)}
-            </span>
-          </div>
+          </button>
         </article>
       ))}
     </div>

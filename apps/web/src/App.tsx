@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { TaskDetailModal } from "./components/TaskDetailModal";
 import { ThemeController } from "./components/ThemeController";
 import { ClientsPage } from "./pages/ClientsPage";
 import { FocusPage } from "./pages/FocusPage";
@@ -74,6 +75,7 @@ export default function App() {
       </Routes>
       <CommandPalette />
       <NewTaskModal />
+      <TaskDetailModal />
       <SettingsModal />
     </>
   );

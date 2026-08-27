@@ -60,7 +60,7 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 		v1.GET("/tasks", service.listTasks)
 		v1.POST("/tasks", service.createTask)
 		v1.GET("/tasks/:id", service.getTask)
-		v1.PATCH("/tasks/:id", service.updateTaskStatus)
+		v1.PATCH("/tasks/:id", service.updateTask)
 		v1.PATCH("/tasks/:id/status", service.updateTaskStatus)
 		v1.DELETE("/tasks/:id", service.deleteTask)
 		v1.GET("/stats/today", service.todayStats)

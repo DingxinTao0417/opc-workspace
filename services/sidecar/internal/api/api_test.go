@@ -142,6 +142,117 @@ func TestTaskCreateListStatusAndTodayStats(t *testing.T) {
 	}
 }
 
+func TestTaskUpdateAndDelete(t *testing.T) {
+	router := newTestAPI(t)
+	create := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks",
+		[]byte(`{"title":"Prepare project brief","priority":"P2","planned_date":"2026-08-28","due_date":"2026-08-28T18:00:00Z","estimated_minutes":45}`),
+		nil,
+	)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	updated := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID,
+		[]byte(`{"title":"Prepare final project brief","description":"Confirm scope and delivery date","priority":"P1","planned_date":"2026-08-29","due_date":"2026-08-29T19:30:00+08:00","estimated_minutes":90}`),
+		nil,
+	)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update status = %d: %s", updated.Code, updated.Body.String())
+	}
+	var updateResponse struct {
+		Data struct {
+			Title            string  `json:"title"`
+			Description      string  `json:"description"`
+			Status           string  `json:"status"`
+			Priority         string  `json:"priority"`
+			PlannedDate      *string `json:"planned_date"`
+			DueDate          *string `json:"due_date"`
+			EstimatedMinutes *int    `json:"estimated_minutes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &updateResponse); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updateResponse.Data.Title != "Prepare final project brief" ||
+		updateResponse.Data.Description != "Confirm scope and delivery date" ||
+		updateResponse.Data.Status != "todo" ||
+		updateResponse.Data.Priority != "P1" ||
+		updateResponse.Data.PlannedDate == nil || *updateResponse.Data.PlannedDate != "2026-08-29" ||
+		updateResponse.Data.DueDate == nil || *updateResponse.Data.DueDate != "2026-08-29T11:30:00Z" ||
+		updateResponse.Data.EstimatedMinutes == nil || *updateResponse.Data.EstimatedMinutes != 90 {
+		t.Fatalf("unexpected update response: %s", updated.Body.String())
+	}
+
+	cleared := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID,
+		[]byte(`{"planned_date":null,"due_date":null,"estimated_minutes":null}`),
+		nil,
+	)
+	if cleared.Code != http.StatusOK {
+		t.Fatalf("clear optional fields status = %d: %s", cleared.Code, cleared.Body.String())
+	}
+	var clearResponse struct {
+		Data struct {
+			PlannedDate      *string `json:"planned_date"`
+			DueDate          *string `json:"due_date"`
+			EstimatedMinutes *int    `json:"estimated_minutes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(cleared.Body.Bytes(), &clearResponse); err != nil {
+		t.Fatalf("decode clear response: %v", err)
+	}
+	if clearResponse.Data.PlannedDate != nil || clearResponse.Data.DueDate != nil || clearResponse.Data.EstimatedMinutes != nil {
+		t.Fatalf("optional fields were not cleared: %s", cleared.Body.String())
+	}
+
+	statusThroughEdit := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID,
+		[]byte(`{"status":"done"}`),
+		nil,
+	)
+	if statusThroughEdit.Code != http.StatusBadRequest {
+		t.Fatalf("status through edit endpoint = %d, want %d: %s", statusThroughEdit.Code, http.StatusBadRequest, statusThroughEdit.Body.String())
+	}
+
+	invalid := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID,
+		[]byte(`{"title":"x"}`),
+		nil,
+	)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid update status = %d, want %d: %s", invalid.Code, http.StatusUnprocessableEntity, invalid.Body.String())
+	}
+
+	deleted := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	missing := performRequest(router, http.MethodGet, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("deleted task status = %d, want %d: %s", missing.Code, http.StatusNotFound, missing.Body.String())
+	}
+}
+
 func TestOriginWhitelistRejectsBrowserRequests(t *testing.T) {
 	router := newTestAPI(t)
 	recorder := performRequest(router, http.MethodGet, "/health", nil, map[string]string{

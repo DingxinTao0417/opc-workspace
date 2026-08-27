@@ -529,6 +529,17 @@ kbd {
   background: #6975df;
 }
 
+.button-danger {
+  border-color: rgba(229, 72, 77, 0.32);
+  background: rgba(229, 72, 77, 0.14);
+  color: var(--danger-text);
+}
+
+.button-danger:hover {
+  border-color: rgba(229, 72, 77, 0.48);
+  background: rgba(229, 72, 77, 0.2);
+}
+
 .button-secondary,
 .button-quiet {
   border-color: var(--border);
@@ -1152,6 +1163,28 @@ kbd {
   background: rgba(94, 106, 210, 0.05);
 }
 
+.task-open {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  grid-column: 2 / -1;
+  grid-template-columns: minmax(160px, 1fr) minmax(240px, auto);
+  gap: 10px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.task-open:focus-visible {
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 2px var(--accent-border);
+}
+
 .task-check {
   display: inline-flex;
   width: 22px;
@@ -1179,6 +1212,7 @@ kbd {
 }
 
 .task-title {
+  display: block;
   overflow: hidden;
   color: var(--text);
   font-size: 12px;
@@ -2475,6 +2509,57 @@ kbd {
   color: var(--text-dim);
 }
 
+.task-detail-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.task-detail-summary > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.task-status-pill {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--panel-hover);
+  color: var(--text-secondary);
+}
+
+.task-status-in_progress {
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.task-status-done {
+  background: rgba(76, 183, 130, 0.12);
+  color: var(--green-light);
+}
+
+.task-detail-delete {
+  margin-right: auto;
+  color: var(--danger-text);
+}
+
+.task-delete-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
 .command-panel {
   top: 18%;
   width: 580px;
@@ -2615,6 +2700,10 @@ kbd {
 
   .task-row {
     grid-template-columns: 24px minmax(140px, 1fr) auto;
+  }
+
+  .task-open {
+    grid-template-columns: minmax(140px, 1fr) auto;
   }
 
   .task-project,

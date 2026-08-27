@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,6 +35,54 @@ type createTaskRequest struct {
 
 type updateTaskStatusRequest struct {
 	Status string `json:"status"`
+}
+
+type nullableStringPatch struct {
+	Set   bool
+	Value *string
+}
+
+func (field *nullableStringPatch) UnmarshalJSON(data []byte) error {
+	field.Set = true
+	if string(data) == "null" {
+		field.Value = nil
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	field.Value = &value
+	return nil
+}
+
+type nullableIntPatch struct {
+	Set   bool
+	Value *int
+}
+
+func (field *nullableIntPatch) UnmarshalJSON(data []byte) error {
+	field.Set = true
+	if string(data) == "null" {
+		field.Value = nil
+		return nil
+	}
+	var value int
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	field.Value = &value
+	return nil
+}
+
+type updateTaskRequest struct {
+	Title            *string             `json:"title"`
+	Description      *string             `json:"description"`
+	Priority         *string             `json:"priority"`
+	ProjectID        nullableStringPatch `json:"project_id"`
+	DueDate          nullableStringPatch `json:"due_date"`
+	PlannedDate      nullableStringPatch `json:"planned_date"`
+	EstimatedMinutes nullableIntPatch    `json:"estimated_minutes"`
 }
 
 type pageMeta struct {
@@ -195,6 +244,122 @@ func (a *API) getTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": task})
 }
 
+func (a *API) updateTask(c *gin.Context) {
+	id, ok := taskID(c)
+	if !ok {
+		return
+	}
+	var input updateTaskRequest
+	if err := decodeJSON(c, &input); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
+		return
+	}
+
+	updates := make(map[string]any)
+	if input.Title != nil {
+		title := strings.TrimSpace(*input.Title)
+		if length := utf8.RuneCountInString(title); length < 2 || length > 200 {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title must contain 2 to 200 characters")
+			return
+		}
+		updates["title"] = title
+	}
+	if input.Description != nil {
+		if utf8.RuneCountInString(*input.Description) > 10_000 {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "description cannot exceed 10000 characters")
+			return
+		}
+		updates["description"] = *input.Description
+	}
+	if input.Priority != nil {
+		priority := strings.TrimSpace(*input.Priority)
+		if _, valid := validPriorities[priority]; !valid {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "priority must be P0, P1, P2, or P3")
+			return
+		}
+		updates["priority"] = priority
+	}
+	if input.ProjectID.Set {
+		if input.ProjectID.Value == nil {
+			updates["project_id"] = nil
+		} else {
+			projectID := strings.TrimSpace(*input.ProjectID.Value)
+			if _, err := uuid.Parse(projectID); err != nil {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "project_id must be a UUID")
+				return
+			}
+			var count int64
+			if err := a.db.WithContext(c.Request.Context()).Table("projects").Where("id = ?", projectID).Count(&count).Error; err != nil {
+				writeDatabaseError(c)
+				return
+			}
+			if count == 0 {
+				writeError(c, http.StatusUnprocessableEntity, "PROJECT_NOT_FOUND", "project_id does not reference an existing project")
+				return
+			}
+			updates["project_id"] = projectID
+		}
+	}
+	if input.DueDate.Set {
+		if input.DueDate.Value == nil {
+			updates["due_date"] = nil
+		} else {
+			parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*input.DueDate.Value))
+			if err != nil {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "due_date must be an RFC 3339 timestamp")
+				return
+			}
+			updates["due_date"] = parsed.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	if input.PlannedDate.Set {
+		if input.PlannedDate.Value == nil {
+			updates["planned_date"] = nil
+		} else {
+			plannedDate := strings.TrimSpace(*input.PlannedDate.Value)
+			if !validDate(plannedDate) {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "planned_date must use YYYY-MM-DD")
+				return
+			}
+			updates["planned_date"] = plannedDate
+		}
+	}
+	if input.EstimatedMinutes.Set {
+		if input.EstimatedMinutes.Value == nil {
+			updates["estimated_minutes"] = nil
+		} else {
+			if *input.EstimatedMinutes.Value < 0 {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "estimated_minutes cannot be negative")
+				return
+			}
+			updates["estimated_minutes"] = *input.EstimatedMinutes.Value
+		}
+	}
+	if len(updates) == 0 {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "at least one editable task field is required")
+		return
+	}
+
+	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	result := a.db.WithContext(c.Request.Context()).Model(&models.Task{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		writeDatabaseError(c)
+		return
+	}
+	if result.RowsAffected == 0 {
+		writeError(c, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
+		return
+	}
+
+	var task models.Task
+	if err := a.db.WithContext(c.Request.Context()).First(&task, "id = ?", id).Error; err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	normalizeTask(&task)
+	c.JSON(http.StatusOK, gin.H{"data": task})
+}
+
 func (a *API) updateTaskStatus(c *gin.Context) {
 	id, ok := taskID(c)
 	if !ok {
@@ -297,6 +462,9 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 	}
 	description := ""
 	if input.Description != nil {
+		if utf8.RuneCountInString(*input.Description) > 10_000 {
+			return models.Task{}, errors.New("description cannot exceed 10000 characters")
+		}
 		description = *input.Description
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)

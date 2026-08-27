@@ -61,3 +61,13 @@ export interface NewTaskInput {
   plannedDate?: string | null;
   estimatedMinutes?: number | null;
 }
+
+export interface UpdateTaskInput {
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  projectId?: string | null;
+  dueDate: string | null;
+  plannedDate: string | null;
+  estimatedMinutes: number | null;
+}

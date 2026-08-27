@@ -1,6 +1,6 @@
 # 任务管理模块
 
-> 实现基线：`HEAD 471f814`（2026-08-27）
+> 实现状态截止：2026-08-27
 >
 > 版本边界：当前代码只有三态任务基础链路；扩展状态、Actor 分派、产出和验收均为 v0.1 规划，Agent 执行为 v0.2 规划。
 
@@ -18,24 +18,24 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已具备可运行的基础 CRUD 纵切的一部分。
+当前状态为**部分完成**，已具备可运行的基础 CRUD 纵切和首个详情编辑闭环。
 
 ### 已实现
 
 - SQLite `tasks` 表，字段包含标题、描述、三态状态、优先级、项目外键、截止/计划日期、预估/实际分钟、手动顺序和时间戳。
 - `tags`、`task_tags` 表已存在，但尚未接入业务 API。
-- 后端支持分页列表、新建、单条读取、三态状态更新和删除。
+- 后端支持分页列表、新建、单条读取、非生命周期字段编辑、三态状态更新和删除。
 - 列表 API 已支持状态、优先级、项目、计划日期、标题/描述关键词和多字段排序。
 - 创建 API 校验字段并可接受 `Idempotency-Key`；项目 ID 存在时验证外键。
 - 前端提供按 `in_progress / todo / done` 分组的列表、新建弹窗、客户端关键词搜索、完成/恢复按钮以及加载/空/错误/重试状态。
+- 任务页和今日页共用任务详情弹窗；点击任务行可查看并编辑标题、描述、优先级、计划日期、截止时间和预计时长，也可经显式二次确认删除。
+- 通用编辑接口拒绝 `status` 等生命周期字段，状态仍由独立状态接口处理。
 
 ### 已知缺口
 
 - 前端固定读取第一页 100 条，搜索也只覆盖已加载数据，没有分页或服务端搜索 UI。
-- `PATCH /tasks/:id` 当前与状态路由共用处理器，只能更新 `status`，尚非完整编辑接口。
-- 前端没有任务详情、编辑、删除确认或删除入口。
 - 状态按钮只在 `done` 与 `todo` 间切换；不能从 UI 开始任务，也没有阻塞、待验收、取消、返工等状态。
-- 项目选择器被禁用；列表响应没有真实项目名 join，标签也不会从后端返回。
+- 项目选择器被禁用；详情只展示已有项目 ID，列表响应没有真实项目名 join，标签也不会从后端返回。
 - 没有父子任务、完成条件、验收策略、Assignment、Artifact、Workflow Event 或乐观并发版本。
 - 没有批量操作、拖拽排序、看板、任务依赖和绑定专注工时。
 - 当前幂等记录只按 key + endpoint 指向资源，尚无请求摘要、响应重放和冲突检测的完整契约。
@@ -98,7 +98,8 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 - 当前 schema：`tasks`、`tags`、`task_tags`；Task 状态仅 `todo / in_progress / done`。
 - 当前 API：`GET/POST /api/v1/tasks`、`GET/PATCH/DELETE /api/v1/tasks/:id`、`PATCH /api/v1/tasks/:id/status`。
-- 当前 `PATCH /tasks/:id` 不是非状态字段编辑接口，扩展状态上线后应废弃通用三态状态写入。
+- 当前 `PATCH /tasks/:id` 只编辑 `title`、`description`、`priority`、`project_id`、`due_date`、`planned_date` 和 `estimated_minutes`；可空字段支持显式 `null` 清除，不能写入 `status`。
+- `PATCH /tasks/:id/status` 暂时保留三态兼容；扩展状态上线后应迁移到显式生命周期命令。
 
 ### v0.1 规划数据
 
@@ -141,7 +142,7 @@ Workflow Event 至少记录创建、编辑、开始、阻塞/解除、改派、�
 
 ## 分阶段实施
 
-1. **任务基础事实**：完整 PATCH、删除 UI、分页/筛选/排序、标签、项目选择、父子任务、批量操作和基础乐观锁，暂时保留三态兼容。
+1. **任务基础事实**：详情、非状态字段 PATCH 和删除确认已交付；继续完成分页/筛选/排序 UI、标签、项目选择、父子任务、批量操作和基础乐观锁，暂时保留三态兼容。
 2. **Actor 与受控状态**：引入 Actor、Assignment、扩展状态、完成条件、验收策略、Artifact 和 Workflow Event；迁移历史任务到 owner Assignment。
 3. **收件箱集成**：支持原子拆分/关联、必需标记和由任务派生的收件箱解决规则。
 4. **专注集成**：绑定持久化 Session，停止与工时累计使用同一幂等事务。
@@ -166,6 +167,9 @@ Workflow Event 至少记录创建、编辑、开始、阻塞/解除、改派、�
 - [整体功能架构](../functional-architecture.md)
 - [TasksPage.tsx](../../apps/web/src/pages/TasksPage.tsx)
 - [TaskList.tsx](../../apps/web/src/components/TaskList.tsx)
+- [TaskList.test.tsx](../../apps/web/src/components/TaskList.test.tsx)
+- [TaskDetailModal.tsx](../../apps/web/src/components/TaskDetailModal.tsx)
+- [TaskDetailModal.test.tsx](../../apps/web/src/components/TaskDetailModal.test.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [前端 API client](../../apps/web/src/api/client.ts)
 - [任务 API](../../services/sidecar/internal/api/tasks.go)
