@@ -9,6 +9,7 @@ import {
   Map,
   ReceiptText,
   Search,
+  Settings2,
   Sun,
   Users,
 } from "lucide-react";
@@ -71,6 +72,7 @@ export function Sidebar() {
   const setCommandPaletteOpen = useUiStore(
     (state) => state.setCommandPaletteOpen,
   );
+  const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
   const taskCount = tasksQuery.data?.length ?? 0;
   const completedCount =
     tasksQuery.data?.filter((task) => task.status === "done").length ?? 0;
@@ -84,7 +86,7 @@ export function Sidebar() {
         <div className="brand-mark">O</div>
         <div className="sidebar-copy min-w-0">
           <div className="brand-name">opc-workspace</div>
-          <span className="local-pill">本地优先 · v0.1</span>
+          <span className="local-pill">v0.1.0</span>
         </div>
       </div>
 
@@ -139,6 +141,17 @@ export function Sidebar() {
           {taskCount ? `${completedCount} / ${taskCount} 项` : "暂无任务"}
         </div>
       </div>
+
+      <button
+        aria-label="打开设置"
+        aria-haspopup="dialog"
+        className="nav-item sidebar-settings"
+        onClick={() => setSettingsOpen(true)}
+        type="button"
+      >
+        <Settings2 className="nav-icon" size={17} />
+        <span className="sidebar-copy nav-text">设置</span>
+      </button>
     </aside>
   );
 }

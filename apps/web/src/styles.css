@@ -349,40 +349,22 @@ kbd {
   font-size: 10px;
 }
 
+.sidebar-settings {
+  flex: 0 0 34px;
+  width: 100%;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
 .main-column {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   background: var(--bg);
-}
-
-.runtime-strip {
-  display: flex;
-  flex: 0 0 28px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 22px;
-  border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-dim);
-  font-size: 10px;
-}
-
-.runtime-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-
-.runtime-strip[data-state="ready"] .runtime-dot {
-  background: var(--green);
-  box-shadow: 0 0 0 3px rgba(76, 183, 130, 0.1);
-}
-
-.runtime-strip[data-state="error"] .runtime-dot {
-  background: var(--red);
-  box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.1);
 }
 
 .page-scroll {
@@ -2349,10 +2331,6 @@ kbd {
 
   .page {
     padding: 18px 15px 40px;
-  }
-
-  .runtime-strip {
-    padding: 0 15px;
   }
 
   .date-pill,
