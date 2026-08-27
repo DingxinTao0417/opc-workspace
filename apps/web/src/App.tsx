@@ -16,6 +16,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TodayPage } from "./pages/TodayPage";
+import { useSettingsStore } from "./store/settings";
 import { useUiStore } from "./store/ui";
 
 function GlobalShortcuts() {
@@ -43,6 +44,10 @@ function GlobalShortcuts() {
 }
 
 export default function App() {
+  const defaultRoute = useSettingsStore(
+    (state) => state.preview?.general.defaultRoute ?? state.defaultRoute,
+  );
+
   return (
     <>
       <GlobalShortcuts />
@@ -50,7 +55,7 @@ export default function App() {
       <FocusTicker />
       <Routes>
         <Route element={<AppShell />}>
-          <Route element={<Navigate replace to="/today" />} index />
+          <Route element={<Navigate replace to={`/${defaultRoute}`} />} index />
           <Route element={<TodayPage />} path="today" />
           <Route element={<TasksPage />} path="tasks" />
           <Route element={<ProjectsPage />} path="projects" />

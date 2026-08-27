@@ -2,16 +2,12 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
-  ChevronRight,
-  Clock3,
-  Focus,
   Hourglass,
   List,
   Plus,
   Target,
 } from "lucide-react";
 import { useTodayStatsQuery, useTasksQuery } from "../api/hooks";
-import { formatFocusTime, useFocusStore } from "../store/focus";
 import { useUiStore } from "../store/ui";
 import type { Task } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -42,15 +38,6 @@ function taskSplit(tasks: Task[]) {
 
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
-  const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
-  const focusRunning = useFocusStore((state) => state.running);
-  const focusCompleted = useFocusStore((state) => state.completed);
-  const focusPhase = useFocusStore((state) => state.phase);
-  const focusRemainingSeconds = useFocusStore(
-    (state) => state.remainingSeconds,
-  );
-  const toggleFocus = useFocusStore((state) => state.toggle);
-  const resetFocus = useFocusStore((state) => state.reset);
   const tasksQuery = useTasksQuery();
   const now = new Date();
   const dateKey = localDateKey(now);
@@ -58,22 +45,11 @@ export function TodayPage() {
   const live = tasksQuery.isSuccess;
   const displayTasks = tasksQuery.data ?? [];
   const groups = taskSplit(displayTasks);
-  const focusTask = displayTasks.find((task) => task.status === "in_progress");
-  const focusLabels = focusTask
-    ? [focusTask.projectName, ...(focusTask.tags ?? [])]
-        .filter((label): label is string => Boolean(label))
-        .slice(0, 3)
-    : [];
   const realStats = statsQuery.data;
   const estimated = realStats
     ? Math.round((realStats.tasks.estimatedMinutes / 60) * 10) / 10
     : 0;
   const stats = [
-    {
-      icon: Focus,
-      value: realStats?.focus.sessions ?? 0,
-      label: "个专注块",
-    },
     { icon: Hourglass, value: `${estimated}h`, label: "预计时长" },
     {
       icon: CheckCircle2,
@@ -137,80 +113,6 @@ export function TodayPage() {
             <span style={{ width: "0%" }} />
           </div>
         </div>
-      </section>
-
-      <div className="section-heading">
-        <div>
-          <span className="section-kicker">现在</span>
-          <h2>
-            {focusCompleted
-              ? "本轮专注已完成"
-              : focusRunning
-                ? focusPhase === "focus"
-                  ? "专注进行中"
-                  : "休息进行中"
-                : focusPhase === "focus"
-                  ? "准备开始专注"
-                  : "准备开始休息"}
-          </h2>
-        </div>
-        <button
-          className="text-link"
-          onClick={() => setSettingsOpen(true)}
-          type="button"
-        >
-          专注设置 <ChevronRight size={13} />
-        </button>
-      </div>
-
-      <section className="focus-card">
-        <span className="focus-card-icon">
-          <Clock3 size={21} />
-        </span>
-        <div className="focus-card-copy">
-          <h3>{focusTask?.title ?? "选择一项任务后开始专注"}</h3>
-          <div className="tag-row">
-            {focusLabels.length ? (
-              focusLabels.map((label) => (
-                <span className="tag" key={label}>
-                  {label}
-                </span>
-              ))
-            ) : (
-              <span className="tag">未关联任务</span>
-            )}
-          </div>
-        </div>
-        <div className="focus-card-timer">
-          {formatFocusTime(focusRemainingSeconds)}
-          <span>
-            {focusCompleted
-              ? "本轮已完成"
-              : focusPhase === "break"
-                ? "休息时间"
-                : "专注时间"}
-          </span>
-        </div>
-        <button
-          className="button button-primary"
-          onClick={() => {
-            if (focusCompleted) {
-              resetFocus();
-              useFocusStore.getState().start();
-            } else {
-              toggleFocus();
-            }
-          }}
-          type="button"
-        >
-          {focusCompleted
-            ? "重新开始"
-            : focusRunning
-              ? "暂停"
-              : focusPhase === "break"
-                ? "开始休息"
-                : "开始专注"}
-        </button>
       </section>
 
       {tasksQuery.isError ? (

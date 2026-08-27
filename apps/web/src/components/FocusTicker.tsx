@@ -36,12 +36,24 @@ function playPhaseCompleteSound() {
 }
 
 export function FocusTicker() {
-  const focusMinutes = useSettingsStore((state) => state.focusMinutes);
-  const breakMinutes = useSettingsStore((state) => state.breakMinutes);
-  const cycles = useSettingsStore((state) => state.cycles);
-  const autoStartBreak = useSettingsStore((state) => state.autoStartBreak);
-  const autoStartFocus = useSettingsStore((state) => state.autoStartFocus);
-  const soundEnabled = useSettingsStore((state) => state.soundEnabled);
+  const focusMinutes = useSettingsStore(
+    (state) => state.preview?.focus.focusMinutes ?? state.focusMinutes,
+  );
+  const breakMinutes = useSettingsStore(
+    (state) => state.preview?.focus.breakMinutes ?? state.breakMinutes,
+  );
+  const cycles = useSettingsStore(
+    (state) => state.preview?.focus.cycles ?? state.cycles,
+  );
+  const autoStartBreak = useSettingsStore(
+    (state) => state.preview?.focus.autoStartBreak ?? state.autoStartBreak,
+  );
+  const autoStartFocus = useSettingsStore(
+    (state) => state.preview?.focus.autoStartFocus ?? state.autoStartFocus,
+  );
+  const soundEnabled = useSettingsStore(
+    (state) => state.preview?.focus.soundEnabled ?? state.soundEnabled,
+  );
   const running = useFocusStore((state) => state.running);
   const setDurationsOrSync = useFocusStore((state) => state.setDurationsOrSync);
   const tick = useFocusStore((state) => state.tick);

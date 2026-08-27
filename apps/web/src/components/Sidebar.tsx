@@ -16,6 +16,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useTasksQuery } from "../api/hooks";
+import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 
 interface NavItem {
@@ -69,6 +70,12 @@ const groups: { label: string; items: NavItem[] }[] = [
 
 export function Sidebar() {
   const tasksQuery = useTasksQuery();
+  const displayName = useSettingsStore(
+    (state) => state.preview?.profile.displayName ?? state.displayName,
+  );
+  const avatarDataUrl = useSettingsStore(
+    (state) => state.preview?.profile.avatarDataUrl ?? state.avatarDataUrl,
+  );
   const setCommandPaletteOpen = useUiStore(
     (state) => state.setCommandPaletteOpen,
   );
@@ -83,9 +90,17 @@ export function Sidebar() {
   return (
     <aside className="left-sidebar" aria-label="主导航">
       <div className="brand-block">
-        <div className="brand-mark">O</div>
+        <div className="brand-mark">
+          {avatarDataUrl ? (
+            <img alt={`${displayName}的头像`} src={avatarDataUrl} />
+          ) : (
+            Array.from(displayName.trim())[0]?.toUpperCase() || "O"
+          )}
+        </div>
         <div className="sidebar-copy min-w-0">
-          <div className="brand-name">opc-workspace</div>
+          <div className="brand-name" title={displayName}>
+            {displayName}
+          </div>
           <span className="local-pill">v0.1.0</span>
         </div>
       </div>

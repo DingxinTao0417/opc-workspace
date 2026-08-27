@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_FOCUS_SETTINGS,
+  DEFAULT_GENERAL_SETTINGS,
+  DEFAULT_PROFILE_SETTINGS,
   DEFAULT_THEME,
   sanitizeAppearanceTheme,
   sanitizeFocusSettings,
+  sanitizeGeneralSettings,
+  sanitizeProfileSettings,
   useSettingsStore,
 } from "./settings";
 
@@ -11,7 +15,10 @@ describe("focus settings", () => {
   beforeEach(() => {
     useSettingsStore.setState({
       ...DEFAULT_FOCUS_SETTINGS,
+      ...DEFAULT_GENERAL_SETTINGS,
+      ...DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      preview: null,
     });
   });
 
@@ -74,5 +81,66 @@ describe("focus settings", () => {
     expect(sanitizeAppearanceTheme("light")).toBe("light");
     expect(sanitizeAppearanceTheme("dark")).toBe("dark");
     expect(sanitizeAppearanceTheme("system")).toBe(DEFAULT_THEME);
+  });
+
+  it("sanitizes general workspace preferences", () => {
+    expect(
+      sanitizeGeneralSettings({
+        defaultRoute: "unknown",
+        showRightOverview: false,
+        reduceMotion: "yes",
+      }),
+    ).toEqual({
+      defaultRoute: "today",
+      showRightOverview: false,
+      reduceMotion: false,
+    });
+  });
+
+  it("sanitizes local profile values", () => {
+    expect(
+      sanitizeProfileSettings({
+        displayName: "  Dingxin   Tao  ",
+        avatarDataUrl: "data:text/html;base64,PHNjcmlwdD4=",
+      }),
+    ).toEqual({
+      displayName: "Dingxin Tao",
+      avatarDataUrl: null,
+    });
+  });
+
+  it("keeps previews separate until they are committed", () => {
+    const { beginPreview, setPreview, commitPreview } =
+      useSettingsStore.getState();
+
+    beginPreview();
+    setPreview({
+      focus: { ...DEFAULT_FOCUS_SETTINGS, focusMinutes: 65 },
+      general: { ...DEFAULT_GENERAL_SETTINGS, showRightOverview: false },
+      profile: { ...DEFAULT_PROFILE_SETTINGS, displayName: "Dingxin Tao" },
+      theme: "light",
+    });
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      focusMinutes: 50,
+      showRightOverview: true,
+      theme: "dark",
+      preview: {
+        focus: { focusMinutes: 65 },
+        general: { showRightOverview: false },
+        profile: { displayName: "Dingxin Tao" },
+        theme: "light",
+      },
+    });
+
+    commitPreview();
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      focusMinutes: 65,
+      showRightOverview: false,
+      displayName: "Dingxin Tao",
+      theme: "light",
+      preview: null,
+    });
   });
 });
