@@ -1,0 +1,86 @@
+# opc-workspace 文档中心
+
+本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
+
+> 当前代码仍是 app v0.1.0 / API v1 / SQLite schema v2 基座。文档中的 Actor、工作编排、本地 Agent、财务等规划，不代表功能已经交付。
+
+## 阅读顺序与事实优先级
+
+1. [产品需求文档（PRD v1.6）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
+3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
+4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
+5. 当前 React 页面与 `styles.css`：判断现有视觉和交互事实；历史 HTML 原型已于 2026-08-27 从仓库移除。
+
+发生冲突时，当前实现事实以代码和测试为准；目标范围以 PRD 为准；跨模块关系以整体功能架构为准；模块文档负责展开落地细节。
+
+## 核心模块
+
+| 模块 | 当前状态 | 目标版本 | 文档 |
+|------|----------|----------|------|
+| 今日工作台 | 部分完成 | v0.1 | [today.md](modules/today.md) |
+| 任务管理 | 部分完成 | v0.1；看板 v0.2 | [tasks.md](modules/tasks.md) |
+| 项目管理 | 页面骨架 | v0.1 | [projects.md](modules/projects.md) |
+| 客户管理 | 页面骨架 | v0.1 | [clients.md](modules/clients.md) |
+| 收件箱工作编排 | 页面骨架 | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md) |
+| Actor 与分派 | 未开始 | v0.1 | [actors.md](modules/actors.md) |
+| 专注与工时 | 部分完成 | v0.1 | [focus.md](modules/focus.md) |
+
+## 平台与共享能力
+
+| 模块 | 当前状态 | 目标版本 | 文档 |
+|------|----------|----------|------|
+| 本地 Agent Runtime | 未开始 | v0.2 | [local-agents.md](modules/local-agents.md) |
+| 设置 | 部分完成 | v0.1 / v0.2 | [settings.md](modules/settings.md) |
+| 命令面板与搜索 | 部分完成 | v0.1 | [command-search.md](modules/command-search.md) |
+| 数据、备份与恢复 | 基座部分完成 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md) |
+| 桌面平台与发布 | 基座部分完成 | v0.1 发布闸门 | [desktop-platform.md](modules/desktop-platform.md) |
+
+## 后续业务与规划模块
+
+| 模块 | 当前状态 | 目标版本 | 文档 |
+|------|----------|----------|------|
+| 收入、支出与发票 | 页面骨架 / 数据表预留 | v0.4 | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访 | 未开始 | v0.4 | [client-followups.md](modules/client-followups.md) |
+| 路线图 | 占位页 | v0.3 | [roadmap.md](modules/roadmap.md) |
+| 内容日历 | 占位页 | v0.3 | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化 | 未开始 | v0.2 | [automation.md](modules/automation.md) |
+| 本地知识库 | 未开始 | 待定 | [knowledge-base.md](modules/knowledge-base.md) |
+| AI 助手 | 未开始 | 待定 | [ai-assistant.md](modules/ai-assistant.md) |
+
+## 全局产品边界
+
+- 所有核心业务、Actor、任务、收件箱、提醒、产出和运行记录默认只保存在本机。
+- v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
+- `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
+- 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
+- Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
+- 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。
+- 当前阶段使用签名离线更新包，不依赖在线 Updater。
+
+## 模块文档维护模板
+
+每份模块文档至少维护以下内容：
+
+1. 定位与非目标。
+2. 当前实现状态与代码证据。
+3. 目标功能和用户流程。
+4. 数据事实、API、状态机和事件。
+5. 与其他模块的输入、输出和依赖。
+6. 分阶段实施顺序。
+7. 可验证的验收标准。
+
+代码交付一个纵向切片时，应同时更新对应模块文档的当前状态、PRD 的实现追踪和实际验证证据。只有页面、按钮外观、静态样式或数据库预留表时，不得将模块标记为“已完成”。
+
+## 核心术语
+
+| 术语 | 含义 |
+|------|------|
+| Inbox Item | 说明为什么需要处理、来源和跟进策略，不承担任务执行状态 |
+| Task | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略 |
+| Actor | 本地责任主体：owner、person、agent、system |
+| Assignment | Task 当前负责人和历史改派记录 |
+| Agent Run | 本地 Agent 的一次执行尝试；成功不等于 Task 完成 |
+| Task Artifact | 人或 Agent 的本地产出，区分实际产出者与录入者 |
+| Reminder | 本地调度事实；到期后幂等生成 Inbox Item |
+| Workflow Event | 创建、拆分、分派、执行、验收和返工的追加式审计时间线 |
