@@ -1,0 +1,30 @@
+{
+  "name": "opc-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first workspace for one-person companies",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=20.19 <27",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev.mjs --web-only",
+    "build": "pnpm build:sidecar && pnpm build:web && pnpm build:desktop",
+    "build:web": "pnpm --filter @opc/web build",
+    "build:sidecar": "node scripts/build-sidecar.mjs",
+    "build:desktop": "pnpm --filter @opc/desktop tauri:build",
+    "typecheck": "pnpm --filter @opc/web typecheck",
+    "test": "pnpm test:go && pnpm --filter @opc/web test",
+    "test:go": "go -C services/sidecar test ./...",
+    "check:tauri": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "check": "pnpm typecheck && pnpm test:go && pnpm build:web && pnpm check:tauri",
+    "format": "prettier --write package.json pnpm-workspace.yaml README.md scripts apps/web apps/desktop/package.json",
+    "format:check": "prettier --check package.json pnpm-workspace.yaml README.md scripts apps/web apps/desktop/package.json"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "prettier": "^3.9.6"
+  }
+}

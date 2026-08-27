@@ -1,0 +1,84 @@
+# Dependencies and package-manager caches
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+
+# JavaScript / TypeScript / Vite outputs
+**/dist/
+**/.vite/
+**/.vitest/
+*.tsbuildinfo
+.eslintcache
+
+# Test and coverage outputs
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+*.coverprofile
+services/sidecar/coverage.out
+
+# Rust / Tauri outputs
+**/target/
+**/.tauri/
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/.gitkeep
+
+# Go build outputs
+services/sidecar/bin/
+services/sidecar/server
+services/sidecar/server.exe
+*.test
+*.test.exe
+*.prof
+
+# Local application data and generated SQLite files
+.local/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Logs and crash dumps
+*.log
+*.log.*
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.stackdump
+*.dmp
+
+# Editor and operating-system metadata
+.idea/
+.vscode/
+.vs/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

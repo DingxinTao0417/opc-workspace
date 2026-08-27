@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>自动化规则 — Solo Company OS</title>
+    <style id="theme-vars">
+/* Solo Today — Brand CSS (High-Fidelity Replication from Screenshot) */
+
+:root {
+  /* === Background Layers === */
+  --solo-bg: #0f0f1a;
+  --solo-bg-deep: #080910;
+  --solo-sidebar: #0c0e15;
+  --solo-panel: #11141d;
+  --solo-panel-2: #161a25;
+  --solo-panel-hover: #181c27;
+
+  /* === Border === */
+  --solo-border: #252a3b;
+  --solo-border-subtle: #1e2230;
+
+  /* === Text === */
+  --solo-text: #f7f8fc;
+  --solo-text-secondary: #b8c0d4;
+  --solo-text-muted: #8992a8;
+  --solo-text-dim: #687086;
+
+  /* === Primary — Purple === */
+  --solo-purple: #8b5cf6;
+  --solo-purple-light: #a78bfa;
+  --solo-purple-deep: #6335d8;
+  --solo-purple-glow: rgba(139, 92, 246, 0.15);
+  --solo-purple-bg: #26154e;
+  --solo-purple-border: #39286c;
+  --solo-purple-text: #c4b5fd;
+  --solo-purple-text-light: #ddd0ff;
+
+  /* === Status Colors === */
+  --solo-green: #22c55e;
+  --solo-green-light: #4ade80;
+  --solo-blue: #3b82f6;
+  --solo-red: #ef4444;
+  --solo-orange: #f59e0b;
+
+  /* === Tags / Badges === */
+  --solo-tag-bg: #252a3c;
+  --solo-tag-bg-2: #232839;
+  --solo-count-bg: #232839;
+
+  /* === Radius === */
+  --solo-radius-sm: 7px;
+  --solo-radius-md: 10px;
+  --solo-radius-lg: 12px;
+  --solo-radius-xl: 16px;
+  --solo-radius-2xl: 18px;
+  --solo-radius-full: 9999px;
+
+  /* === Typography === */
+  --solo-font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --solo-font-mono: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+
+  /* === Shadows / Glows === */
+  --solo-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --solo-glow-purple: 0 0 20px rgba(139, 92, 246, 0.25);
+  --solo-glow-purple-strong: 0 0 30px rgba(139, 92, 246, 0.35);
+}
+
+/* === Base Reset === */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--solo-font-family);
+  background: var(--solo-bg);
+  color: var(--solo-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* === Type Scale === */
+.solo-text-xs { font-size: 11px; line-height: 1.4; }
+.solo-text-sm { font-size: 13px; line-height: 1.5; }
+.solo-text-base { font-size: 14px; line-height: 1.5; }
+.solo-text-lg { font-size: 16px; line-height: 1.4; }
+.solo-text-xl { font-size: 20px; line-height: 1.3; }
+.solo-text-2xl { font-size: 24px; line-height: 1.25; }
+.solo-text-3xl { font-size: 28px; line-height: 1.2; font-weight: 750; }
+
+.solo-font-bold { font-weight: 700; }
+.solo-font-semibold { font-weight: 600; }
+.solo-font-medium { font-weight: 500; }
+
+/* === Surface Tokens === */
+.solo-surface {
+  background: var(--solo-panel);
+  border: 1px solid var(--solo-border);
+  border-radius: var(--solo-radius-lg);
+}
+
+.solo-surface-glow {
+  background: linear-gradient(135deg, #18122c, #11141c);
+  border: 1px solid var(--solo-purple-deep);
+  border-radius: var(--solo-radius-2xl);
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-border: var(--solo-border);
+    --color-sidebar: var(--solo-sidebar);
+  }
+  @layer base {
+    body { background: var(--solo-background); color: var(--solo-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+.bg-background { background-color: var(--solo-bg); }
+.text-background { color: var(--solo-bg); }
+.border-background { border-color: var(--solo-bg); }
+.ring-background { --tw-ring-color: var(--solo-bg); }
+.bg-foreground { background-color: var(--solo-text); }
+.text-foreground { color: var(--solo-text); }
+.border-foreground { border-color: var(--solo-text); }
+.ring-foreground { --tw-ring-color: var(--solo-text); }
+.bg-card { background-color: var(--solo-panel); }
+.text-card { color: var(--solo-panel); }
+.border-card { border-color: var(--solo-panel); }
+.ring-card { --tw-ring-color: var(--solo-panel); }
+.bg-primary { background-color: var(--solo-purple); }
+.text-primary { color: var(--solo-purple); }
+.border-primary { border-color: var(--solo-purple); }
+.ring-primary { --tw-ring-color: var(--solo-purple); }
+.bg-border { background-color: var(--solo-border); }
+.text-border { color: var(--solo-border); }
+.border-border { border-color: var(--solo-border); }
+.ring-border { --tw-ring-color: var(--solo-border); }
+.bg-muted { background-color: var(--solo-text-muted); }
+.text-muted { color: var(--solo-text-muted); }
+.border-muted { border-color: var(--solo-text-muted); }
+.ring-muted { --tw-ring-color: var(--solo-text-muted); }
+.bg-sidebar { background-color: var(--solo-sidebar); }
+.text-sidebar { color: var(--solo-sidebar); }
+.border-sidebar { border-color: var(--solo-sidebar); }
+.ring-sidebar { --tw-ring-color: var(--solo-sidebar); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body>
+    <!-- Fix 3: Inter font from Google Fonts (placed in body to survive --replace-head) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <main class="dashboard-root">
+
+        <!-- ============ Three-Column Body (Fix 1: no browser bar, fills viewport directly) ============ -->
+        <div class="dash-body">
+
+            <!-- ===== Left Sidebar (220px) ===== -->
+            <aside class="left-sidebar no-scrollbar" aria-label="侧边导航">
+                <!-- Profile -->
+                <div class="flex items-center gap-3 mb-3">
+                    <div class="avatar-gradient w-10 h-10 rounded-full flex items-center justify-center font-bold text-base shrink-0" aria-label="用户头像">Z</div>
+                    <div class="min-w-0 flex flex-col gap-1">
+                        <div class="truncate" style="color:var(--solo-text); font-size:14px; font-weight:600; line-height:1.3;">Zion 的一人公司</div>
+                        <span class="pro-pill self-start">Pro · 个人版</span>
+                    </div>
+                </div>
+
+                <!-- Search -->
+                <div class="search-bar" data-dom-id="search-bar" tabindex="0" role="search">
+                    <i data-lucide="search" class="w-4 h-4 shrink-0" style="color:var(--solo-text-muted)"></i>
+                    <span class="flex-1 min-w-0 truncate" style="color:#81899e; font-size:13px;">搜索或跳转...</span>
+                    <span class="kbd-badge">⌘K</span>
+                </div>
+
+                <!-- Fix 4: Nav group names in Chinese -->
+                <!-- Nav: 工作区 -->
+                <div class="nav-group-label">工作区</div>
+                <div class="flex flex-col gap-0.5">
+                    <div class="nav-item active" data-nav-key="today" data-active="true" data-dom-id="nav-today" tabindex="0">
+                        <i data-lucide="sun" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">今日</span>
+                        <span class="count-badge">6</span>
+                    </div>
+                    <div class="nav-item" data-nav-key="inbox" data-dom-id="nav-inbox" tabindex="0">
+                        <i data-lucide="inbox" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">收件箱</span>
+                        <span class="count-badge">3</span>
+                    </div>
+                </div>
+
+                <!-- Nav: 规划 -->
+                <div class="nav-group-label">规划</div>
+                <div class="flex flex-col gap-0.5">
+                    <div class="nav-item" data-nav-key="tasks" data-dom-id="nav-tasks" tabindex="0">
+                        <i data-lucide="check-square" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">任务</span>
+                    </div>
+                    <div class="nav-item" data-nav-key="projects" data-dom-id="nav-projects" tabindex="0">
+                        <i data-lucide="folder" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">项目</span>
+                    </div>
+                    <div class="nav-item" data-nav-key="roadmap" data-dom-id="nav-roadmap" tabindex="0">
+                        <i data-lucide="map" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">路线图</span>
+                    </div>
+                </div>
+
+                <!-- Nav: 业务 -->
+                <div class="nav-group-label">业务</div>
+                <div class="flex flex-col gap-0.5">
+                    <div class="nav-item" data-nav-key="clients" data-dom-id="nav-clients" tabindex="0">
+                        <i data-lucide="users" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">客户</span>
+                    </div>
+                    <div class="nav-item" data-nav-key="income" data-dom-id="nav-income" tabindex="0">
+                        <i data-lucide="trending-up" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">收入</span>
+                    </div>
+                    <div class="nav-item" data-nav-key="invoices" data-dom-id="nav-invoices" tabindex="0">
+                        <i data-lucide="receipt" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">发票</span>
+                    </div>
+                </div>
+
+                <!-- Nav: 增长 -->
+                <div class="nav-group-label">增长</div>
+                <div class="flex flex-col gap-0.5">
+                    <div class="nav-item" data-nav-key="content-calendar" data-dom-id="nav-content-calendar" tabindex="0">
+                        <i data-lucide="calendar" class="nav-icon shrink-0"></i>
+                        <span class="flex-1 min-w-0 truncate">内容日历</span>
+                    </div>
+                </div>
+
+                <!-- Fix 10: Automation card as a small floating window -->
+                <div class="automation-float" data-dom-id="link-automation">
+                    <button class="float-close" data-dom-id="close-automation" aria-label="关闭自动化通知">
+                        <i data-lucide="x" class="w-3 h-3"></i>
+                    </button>
+                    <div class="flex items-center justify-between mb-2 pr-6">
+                        <span style="color:var(--solo-text); font-size:13px; font-weight:600;">自动化</span>
+                        <span class="toggle" aria-label="自动化已开启"></span>
+                    </div>
+                    <div style="color:var(--solo-text-secondary); font-size:13px;">已发送发票 #1042</div>
+                    <div class="mt-1" style="color:var(--solo-text-muted); font-size:11px;">当 发票状态 为 Done 时</div>
+                </div>
+
+                <!-- Weekly progress card -->
+                <div class="side-card">
+                    <div style="color:var(--solo-text); font-size:14px; font-weight:600;">本周效率 72%</div>
+                    <div class="progress-track mt-2"><div class="progress-fill" style="width:72%"></div></div>
+                    <div class="mt-2" style="color:var(--solo-text-muted); font-size:11px;">18/25 项完成 · 4 个专注块</div>
+                </div>
+            </aside>
+
+            <!-- ===== Center Content ===== -->
+            <section class="center-content" aria-label="今日工作台">
+
+                <!-- Fix 5: 今日 + date pill + streak pill ALL on same row, view toggles + new on right -->
+                <div class="flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <h1 class="solo-text-3xl" style="color: var(--solo-text); text-wrap: balance; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 14px;">今日</h1>
+                        <span class="date-pill">8月14日 周五</span>
+                        <span class="streak-pill">
+                            <i data-lucide="flame" class="w-3.5 h-3.5"></i>
+                            连续专注 12 天
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <button class="view-icon-btn" data-dom-id="view-list" aria-label="列表视图"><i data-lucide="list" class="w-4 h-4"></i></button>
+                        <button class="view-icon-btn" data-dom-id="view-grid" aria-label="网格视图"><i data-lucide="layout-grid" class="w-4 h-4"></i></button>
+                        <button class="view-icon-btn" data-dom-id="view-filter" aria-label="筛选"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></button>
+                        <button class="btn-new" data-dom-id="btn-new"><i data-lucide="plus" class="w-4 h-4"></i> 新建</button>
+                    </div>
+                </div>
+
+                <!-- Fix 6+7+1+2: Stat boxes + AI float merged into one row, AI at end, top/bottom dividers -->
+                <div class="stats-row">
+                    <div class="stat-box">
+                        <i data-lucide="clock" class="w-3.5 h-3.5" style="color:var(--solo-purple-light)"></i>
+                        <span>已排程 4 个专注块</span>
+                    </div>
+                    <div class="stat-box">
+                        <i data-lucide="hourglass" class="w-3.5 h-3.5" style="color:var(--solo-purple-light)"></i>
+                        <span>预计 6.5h</span>
+                    </div>
+                    <div class="stat-box">
+                        <i data-lucide="target" class="w-3.5 h-3.5" style="color:var(--solo-purple-light)"></i>
+                        <span>月收入目标 82%</span>
+                    </div>
+                    <div class="ai-float" style="margin-left:auto;">
+                        <i data-lucide="sparkles" class="w-4 h-4 shrink-0" style="color:var(--solo-purple-light)"></i>
+                        <span>AI 已按精力曲线排好今天的顺序</span>
+                    </div>
+                </div>
+
+                <!-- Section: 现在 · 专注中 -->
+                <h2 class="section-header">现在 · 专注中</h2>
+
+                <!-- Focus card — two-row grid: title+timer row, tags+label row, icon spans both rows -->
+                <div class="focus-card" data-dom-id="link-focus-settings">
+                    <div class="focus-grid">
+                        <div class="timer-icon-wrap">
+                            <i data-lucide="timer" class="w-5 h-5"></i>
+                        </div>
+                        <h2 class="focus-title" style="color:var(--solo-text); text-wrap:balance;">重构定价页 Hero 文案</h2>
+                        <span class="focus-timer mono-text" style="color:var(--solo-purple-text); font-size:30px; font-weight:700; line-height:1.25;">34:12</span>
+                        <div class="focus-tags">
+                            <span class="tag-pill">官网改版</span>
+                            <span class="tag-pill">设计</span>
+                            <span class="tag-pill">深度工作</span>
+                        </div>
+                        <span style="color:var(--solo-text-muted); font-size:13px; line-height:1.5; align-self:center; justify-self:end; white-space:nowrap;">专注中 · 50 分钟</span>
+                    </div>
+                </div>
+
+                <!-- Section: 接下来 · 今天 -->
+                <h2 class="section-header">接下来 · 今天</h2>
+                <div class="task-list">
+                    <div class="task-row" data-dom-id="task-reply-acme" tabindex="0">
+                        <i data-lucide="arrow-up" class="w-3.5 h-3.5 shrink-0" style="color:var(--solo-text-muted)"></i>
+                        <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text); font-size:14px;">回复 Acme 的提案邮件</span>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <span class="hidden sm:inline truncate" style="color:var(--solo-text-muted); font-size:12px;">客户 · Acme 官网</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-text-muted); font-size:12px;">17:00</span>
+                            <span class="duration-pill">20m</span>
+                        </div>
+                    </div>
+                    <div class="task-row" data-dom-id="task-demo-video" tabindex="0">
+                        <i data-lucide="arrow-up" class="w-3.5 h-3.5 shrink-0" style="color:var(--solo-text-muted)"></i>
+                        <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text); font-size:14px;">录制 2.0 功能演示视频</span>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <span class="hidden sm:inline truncate" style="color:var(--solo-text-muted); font-size:12px;">增长</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-text-muted); font-size:12px;">今天</span>
+                            <span class="duration-pill">1h</span>
+                        </div>
+                    </div>
+                    <div class="task-row" data-dom-id="task-invoice-1042" tabindex="0">
+                        <i data-lucide="arrow-up" class="w-3.5 h-3.5 shrink-0" style="color:var(--solo-red)"></i>
+                        <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text); font-size:14px;">跟进发票 #1042 到账</span>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <span class="hidden sm:inline truncate" style="color:var(--solo-text-muted); font-size:12px;">财务</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-red); font-size:12px;">逾期 1 天</span>
+                            <span class="duration-pill">10m</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section: 稍后 · 本周 -->
+                <h2 class="section-header">稍后 · 本周</h2>
+                <div class="task-list">
+                    <div class="task-row" data-dom-id="task-newsletter" tabindex="0">
+                        <i data-lucide="arrow-up" class="w-3.5 h-3.5 shrink-0" style="color:var(--solo-text-muted)"></i>
+                        <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text); font-size:14px;">整理 Newsletter 素材</span>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <span class="hidden sm:inline truncate" style="color:var(--solo-text-muted); font-size:12px;">内容</span>
+                            <span class="duration-pill">30m</span>
+                        </div>
+                    </div>
+                    <div class="task-row" data-dom-id="task-competitor-research" tabindex="0">
+                        <i data-lucide="arrow-up" class="w-3.5 h-3.5 shrink-0" style="color:var(--solo-text-muted)"></i>
+                        <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text); font-size:14px;">研究竞品定价页结构</span>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <span class="hidden sm:inline truncate" style="color:var(--solo-text-muted); font-size:12px;">调研</span>
+                            <span class="duration-pill">45m</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== Right Sidebar (280px) ===== -->
+            <aside class="right-sidebar no-scrollbar" aria-label="概览面板">
+
+                <!-- Focus Mode card -->
+                <div class="r-card">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="zap" class="w-4 h-4" style="color:var(--solo-purple-light)"></i>
+                            <span style="color:var(--solo-text); font-size:14px; font-weight:600;">专注模式</span>
+                        </div>
+                        <span class="badge-green">进行中</span>
+                    </div>
+                    <div class="ring-wrap">
+                        <svg width="128" height="128" viewBox="0 0 120 120" class="ring-svg" aria-hidden="true">
+                            <circle cx="60" cy="60" r="52" fill="none" stroke="#292e40" stroke-width="8"></circle>
+                            <circle cx="60" cy="60" r="52" fill="none" stroke="url(#ringGrad)" stroke-width="8" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="104.5" transform="rotate(-90 60 60)"></circle>
+                            <defs>
+                                <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                                    <stop offset="0%" stop-color="#8b5cf6"></stop>
+                                    <stop offset="100%" stop-color="#a78bfa"></stop>
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <div class="ring-center">
+                            <span class="mono-text" style="color:var(--solo-text); font-size:24px; font-weight:700; line-height:1;">34:12</span>
+                            <span class="mono-text" style="color:var(--solo-text-dim); font-size:11px;">/ 50:00</span>
+                        </div>
+                    </div>
+                    <div class="text-center mt-3 truncate" style="color:var(--solo-text-secondary); font-size:13px;">重构定价页...</div>
+                </div>
+
+                <!-- Fix 4+5: ai-insight as small floating window, dot before text, font/bg matching original -->
+                <div class="ai-insight-float">
+                    <div class="flex items-center gap-2">
+                        <span class="insight-dot"></span>
+                        <span style="color:var(--solo-purple-text-light); font-size:13px;">本周复盘草稿已生成</span>
+                    </div>
+                    <div class="mt-1" style="color:var(--solo-text-muted); font-size:11px;">完成 18 项 · 收入 ¥45,400</div>
+                </div>
+
+                <!-- Monthly Revenue card -->
+                <div class="r-card" data-dom-id="link-income-detail">
+                    <div style="color:var(--solo-text-muted); font-size:13px;">本月收入</div>
+                    <div class="flex items-end gap-2 mt-1">
+                        <span style="color:var(--solo-text); font-size:24px; font-weight:700; line-height:1.1;">¥42,380</span>
+                        <span class="badge-growth mb-0.5">+12%</span>
+                    </div>
+                    <div class="mt-3">
+                        <svg width="100%" height="44" viewBox="0 0 240 44" preserveAspectRatio="none" aria-hidden="true">
+                            <defs>
+                                <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stop-color="rgba(139,92,246,0.35)"></stop>
+                                    <stop offset="100%" stop-color="rgba(139,92,246,0)"></stop>
+                                </linearGradient>
+                            </defs>
+                            <path d="M0,38 L30,34 L60,30 L95,26 L125,28 L158,18 L190,20 L240,6 L240,44 L0,44 Z" fill="url(#sparkFill)"></path>
+                            <polyline points="0,38 30,34 60,30 95,26 125,28 158,18 190,20 240,6" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline>
+                        </svg>
+                    </div>
+                    <div class="mt-2" style="color:var(--solo-text-muted); font-size:11px;">距月目标还差 ¥7,620 · MRR ¥38.2k</div>
+                </div>
+
+                <!-- Fix 9: Client Activity card with circular icon badges -->
+                <div class="r-card">
+                    <div class="flex items-center justify-between mb-3">
+                        <span style="color:var(--solo-text); font-size:14px; font-weight:600;">客户动态</span>
+                        <a class="link-text" data-dom-id="link-view-all" style="color:var(--solo-purple-light); font-size:12px;">查看全部</a>
+                    </div>
+                    <div class="flex flex-col gap-3">
+                        <div class="flex items-center gap-2.5">
+                            <div class="activity-icon" style="background: rgba(59,130,246,0.15);">
+                                <i data-lucide="file-down" class="w-3.5 h-3.5" style="color: var(--solo-blue)"></i>
+                            </div>
+                            <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text-secondary); font-size:13px;">Acme 下载了提案 PDF</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-text-dim); font-size:12px;">18:24</span>
+                        </div>
+                        <div class="flex items-center gap-2.5">
+                            <div class="activity-icon" style="background: rgba(59,130,246,0.15);">
+                                <i data-lucide="message-square" class="w-3.5 h-3.5" style="color: var(--solo-blue)"></i>
+                            </div>
+                            <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text-secondary); font-size:13px;">Tony 回复: 报价没问题</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-text-dim); font-size:12px;">昨天</span>
+                        </div>
+                        <div class="flex items-center gap-2.5">
+                            <div class="activity-icon" style="background: rgba(34,197,94,0.15);">
+                                <i data-lucide="user-plus" class="w-3.5 h-3.5" style="color: var(--solo-green)"></i>
+                            </div>
+                            <span class="flex-1 min-w-0 truncate" style="color:var(--solo-text-secondary); font-size:13px;">新线索: Moonlight 转介绍</span>
+                            <span class="whitespace-nowrap" style="color:var(--solo-text-dim); font-size:12px;">昨天</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+        </div>
+    </main>
+
+    <style>
+        /* ===== Fix 2: Override --solo-bg to #080A0A ===== */
+        :root {
+            --solo-bg: #080A0A;
+        }
+
+        /* ===== Fix 1 + Fix 2: Layout shell — no browser frame, solid #080A0A background, no padding ===== */
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            overflow: hidden;
+            font-family: var(--solo-font-family);
+            background: #080A0A;
+            color: var(--solo-text);
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Fix 1: dashboard-root is a plain full-viewport container — no border-radius, border, or box-shadow */
+        .dashboard-root {
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: transparent;
+        }
+
+        /* ===== Three-column body ===== */
+        .dash-body {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 220px 1fr 280px;
+        }
+
+        /* Fix 4: Left sidebar uses same bg as center (#080A0A) */
+        .left-sidebar {
+            background: #080A0A;
+            border-right: 1px solid var(--solo-border);
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .center-content {
+            padding: 22px;
+            overflow-y: auto;
+            min-width: 0;
+        }
+        .right-sidebar {
+            background: #080A0A;
+            border-left: 1px solid var(--solo-border);
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-width: 0;
+        }
+
+        /* ===== Scrollbars ===== */
+        *::-webkit-scrollbar { width: 8px; height: 8px; }
+        *::-webkit-scrollbar-thumb { background: var(--solo-border); border-radius: 8px; }
+        *::-webkit-scrollbar-thumb:hover { background: #2f3548; }
+        *::-webkit-scrollbar-track { background: transparent; }
+        * { scrollbar-width: thin; scrollbar-color: var(--solo-border) transparent; }
+
+        /* ===== Avatar gradient ===== */
+        .avatar-gradient { background: linear-gradient(135deg, #9b6cff, #5425d8); color: #fff; }
+
+        /* ===== Profile pill ===== */
+        .pro-pill {
+            background: var(--solo-count-bg);
+            color: var(--solo-text-secondary);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            white-space: nowrap;
+        }
+
+        /* ===== Search ===== */
+        .search-bar {
+            height: 38px;
+            background: #151923;
+            border: 1px solid var(--solo-border);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 10px;
+            margin: 4px 0 8px;
+            cursor: text;
+            transition: border-color .15s, box-shadow .15s;
+        }
+        .search-bar:focus-within, .search-bar:focus-visible {
+            border-color: var(--solo-purple);
+            outline: 2px solid var(--solo-purple);
+            outline-offset: 1px;
+        }
+        .kbd-badge {
+            background: var(--solo-count-bg);
+            color: var(--solo-text-dim);
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+
+        /* ===== Fix 4: Nav group labels — Chinese, no text-transform uppercase ===== */
+        .nav-group-label {
+            font-size: 11px;
+            letter-spacing: .04em;
+            color: var(--solo-text-dim);
+            margin: 18px 8px 8px;
+        }
+        .nav-item {
+            height: 36px;
+            padding: 0 10px;
+            border-radius: 8px;
+            color: var(--solo-text-secondary);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: background .15s, color .15s;
+        }
+        .nav-icon { width: 18px; height: 18px; }
+        .nav-item:hover { background: var(--solo-panel-hover); color: var(--solo-text); }
+        .nav-item.active { background: var(--solo-purple-bg); color: #fff; }
+        .nav-item:focus-visible { outline: 2px solid var(--solo-purple); outline-offset: 1px; }
+        .count-badge {
+            background: var(--solo-count-bg);
+            color: var(--solo-text-secondary);
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+        .nav-item.active .count-badge { background: rgba(139,92,246,.3); color: #fff; }
+
+        /* ===== Fix 10: Automation card as floating window ===== */
+        .automation-float {
+            position: relative;
+            background: linear-gradient(135deg, #161a25, #1a1e2a);
+            border: 1px solid var(--solo-border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 14px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .float-close {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--solo-text-dim);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: background .15s, color .15s;
+        }
+        .float-close:hover { background: var(--solo-panel-hover); color: var(--solo-text); }
+        .float-close:focus-visible { outline: 2px solid var(--solo-purple); outline-offset: 1px; }
+
+        /* ===== Sidebar cards ===== */
+        .side-card {
+            background: var(--solo-panel);
+            border: 1px solid var(--solo-border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-top: 14px;
+        }
+        .toggle {
+            width: 32px; height: 18px; border-radius: 9999px;
+            background: var(--solo-green); position: relative; flex-shrink: 0;
+        }
+        .toggle::after {
+            content: ""; position: absolute; top: 2px; right: 2px;
+            width: 14px; height: 14px; border-radius: 9999px; background: #fff;
+        }
+        .progress-track { height: 6px; background: #292e40; border-radius: 9999px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, var(--solo-purple), var(--solo-purple-light)); border-radius: 9999px; }
+
+        /* ===== Center topbar controls ===== */
+        .view-icon-btn {
+            width: 32px; height: 32px; border-radius: 8px;
+            display: inline-flex; align-items: center; justify-content: center;
+            color: var(--solo-text-muted); cursor: pointer;
+            transition: background .15s, color .15s;
+            background: transparent; border: none;
+        }
+        .view-icon-btn:hover { background: var(--solo-panel-hover); color: var(--solo-text); }
+        .view-icon-btn:focus-visible { outline: 2px solid var(--solo-purple); outline-offset: 1px; }
+        .btn-new {
+            background: var(--solo-purple); color: #fff; font-weight: 600;
+            padding: 9px 16px; border-radius: 9px; font-size: 14px;
+            display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+            border: none; margin-left: 6px;
+            transition: background .15s, transform .1s;
+        }
+        .btn-new:hover { background: var(--solo-purple-light); }
+        .btn-new:active { transform: translateY(1px); }
+        .btn-new:focus-visible { outline: 2px solid var(--solo-purple-light); outline-offset: 2px; }
+
+        /* ===== Fix 5: Date pill and streak pill ===== */
+        .date-pill {
+            background: var(--solo-panel);
+            border: 1px solid var(--solo-border);
+            border-radius: 9999px;
+            padding: 4px 12px;
+            font-size: 13px;
+            color: var(--solo-text-secondary);
+            white-space: nowrap;
+        }
+        .streak-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(34,197,94,0.1);
+            border: 1px solid rgba(34,197,94,0.2);
+            border-radius: 9999px;
+            padding: 4px 12px;
+            font-size: 13px;
+            color: var(--solo-green-light);
+            white-space: nowrap;
+        }
+
+        /* ===== Fix 1+2: Stats row — merged stat boxes + AI float at end, top/bottom dividers ===== */
+        .stats-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 0;
+            margin-top: 16px;
+            border-top: 1px solid var(--solo-border-subtle);
+            border-bottom: 1px solid var(--solo-border-subtle);
+        }
+
+        /* ===== Fix 6: Stat boxes — each in its own rounded card ===== */
+        .stat-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--solo-panel);
+            border: 1px solid var(--solo-border);
+            border-radius: 12px;
+            padding: 10px 14px;
+            color: var(--solo-text-secondary);
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        /* ===== Fix 7: AI floating element — compact, not full-width ===== */
+        .ai-float {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #17132b;
+            border: 1px solid var(--solo-purple-border);
+            border-radius: 12px;
+            padding: 8px 14px;
+            color: var(--solo-purple-text-light);
+            font-size: 13px;
+            max-width: 360px;
+            width: fit-content;
+        }
+
+        /* ===== Focus card — matching original screenshot ===== */
+        .focus-card {
+            position: relative;
+            margin-top: 4px;
+            background: linear-gradient(135deg, #18122c, #11141c);
+            border: 1px solid var(--solo-purple-deep);
+            border-radius: 18px;
+            padding: 20px;
+            box-shadow: 0 0 20px rgba(139,92,246,0.25);
+        }
+        .focus-grid {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            grid-template-rows: auto auto;
+            column-gap: 14px;
+            row-gap: 10px;
+            align-items: center;
+        }
+        .focus-grid .timer-icon-wrap {
+            grid-row: 1 / 3;
+            grid-column: 1;
+        }
+        .focus-title { grid-column: 2; grid-row: 1; align-self: center; font-size: 24px; font-weight: 700; line-height: 1.25; margin: 0; }
+        .focus-timer { grid-column: 3; grid-row: 1; align-self: center; justify-self: end; }
+        .focus-tags { grid-column: 2; grid-row: 2; align-self: center; }
+        .timer-icon-wrap {
+            border-radius: 10px;
+            background: rgba(139,92,246,0.15);
+            border: 1px solid var(--solo-purple-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--solo-purple-light);
+            flex-shrink: 0;
+            width: 44px;
+            height: 44px;
+        }
+        .pulse-dot {
+            width: 8px; height: 8px; border-radius: 9999px; background: var(--solo-purple-light);
+            position: relative; flex-shrink: 0;
+        }
+        .pulse-dot::after {
+            content: ""; position: absolute; inset: -3px; border-radius: 9999px;
+            background: var(--solo-purple-light); opacity: .5;
+            animation: soloPulse 1.8s ease-out infinite;
+        }
+        @keyframes soloPulse {
+            0% { transform: scale(.7); opacity: .6; }
+            100% { transform: scale(2.3); opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pulse-dot::after { animation: none; opacity: 0; }
+            * { transition-duration: .001ms !important; }
+        }
+        .mono-text { font-family: var(--solo-font-mono); }
+        .tag-pill {
+            background: var(--solo-tag-bg);
+            color: var(--solo-text-secondary);
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        /* ===== Fix 11: Task list — consistent height and spacing ===== */
+        .section-header { font-size: 16px; font-weight: 600; color: var(--solo-text); margin: 20px 0 4px; }
+        .task-list { display: flex; flex-direction: column; }
+        .task-row {
+            display: flex; align-items: center; gap: 12px;
+            min-height: 48px;
+            padding: 12px; border-radius: 12px;
+            border-bottom: 1px solid var(--solo-border-subtle);
+            transition: background .15s;
+            cursor: pointer;
+        }
+        .task-row:hover { background: rgba(139,92,246,.06); }
+        .task-row:focus-visible { outline: 2px solid var(--solo-purple); outline-offset: 1px; }
+        .task-row:last-child { border-bottom: none; }
+        .duration-pill {
+            background: var(--solo-tag-bg);
+            color: var(--solo-text-secondary);
+            font-size: 12px;
+            padding: 3px 9px;
+            border-radius: 9999px;
+            white-space: nowrap;
+        }
+
+        /* ===== Fix 11: Right sidebar cards — consistent padding and spacing ===== */
+        .r-card {
+            background: var(--solo-panel);
+            border: 1px solid var(--solo-border);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .badge-green { background: rgba(34,197,94,.15); color: var(--solo-green-light); font-size: 11px; padding: 2px 8px; border-radius: 9999px; white-space: nowrap; }
+        .badge-growth { background: rgba(34,197,94,.15); color: var(--solo-green-light); font-size: 12px; padding: 2px 8px; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
+        .ring-wrap { position: relative; width: 128px; height: 128px; margin: 4px auto 0; }
+        .ring-svg { display: block; }
+        .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+        /* ===== Fix 4+5: ai-insight as small floating window — font/bg match original ===== */
+        .ai-insight-float {
+            background: #17132b;
+            border: 1px solid var(--solo-purple-border);
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            width: fit-content;
+            max-width: 100%;
+            font-family: var(--solo-font-family);
+        }
+        .insight-dot {
+            width: 6px; height: 6px; border-radius: 9999px;
+            background: var(--solo-purple-light);
+            flex-shrink: 0;
+            display: inline-block;
+        }
+        .link-text { cursor: pointer; transition: color .15s; text-decoration: none; }
+        .link-text:hover { color: var(--solo-purple); }
+
+        /* ===== Fix 9: Client activity circular icon badges ===== */
+        .activity-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        /* ===== Modal: Shared ===== */
+        .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);z-index:100}
+        .modal-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:101;background:#11141d;border:1px solid #252a3b;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,0.5);max-height:82vh;overflow:auto}
+        .modal-panel:focus-visible{outline:2px solid var(--solo-purple);outline-offset:2px}
+        .modal-focus{width:min(460px,calc(100vw - 32px))}
+        .modal-automation{width:min(540px,calc(100vw - 32px))}
+        .modal-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 20px 0}
+        .modal-title{font-size:20px;font-weight:700;line-height:1.3;color:var(--solo-text);margin:0}
+        .modal-close{width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;color:var(--solo-text-muted);background:transparent;border:none;cursor:pointer;transition:background .15s,color .15s}
+        .modal-close:hover{background:var(--solo-panel-hover);color:var(--solo-text)}
+        .modal-close:focus-visible{outline:2px solid var(--solo-purple);outline-offset:1px}
+        .modal-body{display:flex;flex-direction:column;gap:12px;padding:16px 20px}
+        .modal-footer{display:flex;align-items:center;gap:10px;padding:0 20px 20px}
+        .modal-footer-right{justify-content:flex-end}
+        .modal-footer-center{justify-content:center}
+        .modal-divider{height:1px;border:none;background:var(--solo-border-subtle);margin:4px 0}
+
+        /* ===== Modal: Stepper ===== */
+        .step-row{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--solo-panel-2);border:1px solid var(--solo-border-subtle);border-radius:12px;padding:12px 14px}
+        .step-left{display:flex;align-items:center;gap:10px;min-width:0}
+        .step-icon{width:34px;height:34px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:rgba(139,92,246,0.12);border:1px solid var(--solo-purple-border);color:var(--solo-purple-light);flex-shrink:0}
+        .step-title{font-size:14px;font-weight:500;color:var(--solo-text);line-height:1.3}
+        .stepper{display:inline-flex;align-items:center;gap:8px;background:var(--solo-panel);border:1px solid var(--solo-border);border-radius:9999px;padding:4px}
+        .step-btn{width:26px;height:26px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--solo-text-muted);background:transparent;border:none;cursor:pointer;transition:background .15s,color .15s}
+        .step-btn:hover{background:var(--solo-panel-hover);color:var(--solo-text)}
+        .step-btn:focus-visible{outline:2px solid var(--solo-purple);outline-offset:1px}
+        .step-value{min-width:72px;text-align:center;font-family:var(--solo-font-mono);font-size:14px;font-weight:600;color:var(--solo-text)}
+        .step-unit{font-family:var(--solo-font-family);font-size:11px;font-weight:400;color:var(--solo-text-muted)}
+
+        /* ===== Modal: Toggle ===== */
+        .modal-toggle{width:36px;height:20px;border-radius:9999px;position:relative;flex-shrink:0;background:var(--solo-green);border:none;cursor:pointer;padding:0;transition:background .15s}
+        .modal-toggle::after{content:"";position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:9999px;background:#fff;transition:right .15s}
+        .modal-toggle.off{background:#2a2f41}
+        .modal-toggle.off::after{right:18px}
+        .modal-toggle:focus-visible{outline:2px solid var(--solo-purple);outline-offset:2px}
+
+        /* ===== Modal: Option rows ===== */
+        .option-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+        .option-title{font-size:14px;font-weight:500;color:var(--solo-text);line-height:1.3}
+        .option-sub{font-size:12px;color:var(--solo-text-muted);margin-top:2px}
+
+        /* ===== Modal: Buttons ===== */
+        .btn-ghost{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:1px solid var(--solo-border);border-radius:9px;color:var(--solo-text-secondary);font-size:14px;font-weight:500;padding:9px 16px;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+        .btn-ghost:hover{background:var(--solo-panel-hover);color:var(--solo-text);border-color:var(--solo-text-dim)}
+        .btn-ghost:focus-visible{outline:2px solid var(--solo-purple);outline-offset:2px}
+        .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--solo-purple);border:none;border-radius:9px;color:#fff;font-size:14px;font-weight:600;padding:9px 16px;cursor:pointer;transition:background .15s,transform .1s}
+        .btn-primary:hover{background:var(--solo-purple-light)}
+        .btn-primary:active{transform:translateY(1px)}
+        .btn-primary:focus-visible{outline:2px solid var(--solo-purple-light);outline-offset:2px}
+
+        /* ===== Modal: Automation rules ===== */
+        .rule-card{display:flex;align-items:center;gap:12px;background:var(--solo-panel-2);border:1px solid var(--solo-border-subtle);border-radius:12px;padding:12px 14px;transition:border-color .15s,background .15s}
+        .rule-card:hover{border-color:var(--solo-border)}
+        .rule-icon{width:36px;height:36px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+        .rule-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+        .rule-title{font-size:14px;font-weight:500;color:var(--solo-text);line-height:1.3}
+        .rule-sub{font-size:12px;color:var(--solo-text-muted);line-height:1.3}
+        .new-rule-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px;border:1px dashed var(--solo-border);border-radius:12px;background:transparent;color:var(--solo-purple-light);font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s}
+        .new-rule-btn:hover{background:rgba(139,92,246,0.06);border-color:var(--solo-purple)}
+        .new-rule-btn:focus-visible{outline:2px solid var(--solo-purple);outline-offset:2px}
+    </style>
+
+    <!-- ===== Modal: 自动化规则 ===== -->
+    <div class="modal-backdrop" data-dom-id="modal-automation-backdrop" aria-hidden="true"></div>
+    <div class="modal-panel modal-automation" role="dialog" aria-modal="true" aria-labelledby="automation-modal-title" data-dom-id="modal-automation">
+        <div class="modal-header">
+            <h2 class="modal-title" id="automation-modal-title">自动化规则</h2>
+            <button class="modal-close" type="button" data-dom-id="modal-automation-close" aria-label="关闭">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="rule-card">
+                <span class="rule-icon" style="background:rgba(139,92,246,0.15);border:1px solid var(--solo-purple-border);color:var(--solo-purple-light)">
+                    <i data-lucide="zap" class="w-4 h-4"></i>
+                </span>
+                <div class="rule-main">
+                    <div class="rule-title">当 发票状态 为 Done 时</div>
+                    <div class="rule-sub">发送发票 #1042</div>
+                </div>
+                <button class="modal-toggle" type="button" role="switch" aria-checked="true" aria-label="启用：发送发票"></button>
+            </div>
+            <div class="rule-card">
+                <span class="rule-icon" style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);color:var(--solo-blue)">
+                    <i data-lucide="bell" class="w-4 h-4"></i>
+                </span>
+                <div class="rule-main">
+                    <div class="rule-title">当 任务逾期 时</div>
+                    <div class="rule-sub">发送提醒</div>
+                </div>
+                <button class="modal-toggle off" type="button" role="switch" aria-checked="false" aria-label="关闭：发送提醒"></button>
+            </div>
+            <div class="rule-card">
+                <span class="rule-icon" style="background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.3);color:var(--solo-blue)">
+                    <i data-lucide="mail" class="w-4 h-4"></i>
+                </span>
+                <div class="rule-main">
+                    <div class="rule-title">当 新线索 创建时</div>
+                    <div class="rule-sub">发送欢迎邮件</div>
+                </div>
+                <button class="modal-toggle off" type="button" role="switch" aria-checked="false" aria-label="关闭：发送欢迎邮件"></button>
+            </div>
+
+            <button class="new-rule-btn" type="button">
+                <i data-lucide="plus" class="w-4 h-4"></i>新建规则
+            </button>
+        </div>
+        <div class="modal-footer modal-footer-center">
+            <button class="btn-ghost" type="button" data-dom-id="modal-automation-close-footer">关闭</button>
+        </div>
+    </div>
+
+    <script>lucide.createIcons();</script>
+</body>
+</html>
