@@ -35,8 +35,12 @@ export interface FocusSettings {
   soundEnabled: boolean;
 }
 
+export type AppearanceTheme = "light" | "dark";
+
 interface SettingsState extends FocusSettings {
+  theme: AppearanceTheme;
   setSettings: (settings: Partial<FocusSettings>) => void;
+  setTheme: (theme: AppearanceTheme) => void;
   resetSettings: () => void;
 }
 
@@ -48,6 +52,8 @@ export const DEFAULT_FOCUS_SETTINGS: FocusSettings = {
   autoStartFocus: false,
   soundEnabled: true,
 };
+
+export const DEFAULT_THEME: AppearanceTheme = "dark";
 
 function normalizeSteppedNumber(
   value: unknown,
@@ -64,6 +70,13 @@ function normalizeSteppedNumber(
 
 function normalizeBoolean(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
+}
+
+export function sanitizeAppearanceTheme(
+  value: unknown,
+  fallback: AppearanceTheme = DEFAULT_THEME,
+): AppearanceTheme {
+  return value === "light" || value === "dark" ? value : fallback;
 }
 
 export function sanitizeFocusSettings(
@@ -110,9 +123,12 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       ...DEFAULT_FOCUS_SETTINGS,
+      theme: DEFAULT_THEME,
       setSettings: (settings) =>
         set((state) => sanitizeFocusSettings(settings, state)),
-      resetSettings: () => set(DEFAULT_FOCUS_SETTINGS),
+      setTheme: (theme) => set({ theme: sanitizeAppearanceTheme(theme) }),
+      resetSettings: () =>
+        set({ ...DEFAULT_FOCUS_SETTINGS, theme: DEFAULT_THEME }),
     }),
     {
       name: "opc-focus-settings",
@@ -124,11 +140,19 @@ export const useSettingsStore = create<SettingsState>()(
         autoStartBreak: state.autoStartBreak,
         autoStartFocus: state.autoStartFocus,
         soundEnabled: state.soundEnabled,
+        theme: state.theme,
       }),
-      merge: (persistedState, currentState) => ({
-        ...currentState,
-        ...sanitizeFocusSettings(persistedState),
-      }),
+      merge: (persistedState, currentState) => {
+        const persisted =
+          typeof persistedState === "object" && persistedState !== null
+            ? (persistedState as Record<string, unknown>)
+            : {};
+        return {
+          ...currentState,
+          ...sanitizeFocusSettings(persisted),
+          theme: sanitizeAppearanceTheme(persisted.theme),
+        };
+      },
     },
   ),
 );
@@ -143,4 +167,8 @@ export function getFocusSettings(): FocusSettings {
     autoStartFocus: state.autoStartFocus,
     soundEnabled: state.soundEnabled,
   };
+}
+
+export function getAppearanceTheme(): AppearanceTheme {
+  return useSettingsStore.getState().theme;
 }

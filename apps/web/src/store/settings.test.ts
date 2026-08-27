@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_FOCUS_SETTINGS,
+  DEFAULT_THEME,
+  sanitizeAppearanceTheme,
   sanitizeFocusSettings,
   useSettingsStore,
 } from "./settings";
 
 describe("focus settings", () => {
   beforeEach(() => {
-    useSettingsStore.setState(DEFAULT_FOCUS_SETTINGS);
+    useSettingsStore.setState({
+      ...DEFAULT_FOCUS_SETTINGS,
+      theme: DEFAULT_THEME,
+    });
   });
 
   it("normalizes invalid and out-of-range values", () => {
@@ -63,5 +68,11 @@ describe("focus settings", () => {
       autoStartFocus: false,
       soundEnabled: false,
     });
+  });
+
+  it("accepts only supported appearance themes", () => {
+    expect(sanitizeAppearanceTheme("light")).toBe("light");
+    expect(sanitizeAppearanceTheme("dark")).toBe("dark");
+    expect(sanitizeAppearanceTheme("system")).toBe(DEFAULT_THEME);
   });
 });

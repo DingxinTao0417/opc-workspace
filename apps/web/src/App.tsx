@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { ThemeController } from "./components/ThemeController";
 import { ClientsPage } from "./pages/ClientsPage";
 import { FocusPage } from "./pages/FocusPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -45,6 +46,7 @@ export default function App() {
   return (
     <>
       <GlobalShortcuts />
+      <ThemeController />
       <FocusTicker />
       <Routes>
         <Route element={<AppShell />}>

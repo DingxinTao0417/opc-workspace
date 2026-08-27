@@ -1,14 +1,18 @@
-import { Minus, Plus, RotateCcw } from "lucide-react";
+import { Minus, Moon, Plus, RotateCcw, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   DEFAULT_FOCUS_SETTINGS,
+  DEFAULT_THEME,
+  getAppearanceTheme,
   getFocusSettings,
   sanitizeFocusSettings,
+  type AppearanceTheme,
   type FocusSettings,
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore } from "../store/ui";
 import { Modal } from "./Modal";
+import { applyTheme } from "./ThemeController";
 
 interface SettingsModalProps {
   onSettingsSaved?: (next: FocusSettings, previous: FocusSettings) => void;
@@ -103,10 +107,19 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const open = useUiStore((state) => state.settingsOpen);
   const setOpen = useUiStore((state) => state.setSettingsOpen);
   const setSettings = useSettingsStore((state) => state.setSettings);
+  const setTheme = useSettingsStore((state) => state.setTheme);
   const [draft, setDraft] = useState<FocusSettings>(DEFAULT_FOCUS_SETTINGS);
+  const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
 
   useEffect(() => {
-    if (open) setDraft(getFocusSettings());
+    if (!open) return;
+
+    const currentTheme = getAppearanceTheme();
+    setDraft(getFocusSettings());
+    setThemeDraft(currentTheme);
+    applyTheme(currentTheme);
+
+    return () => applyTheme(getAppearanceTheme());
   }, [open]);
 
   const updateDraft = <Key extends keyof FocusSettings>(
@@ -116,10 +129,16 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
   const close = () => setOpen(false);
 
+  const previewTheme = (theme: AppearanceTheme) => {
+    setThemeDraft(theme);
+    applyTheme(theme);
+  };
+
   const save = () => {
     const previous = getFocusSettings();
     const next = sanitizeFocusSettings(draft);
     setSettings(next);
+    setTheme(themeDraft);
     onSettingsSaved?.(next, previous);
     close();
   };
@@ -130,7 +149,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         <>
           <button
             className="button button-quiet settings-reset"
-            onClick={() => setDraft(DEFAULT_FOCUS_SETTINGS)}
+            onClick={() => {
+              setDraft(DEFAULT_FOCUS_SETTINGS);
+              previewTheme(DEFAULT_THEME);
+            }}
             type="button"
           >
             <RotateCcw size={14} />
@@ -154,57 +176,93 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       }
       onClose={close}
       open={open}
-      title="专注模式"
+      title="设置"
       width="460px"
     >
       <>
-        <div className="focus-settings">
-          <Stepper
-            description="每个专注块"
-            label="专注时长"
-            max={120}
-            min={5}
-            onChange={(value) => updateDraft("focusMinutes", value)}
-            step={5}
-            unit="分钟"
-            value={draft.focusMinutes}
-          />
-          <Stepper
-            description="专注块之间"
-            label="休息时长"
-            max={30}
-            min={5}
-            onChange={(value) => updateDraft("breakMinutes", value)}
-            step={5}
-            unit="分钟"
-            value={draft.breakMinutes}
-          />
-          <Stepper
-            description="本轮专注"
-            label="循环次数"
-            max={8}
-            min={1}
-            onChange={(value) => updateDraft("cycles", value)}
-            unit="次"
-            value={draft.cycles}
-          />
-          <Toggle
-            checked={draft.autoStartBreak}
-            label="自动开始休息"
-            onChange={(value) => updateDraft("autoStartBreak", value)}
-          />
-          <Toggle
-            checked={draft.autoStartFocus}
-            label="自动开始专注"
-            onChange={(value) => updateDraft("autoStartFocus", value)}
-          />
-          <Toggle
-            checked={draft.soundEnabled}
-            label="结束后提示音"
-            onChange={(value) => updateDraft("soundEnabled", value)}
-          />
-        </div>
-        <p className="settings-note">保存设置会暂停并重置当前计时。</p>
+        <section className="settings-section">
+          <h3 className="settings-section-title">外观</h3>
+          <div
+            aria-label="主题模式"
+            className="appearance-options"
+            role="radiogroup"
+          >
+            <button
+              aria-checked={themeDraft === "light"}
+              className="appearance-option"
+              data-selected={themeDraft === "light"}
+              onClick={() => previewTheme("light")}
+              role="radio"
+              type="button"
+            >
+              <Sun size={16} />
+              <span>亮色</span>
+            </button>
+            <button
+              aria-checked={themeDraft === "dark"}
+              className="appearance-option"
+              data-selected={themeDraft === "dark"}
+              onClick={() => previewTheme("dark")}
+              role="radio"
+              type="button"
+            >
+              <Moon size={16} />
+              <span>暗色</span>
+            </button>
+          </div>
+        </section>
+        <section className="settings-section">
+          <h3 className="settings-section-title">专注模式</h3>
+          <div className="focus-settings">
+            <Stepper
+              description="每个专注块"
+              label="专注时长"
+              max={120}
+              min={5}
+              onChange={(value) => updateDraft("focusMinutes", value)}
+              step={5}
+              unit="分钟"
+              value={draft.focusMinutes}
+            />
+            <Stepper
+              description="专注块之间"
+              label="休息时长"
+              max={30}
+              min={5}
+              onChange={(value) => updateDraft("breakMinutes", value)}
+              step={5}
+              unit="分钟"
+              value={draft.breakMinutes}
+            />
+            <Stepper
+              description="本轮专注"
+              label="循环次数"
+              max={8}
+              min={1}
+              onChange={(value) => updateDraft("cycles", value)}
+              unit="次"
+              value={draft.cycles}
+            />
+            <Toggle
+              checked={draft.autoStartBreak}
+              label="自动开始休息"
+              onChange={(value) => updateDraft("autoStartBreak", value)}
+            />
+            <Toggle
+              checked={draft.autoStartFocus}
+              label="自动开始专注"
+              onChange={(value) => updateDraft("autoStartFocus", value)}
+            />
+            <Toggle
+              checked={draft.soundEnabled}
+              label="结束后提示音"
+              onChange={(value) => updateDraft("soundEnabled", value)}
+            />
+          </div>
+        </section>
+        <p className="settings-note">
+          修改专注参数后保存会暂停并重置当前计时。
+        </p>
       </>
     </Modal>
   );
