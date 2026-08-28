@@ -37,8 +37,8 @@ func TestTaskWorkflowMigrationUpgradesRealV7DatabaseWithoutLosingFacts(t *testin
 		t.Fatalf("upgrade v7 workflow database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 16 {
-		t.Fatalf("SchemaVersion = %d, want 16", store.SchemaVersion)
+	if store.SchemaVersion != 17 {
+		t.Fatalf("SchemaVersion = %d, want 17", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT version FROM projects WHERE id = ?", v7WorkflowProjectID); got != wantProjectVersion {
 		t.Fatalf("project version changed during task rebuild: got %d want %d", got, wantProjectVersion)

@@ -2,12 +2,12 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.4](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.5](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
 - [今日工作台](today.md)（T-06A–H 日期分组、导航、按钮排序、同日/跨日期拖拽、空精确日期/未排期落点、行内任意日期安排、安全执行快捷操作及编辑/确认删除入口已交付）
-- [任务管理](tasks.md)（事实层、D1/D2、日期/客户筛选、精确计划组同状态拖拽、Inbox 关系删除互锁与批量编排已交付；保存视图、看板、来源消费与 Agent 仍待开发）
+- [任务管理](tasks.md)（事实层、D1/D2、日期/客户筛选、保存视图、精确计划组同状态拖拽、Inbox 关系删除互锁与批量编排已交付；看板、来源消费与 Agent 仍待开发）
 - [项目管理](projects.md)（基础纵切与 Client 选择/筛选已交付；项目级产出/附件/事件仍待开发）
 - [客户管理](clients.md)（基础资料 CRUD、基础详情与 Project 关联已交付；活动/附件/Actor 关联/回访/财务仍待开发）
 - [收件箱工作编排](inbox.md)（T-11A1/A2/A3/B/C/F 的受理分诊、Reminder、Task 编排和 Today/Sidebar 运营计数已交付；其他来源投影和 Agent 待开发）

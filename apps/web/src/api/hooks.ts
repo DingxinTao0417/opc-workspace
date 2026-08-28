@@ -17,12 +17,14 @@ import {
   createPersonActor,
   createTag,
   createTask,
+  createTaskSavedView,
   createTaskAssignment,
   createProject,
   deleteClient,
   deleteProject,
   deleteTag,
   deleteTask,
+  deleteTaskSavedView,
   deleteTaskArtifact,
   cancelReminder,
   downloadTaskArtifact,
@@ -55,6 +57,7 @@ import {
   getTaskEvents,
   getTaskSubmissions,
   getTaskPage,
+  getTaskSavedViews,
   getTasks,
   getTodayStats,
   getProject,
@@ -79,6 +82,7 @@ import {
   updateInboxItemTaskRequirement,
   updateTag,
   updateTask,
+  updateTaskSavedView,
   transitionProject,
   updateActor,
   updateProject,
@@ -90,6 +94,7 @@ import type {
   ActorListParams,
   AppSettingUpdate,
   BatchUpdateTasksInput,
+  CreateTaskSavedViewInput,
   ClientInput,
   ClientListParams,
   CreateFocusSessionInput,
@@ -124,6 +129,7 @@ import type {
   TaskEventListParams,
   TaskLifecycleCommandInput,
   TaskListParams,
+  UpdateTaskSavedViewInput,
   TaskSubmissionListParams,
   SubmitTaskOutputInput,
   ReviewTaskSubmissionInput,
@@ -851,6 +857,74 @@ export function useTaskPageQuery(input: TaskListParams = {}, enabled = true) {
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export const taskSavedViewQueryKey = ["task-saved-views"] as const;
+
+export function useTaskSavedViewsQuery() {
+  return useQuery({
+    queryKey: taskSavedViewQueryKey,
+    queryFn: getTaskSavedViews,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateTaskSavedView() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateTaskSavedViewInput) => createTaskSavedView(input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: taskSavedViewQueryKey });
+    },
+  });
+}
+
+export function useUpdateTaskSavedView() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateTaskSavedViewInput;
+    }) => updateTaskSavedView(id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: taskSavedViewQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({
+          queryKey: taskSavedViewQueryKey,
+        });
+      }
+    },
+  });
+}
+
+export function useDeleteTaskSavedView() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteTaskSavedView(id, expectedVersion),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: taskSavedViewQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({
+          queryKey: taskSavedViewQueryKey,
+        });
+      }
+    },
   });
 }
 

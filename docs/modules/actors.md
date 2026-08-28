@@ -1,10 +1,10 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v16（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10–v16 不改写其契约；v16 的 app_settings 仅引用 active Actor 作为设置修改者。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10–v17 不改写其契约；v16 的 app_settings 仅引用 active Actor 作为设置修改者。
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.4](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.5](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 

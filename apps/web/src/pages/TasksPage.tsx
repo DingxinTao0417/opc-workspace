@@ -26,12 +26,14 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { TagManagerModal } from "../components/TagManagerModal";
 import { TaskList } from "../components/TaskList";
+import { TaskSavedViewsControl } from "../components/TaskSavedViewsControl";
 import { useUiStore } from "../store/ui";
 import type {
   BatchUpdateTasksInput,
   Task,
   TaskKind,
   TaskPriority,
+  TaskSavedViewDefinition,
   TaskStatus,
 } from "../types/models";
 
@@ -96,7 +98,7 @@ export function TasksPage() {
   const [queryText, setQueryText] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
-  const [status, setStatus] = useState<TaskStatus | "">("");
+  const [status, setStatus] = useState<TaskStatus | "active" | "">("");
   const [priority, setPriority] = useState<TaskPriority | "">("");
   const [kind, setKind] = useState<TaskKind | "">("");
   const [projectId, setProjectId] = useState("");
@@ -137,6 +139,38 @@ export function TasksPage() {
         ? "截止日期起点不能晚于终点。"
         : null;
   const filtersValid = dateRangeError === null;
+  const savedViewDefinition = useMemo<TaskSavedViewDefinition>(
+    () => ({
+      q: searchInput.trim(),
+      status,
+      priority,
+      kind,
+      projectId,
+      clientId,
+      tagIds,
+      plannedDate,
+      plannedFrom,
+      plannedTo,
+      dueFrom,
+      dueTo,
+      sort,
+    }),
+    [
+      clientId,
+      dueFrom,
+      dueTo,
+      kind,
+      plannedDate,
+      plannedFrom,
+      plannedTo,
+      priority,
+      projectId,
+      searchInput,
+      sort,
+      status,
+      tagIds,
+    ],
+  );
   const hasFilters = Boolean(
     queryText ||
     status ||
@@ -286,6 +320,24 @@ export function TasksPage() {
     setDueTo("");
     setSearchInput("");
     setQueryText("");
+    setPage(1);
+  };
+
+  const applySavedView = (definition: TaskSavedViewDefinition) => {
+    setSearchInput(definition.q);
+    setQueryText(definition.q);
+    setStatus(definition.status);
+    setPriority(definition.priority);
+    setKind(definition.kind);
+    setProjectId(definition.projectId);
+    setClientId(definition.clientId);
+    setTagIds(definition.tagIds);
+    setPlannedDate(definition.plannedDate);
+    setPlannedFrom(definition.plannedFrom);
+    setPlannedTo(definition.plannedTo);
+    setDueFrom(definition.dueFrom);
+    setDueTo(definition.dueTo);
+    setSort(definition.sort);
     setPage(1);
   };
 
@@ -457,16 +509,21 @@ export function TasksPage() {
 
       {filtersOpen ? (
         <section aria-label="任务筛选条件" className="task-filter-panel">
+          <TaskSavedViewsControl
+            definition={savedViewDefinition}
+            onApply={applySavedView}
+          />
           <label>
             <span>状态</span>
             <select
               onChange={(event) => {
-                setStatus(event.target.value as TaskStatus | "");
+                setStatus(event.target.value as TaskStatus | "active" | "");
                 setPage(1);
               }}
               value={status}
             >
               <option value="">全部</option>
+              <option value="active">活动任务</option>
               <option value="in_progress">进行中</option>
               <option value="todo">待办</option>
               <option value="blocked">阻塞</option>

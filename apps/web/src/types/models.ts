@@ -630,6 +630,47 @@ export interface TaskListParams {
   sort?: string;
 }
 
+export interface TaskSavedViewDefinition {
+  q: string;
+  status: TaskStatus | "active" | "";
+  priority: TaskPriority | "";
+  kind: TaskKind | "";
+  projectId: string;
+  clientId: string;
+  tagIds: string[];
+  plannedDate: string;
+  plannedFrom: string;
+  plannedTo: string;
+  dueFrom: string;
+  dueTo: string;
+  sort: string;
+}
+
+export interface TaskSavedView {
+  id: string;
+  name: string;
+  definition: TaskSavedViewDefinition;
+  schemaVersion: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTaskSavedViewInput {
+  name: string;
+  definition: TaskSavedViewDefinition;
+}
+
+export interface UpdateTaskSavedViewInput {
+  expectedVersion: number;
+  name?: string;
+  definition?: TaskSavedViewDefinition;
+}
+
+export interface DeleteTaskSavedViewResult {
+  deletedId: string;
+}
+
 export interface TagListResult {
   items: Tag[];
   meta: PageMeta;

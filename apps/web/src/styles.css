@@ -1704,13 +1704,52 @@ kbd {
 }
 
 .task-filter-panel > label,
-.task-filter-tags {
+.task-filter-tags,
+.task-saved-views > label {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 5px;
   color: var(--text-muted);
   font-size: 10px;
+}
+
+.task-saved-views {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-saved-view-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-saved-view-actions .button {
+  min-height: 34px;
+}
+
+.task-saved-view-feedback,
+.task-saved-view-confirm {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.task-saved-view-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.task-saved-view-confirm span {
+  margin-right: auto;
 }
 
 .task-filter-panel select,
@@ -7211,6 +7250,14 @@ kbd {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .task-saved-views {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .task-saved-view-actions {
+    grid-column: 1 / -1;
+  }
+
   .task-filter-tags {
     grid-column: 1 / -1;
   }
@@ -7372,6 +7419,14 @@ kbd {
 
   .task-filter-panel {
     grid-template-columns: 1fr;
+  }
+
+  .task-saved-views {
+    grid-template-columns: 1fr;
+  }
+
+  .task-saved-view-actions {
+    grid-column: 1;
   }
 
   .task-filter-tags,

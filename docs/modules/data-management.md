@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v16（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -131,10 +131,11 @@ appLogDir/
 
 ## SQLite 迁移契约
 
-当前 schema v16：
+当前 schema v17：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
+- schema v17 以加法迁移新增版本化 `task_saved_views`；不改写 Task、设置或其他既有事实，也不创建默认视图/demo 数据。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -150,8 +151,9 @@ appLogDir/
 - 014：一次性本地 Reminder、稳定唯一 `source_event_key`、scheduled/fired/cancelled 成组约束、fired Inbox 引用一致性、身份/终态不可变和硬删除保护；不创建 demo Reminder，也不改写 v13 事实。
 - 015：required Task reconciliation 查询索引与 automatic resolution 数据库校验，不改写 v14 事实。
 - 016：版本化 app_settings、设置 schema/version、active 更新 Actor 约束、不可变 key 和硬删除保护；默认值只由 API 读取时提供，不落默认行。
+- 017：任务保存视图、JSON/大小/schema/version 约束、大小写不敏感唯一名称及更新时间索引；不保存任务结果。
 
-新增 schema 只能从 `017_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `018_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## 未来 v0.1 备份/恢复目标
 
@@ -212,6 +214,7 @@ appLogDir/
 - [x] schema v14 嵌入迁移、v13→v14 数据保留、Reminder 状态/投影引用/不可变/删除约束已由定向及全量 Go 测试覆盖。
 - [x] schema v15 嵌入迁移、v14→v15 数据保留、自动结清索引/trigger 与非法 automatic 终态拒绝已由迁移测试覆盖。
 - [x] schema v16 嵌入迁移、v15→v16 业务事实保留、空设置表及 Actor/key/硬删除约束已由迁移测试覆盖。
+- [x] schema v17 嵌入迁移、v16→v17 业务事实保留、空保存视图表及 JSON/名称/schema/version 约束已由迁移测试覆盖。
 - [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。

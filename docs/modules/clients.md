@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v16。客户事实仍由 schema v10 引入；schema v12–v16 的 Inbox、Reminder、编排与设置迁移均不改 Client 结构。v0.1 的基础资料 CRUD、基础详情和 Project 客户关联已交付，模块仍为**部分完成**；活动、附件、Actor 显式关联、回访和财务聚合尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v17。客户事实仍由 schema v10 引入；schema v12–v17 的 Inbox、Reminder、编排、设置与保存视图迁移均不改 Client 结构。v0.1 的基础资料 CRUD、基础详情和 Project 客户关联已交付，模块仍为**部分完成**；活动、附件、Actor 显式关联、回访和财务聚合尚未交付。
 
 ## 定位与边界
 

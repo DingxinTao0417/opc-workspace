@@ -7,7 +7,12 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { Task, TaskListParams, TaskStatus } from "../types/models";
+import type {
+  Task,
+  TaskListParams,
+  TaskSavedView,
+  TaskStatus,
+} from "../types/models";
 import { TasksPage } from "./TasksPage";
 
 const mocks = vi.hoisted(() => ({
@@ -22,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   taskQueries: [] as TaskListParams[],
   taskQueryEnabled: [] as boolean[],
   taskItems: null as Task[] | null,
+  savedViews: [] as TaskSavedView[],
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
 }));
@@ -99,6 +105,31 @@ vi.mock("../api/hooks", () => ({
     ],
     isError: false,
     isPending: false,
+  }),
+  useTaskSavedViewsQuery: () => ({
+    data: mocks.savedViews,
+    isError: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useCreateTaskSavedView: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useUpdateTaskSavedView: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useDeleteTaskSavedView: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
   }),
   useTagOptionsQuery: () => ({
     data: [],
@@ -180,6 +211,7 @@ describe("TasksPage", () => {
     mocks.placeholder = false;
     mocks.taskStatus = "todo";
     mocks.taskItems = null;
+    mocks.savedViews = [];
   });
 
   afterEach(cleanup);
@@ -325,6 +357,57 @@ describe("TasksPage", () => {
     expect(
       screen.queryByRole("button", { name: `查看任务：${task.title}` }),
     ).not.toBeInTheDocument();
+  });
+
+  it("applies a persisted saved view to the complete server query", () => {
+    mocks.savedViews = [
+      {
+        id: "view-1",
+        name: "客户验收",
+        definition: {
+          q: "交付",
+          status: "waiting_review",
+          priority: "P1",
+          kind: "review",
+          projectId: "project-1",
+          clientId: "client-1",
+          tagIds: [],
+          plannedDate: "",
+          plannedFrom: "2026-08-20",
+          plannedTo: "2026-08-31",
+          dueFrom: "2026-08-25",
+          dueTo: "2026-09-05",
+          sort: "-updated_at",
+        },
+        schemaVersion: 1,
+        version: 2,
+        createdAt: "2026-08-27T08:00:00Z",
+        updatedAt: "2026-08-28T08:00:00Z",
+      },
+    ];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    fireEvent.change(screen.getByLabelText("已保存视图"), {
+      target: { value: "view-1" },
+    });
+
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({
+        page: 1,
+        q: "交付",
+        status: "waiting_review",
+        priority: "P1",
+        kind: "review",
+        projectId: "project-1",
+        clientId: "client-1",
+        plannedFrom: "2026-08-20",
+        plannedTo: "2026-08-31",
+        dueFrom: "2026-08-25",
+        dueTo: "2026-09-05",
+        sort: "-updated_at",
+        rootOnly: false,
+      }),
+    );
   });
 
   it("previews and persists pointer drag within an exact plan status group", () => {

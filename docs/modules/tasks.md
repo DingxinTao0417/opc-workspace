@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v16（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12–v16 的 Inbox、Reminder、编排与设置迁移均不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v17 新增保存视图表，不改写 Task 表。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.4](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.5](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -23,7 +23,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围，且在单一精确日期的手动顺序视图中支持同状态拖拽。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序视图中支持同状态拖拽。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -39,6 +39,12 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - Task 存在任一活动 Inbox 关系时，硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，不会移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除。已解除历史关系的实时 `task_id` 随删除置空，但原 Task UUID/标题快照继续保留。
 
 ## 数据模型与约束
+
+### TaskSavedView（schema v17）
+
+`task_saved_views` 独立保存筛选定义，不把视图塞入固定四模块 `app_settings`，也不复制任务结果。名称 1–80 字符、大小写不敏感唯一；定义 JSON 最大 16 KiB、`schema_version = 1`、`version >= 1`，当前每个工作区最多 20 个。定义只包含搜索、状态、优先级、类型、项目、客户、标签、精确/范围计划日期、截止范围和排序；不保存页码、当前选择、展开状态或查询结果。
+
+API 提供列表、新建、`If-Match` 更新和带 `confirm=true` 的删除。服务端按与 Task 列表一致的枚举、UUID、日期、范围和排序白名单规范化；计划精确值与计划范围互斥。保存视图引用的 Project、Client 或 Tag 删除后不级联删除视图，应用时按当前事实自然返回空或剩余结果，避免用历史快照伪造现存关系。
 
 ### Task
 
@@ -242,6 +248,8 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 
 ## 前端交互与并发
 
+- 筛选面板可保存当前完整条件、选择并立即应用视图、以当前条件更新所选视图，或二次确认删除；保存视图在 SQLite 中跨重启保留。创建达到 20 个上限、同名、网络错误和版本冲突都有明确反馈。
+- 应用视图会原子替换搜索、状态、优先级、类型、项目、客户、标签、日期和排序并回到第一页，不恢复旧页码或任务选择；更新/删除携带当前视图版本，冲突时刷新列表且不自动覆盖。
 - 客户筛选复用 Client options，服务端沿 Task 的 Project 当前 `client_id` 过滤；Task 不保存客户副本。客户与项目、标签、状态及日期等条件取 AND，并完整保留到后续分页。
 - 计划日期支持精确值或起止范围二选一，截止日期支持独立起止范围；设置任一计划范围端点会清空精确值，设置精确值会清空计划范围。
 - 起点晚于终点时，对应日期控件显示无效状态和就地错误，主 Task Query 暂停，旧任务结果不继续展示；服务端仍二次校验格式和顺序，避免绕过 UI。
@@ -288,6 +296,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
 - 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
+- schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
 
 仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 
@@ -300,9 +309,12 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)
+- [Task 保存视图 API](../../services/sidecar/internal/api/task_saved_views.go)
+- [schema v17 保存视图迁移](../../services/sidecar/internal/database/migrations/017_task_saved_views.sql)
 - [Task output model](../../services/sidecar/internal/models/artifact.go)
 - [前端 Task output 组件](../../apps/web/src/components/TaskOutputsSection.tsx)
 - [任务列表页](../../apps/web/src/pages/TasksPage.tsx)
+- [任务保存视图控件](../../apps/web/src/components/TaskSavedViewsControl.tsx)
 - [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
 - [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)

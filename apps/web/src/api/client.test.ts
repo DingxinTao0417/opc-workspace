@@ -4,10 +4,12 @@ import {
   createPersonActor,
   createTag,
   createTask,
+  createTaskSavedView,
   createTaskAssignment,
   deleteTaskArtifact,
   deleteTag,
   deleteTask,
+  deleteTaskSavedView,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -16,6 +18,7 @@ import {
   getAllTasks,
   getTags,
   getTaskPage,
+  getTaskSavedViews,
   getTaskAssignments,
   getTaskEvents,
   getTaskArtifact,
@@ -32,6 +35,7 @@ import {
   normalizeTag,
   normalizeProject,
   normalizeTask,
+  normalizeTaskSavedView,
   normalizeTaskArtifact,
   normalizeTaskArtifactSummary,
   normalizeTaskArtifactListResult,
@@ -43,6 +47,7 @@ import {
   submitTaskOutput,
   updateTag,
   updateTask,
+  updateTaskSavedView,
   updateActor,
 } from "./client";
 
@@ -1246,6 +1251,118 @@ describe("task list requests", () => {
     });
     expect(url.searchParams.getAll("tag_id")).toEqual(["tag-1", "tag-2"]);
     expect(result.meta).toEqual({ page: 3, pageSize: 25, total: 61 });
+  });
+});
+
+const savedViewDefinition = {
+  q: "交付",
+  status: "waiting_review" as const,
+  priority: "P1" as const,
+  kind: "review" as const,
+  projectId: "project-1",
+  clientId: "client-1",
+  tagIds: ["tag-1"],
+  plannedDate: "",
+  plannedFrom: "2026-08-20",
+  plannedTo: "2026-08-31",
+  dueFrom: "2026-08-25",
+  dueTo: "2026-09-05",
+  sort: "-updated_at",
+};
+
+function savedViewPayload() {
+  return {
+    id: "view-1",
+    name: "客户验收",
+    definition: {
+      q: "交付",
+      status: "waiting_review",
+      priority: "P1",
+      kind: "review",
+      project_id: "project-1",
+      client_id: "client-1",
+      tag_ids: ["tag-1"],
+      planned_date: "",
+      planned_from: "2026-08-20",
+      planned_to: "2026-08-31",
+      due_from: "2026-08-25",
+      due_to: "2026-09-05",
+      sort: "-updated_at",
+    },
+    schema_version: 1,
+    version: 3,
+    created_at: "2026-08-27T08:00:00Z",
+    updated_at: "2026-08-28T08:00:00Z",
+  };
+}
+
+describe("task saved views", () => {
+  it("strictly normalizes the persisted definition", () => {
+    expect(normalizeTaskSavedView(savedViewPayload())).toEqual({
+      id: "view-1",
+      name: "客户验收",
+      definition: savedViewDefinition,
+      schemaVersion: 1,
+      version: 3,
+      createdAt: "2026-08-27T08:00:00Z",
+      updatedAt: "2026-08-28T08:00:00Z",
+    });
+    expect(() =>
+      normalizeTaskSavedView({
+        ...savedViewPayload(),
+        definition: { ...savedViewPayload().definition, tag_ids: [7] },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeTaskSavedView({ ...savedViewPayload(), schema_version: 2 }),
+    ).toThrow(ApiError);
+  });
+
+  it("lists, creates, version-updates, and confirms deletion", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "DELETE") {
+          return jsonResponse({ data: { deleted_id: "view-1" } });
+        }
+        return jsonResponse(
+          init?.method === "POST" || init?.method === "PATCH"
+            ? { data: savedViewPayload() }
+            : { data: [savedViewPayload()] },
+          init?.method === "POST" ? 201 : 200,
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getTaskSavedViews()).toHaveLength(1);
+    await createTaskSavedView({
+      name: "客户验收",
+      definition: savedViewDefinition,
+    });
+    await updateTaskSavedView("view-1", {
+      expectedVersion: 3,
+      definition: savedViewDefinition,
+    });
+    await deleteTaskSavedView("view-1", 3);
+
+    const createBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(createBody).toEqual({
+      name: "客户验收",
+      definition: expect.objectContaining({
+        client_id: "client-1",
+        planned_from: "2026-08-20",
+        tag_ids: ["tag-1"],
+      }),
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[2][1]?.headers).get("If-Match"),
+    ).toBe('"3"');
+    expect(String(fetchMock.mock.calls[3][0])).toContain(
+      "/api/v1/task-saved-views/view-1?confirm=true",
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[3][1]?.headers).get("If-Match"),
+    ).toBe('"3"');
   });
 });
 
