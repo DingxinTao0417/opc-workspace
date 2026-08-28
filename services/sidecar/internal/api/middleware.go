@@ -61,7 +61,7 @@ func originMiddleware(allowedOrigins []string) gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", origin)
 		c.Header("Vary", "Origin")
 		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, If-Match, X-Request-ID")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Header("Access-Control-Expose-Headers", "ETag, Idempotency-Replayed, X-Request-ID")
 		c.Header("Access-Control-Max-Age", "600")
 		if c.Request.Method == http.MethodOptions {

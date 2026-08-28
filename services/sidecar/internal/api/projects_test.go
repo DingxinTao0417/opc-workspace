@@ -154,6 +154,7 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 		Data struct {
 			ID          string  `json:"id"`
 			ProjectName *string `json:"project_name"`
+			Version     int64   `json:"version"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(taskCreate.Body.Bytes(), &taskEnvelope); err != nil {
@@ -203,7 +204,7 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 		http.MethodPatch,
 		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/status",
 		[]byte(`{"status":"done"}`),
-		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, taskEnvelope.Data.Version)},
 	)
 	if taskDone.Code != http.StatusOK {
 		t.Fatalf("complete task = %d: %s", taskDone.Code, taskDone.Body.String())
@@ -437,6 +438,93 @@ func TestProjectPatchValidationNullsAndVersionConflict(t *testing.T) {
 	}
 }
 
+func TestProjectNameChangeInvalidatesLinkedTaskVersions(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	project := createProjectForTest(t, router, `{"name":"关联任务版本项目"}`, nil)
+
+	createTask := func(title string, projectID *string) (string, int64) {
+		t.Helper()
+		body := fmt.Sprintf(`{"title":%q}`, title)
+		if projectID != nil {
+			body = fmt.Sprintf(`{"title":%q,"project_id":%q}`, title, *projectID)
+		}
+		recorder := performRequest(router, http.MethodPost, "/api/v1/tasks", []byte(body), nil)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("create task %q = %d: %s", title, recorder.Code, recorder.Body.String())
+		}
+		var envelope struct {
+			Data struct {
+				ID      string `json:"id"`
+				Version int64  `json:"version"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode task %q: %v", title, err)
+		}
+		return envelope.Data.ID, envelope.Data.Version
+	}
+
+	linkedTaskID, linkedVersion := createTask("关联任务", &project.ID)
+	unrelatedTaskID, unrelatedVersion := createTask("无关任务", nil)
+	currentRecorder := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID, nil, nil)
+	current := decodeProjectResponse(t, currentRecorder.Body.Bytes())
+
+	sameName := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/projects/"+project.ID,
+		[]byte(`{"name":"  关联任务版本项目  "}`),
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, current.Version)},
+	)
+	if sameName.Code != http.StatusOK {
+		t.Fatalf("same-name project update = %d: %s", sameName.Code, sameName.Body.String())
+	}
+	sameNameProject := decodeProjectResponse(t, sameName.Body.Bytes())
+
+	var version int64
+	if err := store.DB.Table("tasks").Select("version").Where("id = ?", linkedTaskID).Scan(&version).Error; err != nil {
+		t.Fatalf("read linked task version after same-name update: %v", err)
+	}
+	if version != linkedVersion {
+		t.Fatalf("linked task version after same-name update = %d, want %d", version, linkedVersion)
+	}
+
+	renamed := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/projects/"+project.ID,
+		[]byte(`{"name":"关联任务版本项目（新）"}`),
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, sameNameProject.Version)},
+	)
+	if renamed.Code != http.StatusOK {
+		t.Fatalf("rename project = %d: %s", renamed.Code, renamed.Body.String())
+	}
+
+	linked := performRequest(router, http.MethodGet, "/api/v1/tasks/"+linkedTaskID, nil, nil)
+	if linked.Code != http.StatusOK {
+		t.Fatalf("read linked task after project rename = %d: %s", linked.Code, linked.Body.String())
+	}
+	var linkedEnvelope struct {
+		Data struct {
+			ProjectName *string `json:"project_name"`
+			Version     int64   `json:"version"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(linked.Body.Bytes(), &linkedEnvelope); err != nil {
+		t.Fatalf("decode linked task after project rename: %v", err)
+	}
+	if linkedEnvelope.Data.ProjectName == nil || *linkedEnvelope.Data.ProjectName != "关联任务版本项目（新）" ||
+		linkedEnvelope.Data.Version != linkedVersion+1 || linked.Header().Get("ETag") != fmt.Sprintf(`"%d"`, linkedVersion+1) {
+		t.Fatalf("linked task after project rename = version %d, project_name %#v, ETag %q", linkedEnvelope.Data.Version, linkedEnvelope.Data.ProjectName, linked.Header().Get("ETag"))
+	}
+	if err := store.DB.Table("tasks").Select("version").Where("id = ?", unrelatedTaskID).Scan(&version).Error; err != nil {
+		t.Fatalf("read unrelated task version: %v", err)
+	}
+	if version != unrelatedVersion {
+		t.Fatalf("unrelated task version after project rename = %d, want %d", version, unrelatedVersion)
+	}
+}
+
 func TestProjectTransitionsRequireValidStateVersionAndIncompleteConfirmation(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	created := createProjectForTest(t, router, `{"name":"状态流转项目"}`, nil)
@@ -551,7 +639,8 @@ func TestArchivedProjectsRejectNewTaskLinksButKeepExistingTaskEditable(t *testin
 	}
 	var linkedEnvelope struct {
 		Data struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(linkedTask.Body.Bytes(), &linkedEnvelope); err != nil {
@@ -584,7 +673,8 @@ func TestArchivedProjectsRejectNewTaskLinksButKeepExistingTaskEditable(t *testin
 	}
 	var unrelatedEnvelope struct {
 		Data struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(unrelatedTask.Body.Bytes(), &unrelatedEnvelope); err != nil {
@@ -595,7 +685,7 @@ func TestArchivedProjectsRejectNewTaskLinksButKeepExistingTaskEditable(t *testin
 		http.MethodPatch,
 		"/api/v1/tasks/"+unrelatedEnvelope.Data.ID,
 		[]byte(fmt.Sprintf(`{"project_id":%q}`, project.ID)),
-		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, unrelatedEnvelope.Data.Version)},
 	)
 	if changedLink.Code != http.StatusConflict || responseErrorCode(t, changedLink.Body.Bytes()) != "PROJECT_ARCHIVED" {
 		t.Fatalf("move task to archived project = %d: %s", changedLink.Code, changedLink.Body.String())
@@ -606,7 +696,7 @@ func TestArchivedProjectsRejectNewTaskLinksButKeepExistingTaskEditable(t *testin
 		http.MethodPatch,
 		"/api/v1/tasks/"+linkedEnvelope.Data.ID,
 		[]byte(fmt.Sprintf(`{"title":"归档项目中的既有任务","project_id":%q}`, project.ID)),
-		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, linkedEnvelope.Data.Version)},
 	)
 	if keepLink.Code != http.StatusOK {
 		t.Fatalf("edit task with unchanged archived project = %d: %s", keepLink.Code, keepLink.Body.String())
@@ -637,7 +727,8 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	}
 	var taskEnvelope struct {
 		Data struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(task.Body.Bytes(), &taskEnvelope); err != nil {
@@ -707,14 +798,25 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	if deletion.Data.DeletedID != project.ID || deletion.Data.DetachedTasks != 1 || deletion.Data.DetachedInvoices != 1 {
 		t.Fatalf("delete response = %#v", deletion.Data)
 	}
-	for table, id := range map[string]string{"tasks": taskEnvelope.Data.ID, "invoices": invoiceID} {
-		var detachedProjectID *string
-		if err := store.DB.Table(table).Select("project_id").Where("id = ?", id).Scan(&detachedProjectID).Error; err != nil {
-			t.Fatalf("read detached %s: %v", table, err)
-		}
-		if detachedProjectID != nil {
-			t.Fatalf("%s project_id = %q, want null", table, *detachedProjectID)
-		}
+	var detachedTask struct {
+		ProjectID *string `gorm:"column:project_id"`
+		Version   int64   `gorm:"column:version"`
+	}
+	if err := store.DB.Table("tasks").Select("project_id, version").Where("id = ?", taskEnvelope.Data.ID).Scan(&detachedTask).Error; err != nil {
+		t.Fatalf("read detached task: %v", err)
+	}
+	if detachedTask.ProjectID != nil {
+		t.Fatalf("task project_id = %q, want null", *detachedTask.ProjectID)
+	}
+	if detachedTask.Version != taskEnvelope.Data.Version+1 {
+		t.Fatalf("detached task version = %d, want %d", detachedTask.Version, taskEnvelope.Data.Version+1)
+	}
+	var detachedInvoiceProjectID *string
+	if err := store.DB.Table("invoices").Select("project_id").Where("id = ?", invoiceID).Scan(&detachedInvoiceProjectID).Error; err != nil {
+		t.Fatalf("read detached invoice: %v", err)
+	}
+	if detachedInvoiceProjectID != nil {
+		t.Fatalf("invoice project_id = %q, want null", *detachedInvoiceProjectID)
 	}
 	missing := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID, nil, nil)
 	if missing.Code != http.StatusNotFound {

@@ -24,6 +24,7 @@
 - 通过 `GET /api/v1/stats/today?date=YYYY-MM-DD` 读取当天任务总数、完成数、剩余数、逾期/临期数、预估/实际分钟和专注统计。
 - 展示预计时长、待完成数和逾期数；任务列表具备加载、空、错误和重试状态，统计查询具备错误与重试提示。
 - 可打开新建任务弹窗，可把列表中的任务切换为完成或恢复为待办；点击任务行可打开共享详情弹窗，编辑非状态字段或经二次确认删除。
+- 任务事实层已提供真实分页、计划日期范围、稳定排序和 `PUT /api/v1/tasks/reorder`。排序命令按完整 `planned_date` 组及每项 `expected_version` 原子校验，并支持 `manual / default`；任务页已经接入按钮式排序，今日页尚未消费。
 - 右侧全局概览已接内存专注计时器，可开始、暂停和重新开始计时。
 
 ### 已知缺口
@@ -31,7 +32,7 @@
 - 页面将全部未完成任务按 API 顺序直接切成前 3 条“今天”和第 4–6 条“本周”，没有按 `planned_date` 分组；因此列表可能与按日期聚合的统计互相矛盾。
 - 超过 6 条的未完成任务在今日页不展示，超过 100 条的任务根本不会被前端读取。
 - 日期 pill 不可切换；没有逾期、临期、本周边界或用户时区查询。
-- 没有拖拽排序、排序持久化、失败回滚或恢复默认排序。
+- 今日页没有拖拽排序、排序持久化入口、失败回滚或恢复默认排序；底层任务 API 与任务页已经具备计划组持久排序和恢复默认能力。
 - 任务行仍没有行内编辑、开始专注等快捷操作，且 UI 无法把任务设为 `in_progress`；编辑和删除目前通过详情弹窗完成。
 - API 已返回 `dueSoon` 和专注统计，今日页没有展示这些数据。
 - 统计查询加载期间没有独立骨架或“读取中”反馈，卡片会暂时显示零值。
@@ -88,15 +89,16 @@
 
 ### 当前事实
 
-- `tasks.planned_date` 保存计划日期，`manual_order` 已存在但暂无前端排序写入 API。
-- `GET /api/v1/tasks` 已支持 `status`、`priority`、`project_id`、`planned_date`、`q`、`sort` 和分页参数，但今日页未使用这些能力。
+- `tasks.planned_date` 保存计划日期，`manual_order` 保存计划组内手动顺序；改变 `planned_date` 时清除原手动顺序。
+- `GET /api/v1/tasks` 已支持 `status`、`priority`、`kind`、`project_id`、精确/范围计划日期、截止日期范围、标签、父任务/根任务、`q`、稳定 `sort` 和分页参数，但今日页仍只读取第一页并在前端切片。
+- `PUT /api/v1/tasks/reorder` 已实现：一个请求必须携带目标计划日期组的完整任务 ID/版本集合，原子写入手动顺序或恢复默认；组成员或版本变化时拒绝旧写入。
 - `GET /api/v1/stats/today?date=` 已实现；任务统计按 `planned_date` 聚合，逾期/临期按 Sidecar 当前 UTC 时间计算。
 
 ### 规划契约
 
 - 扩展 `GET /api/v1/stats/today?date=&timezone=`，由服务端根据 IANA 时区计算当天和本周的 UTC 边界。
 - 通过任务列表 API 按日期/范围分页查询，而不是先读取前 100 条再由前端切片。
-- `PUT /api/v1/tasks/reorder` 在事务中保存目标日期、组内顺序和 `expected_version`；并发冲突返回 `409 CONFLICT`。
+- 今日页接入现有 `PUT /api/v1/tasks/reorder`，并在拖拽失败、`TASK_REORDER_SET_CHANGED` 或 `VERSION_CONFLICT` 时回滚可见顺序并刷新任务组。
 - 今日页消费 `task_due`、`task_blocked`、`task_output_submitted`、`reminder_due` 等本地事件的派生计数，但不自行写 Workflow Event。
 - 财务、客户和发票统计只有对应模块交付后才接入；当前 schema 中有表不等于 API/业务已可用。
 

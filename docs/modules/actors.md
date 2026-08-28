@@ -2,7 +2,7 @@
 
 > 实现基线：`HEAD 471f814`（2026-08-27）
 >
-> 版本边界：当前 Actor/Assignment 完全未实现。v0.1 交付 owner/person/system 的人工责任记录；agent Actor、Adapter 和实际执行归入 v0.2。
+> 版本边界：当前 Actor/Assignment 完全未实现。schema v6 已交付 Task 父子、完成标准和乐观并发版本，但不包含责任主体、验收策略或审计。v0.1 交付 owner/person/system 的人工责任记录；agent Actor、Adapter 和实际执行归入 v0.2。
 
 ## 定位与边界
 
@@ -28,9 +28,9 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 当前状态为**未开始**。
 
 - 数据库没有 `actors`、`task_assignments`、`agent_adapters`、`agent_runs` 或 `workflow_events`。
-- Task 没有 assignee/reviewer、完成条件、验收策略或乐观并发版本。
+- Task 已有 `completion_criteria` 和 `version`，非状态编辑、三态状态更新和删除已要求 `If-Match`；仍没有 assignee/reviewer、`review_policy`、扩展状态或分派历史。
 - 前端没有 Actor 设置页、负责人选择器、当前负责人、改派历史或停用功能。
-- API 只支持任务基础三态；没有分派、改派、提交产出或验收接口。
+- API 已支持任务基础三态、父子任务和事实层并发冲突；没有分派、改派、提交产出或验收接口。
 - 当前所有任务隐含属于单用户，但数据库中没有可审计的 owner Assignment 历史。
 - 没有本地 Agent Runtime、安全能力令牌、受控执行或崩溃恢复。
 
@@ -106,7 +106,7 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 - `task_assignments`：Task/Actor、`assignee / reviewer`、分派人、生效/结束时间和原因。
 - `task_artifacts`：Task、可选 Agent Run、存储信息、校验和、实际产出者、录入者和 follow-up 标记。
 - `workflow_events`：聚合对象、动作、Actor、Assignment/Run、request ID、前后值和时间。
-- Task 增加完成条件、验收策略、扩展状态和 `version`。
+- Task 已有完成条件和 `version`；本纵切继续增加验收策略、扩展状态及与 Assignment/Artifact/Event 同事务的版本递增规则。
 
 数据库约束至少包括：仅一个 owner；内置 Actor 不可删除；同一 Task/role 只有一个活动 Assignment；停用不级联删除历史。
 
@@ -148,7 +148,7 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 分阶段实施
 
-1. **T-18A 迁移与内置 Actor**：新增 actors/assignments/artifacts/events，幂等创建 owner/system，回填历史任务。
+1. **T-18A 迁移与内置 Actor**：在 schema v6 Task 事实层上新增 actors/assignments/artifacts/events，幂等创建 owner/system，回填历史任务。
 2. **T-18B person 管理**：设置页 CRUD（删除改为受约束停用）、校验、筛选和语义提示。
 3. **T-18C Assignment**：任务负责人选择、初次分派、改派、结束、唯一活动约束和时间线。
 4. **T-18D 受控工作流**：扩展 Task 状态、完成条件、提交产出、owner 验收/返工和乐观并发。

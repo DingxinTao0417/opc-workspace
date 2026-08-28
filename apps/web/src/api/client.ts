@@ -1,4 +1,7 @@
 import type {
+  BatchUpdateTasksInput,
+  BatchUpdateTasksResult,
+  DeleteTagResult,
   HealthResponse,
   NewTaskInput,
   DeleteProjectResult,
@@ -8,12 +11,20 @@ import type {
   ProjectListResult,
   ProjectStatus,
   ProjectTransitionAction,
+  ReorderTasksInput,
+  ReorderTasksResult,
+  Tag,
+  TagInput,
+  TagListParams,
+  TagListResult,
   Task,
+  TaskKind,
   TaskListParams,
   TaskListResult,
   TaskPriority,
   TaskStatus,
   TodayStats,
+  UpdateTagInput,
   UpdateTaskInput,
   UpdateProjectInput,
 } from "../types/models";
@@ -202,20 +213,91 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
 }
 
+function invalidResponse(message: string): never {
+  throw new ApiError(message, { code: "INVALID_RESPONSE" });
+}
+
 function asTaskStatus(value: unknown): TaskStatus {
-  return value === "in_progress" || value === "done" ? value : "todo";
+  if (value === "todo" || value === "in_progress" || value === "done") {
+    return value;
+  }
+  return invalidResponse("任务状态响应无效");
 }
 
 function asTaskPriority(value: unknown): TaskPriority {
-  return value === "P0" || value === "P1" || value === "P3" ? value : "P2";
+  if (value === "P0" || value === "P1" || value === "P2" || value === "P3") {
+    return value;
+  }
+  return invalidResponse("任务优先级响应无效");
+}
+
+function asTaskKind(value: unknown): TaskKind {
+  if (value === undefined || value === null || value === "") return "work";
+  if (
+    value === "work" ||
+    value === "review" ||
+    value === "followup" ||
+    value === "reminder"
+  ) {
+    return value;
+  }
+  return invalidResponse("任务类型响应无效");
 }
 
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+function fieldValue(record: JsonRecord, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+}
+
 function numeric(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function nonNegativeInteger(
+  value: unknown,
+  field: string,
+  fallback?: number,
+): number {
+  if (value === undefined && fallback !== undefined) return fallback;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  return invalidResponse(`${field} 响应无效`);
+}
+
+function positiveInteger(
+  value: unknown,
+  field: string,
+  fallback?: number,
+): number {
+  if (value === undefined && fallback !== undefined) return fallback;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
+    return value;
+  }
+  return invalidResponse(`${field} 响应无效`);
+}
+
+function nullableNonNegativeInteger(
+  value: unknown,
+  field: string,
+): number | null {
+  if (value === undefined || value === null) return null;
+  return nonNegativeInteger(value, field);
+}
+
+function expectedVersionHeader(value: unknown): Record<string, string> {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ApiError("资源版本缺失，请刷新后重试", {
+      code: "EXPECTED_VERSION_REQUIRED",
+    });
+  }
+  return { "If-Match": `"${value}"` };
 }
 
 function asProjectStatus(value: unknown): ProjectStatus {
@@ -305,46 +387,103 @@ export function normalizeProject(value: unknown): Project {
   };
 }
 
-export function normalizeTask(value: unknown): Task {
-  if (!isRecord(value))
-    throw new ApiError("任务响应格式无效", { code: "INVALID_RESPONSE" });
-
+export function normalizeTag(value: unknown): Tag {
+  if (!isRecord(value)) return invalidResponse("标签响应格式无效");
+  const id = stringField(value, "id");
+  const name = stringField(value, "name");
+  const color = stringField(value, "color");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  if (
+    !id ||
+    !name ||
+    !color ||
+    !createdAt ||
+    !/^#[0-9A-Fa-f]{6}$/.test(color)
+  ) {
+    return invalidResponse("标签响应格式无效");
+  }
   return {
-    id: String(value.id ?? ""),
-    title: String(value.title ?? "未命名任务"),
-    description: String(value.description ?? ""),
-    status: asTaskStatus(value.status),
-    priority: asTaskPriority(value.priority),
-    projectId: nullableString(value.project_id ?? value.projectId),
-    projectName:
-      nullableString(value.project_name ?? value.projectName) ?? undefined,
-    dueDate: nullableString(value.due_date ?? value.dueDate),
-    plannedDate: nullableString(value.planned_date ?? value.plannedDate),
-    estimatedMinutes:
-      value.estimated_minutes === null || value.estimatedMinutes === null
-        ? null
-        : numeric(value.estimated_minutes ?? value.estimatedMinutes) || null,
-    actualMinutes: numeric(value.actual_minutes ?? value.actualMinutes),
-    createdAt: String(value.created_at ?? value.createdAt ?? ""),
-    updatedAt: String(value.updated_at ?? value.updatedAt ?? ""),
-    completedAt: nullableString(value.completed_at ?? value.completedAt),
-    tags: Array.isArray(value.tags)
-      ? value.tags.filter((tag): tag is string => typeof tag === "string")
-      : undefined,
+    id,
+    name,
+    color: color.toUpperCase(),
+    version: positiveInteger(value.version, "标签版本", 1),
+    createdAt,
   };
 }
 
-function unwrapTaskList(payload: unknown): unknown[] {
-  if (Array.isArray(payload)) return payload;
-  if (!isRecord(payload)) return [];
-  if (Array.isArray(payload.data)) return payload.data;
-  if (Array.isArray(payload.tasks)) return payload.tasks;
-  if (Array.isArray(payload.items)) return payload.items;
-  if (isRecord(payload.data)) {
-    if (Array.isArray(payload.data.items)) return payload.data.items;
-    if (Array.isArray(payload.data.tasks)) return payload.data.tasks;
+export function normalizeTask(value: unknown): Task {
+  if (!isRecord(value)) return invalidResponse("任务响应格式无效");
+
+  const id = stringField(value, "id");
+  const title = stringField(value, "title");
+  if (!id || !title || typeof value.description !== "string") {
+    return invalidResponse("任务响应格式无效");
   }
-  return [];
+
+  const estimatedMinutes = fieldValue(
+    value,
+    "estimated_minutes",
+    "estimatedMinutes",
+  );
+  const manualOrder = fieldValue(value, "manual_order", "manualOrder");
+  const rawTags = value.tags;
+  if (rawTags !== undefined && !Array.isArray(rawTags)) {
+    return invalidResponse("任务标签响应格式无效");
+  }
+
+  return {
+    id,
+    title,
+    description: value.description,
+    kind: asTaskKind(value.kind),
+    status: asTaskStatus(value.status),
+    priority: asTaskPriority(value.priority),
+    projectId: nullableString(fieldValue(value, "project_id", "projectId")),
+    projectName:
+      nullableString(fieldValue(value, "project_name", "projectName")) ??
+      undefined,
+    parentTaskId: nullableString(
+      fieldValue(value, "parent_task_id", "parentTaskId"),
+    ),
+    parentTaskTitle:
+      nullableString(
+        fieldValue(value, "parent_task_title", "parentTaskTitle"),
+      ) ?? undefined,
+    completionCriteria: String(
+      fieldValue(value, "completion_criteria", "completionCriteria") ?? "",
+    ),
+    dueDate: nullableString(fieldValue(value, "due_date", "dueDate")),
+    plannedDate: nullableString(
+      fieldValue(value, "planned_date", "plannedDate"),
+    ),
+    estimatedMinutes: nullableNonNegativeInteger(
+      estimatedMinutes,
+      "任务预计时长",
+    ),
+    actualMinutes: nonNegativeInteger(
+      fieldValue(value, "actual_minutes", "actualMinutes"),
+      "任务实际时长",
+      0,
+    ),
+    manualOrder: nullableNonNegativeInteger(manualOrder, "任务手动顺序"),
+    version: positiveInteger(value.version, "任务版本", 1),
+    subtaskTotal: nonNegativeInteger(
+      fieldValue(value, "subtask_total", "subtaskTotal"),
+      "子任务总数",
+      0,
+    ),
+    subtaskCompleted: nonNegativeInteger(
+      fieldValue(value, "subtask_completed", "subtaskCompleted"),
+      "已完成子任务数",
+      0,
+    ),
+    createdAt: String(fieldValue(value, "created_at", "createdAt") ?? ""),
+    updatedAt: String(fieldValue(value, "updated_at", "updatedAt") ?? ""),
+    completedAt: nullableString(
+      fieldValue(value, "completed_at", "completedAt"),
+    ),
+    tags: Array.isArray(rawTags) ? rawTags.map(normalizeTag) : [],
+  };
 }
 
 export async function getHealth(): Promise<HealthResponse> {
@@ -356,19 +495,36 @@ export async function getTaskPage(
 ): Promise<TaskListResult> {
   const params = new URLSearchParams({
     page: String(options.page ?? 1),
-    page_size: String(options.pageSize ?? 100),
+    page_size: String(options.pageSize ?? 50),
   });
+  if (options.q?.trim()) params.set("q", options.q.trim());
+  if (options.kind) params.set("kind", options.kind);
+  if (options.status) params.set("status", options.status);
+  if (options.priority) params.set("priority", options.priority);
   if (options.projectId) params.set("project_id", options.projectId);
+  for (const tagId of new Set(options.tagIds?.map((id) => id.trim()))) {
+    if (tagId) params.append("tag_id", tagId);
+  }
+  if (options.plannedDate) params.set("planned_date", options.plannedDate);
+  if (options.plannedFrom) params.set("planned_from", options.plannedFrom);
+  if (options.plannedTo) params.set("planned_to", options.plannedTo);
+  if (options.parentTaskId) params.set("parent_task_id", options.parentTaskId);
+  if (options.rootOnly !== undefined)
+    params.set("root_only", String(options.rootOnly));
+  if (options.sort?.trim()) params.set("sort", options.sort.trim());
   const payload = await apiRequest<unknown>(`/api/v1/tasks?${params}`);
-  const items = unwrapTaskList(payload).map(normalizeTask);
-  const meta = isRecord(payload) && isRecord(payload.meta) ? payload.meta : {};
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("任务列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeTask);
+  const meta = isRecord(payload.meta) ? payload.meta : {};
   return {
     items,
     meta: {
       page: numeric(meta.page, options.page ?? 1),
       pageSize: numeric(
         meta.page_size ?? meta.pageSize,
-        options.pageSize ?? 100,
+        options.pageSize ?? 50,
       ),
       total: numeric(meta.total, items.length),
     },
@@ -376,7 +532,12 @@ export async function getTaskPage(
 }
 
 export async function getTasks(options: TaskListParams = {}): Promise<Task[]> {
-  return (await getTaskPage(options)).items;
+  return (
+    await getTaskPage({
+      ...options,
+      pageSize: options.pageSize ?? 100,
+    })
+  ).items;
 }
 
 export async function getAllTasks(
@@ -415,12 +576,17 @@ export async function createTask(
     body: JSON.stringify({
       title: input.title,
       description: input.description ?? "",
+      kind: input.kind ?? "work",
       status: input.status,
       priority: input.priority,
       project_id: input.projectId ?? null,
+      parent_task_id: input.parentTaskId ?? null,
+      completion_criteria: input.completionCriteria ?? "",
+      tag_ids: input.tagIds ?? [],
       due_date: input.dueDate ?? null,
       planned_date: input.plannedDate ?? null,
       estimated_minutes: input.estimatedMinutes ?? null,
+      manual_order: input.manualOrder ?? null,
     }),
   });
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
@@ -430,11 +596,13 @@ export async function createTask(
 export async function updateTaskStatus(
   id: string,
   status: TaskStatus,
+  expectedVersion: number,
 ): Promise<Task> {
   const payload = await apiRequest<unknown>(
     `/api/v1/tasks/${encodeURIComponent(id)}/status`,
     {
       method: "PATCH",
+      headers: expectedVersionHeader(expectedVersion),
       body: JSON.stringify({ status }),
     },
   );
@@ -450,13 +618,22 @@ export async function updateTask(
     `/api/v1/tasks/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
       body: JSON.stringify({
         title: input.title,
         description: input.description,
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
         priority: input.priority,
         ...(input.projectId === undefined
           ? {}
           : { project_id: input.projectId }),
+        ...(input.parentTaskId === undefined
+          ? {}
+          : { parent_task_id: input.parentTaskId }),
+        ...(input.completionCriteria === undefined
+          ? {}
+          : { completion_criteria: input.completionCriteria }),
+        ...(input.tagIds === undefined ? {} : { tag_ids: input.tagIds }),
         due_date: input.dueDate,
         planned_date: input.plannedDate,
         estimated_minutes: input.estimatedMinutes,
@@ -467,10 +644,185 @@ export async function updateTask(
   return normalizeTask(body);
 }
 
-export async function deleteTask(id: string): Promise<void> {
+export async function deleteTask(
+  id: string,
+  expectedVersion: number,
+): Promise<void> {
   await apiRequest<void>(`/api/v1/tasks/${encodeURIComponent(id)}`, {
     method: "DELETE",
+    headers: expectedVersionHeader(expectedVersion),
   });
+}
+
+export async function batchUpdateTasks(
+  input: BatchUpdateTasksInput,
+): Promise<BatchUpdateTasksResult> {
+  const body: Record<string, unknown> = {
+    action: input.action,
+    items: input.items.map((item) => ({
+      id: item.id,
+      expected_version: item.expectedVersion,
+    })),
+  };
+  if (input.action === "set_project") body.project_id = input.projectId;
+  if (input.action === "set_planned_date")
+    body.planned_date = input.plannedDate;
+  if (input.action === "add_tags" || input.action === "remove_tags") {
+    body.tag_ids = input.tagIds;
+  }
+  const payload = await apiRequest<unknown>("/api/v1/tasks/batch", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  const data =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(data) || !Array.isArray(data.tasks)) {
+    return invalidResponse("任务批量操作响应格式无效");
+  }
+  const action = data.action;
+  if (
+    action !== "set_project" &&
+    action !== "set_planned_date" &&
+    action !== "add_tags" &&
+    action !== "remove_tags"
+  ) {
+    return invalidResponse("任务批量操作类型无效");
+  }
+  return {
+    action,
+    changed: nonNegativeInteger(data.changed, "任务批量变更数", 0),
+    tasks: data.tasks.map(normalizeTask),
+  };
+}
+
+export async function reorderTasks(
+  input: ReorderTasksInput,
+): Promise<ReorderTasksResult> {
+  const payload = await apiRequest<unknown>("/api/v1/tasks/reorder", {
+    method: "PUT",
+    body: JSON.stringify({
+      planned_date: input.plannedDate,
+      mode: input.mode,
+      items: input.items.map((item) => ({
+        id: item.id,
+        expected_version: item.expectedVersion,
+      })),
+    }),
+  });
+  const data =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(data) || !Array.isArray(data.tasks)) {
+    return invalidResponse("任务排序响应格式无效");
+  }
+  if (data.mode !== "manual" && data.mode !== "default") {
+    return invalidResponse("任务排序模式无效");
+  }
+  return {
+    plannedDate: nullableString(
+      fieldValue(data, "planned_date", "plannedDate"),
+    ),
+    mode: data.mode,
+    changed: nonNegativeInteger(data.changed, "任务排序变更数", 0),
+    tasks: data.tasks.map(normalizeTask),
+  };
+}
+
+export async function getTags(
+  input: TagListParams = {},
+): Promise<TagListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 100),
+  });
+  if (input.query?.trim()) params.set("q", input.query.trim());
+  if (input.sort?.trim()) params.set("sort", input.sort.trim());
+  const payload = await apiRequest<unknown>(`/api/v1/tags?${params}`);
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("标签列表响应格式无效");
+  }
+  const meta = isRecord(payload.meta) ? payload.meta : {};
+  return {
+    items: payload.data.map(normalizeTag),
+    meta: {
+      page: numeric(meta.page, input.page ?? 1),
+      pageSize: numeric(meta.page_size ?? meta.pageSize, input.pageSize ?? 100),
+      total: numeric(meta.total),
+    },
+  };
+}
+
+export async function getAllTags(
+  input: Omit<TagListParams, "page" | "pageSize"> = {},
+): Promise<Tag[]> {
+  const tags: Tag[] = [];
+  const pageSize = 100;
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (tags.length < total) {
+    const result = await getTags({ ...input, page, pageSize });
+    tags.push(...result.items);
+    total = result.meta.total;
+    if (result.items.length === 0) break;
+    page += 1;
+  }
+  return tags;
+}
+
+export async function createTag(
+  input: TagInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<Tag> {
+  const payload = await apiRequest<unknown>("/api/v1/tags", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ name: input.name, color: input.color }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeTag(body);
+}
+
+export async function updateTag(
+  id: string,
+  input: UpdateTagInput,
+): Promise<Tag> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tags/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.color === undefined ? {} : { color: input.color }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeTag(body);
+}
+
+export async function deleteTag(
+  id: string,
+  expectedVersion: number,
+): Promise<DeleteTagResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tags/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(expectedVersion),
+    },
+  );
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("标签删除响应格式无效");
+  return {
+    deletedId: String(body.deleted_id ?? body.deletedId ?? id),
+    detachedTasks: nonNegativeInteger(
+      body.detached_tasks ?? body.detachedTasks,
+      "标签关联任务数",
+      0,
+    ),
+  };
 }
 
 export async function getProjects(

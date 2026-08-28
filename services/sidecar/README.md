@@ -42,7 +42,7 @@ stdout receives exactly one newline-terminated ready event; operational logs
 go to stderr:
 
 ```json
-{"event":"ready","status":"ok","host":"127.0.0.1","address":"127.0.0.1:49152","url":"http://127.0.0.1:49152","port":49152,"pid":1234,"version":"0.1.0-dev","app_version":"0.1.0-dev","api_version":"v1","schema_version":5}
+{"event":"ready","status":"ok","host":"127.0.0.1","address":"127.0.0.1:49152","url":"http://127.0.0.1:49152","port":49152,"pid":1234,"version":"0.1.0-dev","app_version":"0.1.0-dev","api_version":"v1","schema_version":6}
 ```
 
 Tauri can gracefully stop the process by writing a line containing
@@ -52,11 +52,14 @@ the WAL before closing the database.
 ## Implemented API foundation
 
 - `GET /health`
-- `GET /api/v1/tasks` with paging, search, filtering, and allowlisted sorting
-- `POST /api/v1/tasks` with normalized-request SHA-256, first-response snapshot replay, and conflict detection for optional `Idempotency-Key`
-- `GET /api/v1/tasks/:id`
-- `PATCH /api/v1/tasks/:id` and `PATCH /api/v1/tasks/:id/status`
-- `DELETE /api/v1/tasks/:id`
+- `GET /api/v1/tasks` with paging; title/description search; status, priority, kind, project, plan/due range, repeated-tag AND, parent/root filtering; and stable allowlisted sorting
+- `POST /api/v1/tasks` with kind, parent, completion criteria and tags plus normalized v2 request SHA-256, legacy-safe snapshot compatibility, and conflict detection for optional `Idempotency-Key`
+- `GET /api/v1/tasks/:id` with project/parent names, tags, subtask counts and `ETag`
+- `PATCH /api/v1/tasks/:id`, `PATCH /api/v1/tasks/:id/status`, and `DELETE /api/v1/tasks/:id` protected by `If-Match`
+- `PATCH /api/v1/tasks/batch` for atomic 1–100 task `set_project`, `set_planned_date`, `add_tags`, or `remove_tags` operations with per-item expected versions
+- `PUT /api/v1/tasks/reorder` for atomic manual/default ordering of a complete planned-date group with per-item expected versions
+- `GET /api/v1/tags` with paging, search and stable sorting
+- `POST /api/v1/tags` with snapshot idempotency; `PATCH /api/v1/tags/:id` and confirmed `DELETE /api/v1/tags/:id?confirm=true` protected by `If-Match`
 - `GET /api/v1/projects` with paging, name/description search, status/client filtering, and allowlisted sorting
 - `POST /api/v1/projects` with normalized-request SHA-256, first-response snapshot replay, and conflict detection for `Idempotency-Key`
 - `GET /api/v1/projects/:id` and `PATCH /api/v1/projects/:id`
@@ -67,21 +70,24 @@ the WAL before closing the database.
 Successful resource responses use `{ "data": ... }`; lists also include
 `meta`. Errors always use `{ "code", "message", "request_id" }`. API
 timestamps are RFC 3339 UTC, pure dates are `YYYY-MM-DD`, and monetary schema
-fields use integer minor units. Task list/detail and edit/status responses join
-the related project as `project_name`. Project reads include `client_name`,
+fields use integer minor units. Task reads return related project/parent names,
+ordered tags, subtask counts, and the current task version. Project reads include `client_name`,
 `task_summary` (including derived progress and summed task `actual_minutes`),
 `invoice_count`, and `available_actions`.
 
-Task and project create snapshots remain replayable with the original `201`
+Task, tag, and project create snapshots remain replayable with the original `201`
 response even if the resource is later edited or deleted; legacy keys without
-a safe snapshot return `409
-IDEMPOTENCY_REPLAY_UNAVAILABLE`, while the same key with a different request
-returns `409 IDEMPOTENCY_CONFLICT`. Project `PATCH`, transition, and delete
-requests require `If-Match`; stale
-versions return `409 VERSION_CONFLICT`. Schema v5 also bumps that version when
+a safe snapshot return `409 IDEMPOTENCY_REPLAY_UNAVAILABLE`, while the same key with a different request
+returns `409 IDEMPOTENCY_CONFLICT`. Task update/status/delete, tag update/delete,
+and Project `PATCH`/transition/delete require `If-Match`; stale versions return
+`409 VERSION_CONFLICT`.
+Schema v5 also bumps the project version when
 task links/status/`actual_minutes`, invoice links/counts, or joined client names
 change, so aggregate and deletion-confirmation facts are covered by the same
-ETag. Transitions are limited to
+ETag. Schema v6 adds task and tag versions; parent/child aggregate changes and
+embedded tag edits/deletion bump the affected task versions. Task list rows,
+their tags, and pagination totals are read in one snapshot transaction.
+Transitions are limited to
 `start/pause/resume/complete/reopen/archive/restore`. Completing a project with
 unfinished tasks requires explicit confirmation and never changes task status.
 Archive remembers the previous state for restore. Hard deletion additionally
@@ -102,9 +108,13 @@ four stable IDs used by the former default demo (two tasks, one project, and
 one client); all other development data is preserved. Migration 003 adds
 `projects.version`, `projects.archived_from_status`, and project
 status/due-date indexes. Migration 004 adds the request hash, response body,
-and response status used for safe idempotent replay. Migration 005 advances the current
+and response status used for safe idempotent replay. Migration 005 advances the
 schema to v5 with triggers that bump `projects.version` when task, invoice, or
-client-name facts used by a project response change.
+client-name facts used by a project response change. Migration 006 advances
+the current schema to v6: it adds task kind, parent, completion criteria and
+version, adds tag version, creates task fact indexes, rejects task-parent
+cycles in SQLite, and invalidates parent, child, and tag-embedded task versions
+when their rendered facts change.
 
 ```powershell
 go test ./...

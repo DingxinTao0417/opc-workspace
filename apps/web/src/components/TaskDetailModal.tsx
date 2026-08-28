@@ -1,22 +1,31 @@
 import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
 import {
   useDeleteTask,
   useProjectOptionsQuery,
+  useTaskOptionsQuery,
   useTaskQuery,
   useUpdateTask,
 } from "../api/hooks";
 import { useUiStore } from "../store/ui";
-import type { TaskPriority, TaskStatus } from "../types/models";
+import type { Task, TaskKind, TaskPriority, TaskStatus } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
+import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
   { value: "P0", label: "紧急" },
   { value: "P1", label: "高" },
   { value: "P2", label: "中" },
   { value: "P3", label: "低" },
+];
+
+const taskKinds: { value: TaskKind; label: string }[] = [
+  { value: "work", label: "工作" },
+  { value: "review", label: "复核" },
+  { value: "followup", label: "跟进" },
+  { value: "reminder", label: "提醒" },
 ];
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -53,6 +62,7 @@ function formatUpdatedAt(value: string): string {
 function mutationErrorMessage(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof ApiError) {
+    if (error.code === "VERSION_CONFLICT") return null;
     const suffix = error.requestId ? ` · 请求 ${error.requestId}` : "";
     return `${error.message}${suffix}`;
   }
@@ -67,31 +77,57 @@ export function TaskDetailModal() {
   const deleteMutation = useDeleteTask();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [kind, setKind] = useState<TaskKind>("work");
   const [priority, setPriority] = useState<TaskPriority>("P2");
   const [plannedDate, setPlannedDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [estimatedMinutes, setEstimatedMinutes] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [parentTaskId, setParentTaskId] = useState("");
+  const [completionCriteria, setCompletionCriteria] = useState("");
+  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [draftVersion, setDraftVersion] = useState(1);
+  const [versionConflict, setVersionConflict] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const task = query.data;
   const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
+  const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
   const busy = updateMutation.isPending || deleteMutation.isPending;
+  const skipNextHydrate = useRef(false);
+
+  const hydrate = (value: Task) => {
+    setTitle(value.title);
+    setDescription(value.description);
+    setKind(value.kind);
+    setPriority(value.priority);
+    setPlannedDate(value.plannedDate ?? "");
+    setDueDate(toLocalDateTime(value.dueDate));
+    setEstimatedMinutes(
+      value.estimatedMinutes === null ? "" : String(value.estimatedMinutes),
+    );
+    setProjectId(value.projectId ?? "");
+    setParentTaskId(value.parentTaskId ?? "");
+    setCompletionCriteria(value.completionCriteria);
+    setTagIds(value.tags.map((tag) => tag.id));
+    setDraftVersion(value.version);
+    setConfirmingDelete(false);
+    setValidationError(null);
+  };
+
+  useEffect(() => {
+    setVersionConflict(false);
+    skipNextHydrate.current = false;
+  }, [taskId]);
 
   useEffect(() => {
     if (!task) return;
-    setTitle(task.title);
-    setDescription(task.description);
-    setPriority(task.priority);
-    setPlannedDate(task.plannedDate ?? "");
-    setDueDate(toLocalDateTime(task.dueDate));
-    setEstimatedMinutes(
-      task.estimatedMinutes === null ? "" : String(task.estimatedMinutes),
-    );
-    setProjectId(task.projectId ?? "");
-    setConfirmingDelete(false);
-    setValidationError(null);
-  }, [task]);
+    if (versionConflict || skipNextHydrate.current) {
+      skipNextHydrate.current = false;
+      return;
+    }
+    hydrate(task);
+  }, [task, versionConflict]);
 
   const errorMessage = useMemo(
     () =>
@@ -106,6 +142,7 @@ export function TaskDetailModal() {
     updateMutation.reset();
     deleteMutation.reset();
     setConfirmingDelete(false);
+    setVersionConflict(false);
     setValidationError(null);
     setTaskId(null);
   };
@@ -141,20 +178,45 @@ export function TaskDetailModal() {
         input: {
           title: cleanTitle,
           description,
+          kind,
           priority,
           projectId: projectId || null,
+          parentTaskId: parentTaskId || null,
+          completionCriteria,
+          tagIds,
           plannedDate: plannedDate || null,
           dueDate: normalizedDueDate,
           estimatedMinutes: parsedMinutes,
+          expectedVersion: draftVersion,
         },
       },
-      { onSuccess: close },
+      {
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+            setVersionConflict(true);
+            void query.refetch();
+          }
+        },
+        onSuccess: close,
+      },
     );
   };
 
   const confirmDelete = () => {
     if (!taskId) return;
-    deleteMutation.mutate(taskId, { onSuccess: close });
+    deleteMutation.mutate(
+      { id: taskId, expectedVersion: draftVersion },
+      {
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+            setVersionConflict(true);
+            setConfirmingDelete(false);
+            void query.refetch();
+          }
+        },
+        onSuccess: close,
+      },
+    );
   };
 
   return (
@@ -226,7 +288,7 @@ export function TaskDetailModal() {
       onClose={close}
       open={Boolean(taskId)}
       title="任务详情"
-      width="620px"
+      width="700px"
     >
       {query.isPending ? <SkeletonRows count={5} /> : null}
 
@@ -240,6 +302,42 @@ export function TaskDetailModal() {
 
       {task ? (
         <form id="task-detail-form" onSubmit={submit}>
+          {versionConflict ? (
+            <div className="task-conflict" role="alert">
+              <AlertTriangle size={15} />
+              <div>
+                <strong>此任务已在其他窗口发生变化</strong>
+                <span>
+                  已读取最新版 v{task.version}，你的草稿仍保留。请决定如何继续。
+                </span>
+              </div>
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  hydrate(task);
+                  setVersionConflict(false);
+                  updateMutation.reset();
+                  deleteMutation.reset();
+                }}
+                type="button"
+              >
+                载入最新
+              </button>
+              <button
+                className="button button-primary"
+                onClick={() => {
+                  skipNextHydrate.current = true;
+                  setDraftVersion(task.version);
+                  setVersionConflict(false);
+                  updateMutation.reset();
+                  deleteMutation.reset();
+                }}
+                type="button"
+              >
+                保留草稿重试
+              </button>
+            </div>
+          ) : null}
           <div className="task-detail-summary">
             <span className={`task-status-pill task-status-${task.status}`}>
               {statusLabels[task.status]}
@@ -249,6 +347,11 @@ export function TaskDetailModal() {
               已记录 {task.actualMinutes} 分钟
             </span>
             <span>更新于 {formatUpdatedAt(task.updatedAt)}</span>
+            {task.subtaskTotal > 0 ? (
+              <span>
+                子任务 {task.subtaskCompleted}/{task.subtaskTotal}
+              </span>
+            ) : null}
           </div>
 
           <label className="form-field">
@@ -258,6 +361,17 @@ export function TaskDetailModal() {
               maxLength={200}
               onChange={(event) => setTitle(event.target.value)}
               value={title}
+            />
+          </label>
+
+          <label className="form-field">
+            <span>完成标准</span>
+            <textarea
+              maxLength={10_000}
+              onChange={(event) => setCompletionCriteria(event.target.value)}
+              placeholder="写清楚完成后应达到的可验证结果…"
+              rows={3}
+              value={completionCriteria}
             />
           </label>
 
@@ -335,6 +449,54 @@ export function TaskDetailModal() {
               ) : null}
             </label>
             <label className="form-field">
+              <span>父任务</span>
+              <select
+                disabled={tasksQuery.isPending || tasksQuery.isError}
+                onChange={(event) => setParentTaskId(event.target.value)}
+                value={parentTaskId}
+              >
+                <option value="">
+                  {tasksQuery.isPending
+                    ? "正在读取任务…"
+                    : tasksQuery.isError
+                      ? "任务暂不可用"
+                      : "无父任务"}
+                </option>
+                {task.parentTaskId &&
+                !(tasksQuery.data ?? []).some(
+                  (candidate) => candidate.id === task.parentTaskId,
+                ) ? (
+                  <option value={task.parentTaskId}>
+                    {task.parentTaskTitle ??
+                      `父任务 ${task.parentTaskId.slice(0, 8)}…`}
+                  </option>
+                ) : null}
+                {(tasksQuery.data ?? [])
+                  .filter((candidate) => candidate.id !== task.id)
+                  .map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.title}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="form-grid">
+            <label className="form-field">
+              <span>任务类型</span>
+              <select
+                onChange={(event) => setKind(event.target.value as TaskKind)}
+                value={kind}
+              >
+                {taskKinds.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
               <span>预计时长</span>
               <div className="field-with-suffix">
                 <input
@@ -348,6 +510,16 @@ export function TaskDetailModal() {
                 <span>分钟</span>
               </div>
             </label>
+          </div>
+
+          <div className="form-field">
+            <span>标签</span>
+            <TaskTagPicker
+              disabled={busy}
+              enabled={Boolean(taskId)}
+              onChange={setTagIds}
+              selectedIds={tagIds}
+            />
           </div>
 
           <fieldset className="form-field form-field-last">

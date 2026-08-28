@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v5。项目管理基础纵切已经接通，但 Actor、工作编排、本地 Agent、财务及项目产出/附件/事件集成仍是规划，不代表功能已经交付。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v6。项目管理基础纵切和任务事实层已经接通，但 Actor、受控任务验收、工作编排、本地 Agent、财务及项目产出/附件/事件集成仍是规划，不代表功能已经交付。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v1.6）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v1.7）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -19,7 +19,7 @@
 | 模块 | 当前状态 | 目标版本 | 文档 |
 |------|----------|----------|------|
 | 今日工作台 | 部分完成 | v0.1 | [today.md](modules/today.md) |
-| 任务管理 | 部分完成 | v0.1；看板 v0.2 | [tasks.md](modules/tasks.md) |
+| 任务管理 | 部分完成（事实层已交付） | v0.1；看板 v0.2 | [tasks.md](modules/tasks.md) |
 | 项目管理 | 部分完成 | v0.1 | [projects.md](modules/projects.md) |
 | 客户管理 | 页面骨架 | v0.1 | [clients.md](modules/clients.md) |
 | 收件箱工作编排 | 页面骨架 | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md) |

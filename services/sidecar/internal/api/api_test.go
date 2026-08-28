@@ -122,7 +122,13 @@ func TestTaskCreateListStatusAndTodayStats(t *testing.T) {
 		t.Fatalf("list response = %s", list.Body.String())
 	}
 
-	status := performRequest(router, http.MethodPatch, "/api/v1/tasks/"+created.Data.ID+"/status", []byte(`{"status":"done"}`), nil)
+	status := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID+"/status",
+		[]byte(`{"status":"done"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
 	if status.Code != http.StatusOK {
 		t.Fatalf("status update = %d: %s", status.Code, status.Body.String())
 	}
@@ -172,7 +178,7 @@ func TestTaskCreateIdempotencyReplaysOriginalResponseAfterMutationAndDeletion(t 
 		http.MethodPatch,
 		"/api/v1/tasks/"+created.Data.ID,
 		[]byte(`{"title":"Mutated task"}`),
-		nil,
+		map[string]string{"If-Match": `"1"`},
 	)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("mutate task status = %d: %s", updated.Code, updated.Body.String())
@@ -193,7 +199,13 @@ func TestTaskCreateIdempotencyReplaysOriginalResponseAfterMutationAndDeletion(t 
 		t.Fatalf("replayed task = %#v, original = %#v", replayedTask.Data, created.Data)
 	}
 
-	deleted := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	deleted := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/tasks/"+created.Data.ID,
+		nil,
+		map[string]string{"If-Match": `"2"`},
+	)
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete task status = %d: %s", deleted.Code, deleted.Body.String())
 	}
@@ -244,7 +256,7 @@ func TestTaskUpdateAndDelete(t *testing.T) {
 		http.MethodPatch,
 		"/api/v1/tasks/"+created.Data.ID,
 		[]byte(`{"title":"Prepare final project brief","description":"Confirm scope and delivery date","priority":"P1","planned_date":"2026-08-29","due_date":"2026-08-29T19:30:00+08:00","estimated_minutes":90}`),
-		nil,
+		map[string]string{"If-Match": `"1"`},
 	)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("update status = %d: %s", updated.Code, updated.Body.String())
@@ -278,7 +290,7 @@ func TestTaskUpdateAndDelete(t *testing.T) {
 		http.MethodPatch,
 		"/api/v1/tasks/"+created.Data.ID,
 		[]byte(`{"planned_date":null,"due_date":null,"estimated_minutes":null}`),
-		nil,
+		map[string]string{"If-Match": `"2"`},
 	)
 	if cleared.Code != http.StatusOK {
 		t.Fatalf("clear optional fields status = %d: %s", cleared.Code, cleared.Body.String())
@@ -302,7 +314,7 @@ func TestTaskUpdateAndDelete(t *testing.T) {
 		http.MethodPatch,
 		"/api/v1/tasks/"+created.Data.ID,
 		[]byte(`{"status":"done"}`),
-		nil,
+		map[string]string{"If-Match": `"3"`},
 	)
 	if statusThroughEdit.Code != http.StatusBadRequest {
 		t.Fatalf("status through edit endpoint = %d, want %d: %s", statusThroughEdit.Code, http.StatusBadRequest, statusThroughEdit.Body.String())
@@ -313,13 +325,19 @@ func TestTaskUpdateAndDelete(t *testing.T) {
 		http.MethodPatch,
 		"/api/v1/tasks/"+created.Data.ID,
 		[]byte(`{"title":"x"}`),
-		nil,
+		map[string]string{"If-Match": `"3"`},
 	)
 	if invalid.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid update status = %d, want %d: %s", invalid.Code, http.StatusUnprocessableEntity, invalid.Body.String())
 	}
 
-	deleted := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	deleted := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/tasks/"+created.Data.ID,
+		nil,
+		map[string]string{"If-Match": `"3"`},
+	)
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d: %s", deleted.Code, deleted.Body.String())
 	}

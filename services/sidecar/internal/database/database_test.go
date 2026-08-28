@@ -12,8 +12,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 5 {
-		t.Fatalf("SchemaVersion = %d, want 5", store.SchemaVersion)
+	if store.SchemaVersion != 6 {
+		t.Fatalf("SchemaVersion = %d, want 6", store.SchemaVersion)
 	}
 
 	checks := map[string]int{
@@ -100,6 +100,22 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	if lifecycle.Version != 3 {
 		t.Fatalf("project version after task update = %d, want 3", lifecycle.Version)
+	}
+
+	var taskFacts struct {
+		Kind               string
+		ParentTaskID       *string
+		CompletionCriteria string
+		Version            int64
+	}
+	if err := store.DB.Table("tasks").
+		Select("kind, parent_task_id, completion_criteria, version").
+		Where("id = ?", taskID).
+		Take(&taskFacts).Error; err != nil {
+		t.Fatalf("read task fact defaults: %v", err)
+	}
+	if taskFacts.Kind != "work" || taskFacts.ParentTaskID != nil || taskFacts.CompletionCriteria != "" || taskFacts.Version != 1 {
+		t.Fatalf("task fact defaults = %#v", taskFacts)
 	}
 }
 

@@ -18,6 +18,24 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     refetch: vi.fn(),
   }),
+  useTaskOptionsQuery: () => ({
+    data: [],
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useTagOptionsQuery: () => ({
+    data: [],
+    isError: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useCreateTag: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+  }),
 }));
 
 describe("NewTaskModal", () => {

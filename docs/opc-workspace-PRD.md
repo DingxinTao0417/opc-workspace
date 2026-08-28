@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v1.6
+> **一人公司操作系统** · PRD v1.7
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-27
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v5
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v6
 
-> **v1.6 更新说明**：将收件箱从被动通知列表升级为本地工作受理与编排中心，引入 `owner / person / agent / system` Actor、任务拆分与分派、产出、验收、返工和审计规划；明确第一阶段不引入线上服务、多人登录、云同步、远程通知或远程 Agent，并补充各模块的具体实施顺序与验收条件。当前实现已推进到 SQLite schema v5 和项目管理基础纵切；Actor、工作编排、项目产出/附件/事件与 Inbox 集成仍是规划，不代表代码已交付。
+> **v1.7 更新说明**：完成 SQLite schema v6 任务事实层：任务类型、父子关系、完成标准、Task/Tag 版本与循环保护；接通标签管理、任务页服务端分页/搜索/筛选/稳定排序、层级展示、`ETag`/`If-Match` 冲突处理、事务化批量安全操作和计划日期组手动排序。任务状态仍保持三态，Actor、Assignment、验收策略、Artifact、Workflow Event 和 Inbox 编排继续作为后续纵切，不把任务事实层误标为完整工作流。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -267,7 +267,7 @@ pnpm dev
 #### 业务逻辑
 
 1. 打开应用时自动加载当日数据，默认先按用户保存的手动顺序展示；未排序任务依次按优先级、截止时间和创建时间排列
-2. 用户可拖拽调整任务顺序，调整结果立即持久化；提供“恢复默认排序”操作
+2. 目标交互为拖拽调整并立即持久化，且提供“恢复默认排序”；当前任务页已先接入精确计划日期组的上移/下移与恢复默认，今日页和拖拽仍待实现
 3. 用户从右侧概览面板进入专注模式并启动番茄钟（默认 50 分钟）；主内容区不再重复放置专注卡片
 4. 专注期间：暂停本应用通知、记录该任务实际工时、显示环形进度；系统级勿扰由用户授权并按平台能力启用
 5. 番茄钟结束：完成当前专注轮次并提示休息 5 分钟；专注工时自动累计，任务是否完成由用户确认
@@ -287,7 +287,7 @@ pnpm dev
 
 **历史原型（已移除）**：`tasks-linear.html`
 
-> **当前状态**：部分完成。已实现列表、快照式幂等新建、详情、非生命周期字段编辑、基础状态更新、带二次确认的删除和前端关键词搜索；任务可在新建/编辑时关联项目，读取响应返回 `project_name`。标签、父子任务、分派、验收、任务页服务端分页筛选和拖拽仍未实现。
+> **当前状态**：部分完成。schema v6 已实现任务类型、父子关系、完成标准、标签和版本；任务页已接服务端分页/搜索/筛选/稳定排序、层级展示、批量安全操作和计划日期组按钮排序，详情支持冲突草稿处理。状态仍只有 `todo / in_progress / done`；Actor 分派、扩展状态、产出验收、今日页排序接入和拖拽仍未实现。
 
 目标提供全量任务视图；v0.1 先完成列表视图，任务看板归入 v0.2。
 
@@ -333,10 +333,11 @@ pnpm dev
    - ⌘N 快捷键唤起新建任务面板
    - 标题为唯一必填项，可通过键盘快速补充截止时间、优先级和预估时长
 3. **筛选与搜索**
-   - 按项目、标签、状态、优先级、日期范围筛选
-   - 全文搜索任务标题和描述
+   - 当前任务页已支持项目、标签（多标签同时包含）、状态、优先级、类型和精确计划日期筛选；API 另支持计划/截止日期范围、父任务与根任务筛选
+   - 当前使用服务端 `LIKE` 搜索任务标题和描述；SQLite FTS 不在本纵切
 4. **批量操作**
-   - 批量完成、批量删除、批量移动项目、批量加标签
+   - 当前已支持事务化批量移动项目、设置/清除计划日期和添加/移除标签
+   - 批量完成与批量删除在受控生命周期上线前不实现，避免绕过验收与审计
 5. **拆分、分派与验收**
    - 父子任务只表达真实的完成层级；项目产出产生的下游工单默认通过收件箱关联，不自动成为来源任务的子任务
    - 任务分派给本地 Actor；分派历史独立保存，不在任务上复制负责人状态
@@ -350,11 +351,11 @@ pnpm dev
 
 #### 状态变更契约
 
-- `PATCH /tasks/:id` 只编辑标题、描述、优先级、项目、标签、日期、预估时长、父任务和完成条件等非生命周期字段，不允许直接写 `status`、`completed_at`、`submitted_at` 或 `reviewed_at`。
+- `PATCH /tasks/:id` 当前编辑标题、描述、类型、优先级、项目、标签、日期、预估时长、父任务和完成条件等非生命周期字段，必须携带 `If-Match`，不允许直接写 `status`、`completed_at`、`submitted_at` 或 `reviewed_at`。
 - 状态变化使用显式命令：开始、阻塞、解除阻塞、直接完成、提交验收、接受/返工、取消和重新打开。
 - `block`、`cancel`、`request_changes` 必须填写原因；原因和前后状态写入 Workflow Event。
 - `complete` 只允许 `review_policy = none` 的人工任务；`review_policy = manual`、Agent 任务和高风险任务必须使用“提交产出 → 验收”链路。
-- 当前 `/tasks/:id/status` 只用于兼容已实现的三态基础版本；引入扩展状态迁移后由显式命令替代，前端不得继续用通用状态按钮绕过验收。
+- 当前 `/tasks/:id/status` 只用于兼容已实现的三态基础版本，也要求 `If-Match`；引入扩展状态迁移后由显式命令替代，前端不得继续用通用状态按钮绕过验收。
 
 | 命令 | 允许来源状态 | 目标状态 | 额外约束 |
 |------|--------------|----------|----------|
@@ -387,7 +388,7 @@ pnpm dev
 
 **历史原型（已移除）**：`projects-linear.html`
 
-> **当前状态**：部分完成。schema v5、Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合均已实现；Client CRUD、客户选择、项目产出/附件/事件和 Inbox 集成仍未实现。
+> **当前状态**：部分完成。当前 schema v6 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合；Client CRUD、客户选择、项目产出/附件/事件和 Inbox 集成仍未实现。
 
 项目采用卡片式网格布局，是任务的上层组织单位。
 
@@ -845,7 +846,7 @@ v0.1 第一版可配置：
 
 **历史原型（已移除）**：`modal-filter.html`
 
-> **当前状态**：未开始；任务页“筛选”按钮目前没有业务行为。
+> **当前状态**：部分完成。任务页筛选按钮已接入状态、优先级、类型、项目、标签和精确计划日期，并由服务端分页查询；保存视图、客户筛选和计划/截止日期范围 UI 仍未实现（范围参数已由 API 提供）。
 
 - 多维度筛选面板
 - 支持保存常用筛选为视图
@@ -875,7 +876,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；v1.6 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；v1.7 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -970,12 +971,12 @@ Invoice → Client / Project
 | id | TEXT | PRIMARY KEY (UUID) |
 | title | TEXT | NOT NULL |
 | description | TEXT | |
-| kind | TEXT | work / review / followup / reminder；规划字段 |
+| kind | TEXT | schema v6；work / review / followup / reminder，默认 work |
 | status | TEXT | 当前为 todo / in_progress / done；规划扩展 blocked / waiting_review / cancelled |
 | priority | TEXT | DEFAULT 'P2' |
 | project_id | TEXT | FOREIGN KEY → projects.id |
-| parent_task_id | TEXT | FOREIGN KEY → tasks.id；规划字段 |
-| completion_criteria | TEXT | 可验证的完成条件；规划字段 |
+| parent_task_id | TEXT | schema v6；FOREIGN KEY → tasks.id ON DELETE SET NULL；禁止自引用与循环 |
+| completion_criteria | TEXT | schema v6；最多 10000 字符，默认空字符串 |
 | review_policy | TEXT | none / manual；普通快速任务默认 none，Agent/高风险任务强制 manual；规划字段 |
 | blocked_reason / blocked_at | TEXT | 阻塞原因与时间；规划字段 |
 | blocked_from_status | TEXT | 解除阻塞时恢复的 todo / in_progress / waiting_review；规划字段 |
@@ -988,7 +989,19 @@ Invoice → Client / Project
 | updated_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | completed_at | TEXT | RFC 3339 UTC |
 | submitted_at / reviewed_at | TEXT | 产出提交与验收时间；规划字段 |
-| version | INTEGER | 乐观并发版本；规划字段 |
+| version | INTEGER | schema v6；乐观并发版本，默认 1 |
+
+**tags / task_tags** - 标签与任务标签关联
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| tags.id | TEXT | PRIMARY KEY (UUID) |
+| tags.name | TEXT | NOT NULL；API 按大小写不敏感唯一，1–50 字符 |
+| tags.color | TEXT | NOT NULL；`#RRGGBB` |
+| tags.version | INTEGER | schema v6；乐观并发版本，默认 1 |
+| task_tags.task_id / tag_id | TEXT | 复合主键与外键；单任务由 API 限制最多 20 个标签 |
+
+标签名称/颜色修改或删除会递增所有关联 Task 的 `version`。任务列表在同一只读事务内读取行、标签与分页计数，避免标签内容与任务版本不一致。
 
 **projects** - 项目表
 
@@ -1045,7 +1058,7 @@ Invoice → Client / Project
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | updated_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 
-**focus_sessions** - 专注记录表（当前 schema v5 保留字段与规划扩展）
+**focus_sessions** - 专注记录表（当前 schema v6 仍保留旧字段与规划扩展）
 
 | 字段 | 类型 | 约束 |
 |------|------|------|
@@ -1053,8 +1066,8 @@ Invoice → Client / Project
 | task_id | TEXT | FOREIGN KEY |
 | started_at | TEXT | NOT NULL，RFC 3339 UTC |
 | ended_at | TEXT | RFC 3339 UTC |
-| duration_minutes | INTEGER | 当前 schema v5 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
-| completed | INTEGER | 当前 schema v5 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
+| duration_minutes | INTEGER | 当前 schema v6 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
+| completed | INTEGER | 当前 schema v6 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | status | TEXT | planned / active / paused / recovery_pending / completed / cancelled / interrupted；规划字段 |
 | planned_seconds | INTEGER | 本次计划时长；规划字段 |
@@ -1068,7 +1081,7 @@ Invoice → Client / Project
 
 #### 本地工作编排规划表（尚未实现）
 
-以下结构必须通过 `006_...` 起的新增递增迁移实现，不得回写已经发布的 `001_initial_schema.sql`、项目生命周期 `003_project_lifecycle.sql`、幂等快照 `004_idempotency_snapshots.sql` 或聚合版本 `005_project_aggregate_versions.sql`。Task 状态 CHECK 扩展时需要在事务内重建相关表，并验证历史数据、外键和索引。
+schema v6 `006_task_facts.sql` 已交付 Task 类型、父子关系、完成标准、Task/Tag 版本、索引与父子循环/聚合失效 trigger。以下 Actor、Assignment、产出、事件和扩展状态结构必须从 `007_...` 起继续追加递增迁移，不得回写任何已发布迁移。Task 状态 CHECK 扩展时需要在事务内重建相关表，并验证 schema v6 数据、外键、trigger 和索引。
 
 **actors** - 本地责任主体
 
@@ -1305,7 +1318,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。v1.6 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。v1.7 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1351,13 +1364,13 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 模块 | MVP 目标功能 | 当前状态（2026-08-27） |
 |------|--------------|--------------------------|
 | 今日工作台 | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板 | **部分完成**：布局、真实任务/今日统计、共享任务详情和基础概览已接通；按日期筛选、拖拽排序、收入与客户动态待实现 |
-| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：列表、快照式幂等新建、读取、非状态字段编辑、基础状态更新、项目选择/`project_name`、前端删除确认和关键词搜索已实现；父子任务、验收、标签、任务页分页筛选和批量操作待实现 |
+| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：schema v6 任务事实、父子/标签/完成标准、快照式幂等新建、`ETag`/`If-Match` CRUD、服务端分页搜索筛选、层级列表、批量安全操作和计划组按钮排序已实现；扩展状态、Actor 分派、产出验收、拖拽和 Focus 工时待实现 |
 | 项目管理 | 项目卡片、状态流转、项目进度、项目详情（任务列表） | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务派生进度/工时已实现；客户选择、产出/附件/事件/Inbox 集成待实现 |
 | 客户管理 | 客户列表表格、客户详情、基本 CRUD | **页面骨架**：可导航空状态已实现，CRUD 与详情未开始 |
 | 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决 | **页面骨架**：空状态已实现；Actor、Inbox Item、Assignment、拆分、提醒和审计均未开始 |
 | 专注模式 | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导 | **部分完成**：全局计时、专注/休息循环、设置、自动衔接、重置和提示音已实现；会话入库、任务工时、连续天数和通知控制待实现 |
 | 全局功能 | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查 | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现 |
-| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发数据隔离、WAL、外键、迁移入口和 schema v5 已实现；一致性备份、恢复和基础导入导出待实现；每日计划和高级导入归 v0.3 |
+| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发数据隔离、WAL、外键、迁移入口和 schema v6 已实现；一致性备份、恢复和基础导入导出待实现；每日计划和高级导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 - 看板视图（任务看板、项目看板）
@@ -1421,16 +1434,16 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 页面骨架 | 路由、原型样式和真实空状态可访问，但按钮或业务数据链路尚未实现 |
 | 未开始 | 仅存在产品需求或技术设计，仓库中没有可用实现 |
 
-当前实现事实以仓库代码、测试和运行结果为准。PRD 中描述的目标接口、插件、迁移或页面，不因出现在文档中就视为已交付。开发时优先使用仓库相对路径；2026-08-27 本次核对的实际 Git 根为 `/Users/tao/Documents/WorkSpace/opc-workspace`，HEAD 为 `471f814`。
+当前实现事实以仓库代码、测试和运行结果为准。PRD 中描述的目标接口、插件、迁移或页面，不因出现在文档中就视为已交付。文档和命令说明只使用仓库相对路径，不记录开发者机器的绝对工作目录或临时 HEAD。
 
 | 基线项 | 当前实现 |
 |--------|----------|
 | 前端 | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力及集中式 `styles.css` |
 | 桌面 | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件 |
 | Sidecar | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0` |
-| API / Schema | API v1；SQLite schema v5 |
+| API / Schema | API v1；SQLite schema v6 |
 | 数据默认值 | 开发数据库默认空白，不自动注入 demo 业务数据 |
-| 明确边界 | 当前代码不使用 Docker，也未实现 Actor、工作编排、Agent 执行、AI 助手、知识库、客户回访或收入/支出/发票业务；v0.1 规划中的 person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
+| 明确边界 | 当前代码不使用 Docker；已实现 Task 事实层但未实现受控验收、Actor、工作编排、Agent 执行、AI 助手、知识库、客户回访或收入/支出/发票业务；v0.1 规划中的 person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
 ### 10.2 单项任务统一开发流程
 
@@ -1500,7 +1513,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v5，新增结构只能追加如 `006_add_xxx.sql` 的递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v6，新增结构只能追加如 `007_add_xxx.sql` 的递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1508,7 +1521,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；`002_remove_default_demo_seed.sql` 只清理旧版本固定 UUID 的 demo 记录，不删除用户创建的数据；`003_project_lifecycle.sql` 增加项目 `version`、`archived_from_status` 及状态/截止日期索引；`004_idempotency_snapshots.sql` 为幂等记录增加 `request_hash`、`response_body` 和 `response_status`；`005_project_aggregate_versions.sql` 用 trigger 在任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除变化时原子递增受影响项目版本，把当前数据库推进到 schema v5。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；`002_remove_default_demo_seed.sql` 只清理旧版本固定 UUID 的 demo 记录，不删除用户创建的数据；`003_project_lifecycle.sql` 增加项目 `version`、`archived_from_status` 及状态/截止日期索引；`004_idempotency_snapshots.sql` 为幂等记录增加 `request_hash`、`response_body` 和 `response_status`；`005_project_aggregate_versions.sql` 用 trigger 在任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除变化时原子递增受影响项目版本；`006_task_facts.sql` 增加任务类型、父级、完成标准、Task/Tag 版本和查询索引，并以递归 trigger 防循环及传播父子聚合版本，把当前数据库推进到 schema v6。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -1517,10 +1530,10 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 | T-01 工程目录与统一脚本 | 已完成 | pnpm workspace、统一启动、Sidecar 构建脚本、开发数据隔离 |
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成 | 窗口、单实例、动态端口、令牌、ready/health、退出清理 |
 | T-03 Go 健康检查与 API 基础 | 已完成 | 版本化路由、安全中间件、统一错误和健康检查 |
-| T-04 SQLite 初始化与迁移 | 已完成 | schema v5、PRAGMA、嵌入式迁移、demo 清理、项目生命周期/幂等快照字段和聚合版本 trigger |
+| T-04 SQLite 初始化与迁移 | 已完成 | schema v6、PRAGMA、嵌入式迁移、demo 清理、项目生命周期/幂等快照/聚合版本及 Task 事实层 trigger |
 | T-05 前端 AppShell 与原型复刻 | 已完成 | Linear 深色三栏框架、导航、响应式和公共组件 |
 | T-06 今日工作台 | 部分完成 | 真实任务/统计、共享任务详情、右侧专注概览和反馈状态 |
-| T-07 任务管理纵向闭环 | 部分完成 | 列表、快照式幂等新建、读取、非状态字段编辑、状态更新、项目选择/`project_name`、详情、删除确认和前端搜索 |
+| T-07 任务管理纵向闭环 | 部分完成 | schema v6 任务事实、标签、父子/完成标准、版本/ETag、服务端分页筛选、层级列表、批量安全操作和计划组排序已交付；受控生命周期/验收待实现 |
 | T-08 项目管理 | 部分完成 | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务聚合 |
 | T-09 客户管理 | 页面骨架 | 路由、标题、新建入口外观和空状态 |
 | T-10 收入、支出与发票 | 页面骨架 | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4 |
@@ -1562,9 +1575,9 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 - **需求映射**：6、7、9.1。
 - **用户流程**：首次启动自动创建数据库并迁移；后续启动只执行尚未应用的版本；开发和正式数据互不影响。
-- **实现方法**：GORM 使用纯 Go SQLite 驱动，连接池固定为一个物理连接；打开后启用外键、WAL 和 5 秒 busy timeout。SQL 迁移嵌入二进制并逐个事务执行。schema v1 建立核心表，schema v2 精确删除旧 demo 固定 ID，schema v3 增加 Project 生命周期版本，schema v4 增加幂等请求摘要与首次响应快照，schema v5 增加覆盖 Project 聚合依赖的版本 trigger。开发数据库位于 `.local/dev-data/`，生产数据库位于 Tauri `appDataDir`。
-- **关键路径**：`internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql`、`migrations/002_remove_default_demo_seed.sql`、`migrations/003_project_lifecycle.sql`、`migrations/004_idempotency_snapshots.sql`、`migrations/005_project_aggregate_versions.sql`。
-- **验证/剩余**：迁移测试已覆盖 schema v5、项目字段默认值、新增索引、幂等快照列和任务聚合触发版本递增；本轮 `go test -count=1 ./...`、`go vet ./...` 及 API/数据库用例重复 10 轮均通过，本地健康检查确认 schema v5。破坏性迁移前备份、一致性快照、恢复、导入导出和校验仍未实现。
+- **实现方法**：GORM 使用纯 Go SQLite 驱动，连接池固定为一个物理连接；打开后启用外键、WAL 和 5 秒 busy timeout。SQL 迁移嵌入二进制并逐个事务执行。schema v1 建立核心表，schema v2 精确删除旧 demo 固定 ID，schema v3 增加 Project 生命周期版本，schema v4 增加幂等请求摘要与首次响应快照，schema v5 增加覆盖 Project 聚合依赖的版本 trigger，schema v6 增加 Task 类型/父子/完成标准、Task/Tag 版本、查询索引和父子循环/聚合失效 trigger。开发数据库位于 `.local/dev-data/`，生产数据库位于 Tauri `appDataDir`。
+- **关键路径**：`internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/006_task_facts.sql`。
+- **验证/剩余**：迁移测试覆盖真实 v5→v6 数据保留、默认值、外键、索引、循环拒绝、父子变更和父任务删除后的子任务解绑/版本失效；破坏性迁移前备份、一致性快照、恢复、导入导出和校验仍未实现。最终全量验证结果以 10.5 节本次更新为准。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -1585,10 +1598,10 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 #### 10.4.7 T-07 任务管理纵向闭环
 
 - **需求映射**：5.2、附录 C。
-- **用户流程**：用户可查看 SQLite 中的任务，按前端关键词搜索，打开新建弹窗并选择项目，在列表中完成或恢复任务，并点击任务行查看详情、编辑项目等资料或经二次确认删除；项目详情新建任务时自动预选当前项目。
-- **实现方法**：Go 列表接口支持分页、状态、优先级、项目、计划日期、关键词和白名单排序；创建接口校验字段和项目外键，对规范化请求计算 SHA-256，并用 `Idempotency-Key` 保存首次任务响应与 `201` 状态，同请求在任务编辑或删除后仍稳定重放，异体复用 key 返回 409；任务读取与编辑/状态响应左连接项目并返回 `project_name`；通用 PATCH 仅编辑标题、描述、优先级、项目、截止/计划日期和预计时长，可空字段支持显式清除且拒绝 `status`；状态仍走独立兼容接口。前端 `client.ts` 负责 snake_case → camelCase 规范化，Query/Mutation 管理单条详情和缓存失效，全局 `TaskDetailModal` 提供加载、错误、重试、项目选择、表单校验和删除确认。
+- **用户流程**：用户按服务端条件搜索/筛选/分页任务；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建与详情可维护类型、项目、父任务、标签、完成标准和日期；可选择多条任务原子改项目/计划日期/标签，也可在一个精确计划日期组内上移、下移或恢复默认顺序。详情保存或删除发生版本冲突时保留草稿并重新获取最新版。
+- **实现方法**：schema v6 增加 `kind`、`parent_task_id`、`completion_criteria`、Task/Tag `version`、任务事实索引和父子循环/聚合失效 trigger。Go 列表接口支持分页、标题/描述搜索、状态/优先级/类型/项目/计划及截止范围/多标签 AND/父级或根任务筛选和稳定白名单排序，并在同一只读事务读取总数、任务、标签。任务创建使用覆盖新增事实的 v2 规范化摘要并兼容安全的 v1 快照；读写返回 `ETag`，非状态 PATCH、三态状态与删除要求 `If-Match`；项目名称变化或硬删除也会递增嵌入该项目名的 Task 版本。Tag API 提供分页、搜索、幂等创建、版本化编辑和确认删除。批量 API 先校验 1–100 项全部版本再原子执行安全动作；排序 API 要求完整计划组及版本集合。前端 `client.ts`/Query hooks 接入分页、标签、批量与排序，`TasksPage` 提供筛选、层级、批量条和排序入口，详情弹窗提供冲突草稿处理。
 - **关键路径**：`services/sidecar/internal/api/tasks.go`、`apps/web/src/api/client.ts`、`apps/web/src/api/hooks.ts`、`apps/web/src/pages/TasksPage.tsx`、`apps/web/src/components/NewTaskModal.tsx`、`apps/web/src/components/TaskList.tsx`、`apps/web/src/components/TaskDetailModal.tsx`。
-- **当前限制**：任务页仍没有服务端分页/筛选 UI；标签、父子任务、拖拽排序、批量操作、扩展状态和任务乐观并发尚未实现。`actual_minutes` 尚未由持久化 Focus Session 自动累计。
+- **验证/剩余**：Go 用例覆盖 schema v6、标签、父子循环/删除、101 条稳定分页、筛选/排序、批量原子性、计划组排序、创建快照兼容和版本冲突；前端定向测试覆盖 client/hooks、详情冲突和任务列表/页面交互。状态仍为三态，Actor/Assignment、`review_policy`、Artifact、Workflow Event、扩展状态、拖拽和 Focus 自动工时尚未实现；今日页尚未接入任务事实层的日期与排序能力。
 
 #### 10.4.8 T-08 项目管理
 
@@ -1597,7 +1610,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 - **用户流程**：用户可分页查看和搜索/按状态筛选项目，新建或编辑非归档项目资料，进入详情查看任务与派生进度/工时，从详情新建项目任务，执行受控状态命令，归档/恢复，并在已归档状态二次确认永久删除；归档项目必须恢复后才能编辑资料。
 - **实现方法**：schema v3 增加 `projects.version`、`archived_from_status` 和查询索引，schema v4 为幂等键增加请求摘要与响应快照，schema v5 用 trigger 把任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除纳入项目版本。Go Project API 提供 CRUD、分页/搜索/状态与客户筛选、白名单排序、基于规范化请求 SHA-256 和首次响应快照的创建幂等、覆盖聚合响应的 `If-Match` 乐观锁、显式 transition、归档来源恢复和受约束硬删除；同请求在资源编辑或删除后仍重放首次响应，异体复用 key 冲突。归档 Project 的资料 PATCH 返回 `409 PROJECT_ARCHIVED`，必须先恢复；归档项目也拒绝新增或改入任务关联，但既有关联任务仍可编辑。查询通过子查询派生任务总数/完成数/进行中数/剩余数、完成百分比与 `actual_minutes` 合计，并返回客户名、发票数和只含生命周期转换的 `available_actions`。前端用 Query/Mutation 接通卡片、表单和详情，串行分页拉全项目任务与任务表单项目选项；完成未结任务、归档和永久删除均有确认，转换期间禁用所有新建项目任务入口，版本冲突刷新详情，任务变更会失效项目缓存。
 - **关键路径**：`services/sidecar/internal/database/migrations/003_project_lifecycle.sql`、`migrations/004_idempotency_snapshots.sql`、`migrations/005_project_aggregate_versions.sql`、`internal/models/project.go`、`internal/api/projects.go`、`internal/api/projects_test.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`pages/ProjectsPage.tsx`、`pages/ProjectDetailPage.tsx`、`components/ProjectFormModal.tsx`。
-- **验证/剩余**：项目 API、schema v5 和前端项目交互已有定向测试；本轮 Go 全量测试与 vet、前端 12 个测试文件共 43 个用例、TypeScript 类型检查、Prettier、Vite 生产构建和本地 API 生命周期往返均通过。已用本机 Chromium 以 1440 × 1000 实际渲染检查项目卡片与应用框架并清理临时数据；窄屏、完整键盘焦点和大数据量分页性能仍需专项验收。Client CRUD/客户选择、项目任务高级筛选/任务树、Focus 自动工时、Artifact/附件/Workflow Event/Inbox 集成仍未实现。
+- **验证/剩余**：项目 API、schema v5 聚合版本和前端项目交互已有定向测试；schema v6 回归覆盖项目、任务和标签事实共同存在时的迁移与版本传播。完整 Go/前端/构建结果以 10.5 节本次最终验证为准。窄屏、完整键盘焦点和大数据量分页性能仍需专项验收；Client CRUD/客户选择、项目详情内的高级筛选/任务树、Focus 自动工时、Artifact/附件/Workflow Event/Inbox 集成仍未实现。
 
 #### 10.4.9 T-09 客户管理
 
@@ -1664,14 +1677,14 @@ pnpm build:desktop
 ```
 
 - **当前实现方法**：前端使用 Vitest + Testing Library；Go 使用包级单元/集成测试和内存 SQLite；Rust 测试覆盖 ready 握手及运行状态。`build-sidecar.mjs` 注入应用版本、去除调试路径和符号，并按 Rust target triple 输出 Tauri `externalBin`。
-- **环境边界**：2026-08-27 文档更新主机未安装 Go/Rust；此前 Windows 环境又缺少完整 MSVC Build Tools / Windows SDK。两者都不能作为桌面完整编译、安装包或跨平台验收证据，不能据此勾选 9.3 的三平台、签名、性能或干净系统验收项。
+- **环境边界**：2026-08-27 文档更新主机的 Go 与 Rust 工具链均可用，Go 测试、静态检查和 Rust 格式检查已经通过；但 Windows 环境缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK），因此 `cargo check` 在依赖构建阶段受阻。当前结果仍不能作为桌面完整编译、安装包或跨平台验收证据，不能据此勾选 9.3 的三平台、签名、性能或干净系统验收项。
 
 #### 10.4.15 T-15 AI 助手
 
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；v1.6 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；v1.7 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -1710,9 +1723,9 @@ pnpm build:desktop
 #### 10.4.18 T-18 本地 Actor 与任务分派
 
 - **需求映射**：5.2、5.6、6、9.1。
-- **当前状态**：未开始；当前仓库没有 Actor、Assignment、父子任务、验收状态或分派历史。
+- **当前状态**：未开始；schema v6 已有父子任务、完成标准和 Task 版本，但当前仓库没有 Actor、Assignment、验收策略、扩展验收状态或分派历史。
 - **用户流程**：owner 在设置中维护 person；在任务详情或收件箱拆分面板中把任务分派给 owner/person；person 只记录线下责任，进度和结果由 owner 回填。
-- **实现方法**：新增 `actors`、`task_assignments`、`task_artifacts`、`workflow_events`，扩展 tasks 的父任务、完成条件、验收策略、状态和乐观并发版本；同一任务同一 role 只允许一个活动 Assignment，改派通过同一事务结束旧记录并新增记录完成。T-18 是这些基础对象和迁移的唯一归属，T-11 只消费它们。
+- **实现方法**：在 schema v6 已有父任务、完成条件和乐观并发版本上新增 `actors`、`task_assignments`、`task_artifacts`、`workflow_events`，继续扩展 tasks 的验收策略与状态；同一任务同一 role 只允许一个活动 Assignment，改派通过同一事务结束旧记录并新增记录完成。T-18 是这些基础对象和迁移的唯一归属，T-11 只消费它们。
 - **前端范围**：Actor 设置页、负责人选择器、当前负责人、改派历史、任务提交产出、接受/返工/阻塞/取消操作和时间线。
 - **验收要求**：仅一个 owner；owner/system 初始化与历史任务 owner Assignment 回填可重复执行且不重复；内置 Actor 不可删除；person 停用保留历史；person UI 不暗示已发送任务；并发改派拒绝旧写入；状态流转和审计在同一事务中完成。
 
@@ -1730,22 +1743,24 @@ pnpm build:desktop
 
 | 检查 | 最近已知结果 | 说明 |
 |------|--------------|------|
-| 项目管理纵切定向验证 | 通过 | schema v5、Task/Project 快照幂等、聚合版本冲突、CRUD/筛选、状态流转、归档资料与任务关联约束、恢复/删除，以及前端卡片、详情、表单和任务关联均有定向回归 |
-| `pnpm format:check` | 通过 | 根脚本覆盖前端与根 README；PRD 等文档另以 `git diff --check` 验证通过 |
-| `pnpm typecheck` | 通过 | 覆盖新增 Project 类型、分页拉全 helper、Query/Mutation 和详情路由 |
-| 前端测试 | 通过 | 设置独立临时 `--localstorage-file` 后，12 个测试文件、43 个用例通过；仅有 React Router v7 future flag 提示 |
-| Go 测试与静态检查 | 通过 | `go test -count=1 ./...` 的 4 个含测试包通过、models 包无测试文件，共 20 个顶层测试；`go vet ./...` 通过，API/数据库用例重复 10 轮通过 |
-| `pnpm build:web` | 通过 | Vite 生产构建完成，1663 个模块转换成功，主 JS 约 297.02 kB、CSS 约 47.94 kB |
+| 任务事实层定向验证 | 通过 | schema v6 真实 v5→v6 迁移、Task/Tag 创建快照、父子循环/删除、标签版本传播、101 条稳定分页、多条件筛选、批量原子性、计划组排序和版本冲突均有 Go 定向测试；前端 client/hooks、详情冲突和任务列表交互有定向回归 |
+| `pnpm format:check` | 通过 | 根配置、README、脚本、Web 与 Desktop package 范围均符合 Prettier 规则；Markdown 文档另通过 `git diff --check` 与本地链接检查 |
+| `pnpm typecheck` | 通过 | `pnpm build` 已执行 TypeScript 编译并通过，覆盖 Task/Tag 类型、分页、批量/排序 Query/Mutation 和任务详情 |
+| 前端测试 | 通过 | `pnpm test` 共 14 个测试文件、65 个测试全部通过，覆盖 client/hooks、TaskList、TaskDetail 冲突和 TasksPage 交互 |
+| Go 测试与静态检查 | 通过 | `go test -count=1 ./...`、`go test -count=10 ./internal/api ./internal/database` 和 `go vet ./...` 均通过 |
+| Web 生产构建 | 通过 | 在 `apps/web` 执行 `pnpm build`，TypeScript 编译与 Vite 生产构建通过，包含任务页层级、筛选、标签、批量和排序交互 |
+| `pnpm build:sidecar` | 通过 | 已生成当前 Windows Rust target triple 对应的 Go Sidecar 二进制；产物位于忽略目录，不纳入提交 |
 | Rust 格式 | 通过 | `cargo fmt -- --check` 通过；Rust 共 6 个 ready/状态单元测试，未覆盖真实 Sidecar 生命周期 |
 | `cargo check` / Rust tests | 环境受限 | Rust 工具链可用，但本机缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK），依赖构建阶段即被阻断 |
-| 本地运行 / 浏览器渲染 | 通过，范围受限 | Bearer 鉴权下 health 返回 API v1 / schema v5；项目创建→编辑→任务关联→状态→归档/恢复→确认删除、聚合版本失效与冲突均完成本地 API 往返，临时项目/任务已清理；Chromium 1440 × 1000 渲染已检查，窄屏和完整键盘流程待专项验收 |
-| 桌面安装包与三平台验收 | 未执行 | Sidecar target binary、签名环境和干净系统矩阵尚未准备 |
+| 本地迁移 / API 冒烟 | 通过 | 真实开发库已从 schema v5 迁移到 v6；标签、父子聚合、筛选、批量和排序本地 API 往返通过，QA 数据已清理且原有 1 条任务保留 |
+| 浏览器渲染 / 窄屏视觉 | 本次未验收 | 本会话浏览器控制接口不可用，未取得任务层级、标签、筛选、批量、排序和窄屏布局的真实截图证据 |
+| 桌面安装包与三平台验收 | 未执行 | 当前 Windows Sidecar target binary 已构建；Tauri 链接、安装包、签名环境和干净系统矩阵仍未完成 |
 
 根 `pnpm check` 当前只执行 TypeScript、Go 测试、Web 构建和 `cargo check`，没有覆盖前端测试、Rust 单元测试或格式检查；在修正聚合脚本前不得把单次 `pnpm check` 视为完整质量门禁。
 
 ### 10.6 已知限制与下一步顺序
 
-1. **完成任务事实层**：详情、非状态字段编辑、项目选择/`project_name` 和删除确认已交付；继续补父子任务、扩展状态、完成条件、标签、任务页分页筛选和持久化手动排序，使今日页真正按 `planned_date` 展示。
+1. **任务事实层已交付，继续受控生命周期**：schema v6 的类型、父子、完成标准、标签、Task/Tag 版本、任务页分页筛选、批量安全操作和计划组手动排序已完成；下一步交付 `review_policy`、扩展状态、Actor/Assignment、Artifact、Workflow Event 和显式状态命令。今日页仍需真正按 `planned_date` 查询并接入排序；当前任务页只有上移/下移，不是拖拽。
 2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务聚合已交付；继续验证大数据量串行分页、真实浏览器/窄屏/焦点，并保留客户、产出/附件/事件/Inbox 为明确缺口。
 3. **建立本地 Actor 与 Assignment**：先交付 owner/person 的本地责任记录、改派历史和人工验收；没有本地执行器时 agent 不可选。
 4. **交付基础客户并补项目客户协作**：实现 Client CRUD、搜索、删除约束和项目客户选择/筛选；客户回访不混入这一阶段。
@@ -1764,7 +1779,7 @@ pnpm build:desktop
 
 | 顺序 | 模块 | 后端与数据 | 前端与用户流程 | 完成验收 |
 |------|------|------------|----------------|----------|
-| 1 | 任务基础事实 | 非状态字段 PATCH、项目关联与 `project_name` 已交付；继续完成分页/筛选/排序、标签、父子任务、批量操作和基础乐观锁，先保持现有三态兼容 | 详情、项目选择、编辑和删除确认已交付；继续完成标签、父子任务、任务页分页筛选和批量操作，看板后置 | CRUD、父子循环防护、全部子任务取消不自动推进、分页边界、并发冲突和加载/空/错误/重试完整 |
+| 1 | 任务基础事实 | schema v6、非状态 PATCH、项目/父子/标签/完成标准、Task/Tag 版本、服务端分页筛选、原子批量安全操作和计划组排序已交付，保持三态兼容 | 详情冲突草稿、标签管理、根任务树/面包屑、筛选分页、批量条和计划组上移/下移已交付；今日页接入与拖拽后置 | 当前纵切覆盖 CRUD、循环防护、稳定分页、标签限制、整批回滚、完整计划组和并发冲突；“全部子任务取消不推进”随扩展状态验收 |
 | 2 | Actor、分派与任务验收 | T-18 交付 actors、task_assignments、Task 扩展状态/完成条件/验收策略、task_artifacts、workflow_events 和受控状态命令 | Actor 管理、负责人/改派、阻塞/取消、提交产出、人工验收/返工和时间线 | person 不发送/同步；唯一活动分派；受控状态不能被 PATCH 绕过；停用保留历史；并发旧写入冲突 |
 | 3 | 项目 | CRUD、schema v4 快照式创建幂等、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务派生进度/工时已交付；Client CRUD 后补客户选择，T-11 后启用产出/Inbox 事件 | 卡片、分页/搜索/状态筛选、新建/编辑、详情任务列表/工时和归档恢复已交付；任务树、产出、附件和时间线待实现 | 当前纵切继续验收聚合并发、幂等快照、分页拉全性能、归档/删除；T-11 后再验收项目产出→拆分→分派→验收和事件去重 |
 | 4 | 客户 | Client CRUD/搜索/状态、删除约束、项目数聚合；发票上线后再聚合收入 | 表格、新建/编辑、详情资料/项目/活动/附件；不伪造邮件打开或下载行为 | 可选字段校验、分页筛选、受约束删除和关联可解释；回访保持 v0.4 |
@@ -1795,7 +1810,7 @@ pnpm build:desktop
   → 预设自动化与后续业务事件源
 ```
 
-在对应纵切完成前，客户/发票“新建”、收件箱“全部已读”、任务“筛选”和收入时间范围等无业务行为控件必须禁用或明确标记“后续版本”，不得用可点击外观暗示已经实现。项目新建、搜索、状态筛选和生命周期操作已经接入真实 API，不再属于该占位清单。
+在对应纵切完成前，客户/发票“新建”、收件箱“全部已读”和收入时间范围等无业务行为控件必须禁用或明确标记“后续版本”，不得用可点击外观暗示已经实现。任务筛选、分页、标签、父子层级、批量安全操作和计划组按钮排序，以及项目新建、搜索、状态筛选和生命周期操作均已接入真实 API，不再属于占位清单；拖拽与生命周期批量操作仍未实现。
 
 ---
 
@@ -1846,12 +1861,16 @@ pnpm build:desktop
 | 方法 | 路径 | 说明 | 当前状态 |
 |------|------|------|----------|
 | GET | /health | 健康检查，返回 app/API/schema 版本 | 已实现 |
-| GET | /api/v1/tasks | 分页查询任务 | 已实现；支持项目等筛选，并在关联时返回 `project_name` |
-| POST | /api/v1/tasks | 新建任务 | 已实现；`Idempotency-Key` 保存规范化请求摘要、首次任务响应与 `201` 状态，资源编辑/删除后仍可安全重放，异体复用 key 返回 409 |
-| GET / DELETE | /api/v1/tasks/:id | 获取、删除任务 | 已实现；读取返回可选 `project_name`，前端已接详情和显式二次删除确认 |
-| PATCH | /api/v1/tasks/:id | 更新非生命周期字段 | 已实现；支持标题、描述、优先级、项目、截止/计划日期和预计时长，拒绝 `status` |
-| PATCH | /api/v1/tasks/:id/status | 更新三态任务状态 | 当前已实现；扩展状态上线后废弃，不能用于 waiting_review/done 等受控转换 |
-| PUT | /api/v1/tasks/reorder | 原子保存手动排序 | v0.1 规划中 |
+| GET | /api/v1/tasks | 分页查询任务 | 已实现；默认 50/最大 100，支持标题/描述搜索、状态/优先级/类型/项目、计划与截止范围、重复标签 AND、父级/根任务和稳定排序；返回项目/父任务标题、标签、子任务统计 |
+| POST | /api/v1/tasks | 新建任务 | 已实现；支持类型、父任务、完成标准和标签；v2 `Idempotency-Key` 摘要保存规范化事实与首次 `201` 快照，并兼容安全的旧 v1 快照；返回 `ETag` |
+| GET / DELETE | /api/v1/tasks/:id | 获取、删除任务 | 已实现；读取返回完整任务事实与 `ETag`；删除要求 `If-Match`，父任务删除只解除子任务父级 |
+| PATCH | /api/v1/tasks/:id | 更新非生命周期字段 | 已实现；支持标题、描述、类型、优先级、项目、父任务、完成标准、标签、截止/计划日期和预计时长；要求 `If-Match`，拒绝 `status` |
+| PATCH | /api/v1/tasks/:id/status | 更新三态任务状态 | 当前已实现并要求 `If-Match`；扩展状态上线后废弃，不能用于 waiting_review/done 等受控转换 |
+| PATCH | /api/v1/tasks/batch | 原子批量安全操作 | 已实现；1–100 条任务，支持 set_project/set_planned_date/add_tags/remove_tags；每项 expected_version，任一失败整批回滚 |
+| PUT | /api/v1/tasks/reorder | 原子保存手动排序 | 已实现；提交完整 planned_date 组和每项 expected_version，支持 manual/default；组成员或版本变化时拒绝 |
+| GET / POST | /api/v1/tags | 分页查询/幂等新建标签 | 已实现；搜索、稳定排序、大小写不敏感名称唯一，颜色为 #RRGGBB |
+| PATCH | /api/v1/tags/:id | 更新标签 | 已实现；要求 `If-Match`，名称/颜色变化会递增关联任务版本 |
+| DELETE | /api/v1/tags/:id?confirm=true | 永久删除标签 | 已实现；要求 `If-Match` 和明确确认，解除任务关联并递增受影响任务版本 |
 | POST | /api/v1/tasks/:id/start | 开始任务 | v0.1 规划中 |
 | POST | /api/v1/tasks/:id/block | 带原因标记阻塞 | v0.1 规划中 |
 | POST | /api/v1/tasks/:id/unblock | 由服务端恢复持久化的 blocked_from_status，客户端不得指定任意目标 | v0.1 规划中 |
@@ -1975,3 +1994,4 @@ pnpm build:desktop
 | v1.4 | 2026-08-26 | 将 AI Provider 接入与本地知识库加入版本待定的后续工作包，补充功能边界、建议实施流程、隐私安全闸门和验收要求；v0.1 继续保持无 AI/LLM 依赖 |
 | v1.5 | 2026-08-26 | 将 AI 助手与知识库拆为独立工作包；新增客户回访与收入/支出需求；把客户回访、收入/支出和发票业务归入 v0.4 后续业务版，进一步收紧 v0.1 范围 |
 | v1.6 | 2026-08-27 | 将收件箱升级为本地工作受理与编排中心；接受单机 Actor 模型和无线上服务边界；增加任务拆分、Assignment、本地 Agent Run、产出、验收/返工、提醒、审计的数据/API 规划，并补齐各模块实施顺序、验收标准和当前文档基线；PRD 移入 `docs/`，新增整体功能架构与模块文档，历史 HTML 原型从仓库移除 |
+| v1.7 | 2026-08-27 | 将当前基线推进到 SQLite schema v6；交付任务类型、父子关系、完成标准、Task/Tag 版本、标签管理、服务端分页筛选、层级列表、事务化批量安全操作、计划组按钮排序与 `ETag`/`If-Match` 冲突处理；保留扩展生命周期、Actor/验收、今日页拖拽和专注工时为后续纵切 |

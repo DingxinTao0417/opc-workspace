@@ -351,7 +351,12 @@ func (a *API) updateProject(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		nameChanged := false
+		if name, exists := updates["name"].(string); exists {
+			nameChanged = name != project.Name
+		}
+		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		updates["updated_at"] = updatedAt
 		updates["version"] = gorm.Expr("version + 1")
 		result := tx.Model(&models.Project{}).
 			Where("id = ? AND version = ?", id, expectedVersion).
@@ -361,6 +366,11 @@ func (a *API) updateProject(c *gin.Context) {
 		}
 		if result.RowsAffected == 0 {
 			return projectVersionConflict()
+		}
+		if nameChanged {
+			if _, err := bumpTasksForProject(tx, id, updatedAt); err != nil {
+				return err
+			}
 		}
 		row, err := loadProjectRow(tx, id)
 		if err != nil {
@@ -493,9 +503,11 @@ func (a *API) deleteProject(c *gin.Context) {
 		if project.Status != "archived" {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
 		}
-		if err := tx.Table("tasks").Where("project_id = ?", id).Count(&deleted.DetachedTasks).Error; err != nil {
+		detachedTasks, err := bumpTasksForProject(tx, id, time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
 			return err
 		}
+		deleted.DetachedTasks = detachedTasks
 		if err := tx.Table("invoices").Where("project_id = ?", id).Count(&deleted.DetachedInvoices).Error; err != nil {
 			return err
 		}
@@ -752,6 +764,19 @@ func requireClient(db *gorm.DB, clientID string) error {
 		return newProjectRequestError(http.StatusUnprocessableEntity, "CLIENT_NOT_FOUND", "client_id does not reference an existing client")
 	}
 	return nil
+}
+
+func bumpTasksForProject(db *gorm.DB, projectID, updatedAt string) (int64, error) {
+	result := db.Model(&models.Task{}).
+		Where("project_id = ?", projectID).
+		Updates(map[string]any{
+			"version":    gorm.Expr("version + 1"),
+			"updated_at": updatedAt,
+		})
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 func projectID(c *gin.Context) (string, bool) {

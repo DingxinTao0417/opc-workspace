@@ -20,7 +20,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已实现
 
-- SQLite schema v5 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`；原有任务和发票外键仍使用 `ON DELETE SET NULL`。
+- SQLite schema v6 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`，v6 增加 Task 事实与版本但不改变 Project 表；原有任务和发票外键仍使用 `ON DELETE SET NULL`。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -38,7 +38,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 ### 已知缺口
 
 - 客户模块仍只有页面骨架和预留表，没有 Client API/CRUD；因此项目表单的客户选择器保持禁用。后端可校验已有 `client_id` 并返回 `client_name`，但当前 UI 不能新建或改选客户，也没有客户筛选控件。
-- 项目任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但没有可见分页、状态筛选或任务树；大数据量下的请求次数与响应性能仍待验证。标签、父子任务、Assignment 和受控任务验收也未实现。
+- 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选或任务树；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子和并发版本已由 schema v6 与任务页交付，Assignment 和受控任务验收仍未实现。
 - 项目工时只是对任务表当前 `actual_minutes` 求和；专注会话尚未持久化或自动累计工时。
 - 没有项目产出、附件、笔记、发票明细或活动时间线；当前只返回发票计数，用于解释硬删除影响。
 - 没有 `task_artifacts`、`workflow_events`、项目事件生产器或 Inbox Item 集成；项目状态变更目前没有追加式审计记录。
@@ -71,7 +71,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- schema v5 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 通过 SQLite trigger 维护聚合版本，不另存可写进度。
+- 当前 schema v6 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护聚合版本，v6 Task 事实变化复用该机制，不另存可写进度。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -116,7 +116,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 任务、产出与后续工作
 
-- 补项目任务分页、筛选和任务树；完整任务生命周期、Assignment、Artifact 与验收由任务/Actor 纵切提供。
+- 将任务页已交付的分页、筛选、标签和任务树能力按项目范围复用到项目详情；完整任务生命周期、Assignment、Artifact 与验收由任务/Actor 纵切提供。
 - 项目交付类 Task 提交 Artifact，或 owner 显式标记 `requires_followup` 时，才可按稳定事件键幂等生成 Inbox Item。
 - owner 在收件箱把产出拆成修改、发布、客户确认等工单并分派给 owner/person；v0.2 才可选择健康且隔离已验证的本地 agent。
 - 项目达到交付、验收或开票节点的自动事件必须等 Workflow Event、Inbox 规则和对应业务模块交付后再启用。
@@ -131,7 +131,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 | 模块 | 当前与后续协作方式 |
 |------|--------------------|
-| 任务 | 当前已支持项目选择、项目名展示、项目任务列表和派生进度/工时；任务树、产出和验收待实现。 |
+| 任务 | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本和派生进度/工时；项目详情内的任务树仍待接入，产出和验收待实现。 |
 | 客户 | 数据/API 已支持可选 `client_id` 和名称聚合；Client CRUD 与项目客户选择尚未实现。 |
 | 收件箱 | 项目产出、阻塞、交付和后续工单的目标承接者；当前没有事件或 Inbox 集成。 |
 | Actor | 项目本身不分派；项目内可执行工作必须落为 Task，再通过未来的 Assignment 分派。 |
@@ -143,9 +143,9 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：schema v5、Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除。
+1. **项目事实与 API（已实现）**：当前 schema v6 保留 schema v3–v5 Project 结构与聚合 trigger；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
-3. **任务协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、派生进度和 `actual_minutes` 已接通；可见分页/筛选、任务树、专注持久化和大数据量性能验证仍待实现。
+3. **任务协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；专注持久化和大数据量性能验证仍待实现。
 4. **客户协作（待实现）**：Client CRUD、项目客户选择及客户筛选。
 5. **产出与 Inbox 协作（待实现）**：Artifact、附件、Workflow Event、拆分/分派/验收和事件去重。
 6. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
@@ -165,7 +165,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 ### 完整模块仍待验收
 
 - Client CRUD 与项目客户选择。
-- 超过 100 条项目任务与项目选项已避免截断，但可见分页/筛选、任务树、大数据量性能和 Focus Session 自动工时累计仍待验收。
+- 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和 Focus Session 自动工时累计仍待验收。
 - 产出、附件、时间线、Workflow Event 与 Inbox Item 的事务、去重和失败恢复。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
@@ -184,3 +184,4 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [schema v3 项目迁移](../../services/sidecar/internal/database/migrations/003_project_lifecycle.sql)
 - [schema v4 幂等快照迁移](../../services/sidecar/internal/database/migrations/004_idempotency_snapshots.sql)
 - [schema v5 聚合版本迁移](../../services/sidecar/internal/database/migrations/005_project_aggregate_versions.sql)
+- [schema v6 任务事实迁移](../../services/sidecar/internal/database/migrations/006_task_facts.sql)
