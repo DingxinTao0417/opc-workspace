@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）。桌面基座与 Task Artifact 运行目录接线已实现，异常恢复、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v10（2026-08-27）。桌面基座与 Task Artifact 运行目录接线已实现，异常恢复、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md)
 
 ## 定位与边界
 
@@ -167,17 +167,17 @@
 
 目标桌面协调状态建议细化为：
 
-| 状态 | 含义 |
-|------|------|
-| initializing | 创建目录和读取启动配置 |
-| starting | 启动 Sidecar 并等待 ready |
-| checking | 健康、版本和 schema 兼容检查 |
-| ready | 业务可用 |
-| restarting | 有上限自动或手动恢复中 |
-| maintenance | 备份、恢复、迁移或离线更新中 |
-| incompatible | 组件或 schema 不兼容，只允许恢复操作 |
-| error | 需要用户处理 |
-| stopping / stopped | 正常退出阶段 |
+| 状态               | 含义                                 |
+| ------------------ | ------------------------------------ |
+| initializing       | 创建目录和读取启动配置               |
+| starting           | 启动 Sidecar 并等待 ready            |
+| checking           | 健康、版本和 schema 兼容检查         |
+| ready              | 业务可用                             |
+| restarting         | 有上限自动或手动恢复中               |
+| maintenance        | 备份、恢复、迁移或离线更新中         |
+| incompatible       | 组件或 schema 不兼容，只允许恢复操作 |
+| error              | 需要用户处理                         |
+| stopping / stopped | 正常退出阶段                         |
 
 前端只能依据桌面层和 Sidecar 返回的状态，不通过请求失败次数自行创造第二状态机。
 
@@ -189,15 +189,15 @@
 
 规划 command 或事件职责：
 
-| 能力 | 职责 |
-|------|------|
-| restart_sidecar | 用户确认后执行有上限的精确重启 |
-| open_log_directory | 打开应用日志目录 |
-| select_import / export_path | 原生文件选择和受控路径授权 |
-| desktop_capabilities | 返回托盘、通知、快捷键、自启和更新能力 |
-| sidecar-state-changed | 向 WebView 推送状态变化 |
-| global-shortcut-invoked | 打开命令面板、新建任务或切换专注 |
-| notification-activated | 打开对应本地资源 |
+| 能力                        | 职责                                   |
+| --------------------------- | -------------------------------------- |
+| restart_sidecar             | 用户确认后执行有上限的精确重启         |
+| open_log_directory          | 打开应用日志目录                       |
+| select_import / export_path | 原生文件选择和受控路径授权             |
+| desktop_capabilities        | 返回托盘、通知、快捷键、自启和更新能力 |
+| sidecar-state-changed       | 向 WebView 推送状态变化                |
+| global-shortcut-invoked     | 打开命令面板、新建任务或切换专注       |
+| notification-activated      | 打开对应本地资源                       |
 
 正式名称在实现 ADR 中冻结。所有高风险命令限制到 main 窗口的最小 Tauri capability，并验证调用参数。
 

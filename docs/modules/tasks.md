@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v10（2026-08-27）；Task D2 的结构仍由 schema v9 引入，v10 不改写 Task 契约。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线，以及 T-18D D2 manual Submission/Artifact 提交验收均已交付。Inbox/Reminder 消费、本地 Agent Run、专注工时回写和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -39,46 +39,46 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 
 ### Task
 
-| 字段 | 当前约束 |
-| --- | --- |
-| `status` | `todo / in_progress / blocked / waiting_review / done / cancelled` |
-| `review_policy` | `none / manual`；策略改变只允许 `todo` 且 Submission 历史为 0 |
-| `current_submission_id` | 指向同一 Task 的最新 Submission；接受、返工、取消后保留，reopen 清空 |
+| 字段                         | 当前约束                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `status`                     | `todo / in_progress / blocked / waiting_review / done / cancelled`       |
+| `review_policy`              | `none / manual`；策略改变只允许 `todo` 且 Submission 历史为 0            |
+| `current_submission_id`      | 指向同一 Task 的最新 Submission；接受、返工、取消后保留，reopen 清空     |
 | `submitted_at / reviewed_at` | 当前/最近一次提交流程的快速状态时间；reopen 清空，历史以 Submission 为准 |
-| `blocked_from_status` | block 时由服务端保存，unblock 只能恢复这个状态 |
-| `version` | 任一影响 Task 聚合呈现或决策的写入递增，用作 ETag 和乐观锁 |
+| `blocked_from_status`        | block 时由服务端保存，unblock 只能恢复这个状态                           |
+| `version`                    | 任一影响 Task 聚合呈现或决策的写入递增，用作 ETag 和乐观锁               |
 
 Task 创建仍只允许 `todo`；非 `todo` 创建返回 `LIFECYCLE_COMMAND_REQUIRED`。状态不能经通用 PATCH 修改。
 
 ### TaskSubmission
 
-| 字段 | 含义 |
-| --- | --- |
-| `id / task_id / sequence` | UUID、所属 Task、Task 内从 1 递增且唯一的批次序号 |
-| `status` | `pending_review / accepted / changes_requested / withdrawn`；每个 Task 至多一条 pending |
-| `summary` | 可为空但最长 10,000 字符；提交时 summary 与 Artifact 至少一个存在 |
-| `submitted_by_actor_id / submitted_at` | 当前实现固定内置 owner 代录及提交时间 |
-| `reviewed_by_actor_id / reviewed_at / review_reason` | 接受或返工时由内置 owner 记录；返工原因必填 |
-| `withdrawn_by_actor_id / withdrawn_at` | waiting-review Task 取消时由内置 owner 记录 |
-| `is_inferred` | schema v9 从无歧义旧 manual 状态回填的批次为 true |
+| 字段                                                 | 含义                                                                                    |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `id / task_id / sequence`                            | UUID、所属 Task、Task 内从 1 递增且唯一的批次序号                                       |
+| `status`                                             | `pending_review / accepted / changes_requested / withdrawn`；每个 Task 至多一条 pending |
+| `summary`                                            | 可为空但最长 10,000 字符；提交时 summary 与 Artifact 至少一个存在                       |
+| `submitted_by_actor_id / submitted_at`               | 当前实现固定内置 owner 代录及提交时间                                                   |
+| `reviewed_by_actor_id / reviewed_at / review_reason` | 接受或返工时由内置 owner 记录；返工原因必填                                             |
+| `withdrawn_by_actor_id / withdrawn_at`               | waiting-review Task 取消时由内置 owner 记录                                             |
+| `is_inferred`                                        | schema v9 从无歧义旧 manual 状态回填的批次为 true                                       |
 
 Submission 的 Task、序号、摘要、提交人、提交时间和 inferred 标记不可修改；只有 `pending_review` 可一次性转为 accepted、changes_requested 或 withdrawn。Task 仍存在时禁止直接硬删 Submission。
 
 ### TaskArtifact
 
-| 字段 | 含义与约束 |
-| --- | --- |
-| `position` | 批次内从 1 开始且唯一，保持客户端提交顺序 |
-| `submission_status`（API 派生） | 必填 `pending_review / accepted / changes_requested / withdrawn`，由父 Submission JOIN 得出；不是第二份可写状态 |
-| `storage_kind` | `text / link / structured / file` |
-| payload | text→`content_text`，link→`reference_url`，structured→`structured_json`，file→受控 `relative_path = objects/<artifact-id>`；四者严格互斥 |
-| `name` | trim 后 1–255 个安全字符，不允许控制字符 |
-| `mime_type / size_bytes / sha256` | 仅文件需要；SHA-256 为 64 位小写十六进制 |
-| `requires_followup` | 人工标记需要后续动作；当前只展示，不自动生成 Task |
-| `produced_by_actor_id` | 提交瞬间的活动 assignee，由服务端派生，客户端不能指定 |
-| `recorded_by_actor_id` | 固定内置 owner，表达“我代录” |
-| `integrity_status` | `unverified / verified / missing / mismatch`；unverified 的检查时间必须为空，其他状态必须有检查时间 |
-| `deleted_*` | owner 软删除时间、操作人和 1–1,000 字符原因，三者同为空或同为非空 |
+| 字段                              | 含义与约束                                                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `position`                        | 批次内从 1 开始且唯一，保持客户端提交顺序                                                                                                |
+| `submission_status`（API 派生）   | 必填 `pending_review / accepted / changes_requested / withdrawn`，由父 Submission JOIN 得出；不是第二份可写状态                          |
+| `storage_kind`                    | `text / link / structured / file`                                                                                                        |
+| payload                           | text→`content_text`，link→`reference_url`，structured→`structured_json`，file→受控 `relative_path = objects/<artifact-id>`；四者严格互斥 |
+| `name`                            | trim 后 1–255 个安全字符，不允许控制字符                                                                                                 |
+| `mime_type / size_bytes / sha256` | 仅文件需要；SHA-256 为 64 位小写十六进制                                                                                                 |
+| `requires_followup`               | 人工标记需要后续动作；当前只展示，不自动生成 Task                                                                                        |
+| `produced_by_actor_id`            | 提交瞬间的活动 assignee，由服务端派生，客户端不能指定                                                                                    |
+| `recorded_by_actor_id`            | 固定内置 owner，表达“我代录”                                                                                                             |
+| `integrity_status`                | `unverified / verified / missing / mismatch`；unverified 的检查时间必须为空，其他状态必须有检查时间                                      |
+| `deleted_*`                       | owner 软删除时间、操作人和 1–1,000 字符原因，三者同为空或同为非空                                                                        |
 
 Artifact 的事实与 payload 创建后不可编辑；仅完整性检查状态和首次软删除元数据允许受控变化。Task 仍存在时禁止直接硬删 Artifact；硬删除整个 Task 聚合时由外键级联清理数据库成员。
 
@@ -131,14 +131,14 @@ done / cancelled ──reopen──> todo
 
 ### Task 与生命周期
 
-| 方法 | 路径 | 关键约束 |
-| --- | --- | --- |
-| POST | `/api/v1/tasks` | 仅 todo；支持 `review_policy`; 可选稳定幂等键 |
-| GET | `/api/v1/tasks/:id` | 完整 Task、关系、版本和 `ETag` |
-| PATCH | `/api/v1/tasks/:id` | `If-Match`；不写 status；策略变化仅 todo+无历史 |
-| DELETE | `/api/v1/tasks/:id` | `If-Match`；硬删整个 Task 聚合并协调文件清理 |
-| POST | `/api/v1/tasks/:id/start|block|unblock|complete|cancel|reopen` | `If-Match`；可选稳定幂等键；显式状态机 |
-| GET | `/api/v1/tasks/:id/events` | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version` |
+| 方法   | 路径                       | 关键约束                                                |
+| ------ | -------------------------- | ------------------------------------------------------- |
+| POST   | `/api/v1/tasks`            | 仅 todo；支持 `review_policy`; 可选稳定幂等键           |
+| GET    | `/api/v1/tasks/:id`        | 完整 Task、关系、版本和 `ETag`                          |
+| PATCH  | `/api/v1/tasks/:id`        | `If-Match`；不写 status；策略变化仅 todo+无历史         |
+| DELETE | `/api/v1/tasks/:id`        | `If-Match`；硬删整个 Task 聚合并协调文件清理            |
+| POST   | `/api/v1/tasks/:id/start   | block                                                   | unblock | complete | cancel | reopen` | `If-Match`；可选稳定幂等键；显式状态机 |
+| GET    | `/api/v1/tasks/:id/events` | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version` |
 
 ### 提交
 
@@ -168,7 +168,7 @@ done / cancelled ──reopen──> todo
       "client_ref": "json-1",
       "storage_kind": "structured",
       "name": "结构化结果",
-      "structured_json": {"outcome":"ok"},
+      "structured_json": { "outcome": "ok" },
       "requires_followup": false
     }
   ]
@@ -191,25 +191,25 @@ done / cancelled ──reopen──> todo
 `POST /api/v1/tasks/:id/review` 要求 Task `If-Match`、可选稳定幂等键，body 为：
 
 ```json
-{"decision":"accept","reason":"可选说明"}
+{ "decision": "accept", "reason": "可选说明" }
 ```
 
 或：
 
 ```json
-{"decision":"request_changes","reason":"必须说明返工原因"}
+{ "decision": "request_changes", "reason": "必须说明返工原因" }
 ```
 
 reason 最长 1,000 字符。只有 manual + waiting_review + current pending Submission + active owner reviewer 可审核。成功返回 `{data:{task,submission,event}}`。
 
 ### 历史、详情与下载
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/tasks/:id/submissions?page=&page_size=` | sequence DESC；每条带 Actor 摘要、Artifact 摘要和总数；包含已软删 Artifact 摘要 |
-| GET | `/api/v1/tasks/:id/artifacts?page=&page_size=&submission_id=&include_deleted=` | 默认隐藏软删；按批次倒序、position/id 正序 |
-| GET | `/api/v1/artifacts/:id` | 返回元数据及按类型的正文；软删详情仍 200，但 payload 全为 null |
-| GET | `/api/v1/artifacts/:id/content` | 仅 file；鉴权后校验大小和 SHA-256，再作为 attachment 下载 |
+| 方法 | 路径                                                                           | 说明                                                                            |
+| ---- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| GET  | `/api/v1/tasks/:id/submissions?page=&page_size=`                               | sequence DESC；每条带 Actor 摘要、Artifact 摘要和总数；包含已软删 Artifact 摘要 |
+| GET  | `/api/v1/tasks/:id/artifacts?page=&page_size=&submission_id=&include_deleted=` | 默认隐藏软删；按批次倒序、position/id 正序                                      |
+| GET  | `/api/v1/artifacts/:id`                                                        | 返回元数据及按类型的正文；软删详情仍 200，但 payload 全为 null                  |
+| GET  | `/api/v1/artifacts/:id/content`                                                | 仅 file；鉴权后校验大小和 SHA-256，再作为 attachment 下载                       |
 
 两个列表默认 `page=1 / page_size=50`、最大 100，返回 `{data, meta:{page,page_size,total,task_version}}` 和 Task `ETag`。所有 Artifact 摘要和详情都必须带由父 Submission 派生的 `submission_status`；摘要不暴露正文或 `relative_path`。前端依据该必填状态禁用 pending-review 删除，但服务端仍执行最终授权校验。
 
@@ -274,7 +274,7 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 
-仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、专注工时持久化、Client/Finance 业务、AI 助手与知识库。
+仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、专注工时持久化、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Client 基础资料和 Project 客户关联已经交付。
 
 ## 相关代码/PRD 链接
 

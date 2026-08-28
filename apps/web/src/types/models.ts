@@ -12,6 +12,7 @@ export type TaskLifecycleAction =
   "start" | "block" | "unblock" | "complete" | "cancel" | "reopen";
 export type ProjectStatus =
   "planning" | "in_progress" | "paused" | "completed" | "archived";
+export type ClientStatus = "active" | "lead" | "inactive";
 export type ProjectTransitionAction =
   "start" | "pause" | "resume" | "complete" | "reopen" | "archive" | "restore";
 export type ActorType = "owner" | "person" | "system" | "agent";
@@ -562,6 +563,7 @@ export interface ProjectListParams {
   query?: string;
   status?: ProjectStatus;
   clientId?: string;
+  includeArchived?: boolean;
   sort?: string;
 }
 
@@ -583,4 +585,55 @@ export interface DeleteProjectResult {
   deletedId: string;
   detachedTasks: number;
   detachedInvoices: number;
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  status: ClientStatus;
+  version: number;
+  projectCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ClientListResult {
+  items: Client[];
+  meta: PageMeta;
+}
+
+export interface ClientListParams {
+  page?: number;
+  pageSize?: number;
+  q?: string;
+  status?: ClientStatus;
+  sort?: string;
+}
+
+export interface ClientInput {
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  status: ClientStatus;
+}
+
+export interface UpdateClientInput {
+  name?: string;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  status?: ClientStatus;
+  expectedVersion: number;
+}
+
+export interface DeleteClientResult {
+  deletedId: string;
+  detachedProjects: number;
 }

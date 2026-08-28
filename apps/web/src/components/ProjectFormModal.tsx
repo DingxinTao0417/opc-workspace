@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
-import { useCreateProject, useUpdateProject } from "../api/hooks";
-import type { Project } from "../types/models";
+import {
+  useClientOptionsQuery,
+  useCreateProject,
+  useUpdateProject,
+} from "../api/hooks";
+import type { ClientStatus, Project } from "../types/models";
 import { Modal } from "./Modal";
 
 const projectColors = [
@@ -12,6 +16,12 @@ const projectColors = [
   "#E5484D",
   "#4B93E6",
 ];
+
+const clientStatusLabels: Record<ClientStatus, string> = {
+  active: "活跃",
+  lead: "潜在客户",
+  inactive: "已停用",
+};
 
 function amountToInput(amountMinor: number | null): string {
   if (amountMinor === null) return "";
@@ -57,8 +67,10 @@ export function ProjectFormModal({
 }) {
   const createMutation = useCreateProject();
   const updateMutation = useUpdateProject();
+  const clientsQuery = useClientOptionsQuery(open);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [clientId, setClientId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [amount, setAmount] = useState("");
@@ -70,6 +82,7 @@ export function ProjectFormModal({
     if (!open) return;
     setName(project?.name ?? "");
     setDescription(project?.description ?? "");
+    setClientId(project?.clientId ?? "");
     setStartDate(project?.startDate ?? "");
     setDueDate(project?.dueDate ?? "");
     setAmount(amountToInput(project?.amountMinor ?? null));
@@ -111,7 +124,7 @@ export function ProjectFormModal({
     const input = {
       name: cleanName,
       description,
-      clientId: project?.clientId ?? null,
+      clientId: clientId || null,
       startDate: startDate || null,
       dueDate: dueDate || null,
       amountMinor,
@@ -212,11 +225,42 @@ export function ProjectFormModal({
         <div className="form-grid">
           <label className="form-field">
             <span>客户</span>
-            <select disabled value="">
-              <option value="">
-                {project?.clientName ?? "客户模块完成后可选择"}
-              </option>
+            <select
+              aria-label="客户"
+              disabled={clientsQuery.isPending || clientsQuery.isError}
+              onChange={(event) => setClientId(event.target.value)}
+              value={clientId}
+            >
+              <option value="">不关联客户</option>
+              {project?.clientId &&
+              !clientsQuery.data?.some(
+                (client) => client.id === project.clientId,
+              ) ? (
+                <option value={project.clientId}>
+                  {project.clientName ?? "当前关联客户"}（当前关联）
+                </option>
+              ) : null}
+              {clientsQuery.data?.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}（{clientStatusLabels[client.status]}）
+                </option>
+              ))}
             </select>
+            {clientsQuery.isPending ? (
+              <small className="form-field-hint">正在读取本地客户…</small>
+            ) : null}
+            {clientsQuery.isError ? (
+              <span className="form-field-error">
+                客户列表不可用，当前关联不会被清空。
+                <button
+                  className="form-inline-action"
+                  onClick={() => void clientsQuery.refetch()}
+                  type="button"
+                >
+                  重试
+                </button>
+              </span>
+            ) : null}
           </label>
           <label className="form-field">
             <span>合同金额</span>

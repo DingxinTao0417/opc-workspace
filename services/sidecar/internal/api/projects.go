@@ -135,9 +135,16 @@ func (a *API) listProjects(c *gin.Context) {
 	}
 
 	query := a.db.WithContext(c.Request.Context()).Table("projects")
+	includeArchived, err := optionalBooleanQuery(c, "include_archived")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
+		return
+	}
 	status := strings.TrimSpace(c.Query("status"))
 	if status == "" {
-		query = query.Where("projects.status <> ?", "archived")
+		if !includeArchived {
+			query = query.Where("projects.status <> ?", "archived")
+		}
 	} else {
 		if _, valid := validProjectStatuses[status]; !valid {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
@@ -146,11 +153,12 @@ func (a *API) listProjects(c *gin.Context) {
 		query = query.Where("projects.status = ?", status)
 	}
 	if clientID := strings.TrimSpace(c.Query("client_id")); clientID != "" {
-		if _, err := uuid.Parse(clientID); err != nil {
+		parsedClientID, err := uuid.Parse(clientID)
+		if err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "client_id filter must be a UUID")
 			return
 		}
-		query = query.Where("projects.client_id = ?", clientID)
+		query = query.Where("projects.client_id = ?", parsedClientID.String())
 	}
 	if search := strings.TrimSpace(c.Query("q")); search != "" {
 		if utf8.RuneCountInString(search) > 200 {

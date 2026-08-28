@@ -156,6 +156,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.PATCH("/projects/:id", service.updateProject)
 		v1.POST("/projects/:id/transitions", service.transitionProject)
 		v1.DELETE("/projects/:id", service.deleteProject)
+		v1.GET("/clients", service.listClients)
+		v1.POST("/clients", service.createClient)
+		v1.GET("/clients/:id", service.getClient)
+		v1.PATCH("/clients/:id", service.updateClient)
+		v1.DELETE("/clients/:id", service.deleteClient)
 		v1.GET("/stats/today", service.todayStats)
 	}
 	return &Router{Engine: router, artifactStore: artifacts}, nil

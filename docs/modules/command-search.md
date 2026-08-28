@@ -123,15 +123,15 @@ GET /api/v1/search?q=&types=&page=&page_size=
 
 建议响应契约：
 
-| 字段 | 含义 |
-|------|------|
-| resource_type / resource_id | 资源类型和稳定 ID |
-| title / subtitle | 可展示摘要，不包含敏感全文 |
-| matched_fields | 命中的允许字段 |
-| route | 应用内详情路由 |
-| status | 用于判断可用操作的资源状态 |
-| updated_at | 稳定排序和陈旧判断 |
-| pagination | 页码、大小和是否还有下一页 |
+| 字段                        | 含义                       |
+| --------------------------- | -------------------------- |
+| resource_type / resource_id | 资源类型和稳定 ID          |
+| title / subtitle            | 可展示摘要，不包含敏感全文 |
+| matched_fields              | 命中的允许字段             |
+| route                       | 应用内详情路由             |
+| status                      | 用于判断可用操作的资源状态 |
+| updated_at                  | 稳定排序和陈旧判断         |
+| pagination                  | 页码、大小和是否还有下一页 |
 
 当前 PRD 已锁定 GET /api/v1/search?q= 方向；具体 types 和分页参数在实现前通过 API 契约测试冻结。
 
@@ -158,7 +158,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 ## 与其他模块协作
 
 - [任务](tasks.md)：任务搜索、详情直达、新建和开始专注；状态命令仍由 Task API校验。
-- [项目](projects.md)、[客户](clients.md)、[收件箱](inbox.md)：模块交付后注册搜索 Provider 和详情路由。
+- [项目](projects.md)、[客户](clients.md)：详情路由已交付；全局搜索 Provider 尚未接入。 [收件箱](inbox.md) 仍需在模块交付后注册 Provider 和详情路由。
 - [财务与发票](finance-invoices.md)：v0.4 交付后才启用发票搜索与生成入口。
 - [专注](focus.md)：选择任务启动专注，存在活动 Session 时先进入确认流程。
 - [设置](settings.md)：打开指定设置模块，展示快捷键和搜索偏好。

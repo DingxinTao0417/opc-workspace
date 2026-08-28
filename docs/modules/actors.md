@@ -1,10 +1,10 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v10（2026-08-27）；Actor/D2 结构仍分别由 schema v7/v9 引入，v10 不改写其契约。
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 
@@ -34,17 +34,17 @@ Assignment 保存某个 Task 在某段时间内的角色事实：
 
 ## Actor 归属语义
 
-| 事实 | 当前 Actor 来源 | 用户可指定吗 |
-| --- | --- | --- |
-| Task assignee | active owner/person Assignment | 通过受控 Assignment 命令指定 |
-| Task reviewer | active owner Assignment | 通过受控 Assignment 命令指定；仅 owner |
-| Submission `submitted_by` | 内置 owner | 否 |
-| Artifact `produced_by` | 提交瞬间的 active assignee | 否；服务端派生 |
-| Artifact `recorded_by` | 内置 owner | 否 |
-| Submission `reviewed_by` | 内置 owner | 否 |
-| Submission `withdrawn_by` | 内置 owner | 否 |
-| Artifact `deleted_by` | 内置 owner | 否 |
-| v7/v9 迁移事件 actor | 内置 system | 否 |
+| 事实                      | 当前 Actor 来源                | 用户可指定吗                           |
+| ------------------------- | ------------------------------ | -------------------------------------- |
+| Task assignee             | active owner/person Assignment | 通过受控 Assignment 命令指定           |
+| Task reviewer             | active owner Assignment        | 通过受控 Assignment 命令指定；仅 owner |
+| Submission `submitted_by` | 内置 owner                     | 否                                     |
+| Artifact `produced_by`    | 提交瞬间的 active assignee     | 否；服务端派生                         |
+| Artifact `recorded_by`    | 内置 owner                     | 否                                     |
+| Submission `reviewed_by`  | 内置 owner                     | 否                                     |
+| Submission `withdrawn_by` | 内置 owner                     | 否                                     |
+| Artifact `deleted_by`     | 内置 owner                     | 否                                     |
+| v7/v9 迁移事件 actor      | 内置 system                    | 否                                     |
 
 UI 应表达为“负责人产出 / 我代录”。`submitted_by` 与 `produced_by` 可以不同，这是刻意的审计设计，不是数据错误。
 
@@ -96,19 +96,19 @@ UI 应表达为“负责人产出 / 我代录”。`submitted_by` 与 `produced_
 
 ### 已实现 API
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/api/v1/actors` | 默认 50/最大 100；type/status 筛选和白名单排序 |
-| POST | `/api/v1/actors` | 只创建 person；可选幂等键；返回 Actor ETag |
-| GET | `/api/v1/actors/:id` | 详情与 ETag |
-| PATCH | `/api/v1/actors/:id` | Actor `If-Match`；owner 仅名称，system/agent 禁止，person 可编辑/停用 |
-| GET | `/api/v1/tasks/:id/assignments` | 当前角色与分页历史；返回 Task ETag/meta.task_version |
-| POST | `/api/v1/tasks/:id/assignments` | Task `If-Match`；创建活动分派 |
-| POST | `/api/v1/tasks/:id/reassign` | Task `If-Match`；原因必填；原子改派 |
-| POST | `/api/v1/assignments/:id/end` | 所属 Task `If-Match`；原因必填 |
-| POST | `/api/v1/tasks/:id/submit-output` | producer 从 assignee 派生，submitter/recorder 为 owner |
-| POST | `/api/v1/tasks/:id/review` | owner 接受或要求返工 |
-| DELETE | `/api/v1/artifacts/:id?confirm=true` | owner 确认软删并记录原因 |
+| 方法   | 路径                                 | 说明                                                                  |
+| ------ | ------------------------------------ | --------------------------------------------------------------------- |
+| GET    | `/api/v1/actors`                     | 默认 50/最大 100；type/status 筛选和白名单排序                        |
+| POST   | `/api/v1/actors`                     | 只创建 person；可选幂等键；返回 Actor ETag                            |
+| GET    | `/api/v1/actors/:id`                 | 详情与 ETag                                                           |
+| PATCH  | `/api/v1/actors/:id`                 | Actor `If-Match`；owner 仅名称，system/agent 禁止，person 可编辑/停用 |
+| GET    | `/api/v1/tasks/:id/assignments`      | 当前角色与分页历史；返回 Task ETag/meta.task_version                  |
+| POST   | `/api/v1/tasks/:id/assignments`      | Task `If-Match`；创建活动分派                                         |
+| POST   | `/api/v1/tasks/:id/reassign`         | Task `If-Match`；原因必填；原子改派                                   |
+| POST   | `/api/v1/assignments/:id/end`        | 所属 Task `If-Match`；原因必填                                        |
+| POST   | `/api/v1/tasks/:id/submit-output`    | producer 从 assignee 派生，submitter/recorder 为 owner                |
+| POST   | `/api/v1/tasks/:id/review`           | owner 接受或要求返工                                                  |
+| DELETE | `/api/v1/artifacts/:id?confirm=true` | owner 确认软删并记录原因                                              |
 
 Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Assignment/Submission/Artifact；Workflow Event 关联 ID 可因外键置空，但 Actor 与 JSON 快照继续提供历史语义。
 

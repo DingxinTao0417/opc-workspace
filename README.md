@@ -9,20 +9,21 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单
-- SQLite schema v9、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v8 依次增加项目生命周期、幂等快照、聚合版本、Task 事实、Actor/Assignment/Event 与六状态生命周期，v9 增加带不可变数据库 ID/一次性 store 绑定的 workspace identity、Submission、Artifact、当前提交引用和事件关联保护
+- SQLite schema v10、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v8 依次增加项目生命周期、幂等快照、聚合版本、Task 事实、Actor/Assignment/Event 与六状态生命周期，v9 增加带不可变数据库 ID/一次性 store 绑定的 workspace identity、Submission、Artifact、当前提交引用和事件关联保护，v10 增加 Client 聚合版本、查询索引和 Project 关联版本触发器
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组手动排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
+- 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情与 Project 客户选择、改绑、解除及筛选已接真实 API
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看 Submission/Artifact 历史
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
-- React 三栏应用框架、今日/任务/项目/专注基础页面；客户、收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
+- React 三栏应用框架、今日/任务/项目/客户/专注基础页面；收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口，以及加载、错误、重试和空状态
 - 全局专注/休息计时状态机，以及可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置
 
-受控任务生命周期 D1 与 T-18D D2（manual policy、Submission、Artifact、提交、验收、返工和受控文件）已经交付。基础客户 CRUD、项目客户选择、项目事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.1](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录，不会收到任务或获得访问权限。Artifact 的 `produced_by` 来自提交瞬间的活动 assignee，`recorded_by`、Submission 的 `submitted_by` 以及审核/撤回/删除操作人均为内置 owner，表达“负责人产出、我代录/验收”，不代表远程协作。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页和项目页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
+受控任务生命周期 D1、T-18D D2（manual policy、Submission、Artifact、提交、验收、返工和受控文件），以及客户基础资料 CRUD/基础详情/Project 客户关联已经交付。客户活动与附件、Actor 显式关联、项目事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.2](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录，不会收到任务或获得访问权限。Artifact 的 `produced_by` 来自提交瞬间的活动 assignee，`recorded_by`、Submission 的 `submitted_by` 以及审核/撤回/删除操作人均为内置 owner，表达“负责人产出、我代录/验收”，不代表远程协作。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页、项目页和客户页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
 
 ## 目录结构
 
@@ -44,7 +45,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v2.1）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v2.2）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -204,6 +205,11 @@ GET    /api/v1/projects/:id
 PATCH  /api/v1/projects/:id
 POST   /api/v1/projects/:id/transitions
 DELETE /api/v1/projects/:id?confirm=true
+GET    /api/v1/clients
+POST   /api/v1/clients
+GET    /api/v1/clients/:id
+PATCH  /api/v1/clients/:id
+DELETE /api/v1/clients/:id?confirm=true
 GET    /api/v1/stats/today?date=YYYY-MM-DD
 ```
 
@@ -215,11 +221,13 @@ manual Task 只能从 `todo / in_progress` 提交，提交前必须同时具备 
 
 Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` 和 `meta.task_version`；Artifact 列表可按 `submission_id` 过滤，并用 `include_deleted=true` 查看软删除记录。所有 Artifact 摘要/详情都携带由父 Submission 派生的必填 `submission_status`。详情只在按需读取时返回文本、链接或结构化正文，删除后正文固定隐藏。文件下载只由鉴权 content 端点提供，响应强制 attachment、`nosniff`、`no-store`，并以 SHA-256 作为 `ETag`；缺失或校验不符会更新 `integrity_status` 并拒绝下载。Artifact 删除要求 `confirm=true`、Task `If-Match`、1–1,000 字符原因，pending-review 批次禁止删除；schema v9 在同一事务写入不可变 `artifact_deletion_tombstones`，文件经受控 trash 完成数据库/文件补偿后物理清理。tombstone 在 Task 聚合删除后仍保留，供启动恢复区分授权删除与未知候选；恢复 active trash 前复验 size/SHA-256，错配项进入 quarantine 并标记 mismatch。物理文件已经缺失时，确认软删除仍会成功并记录 `integrity_status = missing`；Task 聚合硬删除也不会被缺失 object 阻断。Task 硬删除随后由外键级联 Submission/Artifact；Workflow Event 中已失效的关联 ID 可置空，JSON 快照仍保留。
 
-任务资料、Task output/review/Artifact 删除及 Assignment 命令均使用 Task 版本拒绝旧写入；可重试命令可携带稳定 `Idempotency-Key`，同键同请求重放首次响应，同键不同请求返回冲突。前端遇到版本冲突会刷新最新 Task，同时保留摘要、文本、链接、结构化 JSON 与浏览器 `File` 对象草稿，要求用户再次明确提交。事件查询默认每页 50、最大 100，返回 Task `ETag`、`meta.task_version` 和按时间/命令顺序倒序的追加式事件。Assignment 没有 DELETE 路由。批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。
+任务资料、Task output/review/Artifact 删除及 Assignment 命令均使用 Task 版本拒绝旧写入；可重试命令可携带稳定 `Idempotency-Key`，同键同请求重放首次响应，同键不同请求返回冲突。前端遇到版本冲突会刷新最新 Task，同时保留摘要、文本、链接、结构化 JSON 与浏览器 `File` 对象草稿，要求用户再次明确提交。事件查询默认每页 50、最大 100，返回 Task `ETag`、`meta.task_version` 和按时间/命令顺序倒序的追加式事件。Assignment 没有 DELETE 路由。批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。项目列表默认排除归档项；只有需要读取完整关联历史的页面才显式传 `include_archived=true`。
+
+Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v9；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6 为任务增加类型、父任务、完成标准与版本，schema v7 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填历史 owner 分派，schema v8 安全重建六状态 Task 并增加生命周期字段和事件保护。schema v9 新增单例 `workspace_identity`、`task_submissions`、四种互斥 payload 的 `task_artifacts`、不可变 `artifact_deletion_tombstones`、Task `current_submission_id` 以及 Workflow Event 的 `submission_id / artifact_id`；不可变 `database_id` 与首次声明后不可更换的 `artifact_store_id` 将数据库和 Artifact marker 双向绑定。迁移只为 v8 中无歧义的 manual 历史事实回填 `is_inferred = 1` 的首个 Submission 和 `migration_submission_backfill` 系统事件，不虚构 Artifact。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v10；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6 为任务增加类型、父任务、完成标准与版本，schema v7 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填历史 owner 分派，schema v8 安全重建六状态 Task 并增加生命周期字段和事件保护。schema v9 新增单例 `workspace_identity`、`task_submissions`、四种互斥 payload 的 `task_artifacts`、不可变 `artifact_deletion_tombstones`、Task `current_submission_id` 以及 Workflow Event 的 `submission_id / artifact_id`；不可变 `database_id` 与首次声明后不可更换的 `artifact_store_id` 将数据库和 Artifact marker 双向绑定。schema v10 为 `clients` 增加 `version` 与查询索引，将历史空白可选值归一为 `NULL`，并用触发器在 Project 关联变化时递增受影响 Client 的聚合版本。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -229,4 +237,4 @@ Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` �
 
 ## 产品边界
 
-[PRD v2.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座明确不实现任务/项目看板、内容日历业务功能、客户回访、收入/支出/发票业务、自动化规则引擎、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。本地 Actor 身份、person 管理、Assignment、六状态生命周期、Task 时间线以及 manual Submission/Artifact 验收已经交付；新版收件箱、提醒编排、Agent Runtime、备份/恢复和其他业务模块仍未交付。对应页面骨架、数据表或 API 规划不代表完整工作流已经可用。
+[PRD v2.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座明确不实现任务/项目看板、内容日历业务功能、客户回访、收入/支出/发票业务、自动化规则引擎、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。本地 Actor 身份、person 管理、Assignment、六状态生命周期、Task 时间线、manual Submission/Artifact 验收，以及 Client 基础资料 CRUD/Project 客户关联已经交付；客户活动/附件/Actor 显式关联、新版收件箱、提醒编排、Agent Runtime、备份/恢复和其他业务模块仍未交付。对应页面骨架、数据表或 API 规划不代表完整工作流已经可用。

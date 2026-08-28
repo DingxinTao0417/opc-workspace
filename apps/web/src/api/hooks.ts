@@ -10,11 +10,13 @@ import { useRef } from "react";
 import {
   ApiError,
   batchUpdateTasks,
+  createClient,
   createPersonActor,
   createTag,
   createTask,
   createTaskAssignment,
   createProject,
+  deleteClient,
   deleteProject,
   deleteTag,
   deleteTask,
@@ -23,11 +25,14 @@ import {
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
+  getAllClients,
   getAllProjects,
   getAllTags,
   getAllTasks,
   getActor,
   getActors,
+  getClient,
+  getClients,
   getHealth,
   getTags,
   getTask,
@@ -46,6 +51,7 @@ import {
   reassignTaskAssignment,
   reviewTaskSubmission,
   submitTaskOutput,
+  updateClient,
   updateTag,
   updateTask,
   transitionProject,
@@ -55,6 +61,8 @@ import {
 import type {
   ActorListParams,
   BatchUpdateTasksInput,
+  ClientInput,
+  ClientListParams,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
@@ -77,6 +85,7 @@ import type {
   ReviewTaskSubmissionInput,
   ReassignTaskAssignmentInput,
   UpdateActorInput,
+  UpdateClientInput,
   UpdateTagInput,
   UpdateProjectInput,
   UpdateTaskInput,
@@ -149,6 +158,106 @@ export function useUpdateActor() {
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+      }
+    },
+  });
+}
+
+export const clientQueryKey = ["clients"] as const;
+export const clientDetailQueryKey = (id: string) =>
+  [...clientQueryKey, "detail", id] as const;
+
+export function useClientsQuery(input: ClientListParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: [...clientQueryKey, "list", input],
+    queryFn: () => getClients(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useClientOptionsQuery(enabled = true) {
+  return useQuery({
+    queryKey: [...clientQueryKey, "options"],
+    queryFn: () => getAllClients({ sort: "name" }),
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useClientQuery(id: string | null) {
+  return useQuery({
+    queryKey: clientDetailQueryKey(id ?? "missing"),
+    queryFn: () => getClient(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+export function useCreateClient() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: ClientInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createClient(input, attempt.current.key);
+    },
+    onSuccess: async (client) => {
+      attempt.current = null;
+      queryClient.setQueryData(clientDetailQueryKey(client.id), client);
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+  });
+}
+
+export function useUpdateClient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateClientInput }) =>
+      updateClient(id, input),
+    onSuccess: async (client) => {
+      queryClient.setQueryData(clientDetailQueryKey(client.id), client);
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteClient() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteClient(id, expectedVersion),
+    onSuccess: async (_, variables) => {
+      queryClient.removeQueries({
+        queryKey: clientDetailQueryKey(variables.id),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       }
     },
   });
@@ -1053,6 +1162,7 @@ export function useProjectsQuery(
     queryKey: [...projectQueryKey, "list", input],
     queryFn: () => getProjects(input),
     enabled,
+    placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
@@ -1094,6 +1204,7 @@ export function useCreateProject() {
       attempt.current = null;
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
   });
 }
@@ -1107,6 +1218,7 @@ export function useUpdateProject() {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
   });
 }
@@ -1149,6 +1261,7 @@ export function useDeleteProject() {
       });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
   });
 }

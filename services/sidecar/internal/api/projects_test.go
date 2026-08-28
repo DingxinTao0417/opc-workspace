@@ -220,6 +220,27 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), created.ID) {
 		t.Fatalf("project list = %d: %s", list.Code, list.Body.String())
 	}
+
+	archivedProject := transitionProjectForTest(
+		t, router, created.ID, completed.Version, `{"action":"archive"}`,
+	)
+	if archivedProject.Status != "archived" {
+		t.Fatalf("archive client project = %#v", archivedProject)
+	}
+	normalizedClientID := strings.ToUpper(clientID)
+	defaultClientList := performRequest(
+		router, http.MethodGet, "/api/v1/projects?client_id="+normalizedClientID, nil, nil,
+	)
+	if defaultClientList.Code != http.StatusOK || strings.Contains(defaultClientList.Body.String(), created.ID) {
+		t.Fatalf("default client list includes archived project: %d %s", defaultClientList.Code, defaultClientList.Body.String())
+	}
+	allClientProjects := performRequest(
+		router, http.MethodGet,
+		"/api/v1/projects?client_id="+normalizedClientID+"&include_archived=true", nil, nil,
+	)
+	if allClientProjects.Code != http.StatusOK || !strings.Contains(allClientProjects.Body.String(), created.ID) {
+		t.Fatalf("complete client project list misses archived project: %d %s", allClientProjects.Code, allClientProjects.Body.String())
+	}
 }
 
 func TestProjectValidationFilteringAndArchivedVisibility(t *testing.T) {
@@ -282,10 +303,15 @@ func TestProjectValidationFilteringAndArchivedVisibility(t *testing.T) {
 	if !strings.Contains(archivedList.Body.String(), literalPercent.ID) {
 		t.Fatalf("archived list misses project: %s", archivedList.Body.String())
 	}
+	allList := performRequest(router, http.MethodGet, "/api/v1/projects?include_archived=true", nil, nil)
+	if allList.Code != http.StatusOK || !strings.Contains(allList.Body.String(), literalPercent.ID) {
+		t.Fatalf("include archived list misses project: %d %s", allList.Code, allList.Body.String())
+	}
 
 	invalidQueries := []string{
 		"/api/v1/projects?status=unknown",
 		"/api/v1/projects?client_id=not-a-uuid",
+		"/api/v1/projects?include_archived=sometimes",
 		"/api/v1/projects?sort=task_total",
 		"/api/v1/projects?page_size=101",
 	}

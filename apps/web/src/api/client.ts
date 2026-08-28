@@ -6,6 +6,11 @@ import type {
   AssignmentRole,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
+  Client,
+  ClientInput,
+  ClientListParams,
+  ClientListResult,
+  ClientStatus,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
@@ -15,6 +20,7 @@ import type {
   HealthResponse,
   NewTaskInput,
   DeleteProjectResult,
+  DeleteClientResult,
   Project,
   ProjectInput,
   ProjectListParams,
@@ -61,6 +67,7 @@ import type {
   TaskWorkflowEvent,
   TodayStats,
   UpdateActorInput,
+  UpdateClientInput,
   UpdateTagInput,
   UpdateTaskInput,
   UpdateProjectInput,
@@ -425,6 +432,19 @@ function asProjectStatus(value: unknown): ProjectStatus {
   return "planning";
 }
 
+function asClientStatus(value: unknown): ClientStatus {
+  if (value === "active" || value === "lead" || value === "inactive") {
+    return value;
+  }
+  return invalidResponse("客户状态响应无效");
+}
+
+function clientOptionalString(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  if (typeof value === "string") return value || null;
+  return invalidResponse(`${field}响应无效`);
+}
+
 function asActorType(value: unknown): Actor["type"] {
   if (
     value === "owner" ||
@@ -692,6 +712,37 @@ export function normalizeProject(value: unknown): Project {
             projectActions.has(action as ProjectTransitionAction),
         )
       : [],
+  };
+}
+
+export function normalizeClient(value: unknown): Client {
+  if (!isRecord(value)) return invalidResponse("客户响应格式无效");
+  const id = stringField(value, "id");
+  const name = stringField(value, "name");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  if (!id || !name || !createdAt || !updatedAt) {
+    return invalidResponse("客户响应格式无效");
+  }
+
+  return {
+    id,
+    name,
+    contactName: clientOptionalString(
+      fieldValue(value, "contact_name", "contactName"),
+      "客户联系人",
+    ),
+    email: clientOptionalString(value.email, "客户邮箱"),
+    phone: clientOptionalString(value.phone, "客户电话"),
+    notes: clientOptionalString(value.notes, "客户备注"),
+    status: asClientStatus(value.status),
+    version: positiveInteger(value.version, "客户版本"),
+    projectCount: nonNegativeInteger(
+      fieldValue(value, "project_count", "projectCount"),
+      "客户项目数",
+    ),
+    createdAt,
+    updatedAt,
   };
 }
 
@@ -2304,6 +2355,7 @@ export async function getProjects(
   if (input.query?.trim()) params.set("q", input.query.trim());
   if (input.status) params.set("status", input.status);
   if (input.clientId) params.set("client_id", input.clientId);
+  if (input.includeArchived) params.set("include_archived", "true");
   if (input.sort) params.set("sort", input.sort);
   const payload = await apiRequest<unknown>(`/api/v1/projects?${params}`);
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
@@ -2447,6 +2499,131 @@ export async function deleteProject(
     deletedId: String(body.deleted_id ?? body.deletedId ?? id),
     detachedTasks: numeric(body.detached_tasks ?? body.detachedTasks),
     detachedInvoices: numeric(body.detached_invoices ?? body.detachedInvoices),
+  };
+}
+
+export async function getClients(
+  input: ClientListParams = {},
+): Promise<ClientListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.status) params.set("status", input.status);
+  if (input.sort?.trim()) params.set("sort", input.sort.trim());
+  const payload = await apiRequest<unknown>(`/api/v1/clients?${params}`);
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("客户列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(normalizeClient),
+    meta: {
+      page: positiveInteger(payload.meta.page, "客户列表页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "客户列表每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "客户列表总数"),
+    },
+  };
+}
+
+export async function getAllClients(
+  input: Omit<ClientListParams, "page" | "pageSize"> = {},
+): Promise<Client[]> {
+  const clients: Client[] = [];
+  const pageSize = 100;
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (clients.length < total) {
+    const result = await getClients({ ...input, page, pageSize });
+    clients.push(...result.items);
+    total = result.meta.total;
+    if (result.items.length === 0) break;
+    page += 1;
+  }
+  return clients;
+}
+
+export async function getClient(id: string): Promise<Client> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClient(body);
+}
+
+export async function createClient(
+  input: ClientInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<Client> {
+  const payload = await apiRequest<unknown>("/api/v1/clients", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      name: input.name,
+      contact_name: input.contactName,
+      email: input.email,
+      phone: input.phone,
+      notes: input.notes,
+      status: input.status,
+    }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClient(body);
+}
+
+export async function updateClient(
+  id: string,
+  input: UpdateClientInput,
+): Promise<Client> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.contactName === undefined
+          ? {}
+          : { contact_name: input.contactName }),
+        ...(input.email === undefined ? {} : { email: input.email }),
+        ...(input.phone === undefined ? {} : { phone: input.phone }),
+        ...(input.notes === undefined ? {} : { notes: input.notes }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClient(body);
+}
+
+export async function deleteClient(
+  id: string,
+  expectedVersion: number,
+): Promise<DeleteClientResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(expectedVersion),
+    },
+  );
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("客户删除响应格式无效");
+  return {
+    deletedId: stringField(body, "deleted_id", "deletedId") ?? id,
+    detachedProjects: nonNegativeInteger(
+      fieldValue(body, "detached_projects", "detachedProjects"),
+      "客户解绑项目数",
+    ),
   };
 }
 

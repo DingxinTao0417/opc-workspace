@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v9 延续 schema v7 的 Actor 数据并增加 Task Submission/Artifact（不改变设置存储），“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
+> 文档状态：部分实现；当前 schema v10 延续 schema v7 的 Actor 数据和 schema v9 的 Task Submission/Artifact（v10 不改变设置存储），“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
 
 ## 定位与边界
 
@@ -142,25 +142,25 @@
 
 ### app_settings
 
-| 字段 | 用途 |
-|------|------|
-| key | 模块化稳定 key，例如 workspace、general、appearance、focus |
-| value_json | 经服务端 schema 清洗的非敏感值 |
-| version | 乐观并发版本 |
-| updated_by_actor_id | 修改者；交互设置通常为 owner |
-| updated_at | UTC 更新时间 |
+| 字段                | 用途                                                       |
+| ------------------- | ---------------------------------------------------------- |
+| key                 | 模块化稳定 key，例如 workspace、general、appearance、focus |
+| value_json          | 经服务端 schema 清洗的非敏感值                             |
+| version             | 乐观并发版本                                               |
+| updated_by_actor_id | 修改者；交互设置通常为 owner                               |
+| updated_at          | UTC 更新时间                                               |
 
 设置 schema 由 Sidecar 按模块版本化。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
 
 ### API
 
-| 方法与路径 | 用途 |
-|------------|------|
-| GET /api/v1/settings | **规划**：返回全部可见非敏感设置、schema 和版本 |
-| PATCH /api/v1/settings | **规划**：按模块更新，返回服务端规范化结果 |
-| GET / POST /api/v1/actors | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag` |
+| 方法与路径                     | 用途                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| GET /api/v1/settings           | **规划**：返回全部可见非敏感设置、schema 和版本                                                                 |
+| PATCH /api/v1/settings         | **规划**：按模块更新，返回服务端规范化结果                                                                      |
+| GET / POST /api/v1/actors      | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
 | GET / PATCH /api/v1/actors/:id | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
-| GET /health | 提供真实 app、commit、API 和 schema 版本 |
+| GET /health                    | 提供真实 app、commit、API 和 schema 版本                                                                        |
 
 备份、桌面能力与 Agent Adapter 通过各自模块 API 或 Tauri command 提供；设置页不建立第二份状态。
 
@@ -226,7 +226,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - 各入口可直接打开指定设置模块。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v9 延续。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v10 延续。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。

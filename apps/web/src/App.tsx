@@ -8,6 +8,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { TaskDetailModal } from "./components/TaskDetailModal";
 import { ThemeController } from "./components/ThemeController";
 import { ClientsPage } from "./pages/ClientsPage";
+import { ClientDetailPage } from "./pages/ClientDetailPage";
 import { FocusPage } from "./pages/FocusPage";
 import { InboxPage } from "./pages/InboxPage";
 import { IncomePage } from "./pages/IncomePage";
@@ -63,6 +64,7 @@ export default function App() {
           <Route element={<ProjectsPage />} path="projects" />
           <Route element={<ProjectDetailPage />} path="projects/:projectId" />
           <Route element={<ClientsPage />} path="clients" />
+          <Route element={<ClientDetailPage />} path="clients/:clientId" />
           <Route element={<IncomePage />} path="income" />
           <Route element={<InvoicesPage />} path="invoices" />
           <Route element={<InboxPage />} path="inbox" />

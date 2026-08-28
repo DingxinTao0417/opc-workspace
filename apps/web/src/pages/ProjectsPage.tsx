@@ -1,11 +1,11 @@
 import { CalendarDays, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useProjectsQuery } from "../api/hooks";
+import { useClientOptionsQuery, useProjectsQuery } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
-import type { Project, ProjectStatus } from "../types/models";
+import type { ClientStatus, Project, ProjectStatus } from "../types/models";
 
 const statusLabels: Record<ProjectStatus, string> = {
   planning: "规划中",
@@ -13,6 +13,12 @@ const statusLabels: Record<ProjectStatus, string> = {
   paused: "已暂停",
   completed: "已完成",
   archived: "已归档",
+};
+
+const clientStatusLabels: Record<ClientStatus, string> = {
+  active: "活跃",
+  lead: "潜在客户",
+  inactive: "已停用",
 };
 
 function statusClass(status: ProjectStatus): string {
@@ -75,13 +81,16 @@ function ProjectCard({ project }: { project: Project }) {
 export function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ProjectStatus | "">("");
+  const [clientId, setClientId] = useState("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const clientsQuery = useClientOptionsQuery();
   const query = useProjectsQuery({
     page,
     pageSize: 12,
     query: search,
     status: status || undefined,
+    clientId: clientId || undefined,
     sort: "-updated_at",
   });
   const projects = query.data?.items ?? [];
@@ -91,7 +100,7 @@ export function ProjectsPage() {
       (query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 12),
     ),
   );
-  const hasFilters = Boolean(search.trim() || status);
+  const hasFilters = Boolean(search.trim() || status || clientId);
 
   return (
     <div className="page">
@@ -148,6 +157,34 @@ export function ProjectsPage() {
             <option value="archived">已归档</option>
           </select>
         </label>
+        <label className="toolbar-select">
+          <span className="sr-only">关联客户</span>
+          <select
+            aria-label="关联客户"
+            disabled={clientsQuery.isPending || clientsQuery.isError}
+            onChange={(event) => {
+              setClientId(event.target.value);
+              setPage(1);
+            }}
+            value={clientId}
+          >
+            <option value="">全部客户</option>
+            {clientsQuery.data?.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}（{clientStatusLabels[client.status]}）
+              </option>
+            ))}
+          </select>
+        </label>
+        {clientsQuery.isError ? (
+          <button
+            className="button button-quiet"
+            onClick={() => void clientsQuery.refetch()}
+            type="button"
+          >
+            重试客户筛选
+          </button>
+        ) : null}
       </div>
 
       {query.isError ? (
@@ -167,6 +204,7 @@ export function ProjectsPage() {
                 onClick={() => {
                   setSearch("");
                   setStatus("");
+                  setClientId("");
                   setPage(1);
                 }}
                 type="button"
@@ -186,7 +224,7 @@ export function ProjectsPage() {
           }
           message={
             hasFilters
-              ? "调整关键词或状态筛选后再试。"
+              ? "调整关键词、状态或客户筛选后再试。"
               : "创建项目后，可以在这里跟踪任务进度和交付状态。"
           }
           title={hasFilters ? "没有匹配的项目" : "暂无项目"}

@@ -1,6 +1,6 @@
 # 收件箱与本地工作编排模块
 
-> 实现基线：`HEAD 471f814`（2026-08-27）
+> 实现状态截止：2026-08-27（依据当前实现）
 >
 > 版本边界：当前只有页面骨架。v0.1 交付纯本地人工受理、拆分、owner/person 分派与 owner 验收；agent Actor、Adapter 和 Agent Run 归入 v0.2。
 
@@ -10,14 +10,14 @@
 
 对象职责必须分离：
 
-| 对象 | 保存的事实 | 不保存的事实 |
-|------|------------|--------------|
-| Inbox Item | 来源、分诊、已读、稍后、解决策略 | 任务执行状态、当前负责人 |
-| Task | 工作内容、生命周期、完成条件、验收结果 | 收件箱展示状态 |
-| Assignment | 当前责任人和改派历史 | 任务完成状态 |
-| Agent Run | 一次本地执行尝试 | 任务是否验收通过 |
-| Task Artifact | 文本、文件、链接或结构化产出 | 任务是否完成 |
-| Workflow Event | 追加式操作时间线 | 当前业务状态的第二副本 |
+| 对象           | 保存的事实                             | 不保存的事实             |
+| -------------- | -------------------------------------- | ------------------------ |
+| Inbox Item     | 来源、分诊、已读、稍后、解决策略       | 任务执行状态、当前负责人 |
+| Task           | 工作内容、生命周期、完成条件、验收结果 | 收件箱展示状态           |
+| Assignment     | 当前责任人和改派历史                   | 任务完成状态             |
+| Agent Run      | 一次本地执行尝试                       | 任务是否验收通过         |
+| Task Artifact  | 文本、文件、链接或结构化产出           | 任务是否完成             |
+| Workflow Event | 追加式操作时间线                       | 当前业务状态的第二副本   |
 
 核心边界：
 
@@ -39,7 +39,7 @@
 ### 已知缺口
 
 - “全部标为已读”没有行为，且没有收件箱列表、详情、筛选或真实计数。
-- SQLite schema v9 已有 Actor/Assignment、Task 六状态命令、Submission/Artifact 和可查询的 Workflow Event 时间线；仍没有 `inbox_items`、`inbox_item_tasks` 或 `reminders` 表，也没有收件箱拆分/分派消费和 Artifact follow-up 事件投影链路。
+- 当前 SQLite schema v10 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、Submission/Artifact 和可查询的 Workflow Event 时间线，并新增 Client 基础事实；仍没有 `inbox_items`、`inbox_item_tasks` 或 `reminders` 表，也没有收件箱拆分/分派消费、Client 活动事件或 Artifact follow-up 事件投影链路。
 - 没有任何 Inbox/Reminder/Artifact API、Query 或 Mutation；Assignment API 已由任务/Actor 纵切提供，但当前收件箱页面没有调用。
 - 没有来源事件、稳定去重键、调度器、拆分事务、派生进度、解决/忽略/重开或审计。
 - 没有 Agent Adapter、Agent Run、能力令牌、取消/重试或崩溃恢复；这些也不属于 v0.1。
@@ -115,7 +115,7 @@
 - `inbox_item_tasks`：Task 关联、created/linked、必需标记、建立/取消关联历史。
 - `reminders`：来源、触发时间、`scheduled / fired / cancelled`、事件键和生成的 Inbox Item。
 - 依赖任务/Actor 基础：`actors`、`task_assignments`、`task_artifacts`、`workflow_events`。
-- 所有新结构必须从当前 schema v9 之后追加 `010_...` 或更高版本迁移，不能修改任何已发布迁移。
+- 所有新结构必须从当前 schema v10 之后追加 `011_...` 或更高版本迁移，不能修改任何已发布迁移。
 
 ### 主状态
 
@@ -149,15 +149,15 @@ resolved / dismissed → open 或 tracking
 
 ## 与其他模块协作
 
-| 模块 | 事件进入收件箱 | 收件箱反馈 |
-|------|----------------|------------|
-| 任务 | 临期、逾期、阻塞、显式 follow-up 产出 | 创建/关联工单、分派、验收、返工；不直接改业务状态 |
-| 项目 | 产出、交付/验收/开票节点 | 跟踪后续工单；Project 状态保持独立 |
-| 客户 | v0.4 回访到期、本地活动 | 创建 followup Task 并跳回客户详情 |
-| 发票 | v0.4 临期、逾期、待开票 | 准备/核对/催款工单；发送和付款确认仍由 owner |
-| Actor | Assignment 记录 owner/person；v0.2 使用健康 agent | 展示当前负责人和改派历史 |
-| 今日 | 展示待处理、跟进、阻塞、待验收计数 | 提供带筛选的详情入口 |
-| 系统维护 | 备份、迁移、Sidecar 故障 | 生成可追踪的维护工作项 |
+| 模块     | 事件进入收件箱                                    | 收件箱反馈                                        |
+| -------- | ------------------------------------------------- | ------------------------------------------------- |
+| 任务     | 临期、逾期、阻塞、显式 follow-up 产出             | 创建/关联工单、分派、验收、返工；不直接改业务状态 |
+| 项目     | 产出、交付/验收/开票节点                          | 跟踪后续工单；Project 状态保持独立                |
+| 客户     | v0.4 回访到期、本地活动                           | 创建 followup Task 并跳回客户详情                 |
+| 发票     | v0.4 临期、逾期、待开票                           | 准备/核对/催款工单；发送和付款确认仍由 owner      |
+| Actor    | Assignment 记录 owner/person；v0.2 使用健康 agent | 展示当前负责人和改派历史                          |
+| 今日     | 展示待处理、跟进、阻塞、待验收计数                | 提供带筛选的详情入口                              |
+| 系统维护 | 备份、迁移、Sidecar 故障                          | 生成可追踪的维护工作项                            |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
 

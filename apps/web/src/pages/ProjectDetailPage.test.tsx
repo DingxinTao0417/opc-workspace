@@ -37,6 +37,12 @@ const transition = vi.hoisted(() => vi.fn());
 const projectRefetch = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/hooks", () => ({
+  useClientOptionsQuery: () => ({
+    data: [],
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
   useProjectQuery: () => ({
     data: project,
     isError: false,

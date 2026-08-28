@@ -22,7 +22,7 @@
 
 当前状态为未开始：
 
-- SQLite schema v9 已有 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线；但当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
+- 当前 SQLite schema v10 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线；但当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。
@@ -103,28 +103,28 @@
 
 ### 规划数据
 
-| 对象 | 关键事实 |
-|------|----------|
-| actors | type=agent、状态、Adapter 引用和能力摘要；历史引用后只能停用 |
-| agent_adapters | 稳定标识、执行器引用、manifest、启停状态、隔离配置和最近健康结果 |
-| task_assignments | Task 当前 assignee；启动 Run 时必须指向同一个 agent Actor |
-| agent_runs | 一次执行的任务、分派、Agent、输入快照、状态、尝试次数、输出摘要和错误 |
-| task_artifacts | 当前 D2 已有受控文本/文件/链接/结构化产出、相对路径、SHA-256 与 producer/recorder；未来 Run 来源通过新增显式关联或 Workflow Event 表达，不回写 schema v9 |
-| workflow_events | 注册、分派、启动、取消、失败、产出、验收和返工的追加式审计 |
+| 对象             | 关键事实                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| actors           | type=agent、状态、Adapter 引用和能力摘要；历史引用后只能停用                                                                                                     |
+| agent_adapters   | 稳定标识、执行器引用、manifest、启停状态、隔离配置和最近健康结果                                                                                                 |
+| task_assignments | Task 当前 assignee；启动 Run 时必须指向同一个 agent Actor                                                                                                        |
+| agent_runs       | 一次执行的任务、分派、Agent、输入快照、状态、尝试次数、输出摘要和错误                                                                                            |
+| task_artifacts   | 当前 D2 已有受控文本/文件/链接/结构化产出、相对路径、SHA-256 与 producer/recorder；未来 Run 来源通过新增显式关联或 Workflow Event 表达，不回写已发布的 schema v9 |
+| workflow_events  | 注册、分派、启动、取消、失败、产出、验收和返工的追加式审计                                                                                                       |
 
 敏感凭据和单次能力令牌不进入上述表。
 
 ### 规划 API
 
-| 方法与路径 | 用途 |
-|------------|------|
-| GET / POST /api/v1/agent-adapters | 查询或注册本地 Adapter |
-| POST /api/v1/agent-adapters/:id/check | 执行当前健康与能力检查 |
+| 方法与路径                              | 用途                        |
+| --------------------------------------- | --------------------------- |
+| GET / POST /api/v1/agent-adapters       | 查询或注册本地 Adapter      |
+| POST /api/v1/agent-adapters/:id/check   | 执行当前健康与能力检查      |
 | GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或由 owner 启动 Run |
-| GET /api/v1/agent-runs/:id | 查看 Run、输出和错误 |
-| POST /api/v1/agent-runs/:id/cancel | 取消当前 Run |
-| POST /api/v1/agent-runs/:id/retry | 基于旧 Run 创建新尝试 |
-| POST /api/v1/tasks/:id/review | owner 接受产出或要求返工 |
+| GET /api/v1/agent-runs/:id              | 查看 Run、输出和错误        |
+| POST /api/v1/agent-runs/:id/cancel      | 取消当前 Run                |
+| POST /api/v1/agent-runs/:id/retry       | 基于旧 Run 创建新尝试       |
+| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工    |
 
 Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议必须在 v0.2 ADR 中冻结；在此之前不把临时方案视为正式 API。
 
@@ -132,14 +132,14 @@ Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议必�
 
 Agent Run 状态为：
 
-| 状态 | 含义 | 允许的后续 |
-|------|------|------------|
-| queued | 已创建，等待最终校验或资源 | running、failed、cancelled |
-| running | 本地执行器正在运行 | succeeded、failed、cancelled、interrupted |
-| succeeded | 输出已校验并登记 | 不直接改变为任务 done |
-| failed | 执行失败 | owner 可创建新重试 |
-| cancelled | owner 已取消 | owner 可按需创建新重试 |
-| interrupted | 进程或应用异常中断 | owner 检查后决定是否重试 |
+| 状态        | 含义                       | 允许的后续                                |
+| ----------- | -------------------------- | ----------------------------------------- |
+| queued      | 已创建，等待最终校验或资源 | running、failed、cancelled                |
+| running     | 本地执行器正在运行         | succeeded、failed、cancelled、interrupted |
+| succeeded   | 输出已校验并登记           | 不直接改变为任务 done                     |
+| failed      | 执行失败                   | owner 可创建新重试                        |
+| cancelled   | owner 已取消               | owner 可按需创建新重试                    |
+| interrupted | 进程或应用异常中断         | owner 检查后决定是否重试                  |
 
 关键 Workflow Event 至少包括 adapter_registered、agent_assigned、agent_run_queued、agent_run_started、agent_run_succeeded、agent_run_failed、agent_run_cancelled、agent_run_interrupted、task_output_submitted、task_review_accepted 和 task_rework_requested。
 

@@ -1,0 +1,139 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Client, Project } from "../types/models";
+import { ClientDetailPage } from "./ClientDetailPage";
+
+const activeClient: Client = {
+  id: "client-1",
+  name: "星河工作室",
+  contactName: "陶先生",
+  email: "hello@example.com",
+  phone: "13800000000",
+  notes: "品牌设计客户",
+  status: "active",
+  version: 3,
+  projectCount: 1,
+  createdAt: "2026-08-20T00:00:00Z",
+  updatedAt: "2026-08-27T00:00:00Z",
+};
+
+const project: Project = {
+  id: "project-1",
+  name: "品牌官网改版",
+  description: "完成网站交付",
+  clientId: activeClient.id,
+  clientName: activeClient.name,
+  status: "in_progress",
+  startDate: null,
+  dueDate: null,
+  amountMinor: null,
+  color: "#6E7BF2",
+  version: 2,
+  archivedFromStatus: null,
+  createdAt: "2026-08-20T00:00:00Z",
+  updatedAt: "2026-08-27T00:00:00Z",
+  taskSummary: {
+    total: 4,
+    completed: 2,
+    inProgress: 1,
+    remaining: 2,
+    progressPercent: 50,
+    actualMinutes: 120,
+  },
+  invoiceCount: 0,
+  availableActions: ["pause", "complete", "archive"],
+};
+
+const state = vi.hoisted(() => ({
+  client: null as Client | null,
+  projectQueryInput: null as unknown,
+  update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
+  remove: { error: null, isPending: false, mutate: vi.fn() },
+}));
+
+vi.mock("../api/hooks", () => ({
+  useClientQuery: () => ({
+    data: state.client,
+    isError: false,
+    isPending: false,
+    refetch: vi.fn().mockResolvedValue({ data: state.client }),
+  }),
+  useProjectsQuery: (input: unknown) => {
+    state.projectQueryInput = input;
+    return {
+      data: { items: [project], meta: { page: 1, pageSize: 8, total: 1 } },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    };
+  },
+  useCreateClient: () => state.update,
+  useUpdateClient: () => state.update,
+  useDeleteClient: () => state.remove,
+}));
+
+function renderDetail() {
+  return render(
+    <MemoryRouter initialEntries={["/clients/client-1"]}>
+      <Routes>
+        <Route element={<ClientDetailPage />} path="/clients/:clientId" />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("ClientDetailPage", () => {
+  beforeEach(() => {
+    state.client = activeClient;
+    state.update.mutate.mockClear();
+    state.remove.mutate.mockClear();
+  });
+
+  afterEach(cleanup);
+
+  it("shows real related projects and explicit future placeholders", () => {
+    renderDetail();
+
+    expect(screen.getByRole("link", { name: /品牌官网改版/ })).toHaveAttribute(
+      "href",
+      "/projects/project-1",
+    );
+    expect(screen.getByText(/v0.4 交付财务事实后可用/)).toBeTruthy();
+    expect(screen.getByText(/不推测线上行为/)).toBeTruthy();
+    expect(state.projectQueryInput).toEqual(
+      expect.objectContaining({
+        clientId: activeClient.id,
+        includeArchived: true,
+      }),
+    );
+  });
+
+  it("requires the client to be inactive before permanent deletion", () => {
+    const view = renderDetail();
+
+    expect(screen.getByRole("button", { name: "先停用客户" })).toBeDisabled();
+    expect(screen.getByText(/永久删除前必须先停用客户/)).toBeTruthy();
+
+    state.client = { ...activeClient, status: "inactive", version: 4 };
+    view.rerender(
+      <MemoryRouter initialEntries={["/clients/client-1"]}>
+        <Routes>
+          <Route element={<ClientDetailPage />} path="/clients/:clientId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "永久删除客户" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+
+    expect(state.remove.mutate).toHaveBeenCalledWith(
+      { id: activeClient.id, expectedVersion: 4 },
+      expect.objectContaining({
+        onError: expect.any(Function),
+        onSuccess: expect.any(Function),
+      }),
+    );
+  });
+});

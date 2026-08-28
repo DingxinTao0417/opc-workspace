@@ -7,11 +7,21 @@ import { ProjectFormModal } from "./ProjectFormModal";
 const mutations = vi.hoisted(() => ({
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
+  clients: {
+    data: [
+      { id: "client-active", name: "星河工作室", status: "active" },
+      { id: "client-inactive", name: "旧客户", status: "inactive" },
+    ],
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  },
 }));
 
 vi.mock("../api/hooks", () => ({
   useCreateProject: () => mutations.create,
   useUpdateProject: () => mutations.update,
+  useClientOptionsQuery: () => mutations.clients,
 }));
 
 const project: Project = {
@@ -45,6 +55,12 @@ describe("ProjectFormModal", () => {
   beforeEach(() => {
     mutations.create.mutate.mockClear();
     mutations.update.mutate.mockClear();
+    mutations.clients.isError = false;
+    mutations.clients.isPending = false;
+    mutations.clients.data = [
+      { id: "client-active", name: "星河工作室", status: "active" },
+      { id: "client-inactive", name: "旧客户", status: "inactive" },
+    ];
   });
 
   afterEach(cleanup);
@@ -106,5 +122,47 @@ describe("ProjectFormModal", () => {
       new ApiError("Project has changed", { code: "VERSION_CONFLICT" }),
     );
     expect(onVersionConflict).toHaveBeenCalledOnce();
+  });
+
+  it("lists every client status and submits the selected client", () => {
+    render(<ProjectFormModal onClose={vi.fn()} open />);
+
+    expect(
+      screen.getByRole("option", { name: "旧客户（已停用）" }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("项目名称"), {
+      target: { value: "客户官网" },
+    });
+    fireEvent.change(screen.getByLabelText("客户"), {
+      target: { value: "client-inactive" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建项目" }));
+
+    expect(mutations.create.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "client-inactive" }),
+      expect.any(Object),
+    );
+  });
+
+  it("keeps an existing client id when options fail to load", () => {
+    mutations.clients.isError = true;
+    mutations.clients.data = [];
+    const linkedProject = {
+      ...project,
+      clientId: "client-inactive",
+      clientName: "旧客户",
+    };
+    render(<ProjectFormModal onClose={vi.fn()} open project={linkedProject} />);
+
+    expect(screen.getByLabelText("客户")).toBeDisabled();
+    expect(screen.getByLabelText("客户")).toHaveValue("client-inactive");
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(mutations.update.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ clientId: "client-inactive" }),
+      }),
+      expect.any(Object),
+    );
   });
 });

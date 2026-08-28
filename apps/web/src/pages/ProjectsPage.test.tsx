@@ -1,8 +1,10 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types/models";
 import { ProjectsPage } from "./ProjectsPage";
+
+const hooks = vi.hoisted(() => ({ projects: vi.fn() }));
 
 const project: Project = {
   id: "project-1",
@@ -32,13 +34,19 @@ const project: Project = {
 };
 
 vi.mock("../api/hooks", () => ({
-  useProjectsQuery: () => ({
-    data: { items: [project], meta: { page: 1, pageSize: 12, total: 1 } },
+  useClientOptionsQuery: () => ({
+    data: [
+      {
+        id: "client-inactive",
+        name: "旧客户",
+        status: "inactive",
+      },
+    ],
     isError: false,
     isPending: false,
-    isSuccess: true,
     refetch: vi.fn(),
   }),
+  useProjectsQuery: hooks.projects,
   useCreateProject: () => ({
     error: null,
     isPending: false,
@@ -56,6 +64,17 @@ vi.mock("../api/hooks", () => ({
 describe("ProjectsPage", () => {
   afterEach(cleanup);
 
+  beforeEach(() => {
+    hooks.projects.mockReturnValue({
+      data: { items: [project], meta: { page: 1, pageSize: 12, total: 1 } },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+  });
+
   it("renders real project progress and links to the detail route", () => {
     render(
       <MemoryRouter>
@@ -69,6 +88,24 @@ describe("ProjectsPage", () => {
     expect(screen.getByRole("link", { name: /品牌官网改版/ })).toHaveAttribute(
       "href",
       "/projects/project-1",
+    );
+  });
+
+  it("filters projects by any client status", () => {
+    render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("option", { name: "旧客户（已停用）" }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("关联客户"), {
+      target: { value: "client-inactive" },
+    });
+    expect(hooks.projects).toHaveBeenLastCalledWith(
+      expect.objectContaining({ clientId: "client-inactive" }),
     );
   });
 });

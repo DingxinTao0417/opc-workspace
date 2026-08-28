@@ -13,15 +13,15 @@ go run ./cmd/server --dev --db ../../.local/dev-data/opc-workspace.db --artifact
 
 Development starts with empty business data. `--seed` is an explicit, idempotent development-only option and is rejected without `--dev`. Production Tauri supplies absolute app-data paths and uses `--port 0`, allowing the operating system to choose an available loopback port.
 
-| Setting | Flag | Environment |
-| --- | --- | --- |
-| SQLite path | `--db` | `OPC_DB_PATH` |
-| Controlled Artifact root | `--artifacts` | `OPC_ARTIFACT_DIR` |
-| Loopback port | `--port` | `OPC_PORT` |
-| Session token | — | `OPC_SESSION_TOKEN` |
-| Exact Origin allowlist | `--allowed-origins` | `OPC_ALLOWED_ORIGINS` |
-| Development mode | `--dev` | `OPC_DEV` |
-| Development seed | `--seed` | `OPC_DEV_SEED` |
+| Setting                  | Flag                | Environment           |
+| ------------------------ | ------------------- | --------------------- |
+| SQLite path              | `--db`              | `OPC_DB_PATH`         |
+| Controlled Artifact root | `--artifacts`       | `OPC_ARTIFACT_DIR`    |
+| Loopback port            | `--port`            | `OPC_PORT`            |
+| Session token            | —                   | `OPC_SESSION_TOKEN`   |
+| Exact Origin allowlist   | `--allowed-origins` | `OPC_ALLOWED_ORIGINS` |
+| Development mode         | `--dev`             | `OPC_DEV`             |
+| Development seed         | `--seed`            | `OPC_DEV_SEED`        |
 
 When `--artifacts` is omitted for a file-backed database, the default is an `artifacts` sibling of the database. An in-memory database requires an explicit Artifact directory. The root cannot be a filesystem volume root or the database file.
 
@@ -30,7 +30,19 @@ Outside explicit development mode a non-empty session token is required. Every e
 After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event; operational logs go to stderr:
 
 ```json
-{"event":"ready","status":"ok","host":"127.0.0.1","address":"127.0.0.1:49152","url":"http://127.0.0.1:49152","port":49152,"pid":1234,"version":"0.1.0-dev","app_version":"0.1.0-dev","api_version":"v1","schema_version":9}
+{
+  "event": "ready",
+  "status": "ok",
+  "host": "127.0.0.1",
+  "address": "127.0.0.1:49152",
+  "url": "http://127.0.0.1:49152",
+  "port": 49152,
+  "pid": 1234,
+  "version": "0.1.0-dev",
+  "app_version": "0.1.0-dev",
+  "api_version": "v1",
+  "schema_version": 10
+}
 ```
 
 Writing `shutdown` to stdin drains active requests and checkpoints the WAL before closing SQLite.
@@ -39,11 +51,12 @@ Writing `shutdown` to stdin drains active requests and checkpoints the WAL befor
 
 The Sidecar exposes:
 
-- health, Task/Tag/Project CRUD and queries, Task batch/reorder, project lifecycle, and today statistics;
+- health, Task/Tag/Project/Client CRUD and queries, Task batch/reorder, project lifecycle, and today statistics;
 - Actor person management with Actor `ETag`, snapshot idempotency, and protected built-in owner/system records;
 - Task Assignment query/create/reassign/end, using the containing Task's `If-Match` version;
 - explicit Task `start`, `block`, `unblock`, `complete`, `cancel`, and `reopen` commands; the legacy `PATCH /tasks/:id/status` always returns `410 TASK_STATUS_ENDPOINT_DEPRECATED`;
 - Task event history with actor summaries, request IDs, immutable snapshots, `command_seq`, and nullable Assignment/Submission/Artifact correlation IDs;
+- Client fact CRUD with stable filtering/sorting, snapshot idempotency, aggregate `ETag`, Project association propagation, and constrained hard deletion;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 
 ```text
@@ -54,9 +67,24 @@ GET    /api/v1/tasks/:id/artifacts
 GET    /api/v1/artifacts/:id
 GET    /api/v1/artifacts/:id/content
 DELETE /api/v1/artifacts/:id?confirm=true
+GET    /api/v1/clients
+POST   /api/v1/clients
+GET    /api/v1/clients/:id
+PATCH  /api/v1/clients/:id
+DELETE /api/v1/clients/:id?confirm=true
 ```
 
 Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events, and reject key reuse with different input.
+
+### Client facts contract
+
+Client resources contain `id`, `name`, nullable `contact_name/email/phone/notes`, `status`, derived `project_count`, `version`, and timestamps. The server trims text, stores blank optional values as JSON/SQL `null`, rejects disallowed control characters and unknown JSON fields, and enforces these limits: name 1–200 Unicode characters, contact name 200, email 320 and one valid mailbox, phone 50, notes 10,000. Status is `active`, `lead`, or `inactive`; creation defaults to `active`.
+
+`GET /clients` defaults to page 1 with 50 rows and allows at most 100. `q` is at most 200 characters and searches name, contact name, email, and phone with escaped LIKE semantics. `status` is optional. `sort` accepts comma-separated `name`, `contact_name`, `status`, `project_count`, `created_at`, and `updated_at`, prefixed by `-` for descending order; the default is `-updated_at` and every order appends `id ASC` for stable pagination. Project lists still exclude archived rows by default; callers needing a Client's complete association history use `GET /projects?client_id=:id&include_archived=true`.
+
+Client creation optionally accepts `Idempotency-Key`, hashes the normalized request, and stores the first `201` response snapshot. The same key and normalized body replay that snapshot even after later edits or deletion; different input returns `409 IDEMPOTENCY_CONFLICT`. Create, detail, and update return the Client `ETag`. PATCH and DELETE require `If-Match`: missing, malformed, and stale versions return 428 `VERSION_REQUIRED`, 400 `INVALID_VERSION`, and 409 `VERSION_CONFLICT` respectively.
+
+Hard deletion is `DELETE /clients/:id?confirm=true`, requires the latest version, and is allowed only for an `inactive` Client. An Invoice reference returns `409 CLIENT_HAS_INVOICES` without changing the Client, Project links, or either aggregate version. Project references use `ON DELETE SET NULL`; successful deletion returns `deleted_id` and `detached_projects`. Project attach, move, detach, and deletion bump the affected Client aggregate version. Client name changes and deletion continue to bump linked Project aggregate versions.
 
 ### Manual review and output contract
 
@@ -127,7 +155,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v9. Migration 009 adds the singleton `workspace_identity` with immutable `database_id` and one-time `artifact_store_id`, `task_submissions`, `task_artifacts`, immutable `artifact_deletion_tombstones`, `tasks.current_submission_id`, and `workflow_events.submission_id/artifact_id`, with database/store identity binding, same-aggregate checks, one-pending-Submission uniqueness, immutable facts/history, controlled Artifact payload constraints, and recoverable deletion metadata. It backfills only unambiguous schema-v8 manual-review facts as `is_inferred = 1` Submission records plus `migration_submission_backfill` system events; it never invents Artifacts. The foreign-key-off migration path runs on a fixed connection, validates `PRAGMA foreign_key_check` before commit, and restores foreign keys on success or rollback.
+The current schema is v10. Migration 009 adds the singleton `workspace_identity` with immutable `database_id` and one-time `artifact_store_id`, `task_submissions`, `task_artifacts`, immutable `artifact_deletion_tombstones`, `tasks.current_submission_id`, and `workflow_events.submission_id/artifact_id`, with database/store identity binding, same-aggregate checks, one-pending-Submission uniqueness, immutable facts/history, controlled Artifact payload constraints, and recoverable deletion metadata. It backfills only unambiguous schema-v8 manual-review facts as `is_inferred = 1` Submission records plus `migration_submission_backfill` system events; it never invents Artifacts. Migration 010 adds `clients.version`, name/status/update indexes, normalizes blank optional Client values to NULL, and installs Project attach/move/detach/delete triggers that invalidate the affected Client aggregate version. Existing schema-v5 triggers continue to invalidate linked Project versions on Client rename or deletion. The foreign-key-off migration path runs on a fixed connection, validates `PRAGMA foreign_key_check` before commit, and restores foreign keys on success or rollback.
 
 ```powershell
 go test ./... -count=1
@@ -136,4 +164,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the v2.1 documentation baseline, all Go tests, the repeated database suite, and `go vet` pass. Productized backup/restore, Inbox orchestration, Agent Runtime, and platform packaging remain separate future work.
+At the v2.2 documentation baseline, the Go regression suite, repeated database suite, and `go vet` pass. Client coverage includes migration, CRUD/validation, stable filtering and sorting, snapshot idempotency, stale writes, Project association version propagation, Invoice deletion conflicts without side effects, and Client-to-Project version propagation. Client activities, attachments, Actor linkage, follow-ups, finance, productized backup/restore, Inbox orchestration, Agent Runtime, and platform packaging remain separate future work.

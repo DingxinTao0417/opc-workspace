@@ -24,7 +24,7 @@
 - 阶段结束可通过 WebAudio 播放短提示音。
 - 专注页显示环形进度和基本控制。
 - 设置页支持 5–120 分钟专注、5–30 分钟休息、1–8 轮、自动开始和提示音。
-- schema v2 已有 focus_sessions 表，但没有对应 Model、API 或写入逻辑。
+- 当前 schema v10 仍保留由迁移 001 创建的 `focus_sessions` 表，但没有对应 Model、API 或写入逻辑。
 - 今日统计 API读取数据库中的 focus_sessions，因此当前 UI 计时不会进入统计。
 
 已知缺口：
@@ -111,18 +111,18 @@
 
 规划迁移重建 focus_sessions，删除旧 duration_minutes 和 completed 双写字段：
 
-| 字段 | 用途 |
-|------|------|
-| id | Session UUID |
-| task_id | 可空任务引用；主要工作流要求优先绑定任务 |
-| started_at / ended_at | UTC 起止时间 |
-| status | planned / active / paused / recovery_pending / completed / cancelled / interrupted |
-| planned_seconds | 本次计划工作时长 |
-| accumulated_seconds | 已结算的唯一有效时长 |
-| last_resumed_at | 当前 active 区间起点；paused 时为空 |
-| last_heartbeat_at | Sidecar 活跃期间的最近心跳；用于界定崩溃后的不确定间隔 |
-| end_reason | user_stop / completed / cancelled / crash_recovery |
-| version | 乐观并发版本 |
+| 字段                  | 用途                                                                               |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| id                    | Session UUID                                                                       |
+| task_id               | 可空任务引用；主要工作流要求优先绑定任务                                           |
+| started_at / ended_at | UTC 起止时间                                                                       |
+| status                | planned / active / paused / recovery_pending / completed / cancelled / interrupted |
+| planned_seconds       | 本次计划工作时长                                                                   |
+| accumulated_seconds   | 已结算的唯一有效时长                                                               |
+| last_resumed_at       | 当前 active 区间起点；paused 时为空                                                |
+| last_heartbeat_at     | Sidecar 活跃期间的最近心跳；用于界定崩溃后的不确定间隔                             |
+| end_reason            | user_stop / completed / cancelled / crash_recovery                                 |
+| version               | 乐观并发版本                                                                       |
 
 历史迁移规则：
 
@@ -133,16 +133,16 @@
 
 ### API
 
-| 方法与路径 | 用途 |
-|------------|------|
-| GET /api/v1/focus-sessions/active | 查询启动时需要处理的活动会话 |
-| POST /api/v1/focus-sessions | 创建并开始 Session |
-| POST /api/v1/focus-sessions/:id/pause | 结算当前区间并暂停 |
-| POST /api/v1/focus-sessions/:id/resume | 按绝对时间恢复 |
+| 方法与路径                              | 用途                                                         |
+| --------------------------------------- | ------------------------------------------------------------ |
+| GET /api/v1/focus-sessions/active       | 查询启动时需要处理的活动会话                                 |
+| POST /api/v1/focus-sessions             | 创建并开始 Session                                           |
+| POST /api/v1/focus-sessions/:id/pause   | 结算当前区间并暂停                                           |
+| POST /api/v1/focus-sessions/:id/resume  | 按绝对时间恢复                                               |
 | POST /api/v1/focus-sessions/:id/recover | 处理 recovery_pending：计入/排除间隔恢复或结束为 interrupted |
-| POST /api/v1/focus-sessions/:id/stop | 完成并幂等累计任务工时 |
-| POST /api/v1/focus-sessions/:id/cancel | 取消且不累计工时 |
-| GET /api/v1/stats/today | 返回当天 Session 数和专注分钟 |
+| POST /api/v1/focus-sessions/:id/stop    | 完成并幂等累计任务工时                                       |
+| POST /api/v1/focus-sessions/:id/cancel  | 取消且不累计工时                                             |
+| GET /api/v1/stats/today                 | 返回当天 Session 数和专注分钟                                |
 
 所有状态写入携带 expected_version 或 If-Match。start、stop、cancel 支持 Idempotency-Key。
 
