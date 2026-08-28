@@ -1668,6 +1668,65 @@ export function useBatchUpdateTasks() {
   });
 }
 
+function isAmbiguousTaskWrite(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.code === "NETWORK_ERROR" || error.code === "TIMEOUT")
+  );
+}
+
+export function useSetTaskPlannedDate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      taskId,
+      expectedVersion,
+      plannedDate,
+    }: {
+      taskId: string;
+      expectedVersion: number;
+      plannedDate: string | null;
+    }) => {
+      try {
+        return await batchUpdateTasks({
+          action: "set_planned_date",
+          items: [{ id: taskId, expectedVersion }],
+          plannedDate,
+        });
+      } catch (error) {
+        if (!isAmbiguousTaskWrite(error)) throw error;
+        try {
+          const latest = await getTask(taskId);
+          if (
+            latest.plannedDate === plannedDate &&
+            latest.version > expectedVersion
+          ) {
+            return {
+              action: "set_planned_date" as const,
+              changed: 1,
+              tasks: [latest],
+            };
+          }
+        } catch {
+          // Preserve the original ambiguous write error. A failed verification
+          // must not be reported as a confirmed plan change.
+        }
+        throw error;
+      }
+    },
+    onSuccess: async (result) => {
+      for (const task of result.tasks)
+        setTaskDetailIfNotOlder(queryClient, task);
+      await invalidateTaskFacts(queryClient);
+    },
+    onError: async (error) => {
+      if (isTaskFactsStale(error) || isAmbiguousTaskWrite(error)) {
+        await invalidateTaskFacts(queryClient);
+      }
+    },
+  });
+}
+
 export function useReorderTasks() {
   const queryClient = useQueryClient();
   return useMutation({

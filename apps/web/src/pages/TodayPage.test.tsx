@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => ({
   resetOrder: vi.fn(),
   resetResetOrder: vi.fn(),
   setNewTaskOpen: vi.fn(),
+  planTask: vi.fn(),
+  resetPlanTask: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -56,6 +58,13 @@ vi.mock("../api/hooks", () => ({
     isFetching: false,
     isPlaceholderData: false,
     isSuccess: false,
+  }),
+  useSetTaskPlannedDate: () => ({
+    error: null,
+    isError: false,
+    isPending: false,
+    mutateAsync: mocks.planTask,
+    reset: mocks.resetPlanTask,
   }),
 }));
 
@@ -201,6 +210,9 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.getByText("本周任务")).toBeVisible();
     expect(screen.getByRole("heading", { name: "未排期" })).toBeVisible();
     expect(screen.getByText("未排期任务")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "安排任务日期：逾期任务" }),
+    ).toBeVisible();
   });
 
   it("switches the queried date and can return to today", () => {

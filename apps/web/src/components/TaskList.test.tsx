@@ -93,6 +93,18 @@ describe("TaskList", () => {
     expect(useUiStore.getState().taskDetailId).toBe(task.id);
   });
 
+  it("exposes an accessible plan action without opening task details", () => {
+    const onPlanTask = vi.fn();
+    render(<TaskList live onPlanTask={onPlanTask} tasks={[task]} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `安排任务日期：${task.title}` }),
+    );
+
+    expect(onPlanTask).toHaveBeenCalledWith(task);
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+  });
+
   it("uses the status control only to open details for every lifecycle state", () => {
     const statuses = [
       ["todo", "待办"],

@@ -36,6 +36,7 @@ import {
   useReviewTaskSubmission,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
+  useSetTaskPlannedDate,
   useDeleteTaskArtifact,
   useTaskPageQuery,
   useTodayTaskGroupsQuery,
@@ -59,11 +60,14 @@ const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllTasksMock = vi.hoisted(() => vi.fn());
 const reorderTasksMock = vi.hoisted(() => vi.fn());
+const batchUpdateTasksMock = vi.hoisted(() => vi.fn());
+const getTaskMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
   return {
     ...actual,
+    batchUpdateTasks: batchUpdateTasksMock,
     createProject: createProjectMock,
     createTag: createTagMock,
     createTaskAssignment: createTaskAssignmentMock,
@@ -78,6 +82,7 @@ vi.mock("./client", async () => {
     reviewTaskSubmission: reviewTaskSubmissionMock,
     deleteTaskArtifact: deleteTaskArtifactMock,
     getTaskPage: getTaskPageMock,
+    getTask: getTaskMock,
     getTasks: getTasksMock,
     getAllTasks: getAllTasksMock,
     reorderTasks: reorderTasksMock,
@@ -365,6 +370,7 @@ describe("task queries", () => {
       changed: 2,
       tasks: [],
     }));
+
     const { result } = renderHook(() => useMoveTaskWithinPlan(), {
       wrapper: createWrapper(),
     });
@@ -575,6 +581,75 @@ describe("task queries", () => {
         includeDeleted: true,
       }),
     );
+  });
+});
+
+describe("task planned-date mutation", () => {
+  afterEach(() => {
+    batchUpdateTasksMock.mockReset();
+    getTaskMock.mockReset();
+  });
+
+  it("uses the task version and accepts a verified ambiguous response", async () => {
+    batchUpdateTasksMock.mockRejectedValue(
+      new ApiError("response lost", { code: "NETWORK_ERROR" }),
+    );
+    getTaskMock.mockResolvedValue({
+      ...task,
+      plannedDate: "2026-08-28",
+      version: task.version + 1,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const { result } = renderHook(() => useSetTaskPlannedDate(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        taskId: task.id,
+        expectedVersion: task.version,
+        plannedDate: "2026-08-28",
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(batchUpdateTasksMock).toHaveBeenCalledWith({
+      action: "set_planned_date",
+      items: [{ id: task.id, expectedVersion: task.version }],
+      plannedDate: "2026-08-28",
+    });
+    expect(getTaskMock).toHaveBeenCalledWith(task.id);
+    expect(queryClient.getQueryData(taskDetailQueryKey(task.id))).toMatchObject(
+      {
+        plannedDate: "2026-08-28",
+        version: task.version + 1,
+      },
+    );
+  });
+
+  it("keeps an ambiguous write failed when the latest task does not prove it", async () => {
+    const ambiguous = new ApiError("response lost", { code: "TIMEOUT" });
+    batchUpdateTasksMock.mockRejectedValue(ambiguous);
+    getTaskMock.mockResolvedValue({ ...task, plannedDate: task.plannedDate });
+    const { result } = renderHook(() => useSetTaskPlannedDate(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() =>
+      result.current.mutate({
+        taskId: task.id,
+        expectedVersion: task.version,
+        plannedDate: null,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.error).toBe(ambiguous);
   });
 });
 

@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   Ban,
+  CalendarClock,
   Check,
   ChevronDown,
   ChevronRight,
@@ -59,6 +60,8 @@ interface TaskListProps {
   allowDrag?: boolean;
   dragPending?: boolean;
   onDropTask?: (source: Task, target: Task) => void;
+  onPlanTask?: (task: Task) => void;
+  planPendingId?: string | null;
 }
 
 function TaskRow({
@@ -82,6 +85,8 @@ function TaskRow({
   onTaskDragEnd,
   onTaskDragOver,
   onTaskDrop,
+  onPlanTask,
+  planPendingId,
 }: Required<
   Pick<
     TaskListProps,
@@ -252,26 +257,41 @@ function TaskRow({
             </span>
           </span>
         </button>
-        {allowReorder && onMove ? (
+        {(allowReorder && onMove) || onPlanTask ? (
           <div className="task-order-actions">
-            <button
-              aria-label={`上移任务：${task.title}`}
-              disabled={!live || reorderPendingId === task.id}
-              onClick={() => onMove(task, "up")}
-              title="上移"
-              type="button"
-            >
-              <ArrowUp size={12} />
-            </button>
-            <button
-              aria-label={`下移任务：${task.title}`}
-              disabled={!live || reorderPendingId === task.id}
-              onClick={() => onMove(task, "down")}
-              title="下移"
-              type="button"
-            >
-              <ArrowDown size={12} />
-            </button>
+            {onPlanTask ? (
+              <button
+                aria-label={`安排任务日期：${task.title}`}
+                disabled={!live || planPendingId === task.id}
+                onClick={() => onPlanTask(task)}
+                title="安排日期"
+                type="button"
+              >
+                <CalendarClock size={12} />
+              </button>
+            ) : null}
+            {allowReorder && onMove ? (
+              <>
+                <button
+                  aria-label={`上移任务：${task.title}`}
+                  disabled={!live || reorderPendingId === task.id}
+                  onClick={() => onMove(task, "up")}
+                  title="上移"
+                  type="button"
+                >
+                  <ArrowUp size={12} />
+                </button>
+                <button
+                  aria-label={`下移任务：${task.title}`}
+                  disabled={!live || reorderPendingId === task.id}
+                  onClick={() => onMove(task, "down")}
+                  title="下移"
+                  type="button"
+                >
+                  <ArrowDown size={12} />
+                </button>
+              </>
+            ) : null}
           </div>
         ) : null}
       </article>
@@ -299,8 +319,10 @@ function TaskRow({
               level={level + 1}
               live={childrenLive}
               onMove={onMove}
+              onPlanTask={onPlanTask}
               onSelectionChange={onSelectionChange}
               reorderPendingId={reorderPendingId}
+              planPendingId={planPendingId}
               selectedIds={selectedIds}
               selectionLimitReached={selectionLimitReached}
               tasks={childrenQuery.data.items}
@@ -354,6 +376,8 @@ export function TaskList({
   allowDrag = false,
   dragPending = false,
   onDropTask,
+  onPlanTask,
+  planPendingId = null,
 }: TaskListProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -383,6 +407,7 @@ export function TaskList({
           level={level}
           live={live}
           onMove={onMove}
+          onPlanTask={onPlanTask}
           onTaskDragEnd={endDrag}
           onTaskDragOver={(event, target) => {
             if (!draggingId || draggingId === target.id || dragPending) return;
@@ -407,6 +432,7 @@ export function TaskList({
           }}
           onSelectionChange={onSelectionChange}
           reorderPendingId={reorderPendingId}
+          planPendingId={planPendingId}
           selectedIds={selectedIds}
           selectionLimitReached={selectionLimitReached}
           showParent={showParent}

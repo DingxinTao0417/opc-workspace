@@ -1471,6 +1471,68 @@ kbd {
   color: var(--text);
 }
 
+.task-plan-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.task-plan-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  color: var(--accent-light);
+}
+
+.task-plan-summary div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.task-plan-summary span,
+.task-plan-modal .form-hint {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.task-plan-summary strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-plan-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.task-plan-presets .button[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.task-plan-modal input[type="date"] {
+  width: 100%;
+}
+
+.task-plan-modal .form-hint {
+  margin: -4px 0 0;
+}
+
+.task-plan-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 10px;
+}
+
 .task-row-error {
   grid-column: 2 / -1;
   margin: 2px 0 0;

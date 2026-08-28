@@ -27,6 +27,7 @@ import {
 import { useUiStore } from "../store/ui";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskList } from "../components/TaskList";
+import { TaskPlanModal } from "../components/TaskPlanModal";
 import type { Task } from "../types/models";
 
 function localDateKey(date: Date): string {
@@ -93,6 +94,7 @@ export function TodayPage() {
   const today = new Date();
   const todayKey = localDateKey(today);
   const [dateKey, setDateKey] = useState(todayKey);
+  const [planningTask, setPlanningTask] = useState<Task | null>(null);
   const selectedDate = dateFromKey(dateKey);
   const isToday = dateKey === todayKey;
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
@@ -389,7 +391,12 @@ export function TodayPage() {
             </div>
             <span className="section-count">{groups.overdue.length}</span>
           </div>
-          <TaskList compact live={live} tasks={groups.overdue} />
+          <TaskList
+            compact
+            live={live}
+            onPlanTask={setPlanningTask}
+            tasks={groups.overdue}
+          />
         </section>
       ) : null}
 
@@ -441,6 +448,7 @@ export function TodayPage() {
             dragPending={dragMutation.isPending}
             live={reorderReady}
             onMove={(task, direction) => moveTask(task.id, dateKey, direction)}
+            onPlanTask={setPlanningTask}
             reorderPendingId={
               moveMutation.isPending
                 ? (moveMutation.variables?.taskId ?? null)
@@ -472,7 +480,12 @@ export function TodayPage() {
           {taskGroupsQuery.isPending ? (
             <SkeletonRows count={2} />
           ) : (
-            <TaskList compact live={live} tasks={groups.thisWeek} />
+            <TaskList
+              compact
+              live={live}
+              onPlanTask={setPlanningTask}
+              tasks={groups.thisWeek}
+            />
           )}
         </section>
       ) : null}
@@ -504,6 +517,7 @@ export function TodayPage() {
             dragPending={dragMutation.isPending}
             live={reorderReady}
             onMove={(task, direction) => moveTask(task.id, null, direction)}
+            onPlanTask={setPlanningTask}
             reorderPendingId={
               moveMutation.isPending
                 ? (moveMutation.variables?.taskId ?? null)
@@ -522,6 +536,12 @@ export function TodayPage() {
           />
         </section>
       ) : null}
+      <TaskPlanModal
+        onClose={() => setPlanningTask(null)}
+        open={Boolean(planningTask)}
+        selectedDate={dateKey}
+        task={planningTask}
+      />
     </div>
   );
 }
