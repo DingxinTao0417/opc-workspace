@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Inbox,
   FileCheck2,
+  HardDrive,
   Plus,
   Search,
   TriangleAlert,
@@ -108,9 +109,11 @@ function InboxRow({
         : item.summary ||
           (item.kind === "reminder"
             ? "本地提醒"
-            : item.kind === "event"
-              ? "任务产出跟进"
-              : "手工记录");
+            : item.sourceEntityType === "system_maintenance"
+              ? "系统维护"
+              : item.kind === "event"
+                ? "任务产出跟进"
+                : "手工记录");
   return (
     <button
       aria-label={`查看 ${item.title}`}
@@ -134,6 +137,8 @@ function InboxRow({
           <CalendarClock size={15} />
         ) : item.sourceEntityType === "task" ? (
           <TriangleAlert size={15} />
+        ) : item.sourceEntityType === "system_maintenance" ? (
+          <HardDrive size={15} />
         ) : item.kind === "event" ? (
           <FileCheck2 size={15} />
         ) : (

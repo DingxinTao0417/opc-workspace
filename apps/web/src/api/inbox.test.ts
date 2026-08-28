@@ -300,6 +300,64 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates backup-create system maintenance snapshots", () => {
+    const projected = inboxPayload({
+      kind: "event",
+      title: "本地备份需要处理",
+      summary:
+        "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      source_entity_type: "system_maintenance",
+      source_entity_id: "backup:create",
+      source_event_key:
+        "system:backup:create:018f0000-0000-7000-8000-000000000817",
+      due_at: null,
+      payload_json: {
+        component: "backup",
+        operation: "create",
+        failure_code: "backup_create_failed",
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message:
+          "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: "backup:create",
+      dueAt: null,
+      sourceDeletedAt: null,
+      payloadJson: {
+        component: "backup",
+        operation: "create",
+        failure_code: "backup_create_failed",
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          path: "C:\\\\Users\\\\secret\\\\opc-workspace.db",
+        },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          message: "mkdir C:\\\\Users\\\\secret\\\\backups: access denied",
+        },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: "system:backup:verify:abc",
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

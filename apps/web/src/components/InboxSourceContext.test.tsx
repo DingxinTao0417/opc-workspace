@@ -1,7 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InboxItem } from "../types/models";
+import { useUiStore } from "../store/ui";
 import { InboxSourceContext } from "./InboxSourceContext";
 
 const sourceItem: InboxItem = {
@@ -44,7 +45,10 @@ const sourceItem: InboxItem = {
   availableActions: ["edit", "read", "snooze", "resolve", "dismiss"],
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useUiStore.setState({ settingsOpen: false, settingsModule: "general" });
+});
 
 describe("InboxSourceContext", () => {
   it("shows the immutable Task Artifact snapshot and precise Task link", () => {
@@ -165,5 +169,49 @@ describe("InboxSourceContext", () => {
     expect(screen.getByRole("status")).toHaveTextContent("来源任务已删除");
     expect(screen.getByText("准备项目交付")).toBeTruthy();
     expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
+  });
+
+  it("shows a safe backup-create maintenance snapshot and opens data settings", () => {
+    const maintenanceItem: InboxItem = {
+      ...sourceItem,
+      title: "本地备份需要处理",
+      summary:
+        "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: "backup:create",
+      sourceEventKey:
+        "system:backup:create:018f0000-0000-7000-8000-000000000818",
+      dueAt: null,
+      payloadJson: {
+        component: "backup",
+        operation: "create",
+        failure_code: "backup_create_failed",
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message:
+          "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      },
+    };
+    render(
+      <MemoryRouter>
+        <InboxSourceContext item={maintenanceItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("系统维护")).toBeTruthy();
+    expect(screen.getByText("本地备份创建失败")).toBeTruthy();
+    expect(screen.getByText("本地备份")).toBeTruthy();
+    expect(screen.getByText("创建")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/C:\\/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "打开数据与备份" }));
+    expect(useUiStore.getState()).toMatchObject({
+      settingsOpen: true,
+      settingsModule: "data",
+    });
   });
 });

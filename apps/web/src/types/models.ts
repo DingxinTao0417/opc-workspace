@@ -1201,7 +1201,12 @@ export interface InboxItem {
   title: string;
   summary: string;
   sourceEntityType:
-    "manual" | "reminder" | "task_artifact" | "task" | "task_due";
+    | "manual"
+    | "reminder"
+    | "task_artifact"
+    | "task"
+    | "task_due"
+    | "system_maintenance";
   sourceEntityId: string | null;
   sourceEventKey: string | null;
   sourceDeletedAt: string | null;

@@ -395,4 +395,37 @@ describe("InboxItemDetailModal", () => {
     expect(screen.getByRole("button", { name: "标记解决" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "关闭" })).toBeTruthy();
   });
+
+  it("labels a backup-create maintenance item as system maintenance", () => {
+    hooks.detail.mockReturnValue({
+      data: {
+        ...baseItem,
+        kind: "event",
+        title: "本地备份需要处理",
+        summary:
+          "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+        sourceEntityType: "system_maintenance",
+        sourceEntityId: "backup:create",
+        sourceEventKey:
+          "system:backup:create:018f0000-0000-7000-8000-000000000818",
+        payloadJson: {
+          component: "backup",
+          operation: "create",
+          failure_code: "backup_create_failed",
+          occurred_at: "2026-08-28T12:00:00.000000000Z",
+          message:
+            "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+        },
+      },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(<InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />);
+
+    expect(screen.getAllByText("系统维护").length).toBeGreaterThan(0);
+    expect(screen.getByText("本地备份创建失败")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
+  });
 });

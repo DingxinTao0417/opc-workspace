@@ -1,11 +1,13 @@
 import {
   CalendarClock,
+  DatabaseBackup,
   ExternalLink,
   FileCheck2,
   TriangleAlert,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { InboxItem } from "../types/models";
+import { useUiStore } from "../store/ui";
 
 interface TaskArtifactSourceSnapshot {
   artifactId: string;
@@ -38,6 +40,14 @@ interface TaskDueSourceSnapshot {
   dueState: "due_soon" | "overdue";
   projectId: string | null;
   projectName: string | null;
+}
+
+interface SystemMaintenanceSourceSnapshot {
+  component: "backup";
+  operation: "create";
+  failureCode: "backup_create_failed";
+  occurredAt: string;
+  message: string;
 }
 
 function stringValue(
@@ -150,6 +160,34 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
   };
 }
 
+function systemMaintenanceSnapshot(
+  item: InboxItem,
+): SystemMaintenanceSourceSnapshot | null {
+  if (item.sourceEntityType !== "system_maintenance") return null;
+  const payload = item.payloadJson;
+  const component = payload.component;
+  const operation = payload.operation;
+  const failureCode = payload.failure_code;
+  const occurredAt = stringValue(payload, "occurred_at");
+  const message = stringValue(payload, "message");
+  if (
+    component !== "backup" ||
+    operation !== "create" ||
+    failureCode !== "backup_create_failed" ||
+    !occurredAt ||
+    !message
+  ) {
+    return null;
+  }
+  return {
+    component,
+    operation,
+    failureCode,
+    occurredAt,
+    message,
+  };
+}
+
 function localTimestamp(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
@@ -165,6 +203,49 @@ const storageKindLabels: Record<string, string> = {
 };
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
+  const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+  const maintenanceSource = systemMaintenanceSnapshot(item);
+  if (maintenanceSource) {
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <DatabaseBackup size={15} />
+          </span>
+          <div>
+            <strong>系统维护</strong>
+            <small>本地备份创建失败</small>
+          </div>
+        </div>
+        <dl>
+          <div>
+            <dt>组件</dt>
+            <dd>本地备份</dd>
+          </div>
+          <div>
+            <dt>操作</dt>
+            <dd>创建</dd>
+          </div>
+          <div>
+            <dt>发生时间</dt>
+            <dd>{localTimestamp(maintenanceSource.occurredAt)}</dd>
+          </div>
+          <div>
+            <dt>说明</dt>
+            <dd>{maintenanceSource.message}</dd>
+          </div>
+        </dl>
+        <button
+          className="button button-secondary"
+          onClick={() => openDataSettings(true, "data")}
+          type="button"
+        >
+          打开数据与备份
+        </button>
+      </section>
+    );
+  }
+
   const dueSource = taskDueSnapshot(item);
   if (dueSource) {
     return (

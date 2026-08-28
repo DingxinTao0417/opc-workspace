@@ -239,6 +239,9 @@ func (a *API) createBackup(c *gin.Context) {
 	summary, err := a.backupStore.create(a.db.WithContext(c.Request.Context()), a.options, note, keyHash, requestHash)
 	if err != nil {
 		a.logBackupError("create", err)
+		if projectionErr := a.projectBackupCreateFailure(requestIDFromContext(c)); projectionErr != nil {
+			a.logBackupError("record maintenance incident", projectionErr)
+		}
 		writeError(c, http.StatusInternalServerError, "BACKUP_CREATE_FAILED", "A verified local backup could not be created; existing data was not changed")
 		return
 	}

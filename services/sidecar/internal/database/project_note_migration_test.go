@@ -30,8 +30,8 @@ func TestProjectNotesMigrationUpgradesV20WithoutInventingFacts(t *testing.T) {
 		t.Fatalf("upgrade v20 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 25 {
-		t.Fatalf("SchemaVersion = %d, want 25", store.SchemaVersion)
+	if store.SchemaVersion != 26 {
+		t.Fatalf("SchemaVersion = %d, want 26", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM project_notes"); got != 0 {
 		t.Fatalf("migration invented %d project notes", got)

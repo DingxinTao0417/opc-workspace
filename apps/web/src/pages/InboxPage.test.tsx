@@ -314,4 +314,55 @@ describe("InboxPage", () => {
     );
     expect(screen.getByLabelText("跟进状态")).toHaveValue("blocked");
   });
+
+  it("lists a backup-create maintenance item with its safe title", () => {
+    const maintenanceItem: InboxItem = {
+      ...item,
+      kind: "event",
+      title: "本地备份需要处理",
+      summary:
+        "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: "backup:create",
+      sourceEventKey:
+        "system:backup:create:018f0000-0000-7000-8000-000000000818",
+      payloadJson: {
+        component: "backup",
+        operation: "create",
+        failure_code: "backup_create_failed",
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message:
+          "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      },
+    };
+    hooks.items.mockReturnValue({
+      data: {
+        items: [maintenanceItem],
+        meta: {
+          page: 1,
+          pageSize: 30,
+          total: 1,
+          unreadTotal: 1,
+          snapshotAt: "2026-08-28T10:05:00.123456789Z",
+          serverNow: "2026-08-28T10:05:00.123456789Z",
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    renderInbox();
+
+    expect(
+      screen.getByRole("button", { name: "查看 本地备份需要处理" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+      ),
+    ).toBeTruthy();
+  });
 });

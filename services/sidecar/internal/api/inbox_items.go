@@ -422,6 +422,13 @@ func (a *API) updateInboxItem(c *gin.Context) {
 		}
 		next := current
 		patch.apply(&next)
+		if current.SourceEntityType == systemMaintenanceInboxSourceType && !equalStringPointers(current.DueAt, next.DueAt) {
+			return newProjectRequestError(
+				http.StatusUnprocessableEntity,
+				"VALIDATION_ERROR",
+				"system maintenance Inbox Items cannot have a due date",
+			)
+		}
 		if inboxItemEditableEqual(current, next) {
 			response, err = inboxItemOutputFromModel(current, now)
 			return err
@@ -451,7 +458,7 @@ func (a *API) updateInboxItem(c *gin.Context) {
 		return err
 	})
 	if err != nil {
-		if writeProjectRequestError(c, err) {
+		if writeProjectRequestError(c, mapInboxItemConstraintError(err)) {
 			return
 		}
 		writeDatabaseError(c)
@@ -1298,4 +1305,33 @@ func equalStringPointers(left, right *string) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+func mapInboxItemConstraintError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "SYSTEM_MAINTENANCE_INBOX_SOURCE_IMMUTABLE"):
+		return newProjectRequestError(
+			http.StatusConflict,
+			"SYSTEM_MAINTENANCE_INBOX_SOURCE_IMMUTABLE",
+			"System maintenance source facts cannot be changed",
+		)
+	case strings.Contains(message, "SYSTEM_MAINTENANCE_INBOX_SOURCE_DELETE_FORBIDDEN"):
+		return newProjectRequestError(
+			http.StatusConflict,
+			"SYSTEM_MAINTENANCE_INBOX_SOURCE_DELETE_FORBIDDEN",
+			"System maintenance Inbox sources cannot be marked deleted",
+		)
+	case strings.Contains(message, "INVALID_SYSTEM_MAINTENANCE_INBOX_SOURCE"):
+		return newProjectRequestError(
+			http.StatusUnprocessableEntity,
+			"INVALID_SYSTEM_MAINTENANCE_INBOX_SOURCE",
+			"System maintenance Inbox source is invalid",
+		)
+	default:
+		return err
+	}
 }

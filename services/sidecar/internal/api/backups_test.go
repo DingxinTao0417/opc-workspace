@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	glebarezsqlite "github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -209,6 +211,109 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	}
 }
 
+func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T) {
+	router, store, _, backupDir := newBackupTestAPI(t)
+	if err := os.Remove(backupDir); err != nil {
+		t.Fatalf("remove backup root: %v", err)
+	}
+
+	first := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/backups",
+		[]byte(`{"note":"do not persist this note"}`),
+		nil,
+	)
+	if first.Code != http.StatusInternalServerError || responseErrorCode(t, first.Body.Bytes()) != "BACKUP_CREATE_FAILED" {
+		t.Fatalf("first failed backup = %d: %s", first.Code, first.Body.String())
+	}
+	second := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
+	if second.Code != http.StatusInternalServerError || responseErrorCode(t, second.Body.Bytes()) != "BACKUP_CREATE_FAILED" {
+		t.Fatalf("second failed backup = %d: %s", second.Code, second.Body.String())
+	}
+
+	var incident models.InboxItem
+	if err := store.DB.Where(
+		"source_entity_type = ? AND source_entity_id = ?",
+		systemMaintenanceInboxSourceType,
+		systemMaintenanceSourceID(systemMaintenanceBackupComponent, systemMaintenanceCreateOperation),
+	).First(&incident).Error; err != nil {
+		t.Fatalf("load maintenance incident: %v", err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 1)
+	if incident.Kind != "event" || incident.Priority != "P1" || incident.Title != systemMaintenanceBackupCreateTitle ||
+		incident.Summary != systemMaintenanceBackupCreateMessage || incident.SourceEventKey == nil ||
+		!strings.HasPrefix(*incident.SourceEventKey, "system:backup:create:") ||
+		strings.Contains(incident.PayloadJSON, "do not persist this note") || strings.Contains(incident.PayloadJSON, backupDir) {
+		t.Fatalf("maintenance incident must be a safe, stable snapshot: %#v", incident)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(incident.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode maintenance payload: %v", err)
+	}
+	if payload["component"] != "backup" || payload["operation"] != "create" ||
+		payload["failure_code"] != systemMaintenanceBackupCreateCode || payload["message"] != systemMaintenanceBackupCreateMessage {
+		t.Fatalf("maintenance payload = %#v", payload)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_projected' AND actor_id = ?", 1, incident.ID, models.BuiltinSystemActorID)
+	if len(payload) != 5 {
+		t.Fatalf("maintenance payload must only keep safe fields: %#v", payload)
+	}
+	for _, key := range []string{"error", "path", "note", "request_id", "token"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("maintenance payload leaked %s: %#v", key, payload)
+		}
+	}
+
+	detail := performRequest(router, http.MethodGet, "/api/v1/inbox-items/"+incident.ID, nil, nil)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("get maintenance incident = %d: %s", detail.Code, detail.Body.String())
+	}
+	var itemEnvelope struct {
+		Data inboxItemOutput `json:"data"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &itemEnvelope); err != nil {
+		t.Fatalf("decode maintenance incident API: %v", err)
+	}
+	if itemEnvelope.Data.Kind != "event" ||
+		itemEnvelope.Data.SourceEntityType != systemMaintenanceInboxSourceType ||
+		itemEnvelope.Data.SourceEntityID == nil ||
+		*itemEnvelope.Data.SourceEntityID != "backup:create" ||
+		itemEnvelope.Data.DueAt != nil ||
+		itemEnvelope.Data.SourceDeletedAt != nil ||
+		itemEnvelope.Data.PayloadJSON["failure_code"] != systemMaintenanceBackupCreateCode ||
+		len(itemEnvelope.Data.PayloadJSON) != 5 {
+		t.Fatalf("maintenance incident API = %#v", itemEnvelope.Data)
+	}
+
+	duePatch := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/inbox-items/"+incident.ID,
+		[]byte(`{"due_at":"2026-08-29T12:00:00Z"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if duePatch.Code != http.StatusUnprocessableEntity || responseErrorCode(t, duePatch.Body.Bytes()) != "VALIDATION_ERROR" {
+		t.Fatalf("system maintenance due date patch = %d: %s", duePatch.Code, duePatch.Body.String())
+	}
+
+	resolved := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+incident.ID+"/resolve",
+		[]byte(`{"reason":"Storage issue acknowledged"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("resolve maintenance incident = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	third := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
+	if third.Code != http.StatusInternalServerError {
+		t.Fatalf("failed backup after resolution = %d: %s", third.Code, third.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 2)
+}
+
 func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
 	router, _, _, backupDir := newBackupTestAPI(t)
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
@@ -356,7 +461,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("close database before restore: %v", err)
 	}
 
-	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 25)
+	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 26)
 	if err != nil {
 		t.Fatalf("ApplyPendingRestore() error = %v", err)
 	}

@@ -2324,6 +2324,28 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       rawPayload.due_state === "overdue") &&
     rawPayload.lead_minutes === 1440 &&
     sourceEventKey === `task:${sourceEntityId}:due:${rawPayload.due_at}`;
+  const dueAt = nullableString(fieldValue(value, "due_at", "dueAt"));
+  const sourceDeletedAt = nullableString(
+    fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
+  );
+  const validSystemMaintenanceEvent =
+    sourceEntityType === "system_maintenance" &&
+    sourceEntityId === "backup:create" &&
+    dueAt === null &&
+    sourceDeletedAt === null &&
+    (value.priority === "P0" || value.priority === "P1") &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.component === "backup" &&
+    rawPayload.operation === "create" &&
+    rawPayload.failure_code === "backup_create_failed" &&
+    typeof rawPayload.occurred_at === "string" &&
+    rawPayload.occurred_at.length > 0 &&
+    rawPayload.message ===
+      "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。" &&
+    typeof sourceEventKey === "string" &&
+    sourceEventKey.startsWith("system:backup:create:") &&
+    sourceEventKey.slice("system:backup:create:".length).length > 0;
   if (
     !id ||
     !title ||
@@ -2334,7 +2356,8 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "reminder" &&
       sourceEntityType !== "task_artifact" &&
       sourceEntityType !== "task" &&
-      sourceEntityType !== "task_due") ||
+      sourceEntityType !== "task_due" &&
+      sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
         sourceEntityId !== null ||
@@ -2346,7 +2369,8 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     (kind === "event" &&
       !validTaskArtifactEvent &&
       !validTaskBlockedEvent &&
-      !validTaskDueEvent) ||
+      !validTaskDueEvent &&
+      !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==
         "all_required_tasks_done") ||
@@ -2364,9 +2388,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     sourceEntityType,
     sourceEntityId,
     sourceEventKey,
-    sourceDeletedAt: nullableString(
-      fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
-    ),
+    sourceDeletedAt,
     priority: asTaskPriority(value.priority),
     status: asInboxItemStatus(value.status),
     resolutionPolicy: fieldValue(
@@ -2374,7 +2396,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       "resolution_policy",
       "resolutionPolicy",
     ) as InboxItem["resolutionPolicy"],
-    dueAt: nullableString(fieldValue(value, "due_at", "dueAt")),
+    dueAt,
     readAt: nullableString(fieldValue(value, "read_at", "readAt")),
     triagedAt: nullableString(fieldValue(value, "triaged_at", "triagedAt")),
     snoozedUntil: nullableString(

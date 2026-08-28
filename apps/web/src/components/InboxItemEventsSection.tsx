@@ -47,7 +47,7 @@ const eventPresentations: Record<string, EventPresentation> = {
   resolved: { icon: Check, label: "标记为已解决" },
   dismissed: { icon: XCircle, label: "忽略并归档" },
   reopened: { icon: RotateCcw, label: "重新打开" },
-  source_projected: { icon: FileCheck2, label: "从业务来源创建" },
+  source_projected: { icon: FileCheck2, label: "从来源创建" },
   source_deleted: { icon: AlertTriangle, label: "业务来源已删除" },
 };
 

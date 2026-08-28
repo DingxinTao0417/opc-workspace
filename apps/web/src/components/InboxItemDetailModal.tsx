@@ -6,6 +6,7 @@ import {
   Edit3,
   Eye,
   FileCheck2,
+  HardDrive,
   Inbox,
   RotateCcw,
   Save,
@@ -350,6 +351,8 @@ export function InboxItemDetailModal({
                 <CalendarClock size={17} />
               ) : item.sourceEntityType === "task" ? (
                 <TriangleAlert size={17} />
+              ) : item.sourceEntityType === "system_maintenance" ? (
+                <HardDrive size={17} />
               ) : item.kind === "event" ? (
                 <FileCheck2 size={17} />
               ) : (
@@ -370,9 +373,11 @@ export function InboxItemDetailModal({
                     ? "任务临期"
                     : item.sourceEntityType === "task"
                       ? "任务阻塞"
-                      : item.kind === "event"
-                        ? "任务产出跟进"
-                        : "手工录入"}{" "}
+                      : item.sourceEntityType === "system_maintenance"
+                        ? "系统维护"
+                        : item.kind === "event"
+                          ? "任务产出跟进"
+                          : "手工录入"}{" "}
                 · 仅保存在本机
               </p>
             </div>

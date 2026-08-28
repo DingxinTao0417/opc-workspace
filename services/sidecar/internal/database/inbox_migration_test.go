@@ -54,8 +54,8 @@ func TestInboxMigrationUpgradesV11WithoutChangingExistingFacts(t *testing.T) {
 		t.Fatalf("upgrade v11 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 25 {
-		t.Fatalf("SchemaVersion = %d, want 25", store.SchemaVersion)
+	if store.SchemaVersion != 26 {
+		t.Fatalf("SchemaVersion = %d, want 26", store.SchemaVersion)
 	}
 	var client struct {
 		Name        string
@@ -86,8 +86,8 @@ func TestInboxMigrationCreatesConstrainedManualIntakeFacts(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 25 {
-		t.Fatalf("SchemaVersion = %d, want 25", store.SchemaVersion)
+	if store.SchemaVersion != 26 {
+		t.Fatalf("SchemaVersion = %d, want 26", store.SchemaVersion)
 	}
 
 	const itemID = "018f0000-0000-7000-8000-000000001201"
