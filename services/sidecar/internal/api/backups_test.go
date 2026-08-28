@@ -97,6 +97,17 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		t.Fatalf("upload backup client attachment = %d: %s", clientAttachmentRecorder.Code, clientAttachmentRecorder.Body.String())
 	}
 	clientAttachmentID := decodeClientAttachmentResponse(t, clientAttachmentRecorder.Body.Bytes()).ID
+	project := createProjectForTest(t, router, `{"name":"Backup Attachment Project"}`, nil)
+	projectAttachmentBody := []byte("backup project attachment body")
+	projectAttachmentRecorder := performClientAttachmentUpload(
+		t, router, "/api/v1/projects/"+project.ID+"/attachments",
+		`{"name":"project-backup.txt"}`, "project-backup.txt", projectAttachmentBody,
+		map[string]string{"If-Match": `"1"`},
+	)
+	if projectAttachmentRecorder.Code != http.StatusCreated {
+		t.Fatalf("upload backup project attachment = %d: %s", projectAttachmentRecorder.Code, projectAttachmentRecorder.Body.String())
+	}
+	projectAttachmentID := decodeProjectAttachmentResponse(t, projectAttachmentRecorder.Body.Bytes()).ID
 
 	headers := map[string]string{"Idempotency-Key": "manual-backup-1"}
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"提交前检查点"}`), headers)
@@ -104,7 +115,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		t.Fatalf("create backup = %d: %s", created.Code, created.Body.String())
 	}
 	summary := decodeBackupSummary(t, created.Body.Bytes())
-	if summary.VerificationStatus != "verified" || summary.SchemaVersion != store.SchemaVersion || summary.ArtifactCount != 2 || summary.ArtifactBytes != int64(len("backup artifact body")+len(clientAttachmentBody)) || summary.VerifiedAt == "" {
+	if summary.VerificationStatus != "verified" || summary.SchemaVersion != store.SchemaVersion || summary.ArtifactCount != 3 || summary.ArtifactBytes != int64(len("backup artifact body")+len(clientAttachmentBody)+len(projectAttachmentBody)) || summary.VerifiedAt == "" {
 		t.Fatalf("backup summary = %#v", summary)
 	}
 	packagePath := filepath.Join(backupDir, summary.ID)
@@ -114,6 +125,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		filepath.Join(packagePath, "artifacts", artifactStoreMarkerName),
 		filepath.Join(packagePath, "artifacts", "objects", artifactID),
 		filepath.Join(packagePath, "artifacts", "objects", clientAttachmentID),
+		filepath.Join(packagePath, "artifacts", "objects", projectAttachmentID),
 	} {
 		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("backup file %s missing or invalid: info=%v err=%v", path, info, err)
@@ -183,7 +195,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	if drillEnvelope.Data.BackupID != summary.ID ||
 		drillEnvelope.Data.SourceSchema != store.SchemaVersion ||
 		drillEnvelope.Data.ResultSchema != store.SchemaVersion ||
-		drillEnvelope.Data.ArtifactCount != 2 ||
+		drillEnvelope.Data.ArtifactCount != 3 ||
 		!drillEnvelope.Data.TemporaryDataClean {
 		t.Fatalf("restore drill result = %#v", drillEnvelope.Data)
 	}
@@ -285,6 +297,16 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("upload restore client attachment = %d: %s", clientAttachmentRecorder.Code, clientAttachmentRecorder.Body.String())
 	}
 	clientAttachmentID := decodeClientAttachmentResponse(t, clientAttachmentRecorder.Body.Bytes()).ID
+	project := createProjectForTest(t, router.Engine, `{"name":"Restored Attachment Project"}`, nil)
+	projectAttachmentRecorder := performClientAttachmentUpload(
+		t, router.Engine, "/api/v1/projects/"+project.ID+"/attachments",
+		`{"name":"restore-project.txt"}`, "restore-project.txt", []byte("restored project attachment body"),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if projectAttachmentRecorder.Code != http.StatusCreated {
+		t.Fatalf("upload restore project attachment = %d: %s", projectAttachmentRecorder.Code, projectAttachmentRecorder.Body.String())
+	}
+	projectAttachmentID := decodeProjectAttachmentResponse(t, projectAttachmentRecorder.Body.Bytes()).ID
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"restore target"}`), nil)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create restore target = %d: %s", created.Code, created.Body.String())
@@ -334,7 +356,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("close database before restore: %v", err)
 	}
 
-	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 21)
+	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 22)
 	if err != nil {
 		t.Fatalf("ApplyPendingRestore() error = %v", err)
 	}
@@ -374,6 +396,10 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	clientContent := performRequest(restoredRouter, http.MethodGet, "/api/v1/client-attachments/"+clientAttachmentID+"/content", nil, nil)
 	if clientContent.Code != http.StatusOK || clientContent.Body.String() != "restored client attachment body" {
 		t.Fatalf("restored client attachment = %d: %q", clientContent.Code, clientContent.Body.String())
+	}
+	projectContent := performRequest(restoredRouter, http.MethodGet, "/api/v1/project-attachments/"+projectAttachmentID+"/content", nil, nil)
+	if projectContent.Code != http.StatusOK || projectContent.Body.String() != "restored project attachment body" {
+		t.Fatalf("restored project attachment = %d: %q", projectContent.Code, projectContent.Body.String())
 	}
 
 	rollbackDatabase := filepath.Join(backupDir, result.RollbackBackupID, "database", "opc-workspace.db")

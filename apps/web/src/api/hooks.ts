@@ -21,6 +21,7 @@ import {
   createReminder,
   createPersonActor,
   createProjectNote,
+  createProjectAttachment,
   createTag,
   createTask,
   createTaskSavedView,
@@ -33,6 +34,7 @@ import {
   deleteBackup,
   deleteProject,
   deleteProjectNote,
+  deleteProjectAttachment,
   deleteTag,
   deleteTask,
   deleteTaskSavedView,
@@ -40,6 +42,7 @@ import {
   cancelReminder,
   downloadTaskArtifact,
   downloadClientAttachment,
+  downloadProjectAttachment,
   downloadBusinessDataExport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
@@ -82,6 +85,7 @@ import {
   getTodayStats,
   getProject,
   getProjectArtifacts,
+  getProjectAttachments,
   getProjectEvents,
   getProjectNotes,
   getProjects,
@@ -135,12 +139,14 @@ import type {
   CreateReminderInput,
   CreatePersonActorInput,
   CreateProjectNoteInput,
+  CreateProjectAttachmentInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
   DeleteProjectNoteInput,
+  DeleteProjectAttachmentInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusReportParams,
@@ -158,6 +164,7 @@ import type {
   NewTaskInput,
   ProjectInput,
   ProjectArtifactListParams,
+  ProjectAttachmentListParams,
   ProjectEventListParams,
   ProjectNoteListParams,
   ProjectListParams,
@@ -2815,6 +2822,8 @@ export const projectArtifactQueryKey = (id: string) =>
   [...projectDetailQueryKey(id), "artifacts"] as const;
 export const projectNoteQueryKey = (id: string) =>
   [...projectDetailQueryKey(id), "notes"] as const;
+export const projectAttachmentQueryKey = (id: string) =>
+  [...projectDetailQueryKey(id), "attachments"] as const;
 
 export function useProjectsQuery(
   input: ProjectListParams = {},
@@ -2903,6 +2912,103 @@ export function useProjectArtifactsQuery(
     enabled: Boolean(projectId),
     placeholderData: keepPreviousData,
     retry: 1,
+  });
+}
+
+export function useProjectAttachmentsQuery(
+  projectId: string | null,
+  input: ProjectAttachmentListParams = {},
+) {
+  return useQuery({
+    queryKey: [
+      ...projectAttachmentQueryKey(projectId ?? "missing"),
+      "list",
+      input,
+    ],
+    queryFn: () => getProjectAttachments(projectId!, input),
+    enabled: Boolean(projectId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useCreateProjectAttachment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      input,
+    }: {
+      projectId: string;
+      input: CreateProjectAttachmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({
+        projectId,
+        name: input.name,
+        expectedVersion: input.expectedVersion,
+        fileName: input.file.name,
+        fileSize: input.file.size,
+        fileModified: input.file.lastModified,
+      });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createProjectAttachment(projectId, input, attempt.current.key);
+    },
+    onSuccess: async (attachment) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: projectAttachmentQueryKey(attachment.projectId),
+      });
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteProjectAttachment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      id,
+      projectId,
+      input,
+    }: {
+      id: string;
+      projectId: string;
+      input: DeleteProjectAttachmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({ id, projectId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return deleteProjectAttachment(id, input, attempt.current.key);
+    },
+    onSuccess: async (attachment) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: projectAttachmentQueryKey(attachment.projectId),
+      });
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export function useDownloadProjectAttachment() {
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      downloadProjectAttachment(id, name),
   });
 }
 

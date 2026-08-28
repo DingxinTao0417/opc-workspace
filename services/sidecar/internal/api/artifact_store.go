@@ -465,6 +465,19 @@ func loadControlledFile(db *gorm.DB, id string) (controlledFileRecord, bool, err
 	var attachment models.ClientAttachment
 	err = db.Select("id", "relative_path", "size_bytes", "sha256", "integrity_status", "deleted_at").
 		First(&attachment, "id = ?", id).Error
+	if err == nil {
+		return controlledFileRecord{
+			id: attachment.ID, relativePath: attachment.RelativePath, sizeBytes: attachment.SizeBytes,
+			sha256: attachment.SHA256, integrityStatus: attachment.IntegrityStatus,
+			deletedAt: attachment.DeletedAt, kind: "client_attachment",
+		}, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return controlledFileRecord{}, false, err
+	}
+	var projectAttachment models.ProjectAttachment
+	err = db.Select("id", "relative_path", "size_bytes", "sha256", "integrity_status", "deleted_at").
+		First(&projectAttachment, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return controlledFileRecord{}, false, nil
 	}
@@ -472,9 +485,9 @@ func loadControlledFile(db *gorm.DB, id string) (controlledFileRecord, bool, err
 		return controlledFileRecord{}, false, err
 	}
 	return controlledFileRecord{
-		id: attachment.ID, relativePath: attachment.RelativePath, sizeBytes: attachment.SizeBytes,
-		sha256: attachment.SHA256, integrityStatus: attachment.IntegrityStatus,
-		deletedAt: attachment.DeletedAt, kind: "client_attachment",
+		id: projectAttachment.ID, relativePath: projectAttachment.RelativePath, sizeBytes: projectAttachment.SizeBytes,
+		sha256: projectAttachment.SHA256, integrityStatus: projectAttachment.IntegrityStatus,
+		deletedAt: projectAttachment.DeletedAt, kind: "project_attachment",
 	}, true, nil
 }
 
@@ -489,13 +502,21 @@ func loadArtifactDeletionTombstone(db *gorm.DB, id string) (controlledFileTombst
 	}
 	var attachment models.ClientAttachmentDeletionTombstone
 	err = db.First(&attachment, "attachment_id = ?", id).Error
+	if err == nil {
+		return controlledFileTombstone{sizeBytes: attachment.SizeBytes, sha256: attachment.SHA256}, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return controlledFileTombstone{}, false, err
+	}
+	var projectAttachment models.ProjectAttachmentDeletionTombstone
+	err = db.First(&projectAttachment, "attachment_id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return controlledFileTombstone{}, false, nil
 	}
 	if err != nil {
 		return controlledFileTombstone{}, false, err
 	}
-	return controlledFileTombstone{sizeBytes: attachment.SizeBytes, sha256: attachment.SHA256}, true, nil
+	return controlledFileTombstone{sizeBytes: projectAttachment.SizeBytes, sha256: projectAttachment.SHA256}, true, nil
 }
 
 func markRecoveredArtifactIntegrity(db *gorm.DB, id, status string) error {
@@ -510,6 +531,8 @@ func markRecoveredArtifactIntegrity(db *gorm.DB, id, status string) error {
 	model := any(&models.TaskArtifact{})
 	if record.kind == "client_attachment" {
 		model = &models.ClientAttachment{}
+	} else if record.kind == "project_attachment" {
+		model = &models.ProjectAttachment{}
 	}
 	result := db.Model(model).Where("id = ? AND deleted_at IS NULL", id).
 		Updates(map[string]any{"integrity_status": status, "integrity_checked_at": now})

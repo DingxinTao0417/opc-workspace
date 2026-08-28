@@ -1088,6 +1088,47 @@ export interface ClientAttachmentDownload {
   mimeType: string;
 }
 
+export interface ProjectAttachment {
+  id: string;
+  projectId: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  recordedBy: ClientActivityActor;
+  integrityStatus: ClientAttachmentIntegrityStatus;
+  integrityCheckedAt: string;
+  deletedAt: string | null;
+  deletedByActorId: string | null;
+  deleteReason: string | null;
+  createdAt: string;
+  projectVersion: number;
+}
+
+export interface ProjectAttachmentListParams {
+  page?: number;
+  pageSize?: number;
+  includeDeleted?: boolean;
+}
+
+export interface ProjectAttachmentListResult {
+  items: ProjectAttachment[];
+  meta: PageMeta & { projectVersion: number };
+}
+
+export interface CreateProjectAttachmentInput {
+  file: File;
+  name: string;
+  expectedVersion: number;
+}
+
+export interface DeleteProjectAttachmentInput {
+  reason: string;
+  expectedVersion: number;
+}
+
+export type ProjectAttachmentDownload = ClientAttachmentDownload;
+
 export interface ClientActorLinkActor {
   id: string;
   type: ActorType;

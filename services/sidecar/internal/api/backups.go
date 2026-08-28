@@ -661,6 +661,10 @@ func listActiveControlledFiles(db *gorm.DB) ([]controlledFileBackupRow, error) {
 		SELECT id, relative_path, size_bytes, sha256
 		FROM client_attachments
 		WHERE deleted_at IS NULL
+		UNION ALL
+		SELECT id, relative_path, size_bytes, sha256
+		FROM project_attachments
+		WHERE deleted_at IS NULL
 		ORDER BY id ASC
 	`).Scan(&rows).Error
 	return rows, err
@@ -671,13 +675,23 @@ func controlledFileVerificationQueries(schemaVersion int) (string, string) {
 		return "SELECT COUNT(*) FROM task_artifacts WHERE storage_kind = 'file' AND deleted_at IS NULL",
 			"SELECT relative_path, size_bytes, sha256 FROM task_artifacts WHERE id = ? AND storage_kind = 'file' AND deleted_at IS NULL"
 	}
-	union := `
+	clientUnion := `
 		SELECT id, relative_path, size_bytes, sha256
 		FROM task_artifacts
 		WHERE storage_kind = 'file' AND deleted_at IS NULL
 		UNION ALL
 		SELECT id, relative_path, size_bytes, sha256
 		FROM client_attachments
+		WHERE deleted_at IS NULL
+	`
+	if schemaVersion < 22 {
+		return "SELECT COUNT(*) FROM (" + clientUnion + ")",
+			"SELECT relative_path, size_bytes, sha256 FROM (" + clientUnion + ") WHERE id = ?"
+	}
+	union := clientUnion + `
+		UNION ALL
+		SELECT id, relative_path, size_bytes, sha256
+		FROM project_attachments
 		WHERE deleted_at IS NULL
 	`
 	return "SELECT COUNT(*) FROM (" + union + ")",

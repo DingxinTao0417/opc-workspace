@@ -87,6 +87,35 @@ vi.mock("../api/hooks", () => ({
     isSuccess: true,
     refetch: vi.fn(),
   }),
+  useProjectAttachmentsQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 10, total: 0, projectVersion: 2 },
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useCreateProjectAttachment: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useDeleteProjectAttachment: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useDownloadProjectAttachment: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
   useCreateProjectNote: () => ({
     error: null,
     isPending: false,

@@ -9,7 +9,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础；恢复计划挂起后可从设置页确认安全关闭受管 Sidecar 并重启桌面应用
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态并支持重试
-- SQLite schema v21、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11–v14 追加 Focus、手工 Inbox、Task 关系和 Reminder，v15–v17 追加 Inbox 编排、版本化设置与任务保存视图，v18 追加客户本地活动，v19 追加受控客户附件与删除墓碑，v20 追加 Client–person 显式关联历史，v21 追加版本化项目笔记
+- SQLite schema v22、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11–v14 追加 Focus、手工 Inbox、Task 关系和 Reminder，v15–v17 追加 Inbox 编排、版本化设置与任务保存视图，v18 追加客户本地活动，v19 追加受控客户附件与删除墓碑，v20 追加 Client–person 显式关联历史，v21 追加版本化项目笔记，v22 追加受控项目附件与删除墓碑
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
@@ -33,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、项目可编辑笔记/Task Artifact 产出聚合/追加式活动时间线、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B/C 核心命令面板/统一本地搜索/详情直达、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、项目附件、非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、命令最近使用、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v6.0](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、项目可编辑笔记/受控附件/Task Artifact 产出聚合/追加式活动时间线、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B/C 核心命令面板/统一本地搜索/详情直达、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、命令最近使用、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v6.1](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v6.0）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v6.1）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -235,6 +235,11 @@ POST   /api/v1/projects
 GET    /api/v1/projects/:id
 GET    /api/v1/projects/:id/events
 GET    /api/v1/projects/:id/artifacts
+GET    /api/v1/projects/:id/attachments
+POST   /api/v1/projects/:id/attachments
+GET    /api/v1/project-attachments/:id
+GET    /api/v1/project-attachments/:id/content
+DELETE /api/v1/project-attachments/:id?confirm=true
 PATCH  /api/v1/projects/:id
 POST   /api/v1/projects/:id/transitions
 DELETE /api/v1/projects/:id?confirm=true
@@ -291,7 +296,9 @@ Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `
 
 Client Activity 列表默认每页 20、最大 100，按 `occurred_at DESC, id ASC` 稳定分页，默认隐藏软删除记录，可按 kind 筛选并用 `include_deleted=true` 查看审计历史。公开创建只接受人工 `note / meeting`，标题、正文与 RFC 3339 发生时间由服务端校验，可使用 `Idempotency-Key`；PATCH/DELETE 使用活动 `If-Match`，删除还要求 `confirm=true` 和原因。活动新增、修改或软删除会在同一事务递增 Client 聚合版本；删除响应不返回人工正文，删除记录和预留的 `system_reference` 均只读。
 
-Client Attachment 列表默认每页 20、最大 100，按 `created_at DESC, id ASC` 稳定分页，支持 `activity_id` 和 `include_deleted=true`。上传强制 Client `If-Match`，使用首个 `metadata` JSON + 唯一 `file` 的严格 multipart，可带 `Idempotency-Key`；单文件非空且最多 50 MiB，完整请求最多 100 MiB。下载只经鉴权 content 端点并复验 size/SHA-256；确认删除要求 Client `If-Match`、原因和可选幂等键。附件新增/软删除递增 Client 版本；Client 永久删除会协调全部 active 附件的 tombstone、trash 与事务补偿。内部备份包含 active Task/Client objects，业务 JSON 只含附件元数据和 active 文件摘要，不嵌入正文。
+Client Attachment 列表默认每页 20、最大 100，按 `created_at DESC, id ASC` 稳定分页，支持 `activity_id` 和 `include_deleted=true`。上传强制 Client `If-Match`，使用首个 `metadata` JSON + 唯一 `file` 的严格 multipart，可带 `Idempotency-Key`；单文件非空且最多 50 MiB，完整请求最多 100 MiB。下载只经鉴权 content 端点并复验 size/SHA-256；确认删除要求 Client `If-Match`、原因和可选幂等键。附件新增/软删除递增 Client 版本；Client 永久删除会协调全部 active 附件的 tombstone、trash 与事务补偿。
+
+Project Attachment 使用相同受控文件协议，按 `created_at DESC, id ASC` 稳定分页并支持 `include_deleted=true`。上传和确认删除都使用 Project `If-Match` 与可选幂等键，归档项目只读；新增/软删除递增 Project 聚合版本，永久删除 Project 会协调 active 附件的 tombstone、trash、事务回滚和最终清理。内部备份包含 active Task/Client/Project objects，业务 JSON 只含附件元数据和 active 文件摘要，不嵌入正文。
 
 Client contact 关系列表默认每页 20、最大 100，按 `linked_at DESC, id ASC` 稳定分页，`include_unlinked=true` 显式读取解除历史。关联必须使用 Client `If-Match`，并在已有 active person 的 `actor_id` 与原子 `create_person` 间二选一；解除要求 `confirm=true`、Client `If-Match`、原因和可选幂等键。每个 Client 同时只允许一个 active contact；关联/解除递增 Client 版本，active 关系阻止 person 停用，Client 删除级联关系历史但保留 Actor。业务 JSON 导出包含该关系历史。
 
@@ -305,7 +312,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v21；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client；v11–v17 交付 Focus、Inbox/Reminder、设置和保存视图；v18 增加版本化客户活动，v19 增加受控客户附件，v20 增加 Client–person 关联，v21 增加项目笔记及 Project 聚合版本传播。v20→v21 不改写既有事实，也不创建 demo 数据。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v22；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client；v11–v17 交付 Focus、Inbox/Reminder、设置和保存视图；v18 增加版本化客户活动，v19 增加受控客户附件，v20 增加 Client–person 关联，v21 增加项目笔记及 Project 聚合版本传播，v22 增加受控项目附件、完整性事实与删除墓碑。v21→v22 不改写既有事实，也不创建 demo 数据。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -315,4 +322,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v6.0](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 基础纵切/可编辑人工笔记/Task Artifact 产出聚合/追加式活动时间线、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板统一本地搜索与核心详情直达、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、项目附件、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v6.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 基础纵切/可编辑人工笔记/受控附件/Task Artifact 产出聚合/追加式活动时间线、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板统一本地搜索与核心详情直达、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

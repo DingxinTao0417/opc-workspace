@@ -43,6 +43,7 @@ import type {
   CreateReminderInput,
   CreatePersonActorInput,
   CreateProjectNoteInput,
+  CreateProjectAttachmentInput,
   CreateTaskSavedViewInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
@@ -86,11 +87,16 @@ import type {
   NewTaskInput,
   DeleteProjectResult,
   DeleteProjectNoteInput,
+  DeleteProjectAttachmentInput,
   DeleteClientResult,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
   Project,
+  ProjectAttachment,
+  ProjectAttachmentDownload,
+  ProjectAttachmentListParams,
+  ProjectAttachmentListResult,
   ProjectArtifactItem,
   ProjectArtifactListParams,
   ProjectArtifactListResult,
@@ -182,6 +188,34 @@ const MAX_MULTIPART_REQUEST_BYTES = 100 * 1_024 * 1_024;
 // that passes client validation does not immediately exceed the Sidecar limit.
 const MULTIPART_ENVELOPE_RESERVE_BYTES = 64 * 1_024;
 const MULTIPART_FILE_PART_RESERVE_BYTES = 2 * 1_024;
+
+function validateSingleAttachmentFile(file: File, metadata: string): void {
+  if (file.size < 1) {
+    throw new ApiError("附件文件不能为空", {
+      code: "VALIDATION_ERROR",
+      status: 422,
+    });
+  }
+  if (file.size > MAX_ARTIFACT_FILE_BYTES) {
+    throw new ApiError("单个附件不能超过 50 MiB", {
+      code: "ATTACHMENT_FILE_TOO_LARGE",
+      status: 413,
+    });
+  }
+  const encoder = new TextEncoder();
+  const estimatedBytes =
+    encoder.encode(metadata).byteLength +
+    file.size +
+    encoder.encode(file.name).byteLength * 3 +
+    MULTIPART_FILE_PART_RESERVE_BYTES +
+    MULTIPART_ENVELOPE_RESERVE_BYTES;
+  if (estimatedBytes > MAX_MULTIPART_REQUEST_BYTES) {
+    throw new ApiError("编码后的附件请求不能超过 100 MiB", {
+      code: "REQUEST_TOO_LARGE",
+      status: 413,
+    });
+  }
+}
 
 interface RuntimeConnection {
   baseUrl: string;
@@ -1212,6 +1246,96 @@ export function normalizeClientAttachment(value: unknown): ClientAttachment {
     clientVersion: positiveInteger(
       fieldValue(value, "client_version", "clientVersion"),
       "客户附件对应客户版本",
+    ),
+  };
+}
+
+export function normalizeProjectAttachment(value: unknown): ProjectAttachment {
+  if (!isRecord(value)) return invalidResponse("项目附件响应格式无效");
+  const id = stringField(value, "id");
+  const projectId = stringField(value, "project_id", "projectId");
+  const name = stringField(value, "name");
+  const mimeType = stringField(value, "mime_type", "mimeType");
+  const sha256 = stringField(value, "sha256");
+  const integrityCheckedAt = stringField(
+    value,
+    "integrity_checked_at",
+    "integrityCheckedAt",
+  );
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const recordedBy = fieldValue(value, "recorded_by", "recordedBy");
+  if (
+    !id ||
+    !projectId ||
+    !name ||
+    !mimeType ||
+    !sha256 ||
+    !/^[0-9a-f]{64}$/.test(sha256) ||
+    !integrityCheckedAt ||
+    !createdAt ||
+    !isRecord(recordedBy)
+  ) {
+    return invalidResponse("项目附件响应格式无效");
+  }
+  const recordedById = stringField(recordedBy, "id");
+  const recordedByName = stringField(recordedBy, "display_name", "displayName");
+  if (!recordedById || !recordedByName) {
+    return invalidResponse("项目附件记录人响应格式无效");
+  }
+  const integrityStatus = fieldValue(
+    value,
+    "integrity_status",
+    "integrityStatus",
+  );
+  if (
+    integrityStatus !== "verified" &&
+    integrityStatus !== "missing" &&
+    integrityStatus !== "mismatch"
+  ) {
+    return invalidResponse("项目附件完整性状态无效");
+  }
+  const deletedAt = clientOptionalString(
+    fieldValue(value, "deleted_at", "deletedAt"),
+    "项目附件删除时间",
+  );
+  const deletedByActorId = clientOptionalString(
+    fieldValue(value, "deleted_by_actor_id", "deletedByActorId"),
+    "项目附件删除人",
+  );
+  const deleteReason = clientOptionalString(
+    fieldValue(value, "delete_reason", "deleteReason"),
+    "项目附件删除原因",
+  );
+  if (
+    (deletedAt === null) !==
+    (deletedByActorId === null && deleteReason === null)
+  ) {
+    return invalidResponse("项目附件删除状态不一致");
+  }
+  return {
+    id,
+    projectId,
+    name,
+    mimeType,
+    sizeBytes: positiveInteger(
+      fieldValue(value, "size_bytes", "sizeBytes"),
+      "项目附件大小",
+    ),
+    sha256,
+    recordedBy: {
+      id: recordedById,
+      type: asActorType(recordedBy.type),
+      displayName: recordedByName,
+    },
+    integrityStatus,
+    integrityCheckedAt,
+    deletedAt,
+    deletedByActorId,
+    deleteReason,
+    createdAt,
+    projectVersion: positiveInteger(
+      fieldValue(value, "project_version", "projectVersion"),
+      "项目附件对应项目版本",
     ),
   };
 }
@@ -3582,6 +3706,134 @@ export async function getProjectArtifacts(
       ),
     },
   };
+}
+
+export async function getProjectAttachments(
+  projectId: string,
+  input: ProjectAttachmentListParams = {},
+): Promise<ProjectAttachmentListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.includeDeleted) params.set("include_deleted", "true");
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/attachments?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("项目附件列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeProjectAttachment);
+  if (items.some((attachment) => attachment.projectId !== projectId)) {
+    return invalidResponse("项目附件列表与请求不一致");
+  }
+  return {
+    items,
+    meta: {
+      page: positiveInteger(payload.meta.page, "项目附件页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "项目附件每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "项目附件总数"),
+      projectVersion: positiveInteger(
+        fieldValue(payload.meta, "project_version", "projectVersion"),
+        "项目附件对应项目版本",
+      ),
+    },
+  };
+}
+
+export async function getProjectAttachment(
+  id: string,
+): Promise<ProjectAttachment> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/project-attachments/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const attachment = normalizeProjectAttachment(body);
+  if (attachment.id !== id) {
+    return invalidResponse("项目附件详情与请求不一致");
+  }
+  return attachment;
+}
+
+export async function createProjectAttachment(
+  projectId: string,
+  input: CreateProjectAttachmentInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ProjectAttachment> {
+  const metadata = JSON.stringify({ name: input.name });
+  validateSingleAttachmentFile(input.file, metadata);
+  const form = new FormData();
+  form.append("metadata", metadata);
+  form.append("file", input.file, input.file.name);
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: form,
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const attachment = normalizeProjectAttachment(body);
+  if (attachment.projectId !== projectId) {
+    return invalidResponse("项目附件创建响应与请求不一致");
+  }
+  return attachment;
+}
+
+export async function deleteProjectAttachment(
+  id: string,
+  input: DeleteProjectAttachmentInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ProjectAttachment> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/project-attachments/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeProjectAttachment(body);
+}
+
+export async function downloadProjectAttachment(
+  id: string,
+  fallbackName: string,
+): Promise<ProjectAttachmentDownload> {
+  return apiFetch(
+    `/api/v1/project-attachments/${encodeURIComponent(id)}/content`,
+    async (response) => {
+      const blob = await response.blob();
+      const mimeType = response.headers.get("Content-Type") ?? blob.type;
+      return {
+        blob,
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          fallbackName,
+        ),
+        mimeType: mimeType || "application/octet-stream",
+      };
+    },
+    {},
+    "application/octet-stream",
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
 }
 
 export async function getTaskArtifact(id: string): Promise<TaskArtifact> {

@@ -630,6 +630,7 @@ func (a *API) deleteProject(c *gin.Context) {
 	}
 
 	deleted := deletedProjectResponse{DeletedID: id}
+	var movedAttachmentFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var project models.Project
 		if err := tx.First(&project, "id = ?", id).Error; err != nil {
@@ -645,6 +646,11 @@ func (a *API) deleteProject(c *gin.Context) {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
 		}
 		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		var err error
+		movedAttachmentFiles, err = a.trashProjectAttachmentFiles(tx, id, deletedAt)
+		if err != nil {
+			return err
+		}
 		detachedTasks, err := bumpTasksForProject(tx, id, deletedAt)
 		if err != nil {
 			return err
@@ -674,11 +680,19 @@ func (a *API) deleteProject(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if restoreErr := a.restoreProjectAttachmentFiles(movedAttachmentFiles); restoreErr != nil && a.options.Logger != nil {
+			a.options.Logger.Printf("restore project attachment files after delete rollback failed project_id=%s error=%v", id, restoreErr)
+		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
+	}
+	if a.artifactStore != nil {
+		for _, moved := range movedAttachmentFiles {
+			a.artifactStore.purgeTrashedFile(moved)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": deleted})
 }

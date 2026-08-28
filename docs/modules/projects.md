@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v21。schema v21 新增独立、版本化且可追溯软删除的 `project_notes`，不把人工笔记混入不可变 Workflow Event。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v22。schema v21 新增独立、版本化且可追溯软删除的 `project_notes`；schema v22 新增受控 `project_attachments`、完整性事实和不可变删除墓碑。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑项目笔记、所属 Task Artifact 产出聚合和追加式项目活动时间线已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目附件、产出来源投影、批量拆分和自动分诊尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑项目笔记、受控项目附件、所属 Task Artifact 产出聚合和追加式项目活动时间线已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但产出来源投影、批量拆分和自动分诊尚未交付。
 
 ## 定位与边界
 
@@ -18,11 +18,11 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、可编辑人工笔记、所属 Task Artifact 产出聚合、追加式审计时间线、列表和详情纵切。
+当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、可编辑人工笔记、受控项目附件、所属 Task Artifact 产出聚合、追加式审计时间线、列表和详情纵切。
 
 ### 已实现
 
-- SQLite schema v21 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`、时间线索引、身份/删除历史保护和 Project 聚合版本传播，不改写既有项目事实或创建 demo 数据。
+- SQLite schema v22 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`、文件完整性事实、不可变删除墓碑、跨 Task/Client/Project object ID 唯一保护和 Project 聚合版本传播，不改写既有项目事实或创建 demo 数据。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -40,6 +40,8 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目创建、资料编辑、`start/pause/resume/complete/reopen/archive/restore` 和永久删除会在同一数据库事务追加 `project_*` Workflow Event，记录内置 owner、请求 ID、时间及前后项目快照；事件写入失败时整个项目命令回滚，创建幂等重放不会重复追加事件。
 - `GET /api/v1/projects/:id/events` 按 `created_at / command_seq / id` 稳定倒序分页，返回当前 Project `ETag` 和 `meta.project_version`。项目详情默认读取首批记录，展示状态变化或资料变更字段，并提供独立加载、空、错误重试和“加载更早”状态。
 - 项目详情支持人工笔记的幂等创建、稳定分页、版本化编辑、带原因软删除及删除历史查看；记录人固定为本地 owner。每次创建、编辑或软删除都由数据库 trigger 原子递增 Project 聚合版本，归档项目只读。
+- 项目详情支持受控附件上传、稳定分页、按需下载、完整性状态、带原因软删除和删除历史；上传强制 metadata-first 严格 multipart，文件非空且最多 50 MiB，完整请求最多 100 MiB。创建/删除使用 Project `If-Match` 与可选幂等键，归档项目只读。
+- Project Attachment 文件与 Task Artifact、Client Attachment 共享数据库身份绑定的受控 store，但三类元数据保持独立。下载前复验 size/SHA-256；缺失或不匹配会持久化完整性状态并拒绝下载。永久删除 Project 时 active 文件先移入 trash，数据库事务失败则恢复，成功后清理并保留 `project_attachment_deletion_tombstones`。
 - `GET /api/v1/projects/:id/artifacts` 在同一只读事务中校验 Project、分页聚合其所属 Task 的既有 Artifact，并返回 Task 标题/当前状态、Submission 序号和 Project 聚合版本；默认隐藏已删除产出，可显式查看删除历史。它不复制 Artifact 正文、文件、删除或验收事实。
 - 项目详情提供独立的产出加载、空、错误/重试、分页与删除历史状态；每项展示类型、跟进标记、来源 Task/批次并可打开共享任务详情，实际正文查看、文件下载、删除和验收仍由 Task 领域完成。
 
@@ -47,8 +49,8 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 - 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选、任务树或内嵌 Assignment/Submission 控件；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子、并发版本、Assignment 与 manual Submission/Artifact 验收已在共享任务详情交付。
 - 项目工时对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目级 Session 历史和高级分析仍未实现。
-- 没有独立项目附件或发票明细；当前只返回发票计数，用于解释硬删除影响。项目产出只读聚合既有 Task Artifact，人工项目笔记已经独立交付，系统写命令仍保存在不可变活动时间线，三类事实不互相替代。
-- schema v9 已有 Task 活动时间线与 `task_artifacts`；Project 现在已有事件生产器、读取时间线和 Task Artifact 聚合入口，但仍没有项目附件或 Inbox Item 来源投影。
+- 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
+- schema v9 已有 Task 活动时间线与 `task_artifacts`；Project 现在已有事件生产器、读取时间线、Task Artifact 聚合和独立受控附件，但仍没有 Inbox Item 来源投影。
 - 没有项目里程碑、真实收入/成本聚合或开票操作。
 
 ## 当前用户流程
@@ -70,9 +72,9 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 ### 永久删除
 
 1. 只有已归档项目才显示永久删除入口。
-2. UI 展示将被解除关联的任务和发票数量，并要求二次确认。
-3. Sidecar 再次校验 `If-Match`、`confirm=true` 和项目归档状态。
-4. 删除命令先在同一事务追加 `project_deleted` 事件，再删除 Project；关联任务和发票保留但其 `project_id` 被置空。删除事件保留在业务导出中，项目详情与事件 API 随 Project 删除后均返回 404；永久删除本身不可恢复。
+2. UI 展示将被解除关联的任务和发票数量，并明确项目笔记、附件元数据和附件文件会永久删除，再要求二次确认。
+3. Sidecar 再次校验 `If-Match`、`confirm=true` 和项目归档状态，并把 active 项目附件移入受控 trash、写入聚合删除墓碑。
+4. 删除命令在同一事务追加 `project_deleted` 事件并删除 Project；失败时恢复已移动附件，成功后清理 trash。关联任务和发票保留但其 `project_id` 被置空，项目笔记和附件元数据级联删除；删除事件与附件墓碑继续保留供审计/恢复判定，永久删除本身不可恢复。
 
 ### 查看活动时间线
 
@@ -94,11 +96,19 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 3. owner 可切换删除历史；已删除项只展示墓碑摘要和原因。点击“打开任务”进入共享任务详情完成正文查看、文件下载、删除和验收。
 4. 归档项目仍可读取历史产出；Task 的后续合法变化会通过既有聚合 trigger 使 Project 版本失效，列表响应返回同事务读取的 `ETag` 和 `project_version`。
 
+### 管理项目附件
+
+1. 非归档项目可选择一个本地文件，先在页面预览原文件名、可编辑附件名称和大小，再明确确认上传；浏览器 File 草稿在请求前不写入数据库。
+2. 前端携带当前 Project `If-Match` 和稳定幂等键，Sidecar 严格读取首个 `metadata` part 与唯一 `file` part，写入 staging、校验限制并原子发布到 `objects/<attachment-id>`。
+3. 列表默认只显示 active 附件，可切换删除历史；每项展示大小、记录人、时间和 verified/missing/mismatch 状态。下载只走鉴权 content API，并在响应前复验大小和 SHA-256。
+4. 删除必须填写原因并再次使用最新 Project 版本；服务端先写不可变墓碑、移动文件到 trash，再软删除元数据。数据库失败会恢复文件，物理文件已缺失时仍记录 missing 并完成授权删除。
+5. 归档项目仍可读取和下载附件，但添加和删除入口禁用；必须先恢复项目才可写入。
+
 ## 数据、API 与状态机
 
 ### 当前数据
 
-- 当前 schema v21 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存 `id, project_id, title, body, occurred_at, created_by_actor_id, version, deleted_at, deleted_by_actor_id, delete_reason, created_at, updated_at`。笔记写入通过 trigger 递增 Project 聚合版本。
+- 当前 schema v22 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -106,22 +116,27 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前 API
 
-| 方法   | 路径                                     | 当前行为                                                                                                                                                                                                          |
-| ------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/v1/projects`                       | `page` 默认 1，`page_size` 默认 50/最大 100；`q` 搜索名称/描述（最多 200 字符），`status/client_id` 筛选，`sort` 白名单排序；默认隐藏归档项目，`include_archived` 经布尔解析校验，true 时供需要完整关联历史的读取 |
-| POST   | `/api/v1/projects`                       | 创建 `planning` 项目；可选 `Idempotency-Key` 保存规范化请求 SHA-256 与首次响应快照，同请求可稳定重放并拒绝不同请求复用                                                                                            |
-| GET    | `/api/v1/projects/:id`                   | 返回项目资料、派生任务汇总、发票数、允许操作和 `ETag`                                                                                                                                                             |
-| GET    | `/api/v1/projects/:id/events`            | 项目活动时间线；`page` 默认 1，`page_size` 默认 20/最大 100，稳定倒序；返回 owner、request、前后快照、Project `ETag` 与 `meta.project_version`                                                                    |
-| GET    | `/api/v1/projects/:id/artifacts`         | 所属 Task Artifact 只读聚合；`page` 默认 1、`page_size` 默认 20/最大 100，按创建时间/ID 稳定倒序；`include_deleted=true` 可看删除历史；返回来源 Task/Submission 与 Project 版本，不返回 Artifact 正文             |
-| GET    | `/api/v1/projects/:id/notes`             | 项目笔记稳定倒序分页；`include_deleted=true` 可查看删除历史；返回 Project `ETag` 与 `meta.project_version`                                                                                                        |
-| POST   | `/api/v1/projects/:id/notes`             | 幂等创建人工笔记；归档项目返回 `409 PROJECT_ARCHIVED`                                                                                                                                                             |
-| GET    | `/api/v1/project-notes/:id`              | 读取单条笔记及其版本、记录人和当前 Project 聚合版本                                                                                                                                                               |
-| PATCH  | `/api/v1/project-notes/:id`              | `If-Match` 编辑标题、正文或发生时间；已删除或归档项目拒绝修改                                                                                                                                                     |
-| DELETE | `/api/v1/project-notes/:id?confirm=true` | `If-Match` + 删除原因执行软删除，隐藏正文并保留审计字段                                                                                                                                                           |
-| PATCH  | `/api/v1/projects/:id`                   | 仅编辑非归档项目的资料字段；状态字段不能通过通用 PATCH 修改；缺少 `If-Match` 返回 428，旧版本或归档状态返回 409                                                                                                   |
-| POST   | `/api/v1/projects/:id/transitions`       | 执行 `start/pause/resume/complete/reopen/archive/restore`；缺少 `If-Match` 返回 428，旧版本返回 409                                                                                                               |
-| DELETE | `/api/v1/projects/:id?confirm=true`      | 仅永久删除已归档项目；必须携带 `If-Match`，返回 `deleted_id/detached_tasks/detached_invoices`                                                                                                                     |
-| GET    | `/api/v1/tasks?project_id=:id`           | 读取项目任务；任务资源读取与编辑/状态响应包含可选 `project_name`；归档项目不接受新的任务关联                                                                                                                      |
+| 方法   | 路径                                           | 当前行为                                                                                                                                                                                                          |
+| ------ | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/projects`                             | `page` 默认 1，`page_size` 默认 50/最大 100；`q` 搜索名称/描述（最多 200 字符），`status/client_id` 筛选，`sort` 白名单排序；默认隐藏归档项目，`include_archived` 经布尔解析校验，true 时供需要完整关联历史的读取 |
+| POST   | `/api/v1/projects`                             | 创建 `planning` 项目；可选 `Idempotency-Key` 保存规范化请求 SHA-256 与首次响应快照，同请求可稳定重放并拒绝不同请求复用                                                                                            |
+| GET    | `/api/v1/projects/:id`                         | 返回项目资料、派生任务汇总、发票数、允许操作和 `ETag`                                                                                                                                                             |
+| GET    | `/api/v1/projects/:id/events`                  | 项目活动时间线；`page` 默认 1，`page_size` 默认 20/最大 100，稳定倒序；返回 owner、request、前后快照、Project `ETag` 与 `meta.project_version`                                                                    |
+| GET    | `/api/v1/projects/:id/artifacts`               | 所属 Task Artifact 只读聚合；`page` 默认 1、`page_size` 默认 20/最大 100，按创建时间/ID 稳定倒序；`include_deleted=true` 可看删除历史；返回来源 Task/Submission 与 Project 版本，不返回 Artifact 正文             |
+| GET    | `/api/v1/projects/:id/attachments`             | 项目附件稳定倒序分页；默认隐藏软删除记录，`include_deleted=true` 可查看删除历史；返回 Project `ETag` 与 `meta.project_version`                                                                                    |
+| POST   | `/api/v1/projects/:id/attachments`             | Project `If-Match` + 可选幂等键；严格 `metadata` + 单文件 multipart；归档项目拒绝写入                                                                                                                             |
+| GET    | `/api/v1/project-attachments/:id`              | 返回附件元数据、记录人、完整性/删除状态和当前 Project 聚合版本                                                                                                                                                    |
+| GET    | `/api/v1/project-attachments/:id/content`      | 仅 active 附件；复验 size/SHA-256 后以 attachment/no-store/nosniff 响应，缺失或不匹配会持久化状态并拒绝下载                                                                                                       |
+| DELETE | `/api/v1/project-attachments/:id?confirm=true` | Project `If-Match` + 1–1,000 字符原因 + 可选幂等键；写墓碑、trash 补偿后软删除，归档项目拒绝写入                                                                                                                  |
+| GET    | `/api/v1/projects/:id/notes`                   | 项目笔记稳定倒序分页；`include_deleted=true` 可查看删除历史；返回 Project `ETag` 与 `meta.project_version`                                                                                                        |
+| POST   | `/api/v1/projects/:id/notes`                   | 幂等创建人工笔记；归档项目返回 `409 PROJECT_ARCHIVED`                                                                                                                                                             |
+| GET    | `/api/v1/project-notes/:id`                    | 读取单条笔记及其版本、记录人和当前 Project 聚合版本                                                                                                                                                               |
+| PATCH  | `/api/v1/project-notes/:id`                    | `If-Match` 编辑标题、正文或发生时间；已删除或归档项目拒绝修改                                                                                                                                                     |
+| DELETE | `/api/v1/project-notes/:id?confirm=true`       | `If-Match` + 删除原因执行软删除，隐藏正文并保留审计字段                                                                                                                                                           |
+| PATCH  | `/api/v1/projects/:id`                         | 仅编辑非归档项目的资料字段；状态字段不能通过通用 PATCH 修改；缺少 `If-Match` 返回 428，旧版本或归档状态返回 409                                                                                                   |
+| POST   | `/api/v1/projects/:id/transitions`             | 执行 `start/pause/resume/complete/reopen/archive/restore`；缺少 `If-Match` 返回 428，旧版本返回 409                                                                                                               |
+| DELETE | `/api/v1/projects/:id?confirm=true`            | 仅永久删除已归档项目；必须携带 `If-Match`，返回 `deleted_id/detached_tasks/detached_invoices`                                                                                                                     |
+| GET    | `/api/v1/tasks?project_id=:id`                 | 读取项目任务；任务资源读取与编辑/状态响应包含可选 `project_name`；归档项目不接受新的任务关联                                                                                                                      |
 
 项目创建和编辑会校验名称 2–100 字符、描述最多 10000 字符、日期格式与先后顺序、非负金额、`#RRGGBB` 颜色和已有客户外键。
 
@@ -158,7 +173,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 项目详情增强
 
-- 追加式项目写命令活动时间线、可编辑人工笔记和所属 Task Artifact 产出聚合均已交付；独立项目附件仍待开发。
+- 追加式项目写命令活动时间线、可编辑人工笔记、受控项目附件和所属 Task Artifact 产出聚合均已交付。
 - Focus Core 已把 completed Session 的新增完整分钟幂等累计到 Task；项目继续从 `actual_minutes` 派生工时，不新增第二份 Focus 汇总事实。项目级 Session 历史和高级分析仍待实现。
 - 发票模块交付后显示关联发票；财务模块交付后显示真实收入/成本。
 
@@ -178,14 +193,15 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v21 保留 schema v3–v20 的 Project 结构与聚合 trigger，并新增独立 `project_notes`；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v22 保留 schema v3–v20 的 Project 结构与聚合 trigger，并新增独立 `project_notes` 与受控 `project_attachments`；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
-7. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收、项目级只读产出聚合，以及 Inbox 手工关联已有 Task 已交付；项目附件、Inbox 来源投影、批量拆分和来源事件去重仍待实现。
-8. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
+7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
+8. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收、项目级只读产出聚合，以及 Inbox 手工关联已有 Task 已交付；Inbox 来源投影、批量拆分和来源事件去重仍待实现。
+9. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径
 
@@ -203,13 +219,15 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 笔记新增、编辑和删除分别只递增一次 Project 聚合版本；旧 Project 并发视图因此失效。
 - 项目产出只返回所属 Task Artifact，稳定分页、默认排除删除项、显式历史可见，且不泄漏正文；来源 Task/Submission 与 Project 聚合版本保持一致。
 - 项目详情产出区能区分加载、空、错误与删除历史，并通过精确 Task ID 打开共享任务详情，不在 Project 复制查看、下载或验收写命令。
+- 项目附件上传严格限制请求顺序、数量和大小，使用幂等键与 Project 版本；列表稳定分页，下载复验完整性，软删除保留原因和墓碑，归档状态只读。
+- Project 永久删除对附件文件和数据库执行可补偿操作；手动备份/恢复包含 active Project objects，业务 JSON 只导出附件元数据与 active 文件摘要而不嵌入正文。
 - 时间线分页稳定，返回真实 owner、请求 ID、前后快照和 Project 版本；前端的加载、空、错误重试与“加载更早”不影响项目其他区域。
 
 ### 完整模块仍待验收
 
 - Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；外部活动来源、回访与财务不属于已交付客户纵切。
 - 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和项目级 Focus 历史/分析仍待验收。Focus → Task → Project 的整数分钟传播已有自动化覆盖。
-- 项目时间线和 Workflow Event 的事务、幂等重放与失败回滚已有自动化覆盖；产出聚合的项目范围、分页、删除历史和 Task 直达已有自动化覆盖；项目附件及 Inbox Item 来源投影的事务、去重和失败恢复仍待验收。
+- 项目时间线和 Workflow Event 的事务、幂等重放与失败回滚已有自动化覆盖；产出聚合的项目范围、分页、删除历史和 Task 直达已有自动化覆盖；项目附件的迁移约束、上传/重放、分页、下载、软删历史、归档只读、父项目删除、备份恢复和业务导出已有自动化覆盖；Inbox Item 来源投影仍待验收。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
 ## 相关代码/PRD 链接
@@ -222,9 +240,11 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [ProjectEventsSection.tsx](../../apps/web/src/components/ProjectEventsSection.tsx)
 - [ProjectNotesSection.tsx](../../apps/web/src/components/ProjectNotesSection.tsx)
 - [ProjectArtifactsSection.tsx](../../apps/web/src/components/ProjectArtifactsSection.tsx)
+- [ProjectAttachmentsSection.tsx](../../apps/web/src/components/ProjectAttachmentsSection.tsx)
 - [projects.go](../../services/sidecar/internal/api/projects.go)
 - [project_notes.go](../../services/sidecar/internal/api/project_notes.go)
 - [project_artifacts.go](../../services/sidecar/internal/api/project_artifacts.go)
+- [project_attachments.go](../../services/sidecar/internal/api/project_attachments.go)
 - [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [项目 API](../../services/sidecar/internal/api/projects.go)
@@ -235,3 +255,4 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [schema v5 聚合版本迁移](../../services/sidecar/internal/database/migrations/005_project_aggregate_versions.sql)
 - [schema v6 任务事实迁移](../../services/sidecar/internal/database/migrations/006_task_facts.sql)
 - [schema v21 项目笔记迁移](../../services/sidecar/internal/database/migrations/021_project_notes.sql)
+- [schema v22 项目附件迁移](../../services/sidecar/internal/database/migrations/022_project_attachments.sql)

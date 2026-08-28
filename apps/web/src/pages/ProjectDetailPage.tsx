@@ -21,6 +21,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
 import { ProjectEventsSection } from "../components/ProjectEventsSection";
 import { ProjectArtifactsSection } from "../components/ProjectArtifactsSection";
+import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSection";
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
 import { TaskList } from "../components/TaskList";
 import { useUiStore } from "../store/ui";
@@ -381,6 +382,12 @@ export function ProjectDetailPage() {
 
       <ProjectArtifactsSection projectId={project.id} />
 
+      <ProjectAttachmentsSection
+        archived={project.status === "archived"}
+        projectId={project.id}
+        projectVersion={project.version}
+      />
+
       <ProjectEventsSection projectId={project.id} />
 
       {project.status === "archived" ? (
@@ -390,7 +397,7 @@ export function ProjectDetailPage() {
             <p>
               仅归档项目可永久删除；将解除 {project.taskSummary.total} 项任务和
               {project.invoiceCount}{" "}
-              张发票的项目关联；项目笔记将随项目永久删除，
+              张发票的项目关联；项目笔记、附件记录和附件文件将随项目永久删除，
               任务和发票业务记录本身不会被删除。
             </p>
           </div>
@@ -430,7 +437,7 @@ export function ProjectDetailPage() {
 
       <section className="project-future-note">
         <Clock3 size={15} />
-        项目附件、发票与收入将在对应模块完成后接入，不展示模拟数据。
+        发票与收入将在后续业务版本接入，不展示模拟数据。
       </section>
 
       <ProjectFormModal
