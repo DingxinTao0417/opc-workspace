@@ -34,6 +34,7 @@ const client: Client = {
   ...input,
   version: 2,
   projectCount: 1,
+  latestActivityAt: null,
   createdAt: "2026-08-20T00:00:00Z",
   updatedAt: "2026-08-27T00:00:00Z",
 };

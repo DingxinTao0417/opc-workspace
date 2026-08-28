@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v17 新增保存视图表，不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v18（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v17 新增保存视图表，schema v18 新增客户活动，均不改写 Task 表。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.1](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.2](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -298,7 +298,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
 
-仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Artifact 基础备份恢复、Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
+仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus Session 历史/周报/高级分析、Client 附件/外部来源/Actor 关联/回访/财务，以及 AI 助手与知识库；Artifact 基础备份恢复、Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料/Project 关联和人工活动时间线已经交付。
 
 ## 相关代码/PRD 链接
 

@@ -469,7 +469,7 @@ describe("SettingsModal", () => {
                   note: "发布前",
                   app_version: "0.1.0",
                   api_version: "v1",
-                  schema_version: 17,
+                  schema_version: 18,
                   artifact_count: 0,
                   artifact_bytes: 0,
                   database_bytes: 65536,

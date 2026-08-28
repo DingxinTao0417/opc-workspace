@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v17。schema v12–v17 的 Inbox、Reminder、编排、设置与保存视图迁移均不改 Project 表、聚合触发器或现有 Project API。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v18。schema v12–v18 的 Inbox、Reminder、编排、设置、保存视图与客户活动迁移均不改 Project 表、聚合触发器或现有 Project API。
 >
 > 版本边界：项目资料、基础生命周期、任务聚合和 Client 客户关联纵切已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目产出/附件/事件的来源投影、批量拆分和自动分诊尚未交付。
 
@@ -73,7 +73,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v17 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12–v17 不改变这些 Project 事实。
+- 当前 schema v18 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12–v18 不改变这些 Project 事实。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -131,24 +131,24 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 与其他模块协作
 
-| 模块      | 当前与后续协作方式                                                                                                                                                    |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 任务      | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本、派生进度/工时，以及共享任务详情中的 D2 产出与验收；项目详情内的任务树和项目级产出聚合仍待接入。    |
-| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选，以及 Client 详情中的完整关联项目读取；客户活动、附件和 Actor 关联仍待实现。 |
-| 收件箱    | 项目产出、阻塞、交付和后续工单的目标承接者；当前没有事件或 Inbox 集成。                                                                                               |
-| Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                        |
-| 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目级 Session 历史和高级分析仍待实现。                            |
-| 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                    |
-| 今日      | 可展示已有任务项目名；项目节点和风险聚合尚未接入。                                                                                                                    |
+| 模块      | 当前与后续协作方式                                                                                                                                                                       |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 任务      | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本、派生进度/工时，以及共享任务详情中的 D2 产出与验收；项目详情内的任务树和项目级产出聚合仍待接入。                       |
+| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取及人工活动时间线；客户附件、外部活动来源和 Actor 关联仍待实现。 |
+| 收件箱    | 项目产出、阻塞、交付和后续工单的目标承接者；当前没有事件或 Inbox 集成。                                                                                                                  |
+| Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                           |
+| 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目级 Session 历史和高级分析仍待实现。                                               |
+| 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                                       |
+| 今日      | 可展示已有任务项目名；项目节点和风险聚合尚未接入。                                                                                                                                       |
 
 整体协作关系参见[整体功能架构](../functional-architecture.md)。
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v17 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12–v17 的 Inbox、Reminder、编排、设置与保存视图迁移均不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v18 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12–v18 的 Inbox、Reminder、编排、设置、保存视图与客户活动迁移均不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
-4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选和双向聚合版本传播已接通；客户活动、附件、Actor 关联、回访和财务仍待实现。
+4. **客户协作（基础范围与人工活动已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播和 Client 人工活动时间线已接通；客户附件、外部来源、Actor 关联、回访和财务仍待实现。
 5. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收，以及 Inbox 手工关联已有 Task 已交付；项目级产出聚合、项目附件、Inbox 来源投影、批量拆分和来源事件去重仍待实现。
 6. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
@@ -166,7 +166,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 完整模块仍待验收
 
-- Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；客户活动、附件、Actor 关联、回访与财务不属于本轮基础关联纵切。
+- Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；客户附件、外部活动来源、Actor 关联、回访与财务不属于已交付人工活动纵切。
 - 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和项目级 Focus 历史/分析仍待验收。Focus → Task → Project 的整数分钟传播已有自动化覆盖。
 - 产出、附件、时间线、Workflow Event 与 Inbox Item 的事务、去重和失败恢复。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。

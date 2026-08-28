@@ -20,7 +20,7 @@ const backup: BackupSummary = {
   note: "提交前检查点",
   appVersion: "0.1.0",
   apiVersion: "v1",
-  schemaVersion: 17,
+  schemaVersion: 18,
   artifactCount: 2,
   artifactBytes: 4096,
   databaseBytes: 65536,
@@ -55,7 +55,7 @@ vi.mock("../api/hooks", () => ({
         note: "提交前检查点",
         appVersion: "0.1.0",
         apiVersion: "v1",
-        schemaVersion: 17,
+        schemaVersion: 18,
         artifactCount: 2,
         artifactBytes: 4096,
         databaseBytes: 65536,
@@ -127,7 +127,7 @@ describe("BackupSettings", () => {
     render(<BackupSettings />);
 
     expect(screen.getByText("提交前检查点")).toBeVisible();
-    expect(screen.getByText(/schema v17/)).toHaveTextContent("2 个文件");
+    expect(screen.getByText(/schema v18/)).toHaveTextContent("2 个文件");
 
     fireEvent.change(screen.getByLabelText("备份说明"), {
       target: { value: "发布前" },

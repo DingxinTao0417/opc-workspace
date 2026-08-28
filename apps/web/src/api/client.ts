@@ -17,10 +17,14 @@ import type {
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
   Client,
+  ClientActivity,
+  ClientActivityListParams,
+  ClientActivityListResult,
   ClientInput,
   ClientListParams,
   ClientListResult,
   ClientStatus,
+  CreateClientActivityInput,
   CreateFocusSessionInput,
   CreateBackupInput,
   CreateReminderInput,
@@ -64,6 +68,7 @@ import type {
   NewTaskInput,
   DeleteProjectResult,
   DeleteClientResult,
+  DeleteClientActivityInput,
   Project,
   ProjectInput,
   ProjectListParams,
@@ -120,6 +125,7 @@ import type {
   TodayStats,
   UpdateActorInput,
   UpdateClientInput,
+  UpdateClientActivityInput,
   UpdateInboxItemInput,
   UpdateInboxItemTaskRequirementInput,
   UpdateTagInput,
@@ -809,8 +815,107 @@ export function normalizeClient(value: unknown): Client {
       fieldValue(value, "project_count", "projectCount"),
       "客户项目数",
     ),
+    latestActivityAt: clientOptionalString(
+      fieldValue(value, "latest_activity_at", "latestActivityAt"),
+      "客户最近活动时间",
+    ),
     createdAt,
     updatedAt,
+  };
+}
+
+export function normalizeClientActivity(value: unknown): ClientActivity {
+  if (!isRecord(value)) return invalidResponse("客户活动响应格式无效");
+  const id = stringField(value, "id");
+  const clientId = stringField(value, "client_id", "clientId");
+  const title = stringField(value, "title");
+  const occurredAt = stringField(value, "occurred_at", "occurredAt");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  const rawCreatedBy = fieldValue(value, "created_by", "createdBy");
+  if (
+    !id ||
+    !clientId ||
+    !title ||
+    !occurredAt ||
+    !createdAt ||
+    !updatedAt ||
+    !isRecord(rawCreatedBy)
+  ) {
+    return invalidResponse("客户活动响应格式无效");
+  }
+  const kind = value.kind;
+  if (kind !== "note" && kind !== "meeting" && kind !== "system_reference") {
+    return invalidResponse("客户活动类型响应无效");
+  }
+  const createdById = stringField(rawCreatedBy, "id");
+  const createdByDisplayName = stringField(
+    rawCreatedBy,
+    "display_name",
+    "displayName",
+  );
+  if (!createdById || !createdByDisplayName) {
+    return invalidResponse("客户活动记录人响应无效");
+  }
+  const body = clientOptionalString(value.body, "客户活动正文");
+  const sourceType = clientOptionalString(
+    fieldValue(value, "source_type", "sourceType"),
+    "客户活动来源类型",
+  );
+  const sourceId = clientOptionalString(
+    fieldValue(value, "source_id", "sourceId"),
+    "客户活动来源 ID",
+  );
+  const deletedAt = clientOptionalString(
+    fieldValue(value, "deleted_at", "deletedAt"),
+    "客户活动删除时间",
+  );
+  const deletedByActorId = clientOptionalString(
+    fieldValue(value, "deleted_by_actor_id", "deletedByActorId"),
+    "客户活动删除人",
+  );
+  const deleteReason = clientOptionalString(
+    fieldValue(value, "delete_reason", "deleteReason"),
+    "客户活动删除原因",
+  );
+  const sourceContractValid =
+    kind === "system_reference"
+      ? body === null && sourceType !== null && sourceId !== null
+      : sourceType === null &&
+        sourceId === null &&
+        (deletedAt === null ? body !== null : body === null);
+  if (
+    !sourceContractValid ||
+    (deletedAt === null) !==
+      (deletedByActorId === null && deleteReason === null) ||
+    (deletedAt !== null && body !== null)
+  ) {
+    return invalidResponse("客户活动状态响应不一致");
+  }
+  return {
+    id,
+    clientId,
+    kind,
+    title,
+    body,
+    occurredAt,
+    createdBy: {
+      id: createdById,
+      type: asActorType(rawCreatedBy.type),
+      displayName: createdByDisplayName,
+    },
+    sourceType,
+    sourceId,
+    version: positiveInteger(value.version, "客户活动版本"),
+    deletedAt,
+    deletedByActorId,
+    deleteReason,
+    createdAt,
+    updatedAt,
+    clientVersion: positiveInteger(
+      fieldValue(value, "client_version", "clientVersion"),
+      "客户聚合版本",
+    ),
   };
 }
 
@@ -4206,6 +4311,112 @@ export async function deleteClient(
       "客户解绑项目数",
     ),
   };
+}
+
+export async function getClientActivities(
+  clientId: string,
+  input: ClientActivityListParams = {},
+): Promise<ClientActivityListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.kind) params.set("kind", input.kind);
+  if (input.includeDeleted) params.set("include_deleted", "true");
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/activities?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("客户活动列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(normalizeClientActivity),
+    meta: {
+      page: positiveInteger(payload.meta.page, "客户活动页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "客户活动每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "客户活动总数"),
+      clientVersion: positiveInteger(
+        fieldValue(payload.meta, "client_version", "clientVersion"),
+        "客户活动对应客户版本",
+      ),
+    },
+  };
+}
+
+export async function getClientActivity(id: string): Promise<ClientActivity> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-activities/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientActivity(body);
+}
+
+export async function createClientActivity(
+  clientId: string,
+  input: CreateClientActivityInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientActivity> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/activities`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({
+        kind: input.kind,
+        title: input.title,
+        body: input.body,
+        occurred_at: input.occurredAt,
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientActivity(body);
+}
+
+export async function updateClientActivity(
+  id: string,
+  input: UpdateClientActivityInput,
+): Promise<ClientActivity> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-activities/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.body === undefined ? {} : { body: input.body }),
+        ...(input.occurredAt === undefined
+          ? {}
+          : { occurred_at: input.occurredAt }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientActivity(body);
+}
+
+export async function deleteClientActivity(
+  id: string,
+  input: DeleteClientActivityInput,
+): Promise<ClientActivity> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-activities/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientActivity(body);
 }
 
 export async function getInboxItems(

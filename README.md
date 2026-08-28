@@ -9,11 +9,11 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础；恢复计划挂起后可从设置页确认安全关闭受管 Sidecar 并重启桌面应用
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态并支持重试
-- SQLite schema v17、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12 追加手工 Inbox Item，v13 追加 Inbox–Task 活动/历史关系与删除互锁，v14 追加一次性本地 Reminder，v15 追加 Inbox 自动编排校验，v16 追加版本化非敏感 app_settings，v17 追加任务保存视图
+- SQLite schema v18、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12–v14 追加手工 Inbox、Task 关系和一次性 Reminder，v15–v17 追加 Inbox 编排校验、版本化 app_settings 与任务保存视图，v18 追加客户本地活动事实
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
-- 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情与 Project 客户选择、改绑、解除及筛选已接真实 API
+- 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联，以及人工备注/会议活动的幂等创建、稳定分页、版本化编辑与带原因软删除已接真实 API
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
@@ -30,7 +30,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、T-07A 任务页精确计划组拖拽、T-07B 计划/截止日期范围筛选、T-07C Task→Project→Client 客户筛选、T-07D 任务保存视图、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D/E/F/G/H Today 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及行内编辑/删除入口、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移、T-04B 手动一致性备份创建/列表/校验/恢复演练/安全重启恢复/确认删除/业务 JSON 导出，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。受控头像文件、Focus D、客户活动与附件、项目事件/非 Reminder Inbox 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.1](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、T-07A 任务页精确计划组拖拽、T-07B 计划/截止日期范围筛选、T-07C Task→Project→Client 客户筛选、T-07D 任务保存视图、客户基础资料/Project 客户关联/人工活动时间线、Focus Core A+B+C、T-06A/B/C/D/E/F/G/H Today 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及行内编辑/删除入口、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移、T-04B 手动一致性备份创建/列表/校验/恢复演练/安全重启恢复/确认删除/业务 JSON 导出，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。受控头像文件、Focus D、客户附件/外部来源、项目事件/非 Reminder Inbox 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.2](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -52,7 +52,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v5.1）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v5.2）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -181,6 +181,11 @@ POST   /api/v1/backups/:id/verify
 POST   /api/v1/backups/:id/drill
 POST   /api/v1/backups/:id/restore
 DELETE /api/v1/backups/:id?confirm=true
+GET    /api/v1/clients/:id/activities
+POST   /api/v1/clients/:id/activities
+GET    /api/v1/client-activities/:id
+PATCH  /api/v1/client-activities/:id
+DELETE /api/v1/client-activities/:id?confirm=true
 GET    /api/v1/settings
 PATCH  /api/v1/settings
 GET    /api/v1/actors
@@ -272,7 +277,9 @@ Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` �
 
 任务资料、Task output/review/Artifact 删除及 Assignment 命令均使用 Task 版本拒绝旧写入；可重试命令可携带稳定 `Idempotency-Key`，同键同请求重放首次响应，同键不同请求返回冲突。前端遇到版本冲突会刷新最新 Task，同时保留摘要、文本、链接、结构化 JSON 与浏览器 `File` 对象草稿，要求用户再次明确提交。事件查询默认每页 50、最大 100，返回 Task `ETag`、`meta.task_version` 和按时间/命令顺序倒序的追加式事件。Assignment 没有 DELETE 路由。批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。项目列表默认排除归档项；只有需要读取完整关联历史的页面才显式传 `include_archived=true`。
 
-Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
+Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count` 和未删除活动派生的 nullable `latest_activity_at`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
+
+Client Activity 列表默认每页 20、最大 100，按 `occurred_at DESC, id ASC` 稳定分页，默认隐藏软删除记录，可按 kind 筛选并用 `include_deleted=true` 查看审计历史。公开创建只接受人工 `note / meeting`，标题、正文与 RFC 3339 发生时间由服务端校验，可使用 `Idempotency-Key`；PATCH/DELETE 使用活动 `If-Match`，删除还要求 `confirm=true` 和原因。活动新增、修改或软删除会在同一事务递增 Client 聚合版本；删除响应不返回人工正文，删除记录和预留的 `system_reference` 均只读。
 
 当前 Inbox 创建 API 只接受 `kind / source_entity_type / resolution_policy = manual` 的手工条目，不接受来源 ID 或事件键。列表支持 `inbox / snoozed / archive` 三视图、标题/摘要搜索、优先级和分页；`meta.unread_total` 始终统计全局当前待处理视图的未读，不受当前视图或筛选影响。`read_at`、`snoozed_until` 与主状态相互独立；resolve/dismiss 要求 1–2,000 字符原因、清除稍后但不隐式已读，未读终态仍可直接 read。reopen 清除终态和稍后事实，保留 read/triaged，并按是否存在活动 Task 关系进入 `tracking / open`。PATCH 与单条命令使用 `ETag`/`If-Match`；创建、命令和 read-all 支持幂等快照。read-all 提交列表 `snapshot_at` 作为 `through_created_at` 时间截止，只标记创建与最后更新时间均不晚于 cutoff、且按该 cutoff 仍属于待处理可见范围的未读；截止后变化的条目保守跳过。
 
@@ -284,7 +291,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v17；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client 事实；v11–v14 依次交付 Focus、Inbox、Inbox–Task 关系和一次性 Reminder；v15 增加 Inbox 自动结清索引和数据库校验 trigger；v16 增加空的版本化非敏感设置表；`017_task_saved_views.sql` 增加任务保存视图及大小、JSON、schema、版本和大小写不敏感名称约束。v16→v17 不改写既有事实，也不创建 demo 数据。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v18；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client 事实；v11–v14 依次交付 Focus、Inbox、Inbox–Task 关系和一次性 Reminder；v15–v17 增加 Inbox 编排校验、版本化设置和任务保存视图；`018_client_activities.sql` 增加版本化客户活动、软删除审计、时间线索引和 Client 版本传播。v17→v18 不改写既有事实，也不创建 demo 数据。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -294,4 +301,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v5.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务页项目客户/日期范围筛选、SQLite 保存视图与精确计划组同状态拖拽、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航/排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期安排、安全的开始/完成/开始专注快捷操作及编辑/确认删除入口、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工一致性备份创建/列表/校验/隔离恢复演练/安全重启恢复/确认删除、版本化业务 JSON 导出、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付受控头像文件、Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v5.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务页项目客户/日期范围筛选、SQLite 保存视图与精确计划组同状态拖拽、Client/Project 基础纵切与 Client 人工活动时间线、Focus Core A+B+C、Today 真实日期分组/导航/排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期安排、安全的开始/完成/开始专注快捷操作及编辑/确认删除入口、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工一致性备份创建/列表/校验/隔离恢复演练/安全重启恢复/确认删除、版本化业务 JSON 导出、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付受控头像文件、Focus D、任务/项目看板、内容日历业务、客户附件/外部活动来源/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

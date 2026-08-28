@@ -22,6 +22,7 @@ function clientPayload(overrides: Record<string, unknown> = {}) {
     status: "active",
     version: 3,
     project_count: 2,
+    latest_activity_at: null,
     created_at: "2026-08-20T00:00:00Z",
     updated_at: "2026-08-27T00:00:00Z",
     ...overrides,
@@ -52,6 +53,7 @@ describe("client API contract", () => {
       status: "active",
       version: 3,
       projectCount: 2,
+      latestActivityAt: null,
       createdAt: "2026-08-20T00:00:00Z",
       updatedAt: "2026-08-27T00:00:00Z",
     });

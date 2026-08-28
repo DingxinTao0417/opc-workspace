@@ -14,6 +14,7 @@ const activeClient: Client = {
   status: "active",
   version: 3,
   projectCount: 1,
+  latestActivityAt: null,
   createdAt: "2026-08-20T00:00:00Z",
   updatedAt: "2026-08-27T00:00:00Z",
 };
@@ -50,6 +51,12 @@ const state = vi.hoisted(() => ({
   projectQueryInput: null as unknown,
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   remove: { error: null, isPending: false, mutate: vi.fn() },
+  activityMutation: {
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  },
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -73,6 +80,20 @@ vi.mock("../api/hooks", () => ({
   useCreateClient: () => state.update,
   useUpdateClient: () => state.update,
   useDeleteClient: () => state.remove,
+  useClientActivitiesQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0, clientVersion: 3 },
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useCreateClientActivity: () => state.activityMutation,
+  useUpdateClientActivity: () => state.activityMutation,
+  useDeleteClientActivity: () => state.activityMutation,
 }));
 
 function renderDetail() {
@@ -94,7 +115,7 @@ describe("ClientDetailPage", () => {
 
   afterEach(cleanup);
 
-  it("shows real related projects and explicit future placeholders", () => {
+  it("shows real related projects, local activity entry, and explicit future placeholders", () => {
     renderDetail();
 
     expect(screen.getByRole("link", { name: /品牌官网改版/ })).toHaveAttribute(
@@ -102,7 +123,9 @@ describe("ClientDetailPage", () => {
       "/projects/project-1",
     );
     expect(screen.getByText(/v0.4 交付财务事实后可用/)).toBeTruthy();
-    expect(screen.getByText(/不推测线上行为/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "记录活动" })).toBeEnabled();
+    expect(screen.getByText(/不推测邮件、浏览或回复行为/)).toBeTruthy();
+    expect(screen.getByText(/受控客户附件和回访计划仍属后续纵切/)).toBeTruthy();
     expect(state.projectQueryInput).toEqual(
       expect.objectContaining({
         clientId: activeClient.id,

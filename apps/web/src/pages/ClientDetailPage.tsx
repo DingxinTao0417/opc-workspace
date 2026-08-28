@@ -18,6 +18,7 @@ import {
   useUpdateClient,
 } from "../api/hooks";
 import { ClientFormModal } from "../components/ClientFormModal";
+import { ClientActivitiesSection } from "../components/ClientActivitiesSection";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import type { ClientStatus, ProjectStatus } from "../types/models";
@@ -322,6 +323,8 @@ export function ClientDetailPage() {
         ) : null}
       </section>
 
+      <ClientActivitiesSection clientId={client.id} />
+
       <section className="client-future-grid" aria-label="后续客户能力">
         <article>
           <strong>收入与发票</strong>
@@ -329,8 +332,8 @@ export function ClientDetailPage() {
           <span>后续版本</span>
         </article>
         <article>
-          <strong>活动与回访</strong>
-          <p>本地活动、沟通笔记和回访计划尚未交付，不推测线上行为。</p>
+          <strong>附件与回访</strong>
+          <p>受控客户附件和回访计划仍属后续纵切，不自动发送任何外部消息。</p>
           <span>后续版本</span>
         </article>
       </section>

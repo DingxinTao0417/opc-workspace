@@ -99,6 +99,7 @@ vi.mock("../api/hooks", () => ({
         status: "active",
         version: 1,
         projectCount: 1,
+        latestActivityAt: null,
         createdAt: "2026-08-27T08:00:00Z",
         updatedAt: "2026-08-27T08:00:00Z",
       },

@@ -20,6 +20,20 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 			t.Fatal(err)
 		}
 	}
+	if err := store.DB.Exec(`
+		INSERT INTO client_activities(
+			id, client_id, kind, title, body, occurred_at, created_by_actor_id,
+			version, created_at, updated_at
+		) VALUES (
+			'018f0000-0000-7000-8000-000000001703',
+			'018f0000-0000-7000-8000-000000001701',
+			'note', 'Exported client note', 'Local activity body',
+			'2026-08-28T08:00:00Z', '00000000-0000-5000-8000-000000000001',
+			1, '2026-08-28T08:00:00Z', '2026-08-28T08:00:00Z'
+		)
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
 	task, _ := setupManualReviewTask(t, router)
 	uploaded := performMultipartRequest(
 		router,
@@ -74,6 +88,9 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if artifacts := tables["task_artifacts"]; len(artifacts.Rows) != 1 {
 		t.Fatalf("Artifact metadata was not exported: %#v", artifacts)
+	}
+	if activities := tables["client_activities"]; len(activities.Rows) != 1 {
+		t.Fatalf("Client activities were not exported: %#v", activities)
 	}
 	for _, excluded := range businessExportExcludedTables {
 		if _, leaked := tables[excluded]; leaked {

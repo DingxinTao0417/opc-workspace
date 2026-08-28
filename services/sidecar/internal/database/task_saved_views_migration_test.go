@@ -42,8 +42,8 @@ func TestTaskSavedViewsMigrationPreservesV16FactsAndStartsEmpty(t *testing.T) {
 		t.Fatalf("upgrade v16 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 17 {
-		t.Fatalf("SchemaVersion = %d, want 17", store.SchemaVersion)
+	if store.SchemaVersion != 18 {
+		t.Fatalf("SchemaVersion = %d, want 18", store.SchemaVersion)
 	}
 	var preserved models.Task
 	if err := store.DB.First(&preserved, "id = ?", task.ID).Error; err != nil {

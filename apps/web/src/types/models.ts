@@ -773,6 +773,7 @@ export interface Client {
   status: ClientStatus;
   version: number;
   projectCount: number;
+  latestActivityAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -812,6 +813,65 @@ export interface UpdateClientInput {
 export interface DeleteClientResult {
   deletedId: string;
   detachedProjects: number;
+}
+
+export type ClientActivityKind = "note" | "meeting" | "system_reference";
+
+export interface ClientActivityActor {
+  id: string;
+  type: ActorType;
+  displayName: string;
+}
+
+export interface ClientActivity {
+  id: string;
+  clientId: string;
+  kind: ClientActivityKind;
+  title: string;
+  body: string | null;
+  occurredAt: string;
+  createdBy: ClientActivityActor;
+  sourceType: string | null;
+  sourceId: string | null;
+  version: number;
+  deletedAt: string | null;
+  deletedByActorId: string | null;
+  deleteReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  clientVersion: number;
+}
+
+export interface ClientActivityListParams {
+  page?: number;
+  pageSize?: number;
+  kind?: ClientActivityKind;
+  includeDeleted?: boolean;
+}
+
+export interface ClientActivityListResult {
+  items: ClientActivity[];
+  meta: PageMeta & { clientVersion: number };
+}
+
+export interface CreateClientActivityInput {
+  kind: Exclude<ClientActivityKind, "system_reference">;
+  title: string;
+  body: string;
+  occurredAt: string;
+}
+
+export interface UpdateClientActivityInput {
+  kind?: Exclude<ClientActivityKind, "system_reference">;
+  title?: string;
+  body?: string;
+  occurredAt?: string;
+  expectedVersion: number;
+}
+
+export interface DeleteClientActivityInput {
+  reason: string;
+  expectedVersion: number;
 }
 
 export type InboxItemKind = "manual" | "reminder";

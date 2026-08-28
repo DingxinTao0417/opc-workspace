@@ -14,6 +14,7 @@ import {
   drillBackupRestore,
   cancelFocusSession,
   createClient,
+  createClientActivity,
   createFocusSession,
   createReminder,
   createPersonActor,
@@ -23,6 +24,7 @@ import {
   createTaskAssignment,
   createProject,
   deleteClient,
+  deleteClientActivity,
   deleteBackup,
   deleteProject,
   deleteTag,
@@ -44,6 +46,7 @@ import {
   getActor,
   getActors,
   getClient,
+  getClientActivities,
   getClients,
   getActiveFocusSession,
   getHealth,
@@ -84,6 +87,7 @@ import {
   splitInboxItem,
   stopFocusSession,
   updateClient,
+  updateClientActivity,
   updateInboxItem,
   updateInboxItemTaskRequirement,
   updateTag,
@@ -104,12 +108,15 @@ import type {
   BatchUpdateTasksInput,
   CreateTaskSavedViewInput,
   ClientInput,
+  ClientActivityListParams,
   ClientListParams,
+  CreateClientActivityInput,
   CreateFocusSessionInput,
   CreateReminderInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
+  DeleteClientActivityInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusSessionSnapshot,
@@ -145,6 +152,7 @@ import type {
   RecoverFocusSessionInput,
   UpdateActorInput,
   UpdateClientInput,
+  UpdateClientActivityInput,
   UpdateInboxItemInput,
   UpdateInboxItemTaskRequirementInput,
   UpdateTagInput,
@@ -423,6 +431,97 @@ export function useDeleteClient() {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export const clientActivityQueryKey = (clientId: string) =>
+  [...clientDetailQueryKey(clientId), "activities"] as const;
+
+export function useClientActivitiesQuery(
+  clientId: string | null,
+  input: ClientActivityListParams = {},
+) {
+  return useQuery({
+    queryKey: [...clientActivityQueryKey(clientId ?? "missing"), "list", input],
+    queryFn: () => getClientActivities(clientId!, input),
+    enabled: Boolean(clientId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useCreateClientActivity() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      clientId,
+      input,
+    }: {
+      clientId: string;
+      input: CreateClientActivityInput;
+    }) => {
+      const fingerprint = JSON.stringify({ clientId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createClientActivity(clientId, input, attempt.current.key);
+    },
+    onSuccess: async (activity) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: clientActivityQueryKey(activity.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+  });
+}
+
+export function useUpdateClientActivity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateClientActivityInput;
+    }) => updateClientActivity(id, input),
+    onSuccess: async (activity) => {
+      await queryClient.invalidateQueries({
+        queryKey: clientActivityQueryKey(activity.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteClientActivity() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: DeleteClientActivityInput;
+    }) => deleteClientActivity(id, input),
+    onSuccess: async (activity) => {
+      await queryClient.invalidateQueries({
+        queryKey: clientActivityQueryKey(activity.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       }
     },
   });

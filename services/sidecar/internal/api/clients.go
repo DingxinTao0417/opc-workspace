@@ -44,22 +44,24 @@ type updateClientRequest struct {
 }
 
 type clientResponse struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	ContactName  *string `json:"contact_name"`
-	Email        *string `json:"email"`
-	Phone        *string `json:"phone"`
-	Notes        *string `json:"notes"`
-	Status       string  `json:"status"`
-	ProjectCount int64   `json:"project_count"`
-	Version      int64   `json:"version"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	ContactName      *string `json:"contact_name"`
+	Email            *string `json:"email"`
+	Phone            *string `json:"phone"`
+	Notes            *string `json:"notes"`
+	Status           string  `json:"status"`
+	ProjectCount     int64   `json:"project_count"`
+	LatestActivityAt *string `json:"latest_activity_at"`
+	Version          int64   `json:"version"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
 }
 
 type clientRow struct {
-	models.Client `gorm:"embedded"`
-	ProjectCount  int64 `gorm:"column:project_count"`
+	models.Client    `gorm:"embedded"`
+	ProjectCount     int64   `gorm:"column:project_count"`
+	LatestActivityAt *string `gorm:"column:latest_activity_at"`
 }
 
 type deletedClientResponse struct {
@@ -635,7 +637,8 @@ const clientSelectColumns = `
 	clients.version,
 	clients.created_at,
 	clients.updated_at,
-	(SELECT COUNT(*) FROM projects WHERE projects.client_id = clients.id) AS project_count
+	(SELECT COUNT(*) FROM projects WHERE projects.client_id = clients.id) AS project_count,
+	(SELECT MAX(occurred_at) FROM client_activities WHERE client_id = clients.id AND deleted_at IS NULL) AS latest_activity_at
 `
 
 func loadClientRow(db *gorm.DB, id string) (clientRow, error) {
@@ -648,9 +651,14 @@ func loadClientRow(db *gorm.DB, id string) (clientRow, error) {
 }
 
 func clientResponseFromRow(row clientRow) clientResponse {
+	latestActivityAt := row.LatestActivityAt
+	if latestActivityAt != nil {
+		normalized := normalizeTimestamp(*latestActivityAt)
+		latestActivityAt = &normalized
+	}
 	return clientResponse{
 		ID: row.ID, Name: row.Name, ContactName: row.ContactName, Email: row.Email,
 		Phone: row.Phone, Notes: row.Notes, Status: row.Status, ProjectCount: row.ProjectCount,
-		Version: row.Version, CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),
+		LatestActivityAt: latestActivityAt, Version: row.Version, CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),
 	}
 }

@@ -312,7 +312,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("close database before restore: %v", err)
 	}
 
-	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 17)
+	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 18)
 	if err != nil {
 		t.Fatalf("ApplyPendingRestore() error = %v", err)
 	}
