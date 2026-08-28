@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
 import type { Task } from "../types/models";
@@ -73,14 +74,23 @@ const task: Task = {
   tags: [],
 };
 
-function renderModal() {
+function CurrentLocation() {
+  return (
+    <output data-testid="current-location">{useLocation().pathname}</output>
+  );
+}
+
+function renderModal(initialEntry = "/tasks") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <TaskDetailModal />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <QueryClientProvider client={queryClient}>
+        <TaskDetailModal />
+        <CurrentLocation />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -169,6 +179,17 @@ describe("TaskDetailModal", () => {
       ),
     );
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
+  });
+
+  it("hydrates and closes a refreshable task detail route", async () => {
+    useUiStore.setState({ taskDetailId: null });
+    renderModal(`/tasks/${task.id}`);
+
+    expect(await screen.findByLabelText("任务名称")).toHaveValue(task.title);
+    expect(useUiStore.getState().taskDetailId).toBe(task.id);
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/tasks");
+    expect(useUiStore.getState().taskDetailId).toBeNull();
   });
 
   it("requires saving fact changes before a lifecycle command", async () => {

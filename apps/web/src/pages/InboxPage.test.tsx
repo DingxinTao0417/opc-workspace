@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { InboxItem } from "../types/models";
 import { InboxPage } from "./InboxPage";
 
@@ -167,7 +167,10 @@ describe("InboxPage", () => {
   const renderInbox = (initialEntry = "/inbox") =>
     render(
       <MemoryRouter initialEntries={[initialEntry]}>
-        <InboxPage />
+        <Routes>
+          <Route element={<InboxPage />} path="/inbox" />
+          <Route element={<InboxPage />} path="/inbox/:inboxItemId" />
+        </Routes>
       </MemoryRouter>,
     );
 
@@ -216,6 +219,15 @@ describe("InboxPage", () => {
     );
     expect(screen.getByRole("dialog", { name: "收件箱详情" })).toBeTruthy();
     expect(screen.getAllByText("整理需要人工确认的边界")).toHaveLength(2);
+  });
+
+  it("opens the exact inbox item from a refreshable detail route", async () => {
+    renderInbox(`/inbox/${item.id}`);
+
+    expect(
+      await screen.findByRole("dialog", { name: "收件箱详情" }),
+    ).toBeVisible();
+    expect(hooks.detail).toHaveBeenCalledWith(item.id);
   });
 
   it("passes view, search, priority, and paging facts to the server query", () => {

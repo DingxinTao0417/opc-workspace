@@ -38,6 +38,7 @@ export default function App() {
           <Route element={<Navigate replace to={`/${defaultRoute}`} />} index />
           <Route element={<TodayPage />} path="today" />
           <Route element={<TasksPage />} path="tasks" />
+          <Route element={<TasksPage />} path="tasks/:taskId" />
           <Route element={<ProjectsPage />} path="projects" />
           <Route element={<ProjectDetailPage />} path="projects/:projectId" />
           <Route element={<ClientsPage />} path="clients" />
@@ -45,6 +46,7 @@ export default function App() {
           <Route element={<IncomePage />} path="income" />
           <Route element={<InvoicesPage />} path="invoices" />
           <Route element={<InboxPage />} path="inbox" />
+          <Route element={<InboxPage />} path="inbox/:inboxItemId" />
           <Route element={<FocusPage />} path="focus" />
           <Route element={<LaterPage type="roadmap" />} path="roadmap" />
           <Route

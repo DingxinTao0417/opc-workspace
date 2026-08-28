@@ -8,7 +8,7 @@ import {
   Search,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useInboxItemsQuery, useMarkAllInboxItemsRead } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -155,6 +155,8 @@ function mutationErrorMessage(error: unknown): string | null {
 
 export function InboxPage() {
   const [searchParams] = useSearchParams();
+  const { inboxItemId } = useParams<{ inboxItemId: string }>();
+  const navigate = useNavigate();
   const [view, setView] = useState<InboxItemView>("inbox");
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<InboxItemPriority | "">("");
@@ -181,6 +183,10 @@ export function InboxPage() {
     ),
   );
   const hasFilters = Boolean(search.trim() || priority || risk);
+
+  useEffect(() => {
+    setSelectedId(inboxItemId ?? null);
+  }, [inboxItemId]);
 
   useEffect(() => {
     const nextRisk = searchParams.get("risk");
@@ -392,7 +398,7 @@ export function InboxPage() {
                   <InboxRow
                     item={item}
                     key={item.id}
-                    onOpen={() => setSelectedId(item.id)}
+                    onOpen={() => navigate(`/inbox/${item.id}`)}
                     serverNow={query.data?.meta.serverNow ?? item.createdAt}
                     view={view}
                   />
@@ -408,7 +414,7 @@ export function InboxPage() {
                   <InboxRow
                     item={item}
                     key={item.id}
-                    onOpen={() => setSelectedId(item.id)}
+                    onOpen={() => navigate(`/inbox/${item.id}`)}
                     serverNow={query.data?.meta.serverNow ?? item.createdAt}
                     view={view}
                   />
@@ -445,19 +451,22 @@ export function InboxPage() {
 
       <InboxItemFormModal
         onClose={() => setCreating(false)}
-        onCreated={(item) => setSelectedId(item.id)}
+        onCreated={(item) => navigate(`/inbox/${item.id}`)}
         open={creating}
       />
       <InboxItemDetailModal
         itemId={selectedId}
-        onClose={() => setSelectedId(null)}
+        onClose={() => {
+          setSelectedId(null);
+          if (inboxItemId) navigate("/inbox", { replace: true });
+        }}
       />
       {managingReminders ? (
         <ReminderManagerModal
           onClose={() => setManagingReminders(false)}
           onOpenInboxItem={(id) => {
             setManagingReminders(false);
-            setSelectedId(id);
+            navigate(`/inbox/${id}`);
           }}
           open
         />

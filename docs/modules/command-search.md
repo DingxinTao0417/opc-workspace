@@ -1,6 +1,6 @@
 # 命令面板与全局搜索模块
 
-> 文档状态：部分实现；v0.1 目标是建立本地统一搜索、实体详情直达和可靠的键盘工作流。
+> 文档状态：核心本地搜索已实现；最近使用、健康诊断和 OS 全局快捷键仍待后续纵切。
 
 ## 定位与边界
 
@@ -26,17 +26,17 @@
 - 页面导航：今日、收件箱、任务、项目、客户和专注；未交付业务的收入/发票不注册为可执行命令。
 - 操作：新建任务、打开设置。
 - 设置命令可直达个人资料、通用、外观、专注、人员与责任及关于模块。
-- 输入 200 ms 后调用真实 Task 列表搜索，服务端在完整任务集合中匹配标题/描述并返回最近更新的前 12 条结果；选择结果直接打开精确 Task 详情。
-- 任务搜索具备加载、错误、重试和空结果反馈；页面与安全本地命令不依赖 Sidecar 搜索成功。
+- 输入 200 ms 后调用统一 `GET /api/v1/search`，一次搜索真实 Task、Project、Client 和活动 Inbox Item；命令面板读取首 12 条并通过稳定详情路由打开精确资源。
+- 业务搜索具备加载、错误、重试和空结果反馈；页面与安全本地命令不依赖 Sidecar 搜索成功。
+- Task 使用 `/tasks/:taskId`、Project 使用 `/projects/:projectId`、Client 使用 `/clients/:clientId`、Inbox 使用 `/inbox/:inboxItemId`；Task 与 Inbox 路由刷新后会恢复同一详情弹窗，不存在资源由详情查询明确报错。
 - 上下方向键、Enter、Escape、鼠标 hover 和空结果反馈；输入框使用 combobox/listbox 活动项关联。
 - 打开时聚焦搜索框并锁定背景滚动，Tab/Shift+Tab 圈闭在面板内，关闭后恢复原触发元素焦点；输入法组合期间忽略执行和 WebView 全局快捷键。
 
 当前限制：
 
-- 没有统一 `GET /api/v1/search`；当前只接 Task Provider，每次显示服务端匹配结果的前 12 条，需要继续输入关键词缩小范围。
-- 不是模糊搜索，没有关键词高亮、最近使用或相关性排序。
-- Task 结果已打开精确详情，但还没有可刷新/复制的稳定 Task 详情路由。
-- 不搜索项目、客户、收件箱、发票或后续知识库。
+- 第一阶段使用参数化 LIKE 基线，不是模糊搜索，也没有关键词高亮或最近使用。
+- 命令面板只读取统一搜索第一页 12 条；结果更多时需要继续输入关键词，API 本身支持稳定分页和类型筛选。
+- 发票、财务和知识库不在当前搜索类型中，只有对应模块真实交付后才会注册。
 - AppShell 虽每 15 秒查询健康状态，但命令面板不展示服务不可用或恢复动作。
 - 没有 OS 全局快捷键、快捷键冲突检测或自定义快捷键。
 
@@ -52,7 +52,7 @@
 
 ### 本地全局搜索
 
-- 通过 GET /api/v1/search?q= 查询已实现的 Task、Project、Client、Inbox Item；发票模块交付后再加入 Invoice。
+- 通过 `GET /api/v1/search?q=` 查询已实现的 Task、Project、Client、Inbox Item；发票模块交付后再加入 Invoice。
 - 结果至少包含 resource_type、resource_id、title、subtitle、matched_fields、route 和 updated_at。
 - 服务端支持分页、类型筛选、稳定排序和最小查询长度。
 - 第一阶段可用安全的规范化 LIKE 查询建立基线；数据量和相关性验证后再决定是否增加 SQLite FTS5。
@@ -117,11 +117,11 @@
 
 ### 搜索 API
 
-规划接口：
+当前接口：
 
 GET /api/v1/search?q=&types=&page=&page_size=
 
-建议响应契约：
+响应契约：
 
 | 字段                        | 含义                       |
 | --------------------------- | -------------------------- |
@@ -131,9 +131,11 @@ GET /api/v1/search?q=&types=&page=&page_size=
 | route                       | 应用内详情路由             |
 | status                      | 用于判断可用操作的资源状态 |
 | updated_at                  | 稳定排序和陈旧判断         |
-| pagination                  | 页码、大小和是否还有下一页 |
+| `meta.page/page_size/total` | 稳定页码、大小和总数       |
 
-当前 PRD 已锁定 GET /api/v1/search?q= 方向；具体 types 和分页参数在实现前通过 API 契约测试冻结。
+`q` 去空格后必须非空且最多 200 个 Unicode 字符。`types` 可为逗号分隔值或重复参数，只接受 `task / project / client / inbox_item` 并按固定类型顺序去重；默认查询全部类型。`page` 默认 1，`page_size` 默认 20、最大 100。查询对 `%`、`_` 和反斜杠做 LIKE 转义并全程参数化。
+
+相关性按“标题/名称精确匹配 → 标题/名称前缀 → 标题/名称包含 → 允许的次要字段包含”排序，再按更新时间倒序、资源类型和资源 ID 固定兜底。允许字段为 Task 标题/描述、Project 名称/描述、Client 名称/联系人/邮箱/电话、Inbox 标题/说明；响应显式返回 `matched_fields`。归档 Project 和 resolved/dismissed Inbox 不返回可执行结果，硬删除资源天然不在结果中。
 
 ### 命令状态
 
@@ -158,7 +160,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 ## 与其他模块协作
 
 - [任务](tasks.md)：任务搜索、详情直达、新建和开始专注；状态命令仍由 Task API校验。
-- [项目](projects.md)、[客户](clients.md)：详情路由已交付；全局搜索 Provider 尚未接入。 [收件箱](inbox.md) 仍需在模块交付后注册 Provider 和详情路由。
+- [项目](projects.md)、[客户](clients.md)、[收件箱](inbox.md)：均已接入统一搜索和精确详情路由；归档 Project 与终态 Inbox 不产生陈旧搜索命令。
 - [财务与发票](finance-invoices.md)：v0.4 交付后才启用发票搜索与生成入口。
 - [专注](focus.md)：选择任务启动专注，存在活动 Session 时先进入确认流程。
 - [设置](settings.md)：打开指定设置模块，展示快捷键和搜索偏好。
@@ -173,16 +175,16 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - **已完成**：指定设置模块、Task 精确详情打开和未实现收入/发票命令移除。
 - **已完成**：焦点圈闭、关闭后恢复、combobox/listbox 关联、输入法组合保护和键盘边界自动化测试；真实浏览器/桌面 WebView 验收仍待执行。
 
-### v0.1-B：统一本地搜索（Task 基线已交付）
+### v0.1-B：统一本地搜索（已交付）
 
-- 定义 SearchResult 契约和 GET /api/v1/search。
-- 接入 Task、Project、Client 和 Inbox Item；只查询已经真实交付的模块。
-- 增加分页、类型筛选、参数化查询、相关性与性能测试。
-- 已移除“预加载第一页再 slice(0, 12)”作为任务搜索事实的做法；统一多实体 API 仍待实现。
+- **已完成**：定义 strict SearchResult 契约和 `GET /api/v1/search`。
+- **已完成**：接入 Task、Project、Client 和活动 Inbox Item，只查询已经真实交付的模块。
+- **已完成**：分页、类型筛选、参数化/转义查询、确定性相关性排序和输入/返回上限测试。
+- **已完成**：命令面板改用统一 API，不再以 Task 列表接口充当全局搜索。
 
-### v0.1-C：详情直达与健康反馈
+### v0.1-C：详情直达与健康反馈（详情路由已交付）
 
-- 为各实体建立稳定详情路由和不存在状态。
+- **已完成**：为 Task、Project、Client 和 Inbox 建立稳定详情路由和不存在状态。
 - 接入 Sidecar health/version，提供搜索重试和诊断入口。
 - 记录有上限的最近使用，并处理资源删除与归档。
 
@@ -198,7 +200,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - Ctrl/Cmd+K 和 Ctrl/Cmd+N 在当前 WebView 内可靠工作，不干扰文本输入和输入法组合。
 - 命令面板可完全使用键盘操作，并在关闭后恢复触发元素焦点。
 - 搜索不受任务第一页 100 项或前 12 项限制，能定位匹配的真实任务。
-- Task、Project、Client 和 Inbox Item 只在对应模块交付后返回真实结果。
+- Task、Project、Client 和 Inbox Item 只返回真实、仍可打开的本地结果。
 - 选择搜索结果打开指定资源详情，刷新路由仍能定位同一 ID。
 - Sidecar 不可用时仍可导航本地页面，并明确显示搜索不可用与重试入口。
 - 查询完全本地执行，日志和最近使用不保存完整敏感正文。
@@ -206,7 +208,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - 高风险操作不能从命令面板绕过确认、验收或权限检查。
 - 参数化查询、输入长度、分页和性能边界有测试；特殊字符不会形成 SQL 注入。
 - OS 全局快捷键只有在平台实际注册成功后才显示为可用。
-- 搜索、空结果、错误、键盘导航和焦点行为通过真实浏览器验证。
+- 搜索契约、空结果、错误、重试、键盘导航、焦点行为和稳定详情路由有自动化测试；真实浏览器/WebView 视觉与焦点仍需人工验收。
 
 ## 相关代码/PRD链接
 
@@ -214,6 +216,8 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - [PRD：T-13 命令面板、快捷键与反馈状态](../opc-workspace-PRD.md#10413-t-13-命令面板快捷键与反馈状态)
 - [PRD：全局快捷键](../opc-workspace-PRD.md#85-全局快捷键)
 - [当前命令面板](../../apps/web/src/components/CommandPalette.tsx)
+- [统一搜索 API](../../services/sidecar/internal/api/search.go)
+- [统一搜索 API 测试](../../services/sidecar/internal/api/search_test.go)
 - [当前 WebView 快捷键](../../apps/web/src/App.tsx)
 - [当前任务查询](../../apps/web/src/api/hooks.ts)
 - [当前 API 客户端](../../apps/web/src/api/client.ts)

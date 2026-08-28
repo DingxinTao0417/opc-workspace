@@ -66,6 +66,7 @@ import {
   getInboxItems,
   getReminder,
   getReminders,
+  getSearchResults,
   getTags,
   getTask,
   getTaskArtifact,
@@ -153,6 +154,7 @@ import type {
   ProjectListParams,
   ProjectTransitionAction,
   ReminderListParams,
+  SearchListParams,
   ReorderTasksInput,
   SplitInboxItemInput,
   TagInput,
@@ -182,6 +184,19 @@ import type {
 } from "../types/models";
 
 export const settingsQueryKey = ["settings"] as const;
+
+export const searchQueryKey = ["search"] as const;
+
+export function useSearchQuery(input: SearchListParams, enabled = true) {
+  return useQuery({
+    queryKey: [...searchQueryKey, input],
+    queryFn: () => getSearchResults(input),
+    enabled,
+    retry: 1,
+    retryDelay: 500,
+    staleTime: 5_000,
+  });
+}
 
 export const backupQueryKey = ["backups"] as const;
 

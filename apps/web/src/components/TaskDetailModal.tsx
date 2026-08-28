@@ -1,5 +1,6 @@
 import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useDeleteTask,
@@ -89,6 +90,11 @@ function mutationErrorMessage(error: unknown): string | null {
 export function TaskDetailModal() {
   const taskId = useUiStore((state) => state.taskDetailId);
   const setTaskId = useUiStore((state) => state.setTaskDetailId);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routedTaskId = matchPath("/tasks/:taskId", location.pathname)?.params
+    .taskId;
+  const previousRoutedTaskId = useRef<string | null>(null);
   const query = useTaskQuery(taskId);
   const updateMutation = useUpdateTask();
   const deleteMutation = useDeleteTask();
@@ -127,6 +133,18 @@ export function TaskDetailModal() {
   const busy = taskWriteBusy || assignmentBusy || workflowBusy || outputBusy;
   const skipNextHydrate = useRef(false);
   const hydratedTaskId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (routedTaskId) {
+      previousRoutedTaskId.current = routedTaskId;
+      setTaskId(routedTaskId);
+      return;
+    }
+    if (previousRoutedTaskId.current) {
+      previousRoutedTaskId.current = null;
+      setTaskId(null);
+    }
+  }, [routedTaskId, setTaskId]);
 
   const hydrate = (value: Task) => {
     setTitle(value.title);
@@ -207,6 +225,7 @@ export function TaskDetailModal() {
     setConflictRefreshing(false);
     setValidationError(null);
     setTaskId(null);
+    if (routedTaskId) navigate("/tasks", { replace: true });
   };
 
   const refreshTask = async (): Promise<Task | null> => {

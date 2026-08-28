@@ -13,8 +13,9 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useTaskPageQuery } from "../api/hooks";
+import { useSearchQuery } from "../api/hooks";
 import { useUiStore, type SettingsModule } from "../store/ui";
+import type { SearchResourceType } from "../types/models";
 
 interface Command {
   id: string;
@@ -47,22 +48,31 @@ const settingsCommands: {
   { id: "settings-about", label: "关于", module: "about" },
 ];
 
+const searchResourcePresentation: Record<
+  SearchResourceType,
+  { label: string; icon: LucideIcon }
+> = {
+  task: { label: "任务", icon: Clock3 },
+  project: { label: "项目", icon: FolderKanban },
+  client: { label: "客户", icon: Users },
+  inbox_item: { label: "收件箱", icon: Inbox },
+};
+
 export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
-  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [taskQuery, setTaskQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const normalizedQuery = query.trim();
-  const tasksQuery = useTaskPageQuery(
-    { q: taskQuery, page: 1, pageSize: 12, sort: "-updated_at" },
-    open && taskQuery.length > 0,
+  const resourcesQuery = useSearchQuery(
+    { q: searchQuery, page: 1, pageSize: 12 },
+    open && searchQuery.length > 0,
   );
 
   const closeAndNavigate = (to: string) => {
@@ -138,19 +148,19 @@ export function CommandPalette() {
     return pageCommands;
   }, [navigate, setNewTaskOpen, setOpen, setSettingsOpen]);
 
-  const taskCommands = useMemo<Command[]>(() => {
-    const taskSource = tasksQuery.data?.items ?? [];
-    return taskSource.map((task) => ({
-      id: `task-${task.id}`,
-      label: task.title,
-      hint: `本地任务 · ${task.status}`,
-      icon: Clock3,
+  const resourceCommands = useMemo<Command[]>(() => {
+    const resourceSource = resourcesQuery.data?.items ?? [];
+    return resourceSource.map((resource) => ({
+      id: `${resource.resourceType}-${resource.resourceId}`,
+      label: resource.title,
+      hint: `本地${searchResourcePresentation[resource.resourceType].label} · ${resource.subtitle || resource.status}`,
+      icon: searchResourcePresentation[resource.resourceType].icon,
       run: () => {
         setOpen(false);
-        setTaskDetailId(task.id);
+        navigate(resource.route);
       },
     }));
-  }, [setOpen, setTaskDetailId, tasksQuery.data]);
+  }, [navigate, resourcesQuery.data, setOpen]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -163,16 +173,17 @@ export function CommandPalette() {
   }, [commands, query]);
 
   const results = useMemo(
-    () => (taskQuery ? [...filtered, ...taskCommands] : filtered),
-    [filtered, taskCommands, taskQuery],
+    () => (searchQuery ? [...filtered, ...resourceCommands] : filtered),
+    [filtered, resourceCommands, searchQuery],
   );
 
   useEffect(() => {
     if (!open || !normalizedQuery) {
-      setTaskQuery("");
+      setSearchQuery("");
       return;
     }
-    const timer = window.setTimeout(() => setTaskQuery(normalizedQuery), 200);
+    setSearchQuery("");
+    const timer = window.setTimeout(() => setSearchQuery(normalizedQuery), 200);
     return () => window.clearTimeout(timer);
   }, [normalizedQuery, open]);
 
@@ -185,7 +196,7 @@ export function CommandPalette() {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     setQuery("");
-    setTaskQuery("");
+    setSearchQuery("");
     setActiveIndex(0);
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => {
@@ -283,9 +294,9 @@ export function CommandPalette() {
             aria-autocomplete="list"
             aria-controls="command-results"
             aria-expanded="true"
-            aria-label="搜索页面或任务"
+            aria-label="搜索页面、业务或操作"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索页面、任务或操作…"
+            placeholder="搜索任务、项目、客户、收件箱或操作…"
             ref={inputRef}
             role="combobox"
             value={query}
@@ -316,18 +327,21 @@ export function CommandPalette() {
                 </button>
               );
             })
-          ) : (normalizedQuery && !taskQuery) ||
-            (tasksQuery.isPending && taskQuery) ? (
+          ) : (normalizedQuery && !searchQuery) ||
+            (resourcesQuery.isPending && searchQuery) ? (
             <div aria-live="polite" className="command-empty">
-              正在搜索本地任务…
+              正在搜索本地业务…
             </div>
-          ) : !tasksQuery.isError ? (
+          ) : !resourcesQuery.isError ? (
             <div className="command-empty">没有匹配结果</div>
           ) : null}
-          {tasksQuery.isError && taskQuery ? (
+          {resourcesQuery.isError && searchQuery ? (
             <div className="command-search-error" role="alert">
-              <span>任务搜索暂时不可用。</span>
-              <button onClick={() => void tasksQuery.refetch()} type="button">
+              <span>本地业务搜索暂时不可用。</span>
+              <button
+                onClick={() => void resourcesQuery.refetch()}
+                type="button"
+              >
                 重试
               </button>
             </div>

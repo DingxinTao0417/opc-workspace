@@ -605,6 +605,31 @@ export interface PageMeta {
   total: number;
 }
 
+export type SearchResourceType = "task" | "project" | "client" | "inbox_item";
+
+export interface SearchResult {
+  resourceType: SearchResourceType;
+  resourceId: string;
+  title: string;
+  subtitle: string;
+  matchedFields: string[];
+  route: string;
+  status: string;
+  updatedAt: string;
+}
+
+export interface SearchListParams {
+  q: string;
+  types?: SearchResourceType[];
+  page?: number;
+  pageSize?: number;
+}
+
+export interface SearchListResult {
+  items: SearchResult[];
+  meta: PageMeta;
+}
+
 export interface TaskListResult {
   items: Task[];
   meta: PageMeta;

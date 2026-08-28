@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v20。项目/任务/Actor、Project 追加式活动时间线、D2 Submission/Artifact、Task 保存视图、Client 基础事实/人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a（终态历史/七日趋势/Streak/Task 详情记录）、Today T-06A–H、设置前后端闭环、手动一致性备份完整闭环、桌面安全重启、基础业务 JSON 导出、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D2b/高级分析、客户外部活动来源、非 Reminder 来源投影、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务及项目产出/附件/人工笔记仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v20。项目/任务/Actor、Project 追加式活动时间线、D2 Submission/Artifact、Task 保存视图、Client 基础事实/人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a（终态历史/七日趋势/Streak/Task 详情记录）、Today T-06A–H、设置前后端闭环、统一本地搜索与核心详情直达、手动一致性备份完整闭环、桌面安全重启、基础业务 JSON 导出、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D2b/高级分析、客户外部活动来源、非 Reminder 来源投影、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务及项目产出/附件/人工笔记仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v5.7）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v5.8）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -33,7 +33,7 @@
 | -------------------------- | ------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
 | 本地 Agent Runtime         | 未开始                                                                                | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                              | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
-| 命令面板与搜索             | 部分完成                                                                              | v0.1                | [command-search.md](modules/command-search.md)     |
+| 命令面板与搜索             | 核心本地搜索与详情直达完成；最近使用/健康诊断/OS 快捷键待后续                         | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、手动备份完整闭环及基础业务 JSON 导出已交付；导入/含文件包待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
 | 桌面平台与发布             | 基座部分完成                                                                          | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 

@@ -188,6 +188,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/actors", service.createActor)
 		v1.GET("/actors/:id", service.getActor)
 		v1.PATCH("/actors/:id", service.updateActor)
+		v1.GET("/search", service.search)
 		v1.GET("/tasks", service.listTasks)
 		v1.POST("/tasks", service.createTask)
 		v1.GET("/task-saved-views", service.listTaskSavedViews)
