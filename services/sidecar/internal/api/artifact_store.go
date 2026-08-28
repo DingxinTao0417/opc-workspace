@@ -65,6 +65,21 @@ type artifactStoreMarker struct {
 	StoreID       string `json:"store_id"`
 }
 
+type controlledFileRecord struct {
+	id              string
+	relativePath    string
+	sizeBytes       int64
+	sha256          string
+	integrityStatus string
+	deletedAt       *string
+	kind            string
+}
+
+type controlledFileTombstone struct {
+	sizeBytes int64
+	sha256    string
+}
+
 func newArtifactStore(root, databaseID, boundStoreID string) (*artifactStore, error) {
 	if strings.TrimSpace(root) == "" {
 		return nil, errors.New("Artifact root is required")
@@ -378,20 +393,18 @@ func (s *artifactStore) reconcileQuarantine(db *gorm.DB) error {
 		if err != nil || !info.Mode().IsRegular() {
 			continue
 		}
-		var artifact models.TaskArtifact
-		err = db.Select("id", "storage_kind", "relative_path", "size_bytes", "sha256", "deleted_at").
-			First(&artifact, "id = ?", artifactID).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		artifact, found, err := loadControlledFile(db, artifactID)
+		if err != nil {
 			return err
 		}
 		quarantinePath := filepath.Join(s.quarantineDir, entry.Name())
-		if errors.Is(err, gorm.ErrRecordNotFound) || artifact.DeletedAt != nil {
+		if !found || artifact.deletedAt != nil {
 			tombstone, found, err := loadArtifactDeletionTombstone(db, artifactID)
 			if err != nil {
 				return err
 			}
 			if found {
-				matches, err := artifactFileMatches(quarantinePath, tombstone.SizeBytes, tombstone.SHA256)
+				matches, err := artifactFileMatches(quarantinePath, tombstone.sizeBytes, tombstone.sha256)
 				if err != nil {
 					return err
 				}
@@ -403,10 +416,7 @@ func (s *artifactStore) reconcileQuarantine(db *gorm.DB) error {
 			}
 			continue
 		}
-		if artifact.StorageKind != "file" || artifact.RelativePath == nil || artifact.SizeBytes == nil || artifact.SHA256 == nil {
-			continue
-		}
-		livePath, err := s.resolveObject(*artifact.RelativePath)
+		livePath, err := s.resolveObject(artifact.relativePath)
 		if err != nil {
 			return err
 		}
@@ -418,7 +428,7 @@ func (s *artifactStore) reconcileQuarantine(db *gorm.DB) error {
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
-		matches, err := artifactFileMatches(quarantinePath, *artifact.SizeBytes, *artifact.SHA256)
+		matches, err := artifactFileMatches(quarantinePath, artifact.sizeBytes, artifact.sha256)
 		if err != nil {
 			return err
 		}
@@ -435,28 +445,79 @@ func (s *artifactStore) reconcileQuarantine(db *gorm.DB) error {
 	return nil
 }
 
-func loadArtifactDeletionTombstone(db *gorm.DB, artifactID string) (models.ArtifactDeletionTombstone, bool, error) {
-	var tombstone models.ArtifactDeletionTombstone
-	err := db.First(&tombstone, "artifact_id = ?", artifactID).Error
+func loadControlledFile(db *gorm.DB, id string) (controlledFileRecord, bool, error) {
+	var artifact models.TaskArtifact
+	err := db.Select("id", "relative_path", "size_bytes", "sha256", "integrity_status", "deleted_at").
+		Where("id = ? AND storage_kind = 'file'", id).First(&artifact).Error
+	if err == nil {
+		if artifact.RelativePath == nil || artifact.SizeBytes == nil || artifact.SHA256 == nil {
+			return controlledFileRecord{}, false, errors.New("file Artifact has incomplete storage facts")
+		}
+		return controlledFileRecord{
+			id: artifact.ID, relativePath: *artifact.RelativePath, sizeBytes: *artifact.SizeBytes,
+			sha256: *artifact.SHA256, integrityStatus: artifact.IntegrityStatus,
+			deletedAt: artifact.DeletedAt, kind: "task_artifact",
+		}, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return controlledFileRecord{}, false, err
+	}
+	var attachment models.ClientAttachment
+	err = db.Select("id", "relative_path", "size_bytes", "sha256", "integrity_status", "deleted_at").
+		First(&attachment, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return models.ArtifactDeletionTombstone{}, false, nil
+		return controlledFileRecord{}, false, nil
 	}
 	if err != nil {
-		return models.ArtifactDeletionTombstone{}, false, err
+		return controlledFileRecord{}, false, err
 	}
-	return tombstone, true, nil
+	return controlledFileRecord{
+		id: attachment.ID, relativePath: attachment.RelativePath, sizeBytes: attachment.SizeBytes,
+		sha256: attachment.SHA256, integrityStatus: attachment.IntegrityStatus,
+		deletedAt: attachment.DeletedAt, kind: "client_attachment",
+	}, true, nil
 }
 
-func markRecoveredArtifactIntegrity(db *gorm.DB, artifactID, status string) error {
+func loadArtifactDeletionTombstone(db *gorm.DB, id string) (controlledFileTombstone, bool, error) {
+	var artifact models.ArtifactDeletionTombstone
+	err := db.First(&artifact, "artifact_id = ?", id).Error
+	if err == nil {
+		return controlledFileTombstone{sizeBytes: artifact.SizeBytes, sha256: artifact.SHA256}, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return controlledFileTombstone{}, false, err
+	}
+	var attachment models.ClientAttachmentDeletionTombstone
+	err = db.First(&attachment, "attachment_id = ?", id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return controlledFileTombstone{}, false, nil
+	}
+	if err != nil {
+		return controlledFileTombstone{}, false, err
+	}
+	return controlledFileTombstone{sizeBytes: attachment.SizeBytes, sha256: attachment.SHA256}, true, nil
+}
+
+func markRecoveredArtifactIntegrity(db *gorm.DB, id, status string) error {
+	record, found, err := loadControlledFile(db, id)
+	if err != nil {
+		return err
+	}
+	if !found || record.deletedAt != nil {
+		return errors.New("recovered controlled file row is no longer active")
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result := db.Model(&models.TaskArtifact{}).
-		Where("id = ? AND deleted_at IS NULL", artifactID).
+	model := any(&models.TaskArtifact{})
+	if record.kind == "client_attachment" {
+		model = &models.ClientAttachment{}
+	}
+	result := db.Model(model).Where("id = ? AND deleted_at IS NULL", id).
 		Updates(map[string]any{"integrity_status": status, "integrity_checked_at": now})
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected != 1 {
-		return errors.New("recovered Artifact row is no longer active")
+		return errors.New("recovered controlled file row is no longer active")
 	}
 	return nil
 }
@@ -513,19 +574,17 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 			continue
 		}
 		trashPath := filepath.Join(s.trashDir, name)
-		var artifact models.TaskArtifact
-		err = db.Select("id", "storage_kind", "relative_path", "size_bytes", "sha256", "integrity_status", "deleted_at").
-			First(&artifact, "id = ?", artifactID).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		artifact, found, err := loadControlledFile(db, artifactID)
+		if err != nil {
 			return err
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) || artifact.DeletedAt != nil || artifact.StorageKind != "file" || artifact.RelativePath == nil {
+		if !found || artifact.deletedAt != nil {
 			tombstone, found, err := loadArtifactDeletionTombstone(db, artifactID)
 			if err != nil {
 				return err
 			}
 			if found {
-				matches, err := artifactFileMatches(trashPath, tombstone.SizeBytes, tombstone.SHA256)
+				matches, err := artifactFileMatches(trashPath, tombstone.sizeBytes, tombstone.sha256)
 				if err != nil {
 					return err
 				}
@@ -541,10 +600,7 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 			}
 			continue
 		}
-		if artifact.SizeBytes == nil || artifact.SHA256 == nil {
-			return errors.New("active file Artifact has incomplete integrity metadata")
-		}
-		livePath, err := s.resolveObject(*artifact.RelativePath)
+		livePath, err := s.resolveObject(artifact.relativePath)
 		if err != nil {
 			return err
 		}
@@ -552,11 +608,11 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 			if !liveInfo.Mode().IsRegular() || liveInfo.Mode()&os.ModeSymlink != 0 {
 				return errors.New("active Artifact path is not a regular file")
 			}
-			liveMatches, err := artifactFileMatches(livePath, *artifact.SizeBytes, *artifact.SHA256)
+			liveMatches, err := artifactFileMatches(livePath, artifact.sizeBytes, artifact.sha256)
 			if err != nil {
 				return err
 			}
-			trashMatches, err := artifactFileMatches(trashPath, *artifact.SizeBytes, *artifact.SHA256)
+			trashMatches, err := artifactFileMatches(trashPath, artifact.sizeBytes, artifact.sha256)
 			if err != nil {
 				return err
 			}
@@ -565,7 +621,7 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 				if err := removeArtifactFileDurably(trashPath); err != nil {
 					return err
 				}
-				if artifact.IntegrityStatus != "verified" {
+				if artifact.integrityStatus != "verified" {
 					if err := markRecoveredArtifactIntegrity(db, artifactID, "verified"); err != nil {
 						return err
 					}
@@ -574,7 +630,7 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 				if err := s.quarantineFile(trashPath, name); err != nil {
 					return err
 				}
-				if artifact.IntegrityStatus != "verified" {
+				if artifact.integrityStatus != "verified" {
 					if err := markRecoveredArtifactIntegrity(db, artifactID, "verified"); err != nil {
 						return err
 					}
@@ -601,7 +657,7 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 		} else if !errors.Is(statErr, os.ErrNotExist) {
 			return statErr
 		}
-		matches, err := artifactFileMatches(trashPath, *artifact.SizeBytes, *artifact.SHA256)
+		matches, err := artifactFileMatches(trashPath, artifact.sizeBytes, artifact.sha256)
 		if err != nil {
 			return err
 		}
@@ -617,7 +673,7 @@ func (s *artifactStore) reconcileTrash(db *gorm.DB) error {
 		if err := moveFileNoReplace(trashPath, livePath); err != nil {
 			return fmt.Errorf("restore uncommitted Artifact trash entry: %w", err)
 		}
-		if artifact.IntegrityStatus != "verified" {
+		if artifact.integrityStatus != "verified" {
 			if err := markRecoveredArtifactIntegrity(db, artifactID, "verified"); err != nil {
 				return err
 			}
@@ -647,21 +703,18 @@ func (s *artifactStore) reconcileObjects(db *gorm.DB) error {
 			continue
 		}
 		relative := filepath.ToSlash(filepath.Join("objects", entry.Name()))
-		var artifact models.TaskArtifact
-		err = db.Select("id", "size_bytes", "sha256", "integrity_status").
-			Where("id = ? AND storage_kind = 'file' AND relative_path = ? AND deleted_at IS NULL", entry.Name(), relative).
-			First(&artifact).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		artifact, found, err := loadControlledFile(db, entry.Name())
+		if err != nil {
 			return err
 		}
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if !found || artifact.deletedAt != nil || artifact.relativePath != relative {
 			objectPath := filepath.Join(s.objectsDir, entry.Name())
 			tombstone, found, err := loadArtifactDeletionTombstone(db, entry.Name())
 			if err != nil {
 				return err
 			}
 			if found {
-				matches, err := artifactFileMatches(objectPath, tombstone.SizeBytes, tombstone.SHA256)
+				matches, err := artifactFileMatches(objectPath, tombstone.sizeBytes, tombstone.sha256)
 				if err != nil {
 					return err
 				}
@@ -677,13 +730,13 @@ func (s *artifactStore) reconcileObjects(db *gorm.DB) error {
 			}
 			continue
 		}
-		if artifact.IntegrityStatus != "verified" && artifact.SizeBytes != nil && artifact.SHA256 != nil {
-			matches, err := artifactFileMatches(filepath.Join(s.objectsDir, entry.Name()), *artifact.SizeBytes, *artifact.SHA256)
+		if artifact.integrityStatus != "verified" {
+			matches, err := artifactFileMatches(filepath.Join(s.objectsDir, entry.Name()), artifact.sizeBytes, artifact.sha256)
 			if err != nil {
 				return err
 			}
 			if matches {
-				if err := markRecoveredArtifactIntegrity(db, artifact.ID, "verified"); err != nil {
+				if err := markRecoveredArtifactIntegrity(db, artifact.id, "verified"); err != nil {
 					return err
 				}
 			}

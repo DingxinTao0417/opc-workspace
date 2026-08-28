@@ -19,6 +19,7 @@ import {
 } from "../api/hooks";
 import { ClientFormModal } from "../components/ClientFormModal";
 import { ClientActivitiesSection } from "../components/ClientActivitiesSection";
+import { ClientAttachmentsSection } from "../components/ClientAttachmentsSection";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import type { ClientStatus, ProjectStatus } from "../types/models";
@@ -325,6 +326,11 @@ export function ClientDetailPage() {
 
       <ClientActivitiesSection clientId={client.id} />
 
+      <ClientAttachmentsSection
+        clientId={client.id}
+        clientVersion={client.version}
+      />
+
       <section className="client-future-grid" aria-label="后续客户能力">
         <article>
           <strong>收入与发票</strong>
@@ -332,8 +338,8 @@ export function ClientDetailPage() {
           <span>后续版本</span>
         </article>
         <article>
-          <strong>附件与回访</strong>
-          <p>受控客户附件和回访计划仍属后续纵切，不自动发送任何外部消息。</p>
+          <strong>客户回访</strong>
+          <p>回访计划属于后续业务版本，不自动发送任何外部消息。</p>
           <span>后续版本</span>
         </article>
       </section>

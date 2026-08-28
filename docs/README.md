@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v18。项目/任务/Actor、D2 Submission/Artifact、Task 保存视图、Client 基础事实与人工活动时间线、Focus Core A+B+C、Today T-06A–H、设置前后端闭环、手动一致性备份完整闭环、桌面安全重启、基础业务 JSON 导出、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D、客户附件/外部活动来源、非 Reminder 来源投影、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务及项目附件/事件仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v19。项目/任务/Actor、D2 Submission/Artifact、Task 保存视图、Client 基础事实/人工活动/受控附件、Focus Core A+B+C、Today T-06A–H、设置前后端闭环、手动一致性备份完整闭环、桌面安全重启、基础业务 JSON 导出、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D、客户外部活动来源/Actor 关联、非 Reminder 来源投影、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务及项目附件/事件仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v5.2）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v5.3）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -55,7 +55,7 @@
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
-- Task 文件 Artifact 只保存在 Sidecar 声明的受控目录并经鉴权 API 下载；受控根通过不可变数据库身份 marker、进程独占锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用已能完整管理 SQLite+Artifact 内部备份，并可下载不含文件正文的白名单业务 JSON；含文件外部包和数据导入仍未实现。
+- Task file Artifact 与 Client Attachment 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；schema v19 保证跨表 object ID 唯一，受控根通过不可变数据库身份 marker、进程独占锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用已能完整管理 SQLite+两类 active objects 的内部备份，并可下载不含文件正文的白名单业务 JSON；含文件外部包和数据导入仍未实现。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。
@@ -77,16 +77,17 @@
 
 ## 核心术语
 
-| 术语            | 含义                                                                                    |
-| --------------- | --------------------------------------------------------------------------------------- |
-| Inbox Item      | 说明为什么需要处理、来源和跟进策略，不承担任务执行状态                                  |
-| Inbox–Task 关系 | 保存活动/历史关联、required、顺序和软解除；进度实时从 Task 派生                         |
-| Task            | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略                              |
-| Actor           | 本地责任主体：owner、person、agent、system                                              |
-| Assignment      | Task 当前负责人和历史改派记录                                                           |
-| Task Submission | 一次产出提交批次，保存摘要、pending/accepted/changes_requested/withdrawn 状态与操作责任 |
-| Agent Run       | 本地 Agent 的一次执行尝试；成功不等于 Task 完成                                         |
-| Task Artifact   | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计     |
-| Reminder        | 本地调度事实；到期后幂等生成 Inbox Item                                                 |
-| Workflow Event  | 创建、拆分、分派、执行、验收和返工的追加式审计时间线                                    |
-| Focus Session   | 服务端持久化的一次工作段；interval 保存实际计入区间，前端 ticker 只派生显示             |
+| 术语              | 含义                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| Inbox Item        | 说明为什么需要处理、来源和跟进策略，不承担任务执行状态                                  |
+| Inbox–Task 关系   | 保存活动/历史关联、required、顺序和软解除；进度实时从 Task 派生                         |
+| Task              | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略                              |
+| Actor             | 本地责任主体：owner、person、agent、system                                              |
+| Assignment        | Task 当前负责人和历史改派记录                                                           |
+| Task Submission   | 一次产出提交批次，保存摘要、pending/accepted/changes_requested/withdrawn 状态与操作责任 |
+| Agent Run         | 本地 Agent 的一次执行尝试；成功不等于 Task 完成                                         |
+| Task Artifact     | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计     |
+| Client Attachment | 客户本地受控文件，可选关联 Activity，带完整性、软删除和聚合删除补偿                     |
+| Reminder          | 本地调度事实；到期后幂等生成 Inbox Item                                                 |
+| Workflow Event    | 创建、拆分、分派、执行、验收和返工的追加式审计时间线                                    |
+| Focus Session     | 服务端持久化的一次工作段；interval 保存实际计入区间，前端 ticker 只派生显示             |

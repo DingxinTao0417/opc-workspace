@@ -1,10 +1,10 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v18（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v19（2026-08-28）
 >
 > 版本边界：T-11A3 一次性本地 Reminder 已交付。重复提醒、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.2](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.3](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 
@@ -56,7 +56,7 @@ schema v14 的 `014_reminders.sql` 新增 `reminders`：
 - fired/cancelled 为不可变终态，Reminder 不允许硬删除；
 - 创建者和取消者必须是有效 Actor，当前公开 API 只使用内置 owner，触发事件由内置 system 记录。
 
-迁移为纯加法，不创建 demo Reminder，也不改写 schema v13 的 Task、Inbox、Client、Project、Focus 或 Artifact 事实。其后的 schema v15 仅增加 Inbox 编排校验，schema v16 增加 app_settings，schema v17 增加任务保存视图，schema v18 增加客户活动；后续迁移必须从 `019_*` 继续。
+迁移为纯加法，不创建 demo Reminder，也不改写 schema v13 的 Task、Inbox、Client、Project、Focus 或 Artifact 事实。其后的 schema v15 仅增加 Inbox 编排校验，schema v16 增加 app_settings，schema v17 增加任务保存视图，schema v18 增加客户活动，schema v19 增加客户附件；后续迁移必须从 `020_*` 继续。
 
 ## API 契约
 

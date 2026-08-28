@@ -2849,6 +2849,186 @@ kbd {
   line-height: 1.55;
 }
 
+.client-attachments-section {
+  margin-top: 12px;
+}
+
+.client-attachments-heading,
+.client-attachment-heading-actions,
+.client-attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.client-attachment-heading-actions .is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.client-attachments-section .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.client-attachment-upload {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+}
+
+.client-attachment-upload-fields {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.client-attachment-upload-fields label {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.client-attachment-upload-fields input,
+.client-attachment-delete-confirm input {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.client-attachment-upload-fields input:focus,
+.client-attachment-delete-confirm input:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.client-attachment-upload-fields small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-attachment-list {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.client-attachment-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.client-attachment-row:last-child {
+  border-bottom: 0;
+}
+
+.client-attachment-row.is-deleted {
+  background: var(--surface-soft);
+  opacity: 0.78;
+}
+
+.client-attachment-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.client-attachment-main {
+  min-width: 0;
+}
+
+.client-attachment-main strong,
+.client-attachment-main small,
+.client-attachment-deleted-note {
+  display: block;
+}
+
+.client-attachment-main strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-attachment-main small {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.client-attachment-deleted-note {
+  margin-top: 4px;
+  color: var(--danger-text);
+  font-size: 8px;
+}
+
+.client-attachment-integrity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--green-light);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.client-attachment-integrity.is-warning {
+  color: var(--orange);
+}
+
+.client-attachment-actions .danger:hover {
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--danger-text);
+}
+
+.client-attachment-delete-confirm {
+  grid-column: 2 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(229, 72, 77, 0.2);
+}
+
+.client-attachment-delete-confirm strong {
+  color: var(--text-secondary);
+  font-size: 9px;
+}
+
 .client-future-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7834,6 +8014,33 @@ kbd {
   .client-contact-grid,
   .client-activity-editor-grid,
   .client-future-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .client-attachments-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .client-attachment-heading-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .client-attachment-upload,
+  .client-attachment-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .client-attachment-upload > .button,
+  .client-attachment-integrity,
+  .client-attachment-actions {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .client-attachment-delete-confirm {
+    grid-column: 1 / -1;
     grid-template-columns: 1fr;
   }
 

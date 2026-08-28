@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
-	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -558,9 +557,8 @@ func verifyLiveRestore(databasePath, artifactRoot string, manifest backupManifes
 }
 
 func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, expectedCount int) error {
-	var rows []models.TaskArtifact
-	if err := db.Select("id", "relative_path", "size_bytes", "sha256").
-		Where("storage_kind = 'file' AND deleted_at IS NULL").Order("id ASC").Find(&rows).Error; err != nil {
+	rows, err := listActiveControlledFiles(db)
+	if err != nil {
 		return err
 	}
 	if len(rows) != expectedCount {
@@ -568,14 +566,14 @@ func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, expectedCount 
 	}
 	expected := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if row.RelativePath == nil || row.SizeBytes == nil || row.SHA256 == nil || *row.RelativePath != "objects/"+row.ID {
+		if row.RelativePath != "objects/"+row.ID {
 			return errors.New("restored Artifact storage facts are invalid")
 		}
-		path, err := artifacts.resolveObject(*row.RelativePath)
+		path, err := artifacts.resolveObject(row.RelativePath)
 		if err != nil {
 			return err
 		}
-		matched, err := artifactFileMatches(path, *row.SizeBytes, *row.SHA256)
+		matched, err := artifactFileMatches(path, row.SizeBytes, row.SHA256)
 		if err != nil || !matched {
 			return errors.New("restored Artifact object failed integrity verification")
 		}

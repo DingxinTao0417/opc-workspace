@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v18。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17 保存视图和 schema v18 客户活动不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“数据与备份”已接一致性备份完整闭环与基础业务 JSON 下载，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据导入和完整桌面诊断入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v19。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17–v19 的保存视图、客户活动与附件不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“数据与备份”已接一致性备份完整闭环与基础业务 JSON 下载，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据导入和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -145,7 +145,7 @@
 
 1. owner 打开“数据与备份”，页面读取内部 backup root 的已发布 UUID 包；损坏 manifest 显示 invalid，而不是从文件名猜测成功。
 2. owner 可填写最多 200 字说明并点击“立即备份”；前端为同一次尝试保留稳定 Idempotency-Key，显示长操作进行中并阻止重复点击。
-3. Sidecar 获取维护写锁，等待普通业务请求、Focus heartbeat 与 Reminder 扫描结束；随后用 `VACUUM INTO` 创建 SQLite 一致性快照并复制全部 active file Artifact 和身份 marker。
+3. Sidecar 获取维护写锁，等待普通业务请求、Focus heartbeat 与 Reminder 扫描结束；随后用 `VACUUM INTO` 创建 SQLite 一致性快照并复制全部 active Task Artifact / Client Attachment 文件和身份 marker。
 4. staging 包只有在逐项 size/SHA-256、预期文件全集、数据库 quick/foreign-key/schema/identity/active Artifact 校验全部通过后才原子发布；失败不改变当前数据库或 Artifact root。
 5. 页面刷新列表并展示创建时间、说明、schema、文件数量和总大小；owner 可点击“重新校验”再次逐字节验证并刷新 `verified_at`。
 6. owner 可点击“恢复演练”；Sidecar 再次校验源包，在隔离临时数据根复制、打开/迁移数据库、声明 Artifact store 并逐文件复验，成功或失败后都清理临时数据，不改当前数据库、Artifact root 或源备份。
@@ -257,7 +257,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 和 Client Activity 记录人引用保护，历史分派基础由 schema v7 建立并在当前 schema v18 延续。schema v12–v18 的 Inbox、Reminder、编排、设置、保存视图与客户活动迁移不改变 Assignment 约束。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment、Client Activity 和 Client Attachment 记录人引用保护，历史分派基础由 schema v7 建立并在当前 schema v19 延续。schema v12–v19 的 Inbox、Reminder、编排、设置、保存视图、客户活动与附件迁移不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除或业务 JSON 生成/下载后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、导出中/失败、挂起提示和 invalid 包均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。

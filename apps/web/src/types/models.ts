@@ -874,6 +874,57 @@ export interface DeleteClientActivityInput {
   expectedVersion: number;
 }
 
+export type ClientAttachmentIntegrityStatus =
+  "verified" | "missing" | "mismatch";
+
+export interface ClientAttachment {
+  id: string;
+  clientId: string;
+  activityId: string | null;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  sha256: string;
+  recordedBy: ClientActivityActor;
+  integrityStatus: ClientAttachmentIntegrityStatus;
+  integrityCheckedAt: string;
+  deletedAt: string | null;
+  deletedByActorId: string | null;
+  deleteReason: string | null;
+  createdAt: string;
+  clientVersion: number;
+}
+
+export interface ClientAttachmentListParams {
+  page?: number;
+  pageSize?: number;
+  activityId?: string;
+  includeDeleted?: boolean;
+}
+
+export interface ClientAttachmentListResult {
+  items: ClientAttachment[];
+  meta: PageMeta & { clientVersion: number };
+}
+
+export interface CreateClientAttachmentInput {
+  file: File;
+  name: string;
+  activityId?: string | null;
+  expectedVersion: number;
+}
+
+export interface DeleteClientAttachmentInput {
+  reason: string;
+  expectedVersion: number;
+}
+
+export interface ClientAttachmentDownload {
+  blob: Blob;
+  fileName: string;
+  mimeType: string;
+}
+
 export type InboxItemKind = "manual" | "reminder";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";

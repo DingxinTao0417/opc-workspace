@@ -19,7 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	glebarezsqlite "github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -47,6 +46,16 @@ type backupManifestFile struct {
 type backupManifestArtifact struct {
 	ID string `json:"id"`
 	backupManifestFile
+}
+
+// controlledFileBackupRow deliberately spans every file-backed business fact
+// that lives in the shared Artifact store. The v1 manifest field names stay
+// unchanged so schema <=18 backup packages remain readable.
+type controlledFileBackupRow struct {
+	ID           string `gorm:"column:id"`
+	RelativePath string `gorm:"column:relative_path"`
+	SizeBytes    int64  `gorm:"column:size_bytes"`
+	SHA256       string `gorm:"column:sha256"`
 }
 
 type backupManifest struct {
@@ -379,27 +388,23 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 		return backupSummary{}, errors.New("Artifact marker does not match workspace identity")
 	}
 
-	var rows []models.TaskArtifact
-	if err := db.Select("id", "relative_path", "size_bytes", "sha256").
-		Where("storage_kind = 'file' AND deleted_at IS NULL").Order("id ASC").Find(&rows).Error; err != nil {
+	rows, err := listActiveControlledFiles(db)
+	if err != nil {
 		return backupSummary{}, fmt.Errorf("list active Artifact objects: %w", err)
 	}
 	artifacts := make([]backupManifestArtifact, 0, len(rows))
 	var artifactBytes int64
 	for _, row := range rows {
-		if row.RelativePath == nil || row.SizeBytes == nil || row.SHA256 == nil {
-			return backupSummary{}, fmt.Errorf("active file Artifact %s has incomplete storage facts", row.ID)
-		}
 		expectedRelative := "objects/" + row.ID
-		if *row.RelativePath != expectedRelative {
-			return backupSummary{}, fmt.Errorf("active file Artifact %s has an invalid path", row.ID)
+		if row.RelativePath != expectedRelative {
+			return backupSummary{}, fmt.Errorf("active controlled file %s has an invalid path", row.ID)
 		}
-		source, err := s.artifacts.resolveObject(*row.RelativePath)
+		source, err := s.artifacts.resolveObject(row.RelativePath)
 		if err != nil {
 			return backupSummary{}, fmt.Errorf("resolve active Artifact %s: %w", row.ID, err)
 		}
 		relative := "artifacts/objects/" + row.ID
-		copied, err := copyVerifiedBackupFile(source, filepath.Join(stagingPath, filepath.FromSlash(relative)), *row.SizeBytes, *row.SHA256)
+		copied, err := copyVerifiedBackupFile(source, filepath.Join(stagingPath, filepath.FromSlash(relative)), row.SizeBytes, row.SHA256)
 		if err != nil {
 			return backupSummary{}, fmt.Errorf("copy active Artifact %s: %w", row.ID, err)
 		}
@@ -628,14 +633,15 @@ func verifyBackupDatabase(path string, manifest backupManifest) error {
 	if databaseID != manifest.DatabaseID || storeID != manifest.ArtifactStoreID {
 		return errors.New("backup database identity does not match manifest")
 	}
+	countQuery, lookupQuery := controlledFileVerificationQueries(manifest.SchemaVersion)
 	var activeCount int
-	if err := sqlDB.QueryRow("SELECT COUNT(*) FROM task_artifacts WHERE storage_kind = 'file' AND deleted_at IS NULL").Scan(&activeCount); err != nil || activeCount != manifest.ArtifactCount {
+	if err := sqlDB.QueryRow(countQuery).Scan(&activeCount); err != nil || activeCount != manifest.ArtifactCount {
 		return errors.New("backup active Artifact count does not match manifest")
 	}
 	for _, artifact := range manifest.Artifacts {
 		var relativePath, hash string
 		var size int64
-		if err := sqlDB.QueryRow("SELECT relative_path, size_bytes, sha256 FROM task_artifacts WHERE id = ? AND storage_kind = 'file' AND deleted_at IS NULL", artifact.ID).Scan(&relativePath, &size, &hash); err != nil {
+		if err := sqlDB.QueryRow(lookupQuery, artifact.ID).Scan(&relativePath, &size, &hash); err != nil {
 			return fmt.Errorf("read backup Artifact %s: %w", artifact.ID, err)
 		}
 		if relativePath != "objects/"+artifact.ID || size != artifact.SizeBytes || hash != artifact.SHA256 {
@@ -643,6 +649,39 @@ func verifyBackupDatabase(path string, manifest backupManifest) error {
 		}
 	}
 	return nil
+}
+
+func listActiveControlledFiles(db *gorm.DB) ([]controlledFileBackupRow, error) {
+	var rows []controlledFileBackupRow
+	err := db.Raw(`
+		SELECT id, relative_path, size_bytes, sha256
+		FROM task_artifacts
+		WHERE storage_kind = 'file' AND deleted_at IS NULL
+		UNION ALL
+		SELECT id, relative_path, size_bytes, sha256
+		FROM client_attachments
+		WHERE deleted_at IS NULL
+		ORDER BY id ASC
+	`).Scan(&rows).Error
+	return rows, err
+}
+
+func controlledFileVerificationQueries(schemaVersion int) (string, string) {
+	if schemaVersion < 19 {
+		return "SELECT COUNT(*) FROM task_artifacts WHERE storage_kind = 'file' AND deleted_at IS NULL",
+			"SELECT relative_path, size_bytes, sha256 FROM task_artifacts WHERE id = ? AND storage_kind = 'file' AND deleted_at IS NULL"
+	}
+	union := `
+		SELECT id, relative_path, size_bytes, sha256
+		FROM task_artifacts
+		WHERE storage_kind = 'file' AND deleted_at IS NULL
+		UNION ALL
+		SELECT id, relative_path, size_bytes, sha256
+		FROM client_attachments
+		WHERE deleted_at IS NULL
+	`
+	return "SELECT COUNT(*) FROM (" + union + ")",
+		"SELECT relative_path, size_bytes, sha256 FROM (" + union + ") WHERE id = ?"
 }
 
 func readBackupManifest(packagePath string) (backupManifest, error) {

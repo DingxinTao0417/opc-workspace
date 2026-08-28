@@ -332,6 +332,7 @@ func (a *API) deleteClient(c *gin.Context) {
 	}
 
 	deleted := deletedClientResponse{DeletedID: id}
+	var movedAttachmentFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var client models.Client
 		if err := tx.First(&client, "id = ?", id).Error; err != nil {
@@ -365,6 +366,11 @@ func (a *API) deleteClient(c *gin.Context) {
 		if err := tx.Table("projects").Where("client_id = ?", id).Count(&deleted.DetachedProjects).Error; err != nil {
 			return err
 		}
+		var err error
+		movedAttachmentFiles, err = a.trashClientAttachmentFiles(tx, id, a.options.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return err
+		}
 		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.Client{})
 		if result.Error != nil {
 			return result.Error
@@ -375,11 +381,19 @@ func (a *API) deleteClient(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if restoreErr := a.restoreClientAttachmentFiles(movedAttachmentFiles); restoreErr != nil && a.options.Logger != nil {
+			a.options.Logger.Printf("Client attachment delete compensation failed client_id=%s error=%v", id, restoreErr)
+		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
+	}
+	if a.artifactStore != nil {
+		for _, moved := range movedAttachmentFiles {
+			a.artifactStore.purgeTrashedFile(moved)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": deleted})
 }

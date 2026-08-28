@@ -26,6 +26,7 @@ type businessExportTableSpec struct {
 var businessExportTables = []businessExportTableSpec{
 	{Name: "clients", OrderBy: "id"},
 	{Name: "client_activities", OrderBy: "client_id, occurred_at, id"},
+	{Name: "client_attachments", OrderBy: "client_id, created_at, id"},
 	{Name: "projects", OrderBy: "id"},
 	{Name: "tasks", OrderBy: "id"},
 	{Name: "tags", OrderBy: "id"},
@@ -50,6 +51,7 @@ var businessExportExcludedTables = []string{
 	"workspace_identity",
 	"idempotency_keys",
 	"artifact_deletion_tombstones",
+	"client_attachment_deletion_tombstones",
 	"task_focus_totals",
 }
 
@@ -129,8 +131,15 @@ func (a *API) buildBusinessExport(c *gin.Context, exportedAt time.Time) (busines
 		}
 		if err := tx.Raw(`
 			SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
-			FROM task_artifacts
-			WHERE storage_kind = 'file' AND deleted_at IS NULL
+			FROM (
+				SELECT size_bytes
+				FROM task_artifacts
+				WHERE storage_kind = 'file' AND deleted_at IS NULL
+				UNION ALL
+				SELECT size_bytes
+				FROM client_attachments
+				WHERE deleted_at IS NULL
+			)
 		`).Row().Scan(&result.ArtifactFiles.ActiveCount, &result.ArtifactFiles.ActiveBytes); err != nil {
 			return fmt.Errorf("read export Artifact summary: %w", err)
 		}

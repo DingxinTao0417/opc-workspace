@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v18（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v15 不改 Focus 契约，schema v16 仅新增下一轮 Focus 默认参数的非敏感设置事实，schema v17 保存视图和 schema v18 客户活动均不改 Focus。Focus Core 的 v0.1-A（事实与迁移）、v0.1-B（Session API 与事务）和 v0.1-C（前端接入与恢复）已经交付；历史列表、日/周报告、连续专注天数和原生桌面反馈仍属于 v0.1-D，尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v19（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v15 不改 Focus 契约，schema v16 仅新增下一轮 Focus 默认参数的非敏感设置事实，schema v17–v19 的保存视图、客户活动与附件均不改 Focus。Focus Core 的 v0.1-A（事实与迁移）、v0.1-B（Session API 与事务）和 v0.1-C（前端接入与恢复）已经交付；历史列表、日/周报告、连续专注天数和原生桌面反馈仍属于 v0.1-D，尚未交付。
 
 ## 定位与边界
 

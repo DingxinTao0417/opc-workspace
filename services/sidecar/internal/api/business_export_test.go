@@ -45,6 +45,15 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if uploaded.Code != http.StatusCreated {
 		t.Fatalf("submit export fixture = %d: %s", uploaded.Code, uploaded.Body.String())
 	}
+	clientAttachmentBody := []byte("client attachment bytes stay outside JSON")
+	clientAttachment := performClientAttachmentUpload(
+		t, router, "/api/v1/clients/018f0000-0000-7000-8000-000000001702/attachments",
+		`{"name":"client-export.txt"}`, "client-export.txt", clientAttachmentBody,
+		map[string]string{"If-Match": `"1"`},
+	)
+	if clientAttachment.Code != http.StatusCreated {
+		t.Fatalf("create client attachment export fixture = %d: %s", clientAttachment.Code, clientAttachment.Body.String())
+	}
 
 	response := performRequest(router, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
 	if response.Code != http.StatusOK {
@@ -63,8 +72,8 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if exported.FormatVersion != 1 || exported.Source.SchemaVersion != store.SchemaVersion || exported.Source.APIVersion != Version {
 		t.Fatalf("export metadata = %#v", exported)
 	}
-	if exported.ArtifactFiles.Included || exported.ArtifactFiles.ActiveCount != 1 ||
-		exported.ArtifactFiles.ActiveBytes != int64(len("file bytes stay outside JSON")) ||
+	if exported.ArtifactFiles.Included || exported.ArtifactFiles.ActiveCount != 2 ||
+		exported.ArtifactFiles.ActiveBytes != int64(len("file bytes stay outside JSON")+len(clientAttachmentBody)) ||
 		len(exported.Tables) != len(businessExportTables) {
 		t.Fatalf("export scope = %#v tables=%d", exported.ArtifactFiles, len(exported.Tables))
 	}
@@ -92,13 +101,16 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if activities := tables["client_activities"]; len(activities.Rows) != 1 {
 		t.Fatalf("Client activities were not exported: %#v", activities)
 	}
+	if attachments := tables["client_attachments"]; len(attachments.Rows) != 1 {
+		t.Fatalf("Client attachment metadata was not exported: %#v", attachments)
+	}
 	for _, excluded := range businessExportExcludedTables {
 		if _, leaked := tables[excluded]; leaked {
 			t.Fatalf("operational table %q leaked into export", excluded)
 		}
 	}
 	body := response.Body.String()
-	if strings.Contains(body, "file bytes stay outside JSON") || strings.Contains(body, testToken) || strings.Contains(body, `:\\`) || strings.Contains(body, "/tmp/") {
+	if strings.Contains(body, "file bytes stay outside JSON") || strings.Contains(body, "client attachment bytes stay outside JSON") || strings.Contains(body, testToken) || strings.Contains(body, `:\\`) || strings.Contains(body, "/tmp/") {
 		t.Fatalf("export leaked runtime token or absolute database path")
 	}
 }

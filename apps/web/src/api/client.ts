@@ -18,6 +18,10 @@ import type {
   BatchUpdateTasksResult,
   Client,
   ClientActivity,
+  ClientAttachment,
+  ClientAttachmentDownload,
+  ClientAttachmentListParams,
+  ClientAttachmentListResult,
   ClientActivityListParams,
   ClientActivityListResult,
   ClientInput,
@@ -25,6 +29,7 @@ import type {
   ClientListResult,
   ClientStatus,
   CreateClientActivityInput,
+  CreateClientAttachmentInput,
   CreateFocusSessionInput,
   CreateBackupInput,
   CreateReminderInput,
@@ -69,6 +74,7 @@ import type {
   DeleteProjectResult,
   DeleteClientResult,
   DeleteClientActivityInput,
+  DeleteClientAttachmentInput,
   Project,
   ProjectInput,
   ProjectListParams,
@@ -915,6 +921,101 @@ export function normalizeClientActivity(value: unknown): ClientActivity {
     clientVersion: positiveInteger(
       fieldValue(value, "client_version", "clientVersion"),
       "客户聚合版本",
+    ),
+  };
+}
+
+export function normalizeClientAttachment(value: unknown): ClientAttachment {
+  if (!isRecord(value)) return invalidResponse("客户附件响应格式无效");
+  const id = stringField(value, "id");
+  const clientId = stringField(value, "client_id", "clientId");
+  const name = stringField(value, "name");
+  const mimeType = stringField(value, "mime_type", "mimeType");
+  const sha256 = stringField(value, "sha256");
+  const integrityCheckedAt = stringField(
+    value,
+    "integrity_checked_at",
+    "integrityCheckedAt",
+  );
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const recordedBy = fieldValue(value, "recorded_by", "recordedBy");
+  if (
+    !id ||
+    !clientId ||
+    !name ||
+    !mimeType ||
+    !sha256 ||
+    !/^[0-9a-f]{64}$/.test(sha256) ||
+    !integrityCheckedAt ||
+    !createdAt ||
+    !isRecord(recordedBy)
+  ) {
+    return invalidResponse("客户附件响应格式无效");
+  }
+  const recordedById = stringField(recordedBy, "id");
+  const recordedByName = stringField(recordedBy, "display_name", "displayName");
+  if (!recordedById || !recordedByName) {
+    return invalidResponse("客户附件记录人响应格式无效");
+  }
+  const integrityStatus = fieldValue(
+    value,
+    "integrity_status",
+    "integrityStatus",
+  );
+  if (
+    integrityStatus !== "verified" &&
+    integrityStatus !== "missing" &&
+    integrityStatus !== "mismatch"
+  ) {
+    return invalidResponse("客户附件完整性状态无效");
+  }
+  const activityId = clientOptionalString(
+    fieldValue(value, "activity_id", "activityId"),
+    "客户附件关联活动",
+  );
+  const deletedAt = clientOptionalString(
+    fieldValue(value, "deleted_at", "deletedAt"),
+    "客户附件删除时间",
+  );
+  const deletedByActorId = clientOptionalString(
+    fieldValue(value, "deleted_by_actor_id", "deletedByActorId"),
+    "客户附件删除人",
+  );
+  const deleteReason = clientOptionalString(
+    fieldValue(value, "delete_reason", "deleteReason"),
+    "客户附件删除原因",
+  );
+  if (
+    (deletedAt === null) !==
+    (deletedByActorId === null && deleteReason === null)
+  ) {
+    return invalidResponse("客户附件删除状态不一致");
+  }
+  return {
+    id,
+    clientId,
+    activityId,
+    name,
+    mimeType,
+    sizeBytes: positiveInteger(
+      fieldValue(value, "size_bytes", "sizeBytes"),
+      "客户附件大小",
+    ),
+    sha256,
+    recordedBy: {
+      id: recordedById,
+      type: asActorType(recordedBy.type),
+      displayName: recordedByName,
+    },
+    integrityStatus,
+    integrityCheckedAt,
+    deletedAt,
+    deletedByActorId,
+    deleteReason,
+    createdAt,
+    clientVersion: positiveInteger(
+      fieldValue(value, "client_version", "clientVersion"),
+      "客户附件对应客户版本",
     ),
   };
 }
@@ -4417,6 +4518,139 @@ export async function deleteClientActivity(
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeClientActivity(body);
+}
+
+export async function getClientAttachments(
+  clientId: string,
+  input: ClientAttachmentListParams = {},
+): Promise<ClientAttachmentListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.activityId) params.set("activity_id", input.activityId);
+  if (input.includeDeleted) params.set("include_deleted", "true");
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/attachments?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("客户附件列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeClientAttachment);
+  if (items.some((attachment) => attachment.clientId !== clientId)) {
+    return invalidResponse("客户附件列表与请求不一致");
+  }
+  return {
+    items,
+    meta: {
+      page: positiveInteger(payload.meta.page, "客户附件页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "客户附件每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "客户附件总数"),
+      clientVersion: positiveInteger(
+        fieldValue(payload.meta, "client_version", "clientVersion"),
+        "客户附件对应客户版本",
+      ),
+    },
+  };
+}
+
+export async function getClientAttachment(
+  id: string,
+): Promise<ClientAttachment> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-attachments/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const attachment = normalizeClientAttachment(body);
+  if (attachment.id !== id) {
+    return invalidResponse("客户附件详情与请求不一致");
+  }
+  return attachment;
+}
+
+export async function createClientAttachment(
+  clientId: string,
+  input: CreateClientAttachmentInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientAttachment> {
+  const form = new FormData();
+  form.append(
+    "metadata",
+    JSON.stringify({
+      name: input.name,
+      activity_id: input.activityId ?? null,
+    }),
+  );
+  form.append("file", input.file, input.file.name);
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: form,
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const attachment = normalizeClientAttachment(body);
+  if (attachment.clientId !== clientId) {
+    return invalidResponse("客户附件创建响应与请求不一致");
+  }
+  return attachment;
+}
+
+export async function deleteClientAttachment(
+  id: string,
+  input: DeleteClientAttachmentInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientAttachment> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-attachments/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientAttachment(body);
+}
+
+export async function downloadClientAttachment(
+  id: string,
+  fallbackName: string,
+): Promise<ClientAttachmentDownload> {
+  return apiFetch(
+    `/api/v1/client-attachments/${encodeURIComponent(id)}/content`,
+    async (response) => {
+      const blob = await response.blob();
+      const mimeType = response.headers.get("Content-Type") ?? blob.type;
+      return {
+        blob,
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          fallbackName,
+        ),
+        mimeType: mimeType || "application/octet-stream",
+      };
+    },
+    {},
+    "application/octet-stream",
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
 }
 
 export async function getInboxItems(

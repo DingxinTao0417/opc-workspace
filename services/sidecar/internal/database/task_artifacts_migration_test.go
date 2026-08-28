@@ -45,8 +45,8 @@ func TestTaskArtifactsMigrationUpgradesRealV8DatabaseWithoutLosingFacts(t *testi
 		t.Fatalf("upgrade v8 artifact database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 18 {
-		t.Fatalf("SchemaVersion = %d, want 18", store.SchemaVersion)
+	if store.SchemaVersion != 19 {
+		t.Fatalf("SchemaVersion = %d, want 19", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT version FROM projects WHERE id = ?", v8ArtifactProjectID); got != wantProjectVersion {
 		t.Fatalf("project version changed during v9 migration: got %d want %d", got, wantProjectVersion)
@@ -671,8 +671,8 @@ func TestTaskArtifactsMigrationUsesInjectiveIDsAndAvoidsOccupiedLegacyEventID(t 
 		t.Fatalf("upgrade v8 database with UUID-version siblings and occupied event ID: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 18 {
-		t.Fatalf("SchemaVersion = %d, want 18", store.SchemaVersion)
+	if store.SchemaVersion != 19 {
+		t.Fatalf("SchemaVersion = %d, want 19", store.SchemaVersion)
 	}
 	for _, taskID := range []string{versionSevenTaskID, versionEightTaskID} {
 		if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM task_submissions WHERE task_id = ?", taskID); got != 1 {

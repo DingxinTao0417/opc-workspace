@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
-	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
 type backupRestoreDrillResult struct {
@@ -139,9 +138,8 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 			err = errors.Join(err, fmt.Errorf("close restore drill Artifact store: %w", closeErr))
 		}
 	}()
-	var rows []models.TaskArtifact
-	if err := store.DB.Select("id", "relative_path", "size_bytes", "sha256").
-		Where("storage_kind = 'file' AND deleted_at IS NULL").Order("id ASC").Find(&rows).Error; err != nil {
+	rows, err := listActiveControlledFiles(store.DB)
+	if err != nil {
 		return backupRestoreDrillResult{}, fmt.Errorf("read restore drill Artifacts: %w", err)
 	}
 	if len(rows) != manifest.ArtifactCount {
@@ -149,14 +147,14 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	}
 	expectedObjects := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if row.RelativePath == nil || row.SizeBytes == nil || row.SHA256 == nil || *row.RelativePath != "objects/"+row.ID {
+		if row.RelativePath != "objects/"+row.ID {
 			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s has invalid storage facts", row.ID)
 		}
-		objectPath, err := artifacts.resolveObject(*row.RelativePath)
+		objectPath, err := artifacts.resolveObject(row.RelativePath)
 		if err != nil {
 			return backupRestoreDrillResult{}, err
 		}
-		matches, err := artifactFileMatches(objectPath, *row.SizeBytes, *row.SHA256)
+		matches, err := artifactFileMatches(objectPath, row.SizeBytes, row.SHA256)
 		if err != nil || !matches {
 			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s failed integrity verification", row.ID)
 		}

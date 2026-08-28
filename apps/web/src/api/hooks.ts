@@ -15,6 +15,7 @@ import {
   cancelFocusSession,
   createClient,
   createClientActivity,
+  createClientAttachment,
   createFocusSession,
   createReminder,
   createPersonActor,
@@ -25,6 +26,7 @@ import {
   createProject,
   deleteClient,
   deleteClientActivity,
+  deleteClientAttachment,
   deleteBackup,
   deleteProject,
   deleteTag,
@@ -33,6 +35,7 @@ import {
   deleteTaskArtifact,
   cancelReminder,
   downloadTaskArtifact,
+  downloadClientAttachment,
   downloadBusinessDataExport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
@@ -47,6 +50,7 @@ import {
   getActors,
   getClient,
   getClientActivities,
+  getClientAttachments,
   getClients,
   getActiveFocusSession,
   getHealth,
@@ -109,14 +113,17 @@ import type {
   CreateTaskSavedViewInput,
   ClientInput,
   ClientActivityListParams,
+  ClientAttachmentListParams,
   ClientListParams,
   CreateClientActivityInput,
+  CreateClientAttachmentInput,
   CreateFocusSessionInput,
   CreateReminderInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
   DeleteClientActivityInput,
+  DeleteClientAttachmentInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusSessionSnapshot,
@@ -524,6 +531,107 @@ export function useDeleteClientActivity() {
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       }
     },
+  });
+}
+
+export const clientAttachmentQueryKey = (clientId: string) =>
+  [...clientDetailQueryKey(clientId), "attachments"] as const;
+
+export function useClientAttachmentsQuery(
+  clientId: string | null,
+  input: ClientAttachmentListParams = {},
+) {
+  return useQuery({
+    queryKey: [
+      ...clientAttachmentQueryKey(clientId ?? "missing"),
+      "list",
+      input,
+    ],
+    queryFn: () => getClientAttachments(clientId!, input),
+    enabled: Boolean(clientId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useCreateClientAttachment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      clientId,
+      input,
+    }: {
+      clientId: string;
+      input: CreateClientAttachmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({
+        clientId,
+        name: input.name,
+        activityId: input.activityId,
+        expectedVersion: input.expectedVersion,
+        fileName: input.file.name,
+        fileSize: input.file.size,
+        fileModified: input.file.lastModified,
+      });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createClientAttachment(clientId, input, attempt.current.key);
+    },
+    onSuccess: async (attachment) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: clientAttachmentQueryKey(attachment.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteClientAttachment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      id,
+      clientId,
+      input,
+    }: {
+      id: string;
+      clientId: string;
+      input: DeleteClientAttachmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({ id, clientId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return deleteClientAttachment(id, input, attempt.current.key);
+    },
+    onSuccess: async (attachment) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: clientAttachmentQueryKey(attachment.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
+    },
+  });
+}
+
+export function useDownloadClientAttachment() {
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      downloadClientAttachment(id, name),
   });
 }
 

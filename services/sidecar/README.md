@@ -1,6 +1,6 @@
 # opc-workspace Go Sidecar
 
-The Sidecar is opc-workspace's local HTTP, SQLite, and controlled Task Artifact boundary. It is a Go 1.22+ binary built with Gin, GORM, and the pure-Go `modernc.org/sqlite` stack through `github.com/glebarez/sqlite`. Local development and desktop runtime do not require CGO or Docker.
+The Sidecar is opc-workspace's local HTTP, SQLite, and controlled business-file boundary for Task Artifacts and Client Attachments. It is a Go 1.22+ binary built with Gin, GORM, and the pure-Go `modernc.org/sqlite` stack through `github.com/glebarez/sqlite`. Local development and desktop runtime do not require CGO or Docker.
 
 ## Run in development
 
@@ -65,7 +65,7 @@ The Sidecar exposes:
 - one-time local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, periodic due scanning, and exactly-once Reminder-to-Inbox projection;
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands and today aggregation;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
-- synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active file Artifact through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
+- synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active controlled Task Artifact or Client Attachment through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
 
 ```text
 GET    /api/v1/settings
@@ -90,6 +90,11 @@ POST   /api/v1/clients/:id/activities
 GET    /api/v1/client-activities/:id
 PATCH  /api/v1/client-activities/:id
 DELETE /api/v1/client-activities/:id?confirm=true
+GET    /api/v1/clients/:id/attachments
+POST   /api/v1/clients/:id/attachments
+GET    /api/v1/client-attachments/:id
+GET    /api/v1/client-attachments/:id/content
+DELETE /api/v1/client-attachments/:id?confirm=true
 POST   /api/v1/clients
 GET    /api/v1/clients/:id
 PATCH  /api/v1/clients/:id
@@ -108,7 +113,7 @@ PATCH  /api/v1/reminders/:id
 DELETE /api/v1/reminders/:id
 ```
 
-Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events, and reject key reuse with different input.
+Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; Client Attachment upload uses Client `If-Match`, while attachment deletion uses its own `ETag`. Stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events or file writes, and reject key reuse with different input.
 
 ### Settings contract
 
@@ -118,7 +123,7 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 
 ### Verified backup and restart-restore contract
 
-`POST /api/v1/backups` freezes ordinary API traffic and background writers, creates a `VACUUM INTO` SQLite snapshot, copies the ownership marker and all active file Artifacts, then verifies hashes, the exact file set, SQLite integrity/schema/identity, and Artifact metadata before publishing a UUID package. `GET /api/v1/backups` lists recorded verification facts; `POST /api/v1/backups/:id/verify` performs the complete verification again.
+`POST /api/v1/backups` freezes ordinary API traffic and background writers, creates a `VACUUM INTO` SQLite snapshot, copies the ownership marker and all active controlled Task Artifact and Client Attachment files, then verifies hashes, the exact file set, SQLite integrity/schema/identity, and controlled-file metadata before publishing a UUID package. `GET /api/v1/backups` lists recorded verification facts; `POST /api/v1/backups/:id/verify` performs the complete verification again.
 
 `POST /api/v1/backups/:id/drill` does not replace live data. It verifies the source package again, copies it into a unique temporary data root, opens and migrates the copied database with the current migration runner, validates final SQLite facts, claims an isolated Artifact store, and checks every active file object. Database and lease handles are closed before the temporary root is removed.
 
@@ -126,7 +131,7 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 
 `DELETE /api/v1/backups/:id?confirm=true` permanently deletes one canonical UUID package without touching live data. It accepts valid or corrupt packages so users are not trapped with an invalid archive, but rejects symlink/reparse traversal and non-regular entries. The package is first atomically renamed to `.deleting-<id>` under the same backup root and the directory is synchronized; removal then resumes from that exact hidden path if an earlier attempt stopped after the rename. A pending restore freezes this route with the rest of the ordinary API.
 
-`GET /api/v1/exports/business-data` returns an attachment using business-export format v1. It reads an explicit allowlist of business tables in one SQLite transaction with deterministic table/column/row structure. File Artifact metadata is included while file bytes are deliberately omitted and summarized separately. Session credentials, absolute machine paths, workspace identity, idempotency responses, tombstones, migrations and derived focus totals are not exported. The synchronous v0.1 endpoint fails closed if an allowlisted table is unavailable; import and external file bundles are separate future flows.
+`GET /api/v1/exports/business-data` returns an attachment using business-export format v1. It reads an explicit allowlist of business tables in one SQLite transaction with deterministic table/column/row structure. Task Artifact and Client Attachment metadata is included while file bytes are deliberately omitted and summarized together. Session credentials, absolute machine paths, workspace identity, idempotency responses, tombstones, migrations and derived focus totals are not exported. The synchronous v0.1 endpoint fails closed if an allowlisted table is unavailable; import and external file bundles are separate future flows.
 
 ### Inbox Item–Task relationship contract
 
@@ -238,4 +243,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v5.2 / schema v18 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, Client Activity migration/constraints/idempotency/pagination/optimistic editing/soft deletion, verified SQLite+Artifact backup creation/list/replay/re-verification/tamper rejection, isolated restore drills, automatic rollback packages, restart-applied atomic restore, confirmed package deletion and deterministic allowlisted business JSON export, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. The Tauri shell now exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Settings frontend migration, Client attachments/external source projection, follow-ups, finance, data import, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v5.3 / schema v19 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, Client Activity and Client Attachment migrations/constraints/idempotency/pagination/optimistic deletion/integrity, verified SQLite+controlled-file backup creation/list/replay/re-verification/tamper rejection, isolated restore drills, automatic rollback packages, restart-applied atomic restore, confirmed package deletion and deterministic allowlisted business JSON export, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. The Tauri shell now exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Client external-source projection, follow-ups, finance, data import, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
