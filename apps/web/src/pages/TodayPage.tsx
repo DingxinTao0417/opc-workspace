@@ -14,11 +14,10 @@ import {
 import { Link } from "react-router-dom";
 import {
   useInboxStatsQuery,
+  useTodayTaskGroupsQuery,
   useTodayStatsQuery,
-  useTasksQuery,
 } from "../api/hooks";
 import { useUiStore } from "../store/ui";
-import type { Task } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskList } from "../components/TaskList";
 
@@ -37,40 +36,39 @@ function formatToday(date: Date): string {
   }).format(date);
 }
 
-function taskSplit(tasks: Task[]) {
-  const active = tasks.filter(
-    (task) => task.status !== "done" && task.status !== "cancelled",
-  );
-  return {
-    today: active.slice(0, 3),
-    later: active.slice(3, 6),
-  };
-}
-
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
-  const tasksQuery = useTasksQuery();
   const now = new Date();
   const dateKey = localDateKey(now);
+  const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
   const statsQuery = useTodayStatsQuery(dateKey);
   const inboxStatsQuery = useInboxStatsQuery();
-  const live = tasksQuery.isSuccess;
-  const displayTasks = tasksQuery.data ?? [];
-  const groups = taskSplit(displayTasks);
+  const live = taskGroupsQuery.isSuccess;
+  const groups = taskGroupsQuery.data ?? {
+    overdue: [],
+    today: [],
+    thisWeek: [],
+    unscheduled: [],
+  };
   const realStats = statsQuery.data;
   const estimated = realStats
     ? Math.round((realStats.tasks.estimatedMinutes / 60) * 10) / 10
     : 0;
+  const statsPending = statsQuery.isPending;
   const stats = [
-    { icon: Hourglass, value: `${estimated}h`, label: "预计时长" },
+    {
+      icon: Hourglass,
+      value: statsPending ? "…" : `${estimated}h`,
+      label: "预计时长",
+    },
     {
       icon: CheckCircle2,
-      value: realStats?.tasks.remaining ?? 0,
+      value: statsPending ? "…" : (realStats?.tasks.remaining ?? 0),
       label: "项待完成",
     },
     {
       icon: AlertTriangle,
-      value: realStats?.tasks.overdue ?? 0,
+      value: statsPending ? "…" : (realStats?.tasks.overdue ?? 0),
       label: "项已逾期",
       danger: true,
     },
@@ -191,11 +189,11 @@ export function TodayPage() {
         )}
       </section>
 
-      {tasksQuery.isError ? (
+      {taskGroupsQuery.isError ? (
         <ErrorState
           compact
           message="无法读取任务；请确认本地服务已启动后重试。"
-          onRetry={() => void tasksQuery.refetch()}
+          onRetry={() => void taskGroupsQuery.refetch()}
         />
       ) : null}
 
@@ -207,6 +205,19 @@ export function TodayPage() {
         />
       ) : null}
 
+      {groups.overdue.length > 0 ? (
+        <section className="task-section">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="section-kicker danger-text">需要处理</span>
+              <h2>逾期计划</h2>
+            </div>
+            <span className="section-count">{groups.overdue.length}</span>
+          </div>
+          <TaskList compact live={live} tasks={groups.overdue} />
+        </section>
+      ) : null}
+
       <section className="task-section">
         <div className="section-heading compact-heading">
           <div>
@@ -215,9 +226,9 @@ export function TodayPage() {
           </div>
           <span className="section-count">{groups.today.length}</span>
         </div>
-        {tasksQuery.isPending ? (
+        {taskGroupsQuery.isPending ? (
           <SkeletonRows count={3} />
-        ) : tasksQuery.isSuccess && displayTasks.length === 0 ? (
+        ) : taskGroupsQuery.isSuccess && groups.today.length === 0 ? (
           <EmptyState
             action={
               <button
@@ -229,28 +240,41 @@ export function TodayPage() {
                 新建第一项任务
               </button>
             }
-            message="本地数据库中还没有任务。"
-            title="今天还没有任务"
+            message="今天没有已安排的活动任务；可新建任务，或在任务页设置计划日期。"
+            title="今天已经安排妥当"
           />
         ) : (
           <TaskList compact live={live} tasks={groups.today} />
         )}
       </section>
 
-      {tasksQuery.isPending || displayTasks.length > 0 ? (
+      {taskGroupsQuery.isPending || groups.thisWeek.length > 0 ? (
         <section className="task-section">
           <div className="section-heading compact-heading">
             <div>
               <span className="section-kicker">稍后</span>
               <h2>本周</h2>
             </div>
-            <span className="section-count">{groups.later.length}</span>
+            <span className="section-count">{groups.thisWeek.length}</span>
           </div>
-          {tasksQuery.isPending ? (
+          {taskGroupsQuery.isPending ? (
             <SkeletonRows count={2} />
           ) : (
-            <TaskList compact live={live} tasks={groups.later} />
+            <TaskList compact live={live} tasks={groups.thisWeek} />
           )}
+        </section>
+      ) : null}
+
+      {groups.unscheduled.length > 0 ? (
+        <section className="task-section">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="section-kicker">待安排</span>
+              <h2>未排期</h2>
+            </div>
+            <span className="section-count">{groups.unscheduled.length}</span>
+          </div>
+          <TaskList compact live={live} tasks={groups.unscheduled} />
         </section>
       ) : null}
     </div>

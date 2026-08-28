@@ -759,6 +759,51 @@ export function useTasksQuery(
   });
 }
 
+function shiftDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+}
+
+function endOfWeekKey(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return shiftDateKey(dateKey, weekday === 0 ? 0 : 7 - weekday);
+}
+
+export interface TodayTaskGroups {
+  overdue: Task[];
+  today: Task[];
+  thisWeek: Task[];
+  unscheduled: Task[];
+}
+
+export function useTodayTaskGroupsQuery(dateKey: string) {
+  return useQuery({
+    queryKey: [...taskQueryKey, "today-groups", dateKey],
+    queryFn: async (): Promise<TodayTaskGroups> => {
+      const tomorrow = shiftDateKey(dateKey, 1);
+      const endOfWeek = endOfWeekKey(dateKey);
+      const [overdue, today, thisWeek, unscheduled] = await Promise.all([
+        getAllTasks({ status: "active", plannedTo: shiftDateKey(dateKey, -1) }),
+        getAllTasks({ status: "active", plannedDate: dateKey }),
+        tomorrow <= endOfWeek
+          ? getAllTasks({
+              status: "active",
+              plannedFrom: tomorrow,
+              plannedTo: endOfWeek,
+            })
+          : Promise.resolve([]),
+        getAllTasks({ status: "active", plannedState: "unscheduled" }),
+      ]);
+      return { overdue, today, thisWeek, unscheduled };
+    },
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
 export const taskPageQueryKey = (input: TaskListParams) =>
   [...taskQueryKey, "page", input] as const;
 

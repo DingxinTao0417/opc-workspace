@@ -393,6 +393,34 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 	if dateRange.Meta.Total != 2 {
 		t.Fatalf("planned range total = %d, want 2", dateRange.Meta.Total)
 	}
+	if err := store.DB.Exec("UPDATE tasks SET status = 'done', completed_at = ?, version = version + 1 WHERE id = ?", createdAt, ids[97]).Error; err != nil {
+		t.Fatalf("mark terminal task done: %v", err)
+	}
+	if err := store.DB.Exec("UPDATE tasks SET status = 'cancelled', version = version + 1 WHERE id = ?", ids[98]).Error; err != nil {
+		t.Fatalf("mark terminal task cancelled: %v", err)
+	}
+	active := readList("/api/v1/tasks?status=active")
+	if active.Meta.Total != 99 {
+		t.Fatalf("active task total = %d, want 99", active.Meta.Total)
+	}
+	unscheduled := readList("/api/v1/tasks?status=active&planned_state=unscheduled")
+	if unscheduled.Meta.Total != 97 {
+		t.Fatalf("unscheduled active total = %d, want 97", unscheduled.Meta.Total)
+	}
+	scheduled := readList("/api/v1/tasks?planned_state=scheduled")
+	if scheduled.Meta.Total != 2 {
+		t.Fatalf("scheduled total = %d, want 2", scheduled.Meta.Total)
+	}
+	for _, path := range []string{
+		"/api/v1/tasks?status=unknown",
+		"/api/v1/tasks?planned_state=unknown",
+		"/api/v1/tasks?planned_state=unscheduled&planned_from=2026-08-01",
+	} {
+		invalidFilter := performRequest(router, http.MethodGet, path, nil, nil)
+		if invalidFilter.Code != http.StatusBadRequest || responseErrorCode(t, invalidFilter.Body.Bytes()) != "INVALID_FILTER" {
+			t.Fatalf("invalid task filter %s = %d: %s", path, invalidFilter.Code, invalidFilter.Body.String())
+		}
+	}
 	for _, query := range []string{"%", "_", `\`} {
 		result := readList("/api/v1/tasks?q=" + url.QueryEscape(query))
 		if result.Meta.Total != 1 {

@@ -2366,6 +2366,7 @@ export async function getTaskPage(
   if (options.plannedDate) params.set("planned_date", options.plannedDate);
   if (options.plannedFrom) params.set("planned_from", options.plannedFrom);
   if (options.plannedTo) params.set("planned_to", options.plannedTo);
+  if (options.plannedState) params.set("planned_state", options.plannedState);
   if (options.parentTaskId) params.set("parent_task_id", options.parentTaskId);
   if (options.rootOnly !== undefined)
     params.set("root_only", String(options.rootOnly));

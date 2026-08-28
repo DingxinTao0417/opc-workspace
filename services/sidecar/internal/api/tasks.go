@@ -128,6 +128,7 @@ type taskListFilters struct {
 	PlannedDate  string
 	PlannedFrom  string
 	PlannedTo    string
+	PlannedState string
 	DueFrom      string
 	DueTo        string
 	TagIDs       []string
@@ -184,23 +185,32 @@ func (a *API) listTasks(c *gin.Context) {
 
 func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 	filters := taskListFilters{
-		Status:      strings.TrimSpace(c.Query("status")),
-		Priority:    strings.TrimSpace(c.Query("priority")),
-		Kind:        strings.TrimSpace(c.Query("kind")),
-		ProjectID:   strings.TrimSpace(c.Query("project_id")),
-		PlannedDate: strings.TrimSpace(c.Query("planned_date")),
-		PlannedFrom: strings.TrimSpace(c.Query("planned_from")),
-		PlannedTo:   strings.TrimSpace(c.Query("planned_to")),
-		DueFrom:     strings.TrimSpace(c.Query("due_from")),
-		DueTo:       strings.TrimSpace(c.Query("due_to")),
-		Search:      strings.TrimSpace(c.Query("q")),
-		Sort:        strings.TrimSpace(c.Query("sort")),
+		Status:       strings.TrimSpace(c.Query("status")),
+		Priority:     strings.TrimSpace(c.Query("priority")),
+		Kind:         strings.TrimSpace(c.Query("kind")),
+		ProjectID:    strings.TrimSpace(c.Query("project_id")),
+		PlannedDate:  strings.TrimSpace(c.Query("planned_date")),
+		PlannedFrom:  strings.TrimSpace(c.Query("planned_from")),
+		PlannedTo:    strings.TrimSpace(c.Query("planned_to")),
+		PlannedState: strings.TrimSpace(c.Query("planned_state")),
+		DueFrom:      strings.TrimSpace(c.Query("due_from")),
+		DueTo:        strings.TrimSpace(c.Query("due_to")),
+		Search:       strings.TrimSpace(c.Query("q")),
+		Sort:         strings.TrimSpace(c.Query("sort")),
 	}
 	if filters.Status != "" {
-		if _, valid := validTaskStatuses[filters.Status]; !valid {
+		if _, valid := validTaskStatuses[filters.Status]; !valid && filters.Status != "active" {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
 			return taskListFilters{}, false
 		}
+	}
+	if filters.PlannedState != "" && filters.PlannedState != "scheduled" && filters.PlannedState != "unscheduled" {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "planned_state must be scheduled or unscheduled")
+		return taskListFilters{}, false
+	}
+	if filters.PlannedState == "unscheduled" && (filters.PlannedDate != "" || filters.PlannedFrom != "" || filters.PlannedTo != "") {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "unscheduled planned_state cannot be combined with planned date filters")
+		return taskListFilters{}, false
 	}
 	if filters.Priority != "" {
 		if _, valid := validPriorities[filters.Priority]; !valid {
@@ -273,7 +283,9 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 }
 
 func applyTaskFilters(query *gorm.DB, filters taskListFilters) *gorm.DB {
-	if filters.Status != "" {
+	if filters.Status == "active" {
+		query = query.Where("tasks.status NOT IN ?", []string{"done", "cancelled"})
+	} else if filters.Status != "" {
 		query = query.Where("tasks.status = ?", filters.Status)
 	}
 	if filters.Priority != "" {
@@ -287,6 +299,11 @@ func applyTaskFilters(query *gorm.DB, filters taskListFilters) *gorm.DB {
 	}
 	if filters.PlannedDate != "" {
 		query = query.Where("tasks.planned_date = ?", filters.PlannedDate)
+	}
+	if filters.PlannedState == "scheduled" {
+		query = query.Where("tasks.planned_date IS NOT NULL")
+	} else if filters.PlannedState == "unscheduled" {
+		query = query.Where("tasks.planned_date IS NULL")
 	}
 	for _, filter := range []struct {
 		column   string

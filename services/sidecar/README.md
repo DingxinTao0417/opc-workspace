@@ -51,7 +51,7 @@ Writing `shutdown` to stdin drains active requests and checkpoints the WAL befor
 
 The Sidecar exposes:
 
-- health, Task/Tag/Project/Client CRUD and queries, Task batch/reorder, project lifecycle, and today statistics;
+- health, Task/Tag/Project/Client CRUD and queries, Task batch/reorder, project lifecycle, and today statistics; Task lists support the derived `status=active` filter plus `planned_state=scheduled/unscheduled` for complete Today grouping;
 - Actor person management with Actor `ETag`, snapshot idempotency, and protected built-in owner/system records;
 - Task Assignment query/create/reassign/end, using the containing Task's `If-Match` version;
 - explicit Task `start`, `block`, `unblock`, `complete`, `cancel`, and `reopen` commands; the legacy `PATCH /tasks/:id/status` always returns `410 TASK_STATUS_ENDPOINT_DEPRECATED`;
@@ -202,4 +202,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v2.8 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v2.9 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, and active/scheduled Task list filters used by Today. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

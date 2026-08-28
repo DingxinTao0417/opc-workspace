@@ -1092,6 +1092,10 @@ kbd {
   text-transform: uppercase;
 }
 
+.danger-text {
+  color: var(--danger-text);
+}
+
 .compact-heading {
   align-items: center;
 }

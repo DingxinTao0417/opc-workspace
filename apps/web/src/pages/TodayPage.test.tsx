@@ -6,14 +6,20 @@ import { TodayPage } from "./TodayPage";
 const mocks = vi.hoisted(() => ({
   inbox: vi.fn(),
   stats: vi.fn(),
-  tasks: vi.fn(),
+  taskGroups: vi.fn(),
   setNewTaskOpen: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: mocks.inbox,
   useTodayStatsQuery: mocks.stats,
-  useTasksQuery: mocks.tasks,
+  useTodayTaskGroupsQuery: mocks.taskGroups,
+  useTaskPageQuery: () => ({
+    data: undefined,
+    isFetching: false,
+    isPlaceholderData: false,
+    isSuccess: false,
+  }),
 }));
 
 vi.mock("../store/ui", () => ({
@@ -28,8 +34,8 @@ describe("TodayPage Inbox overview", () => {
   });
 
   it("shows derived Inbox counts with risk deep links", () => {
-    mocks.tasks.mockReturnValue({
-      data: [],
+    mocks.taskGroups.mockReturnValue({
+      data: { overdue: [], today: [], thisWeek: [], unscheduled: [] },
       isError: false,
       isPending: false,
       isSuccess: true,
@@ -50,6 +56,7 @@ describe("TodayPage Inbox overview", () => {
         focus: { sessions: 0, seconds: 0, minutes: 0 },
       },
       isError: false,
+      isPending: false,
       refetch: vi.fn(),
     });
     mocks.inbox.mockReturnValue({
@@ -89,5 +96,68 @@ describe("TodayPage Inbox overview", () => {
       "href",
       "/inbox?risk=blocked",
     );
+  });
+
+  it("renders complete planned-date groups instead of arbitrary slices", () => {
+    const makeTask = (id: string, title: string) => ({
+      id,
+      title,
+      description: "",
+      kind: "work",
+      status: "todo",
+      reviewPolicy: "none",
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate: null,
+      estimatedMinutes: null,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: 1,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    });
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [makeTask("overdue", "逾期任务")],
+        today: [makeTask("today", "今日任务")],
+        thisWeek: [makeTask("week", "本周任务")],
+        unscheduled: [makeTask("unscheduled", "未排期任务")],
+      },
+      isError: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "逾期计划" })).toBeVisible();
+    expect(screen.getByText("逾期任务")).toBeVisible();
+    expect(screen.getByText("今日任务")).toBeVisible();
+    expect(screen.getByText("本周任务")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "未排期" })).toBeVisible();
+    expect(screen.getByText("未排期任务")).toBeVisible();
   });
 });

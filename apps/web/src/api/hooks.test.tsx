@@ -36,6 +36,7 @@ import {
   useReviewTaskSubmission,
   useDeleteTaskArtifact,
   useTaskPageQuery,
+  useTodayTaskGroupsQuery,
   useTasksQuery,
 } from "./hooks";
 
@@ -54,6 +55,7 @@ const reviewTaskSubmissionMock = vi.hoisted(() => vi.fn());
 const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
+const getAllTasksMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
@@ -74,6 +76,7 @@ vi.mock("./client", async () => {
     deleteTaskArtifact: deleteTaskArtifactMock,
     getTaskPage: getTaskPageMock,
     getTasks: getTasksMock,
+    getAllTasks: getAllTasksMock,
   };
 });
 
@@ -308,6 +311,39 @@ describe("task queries", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([task]);
     expect(Array.isArray(result.current.data)).toBe(true);
+  });
+
+  it("loads complete active Today groups with explicit date boundaries", async () => {
+    getAllTasksMock.mockImplementation(async (input) => [
+      { ...task, id: JSON.stringify(input) },
+    ]);
+    const { result } = renderHook(() => useTodayTaskGroupsQuery("2026-08-28"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getAllTasksMock).toHaveBeenCalledTimes(4);
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(1, {
+      status: "active",
+      plannedTo: "2026-08-27",
+    });
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(2, {
+      status: "active",
+      plannedDate: "2026-08-28",
+    });
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(3, {
+      status: "active",
+      plannedFrom: "2026-08-29",
+      plannedTo: "2026-08-30",
+    });
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(4, {
+      status: "active",
+      plannedState: "unscheduled",
+    });
+    expect(result.current.data?.overdue).toHaveLength(1);
+    expect(result.current.data?.today).toHaveLength(1);
+    expect(result.current.data?.thisWeek).toHaveLength(1);
+    expect(result.current.data?.unscheduled).toHaveLength(1);
   });
 
   it("loads assignment history pages under a task-scoped query key", async () => {

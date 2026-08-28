@@ -545,13 +545,14 @@ export interface TaskListParams {
   pageSize?: number;
   q?: string;
   kind?: TaskKind;
-  status?: TaskStatus;
+  status?: TaskStatus | "active";
   priority?: TaskPriority;
   projectId?: string;
   tagIds?: string[];
   plannedDate?: string;
   plannedFrom?: string;
   plannedTo?: string;
+  plannedState?: "scheduled" | "unscheduled";
   parentTaskId?: string;
   rootOnly?: boolean;
   sort?: string;
