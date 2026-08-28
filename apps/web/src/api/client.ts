@@ -2242,8 +2242,46 @@ export function normalizeInboxEventListResult(
   };
 }
 
+export function normalizeHealthResponse(value: unknown): HealthResponse {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.app) ||
+    !isRecord(value.api) ||
+    !isRecord(value.schema)
+  ) {
+    return invalidResponse("健康检查响应格式无效");
+  }
+  const status = stringField(value, "status");
+  const appName = stringField(value.app, "name");
+  const appVersion = stringField(value.app, "version");
+  const commit = stringField(value.app, "commit");
+  const apiVersion = stringField(value.api, "version");
+  if (
+    !status ||
+    !appName ||
+    !appVersion ||
+    !commit ||
+    !apiVersion ||
+    status.length > 32 ||
+    appName.length > 128 ||
+    appVersion.length > 128 ||
+    commit.length > 128 ||
+    apiVersion.length > 64
+  ) {
+    return invalidResponse("健康检查响应字段无效");
+  }
+  return {
+    status,
+    app: { name: appName, version: appVersion, commit },
+    api: { version: apiVersion },
+    schema: {
+      version: positiveInteger(value.schema.version, "数据库 schema 版本"),
+    },
+  };
+}
+
 export async function getHealth(): Promise<HealthResponse> {
-  return apiRequest<HealthResponse>("/health");
+  return normalizeHealthResponse(await apiRequest<unknown>("/health"));
 }
 
 export async function getActors(

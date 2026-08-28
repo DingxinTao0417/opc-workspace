@@ -1,11 +1,15 @@
 import {
+  AlertCircle,
+  CheckCircle2,
   Focus,
   ImagePlus,
   Info,
+  LoaderCircle,
   Minus,
   Moon,
   Palette,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings2,
   Sun,
@@ -16,6 +20,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { ApiError } from "../api/client";
+import { useHealthQuery } from "../api/hooks";
 import {
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
@@ -68,6 +74,24 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.addEventListener("error", () => reject(reader.error));
     reader.readAsDataURL(file);
   });
+}
+
+function formatHealthError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return `${error.message}${error.requestId ? ` · 请求 ${error.requestId}` : ""}`;
+  }
+  return "无法连接本地服务，请确认 Sidecar 已启动后重试。";
+}
+
+function displayVersion(version: string): string {
+  return version.startsWith("v") ? version : `v${version}`;
+}
+
+function displayCommit(commit: string): string {
+  if (commit === "unknown") return "开发构建（未注入）";
+  const dirty = commit.endsWith("-dirty");
+  const revision = dirty ? commit.slice(0, -"-dirty".length) : commit;
+  return `${revision.slice(0, 12)}${dirty ? "-dirty" : ""}`;
 }
 
 const defaultRouteOptions: { value: DefaultRoute; label: string }[] = [
@@ -193,6 +217,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   );
   const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const healthQuery = useHealthQuery(open && activeModule === "about");
 
   useEffect(() => {
     if (!open) return;
@@ -558,20 +583,93 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       return <ActorSettings />;
     }
 
+    if (healthQuery.isPending) {
+      return (
+        <>
+          <header className="settings-content-header">
+            <h3>关于</h3>
+            <p>读取应用、本地 API 与数据库版本。</p>
+          </header>
+          <div aria-live="polite" className="settings-state" role="status">
+            <LoaderCircle className="animate-spin" size={16} />
+            正在检查本地服务…
+          </div>
+        </>
+      );
+    }
+
+    if (healthQuery.isError && !healthQuery.data) {
+      return (
+        <>
+          <header className="settings-content-header">
+            <h3>关于</h3>
+            <p>读取应用、本地 API 与数据库版本。</p>
+          </header>
+          <div className="settings-state settings-state-error" role="alert">
+            <AlertCircle size={16} />
+            <div>
+              <strong>本地服务检查失败</strong>
+              <span>{formatHealthError(healthQuery.error)}</span>
+            </div>
+            <button
+              className="button button-secondary"
+              onClick={() => void healthQuery.refetch()}
+              type="button"
+            >
+              <RefreshCw size={14} />
+              重试
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    const health = healthQuery.data!;
+    const commit = displayCommit(health.app.commit);
     return (
       <>
         <header className="settings-content-header">
           <h3>关于</h3>
-          <p>opc-workspace 当前版本与本地数据边界。</p>
+          <p>真实运行版本、本地服务状态与数据边界。</p>
         </header>
         <div className="settings-about">
           <div className="settings-about-row">
-            <span>应用版本</span>
-            <strong>v0.1.0</strong>
+            <span>本地服务</span>
+            <strong
+              className="settings-health-state"
+              data-status={health.status}
+            >
+              {health.status === "ok" ? (
+                <CheckCircle2 size={13} />
+              ) : (
+                <AlertCircle size={13} />
+              )}
+              {health.status === "ok" ? "就绪" : health.status}
+            </strong>
+          </div>
+          <div className="settings-about-row">
+            <span>应用</span>
+            <strong>{health.app.name}</strong>
+          </div>
+          <div className="settings-about-row">
+            <span>运行版本</span>
+            <strong>{displayVersion(health.app.version)}</strong>
+          </div>
+          <div className="settings-about-row">
+            <span>构建提交</span>
+            <strong title={health.app.commit}>{commit}</strong>
+          </div>
+          <div className="settings-about-row">
+            <span>本地 API</span>
+            <strong>{health.api.version}</strong>
+          </div>
+          <div className="settings-about-row">
+            <span>数据库 schema</span>
+            <strong>v{health.schema.version}</strong>
           </div>
           <div className="settings-about-row">
             <span>数据存储</span>
-            <strong>本地 SQLite</strong>
+            <strong>本地 SQLite · 可用</strong>
           </div>
           <div className="settings-about-row">
             <span>桌面架构</span>
@@ -581,6 +679,29 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             <span>云同步</span>
             <strong>未启用</strong>
           </div>
+        </div>
+        {healthQuery.isError ? (
+          <p
+            className="settings-inline-note settings-inline-warning"
+            role="alert"
+          >
+            最近一次重新检查失败，当前展示上一次成功结果：
+            {formatHealthError(healthQuery.error)}
+          </p>
+        ) : null}
+        <div className="settings-about-actions">
+          <button
+            className="button button-secondary"
+            disabled={healthQuery.isFetching}
+            onClick={() => void healthQuery.refetch()}
+            type="button"
+          >
+            <RefreshCw
+              className={healthQuery.isFetching ? "animate-spin" : undefined}
+              size={14}
+            />
+            {healthQuery.isFetching ? "检查中…" : "重新检查"}
+          </button>
         </div>
         <p className="settings-inline-note">
           当前核心数据保存在本机，不依赖 Docker 或远程云服务。
@@ -592,11 +713,13 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   return (
     <Modal
       footer={
-        activeModule === "actors" ? (
+        activeModule === "actors" || activeModule === "about" ? (
           <>
-            <span className="settings-actor-footer-note">
-              人员资料通过模块内按钮单独保存
-            </span>
+            {activeModule === "actors" ? (
+              <span className="settings-actor-footer-note">
+                人员资料通过模块内按钮单独保存
+              </span>
+            ) : null}
             <button
               className="button button-secondary"
               onClick={close}

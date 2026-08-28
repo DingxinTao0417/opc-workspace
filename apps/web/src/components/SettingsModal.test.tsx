@@ -24,6 +24,17 @@ function LocationProbe() {
   return <output data-testid="current-location">{location.pathname}</output>;
 }
 
+const healthPayload = {
+  status: "ok",
+  app: {
+    name: "opc-workspace",
+    version: "0.1.0",
+    commit: "abc123def456789-dirty",
+  },
+  api: { version: "v1" },
+  schema: { version: 15 },
+};
+
 function renderSettings() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -41,6 +52,16 @@ function renderSettings() {
 
 describe("SettingsModal", () => {
   beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Promise.resolve(
+          new Response(JSON.stringify(healthPayload), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
     useSettingsStore.setState({
       ...DEFAULT_FOCUS_SETTINGS,
       ...DEFAULT_GENERAL_SETTINGS,
@@ -224,14 +245,42 @@ describe("SettingsModal", () => {
     });
   });
 
-  it("switches between settings modules", () => {
+  it("shows real health and version facts in the read-only About module", async () => {
     renderSettings();
 
     expect(screen.getByRole("heading", { name: "通用" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "关于" }));
 
-    expect(screen.getByText("v0.1.0")).toBeTruthy();
-    expect(screen.getByText("本地 SQLite")).toBeTruthy();
+    expect(await screen.findByText("v0.1.0")).toBeVisible();
+    expect(screen.getByText("opc-workspace")).toBeVisible();
+    expect(screen.getByText("abc123def456-dirty")).toHaveAttribute(
+      "title",
+      "abc123def456789-dirty",
+    );
+    expect(screen.getByText("v1")).toBeVisible();
+    expect(screen.getByText("v15")).toBeVisible();
+    expect(screen.getByText("本地 SQLite · 可用")).toBeVisible();
+    expect(screen.getByText("就绪")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(
+      screen.getByText("关闭", { selector: ".modal-footer button" }),
+    ).toBeVisible();
+  });
+
+  it("shows a retryable About error when the local service is unavailable", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    useUiStore.setState({ settingsOpen: true, settingsModule: "about" });
+    renderSettings();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "本地服务检查失败",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("无法连接本地 Sidecar");
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it("opens directly on a requested settings module", () => {

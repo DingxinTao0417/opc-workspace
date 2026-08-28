@@ -364,16 +364,16 @@ export interface TaskLifecycleCommandResult {
 
 export interface HealthResponse {
   status: string;
-  app?: {
-    name?: string;
-    version?: string;
-    commit?: string;
+  app: {
+    name: string;
+    version: string;
+    commit: string;
   };
-  api?: {
-    version?: string;
+  api: {
+    version: string;
   };
-  schema?: {
-    version?: number;
+  schema: {
+    version: number;
   };
 }
 

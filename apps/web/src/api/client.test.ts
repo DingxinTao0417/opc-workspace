@@ -24,6 +24,7 @@ import {
   downloadTaskArtifact,
   normalizeActor,
   normalizeActorSummary,
+  normalizeHealthResponse,
   normalizeTaskAssignment,
   normalizeTaskAssignmentListResult,
   normalizeTaskEventListResult,
@@ -44,6 +45,36 @@ import {
   updateTask,
   updateActor,
 } from "./client";
+
+describe("health response normalization", () => {
+  it("accepts the complete local runtime contract", () => {
+    expect(
+      normalizeHealthResponse({
+        status: "ok",
+        app: { name: "opc-workspace", version: "0.1.0", commit: "abc123" },
+        api: { version: "v1" },
+        schema: { version: 15 },
+      }),
+    ).toEqual({
+      status: "ok",
+      app: { name: "opc-workspace", version: "0.1.0", commit: "abc123" },
+      api: { version: "v1" },
+      schema: { version: 15 },
+    });
+  });
+
+  it("rejects missing or malformed runtime facts", () => {
+    expect(() =>
+      normalizeHealthResponse({
+        status: "ok",
+        app: { name: "opc-workspace", version: "0.1.0", commit: "abc123" },
+        api: { version: "v1" },
+        schema: { version: 0 },
+      }),
+    ).toThrow(ApiError);
+    expect(() => normalizeHealthResponse({ status: "ok" })).toThrow(ApiError);
+  });
+});
 
 afterEach(() => {
   vi.useRealTimers();

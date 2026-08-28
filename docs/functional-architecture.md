@@ -2,7 +2,7 @@
 
 > 文档版本：1.8
 > 日期：2026-08-28
-> 依据：[PRD v3.2](opc-workspace-PRD.md)
+> 依据：[PRD v3.3](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v15
 
 ## 1. 目的
@@ -50,7 +50,7 @@
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量和计划组排序，Project 已接 Client 选择/筛选。
-- Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
+- Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
 - SQLite 当前为 schema v15：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15 以 `015_inbox_task_orchestration.sql` 增加自动结清查询索引和数据库校验 trigger，不改写 v14 既有事实，也不创建 demo 数据。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
@@ -59,7 +59,7 @@
 - 归档项目不再接受新任务关联；schema v5 让任务、发票和客户聚合事实变化同步失效 Project `ETag`，避免基于旧汇总完成、归档或硬删除。
 - Client 列表/详情/创建/编辑/停用/恢复/确认硬删除已接真实 API；创建支持首次响应快照幂等，PATCH/DELETE 使用聚合 `ETag`，项目数从 Project 实时派生。Project 客户关联变化使旧 Client 版本失效，Client 名称变化继续使旧 Project 版本失效；Invoice 强引用阻止删除，Project 可选关联按外键置空。
 - schema v7 以固定 UUID 初始化唯一 owner 与 system，按历史任务完成状态幂等回填 owner Assignment 和 `migration_assignment_backfill` 事件；数据库保护内置主体、活动分派与引用历史。
-- 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。
+- 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。“关于”按需读取 `/health`，严格校验后展示运行事实，失败保留明确错误与重试入口。
 - 任务详情已接 Assignment API/UI：可查询当前 assignee/reviewer 与结束历史，完成首次分派、改派和结束；命令使用 Task `If-Match`/`version`、可选幂等快照和事务化 Workflow Event。完成 Task 会结束活动 Assignment，重新打开不会恢复旧记录。
 - Task 已扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态，并通过 `start / block / unblock / complete / cancel / reopen` 六个显式命令改变生命周期；新建只能进入 `todo`，旧通用状态端点返回 410。开始要求活动负责人，阻塞/取消要求原因，解除阻塞由服务端恢复来源状态，完成/取消会原子结束活动 Assignment，重新打开不会恢复旧分派。
 - 任务详情已提供按需加载的通用 Task Workflow Event 时间线；生命周期、Assignment 和迁移事件按时间与 `command_seq` 倒序展示，事件记录受数据库不可修改/删除保护。
@@ -109,7 +109,7 @@
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                           | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                                 | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                   |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                 | 单次受控执行                                                                                                                                | Agent Run、Task Artifact、待验收或失败事件                                              |
 | [专注](modules/focus.md)                   | 当前 Task                                                               | 活动 Session 和有效工时                                                                                                                     | Task actual_minutes、今日/统计数据                                                      |
-| [设置](modules/settings.md)                | 当前 localStorage 偏好与 Actor API                                      | 本地偏好界面及已实现的 person 管理；版本化 app_settings 仍待实现                                                                            | 布局、主题、Actor、备份和桌面行为                                                       |
+| [设置](modules/settings.md)                | 当前 localStorage 偏好、Actor API 与 `/health`                           | 本地偏好界面、person 管理和只读运行诊断；版本化 app_settings 仍待实现                                                                        | 布局、主题、Actor、运行版本、备份和桌面行为                                             |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/Inbox 索引                                          | 统一查找与快捷操作入口                                                                                                                      | 跳转详情或触发受控命令                                                                  |
 | [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                       | 已实现迁移和受控 Artifact 一致性；备份、恢复、导入导出仍规划                                                                                | 当前文件安全；未来恢复后的完整应用状态和诊断包                                          |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                 | 原生窗口、进程、权限、运行日志和发布                                                                                                        | 可运行、可诊断的本地应用环境                                                            |

@@ -3476,6 +3476,27 @@ kbd {
   font-weight: 500;
 }
 
+.settings-about-row > .settings-health-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--danger-text);
+}
+
+.settings-about-row > .settings-health-state[data-status="ok"] {
+  color: var(--green-light);
+}
+
+.settings-about-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.settings-inline-warning {
+  color: var(--danger-text);
+}
+
 .settings-actor-footer-note {
   margin-right: auto;
   color: var(--text-dim);

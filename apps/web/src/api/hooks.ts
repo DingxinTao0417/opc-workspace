@@ -735,10 +735,11 @@ export const taskQueryKey = ["tasks"] as const;
 
 export const taskDetailQueryKey = (id: string) => ["tasks", id] as const;
 
-export function useHealthQuery() {
+export function useHealthQuery(enabled = true) {
   return useQuery({
     queryKey: ["health"],
     queryFn: getHealth,
+    enabled,
     retry: false,
     refetchInterval: 15_000,
   });

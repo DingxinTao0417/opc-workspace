@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v15。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立一次性 Reminder，均不改设置结构。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/诊断和桌面设置入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v15。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立一次性 Reminder，均不改设置结构。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/备份和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -25,7 +25,7 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
-- 关于：硬编码应用版本、数据存储、桌面架构和云同步状态。
+- 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - Zustand persist 对输入进行边界清洗，历史存储键为 opc-focus-settings。
 - 当前设置状态明确分为三层：persist 后的 store 值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存提交 preview，取消丢弃 preview。
 - Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
@@ -38,8 +38,7 @@
 - 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
 - 没有 GET / PATCH /settings API，也没有 app_settings 表。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、诊断或 Agent 设置页。
-- “关于”没有读取真实 app、commit、API、schema 和 Sidecar 健康信息。
+- 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、完整诊断或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
@@ -91,7 +90,7 @@
 
 ### 关于与诊断
 
-- 展示真实应用版本、commit、API 版本、schema 版本和 Sidecar 状态。
+- **已完成基线**：展示真实应用版本、commit、API 版本、schema 版本和 Sidecar 状态；Sidecar 构建脚本注入 Git 短提交并为未提交工作树追加 `-dirty`，也支持 CI 显式覆盖；前端严格校验响应契约，失败不回退为硬编码事实。
 - 显示当前数据目录、日志目录、平台与架构，不展示令牌。
 - 提供重新检查服务、手动恢复 Sidecar、打开日志和复制脱敏诊断信息。
 - 清楚区分当前已实现能力、后续版本和平台不支持能力。
@@ -203,9 +202,9 @@
 
 ### v0.1-C：设置页面补齐
 
-- “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和诊断模块待实现。
+- “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和完整诊断模块待实现。
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
-- 展示真实健康和版本信息，移除硬编码“关于”事实。
+- **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
 - 补真实浏览器/窄屏的键盘与焦点验收，并实现持久化设置保存错误状态。
 
 ### v0.1-D：运行态解耦
@@ -230,7 +229,7 @@
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
 - person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v15 延续。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立 Reminder，均不改变 Assignment 约束。
-- “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
+- “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
 - 在线 Updater 不作为当前设置项、启动依赖或默认网络行为出现。

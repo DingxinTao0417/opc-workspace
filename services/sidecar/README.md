@@ -38,10 +38,10 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "url": "http://127.0.0.1:49152",
   "port": 49152,
   "pid": 1234,
-  "version": "0.1.0-dev",
-  "app_version": "0.1.0-dev",
+  "version": "0.1.0",
+  "app_version": "0.1.0",
   "api_version": "v1",
-  "schema_version": 14
+  "schema_version": 15
 }
 ```
 
@@ -202,4 +202,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v3.2 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, active/scheduled Task list filters used by Today, and bounded Task search used by the command palette. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v3.3 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, active/scheduled Task list filters used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
