@@ -35,6 +35,12 @@ func TestInboxTaskMigrationUpgradesV12WithoutChangingExistingFacts(t *testing.T)
 	if err := store.DB.Create(&task).Error; err != nil {
 		t.Fatalf("seed v12 Task fact: %v", err)
 	}
+	if err := store.DB.Exec("DROP TABLE reminders").Error; err != nil {
+		t.Fatalf("remove v14 Reminder table: %v", err)
+	}
+	if err := store.DB.Exec("DELETE FROM schema_migrations WHERE version = 14").Error; err != nil {
+		t.Fatalf("rewind fixture migration 14 history: %v", err)
+	}
 	if err := store.DB.Exec("DROP TRIGGER trg_tasks_prevent_active_inbox_relation_delete").Error; err != nil {
 		t.Fatalf("remove v13 Task delete trigger: %v", err)
 	}
@@ -53,8 +59,8 @@ func TestInboxTaskMigrationUpgradesV12WithoutChangingExistingFacts(t *testing.T)
 		t.Fatalf("upgrade v12 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 13 {
-		t.Fatalf("SchemaVersion = %d, want 13", store.SchemaVersion)
+	if store.SchemaVersion != 14 {
+		t.Fatalf("SchemaVersion = %d, want 14", store.SchemaVersion)
 	}
 	var preservedInbox models.InboxItem
 	if err := store.DB.First(&preservedInbox, "id = ?", inboxID).Error; err != nil {

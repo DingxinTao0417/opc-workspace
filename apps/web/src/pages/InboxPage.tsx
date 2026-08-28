@@ -14,6 +14,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { InboxItemDetailModal } from "../components/InboxItemDetailModal";
 import { InboxItemFormModal } from "../components/InboxItemFormModal";
 import { PageHeader } from "../components/PageHeader";
+import { ReminderManagerModal } from "../components/ReminderManagerModal";
 import type {
   InboxItem,
   InboxItemPriority,
@@ -27,7 +28,7 @@ const viewLabels: Record<InboxItemView, string> = {
 };
 
 const viewDescriptions: Record<InboxItemView, string> = {
-  inbox: "手工记录的新事项会显示在这里。",
+  inbox: "手工记录和已到期的本地提醒会显示在这里。",
   snoozed: "设置恢复时间后，条目会暂存在这里。",
   archive: "已解决和已忽略的条目会保留在这里。",
 };
@@ -99,7 +100,7 @@ function InboxRow({
         ? item.status === "resolved"
           ? `已解决${item.resolutionReason ? ` · ${item.resolutionReason}` : ""}`
           : `已忽略${item.dismissReason ? ` · ${item.dismissReason}` : ""}`
-        : item.summary || "手工记录";
+        : item.summary || (item.kind === "reminder" ? "本地提醒" : "手工记录");
   return (
     <button
       aria-label={`查看 ${item.title}`}
@@ -117,6 +118,8 @@ function InboxRow({
           <BellRing size={15} />
         ) : view === "archive" ? (
           <Archive size={15} />
+        ) : item.kind === "reminder" ? (
+          <BellRing size={15} />
         ) : (
           <Inbox size={15} />
         )}
@@ -154,6 +157,7 @@ export function InboxPage() {
   const [priority, setPriority] = useState<InboxItemPriority | "">("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [managingReminders, setManagingReminders] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const query = useInboxItemsQuery({
     view,
@@ -197,6 +201,14 @@ export function InboxPage() {
       <PageHeader
         actions={
           <div className="inbox-header-actions">
+            <button
+              className="button button-secondary"
+              onClick={() => setManagingReminders(true)}
+              type="button"
+            >
+              <BellRing size={15} />
+              本地提醒
+            </button>
             <button
               className="button button-secondary"
               disabled={
@@ -402,6 +414,16 @@ export function InboxPage() {
         itemId={selectedId}
         onClose={() => setSelectedId(null)}
       />
+      {managingReminders ? (
+        <ReminderManagerModal
+          onClose={() => setManagingReminders(false)}
+          onOpenInboxItem={(id) => {
+            setManagingReminders(false);
+            setSelectedId(id);
+          }}
+          open
+        />
+      ) : null}
     </div>
   );
 }

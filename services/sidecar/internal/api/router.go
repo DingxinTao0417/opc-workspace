@@ -28,6 +28,7 @@ type Options struct {
 	ArtifactDir            string
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration
+	ReminderScanInterval   time.Duration
 }
 
 type API struct {
@@ -41,6 +42,8 @@ type Router struct {
 	artifactStore        *artifactStore
 	focusHeartbeatCancel context.CancelFunc
 	focusHeartbeatDone   chan struct{}
+	reminderScanCancel   context.CancelFunc
+	reminderScanDone     chan struct{}
 	closeOnce            sync.Once
 	closeErr             error
 }
@@ -53,6 +56,10 @@ func (r *Router) Close() error {
 		if r.focusHeartbeatCancel != nil {
 			r.focusHeartbeatCancel()
 			<-r.focusHeartbeatDone
+		}
+		if r.reminderScanCancel != nil {
+			r.reminderScanCancel()
+			<-r.reminderScanDone
 		}
 		if r.artifactStore != nil {
 			r.closeErr = r.artifactStore.close()
@@ -73,6 +80,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.FocusHeartbeatInterval == 0 {
 		options.FocusHeartbeatInterval = 15 * time.Second
+	}
+	if options.ReminderScanInterval == 0 {
+		options.ReminderScanInterval = 15 * time.Second
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -135,6 +145,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		return nil, fmt.Errorf("recover active Focus Sessions: %w", err)
 	}
 	service := &API{db: db, options: options, artifactStore: artifacts}
+	if err := service.projectDueReminders(context.Background()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("project due Reminders: %w", err)
+	}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
 	{
@@ -206,6 +222,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/inbox-items/:id/resolve", service.resolveInboxItem)
 		v1.POST("/inbox-items/:id/dismiss", service.dismissInboxItem)
 		v1.POST("/inbox-items/:id/reopen", service.reopenInboxItem)
+		v1.GET("/reminders", service.listReminders)
+		v1.POST("/reminders", service.createReminder)
+		v1.GET("/reminders/:id", service.getReminder)
+		v1.PATCH("/reminders/:id", service.updateReminder)
+		v1.DELETE("/reminders/:id", service.cancelReminder)
 		v1.GET("/stats/today", service.todayStats)
 	}
 	result := &Router{Engine: router, artifactStore: artifacts}
@@ -224,6 +245,26 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 				case <-ticker.C:
 					if err := service.refreshActiveFocusHeartbeat(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
 						options.Logger.Printf("Focus Session heartbeat failed: %v", err)
+					}
+				}
+			}
+		}()
+	}
+	if options.ReminderScanInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result.reminderScanCancel = cancel
+		result.reminderScanDone = make(chan struct{})
+		go func() {
+			defer close(result.reminderScanDone)
+			ticker := time.NewTicker(options.ReminderScanInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := service.projectDueReminders(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+						options.Logger.Printf("Reminder scan failed: %v", err)
 					}
 				}
 			}

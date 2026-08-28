@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v13（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v14（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -29,6 +29,7 @@
 - schema v11 重建 `focus_sessions`，新增有效工作区间账本 `focus_session_intervals` 和精确秒数余量账本 `task_focus_totals`；旧 Focus 记录按终态映射并补 interval，不二次增加 Task 工时，并用只适用于迁入终态的 `legacy_imported` 标记无损保留旧 schema 中超过 120 分钟的合法记录。
 - schema v12 以加法迁移新增 `inbox_items` 及列表/未读查询索引；`source_event_key` 只对非空值建立部分唯一索引。v11→v12 升级测试验证既有 Client 等业务事实不变，当前迁移不创建 demo Inbox 数据。
 - schema v13 以加法迁移新增 `inbox_item_tasks`、活动关系唯一/position/软解除约束、原 Task ID/标题快照与活动关系 Task 删除保护。v12→v13 不重建 Task、Inbox Item 或其他模块表，也不创建 demo 关系。
+- schema v14 以加法迁移新增 `reminders`、稳定来源事件键、终态字段分组、触发投影引用一致性、身份/终态不可变与硬删除保护。v13→v14 不重建既有表、不改写业务事实，也不创建 demo Reminder。
 - 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
@@ -130,7 +131,7 @@ appLogDir/
 
 ## SQLite 迁移契约
 
-当前 schema v13：
+当前 schema v14：
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -143,8 +144,9 @@ appLogDir/
 - 011：Focus Session 状态/版本重建、有效 interval、Task 精确秒数余量账本、单一开放 Session/interval 约束和 v10 历史兼容迁移。
 - 012：手工 Inbox Item 事实、终态成组约束、查询索引及 nullable `source_event_key` 部分唯一索引；不创建 Task 关系、Reminder 或来源投影。
 - 013：Inbox–Task 活动/历史关系、required、稳定 position、带原因软解除、原 Task ID/标题快照、nullable 实时 Task 外键和活动关系 Task 删除保护；不创建 Task、Assignment、Reminder、来源投影或自动解决。
+- 014：一次性本地 Reminder、稳定唯一 `source_event_key`、scheduled/fired/cancelled 成组约束、fired Inbox 引用一致性、身份/终态不可变和硬删除保护；不创建 demo Reminder，也不改写 v13 事实。
 
-新增 schema 只能从 `014_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `015_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## 未来 v0.1 备份/恢复目标
 
@@ -202,6 +204,7 @@ appLogDir/
 - [x] 开发/正式数据库和 Artifact root 隔离。
 - [x] schema v12 嵌入迁移、回滚、外键恢复和测试；v11→v12 数据保留与 Inbox 约束已有定向覆盖。
 - [x] schema v13 嵌入迁移、v12→v13 数据保留、关系约束、删除保护和外键恢复已由定向及全量 Go 测试覆盖。
+- [x] schema v14 嵌入迁移、v13→v14 数据保留、Reminder 状态/投影引用/不可变/删除约束已由定向及全量 Go 测试覆盖。
 - [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
@@ -225,9 +228,11 @@ appLogDir/
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
+- [schema v14 Reminder 迁移](../../services/sidecar/internal/database/migrations/014_reminders.sql)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
 - [统一开发脚本](../../scripts/dev.mjs)
 - [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)
 - [schema v13 迁移测试](../../services/sidecar/internal/database/inbox_task_migration_test.go)
+- [schema v14 迁移测试](../../services/sidecar/internal/database/reminder_migration_test.go)

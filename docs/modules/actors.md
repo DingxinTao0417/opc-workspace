@@ -1,10 +1,10 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v13（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10–v13 不改写其契约；v12 新增独立 Inbox Item，v13 新增 Inbox–Task 关系和 Task 删除互锁。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v14（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10–v14 不改写其契约；v12 新增独立 Inbox Item，v13 新增 Inbox–Task 关系和 Task 删除互锁，v14 新增引用 owner/system 的一次性 Reminder。
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.6](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 
@@ -127,7 +127,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 3. **T-18C（已完成）**：Assignment 查询、创建、改派、结束、Task 版本和责任 UI。
 4. **T-18D D1（已完成）**：schema v8 六状态、显式命令、事件顺序/不可变保护与时间线。
 5. **T-18D D2（已完成）**：schema v9、manual policy、Submission/Artifact、受控文件、提交/接受/返工/撤回/软删。
-6. **Inbox/Reminder（部分实现）**：独立手工 Inbox Item、人工分诊和已有 Task 的活动/历史关系已交付；来源消费、Task 拆分/分派、Reminder 和自动解决未实现。
+6. **Inbox/Reminder（部分实现）**：独立手工 Inbox Item、人工分诊、已有 Task 的活动/历史关系，以及一次性 Reminder 的 owner 创建/system 触发审计已交付；其他来源消费、Task 拆分/分派和自动解决未实现。
 7. **T-19 v0.2（未实现）**：agent Adapter、Run、能力令牌、取消/重试与崩溃恢复。
 
 ## 验收状态
@@ -141,7 +141,8 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [ ] agent Actor、Adapter/Run、能力令牌、权限撤销和实际本地执行。
 - [x] 独立的手工 Inbox Item 与人工分诊，不隐式创建 Assignment。
 - [x] Inbox 可关联/解除已有 Task，关系动作不隐式创建 Assignment。
-- [ ] Inbox 来源事件消费、Task 批量拆分/分派、Reminder 与自动解决。
+- [x] 一次性 Reminder 的 owner 创建/取消与 system 到期触发审计。
+- [ ] 非 Reminder Inbox 来源事件消费、Task 批量拆分/分派与自动解决。
 
 ## 相关代码/PRD 链接
 

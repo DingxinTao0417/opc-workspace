@@ -144,6 +144,37 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("accepts only internally consistent Reminder Inbox projections", () => {
+    const reminderId = "018f0000-0000-7000-8000-000000000811";
+    expect(
+      normalizeInboxItem(
+        inboxPayload({
+          kind: "reminder",
+          source_entity_type: "reminder",
+          source_entity_id: reminderId,
+          source_event_key: `reminder:${reminderId}:due`,
+          payload_json: {
+            reminder_id: reminderId,
+            trigger_at: "2026-08-28T10:00:00Z",
+          },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "reminder",
+      sourceEntityType: "reminder",
+      sourceEntityId: reminderId,
+    });
+    expect(() =>
+      normalizeInboxItem(
+        inboxPayload({
+          kind: "reminder",
+          source_entity_type: "manual",
+          source_entity_id: reminderId,
+        }),
+      ),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

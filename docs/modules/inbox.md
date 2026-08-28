@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v13。T-11A1 手工 `inbox_items`、T-11B 人工受理/分诊与 T-11A2 已有 Task 关系纵切已交付；批量拆分/分派/自动解决、Reminder、来源投影和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v14。T-11A1 手工 `inbox_items`、T-11B 人工受理/分诊、T-11A2 已有 Task 关系和 T-11A3 一次性 Reminder 到期投影已交付；批量拆分/分派/自动解决、非 Reminder 来源投影和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,13 +31,13 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工条目的本地受理、查看、编辑、分诊和归档闭环，以及与已有 Task 的活动/历史关系、实时进度和软解除已接真实 SQLite/API/UI；批量任务拆分、Assignment、自动解决和自动事件来源尚未交付。
+当前模块为**部分完成**：手工条目的本地受理、查看、编辑、分诊和归档闭环，与已有 Task 的活动/历史关系、实时进度和软解除，以及一次性 Reminder 到期 Inbox 投影已接真实 SQLite/API/UI；批量任务拆分、Assignment、自动解决和非 Reminder 自动事件来源尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
 - schema v12 通过 `012_inbox_items.sql` 新增 `inbox_items`，从 v11 升级时只追加表和索引，不改写已有业务事实。
 - 当前公开创建 API 强制 `kind = manual`、`source_entity_type = manual`、`resolution_policy = manual`；不接受 `source_entity_id` 或 `source_event_key`。
-- 迁移为未来事件来源预留 `event / reminder` kind、`all_required_tasks_done` 策略及 nullable `source_event_key`，并用仅覆盖非空值的部分唯一索引去重；这些预留值当前不能通过创建 API 使用。
+- 迁移为来源投影预留 `event / reminder` kind、`all_required_tasks_done` 策略及 nullable `source_event_key`，并用仅覆盖非空值的部分唯一索引去重。公开 Inbox 创建 API 仍不能使用这些值；schema v14 的内部 Reminder 调度器已经使用 `kind=reminder` 和稳定事件键。
 - 主状态约束为 `open / tracking / resolved / dismissed`。当前手工创建固定进入 `open`；schema v13 的显式 Task 关系命令已经使用 `tracking`，受理/分诊命令本身不会隐式创建关系或进入该状态。
 - 标题为 trim 后 2–200 字符，摘要最多 10,000 字符，优先级为 `P0 / P1 / P2 / P3`，截止时间使用 RFC 3339 UTC。
 - `payload_json` 必须是 JSON object；当前前端不暴露该字段，也不会以此伪造来源事实。
@@ -61,10 +61,17 @@
 - 关系 POST/PATCH/DELETE 使用 Inbox `ETag / If-Match` 和可选 `Idempotency-Key`，业务事实、Inbox 状态/version 与 `task_linked / task_requirement_changed / task_unlinked` 事件同事务提交。关系命令不递增 Task version。
 - 任一活动 Inbox 关系会使 Task 硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`。带原因软解除后 Task 可以删除；历史行的实时 `task_id` 置空，但 `task_ref_id / task_title_snapshot` 与事件继续保留。
 
+### 已交付：T-11A3 一次性本地 Reminder
+
+- schema v14 新增独立 `reminders` 调度事实；公开 API 提供创建、分页/搜索/状态查询、详情、scheduled 编辑和带原因取消。
+- Sidecar ready 前先补扫到期项，运行中每 15 秒扫描最多 100 条；以 `reminder:<id>:due` 为稳定事件键在同一事务中生成或复用一个 Reminder Inbox Item、记录 system 事件并把 Reminder 标记为 fired。
+- Inbox Item 使用 `kind/source_entity_type=reminder`、指向 Reminder ID、继承标题/摘要/优先级/触发时间，并保持 `resolution_policy=manual`。用户随后在普通 Inbox 流程中阅读、稍后、解决、忽略或关联 Task，不反向修改 fired Reminder。
+- Reminder 管理器从 Inbox 页打开，提供待提醒/已触发/已取消模块、搜索、分页、新建、编辑/改期、带原因取消和触发后跳转 Inbox。重复提醒、系统原生通知和其他业务来源投影仍未交付。
+
 ### 明确未交付
 
 - Task 批量创建/父子拆分、Assignment 消费、统一依赖失效/reconciliation 与自动解决；
-- `reminders`、一次性调度器、改期/取消和到期生成 Inbox Item；
+- 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
 - Task/Project/Client/Invoice/系统故障等来源投影、Artifact `requires_followup` 消费和稳定事件扫描；
 - `force-resolve`、`source_entity_type=task` 等多态来源删除协调、Inbox Item 硬删除；
 - Sidebar 与 Today 的 Inbox 计数和带筛选跳转；
@@ -137,29 +144,29 @@
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v13 延续）
+### `inbox_items`（schema v12，在当前 schema v14 延续）
 
-| 字段                                | 当前约束 / 说明                                                   |
-| ----------------------------------- | ----------------------------------------------------------------- |
-| `id`                                | UUID 主键                                                         |
-| `kind`                              | 表约束 manual/event/reminder；当前创建 API 仅 manual              |
-| `title / summary`                   | 标题 2–200；摘要最多 10,000                                       |
-| `source_entity_type`                | 当前创建 API 固定 manual                                          |
-| `source_entity_id`                  | 当前手工项必须为 null                                             |
-| `source_event_key`                  | nullable；非空值受部分唯一索引保护；当前手工 API 禁止设置         |
-| `source_deleted_at`                 | 当前手工项为 null；来源删除协调尚未实现                           |
-| `priority`                          | P0 / P1 / P2 / P3                                                 |
-| `status`                            | open / tracking / resolved / dismissed                            |
-| `resolution_policy`                 | 表约束 manual/all_required_tasks_done；当前 API 仅 manual         |
-| `due_at`                            | 可空 RFC 3339 UTC                                                 |
-| `read_at / triaged_at`              | 相互独立的已读与分诊时间                                          |
-| `snoozed_until`                     | 可空；未来值进入稍后视图，到期后按查询恢复                        |
-| `resolved_* / resolution_*`         | resolved 终态的 owner、时间、原因和模式；当前命令只写 mode=manual |
-| `dismissed_* / dismiss_reason`      | dismissed 终态的 owner、时间和原因                                |
-| `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                |
-| `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                           |
+| 字段                                | 当前约束 / 说明                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `id`                                | UUID 主键                                                                             |
+| `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 投影使用 reminder |
+| `title / summary`                   | 标题 2–200；摘要最多 10,000                                                           |
+| `source_entity_type`                | 当前创建 API 固定 manual                                                              |
+| `source_entity_id`                  | 当前手工项必须为 null                                                                 |
+| `source_event_key`                  | nullable；非空值受部分唯一索引保护；当前手工 API 禁止设置                             |
+| `source_deleted_at`                 | 当前手工项为 null；来源删除协调尚未实现                                               |
+| `priority`                          | P0 / P1 / P2 / P3                                                                     |
+| `status`                            | open / tracking / resolved / dismissed                                                |
+| `resolution_policy`                 | 表约束 manual/all_required_tasks_done；当前 API 仅 manual                             |
+| `due_at`                            | 可空 RFC 3339 UTC                                                                     |
+| `read_at / triaged_at`              | 相互独立的已读与分诊时间                                                              |
+| `snoozed_until`                     | 可空；未来值进入稍后视图，到期后按查询恢复                                            |
+| `resolved_* / resolution_*`         | resolved 终态的 owner、时间、原因和模式；当前命令只写 mode=manual                     |
+| `dismissed_* / dismiss_reason`      | dismissed 终态的 owner、时间和原因                                                    |
+| `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                    |
+| `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                               |
 
-schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用。event/reminder kind、自动解决策略及非空来源事件键仍是未来迁移/API 会使用的受约束空间，不代表 Reminder、来源投影或自动解决已经上线。
+schema v13 不重建 `inbox_items`，`tracking` 已由活动 Task 关系使用；schema v14 也不重建该表，而是由内部调度器使用既有 reminder kind、`source_entity_type=reminder` 和非空稳定事件键。event kind、其他来源投影和自动解决策略仍是受约束的未来空间。
 
 ### `inbox_item_tasks`（schema v13）
 
@@ -202,7 +209,7 @@ schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用�
 | PATCH  | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{is_required}`；修改活动关系 required，强制 Inbox `If-Match`，可选幂等键                         |
 | DELETE | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{reason}`；带原因软解除，强制 Inbox `If-Match`，可选幂等键，最后关系回到 open                    |
 
-关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history，`total` 是 history 总数，active 全量返回且最多 100。POST 成功返回 201，PATCH/DELETE 成功返回 200；三者的 `data` 均为 `{inbox_item,relation,progress}`。当前没有 split、Reminder、force-resolve、自动投影或 Inbox 删除路由。
+关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history，`total` 是 history 总数，active 全量返回且最多 100。POST 成功返回 201，PATCH/DELETE 成功返回 200；三者的 `data` 均为 `{inbox_item,relation,progress}`。Reminder 使用独立 `/api/v1/reminders` 路由和内部到期投影；当前没有 split、force-resolve、非 Reminder 自动投影或 Inbox 删除路由。
 
 ### 幂等、并发与事务
 
@@ -242,7 +249,7 @@ schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用�
 2. **T-11A1 手工 Inbox Item 数据契约（已完成）**：schema v12、约束、索引和迁移保留测试。
 3. **T-11B 人工受理与分诊（已完成）**：真实列表/详情/编辑、已读/快照式全部已读、稍后/恢复、解决/忽略/重开及事件 UI/API。
 4. **T-11A2 Task 关系事实（已完成）**：schema v13、活动/历史关系、实时进度、已有 Task 关联、required 修改、带原因软解除、状态联动、事件，以及关联 Task 硬删除互锁和历史快照。多态来源删除协调不属于 A2。
-5. **T-11A3 Reminder 事实**：新增 `reminders`、一次性调度、改期/取消及幂等到期投影。
+5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派**：原子多任务/父子拆分、owner/person Assignment、统一依赖失效/reconciliation、自动解决和 force-resolve；单条已有 Task 关联、required 修改与实时派生读模型已在 A2 完成。
 7. **T-11E v0.1 来源投影**：显式 follow-up 产出、任务临期/阻塞和系统故障；逐项验证稳定事件键。
 8. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
@@ -269,7 +276,7 @@ schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用�
 - [ ] T-11C 批量拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
 - [ ] 进度完全从活动必需 Task 派生，零必需任务不自动解决。
 - [ ] blocked、cancelled、waiting_review 和失败任务不误触发自动解决。
-- [ ] Reminder 与每种来源事件跨扫描、跨重启只生成一条 Inbox Item。
+- [x] Reminder 跨扫描、跨重启只生成一条 Inbox Item；其他来源事件仍待 T-11E 逐项验收。
 - [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
 - [ ] T-11E 多态来源删除保留快照并可解释；不要以关联 Task 删除互锁冒充来源协调。
 - [ ] Sidebar/Today 计数、真实浏览器键盘/焦点、长列表和窄屏视觉完成专项验收。
@@ -281,6 +288,8 @@ schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用�
 - [整体功能架构](../functional-architecture.md)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
+- [schema v14 Reminder 迁移](../../services/sidecar/internal/database/migrations/014_reminders.sql)
+- [Reminder 模块文档](reminders.md)
 - [Inbox API](../../services/sidecar/internal/api/inbox_items.go)
 - [Inbox–Task 关系 API](../../services/sidecar/internal/api/inbox_item_tasks.go)
 - [Inbox API 测试](../../services/sidecar/internal/api/inbox_items_test.go)

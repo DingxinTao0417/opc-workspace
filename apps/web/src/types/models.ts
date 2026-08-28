@@ -691,7 +691,7 @@ export interface DeleteClientResult {
   detachedProjects: number;
 }
 
-export type InboxItemKind = "manual";
+export type InboxItemKind = "manual" | "reminder";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
 export type InboxItemView = "inbox" | "snoozed" | "archive";
@@ -705,7 +705,7 @@ export interface InboxItem {
   kind: InboxItemKind;
   title: string;
   summary: string;
-  sourceEntityType: "manual";
+  sourceEntityType: "manual" | "reminder";
   sourceEntityId: string | null;
   sourceEventKey: string | null;
   sourceDeletedAt: string | null;
@@ -900,4 +900,80 @@ export interface InboxEventListMeta extends PageMeta {
 export interface InboxEventListResult {
   items: InboxWorkflowEvent[];
   meta: InboxEventListMeta;
+}
+
+export type ReminderStatus = "scheduled" | "fired" | "cancelled";
+export type ReminderAction = "edit" | "cancel";
+export type ReminderSort =
+  | "title"
+  | "status"
+  | "priority"
+  | "trigger_at"
+  | "created_at"
+  | "updated_at"
+  | "-title"
+  | "-status"
+  | "-priority"
+  | "-trigger_at"
+  | "-created_at"
+  | "-updated_at";
+
+export interface Reminder {
+  id: string;
+  sourceEntityType: "manual";
+  sourceEntityId: null;
+  title: string;
+  summary: string;
+  priority: InboxItemPriority;
+  triggerAt: string;
+  status: ReminderStatus;
+  sourceEventKey: string;
+  createdByActorId: string;
+  firedAt: string | null;
+  inboxItemId: string | null;
+  cancelledByActorId: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  availableActions: ReminderAction[];
+}
+
+export interface ReminderListParams {
+  status?: ReminderStatus;
+  q?: string;
+  sort?: ReminderSort;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ReminderListMeta extends PageMeta {
+  serverNow: string;
+}
+
+export interface ReminderListResult {
+  items: Reminder[];
+  meta: ReminderListMeta;
+}
+
+export interface CreateReminderInput {
+  title: string;
+  summary: string;
+  priority: InboxItemPriority;
+  triggerAt: string;
+}
+
+export interface UpdateReminderInput {
+  title?: string;
+  summary?: string;
+  priority?: InboxItemPriority;
+  triggerAt?: string;
+  expectedVersion: number;
+}
+
+export interface CancelReminderInput {
+  id: string;
+  reason: string;
+  expectedVersion: number;
 }

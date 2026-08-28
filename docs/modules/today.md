@@ -1,6 +1,6 @@
 # 今日工作台模块
 
-> 实现状态截止：2026-08-28；当前数据库 schema v13。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和实时进度；Today 的 Inbox 派生计数仍未接入。
+> 实现状态截止：2026-08-28；当前数据库 schema v14。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和实时进度，schema v14 新增一次性 Reminder 到期 Inbox 投影；Today 的 Inbox/Reminder 派生计数仍未接入。
 >
 > 版本边界：本文同时描述当前实现与目标规划；凡标注“规划”的内容均未在该基线交付。
 
@@ -102,7 +102,7 @@
 - 任务列表与任务统计后续统一采用用户 IANA 时区；Focus 统计的 IANA 本地日边界已经实现。
 - 通过任务列表 API 按日期/范围分页查询，而不是先读取前 100 条再由前端切片。
 - 今日页接入现有 `PUT /api/v1/tasks/reorder`，并在拖拽失败、`TASK_REORDER_SET_CHANGED` 或 `VERSION_CONFLICT` 时回滚可见顺序并刷新任务组。
-- 今日页消费 `task_due`、`task_blocked`、`task_output_submitted`、`reminder_due` 等本地事件的派生计数，但不自行写 Workflow Event。
+- **规划**：今日页消费 `task_due`、`task_blocked`、`task_output_submitted` 和已交付 Reminder 到期 Inbox Item 等本地事实的派生计数，但不自行写 Workflow Event；当前 UI 尚未接入这些 Inbox 计数。
 - 财务、客户和发票统计只有对应模块交付后才接入；当前 schema 中有表不等于 API/业务已可用。
 
 ## 与其他模块协作

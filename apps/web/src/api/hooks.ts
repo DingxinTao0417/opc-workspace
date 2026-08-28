@@ -13,6 +13,7 @@ import {
   cancelFocusSession,
   createClient,
   createFocusSession,
+  createReminder,
   createPersonActor,
   createTag,
   createTask,
@@ -23,6 +24,7 @@ import {
   deleteTag,
   deleteTask,
   deleteTaskArtifact,
+  cancelReminder,
   downloadTaskArtifact,
   endTaskAssignment,
   executeTaskLifecycleCommand,
@@ -41,6 +43,8 @@ import {
   getInboxItemEvents,
   getInboxItemTasks,
   getInboxItems,
+  getReminder,
+  getReminders,
   getTags,
   getTask,
   getTaskArtifact,
@@ -74,6 +78,7 @@ import {
   transitionProject,
   updateActor,
   updateProject,
+  updateReminder,
   unlinkInboxItemTask,
 } from "./client";
 import type {
@@ -82,6 +87,7 @@ import type {
   ClientInput,
   ClientListParams,
   CreateFocusSessionInput,
+  CreateReminderInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
@@ -95,10 +101,12 @@ import type {
   InboxItemTaskListParams,
   LinkInboxItemTaskInput,
   MarkAllInboxReadInput,
+  CancelReminderInput,
   NewTaskInput,
   ProjectInput,
   ProjectListParams,
   ProjectTransitionAction,
+  ReminderListParams,
   ReorderTasksInput,
   TagInput,
   TagListParams,
@@ -119,6 +127,7 @@ import type {
   UpdateInboxItemTaskRequirementInput,
   UpdateTagInput,
   UpdateProjectInput,
+  UpdateReminderInput,
   UpdateTaskInput,
   UnlinkInboxItemTaskInput,
 } from "../types/models";
@@ -303,6 +312,117 @@ export const inboxEventQueryKey = (id: string) =>
   [...inboxQueryKey, "events", id] as const;
 export const inboxTaskRelationQueryKey = (id: string) =>
   [...inboxQueryKey, "tasks", id] as const;
+
+export const reminderQueryKey = ["reminders"] as const;
+export const reminderDetailQueryKey = (id: string) =>
+  [...reminderQueryKey, "detail", id] as const;
+
+export function useRemindersQuery(
+  input: ReminderListParams = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...reminderQueryKey, "list", input],
+    queryFn: () => getReminders(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+    refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useReminderQuery(id: string | null) {
+  return useQuery({
+    queryKey: reminderDetailQueryKey(id ?? "closed"),
+    queryFn: () => getReminder(id!),
+    enabled: Boolean(id),
+    retry: 1,
+    refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,
+  });
+}
+
+async function invalidateReminderFacts(
+  queryClient: QueryClient,
+  id?: string,
+): Promise<void> {
+  await queryClient.invalidateQueries({ queryKey: reminderQueryKey });
+  if (id) {
+    await queryClient.invalidateQueries({
+      queryKey: reminderDetailQueryKey(id),
+    });
+  }
+}
+
+function reminderFactsNeedRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 ||
+      error.status === 409 ||
+      error.code === "VERSION_CONFLICT")
+  );
+}
+
+export function useCreateReminder() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateReminderInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createReminder(input, attempt.current.key);
+    },
+    onSuccess: async (reminder) => {
+      attempt.current = null;
+      queryClient.setQueryData(reminderDetailQueryKey(reminder.id), reminder);
+      await invalidateReminderFacts(queryClient, reminder.id);
+    },
+  });
+}
+
+export function useUpdateReminder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateReminderInput }) =>
+      updateReminder(id, input),
+    onSuccess: async (reminder) => {
+      queryClient.setQueryData(reminderDetailQueryKey(reminder.id), reminder);
+      await invalidateReminderFacts(queryClient, reminder.id);
+    },
+    onError: async (error, variables) => {
+      if (reminderFactsNeedRefresh(error)) {
+        await invalidateReminderFacts(queryClient, variables.id);
+      }
+    },
+  });
+}
+
+export function useCancelReminder() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CancelReminderInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return cancelReminder(input, attempt.current.key);
+    },
+    onSuccess: async (reminder) => {
+      attempt.current = null;
+      queryClient.setQueryData(reminderDetailQueryKey(reminder.id), reminder);
+      await invalidateReminderFacts(queryClient, reminder.id);
+    },
+    onError: async (error, variables) => {
+      if (reminderFactsNeedRefresh(error)) {
+        await invalidateReminderFacts(queryClient, variables.id);
+      }
+    },
+  });
+}
 
 export function useInboxItemsQuery(
   input: InboxItemListParams = {},

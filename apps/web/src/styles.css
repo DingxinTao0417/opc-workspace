@@ -2993,6 +2993,24 @@ kbd {
   border-top-color: var(--border-subtle);
 }
 
+.modal-panel:has(.reminder-manager) {
+  display: flex;
+  height: min(700px, calc(100vh - 32px));
+  flex-direction: column;
+}
+
+.modal-panel:has(.reminder-manager) .modal-body {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+}
+
+.modal-panel:has(.reminder-manager) .modal-footer {
+  flex: 0 0 auto;
+}
+
 .settings-layout {
   display: grid;
   height: 100%;
@@ -5546,6 +5564,397 @@ kbd {
   gap: 8px;
 }
 
+.reminder-manager {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: 164px minmax(0, 1fr);
+}
+
+.reminder-manager-nav {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
+}
+
+.reminder-manager-nav-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 8px 9px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.reminder-manager-nav > button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.reminder-manager-nav > button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.reminder-manager-nav > button.active {
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.reminder-manager-nav > p {
+  margin: auto 8px 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.reminder-manager-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 16px 18px 0;
+}
+
+.reminder-manager-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reminder-manager-heading h3,
+.reminder-terminal-detail h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.reminder-manager-heading p {
+  max-width: 540px;
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.reminder-manager-search {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-muted);
+}
+
+.reminder-manager-search:focus-within {
+  border-color: var(--accent-border);
+}
+
+.reminder-manager-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.reminder-manager-workspace {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: minmax(250px, 0.86fr) minmax(320px, 1.14fr);
+  margin-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.reminder-manager-list-pane,
+.reminder-manager-editor-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.reminder-manager-list-pane {
+  padding: 10px 10px 14px 0;
+}
+
+.reminder-manager-editor-pane {
+  padding: 14px 0 16px 16px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.reminder-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reminder-manager-list > button {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  min-height: 54px;
+  grid-template-columns: 28px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.reminder-manager-list > button:hover,
+.reminder-manager-list > button.active {
+  background: var(--panel-hover);
+  color: var(--text-secondary);
+}
+
+.reminder-manager-list > button.active {
+  box-shadow: inset 2px 0 var(--accent-light);
+}
+
+.reminder-manager-list > button > span:nth-child(2),
+.reminder-manager-list strong,
+.reminder-manager-list small {
+  display: block;
+  min-width: 0;
+}
+
+.reminder-manager-list strong,
+.reminder-manager-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reminder-manager-list strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.reminder-manager-list small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.reminder-status-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.reminder-status-icon.fired {
+  background: color-mix(in srgb, var(--green) 13%, transparent);
+  color: var(--green-light);
+}
+
+.reminder-status-icon.cancelled {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--danger-text);
+}
+
+.reminder-manager-pagination,
+.reminder-editor-actions,
+.reminder-cancel-editor > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reminder-manager-pagination {
+  justify-content: center;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.reminder-manager-error,
+.reminder-editor-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.reminder-manager-error {
+  padding: 10px;
+  color: var(--danger-text);
+  font-size: 10px;
+}
+
+.reminder-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.reminder-editor-heading,
+.reminder-editor-heading > div {
+  display: flex;
+  align-items: center;
+}
+
+.reminder-editor-heading {
+  justify-content: space-between;
+  color: var(--text);
+}
+
+.reminder-editor-heading > div {
+  gap: 7px;
+}
+
+.reminder-editor-heading strong {
+  font-size: 12px;
+}
+
+.reminder-editor-heading small {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.reminder-editor-actions {
+  justify-content: space-between;
+}
+
+.reminder-cancel-editor {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 26%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+
+.reminder-cancel-editor strong {
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.reminder-cancel-editor p {
+  margin: 3px 0 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.reminder-cancel-editor > div:last-child {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.reminder-terminal-detail {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.reminder-terminal-detail > div > small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.reminder-terminal-detail h4 {
+  margin-top: 3px;
+}
+
+.reminder-terminal-detail > div > p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.reminder-terminal-detail dl {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.reminder-terminal-detail dl > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 10px;
+}
+
+.reminder-terminal-detail dl > div:last-child {
+  border-bottom: 0;
+}
+
+.reminder-terminal-detail dt {
+  color: var(--text-muted);
+}
+
+.reminder-terminal-detail dd {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.reminder-terminal-detail > .button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.reminder-manager-placeholder {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.reminder-manager-placeholder strong {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.reminder-manager-placeholder p {
+  max-width: 250px;
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .inbox-view-tabs {
   display: inline-flex;
   gap: 2px;
@@ -6669,6 +7078,66 @@ kbd {
   .inbox-detail-actions .button,
   .inbox-detail-editor-actions .button {
     width: 100%;
+  }
+
+  .reminder-manager {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reminder-manager-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .reminder-manager-nav-heading,
+  .reminder-manager-nav > p {
+    display: none;
+  }
+
+  .reminder-manager-nav > button {
+    justify-content: center;
+    padding: 0 6px;
+  }
+
+  .reminder-manager-content {
+    padding: 12px 12px 0;
+  }
+
+  .reminder-manager-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .reminder-manager-heading .button {
+    width: 100%;
+  }
+
+  .reminder-manager-workspace {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .reminder-manager-list-pane,
+  .reminder-manager-editor-pane {
+    overflow: visible;
+  }
+
+  .reminder-manager-list-pane {
+    max-height: 230px;
+    overflow-y: auto;
+  }
+
+  .reminder-manager-editor-pane {
+    padding: 14px 0;
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+
+  .reminder-editor .form-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .table-panel {

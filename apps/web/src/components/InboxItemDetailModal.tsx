@@ -341,7 +341,11 @@ export function InboxItemDetailModal({
         <div className="inbox-detail">
           <div className="inbox-detail-heading">
             <span aria-hidden="true" className="inbox-detail-icon">
-              <Inbox size={17} />
+              {item.kind === "reminder" ? (
+                <BellRing size={17} />
+              ) : (
+                <Inbox size={17} />
+              )}
             </span>
             <div className="min-w-0 flex-1">
               <div className="inbox-detail-title-row">
@@ -350,7 +354,10 @@ export function InboxItemDetailModal({
                   {statusLabels[item.status]}
                 </span>
               </div>
-              <p>手工录入 · 仅保存在本机</p>
+              <p>
+                {item.kind === "reminder" ? "本地提醒" : "手工录入"} ·
+                仅保存在本机
+              </p>
             </div>
           </div>
 

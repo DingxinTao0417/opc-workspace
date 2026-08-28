@@ -22,6 +22,12 @@ func TestInboxMigrationUpgradesV11WithoutChangingExistingFacts(t *testing.T) {
 		t.Fatalf("seed v11 client fact: %v", err)
 	}
 	// Build an exact schema-history v11 boundary from the verified current store.
+	if err := store.DB.Exec("DROP TABLE reminders").Error; err != nil {
+		t.Fatalf("remove v14 Reminder table from fixture: %v", err)
+	}
+	if err := store.DB.Exec("DELETE FROM schema_migrations WHERE version = 14").Error; err != nil {
+		t.Fatalf("rewind fixture migration 14 history: %v", err)
+	}
 	// Migration 013 depends on the migration 012 Inbox table, so remove its
 	// independent Task trigger and relation table before rewinding migration 012.
 	if err := store.DB.Exec("DROP TRIGGER trg_tasks_prevent_active_inbox_relation_delete").Error; err != nil {
@@ -48,8 +54,8 @@ func TestInboxMigrationUpgradesV11WithoutChangingExistingFacts(t *testing.T) {
 		t.Fatalf("upgrade v11 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 13 {
-		t.Fatalf("SchemaVersion = %d, want 13", store.SchemaVersion)
+	if store.SchemaVersion != 14 {
+		t.Fatalf("SchemaVersion = %d, want 14", store.SchemaVersion)
 	}
 	var client struct {
 		Name        string
@@ -80,8 +86,8 @@ func TestInboxMigrationCreatesConstrainedManualIntakeFacts(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 13 {
-		t.Fatalf("SchemaVersion = %d, want 13", store.SchemaVersion)
+	if store.SchemaVersion != 14 {
+		t.Fatalf("SchemaVersion = %d, want 14", store.SchemaVersion)
 	}
 
 	const itemID = "018f0000-0000-7000-8000-000000001201"

@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v13（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12 新增独立 Inbox Item，schema v13 只新增 Inbox–Task 关系和删除互锁，不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v14（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和删除互锁，schema v14 新增独立 Reminder；v12–v14 均不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写，以及 Inbox 对已有 Task 的活动/历史关系均已交付。Inbox 批量拆分/分派/自动解决、来源消费、Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的活动/历史关系，以及独立一次性 Reminder 均已交付。Inbox 批量拆分/分派/自动解决、Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.6](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -280,7 +280,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 
-仍属后续：Inbox 批量拆分/Assignment/自动解决、Reminder/来源投影、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；已有 Task 的 Inbox 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
+仍属后续：Inbox 批量拆分/Assignment/自动解决、Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；独立一次性 Reminder、已有 Task 的 Inbox 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 
 ## 相关代码/PRD 链接
 

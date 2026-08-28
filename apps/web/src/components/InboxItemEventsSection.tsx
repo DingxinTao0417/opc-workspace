@@ -27,7 +27,7 @@ interface EventPresentation {
 }
 
 const eventPresentations: Record<string, EventPresentation> = {
-  inbox_item_created: { icon: Inbox, label: "创建手工条目" },
+  inbox_item_created: { icon: Inbox, label: "创建收件箱条目" },
   inbox_item_updated: { icon: Edit3, label: "更新条目资料" },
   inbox_item_read: { icon: Eye, label: "标记为已读" },
   inbox_item_snoozed: { icon: BellOff, label: "设置稍后处理" },
@@ -38,7 +38,7 @@ const eventPresentations: Record<string, EventPresentation> = {
   task_linked: { icon: Link2, label: "关联任务" },
   task_requirement_changed: { icon: ListChecks, label: "调整任务要求" },
   task_unlinked: { icon: Unlink2, label: "解除任务关联" },
-  created: { icon: Inbox, label: "创建手工条目" },
+  created: { icon: Inbox, label: "创建收件箱条目" },
   updated: { icon: Edit3, label: "更新条目资料" },
   read: { icon: Eye, label: "标记为已读" },
   snoozed: { icon: BellOff, label: "设置稍后处理" },
