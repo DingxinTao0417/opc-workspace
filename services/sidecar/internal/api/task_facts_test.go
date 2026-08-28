@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -415,6 +416,7 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 		"/api/v1/tasks?status=unknown",
 		"/api/v1/tasks?planned_state=unknown",
 		"/api/v1/tasks?planned_state=unscheduled&planned_from=2026-08-01",
+		"/api/v1/tasks?q=" + strings.Repeat("界", 201),
 	} {
 		invalidFilter := performRequest(router, http.MethodGet, path, nil, nil)
 		if invalidFilter.Code != http.StatusBadRequest || responseErrorCode(t, invalidFilter.Body.Bytes()) != "INVALID_FILTER" {

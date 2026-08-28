@@ -212,6 +212,10 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "unscheduled planned_state cannot be combined with planned date filters")
 		return taskListFilters{}, false
 	}
+	if utf8.RuneCountInString(filters.Search) > 200 {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "q must not exceed 200 characters")
+		return taskListFilters{}, false
+	}
 	if filters.Priority != "" {
 		if _, valid := validPriorities[filters.Priority]; !valid {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "priority filter is invalid")

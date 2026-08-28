@@ -5613,6 +5613,24 @@ kbd {
   text-align: center;
 }
 
+.command-search-error {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.command-search-error button {
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger-text) 32%, var(--border));
+  border-radius: 6px;
+  color: var(--danger-text);
+}
+
 .command-footer {
   display: flex;
   gap: 14px;

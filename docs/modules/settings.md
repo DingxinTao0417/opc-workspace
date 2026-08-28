@@ -36,7 +36,7 @@
 - 除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage；浏览器开发环境与桌面应用互不共享。
 - 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
 - 没有 GET / PATCH /settings API，也没有 app_settings 表。
-- 命令面板中的“专注设置”仍只打开通用设置；只有 Focus 页齿轮已直达 focus 模块。
+- 命令面板中的“打开设置”仍打开默认设置模块；只有 Focus 页齿轮已直达 focus 模块。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
 - 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、诊断或 Agent 设置页。
 - “关于”没有读取真实 app、commit、API、schema 和 Sidecar 健康信息。
@@ -204,7 +204,7 @@
 ### v0.1-C：设置页面补齐
 
 - “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和诊断模块待实现。
-- **部分完成**：UI store 和 Focus 页入口已支持指定 activeModule；命令面板直达 focus 仍待接入。
+- **部分完成**：UI store 和 Focus 页入口已支持指定 activeModule；命令面板当前只打开默认模块，直达 focus 仍待接入。
 - 展示真实健康和版本信息，移除硬编码“关于”事实。
 - 补真实浏览器/窄屏的键盘与焦点验收，并实现持久化设置保存错误状态。
 
@@ -228,7 +228,7 @@
 - 保存返回服务端规范化值；并发旧版本更新返回 409。
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
-- Focus 页齿轮可直接打开 focus 模块；命令面板仍待达到同一行为。
+- Focus 页齿轮可直接打开 focus 模块；命令面板“打开设置”仍待支持指定模块。
 - person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v15 延续。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立 Reminder，均不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。

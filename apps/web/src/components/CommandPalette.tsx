@@ -1,8 +1,6 @@
 import {
   CheckSquare2,
-  CircleDollarSign,
   Clock3,
-  FileText,
   FolderKanban,
   Focus,
   Inbox,
@@ -15,7 +13,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useTasksQuery } from "../api/hooks";
+import { useTaskPageQuery } from "../api/hooks";
 import { useUiStore } from "../store/ui";
 
 interface Command {
@@ -31,11 +29,17 @@ export function CommandPalette() {
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
   const navigate = useNavigate();
-  const tasksQuery = useTasksQuery();
   const [query, setQuery] = useState("");
+  const [taskQuery, setTaskQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const normalizedQuery = query.trim();
+  const tasksQuery = useTaskPageQuery(
+    { q: taskQuery, page: 1, pageSize: 12, sort: "-updated_at" },
+    open && taskQuery.length > 0,
+  );
 
   const closeAndNavigate = (to: string) => {
     setOpen(false);
@@ -80,20 +84,6 @@ export function CommandPalette() {
         run: () => closeAndNavigate("/clients"),
       },
       {
-        id: "income",
-        label: "收入",
-        hint: "页面",
-        icon: CircleDollarSign,
-        run: () => closeAndNavigate("/income"),
-      },
-      {
-        id: "invoices",
-        label: "发票",
-        hint: "页面",
-        icon: FileText,
-        run: () => closeAndNavigate("/invoices"),
-      },
-      {
         id: "focus",
         label: "专注",
         hint: "页面",
@@ -112,7 +102,7 @@ export function CommandPalette() {
       },
       {
         id: "focus-settings",
-        label: "专注设置",
+        label: "打开设置",
         hint: "设置",
         icon: Settings2,
         run: () => {
@@ -121,16 +111,22 @@ export function CommandPalette() {
         },
       },
     ];
-    const taskSource = tasksQuery.data ?? [];
-    const taskCommands: Command[] = taskSource.slice(0, 12).map((task) => ({
+    return pageCommands;
+  }, [navigate, setNewTaskOpen, setOpen, setSettingsOpen]);
+
+  const taskCommands = useMemo<Command[]>(() => {
+    const taskSource = tasksQuery.data?.items ?? [];
+    return taskSource.map((task) => ({
       id: `task-${task.id}`,
       label: task.title,
-      hint: "本地任务",
+      hint: `本地任务 · ${task.status}`,
       icon: Clock3,
-      run: () => closeAndNavigate("/tasks"),
+      run: () => {
+        setOpen(false);
+        setTaskDetailId(task.id);
+      },
     }));
-    return [...pageCommands, ...taskCommands];
-  }, [navigate, setNewTaskOpen, setOpen, setSettingsOpen, tasksQuery.data]);
+  }, [setOpen, setTaskDetailId, tasksQuery.data]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -142,9 +138,21 @@ export function CommandPalette() {
     );
   }, [commands, query]);
 
+  const results = taskQuery ? [...filtered, ...taskCommands] : filtered;
+
+  useEffect(() => {
+    if (!open || !normalizedQuery) {
+      setTaskQuery("");
+      return;
+    }
+    const timer = window.setTimeout(() => setTaskQuery(normalizedQuery), 200);
+    return () => window.clearTimeout(timer);
+  }, [normalizedQuery, open]);
+
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    setTaskQuery("");
     setActiveIndex(0);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [open]);
@@ -161,13 +169,15 @@ export function CommandPalette() {
       setOpen(false);
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((index) => Math.min(index + 1, filtered.length - 1));
+      setActiveIndex((index) =>
+        results.length ? Math.min(index + 1, results.length - 1) : 0,
+      );
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setActiveIndex((index) => Math.max(index - 1, 0));
-    } else if (event.key === "Enter" && filtered[activeIndex]) {
+    } else if (event.key === "Enter" && results[activeIndex]) {
       event.preventDefault();
-      filtered[activeIndex].run();
+      results[activeIndex].run();
     }
   };
 
@@ -197,8 +207,8 @@ export function CommandPalette() {
           <kbd>Esc</kbd>
         </div>
         <div className="command-list" role="listbox">
-          {filtered.length ? (
-            filtered.map((command, index) => {
+          {results.length ? (
+            results.map((command, index) => {
               const Icon = command.icon;
               return (
                 <button
@@ -218,9 +228,22 @@ export function CommandPalette() {
                 </button>
               );
             })
-          ) : (
+          ) : (normalizedQuery && !taskQuery) ||
+            (tasksQuery.isPending && taskQuery) ? (
+            <div aria-live="polite" className="command-empty">
+              正在搜索本地任务…
+            </div>
+          ) : !tasksQuery.isError ? (
             <div className="command-empty">没有匹配结果</div>
-          )}
+          ) : null}
+          {tasksQuery.isError && taskQuery ? (
+            <div className="command-search-error" role="alert">
+              <span>任务搜索暂时不可用。</span>
+              <button onClick={() => void tasksQuery.refetch()} type="button">
+                重试
+              </button>
+            </div>
+          ) : null}
         </div>
         <footer className="command-footer">
           <span>
