@@ -76,6 +76,9 @@ function mutationErrorMessage(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof ApiError) {
     if (error.code === "VERSION_CONFLICT") return null;
+    if (error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS") {
+      return "该任务仍被收件箱条目关联。请先到收件箱解除活动关联，再删除任务。";
+    }
     const suffix = error.requestId ? ` · 请求 ${error.requestId}` : "";
     return `${error.message}${suffix}`;
   }

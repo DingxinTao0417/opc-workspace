@@ -749,6 +749,90 @@ export interface InboxItemListResult {
   meta: InboxItemListMeta;
 }
 
+export type InboxTaskRelationType = "created" | "linked";
+
+export interface InboxTaskSummary {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  kind: TaskKind;
+  projectId: string | null;
+  projectName: string | null;
+  version: number;
+}
+
+export interface InboxItemTaskRelation {
+  id: string;
+  inboxItemId: string;
+  taskRefId: string;
+  taskId: string | null;
+  taskTitleSnapshot: string;
+  task: InboxTaskSummary | null;
+  relationType: InboxTaskRelationType;
+  isRequired: boolean;
+  position: number;
+  linkedByActorId: string;
+  linkedByActor: ActorSummary;
+  linkedAt: string;
+  unlinkedByActorId: string | null;
+  unlinkedByActor: ActorSummary | null;
+  unlinkedAt: string | null;
+  unlinkReason: string | null;
+  isActive: boolean;
+  taskDeleted: boolean;
+}
+
+export interface InboxTaskProgress {
+  activeTotal: number;
+  requiredTotal: number;
+  requiredDone: number;
+  requiredRemaining: number;
+  requiredBlocked: number;
+  requiredWaitingReview: number;
+  requiredCancelled: number;
+  percent: number | null;
+  allRequiredDone: boolean;
+}
+
+export interface InboxItemTaskListMeta extends PageMeta {
+  inboxItemVersion: number;
+  progress: InboxTaskProgress;
+}
+
+export interface InboxItemTaskListResult {
+  active: InboxItemTaskRelation[];
+  history: InboxItemTaskRelation[];
+  meta: InboxItemTaskListMeta;
+}
+
+export interface InboxItemTaskListParams {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface InboxItemTaskMutationResult {
+  inboxItem: InboxItem;
+  relation: InboxItemTaskRelation;
+  progress: InboxTaskProgress;
+}
+
+export interface LinkInboxItemTaskInput {
+  inboxItemId: string;
+  taskId: string;
+  isRequired: boolean;
+  expectedVersion: number;
+}
+
+export interface UpdateInboxItemTaskRequirementInput extends LinkInboxItemTaskInput {}
+
+export interface UnlinkInboxItemTaskInput {
+  inboxItemId: string;
+  taskId: string;
+  reason: string;
+  expectedVersion: number;
+}
+
 export interface CreateInboxItemInput {
   title: string;
   summary: string;

@@ -22,7 +22,7 @@
 
 当前状态为未开始：
 
-- 当前 SQLite schema v12 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线，并包含 schema v11 Focus Core 与 schema v12 独立手工 Inbox Item；v12 没有新增 Agent 表、适配器或自动执行能力。当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
+- 当前 SQLite schema v13 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线，并包含 schema v11 Focus Core、schema v12 独立手工 Inbox Item，以及 schema v13 Inbox–Task 关系和 Task 删除互锁；v12–v13 均没有新增 Agent 表、适配器或自动执行能力。当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。

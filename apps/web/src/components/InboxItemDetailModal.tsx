@@ -25,6 +25,7 @@ import type {
 } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { InboxItemEventsSection } from "./InboxItemEventsSection";
+import { InboxItemTasksSection } from "./InboxItemTasksSection";
 import { Modal } from "./Modal";
 
 type ActionEditor = "snooze" | "resolve" | "dismiss" | null;
@@ -121,8 +122,10 @@ export function InboxItemDetailModal({
   const [actionValue, setActionValue] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [relationBusy, setRelationBusy] = useState(false);
   const item = query.data;
-  const busy = updateMutation.isPending || commandMutation.isPending;
+  const busy =
+    updateMutation.isPending || commandMutation.isPending || relationBusy;
 
   useEffect(() => {
     if (!itemId) {
@@ -143,6 +146,7 @@ export function InboxItemDetailModal({
     setActionValue("");
     setValidationError(null);
     setConflictMessage(null);
+    setRelationBusy(false);
     updateMutation.reset();
     commandMutation.reset();
   }, [item, itemId]);
@@ -638,6 +642,19 @@ export function InboxItemDetailModal({
               {operationError}
             </div>
           ) : null}
+
+          <InboxItemTasksSection
+            disabled={editing || actionEditor !== null || busy}
+            item={item}
+            onBusyChange={setRelationBusy}
+            onRefreshItem={async () => {
+              const result = await query.refetch();
+              if (result.isError || !result.data) {
+                throw result.error ?? new Error("无法刷新收件箱条目");
+              }
+              return result.data;
+            }}
+          />
 
           <InboxItemEventsSection itemId={item.id} />
         </div>

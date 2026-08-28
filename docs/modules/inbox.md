@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v12。T-11A1 手工 `inbox_items` 事实与 T-11B 人工受理/分诊纵切已交付；任务关联、Reminder、来源投影和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v13。T-11A1 手工 `inbox_items`、T-11B 人工受理/分诊与 T-11A2 已有 Task 关系纵切已交付；批量拆分/分派/自动解决、Reminder、来源投影和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md)
 
 ## 定位与边界
 
@@ -31,14 +31,14 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工条目的本地受理、查看、编辑、分诊和归档闭环已接真实 SQLite/API/UI；完整任务编排和自动事件来源尚未交付。
+当前模块为**部分完成**：手工条目的本地受理、查看、编辑、分诊和归档闭环，以及与已有 Task 的活动/历史关系、实时进度和软解除已接真实 SQLite/API/UI；批量任务拆分、Assignment、自动解决和自动事件来源尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
 - schema v12 通过 `012_inbox_items.sql` 新增 `inbox_items`，从 v11 升级时只追加表和索引，不改写已有业务事实。
 - 当前公开创建 API 强制 `kind = manual`、`source_entity_type = manual`、`resolution_policy = manual`；不接受 `source_entity_id` 或 `source_event_key`。
 - 迁移为未来事件来源预留 `event / reminder` kind、`all_required_tasks_done` 策略及 nullable `source_event_key`，并用仅覆盖非空值的部分唯一索引去重；这些预留值当前不能通过创建 API 使用。
-- 主状态约束为 `open / tracking / resolved / dismissed`。当前手工创建固定进入 `open`；`tracking` 为后续任务关联保留，现有公开命令不会主动进入该状态。
+- 主状态约束为 `open / tracking / resolved / dismissed`。当前手工创建固定进入 `open`；schema v13 的显式 Task 关系命令已经使用 `tracking`，受理/分诊命令本身不会隐式创建关系或进入该状态。
 - 标题为 trim 后 2–200 字符，摘要最多 10,000 字符，优先级为 `P0 / P1 / P2 / P3`，截止时间使用 RFC 3339 UTC。
 - `payload_json` 必须是 JSON object；当前前端不暴露该字段，也不会以此伪造来源事实。
 - 解决和忽略终态由数据库约束成组校验：责任 Actor、时间、原因和模式不能出现半套事实。
@@ -48,21 +48,30 @@
 - `/inbox` 已接真实列表、全局待处理未读数、搜索、优先级筛选、分页，以及“待处理 / 稍后 / 已归档”三个视图。
 - 支持新建手工条目、查看详情、编辑标题/摘要/优先级/截止时间、单条已读和快照式全部已读。
 - 支持设置稍后时间、提前恢复、到期自动回到待处理视图；稍后只改变可见性，不复制条目。列表每 15 秒低频刷新，以服务端时钟重新判定到期可见性。
-- 支持带原因解决、带原因忽略和重新打开。解决/忽略不会隐式标为已读；未读终态仍可直接标为已读，无需先重开。重新打开保留 `read_at` 与 `triaged_at`，清除终态事实和 `snoozed_until`，回到 `open`。
+- 支持带原因解决、带原因忽略和重新打开。解决/忽略不会隐式标为已读；未读终态仍可直接标为已读，无需先重开。重新打开保留 `read_at` 与 `triaged_at`，清除终态事实和 `snoozed_until`，并按是否存在活动 Task 关系进入 `tracking / open`。
 - 详情提供追加式活动时间线，覆盖 `created / updated / read / snoozed / unsnoozed / resolved / dismissed / reopened`。
 - 列表、详情和时间线均有加载、空、错误与重试状态；表单和命令有校验、禁用态及并发冲突提示，编辑草稿在冲突刷新后保留。
 
+### 已交付：T-11A2 已有 Task 关系
+
+- schema v13 通过 `013_inbox_item_tasks.sql` 新增活动/历史关系、required、稳定 position、软解除事实、原 Task ID/标题快照，以及活动关系阻止 Task 硬删除的数据库保护；v12→v13 是加法迁移，不改写既有业务事实或创建 demo 关系。
+- 详情可查询全部活动关系和分页历史；服务端实时 JOIN 当前 Task，返回 Task 状态/版本以及 `active_total / required_total / required_done / required_remaining / required_blocked / required_waiting_review / required_cancelled / percent / all_required_done`。零个 required 时 `percent = null`、`all_required_done = false`，不会触发空集合完成。Task 状态与百分比不复制到 Inbox 表。
+- 支持把已有 Task 关联到活动 Inbox Item、修改活动关系的 `is_required`，以及填写原因软解除。重新关联同一 Task 创建新关系行，不恢复或覆盖旧历史。
+- 第一条活动关系使 `open → tracking`；解除最后一条活动关系使 `tracking → open`；归档项重新打开时有活动关系进入 `tracking`，否则进入 `open`。关系命令不自动已读、不清除稍后、不改变 Task 生命周期，也不创建 Assignment。
+- 关系 POST/PATCH/DELETE 使用 Inbox `ETag / If-Match` 和可选 `Idempotency-Key`，业务事实、Inbox 状态/version 与 `task_linked / task_requirement_changed / task_unlinked` 事件同事务提交。关系命令不递增 Task version。
+- 任一活动 Inbox 关系会使 Task 硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`。带原因软解除后 Task 可以删除；历史行的实时 `task_id` 置空，但 `task_ref_id / task_title_snapshot` 与事件继续保留。
+
 ### 明确未交付
 
-- `inbox_item_tasks`、Task 创建/关联/软取消关联、父子任务拆分、必需标记、Assignment 消费、派生进度与自动解决；
+- Task 批量创建/父子拆分、Assignment 消费、统一依赖失效/reconciliation 与自动解决；
 - `reminders`、一次性调度器、改期/取消和到期生成 Inbox Item；
 - Task/Project/Client/Invoice/系统故障等来源投影、Artifact `requires_followup` 消费和稳定事件扫描；
-- `force-resolve`、来源删除协调、Inbox Item 硬删除；
+- `force-resolve`、`source_entity_type=task` 等多态来源删除协调、Inbox Item 硬删除；
 - Sidebar 与 Today 的 Inbox 计数和带筛选跳转；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
 
-当前代码虽然已经有 Task Assignment、六状态生命周期、Submission/Artifact 和 Task Event API，但本次 Inbox 纵切没有调用它们来拆分、关联、分派或验收任务。
+当前代码虽然已经有 Task Assignment、六状态生命周期、Submission/Artifact 和 Task Event API，但 T-11A2 只读取已有 Task 并维护 Inbox 关系，不调用它们批量拆分、分派、改变生命周期或验收任务。
 
 ## 当前用户流程
 
@@ -95,7 +104,23 @@
 1. `resolve` 与 `dismiss` 只接受 `open / tracking`，均要求 trim 后非空且不超过 2,000 字符的原因。
 2. 两个命令都会写入 `triaged_at`、清除稍后时间并进入相应终态，但不会写入 `read_at`。
 3. 终态条目不能编辑或稍后；若终态仍未读，详情可直接执行 `read`，该操作不要求先重新打开，也不改变终态。
-4. 终态条目无论已读与否均可 `reopen`。重开清除解决/忽略字段和稍后时间，状态固定回到 `open`；已读与分诊时间保留，便于解释历史。
+4. 终态条目无论已读与否均可 `reopen`。重开清除解决/忽略字段和稍后时间；有活动 Task 关系时进入 `tracking`，否则进入 `open`，并保留已读与分诊时间。
+
+### 关联已有 Task
+
+1. 用户在活动 Inbox Item 详情打开“关联任务”，从真实 Task 查询结果中选择已有 Task，并明确是否为必需任务。
+2. 前端提交 Task ID、`is_required`、当前 Inbox `If-Match` 和稳定幂等键；服务端在同一事务创建 `relation_type=linked` 的关系、必要时把 `open` 推进为 `tracking`、递增 Inbox version 并写 `task_linked` 事件。
+3. 关系列表的 active 部分不分页且最多 100 条；history 使用 `page/page_size` 分页。服务端实时读取 Task 状态，因此显示进度不依赖 Inbox 中的缓存字段。
+4. 修改 required 使用同一路径 PATCH，并写 `task_requirement_changed`；它只改变关系事实，不在 A2 自动解决 Inbox Item。
+5. 解除关系必须填写原因。DELETE 软写 `unlinked_* / unlink_reason` 与 `task_unlinked` 事件；最后一条活动关系解除时 `tracking → open`。
+6. 重新关联同一 Task 创建新的关系 ID 和 linked 时间。历史记录保留此前 required、position、解除人、解除时间及原因。
+
+### 关联 Task 的硬删除
+
+1. Task 仍有活动 Inbox 关系时，Task DELETE 返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不会移动 Artifact 文件或删除 Task 聚合。
+2. 用户回到对应 Inbox Item，带原因软解除全部活动关系。
+3. Task 随后可按原有 `If-Match`、Focus Session 和 Artifact 删除契约硬删除。
+4. 已解除历史关系的 nullable `task_id` 置空；不可变 `task_ref_id` 与 `task_title_snapshot` 继续用于显示“原任务已删除”。这不是 T-11E 的多态来源删除协调。
 
 ## 列表与计数契约
 
@@ -112,7 +137,7 @@
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12）
+### `inbox_items`（schema v12，在当前 schema v13 延续）
 
 | 字段                                | 当前约束 / 说明                                                   |
 | ----------------------------------- | ----------------------------------------------------------------- |
@@ -134,52 +159,80 @@
 | `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                |
 | `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                           |
 
-schema v12 尚未创建 `inbox_item_tasks` 或 `reminders`。`tracking`、event/reminder kind、派生策略及非空来源事件键是未来迁移/API 会使用的受约束空间，不代表对应工作流已经上线。
+schema v13 不重建 `inbox_items`；`tracking` 已由活动 Task 关系使用。event/reminder kind、自动解决策略及非空来源事件键仍是未来迁移/API 会使用的受约束空间，不代表 Reminder、来源投影或自动解决已经上线。
+
+### `inbox_item_tasks`（schema v13）
+
+| 字段                                 | 当前约束 / 说明                                                   |
+| ------------------------------------ | ----------------------------------------------------------------- |
+| `id`                                 | UUID 主键                                                         |
+| `inbox_item_id`                      | Inbox Item 外键                                                   |
+| `task_ref_id`                        | 不可变原 Task UUID；Task 删除后仍保留                             |
+| `task_id`                            | nullable 实时 Task 外键，`ON DELETE SET NULL`                     |
+| `task_title_snapshot`                | 建立关系时保存的标题；Task 删除后用于解释历史                     |
+| `relation_type`                      | linked / created；公开 A2 POST 固定 linked，created 为 T-11C 预留 |
+| `is_required`                        | 0/1；A2 可修改并审计，当前只影响实时进度，不触发自动解决          |
+| `position`                           | 大于等于 1；单条关系按末尾追加，活动列表稳定排序                  |
+| `linked_by_actor_id / linked_at`     | 当前固定内置 owner 与 UTC 时间                                    |
+| `unlinked_by_actor_id / unlinked_at` | 软解除 Actor/时间；与原因成组出现                                 |
+| `unlink_reason`                      | trim 后 1–1,000 字符；历史行不可通过重新关联覆盖                  |
+
+- 活动关系定义为 `unlinked_at IS NULL` 且 `task_id IS NOT NULL`；同 Inbox/Task 只允许一条活动关系，active 总数上限为 100。
+- history 按 `unlinked_at DESC, linked_at DESC, id DESC` 稳定分页；重新关联写新行。Task 硬删除只允许作用于已解除关系，随后 `task_id` 置空，快照字段不变。
+- A2 不增加 Task.version→Inbox.version trigger；关系 GET 每次实时 JOIN Task，返回的 Task 状态/version 是读取时快照。
 
 ### 已实现 API
 
-| 方法  | 路径                               | 契约摘要                                                               |
-| ----- | ---------------------------------- | ---------------------------------------------------------------------- |
-| GET   | `/api/v1/inbox-items`              | 三视图、搜索、优先级、分页、稳定排序；返回全局待处理未读数与快照时间   |
-| POST  | `/api/v1/inbox-items`              | 新建 manual 条目；可选 `Idempotency-Key`；返回 `201`、数据和 `ETag`    |
-| POST  | `/api/v1/inbox-items/read-all`     | 以 `through_created_at` 批量已读；可选幂等键；不受当前筛选缩小         |
-| GET   | `/api/v1/inbox-items/:id`          | 详情、可用动作和 `ETag`                                                |
-| PATCH | `/api/v1/inbox-items/:id`          | 编辑标题/摘要/优先级/截止时间；强制 `If-Match`；终态拒绝               |
-| GET   | `/api/v1/inbox-items/:id/events`   | 分页时间线，默认 50/最大 100；返回 `ETag` 与 `meta.inbox_item_version` |
-| POST  | `/api/v1/inbox-items/:id/read`     | 单条已读；强制 `If-Match`，可选幂等键                                  |
-| POST  | `/api/v1/inbox-items/:id/snooze`   | 设置未来 `snoozed_until`；强制 `If-Match`，可选幂等键                  |
-| POST  | `/api/v1/inbox-items/:id/unsnooze` | 清除稍后时间；强制 `If-Match`，可选幂等键                              |
-| POST  | `/api/v1/inbox-items/:id/resolve`  | 必填原因，manual 解决；强制 `If-Match`，可选幂等键；不隐式已读         |
-| POST  | `/api/v1/inbox-items/:id/dismiss`  | 必填原因，忽略归档；强制 `If-Match`，可选幂等键；不隐式已读            |
-| POST  | `/api/v1/inbox-items/:id/reopen`   | 重新打开并保留 read/triaged；强制 `If-Match`，可选幂等键               |
+| 方法   | 路径                                     | 契约摘要                                                                                               |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| GET    | `/api/v1/inbox-items`                    | 三视图、搜索、优先级、分页、稳定排序；返回全局待处理未读数与快照时间                                   |
+| POST   | `/api/v1/inbox-items`                    | 新建 manual 条目；可选 `Idempotency-Key`；返回 `201`、数据和 `ETag`                                    |
+| POST   | `/api/v1/inbox-items/read-all`           | 以 `through_created_at` 批量已读；可选幂等键；不受当前筛选缩小                                         |
+| GET    | `/api/v1/inbox-items/:id`                | 详情、可用动作和 `ETag`                                                                                |
+| PATCH  | `/api/v1/inbox-items/:id`                | 编辑标题/摘要/优先级/截止时间；强制 `If-Match`；终态拒绝                                               |
+| GET    | `/api/v1/inbox-items/:id/events`         | 分页时间线，默认 50/最大 100；返回 `ETag` 与 `meta.inbox_item_version`                                 |
+| POST   | `/api/v1/inbox-items/:id/read`           | 单条已读；强制 `If-Match`，可选幂等键                                                                  |
+| POST   | `/api/v1/inbox-items/:id/snooze`         | 设置未来 `snoozed_until`；强制 `If-Match`，可选幂等键                                                  |
+| POST   | `/api/v1/inbox-items/:id/unsnooze`       | 清除稍后时间；强制 `If-Match`，可选幂等键                                                              |
+| POST   | `/api/v1/inbox-items/:id/resolve`        | 必填原因，manual 解决；强制 `If-Match`，可选幂等键；不隐式已读                                         |
+| POST   | `/api/v1/inbox-items/:id/dismiss`        | 必填原因，忽略归档；强制 `If-Match`，可选幂等键；不隐式已读                                            |
+| POST   | `/api/v1/inbox-items/:id/reopen`         | 重新打开并保留 read/triaged；强制 `If-Match`，可选幂等键                                               |
+| GET    | `/api/v1/inbox-items/:id/tasks`          | 返回 `data.active/history`；history 分页，meta 含 Inbox version 与实时 progress，响应携带 Inbox `ETag` |
+| POST   | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{is_required}`；关联已有 Task，强制 Inbox `If-Match`，可选幂等键，第一条关系进入 tracking        |
+| PATCH  | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{is_required}`；修改活动关系 required，强制 Inbox `If-Match`，可选幂等键                         |
+| DELETE | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{reason}`；带原因软解除，强制 Inbox `If-Match`，可选幂等键，最后关系回到 open                    |
 
-当前没有 split、task relation、Reminder、force-resolve、自动投影或删除路由。
+关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history，`total` 是 history 总数，active 全量返回且最多 100。POST 成功返回 201，PATCH/DELETE 成功返回 200；三者的 `data` 均为 `{inbox_item,relation,progress}`。当前没有 split、Reminder、force-resolve、自动投影或 Inbox 删除路由。
 
 ### 幂等、并发与事务
 
 - 创建、单条命令和全部已读支持 `Idempotency-Key`；同 key/endpoint/规范请求重放首次状态码与数据快照，同 key 不同请求返回 `409 IDEMPOTENCY_CONFLICT`。
+- Task 关系 POST/PATCH/DELETE 同样保存规范化请求摘要和首次响应；摘要包含 Inbox expected version、Task ID 与 required/reason。重放发生在当前关系/Inbox 版本检查前，不重复关系或事件。
 - 单条命令的请求摘要包含 expected version，并在读取当前数据库版本之前检查幂等快照，因此一次已经成功但响应丢失的命令可用原 key/原版本安全重放。
 - PATCH 和所有单条命令使用资源 `ETag`/`If-Match`；缺失前置条件和旧版本分别被拒绝，不自动覆盖其他窗口的新事实。
+- 关系写入以 Inbox 为聚合边界：成功只递增 Inbox version，不递增 Task version；Task 在关系提交前必须仍存在，Task 删除在同一 SQLite 写边界内检查活动关系。
+- 关系 GET 实时 JOIN Task；A2 没有 Task.version→Inbox.version 传播 trigger，也没有统一 reconciliation。前端在自身 Task 写入成功后失效关系查询，跨入口的统一依赖失效属于 T-11C。
 - 业务事实、Workflow Event 与幂等快照在同一个 SQLite 事务中提交；事件失败不遗留半完成状态。
 
 ### Workflow Event
 
 - Inbox 事件使用 `aggregate_type = inbox_item`、条目 ID 作为 aggregate ID，并记录内置 owner Actor、request ID、前后 JSON 快照、命令序号和 UTC 时间。
-- 当前 action 为 `created / updated / read / snoozed / unsnoozed / resolved / dismissed / reopened`。
+- 当前 action 为 `created / updated / read / snoozed / unsnoozed / resolved / dismissed / reopened / task_linked / task_requirement_changed / task_unlinked`。
+- 关系事件的前后快照包含关系、读取时 Task 摘要、实时进度、Inbox 状态/version 与可选解除原因；这些是不可变审计快照，不是可写的 Task 或 Inbox 第二事实源。
 - 事件沿用 schema v8/v9 的不可修改、不可删除保护；事件列表只读，不作为当前 Inbox Item 状态的第二副本。
 
 ## 与其他模块协作
 
-| 模块     | 当前协作事实                                        | 后续扩展                                                |
-| -------- | --------------------------------------------------- | ------------------------------------------------------- |
-| 任务     | 当前 Inbox 不创建、关联、分派或改变 Task            | T-11A2/C 增加关系、拆分、Assignment、派生进度和自动解决 |
-| 项目     | 当前没有项目来源投影                                | 显式 follow-up 产出和项目节点使用稳定事件键投影         |
-| 客户     | 当前没有客户活动或回访来源                          | v0.4 回访到期生成去重 Inbox Item                        |
-| 发票     | 当前没有财务来源                                    | v0.4 临期/逾期及开票节点生成本地待办                    |
-| Actor    | 当前人工命令审计记录固定 owner；不创建新 Assignment | 任务拆分阶段复用已交付 owner/person Assignment          |
-| 今日     | 当前没有 Inbox 派生计数                             | 后续展示待处理/跟进/阻塞/待验收计数与筛选跳转           |
-| 系统维护 | 当前不投影备份、迁移或 Sidecar 故障                 | 对应故障链路完成后生成可追踪维护项                      |
-| Agent    | 未实现                                              | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件        |
+| 模块     | 当前协作事实                                                                        | 后续扩展                                                       |
+| -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 任务     | 已可关联已有 Task、读取实时进度并以活动关系阻止 Task 硬删；不改变 Task version/状态 | T-11C 增加批量拆分、Assignment、统一 reconciliation 和自动解决 |
+| 项目     | 当前没有项目来源投影                                                                | 显式 follow-up 产出和项目节点使用稳定事件键投影                |
+| 客户     | 当前没有客户活动或回访来源                                                          | v0.4 回访到期生成去重 Inbox Item                               |
+| 发票     | 当前没有财务来源                                                                    | v0.4 临期/逾期及开票节点生成本地待办                           |
+| Actor    | Inbox 与关系命令审计记录固定 owner；不创建新 Assignment                             | T-11C 拆分阶段复用已交付 owner/person Assignment               |
+| 今日     | 当前没有 Inbox 派生计数                                                             | 后续展示待处理/跟进/阻塞/待验收计数与筛选跳转                  |
+| 系统维护 | 当前不投影备份、迁移或 Sidecar 故障                                                 | 对应故障链路完成后生成可追踪维护项                             |
+| Agent    | 未实现                                                                              | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件               |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
 
@@ -188,9 +241,9 @@ schema v12 尚未创建 `inbox_item_tasks` 或 `reminders`。`tracking`、event/
 1. **前置 Actor/Task 工作流基础（已完成）**：Actor、Assignment、六状态命令、Task Event、manual Submission/Artifact。
 2. **T-11A1 手工 Inbox Item 数据契约（已完成）**：schema v12、约束、索引和迁移保留测试。
 3. **T-11B 人工受理与分诊（已完成）**：真实列表/详情/编辑、已读/快照式全部已读、稍后/恢复、解决/忽略/重开及事件 UI/API。
-4. **T-11A2 Task 关系事实**：新增 `inbox_item_tasks`、活动关系部分唯一、软取消和来源删除协调。
+4. **T-11A2 Task 关系事实（已完成）**：schema v13、活动/历史关系、实时进度、已有 Task 关联、required 修改、带原因软解除、状态联动、事件，以及关联 Task 硬删除互锁和历史快照。多态来源删除协调不属于 A2。
 5. **T-11A3 Reminder 事实**：新增 `reminders`、一次性调度、改期/取消及幂等到期投影。
-6. **T-11C 拆分与分派**：原子多任务拆分/关联、必需标记、owner/person 分派、派生进度和自动解决。
+6. **T-11C 拆分与分派**：原子多任务/父子拆分、owner/person Assignment、统一依赖失效/reconciliation、自动解决和 force-resolve；单条已有 Task 关联、required 修改与实时派生读模型已在 A2 完成。
 7. **T-11E v0.1 来源投影**：显式 follow-up 产出、任务临期/阻塞和系统故障；逐项验证稳定事件键。
 8. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
 9. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
@@ -206,14 +259,19 @@ schema v12 尚未创建 `inbox_item_tasks` 或 `reminders`。`tracking`、event/
 - [x] 全局未读计数不受页面筛选影响；时间截止式全部已读只处理创建与最后更新时间都不晚于 cutoff、且按 cutoff 仍属于待处理可见范围的未读，截止后更新项保守跳过。
 - [x] 解决/忽略原因必填且不隐式已读；重开保留 read/triaged。
 - [x] 前端覆盖分页、筛选、加载、空、错误、重试和冲突草稿保留的自动测试。
+- [x] 已有 Task 活动/历史关系、实时进度、required 修改和带原因软解除均经过真实 API/SQLite，不复制 Task 状态。
+- [x] 关系写入使用 Inbox `If-Match`/幂等快照，与状态/version/事件同事务；重新关联不覆盖旧历史。
+- [x] 第一条/最后一条活动关系驱动 `open / tracking`，reopen 按活动关系选择状态；A2 不自动解决。
+- [x] 活动关系阻止 Task 硬删除，软解除后可删且历史保留 Task ID/标题快照。
 
 ### 完整人工编排仍需验收
 
-- [ ] Task 关联/拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
+- [ ] T-11C 批量拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
 - [ ] 进度完全从活动必需 Task 派生，零必需任务不自动解决。
 - [ ] blocked、cancelled、waiting_review 和失败任务不误触发自动解决。
 - [ ] Reminder 与每种来源事件跨扫描、跨重启只生成一条 Inbox Item。
-- [ ] 来源删除、关系软取消和重新关联都保留可解释历史。
+- [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
+- [ ] T-11E 多态来源删除保留快照并可解释；不要以关联 Task 删除互锁冒充来源协调。
 - [ ] Sidebar/Today 计数、真实浏览器键盘/焦点、长列表和窄屏视觉完成专项验收。
 - [ ] v0.2 Agent 成功只进入 `waiting_review`，只有 owner 可接受，重试保留全部 Run 与 Artifact。
 
@@ -222,9 +280,14 @@ schema v12 尚未创建 `inbox_item_tasks` 或 `reminders`。`tracking`、event/
 - [PRD：收件箱与本地工作编排中心](../opc-workspace-PRD.md#56-收件箱与本地工作编排中心)
 - [整体功能架构](../functional-architecture.md)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
+- [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
 - [Inbox API](../../services/sidecar/internal/api/inbox_items.go)
+- [Inbox–Task 关系 API](../../services/sidecar/internal/api/inbox_item_tasks.go)
 - [Inbox API 测试](../../services/sidecar/internal/api/inbox_items_test.go)
+- [Inbox–Task 关系 API 测试](../../services/sidecar/internal/api/inbox_item_tasks_test.go)
 - [Inbox 迁移测试](../../services/sidecar/internal/database/inbox_migration_test.go)
+- [Inbox–Task 关系迁移测试](../../services/sidecar/internal/database/inbox_task_migration_test.go)
 - [Inbox 页面](../../apps/web/src/pages/InboxPage.tsx)
 - [Inbox 详情](../../apps/web/src/components/InboxItemDetailModal.tsx)
+- [Inbox–Task 关系 UI](../../apps/web/src/components/InboxItemTasksSection.tsx)
 - [Inbox 时间线](../../apps/web/src/components/InboxItemEventsSection.tsx)

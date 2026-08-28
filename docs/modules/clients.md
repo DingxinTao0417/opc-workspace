@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v12。客户事实仍由 schema v10 引入；schema v12 只新增独立 Inbox Item，不改 Client 结构。v0.1 的基础资料 CRUD、基础详情和 Project 客户关联已交付，模块仍为**部分完成**；活动、附件、Actor 显式关联、回访和财务聚合尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v13。客户事实仍由 schema v10 引入；schema v12 新增独立 Inbox Item，schema v13 只新增 Inbox–Task 关系和 Task 删除互锁，均不改 Client 结构。v0.1 的基础资料 CRUD、基础详情和 Project 客户关联已交付，模块仍为**部分完成**；活动、附件、Actor 显式关联、回访和财务聚合尚未交付。
 
 ## 定位与边界
 

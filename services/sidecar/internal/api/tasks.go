@@ -755,6 +755,19 @@ func (a *API) deleteTask(c *gin.Context) {
 		if task.Version != expectedVersion {
 			return taskVersionConflict()
 		}
+		var activeInboxRelations int64
+		if err := tx.Model(&models.InboxItemTask{}).
+			Where("task_id = ? AND unlinked_at IS NULL", id).
+			Count(&activeInboxRelations).Error; err != nil {
+			return err
+		}
+		if activeInboxRelations > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"TASK_HAS_ACTIVE_INBOX_RELATIONS",
+				"Unlink the Task from active Inbox Items before deleting it",
+			)
+		}
 		var openFocusSessions int64
 		if err := tx.Model(&models.FocusSession{}).
 			Where("task_id = ? AND status IN ?", id, []string{"active", "paused", "recovery_pending"}).
@@ -787,7 +800,7 @@ func (a *API) deleteTask(c *gin.Context) {
 		if restoreErr := a.restoreTaskArtifactFiles(movedArtifactFiles); restoreErr != nil && a.options.Logger != nil {
 			a.options.Logger.Printf("Task delete Artifact compensation failed task_id=%s error=%v", id, restoreErr)
 		}
-		if writeProjectRequestError(c, err) {
+		if writeProjectRequestError(c, mapInboxTaskConstraintError(err)) {
 			return
 		}
 		writeDatabaseError(c)

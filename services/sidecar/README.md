@@ -41,7 +41,7 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "version": "0.1.0-dev",
   "app_version": "0.1.0-dev",
   "api_version": "v1",
-  "schema_version": 10
+  "schema_version": 13
 }
 ```
 
@@ -57,6 +57,9 @@ The Sidecar exposes:
 - explicit Task `start`, `block`, `unblock`, `complete`, `cancel`, and `reopen` commands; the legacy `PATCH /tasks/:id/status` always returns `410 TASK_STATUS_ENDPOINT_DEPRECATED`;
 - Task event history with actor summaries, request IDs, immutable snapshots, `command_seq`, and nullable Assignment/Submission/Artifact correlation IDs;
 - Client fact CRUD with stable filtering/sorting, snapshot idempotency, aggregate `ETag`, Project association propagation, and constrained hard deletion;
+- Inbox Item create/query/detail, read/snooze/resolve/dismiss/reopen commands and immutable Inbox workflow history;
+- Inbox Item–Task active/history relationships, server-derived progress, required-flag updates, reasoned soft unlinking, and active-relation protection for Task hard deletion;
+- persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands and today aggregation;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 
 ```text
@@ -72,9 +75,21 @@ POST   /api/v1/clients
 GET    /api/v1/clients/:id
 PATCH  /api/v1/clients/:id
 DELETE /api/v1/clients/:id?confirm=true
+GET    /api/v1/inbox-items/:id/tasks?page=1&page_size=50
+POST   /api/v1/inbox-items/:id/tasks/:task_id
+PATCH  /api/v1/inbox-items/:id/tasks/:task_id
+DELETE /api/v1/inbox-items/:id/tasks/:task_id
 ```
 
 Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events, and reject key reuse with different input.
+
+### Inbox Item–Task relationship contract
+
+`GET /api/v1/inbox-items/:id/tasks` returns `{ "data": { "active", "history" }, "meta": { "page", "page_size", "total", "inbox_item_version", "progress" } }` and the current Inbox Item `ETag`. `active` is the complete position-ordered active set and is capped at 100; `history` alone is paginated newest-unlinked-first, so `meta.total` is the history total. Every active relation joins the current Task summary at read time. Progress is therefore derived from current Task status without copying Task state or propagating Task version changes into the Inbox Item version.
+
+POST and PATCH use `{ "is_required": boolean }`; DELETE uses `{ "reason": string }`, trimmed to 1–1,000 characters. All three mutation routes require the Inbox Item `If-Match`, accept an optional `Idempotency-Key`, return the updated Inbox Item, relation, progress, and `ETag`, and append exactly one `task_linked`, `task_requirement_changed`, or `task_unlinked` event when the fact changes. The first active relation moves `open` to `tracking`; removing the last active relation moves `tracking` to `open`. Reopen derives `tracking` when any active relation remains and `open` otherwise. Linking never automatically resolves an Inbox Item, creates an Assignment, or creates a Task.
+
+An active Inbox relationship makes `DELETE /api/v1/tasks/:id` return `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`. Unlink the relationship first; a later successful Task deletion sets the historical relation's nullable `task_id` to null through the foreign key while retaining immutable `task_ref_id`, `task_title_snapshot`, actors, timestamps, required flag, and unlink reason. Source-event deletion coordination and `source_entity_type=task` projection are not part of this relationship contract.
 
 ### Client facts contract
 
@@ -155,7 +170,11 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v10. Migration 009 adds the singleton `workspace_identity` with immutable `database_id` and one-time `artifact_store_id`, `task_submissions`, `task_artifacts`, immutable `artifact_deletion_tombstones`, `tasks.current_submission_id`, and `workflow_events.submission_id/artifact_id`, with database/store identity binding, same-aggregate checks, one-pending-Submission uniqueness, immutable facts/history, controlled Artifact payload constraints, and recoverable deletion metadata. It backfills only unambiguous schema-v8 manual-review facts as `is_inferred = 1` Submission records plus `migration_submission_backfill` system events; it never invents Artifacts. Migration 010 adds `clients.version`, name/status/update indexes, normalizes blank optional Client values to NULL, and installs Project attach/move/detach/delete triggers that invalidate the affected Client aggregate version. Existing schema-v5 triggers continue to invalidate linked Project versions on Client rename or deletion. The foreign-key-off migration path runs on a fixed connection, validates `PRAGMA foreign_key_check` before commit, and restores foreign keys on success or rollback.
+The current schema is v13. Migration 009 adds the controlled Artifact and Submission aggregate described above; migration 010 adds Client aggregate versioning and Project-association propagation; migration 011 adds persistent Focus Session intervals and exact Task focus totals; migration 012 adds the independent manual Inbox Item and Inbox workflow events. Migration 013 is additive: it adds only `inbox_item_tasks` plus its relationship-integrity and Task-delete interlock triggers. It does not rewrite v12 facts or change Task, Project, Client, Focus, Assignment, Submission, Artifact, or source-event structures. Future changes must start at `014_*`; never edit a shipped migration.
+
+Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
+
+The foreign-key-off migration path runs on a fixed connection, validates `PRAGMA foreign_key_check` before commit, and restores foreign keys on success or rollback.
 
 ```powershell
 go test ./... -count=1
@@ -164,4 +183,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the v2.2 documentation baseline, the Go regression suite, repeated database suite, and `go vet` pass. Client coverage includes migration, CRUD/validation, stable filtering and sorting, snapshot idempotency, stale writes, Project association version propagation, Invoice deletion conflicts without side effects, and Client-to-Project version propagation. Client activities, attachments, Actor linkage, follow-ups, finance, productized backup/restore, Inbox orchestration, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v2.5 / schema v13 baseline, regression coverage includes historical migration preservation plus Inbox relationship migration, validation, pagination, live progress, optimistic concurrency, idempotency replay/conflict, immutable events, state coupling, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, Inbox source projection, split/Assignment/automatic-resolution orchestration, Agent Runtime, and platform packaging remain separate future work.

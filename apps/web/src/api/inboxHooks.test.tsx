@@ -9,12 +9,14 @@ import {
   useCreateInboxItem,
   useInboxItemCommand,
   useInboxItemsQuery,
+  useLinkInboxItemTask,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
   command: vi.fn(),
+  linkTask: vi.fn(),
 }));
 
 vi.mock("./client", async () => {
@@ -24,6 +26,7 @@ vi.mock("./client", async () => {
     getInboxItems: calls.list,
     createInboxItem: calls.create,
     executeInboxItemCommand: calls.command,
+    linkInboxItemTask: calls.linkTask,
   };
 });
 
@@ -161,6 +164,53 @@ describe("inbox hooks", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(calls.command.mock.calls[1][1]).toBe(calls.command.mock.calls[0][1]);
+    expect(
+      queryClient.getQueryData(inboxDetailQueryKey(inboxItem().id)),
+    ).toEqual(inboxItem(2));
+  });
+
+  it("reuses the relation key after a lost response and caches the bumped Inbox version", async () => {
+    const mutationResult = {
+      inboxItem: inboxItem(2),
+      relation: {
+        id: "relation-1",
+        inboxItemId: inboxItem().id,
+        taskRefId: "task-1",
+      },
+      progress: {
+        activeTotal: 1,
+        requiredTotal: 1,
+        requiredDone: 0,
+        requiredRemaining: 1,
+        requiredBlocked: 0,
+        requiredWaitingReview: 0,
+        requiredCancelled: 0,
+        percent: 0,
+        allRequiredDone: false,
+      },
+    };
+    calls.linkTask
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(mutationResult);
+    const queryClient = createQueryClient();
+    const { result } = renderHook(() => useLinkInboxItemTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+    const input = {
+      inboxItemId: inboxItem().id,
+      taskId: "task-1",
+      isRequired: true,
+      expectedVersion: 1,
+    };
+
+    act(() => result.current.mutate(input));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(input));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(calls.linkTask.mock.calls[1][1]).toBe(
+      calls.linkTask.mock.calls[0][1],
+    );
     expect(
       queryClient.getQueryData(inboxDetailQueryKey(inboxItem().id)),
     ).toEqual(inboxItem(2));

@@ -4,11 +4,16 @@ import {
   createInboxItem,
   executeInboxItemCommand,
   getInboxItemEvents,
+  getInboxItemTasks,
   getInboxItems,
+  linkInboxItemTask,
   markAllInboxItemsRead,
   normalizeInboxItem,
+  normalizeInboxItemTaskListResult,
   resetRuntimeConnection,
+  unlinkInboxItemTask,
   updateInboxItem,
+  updateInboxItemTaskRequirement,
 } from "./client";
 
 function inboxPayload(overrides: Record<string, unknown> = {}) {
@@ -49,6 +54,65 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function actorPayload() {
+  return {
+    id: "00000000-0000-0000-0000-000000000001",
+    type: "owner",
+    display_name: "陶定鑫",
+    status: "active",
+    is_builtin: true,
+    version: 1,
+  };
+}
+
+function taskRelationPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "018f0000-0000-7000-8000-000000000921",
+    inbox_item_id: "018f0000-0000-7000-8000-000000000801",
+    task_ref_id: "018f0000-0000-7000-8000-000000000101",
+    task_id: "018f0000-0000-7000-8000-000000000101",
+    task_title_snapshot: "整理发布清单",
+    task: {
+      id: "018f0000-0000-7000-8000-000000000101",
+      title: "整理发布清单",
+      status: "in_progress",
+      priority: "P1",
+      kind: "work",
+      project_id: "018f0000-0000-7000-8000-000000000201",
+      project_name: "官网升级",
+      version: 4,
+    },
+    relation_type: "linked",
+    is_required: true,
+    position: 1,
+    linked_by_actor_id: "00000000-0000-0000-0000-000000000001",
+    linked_by_actor: actorPayload(),
+    linked_at: "2026-08-28T10:10:00Z",
+    unlinked_by_actor_id: null,
+    unlinked_by_actor: null,
+    unlinked_at: null,
+    unlink_reason: null,
+    is_active: true,
+    task_deleted: false,
+    ...overrides,
+  };
+}
+
+function progressPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    active_total: 1,
+    required_total: 1,
+    required_done: 0,
+    required_remaining: 1,
+    required_blocked: 0,
+    required_waiting_review: 0,
+    required_cancelled: 0,
+    percent: 0,
+    all_required_done: false,
+    ...overrides,
+  };
 }
 
 afterEach(() => {
@@ -241,5 +305,203 @@ describe("inbox API contract", () => {
     expect(events.items[0].actor?.displayName).toBe("陶定鑫");
     expect(events.items[0].reason).toBe("手工创建");
     expect(events.meta.inboxItemVersion).toBe(2);
+  });
+
+  it("strictly normalizes active relations and authoritative progress", () => {
+    const result = normalizeInboxItemTaskListResult({
+      data: { active: [taskRelationPayload()], history: [] },
+      meta: {
+        page: 1,
+        page_size: 20,
+        total: 0,
+        inbox_item_version: 2,
+        progress: progressPayload(),
+      },
+    });
+    expect(result.active[0]).toMatchObject({
+      taskRefId: "018f0000-0000-7000-8000-000000000101",
+      taskTitleSnapshot: "整理发布清单",
+      isRequired: true,
+      position: 1,
+      isActive: true,
+    });
+    expect(result.meta.progress).toMatchObject({
+      activeTotal: 1,
+      requiredRemaining: 1,
+      percent: 0,
+    });
+    expect(() =>
+      normalizeInboxItemTaskListResult({
+        data: { active: [taskRelationPayload()], history: [] },
+        meta: {
+          page: 1,
+          page_size: 20,
+          total: 0,
+          inbox_item_version: 2,
+          progress: progressPayload({ active_total: 0 }),
+        },
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("accepts stable ascending active positions with gaps", () => {
+    const first = taskRelationPayload({ position: 2 });
+    const secondTaskId = "018f0000-0000-7000-8000-000000000102";
+    const second = taskRelationPayload({
+      id: "018f0000-0000-7000-8000-000000000902",
+      task_ref_id: secondTaskId,
+      task_id: secondTaskId,
+      task_title_snapshot: "核对上线清单",
+      task: {
+        ...taskRelationPayload().task,
+        id: secondTaskId,
+        title: "核对上线清单",
+      },
+      position: 4,
+    });
+    const result = normalizeInboxItemTaskListResult({
+      data: { active: [first, second], history: [] },
+      meta: {
+        page: 1,
+        page_size: 20,
+        total: 0,
+        inbox_item_version: 4,
+        progress: progressPayload({
+          active_total: 2,
+          required_total: 2,
+          required_remaining: 2,
+        }),
+      },
+    });
+
+    expect(result.active.map((relation) => relation.position)).toEqual([2, 4]);
+    expect(() =>
+      normalizeInboxItemTaskListResult({
+        data: {
+          active: [
+            { ...first, position: 4 },
+            { ...second, position: 2 },
+          ],
+          history: [],
+        },
+        meta: {
+          page: 1,
+          page_size: 20,
+          total: 0,
+          inbox_item_version: 4,
+          progress: progressPayload({
+            active_total: 2,
+            required_total: 2,
+            required_remaining: 2,
+          }),
+        },
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("uses version and idempotency headers for all relation writes", async () => {
+    const inboxItemId = "018f0000-0000-7000-8000-000000000801";
+    const taskId = "018f0000-0000-7000-8000-000000000101";
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? "GET";
+        const relation =
+          method === "DELETE"
+            ? taskRelationPayload({
+                is_active: false,
+                unlinked_by_actor_id: "00000000-0000-0000-0000-000000000001",
+                unlinked_by_actor: actorPayload(),
+                unlinked_at: "2026-08-28T10:20:00Z",
+                unlink_reason: "不再需要",
+              })
+            : taskRelationPayload({
+                is_required: method === "PATCH" ? false : true,
+              });
+        return jsonResponse({
+          data: {
+            inbox_item: inboxPayload({ version: 3, status: "tracking" }),
+            relation,
+            progress:
+              method === "DELETE"
+                ? progressPayload({
+                    active_total: 0,
+                    required_total: 0,
+                    required_remaining: 0,
+                    percent: null,
+                  })
+                : method === "PATCH"
+                  ? progressPayload({
+                      required_total: 0,
+                      required_remaining: 0,
+                      percent: null,
+                    })
+                  : progressPayload(),
+          },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await linkInboxItemTask(
+      { inboxItemId, taskId, isRequired: true, expectedVersion: 2 },
+      "link-key",
+    );
+    await updateInboxItemTaskRequirement(
+      { inboxItemId, taskId, isRequired: false, expectedVersion: 3 },
+      "required-key",
+    );
+    await unlinkInboxItemTask(
+      { inboxItemId, taskId, reason: "不再需要", expectedVersion: 4 },
+      "unlink-key",
+    );
+
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual([
+      "POST",
+      "PATCH",
+      "DELETE",
+    ]);
+    expect(
+      fetchMock.mock.calls.map((call) =>
+        new Headers(call[1]?.headers).get("If-Match"),
+      ),
+    ).toEqual(['"2"', '"3"', '"4"']);
+    expect(
+      fetchMock.mock.calls.map((call) =>
+        new Headers(call[1]?.headers).get("Idempotency-Key"),
+      ),
+    ).toEqual(["link-key", "required-key", "unlink-key"]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      is_required: true,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      reason: "不再需要",
+    });
+  });
+
+  it("requests all active relations with paginated history", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: { active: [taskRelationPayload()], history: [] },
+        meta: {
+          page: 2,
+          page_size: 10,
+          total: 12,
+          inbox_item_version: 2,
+          progress: progressPayload(),
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getInboxItemTasks(
+      "018f0000-0000-7000-8000-000000000801",
+      { page: 2, pageSize: 10 },
+    );
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "10",
+    });
+    expect(result.meta.total).toBe(12);
   });
 });

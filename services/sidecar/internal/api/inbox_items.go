@@ -519,7 +519,17 @@ func (a *API) executeInboxCommand(c *gin.Context, command string) {
 		if current.Version != expectedVersion {
 			return inboxVersionConflict()
 		}
-		next, changed, transitionErr := applyInboxCommand(current, commandInput, nowText)
+		reopenTracking := false
+		if command == "reopen" {
+			var activeRelations int64
+			if err := tx.Model(&models.InboxItemTask{}).
+				Where("inbox_item_id = ? AND unlinked_at IS NULL", id).
+				Count(&activeRelations).Error; err != nil {
+				return err
+			}
+			reopenTracking = activeRelations > 0
+		}
+		next, changed, transitionErr := applyInboxCommand(current, commandInput, nowText, reopenTracking)
 		if transitionErr != nil {
 			return transitionErr
 		}
@@ -880,7 +890,7 @@ func decodeInboxCommand(c *gin.Context, command string, expectedVersion int64) (
 	return result, true
 }
 
-func applyInboxCommand(current models.InboxItem, input inboxCommandHash, now string) (models.InboxItem, bool, error) {
+func applyInboxCommand(current models.InboxItem, input inboxCommandHash, now string, reopenTracking bool) (models.InboxItem, bool, error) {
 	next := current
 	switch input.Command {
 	case "read":
@@ -943,6 +953,9 @@ func applyInboxCommand(current models.InboxItem, input inboxCommandHash, now str
 			return current, false, newProjectRequestError(http.StatusConflict, "INBOX_ITEM_NOT_ARCHIVED", "Only resolved or dismissed Inbox Items can be reopened")
 		}
 		next.Status = "open"
+		if reopenTracking {
+			next.Status = "tracking"
+		}
 		next.SnoozedUntil = nil
 		next.ResolvedByActorID = nil
 		next.ResolvedAt = nil

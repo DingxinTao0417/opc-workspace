@@ -9,7 +9,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单
-- SQLite schema v12、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12 追加手工 Inbox Item 事实
+- SQLite schema v13、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12 追加手工 Inbox Item，v13 追加 Inbox–Task 活动/历史关系与删除互锁
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组手动排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
@@ -23,9 +23,10 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口，以及加载、错误、重试和空状态
 - Focus Core A+B+C：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today 统计，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
+- Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留
 - 可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；committed/draft/preview 已隔离，预览或取消不会改写活动 Session
 
-受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C，以及 T-11A1/T-11B 手工 Inbox 受理分诊已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/Inbox 来源投影、Inbox Task 关联/拆分/分派/自动解决、Reminder、Sidebar/Today Inbox 计数、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包也仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.4](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库归入更后续版本。开发数据库默认从空业务数据开始；完成的绑定 Focus Session 会通过精确秒数账本把新增完整分钟写入 Task `actual_minutes`，Project 沿既有 Task 聚合读取结果。
+受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C，以及 T-11A1/T-11A2/T-11B 手工 Inbox 受理分诊与已有 Task 关系已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/Inbox 来源投影、Inbox Task 批量拆分/分派/自动解决、Reminder、Sidebar/Today Inbox 计数、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包也仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.5](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库归入更后续版本。开发数据库默认从空业务数据开始；完成的绑定 Focus Session 会通过精确秒数账本把新增完整分钟写入 Task `actual_minutes`，Project 沿既有 Task 聚合读取结果。
 
 ## 目录结构
 
@@ -47,7 +48,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v2.4）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v2.5）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -224,6 +225,10 @@ POST   /api/v1/inbox-items/:id/unsnooze
 POST   /api/v1/inbox-items/:id/resolve
 POST   /api/v1/inbox-items/:id/dismiss
 POST   /api/v1/inbox-items/:id/reopen
+GET    /api/v1/inbox-items/:id/tasks
+POST   /api/v1/inbox-items/:id/tasks/:task_id
+PATCH  /api/v1/inbox-items/:id/tasks/:task_id
+DELETE /api/v1/inbox-items/:id/tasks/:task_id
 GET    /api/v1/focus-sessions/active
 POST   /api/v1/focus-sessions
 POST   /api/v1/focus-sessions/:id/pause
@@ -240,19 +245,21 @@ Task 只能以 `todo` 新建；创建和非生命周期 PATCH 接受 `review_pol
 
 manual Task 只能从 `todo / in_progress` 提交，提交前必须同时具备 active assignee 与 active owner reviewer。JSON 可提交文本、HTTP(S) 链接或 JSON object；包含文件时使用 multipart，唯一 `manifest` 必须是首个 part，之后只允许它通过唯一 `file_field` 精确引用的文件 part。摘要最长 10,000 字符；每批最多 20 个 Artifact；名称 1–255 个安全字符；文本最多 500,000 字符；链接最多 4,096 bytes 且禁止 URL credentials；严格 JSON body、multipart `manifest` 和单个 structured object 各不超过 1 MiB；单文件非空且最多 50 MiB，完整 multipart 请求最多 100 MiB。Sidecar HTTP read/write timeout 为 180 秒，前端上传与下载使用 120 秒端到端超时。提交进入 `waiting_review`；owner 接受后进入 `done` 并结束活动 Assignment，要求返工时必须填写不超过 1,000 字符的原因并回到 `in_progress`。`current_submission_id` 在接受、返工和取消后用于指向最近一批，只有 reopen 清空。
 
-Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` 和 `meta.task_version`；Artifact 列表可按 `submission_id` 过滤，并用 `include_deleted=true` 查看软删除记录。所有 Artifact 摘要/详情都携带由父 Submission 派生的必填 `submission_status`。详情只在按需读取时返回文本、链接或结构化正文，删除后正文固定隐藏。文件下载只由鉴权 content 端点提供，响应强制 attachment、`nosniff`、`no-store`，并以 SHA-256 作为 `ETag`；缺失或校验不符会更新 `integrity_status` 并拒绝下载。Artifact 删除要求 `confirm=true`、Task `If-Match`、1–1,000 字符原因，pending-review 批次禁止删除；schema v9 在同一事务写入不可变 `artifact_deletion_tombstones`，文件经受控 trash 完成数据库/文件补偿后物理清理。tombstone 在 Task 聚合删除后仍保留，供启动恢复区分授权删除与未知候选；恢复 active trash 前复验 size/SHA-256，错配项进入 quarantine 并标记 mismatch。物理文件已经缺失时，确认软删除仍会成功并记录 `integrity_status = missing`；Task 聚合硬删除也不会被缺失 object 阻断。Task 硬删除随后由外键级联 Submission/Artifact；Workflow Event 中已失效的关联 ID 可置空，JSON 快照仍保留。
+Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` 和 `meta.task_version`；Artifact 列表可按 `submission_id` 过滤，并用 `include_deleted=true` 查看软删除记录。所有 Artifact 摘要/详情都携带由父 Submission 派生的必填 `submission_status`。详情只在按需读取时返回文本、链接或结构化正文，删除后正文固定隐藏。文件下载只由鉴权 content 端点提供，响应强制 attachment、`nosniff`、`no-store`，并以 SHA-256 作为 `ETag`；缺失或校验不符会更新 `integrity_status` 并拒绝下载。Artifact 删除要求 `confirm=true`、Task `If-Match`、1–1,000 字符原因，pending-review 批次禁止删除；schema v9 在同一事务写入不可变 `artifact_deletion_tombstones`，文件经受控 trash 完成数据库/文件补偿后物理清理。tombstone 在 Task 聚合删除后仍保留，供启动恢复区分授权删除与未知候选；恢复 active trash 前复验 size/SHA-256，错配项进入 quarantine 并标记 mismatch。物理文件已经缺失时，确认软删除仍会成功并记录 `integrity_status = missing`；Task 聚合硬删除也不会被缺失 object 阻断。Task 硬删除在移动文件前还会拒绝开放 Focus Session 和活动 Inbox 关系；用户带原因软解除关系后才可继续。删除随后级联 Submission/Artifact，已解除 Inbox 关系的实时 `task_id` 置空而原 ID/标题快照保留；Workflow Event 中已失效的关联 ID 可置空，JSON 快照仍保留。
 
 任务资料、Task output/review/Artifact 删除及 Assignment 命令均使用 Task 版本拒绝旧写入；可重试命令可携带稳定 `Idempotency-Key`，同键同请求重放首次响应，同键不同请求返回冲突。前端遇到版本冲突会刷新最新 Task，同时保留摘要、文本、链接、结构化 JSON 与浏览器 `File` 对象草稿，要求用户再次明确提交。事件查询默认每页 50、最大 100，返回 Task `ETag`、`meta.task_version` 和按时间/命令顺序倒序的追加式事件。Assignment 没有 DELETE 路由。批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。项目列表默认排除归档项；只有需要读取完整关联历史的页面才显式传 `include_archived=true`。
 
 Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
 
-当前 Inbox API 只接受 `kind / source_entity_type / resolution_policy = manual` 的手工条目，不接受来源 ID 或事件键。列表支持 `inbox / snoozed / archive` 三视图、标题/摘要搜索、优先级和分页；`meta.unread_total` 始终统计全局当前待处理视图的未读，不受当前视图或筛选影响。`read_at`、`snoozed_until` 与主状态相互独立；resolve/dismiss 要求 1–2,000 字符原因、清除稍后但不隐式已读，未读终态仍可直接 read；reopen 清除终态和稍后事实、回到 open，并保留 read/triaged。PATCH 与单条命令使用 `ETag`/`If-Match`；创建、命令和 read-all 支持幂等快照。read-all 提交列表 `snapshot_at` 作为 `through_created_at` 时间截止，只标记创建与最后更新时间均不晚于 cutoff、且按该 cutoff 仍属于待处理可见范围的未读；截止后发生编辑、分诊、重开等更新的条目会保守跳过。这不是历史状态重建，也不是由 created_at+稳定序列组成的严格游标。当前没有 Task 关系/拆分/分派、Reminder、来源投影、自动解决或 Inbox 删除路由。
+当前 Inbox 创建 API 只接受 `kind / source_entity_type / resolution_policy = manual` 的手工条目，不接受来源 ID 或事件键。列表支持 `inbox / snoozed / archive` 三视图、标题/摘要搜索、优先级和分页；`meta.unread_total` 始终统计全局当前待处理视图的未读，不受当前视图或筛选影响。`read_at`、`snoozed_until` 与主状态相互独立；resolve/dismiss 要求 1–2,000 字符原因、清除稍后但不隐式已读，未读终态仍可直接 read。reopen 清除终态和稍后事实，保留 read/triaged，并按是否存在活动 Task 关系进入 `tracking / open`。PATCH 与单条命令使用 `ETag`/`If-Match`；创建、命令和 read-all 支持幂等快照。read-all 提交列表 `snapshot_at` 作为 `through_created_at` 时间截止，只标记创建与最后更新时间均不晚于 cutoff、且按该 cutoff 仍属于待处理可见范围的未读；截止后变化的条目保守跳过。
+
+Task 关系 GET 返回全部 active、分页 history、Inbox version 和服务端实时 progress；Task 状态通过 JOIN 派生，不复制到 Inbox，也没有 Task.version→Inbox.version trigger。POST/PATCH 的 body 为 `{is_required}`，分别关联已有 Task 和修改活动关系 required；DELETE body 为 `{reason}`，只做软解除。三种写入都使用 Inbox `If-Match` 和可选幂等键，与 `task_linked / task_requirement_changed / task_unlinked` 事件同事务。第一条活动关系使 open→tracking，最后一条解除使 tracking→open；关系操作不创建 Assignment 或改变 Task。当前没有批量 split、自动解决、Reminder、来源投影、force-resolve 或 Inbox 删除路由。
 
 Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时和 Today 统计；Today 以 IANA 本地日边界与已关闭 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v12；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client 事实；`011_focus_sessions.sql` 重建 Focus Session，移除旧分钟/布尔双写字段，新增 interval 与 Task 精确秒数 ledger，并兼容映射历史 Session 而不二次增加 Task 工时；`012_inbox_items.sql` 以加法迁移追加手工 Inbox Item、查询索引及 nullable `source_event_key` 部分唯一约束，v11→v12 不改写既有事实。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v13；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client 事实；`011_focus_sessions.sql` 重建 Focus Session，新增 interval 与 Task 精确秒数 ledger；`012_inbox_items.sql` 以加法迁移追加手工 Inbox Item、查询索引及 nullable `source_event_key` 部分唯一约束；`013_inbox_item_tasks.sql` 再追加活动/历史 Task 关系、required、position、带原因软解除、原 Task ID/标题快照和活动关系 Task 删除保护，v12→v13 不改写既有事实或其他模块结构。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -262,4 +269,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v2.4](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C 和手工 Inbox 受理/分诊；明确未交付 Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、Inbox Task 关系/拆分/分派/自动解决、Reminder 与来源投影、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。对应页面骨架、预留字段或规划 API 不代表完整工作流已经可用。
+[PRD v2.5](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、手工 Inbox 受理/分诊和已有 Task 关系；明确未交付 Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、Inbox Task 批量拆分/分派/自动解决、Reminder 与来源投影、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。对应页面骨架、预留字段或规划 API 不代表完整工作流已经可用。

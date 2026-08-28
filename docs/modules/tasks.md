@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v12（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12 只新增独立 Inbox Item，不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v13（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12 新增独立 Inbox Item，schema v13 只新增 Inbox–Task 关系和删除互锁，不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收，以及 Focus Core 工时回写均已交付。手工 Inbox 受理分诊已独立交付，但 Inbox Task 关系/来源消费、Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写，以及 Inbox 对已有 Task 的活动/历史关系均已交付。Inbox 批量拆分/分派/自动解决、来源消费、Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -19,7 +19,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - Submission 批次、四种 Artifact、受控文件下载、审计软删除及 Task 聚合硬删除；
 - 所有真实页面的加载、空数据、错误、重试、版本冲突和草稿保留。
 
-当前不负责：Inbox 的来源消费与自动拆分、Agent Runtime、远程协作/通知、自动生成产出、AI 分析、知识库、备份/恢复或专注计时写入。
+当前不负责：Inbox 的来源消费、批量拆分/分派与自动解决、Agent Runtime、远程协作/通知、自动生成产出、AI 分析、知识库、备份/恢复或专注计时写入。已有 Task 的 Inbox 关系由 Inbox 聚合负责，Task 只提供实时读取和删除互锁。
 
 ## 已实现状态
 
@@ -36,6 +36,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - Task 时间线已覆盖策略变化、提交、接受、返工、等待验收时撤回、Artifact 删除及 v9 迁移回填文案。
 - 绑定 Task 的 Focus Session 只有 stop→completed 才把精确秒数写入 `task_focus_totals`，再把新增完整分钟追加到 `actual_minutes`；余秒跨 Session 保留，cancel/interrupted 不入账，也不改变 Task 生命周期。
 - Task 存在 active/paused/recovery_pending Focus Session 时，硬删除返回 `409 TASK_HAS_OPEN_FOCUS_SESSION`；Session 进入终态后可删除 Task，历史 Session 的 `task_id` 自动置空。
+- Task 存在任一活动 Inbox 关系时，硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，不会移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除。已解除历史关系的实时 `task_id` 随删除置空，但原 Task UUID/标题快照继续保留。
 
 ## 数据模型与约束
 
@@ -133,14 +134,14 @@ done / cancelled ──reopen──> todo
 
 ### Task 与生命周期
 
-| 方法   | 路径                       | 关键约束                                                |
-| ------ | -------------------------- | ------------------------------------------------------- |
-| POST   | `/api/v1/tasks`            | 仅 todo；支持 `review_policy`; 可选稳定幂等键           |
-| GET    | `/api/v1/tasks/:id`        | 完整 Task、关系、版本和 `ETag`                          |
-| PATCH  | `/api/v1/tasks/:id`        | `If-Match`；不写 status；策略变化仅 todo+无历史         |
-| DELETE | `/api/v1/tasks/:id`        | `If-Match`；硬删整个 Task 聚合并协调文件清理            |
-| POST   | `/api/v1/tasks/:id/start   | block                                                   | unblock | complete | cancel | reopen` | `If-Match`；可选稳定幂等键；显式状态机 |
-| GET    | `/api/v1/tasks/:id/events` | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version` |
+| 方法   | 路径                                                                  | 关键约束                                                                     |
+| ------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| POST   | `/api/v1/tasks`                                                       | 仅 todo；支持 `review_policy`; 可选稳定幂等键                                |
+| GET    | `/api/v1/tasks/:id`                                                   | 完整 Task、关系、版本和 `ETag`                                               |
+| PATCH  | `/api/v1/tasks/:id`                                                   | `If-Match`；不写 status；策略变化仅 todo+无历史                              |
+| DELETE | `/api/v1/tasks/:id`                                                   | `If-Match`；先拒绝开放 Focus/活动 Inbox 关系，再硬删 Task 聚合并协调文件清理 |
+| POST   | `/api/v1/tasks/:id/{start\|block\|unblock\|complete\|cancel\|reopen}` | `If-Match`；可选稳定幂等键；显式状态机                                       |
+| GET    | `/api/v1/tasks/:id/events`                                            | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version`                      |
 
 ### 提交
 
@@ -223,7 +224,7 @@ reason 最长 1,000 字符。只有 manual + waiting_review + current pending Su
 
 `DELETE /api/v1/artifacts/:id?confirm=true` 要求 Task `If-Match`、可选稳定幂等键和 `{ "reason": "1–1000 字符" }`。pending-review 批次禁止删除。非文件只写软删除元数据；file 删除在同一事务写不可变 tombstone，存在的文件先移入 `.trash/`，事务失败恢复，成功提交后清除 trash 文件。若物理文件已经缺失，确认软删除仍成功，并将完整性记录为 `missing` 及检查时间。列表可用 `include_deleted=true` 审计，详情隐藏已删 payload，文件下载返回 410。
 
-Task DELETE 是聚合硬删除：服务端先确认没有关联的 active/paused/recovery_pending Focus Session，否则返回 `TASK_HAS_OPEN_FOCUS_SESSION` 且不移动文件。通过检查后，同一事务为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，终态 Focus Session 按外键 `SET NULL` 保留；失败恢复已移动文件，提交后物理清理。它不是单 Artifact 删除的替代入口。
+Task DELETE 是聚合硬删除：服务端先确认没有关联的 active/paused/recovery_pending Focus Session，也没有任何 `unlinked_at IS NULL` 的活动 Inbox 关系；命中时分别返回 `TASK_HAS_OPEN_FOCUS_SESSION` 或 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，并且不移动文件、不删除部分事实。用户必须先在 Inbox 中带原因软解除活动关系。通过检查后，同一事务为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，终态 Focus Session 按外键 `SET NULL` 保留；已解除 Inbox 关系的 nullable `task_id` 置空，但 `task_ref_id / task_title_snapshot` 和关系事件保留。失败恢复已移动文件，提交后物理清理。它不是单 Artifact 删除或关系解除的替代入口。
 
 ## 受控文件目录
 
@@ -247,6 +248,7 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 - Artifact 正文按需加载；missing/mismatch/deleted/corrupt 响应均有明确提示和重试边界，不将下载错误伪装为成功。
 - 上传与下载的 120 秒传输期间显示 busy 状态并锁定其他 Task 写入；超时或失败保留未提交草稿，不伪造成功。
 - 删除需要确认并填写原因；pending-review 项不显示可执行删除动作。
+- Task 删除若被活动 Inbox 关系阻止，前端显示可解释冲突并提示先到收件箱解除活动关系，不自动替用户解除或重试删除；当前尚无 Task→Inbox 反向关系列表或直达导航。
 - 所有 D2 写操作与事实编辑、Assignment、生命周期命令互斥。
 - 版本冲突时客户端保留完整草稿，刷新 Task/Assignment/Submission/Artifact/Event/Project/Today 缓存，再要求用户重新确认；不会用旧 `If-Match` 自动重试。
 - 成功提交或写命令使用同一稳定幂等 key；重新确认冲突后生成新命令上下文，避免把不同预期版本复用到旧 key。
@@ -266,6 +268,8 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 
 迁移在固定连接上事务外临时关闭外键，事务提交前运行 `foreign_key_check`，成功或失败都恢复外键；异常时整体回滚。
 
+schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约，只新增关系表及 Task 删除保护。关系 GET 实时 JOIN `tasks`；A2 不新增 Task.version→Inbox.version trigger。Task 删除前由 API/数据库共同拒绝活动关系，已解除历史关系使用 nullable FK `SET NULL` 并保留原 ID/标题快照。
+
 ## 已验证与后续
 
 当前自动验证覆盖：
@@ -276,12 +280,13 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 
-仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
+仍属后续：Inbox 批量拆分/Assignment/自动解决、Reminder/来源投影、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；已有 Task 的 Inbox 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 
 ## 相关代码/PRD 链接
 
 - [PRD 任务需求与 T-18D](../opc-workspace-PRD.md)
 - [schema v9 迁移](../../services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql)
+- [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
@@ -291,4 +296,5 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
 - [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)
 - [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)
+- [Inbox–Task 删除互锁测试](../../services/sidecar/internal/api/inbox_item_tasks_test.go)
 - [前端 D2 测试](../../apps/web/src/components/TaskOutputsSection.test.tsx)

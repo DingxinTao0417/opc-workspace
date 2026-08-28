@@ -21,14 +21,23 @@ func TestInboxMigrationUpgradesV11WithoutChangingExistingFacts(t *testing.T) {
 	`, clientID).Error; err != nil {
 		t.Fatalf("seed v11 client fact: %v", err)
 	}
-	// Build an exact schema-history v11 boundary from the verified current store:
-	// migration 012 is additive, so removing only its table/indexes and history row
-	// leaves the same schema and facts that a real v11 database exposes.
+	// Build an exact schema-history v11 boundary from the verified current store.
+	// Migration 013 depends on the migration 012 Inbox table, so remove its
+	// independent Task trigger and relation table before rewinding migration 012.
+	if err := store.DB.Exec("DROP TRIGGER trg_tasks_prevent_active_inbox_relation_delete").Error; err != nil {
+		t.Fatalf("remove v13 Task delete trigger from fixture: %v", err)
+	}
+	if err := store.DB.Exec("DROP TABLE inbox_item_tasks").Error; err != nil {
+		t.Fatalf("remove v13 relation table from fixture: %v", err)
+	}
+	if err := store.DB.Exec("DELETE FROM schema_migrations WHERE version = 13").Error; err != nil {
+		t.Fatalf("rewind fixture migration 13 history: %v", err)
+	}
 	if err := store.DB.Exec("DROP TABLE inbox_items").Error; err != nil {
 		t.Fatalf("remove v12 table from fixture: %v", err)
 	}
 	if err := store.DB.Exec("DELETE FROM schema_migrations WHERE version = 12").Error; err != nil {
-		t.Fatalf("rewind fixture migration history: %v", err)
+		t.Fatalf("rewind fixture migration 12 history: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close v11 fixture: %v", err)
@@ -39,8 +48,8 @@ func TestInboxMigrationUpgradesV11WithoutChangingExistingFacts(t *testing.T) {
 		t.Fatalf("upgrade v11 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 12 {
-		t.Fatalf("SchemaVersion = %d, want 12", store.SchemaVersion)
+	if store.SchemaVersion != 13 {
+		t.Fatalf("SchemaVersion = %d, want 13", store.SchemaVersion)
 	}
 	var client struct {
 		Name        string
@@ -71,8 +80,8 @@ func TestInboxMigrationCreatesConstrainedManualIntakeFacts(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 12 {
-		t.Fatalf("SchemaVersion = %d, want 12", store.SchemaVersion)
+	if store.SchemaVersion != 13 {
+		t.Fatalf("SchemaVersion = %d, want 13", store.SchemaVersion)
 	}
 
 	const itemID = "018f0000-0000-7000-8000-000000001201"

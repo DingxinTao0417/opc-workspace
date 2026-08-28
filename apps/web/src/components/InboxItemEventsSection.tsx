@@ -9,7 +9,10 @@ import {
   History,
   Inbox,
   LoaderCircle,
+  Link2,
+  ListChecks,
   RotateCcw,
+  Unlink2,
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -32,6 +35,9 @@ const eventPresentations: Record<string, EventPresentation> = {
   inbox_item_resolved: { icon: Check, label: "标记为已解决" },
   inbox_item_dismissed: { icon: XCircle, label: "忽略并归档" },
   inbox_item_reopened: { icon: RotateCcw, label: "重新打开" },
+  task_linked: { icon: Link2, label: "关联任务" },
+  task_requirement_changed: { icon: ListChecks, label: "调整任务要求" },
+  task_unlinked: { icon: Unlink2, label: "解除任务关联" },
   created: { icon: Inbox, label: "创建手工条目" },
   updated: { icon: Edit3, label: "更新条目资料" },
   read: { icon: Eye, label: "标记为已读" },
@@ -66,6 +72,38 @@ function snapshotString(
 }
 
 function eventDetail(event: InboxWorkflowEvent): string | null {
+  const nestedRelation =
+    event.current?.relation &&
+    typeof event.current.relation === "object" &&
+    !Array.isArray(event.current.relation)
+      ? (event.current.relation as Record<string, unknown>)
+      : null;
+  const taskTitle = snapshotString(
+    nestedRelation ?? event.current,
+    "task_title_snapshot",
+    "task_title",
+    "title",
+  );
+  if (event.action === "task_linked") {
+    const isRequired =
+      nestedRelation?.is_required ??
+      nestedRelation?.isRequired ??
+      event.current?.is_required ??
+      event.current?.isRequired;
+    return taskTitle
+      ? `${taskTitle}${typeof isRequired === "boolean" ? ` · ${isRequired ? "必需" : "可选"}` : ""}`
+      : null;
+  }
+  if (event.action === "task_requirement_changed") {
+    const isRequired =
+      nestedRelation?.is_required ??
+      nestedRelation?.isRequired ??
+      event.current?.is_required ??
+      event.current?.isRequired;
+    if (typeof isRequired === "boolean") {
+      return `${taskTitle ? `${taskTitle} · ` : ""}${isRequired ? "设为必需任务" : "改为可选任务"}`;
+    }
+  }
   const reason =
     event.reason ??
     snapshotString(
@@ -74,7 +112,11 @@ function eventDetail(event: InboxWorkflowEvent): string | null {
       "resolution_reason",
       "dismiss_reason",
     );
-  if (reason) return `原因：${reason}`;
+  if (reason) {
+    return event.action === "task_unlinked" && taskTitle
+      ? `${taskTitle} · 原因：${reason}`
+      : `原因：${reason}`;
+  }
   const snoozedUntil = snapshotString(
     event.current,
     "snoozed_until",

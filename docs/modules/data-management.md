@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v12（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v13（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -28,6 +28,7 @@
 - schema v10 为 Client 增加聚合 `version`、名称/状态/更新时间查询索引和 Project 关联变化触发器，并把历史空白可选资料归一为 `NULL`；迁移不改写 schema v9 的 Artifact store 契约。
 - schema v11 重建 `focus_sessions`，新增有效工作区间账本 `focus_session_intervals` 和精确秒数余量账本 `task_focus_totals`；旧 Focus 记录按终态映射并补 interval，不二次增加 Task 工时，并用只适用于迁入终态的 `legacy_imported` 标记无损保留旧 schema 中超过 120 分钟的合法记录。
 - schema v12 以加法迁移新增 `inbox_items` 及列表/未读查询索引；`source_event_key` 只对非空值建立部分唯一索引。v11→v12 升级测试验证既有 Client 等业务事实不变，当前迁移不创建 demo Inbox 数据。
+- schema v13 以加法迁移新增 `inbox_item_tasks`、活动关系唯一/position/软解除约束、原 Task ID/标题快照与活动关系 Task 删除保护。v12→v13 不重建 Task、Inbox Item 或其他模块表，也不创建 demo 关系。
 - 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
@@ -115,7 +116,7 @@ appLogDir/
 - 单 Artifact 删除要求确认、Task `If-Match` 和原因；pending-review 批次禁止删除。
 - text/link/structured 只写软删除元数据；详情仍可看元数据，但正文固定为 null。
 - file object 软删在同一事务写 immutable tombstone（size/SHA、`deletion_scope = artifact`）并移到 `.trash/<artifact-id>-<uuid>.trash`；数据库失败则恢复，成功提交后物理清除。object 已缺失时仍完成软删除，并写 `integrity_status = missing` 与检查时间。
-- Task DELETE 在同一事务为每个 active file 写 `deletion_scope = task` tombstone，再移动仍存在的 objects；缺失 object 不阻断聚合删除。随后事务级联删除 Task/Submission/Artifact；失败逆序恢复，提交后清除。tombstone 不引用被删聚合且不可修改/删除，供后续启动恢复判定授权删除。
+- Task DELETE 先检查开放 Focus Session 与活动 Inbox 关系；任一存在都在移动 Artifact 文件前返回冲突。用户带原因软解除关系后，删除在同一事务为每个 active file 写 `deletion_scope = task` tombstone，再移动仍存在的 objects；缺失 object 不阻断聚合删除。随后事务级联删除 Task/Submission/Artifact，并把已解除历史关系的 nullable `task_id` 置空，保留 `task_ref_id / task_title_snapshot`。失败逆序恢复，提交后清除。tombstone 不引用被删聚合且不可修改/删除，供后续启动恢复判定授权删除。
 - 已软删文件在单 Artifact 删除成功时已无 object；Task 后续硬删除不重复寻找该文件。
 
 ### 启动协调
@@ -129,7 +130,7 @@ appLogDir/
 
 ## SQLite 迁移契约
 
-当前 schema v12：
+当前 schema v13：
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -141,8 +142,9 @@ appLogDir/
 - 010：Client 聚合版本、查询索引、空白可选值归一，以及 Project 客户关联变化的版本传播 trigger；
 - 011：Focus Session 状态/版本重建、有效 interval、Task 精确秒数余量账本、单一开放 Session/interval 约束和 v10 历史兼容迁移。
 - 012：手工 Inbox Item 事实、终态成组约束、查询索引及 nullable `source_event_key` 部分唯一索引；不创建 Task 关系、Reminder 或来源投影。
+- 013：Inbox–Task 活动/历史关系、required、稳定 position、带原因软解除、原 Task ID/标题快照、nullable 实时 Task 外键和活动关系 Task 删除保护；不创建 Task、Assignment、Reminder、来源投影或自动解决。
 
-新增 schema 只能从 `013_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `014_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## 未来 v0.1 备份/恢复目标
 
@@ -199,6 +201,7 @@ appLogDir/
 
 - [x] 开发/正式数据库和 Artifact root 隔离。
 - [x] schema v12 嵌入迁移、回滚、外键恢复和测试；v11→v12 数据保留与 Inbox 约束已有定向覆盖。
+- [x] schema v13 嵌入迁移、v12→v13 数据保留、关系约束、删除保护和外键恢复已由定向及全量 Go 测试覆盖。
 - [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
@@ -221,8 +224,10 @@ appLogDir/
 - [schema v10 Client 迁移](../../services/sidecar/internal/database/migrations/010_client_facts.sql)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
+- [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
 - [统一开发脚本](../../scripts/dev.mjs)
 - [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)
+- [schema v13 迁移测试](../../services/sidecar/internal/database/inbox_task_migration_test.go)

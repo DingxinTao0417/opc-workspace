@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-27（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v12。schema v12 只新增独立的手工 Inbox Item，不改 Project 表、聚合触发器或现有 Project API。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v13。schema v12 新增独立手工 Inbox Item，schema v13 只新增 Inbox–Task 关系和 Task 删除互锁，均不改 Project 表、聚合触发器或现有 Project API。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合和 Client 客户关联纵切已实现，模块仍为**部分完成**；项目产出/附件/事件与 Inbox 来源投影、关联和自动分诊尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合和 Client 客户关联纵切已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目产出/附件/事件的来源投影、批量拆分和自动分诊尚未交付。
 
 ## 定位与边界
 
@@ -22,7 +22,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已实现
 
-- SQLite schema v12 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`，v6 增加 Task 事实，v7 增加 Actor/Assignment/Event，v8 重建 Task 六状态并恢复 Project 聚合 trigger，v9 增加 Task Submission/Artifact 与受控文件，v10 增加 Client 聚合版本和 Project 客户关联反向传播 trigger，v11 让 completed Focus Session 经 Task `actual_minutes` 进入项目聚合，v12 只新增独立 Inbox Item；v6–v12 均不改变 Project 表，原有任务和发票外键继续使用 `ON DELETE SET NULL`。
+- SQLite schema v13 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`，v6 增加 Task 事实，v7 增加 Actor/Assignment/Event，v8 重建 Task 六状态并恢复 Project 聚合 trigger，v9 增加 Task Submission/Artifact 与受控文件，v10 增加 Client 聚合版本和 Project 客户关联反向传播 trigger，v11 让 completed Focus Session 经 Task `actual_minutes` 进入项目聚合，v12 新增独立 Inbox Item，v13 新增 Inbox–Task 关系和 Task 删除互锁；v6–v13 均不改变 Project 表，原有任务和发票外键继续使用 `ON DELETE SET NULL`。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -73,7 +73,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v12 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12 不改变这些 Project 事实。
+- 当前 schema v13 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12–v13 不改变这些 Project 事实。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -145,11 +145,11 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v12 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12 的手工 Inbox Item 不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v13 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12 的手工 Inbox Item 和 schema v13 的 Inbox–Task 关系不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选和双向聚合版本传播已接通；客户活动、附件、Actor 关联、回访和财务仍待实现。
-5. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派和验收已交付；项目级产出聚合、项目附件、Inbox 拆分/关联和事件去重仍待实现。
+5. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收，以及 Inbox 手工关联已有 Task 已交付；项目级产出聚合、项目附件、Inbox 来源投影、批量拆分和来源事件去重仍待实现。
 6. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径

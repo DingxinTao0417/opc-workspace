@@ -204,6 +204,30 @@ describe("TaskDetailModal", () => {
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
   });
 
+  it("explains how to resolve an active Inbox relation before deletion", async () => {
+    apiMocks.deleteTask.mockRejectedValueOnce(
+      new ApiError(
+        "Unlink the Task from active Inbox Items before deleting it",
+        {
+          status: 409,
+          code: "TASK_HAS_ACTIVE_INBOX_RELATIONS",
+        },
+      ),
+    );
+    renderModal();
+
+    await screen.findByLabelText("任务名称");
+    fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(
+      await screen.findByText(
+        "该任务仍被收件箱条目关联。请先到收件箱解除活动关联，再删除任务。",
+      ),
+    ).toBeInTheDocument();
+    expect(useUiStore.getState().taskDetailId).toBe(task.id);
+  });
+
   it("keeps an unsaved task draft while an assignment write updates the task version", async () => {
     const updatedTask = {
       ...task,
