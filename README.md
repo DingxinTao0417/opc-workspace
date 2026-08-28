@@ -20,7 +20,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看 Submission/Artifact 历史
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
-- Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；精确日期/未排期组支持按钮与同组拖拽排序，四组任务均可行内安排到任意日期或未排期，模糊响应必须回读证明后才确认成功
+- Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；精确日期/未排期组支持按钮与同组拖拽排序，四组任务均可行内安排到任意日期或未排期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖搜索完整本地 Task 集合并直达精确详情/指定设置模块，具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护
 - Focus Core A+B+C：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today 统计，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
@@ -28,7 +28,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D/E Today 日期分组/导航/排序与行内改期、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。Today 跨分组拖拽、受控头像文件、Focus D、客户活动与附件、项目事件/非 Reminder Inbox 来源投影、重复提醒、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v3.8](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D/E/F Today 日期分组/导航/排序/行内改期与安全执行快捷操作、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。Today 跨分组拖拽与行内编辑/删除、受控头像文件、Focus D、客户活动与附件、项目事件/非 Reminder Inbox 来源投影、重复提醒、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v3.9](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -50,7 +50,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v3.8）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v3.9）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -283,4 +283,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v3.8](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航/排序及行内任意日期安排、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Today 跨分组拖拽与其他行内执行快捷操作、受控头像文件、Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v3.9](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航/排序、行内任意日期安排及安全的开始/完成/开始专注快捷操作、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Today 跨分组拖拽与行内编辑/删除、受控头像文件、Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

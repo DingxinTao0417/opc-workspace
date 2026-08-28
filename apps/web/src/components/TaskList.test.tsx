@@ -105,6 +105,73 @@ describe("TaskList", () => {
     expect(useUiStore.getState().taskDetailId).toBeNull();
   });
 
+  it("exposes only policy-safe lifecycle shortcuts plus focus", () => {
+    const onStartTask = vi.fn();
+    const onCompleteTask = vi.fn();
+    const onStartFocus = vi.fn();
+    const inProgress = {
+      ...task,
+      id: "task-progress",
+      title: "进行中的任务",
+      status: "in_progress" as const,
+    };
+    const manualReview = {
+      ...inProgress,
+      id: "task-manual",
+      title: "人工验收任务",
+      reviewPolicy: "manual" as const,
+    };
+    render(
+      <TaskList
+        live
+        onCompleteTask={onCompleteTask}
+        onStartFocus={onStartFocus}
+        onStartTask={onStartTask}
+        tasks={[task, inProgress, manualReview]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `开始执行任务：${task.title}` }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: `完成任务：${inProgress.title}` }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: `开始专注：${manualReview.title}` }),
+    );
+
+    expect(onStartTask).toHaveBeenCalledWith(task);
+    expect(onCompleteTask).toHaveBeenCalledWith(inProgress);
+    expect(onStartFocus).toHaveBeenCalledWith(manualReview);
+    expect(
+      screen.queryByRole("button", {
+        name: `完成任务：${manualReview.title}`,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("disables shortcuts while facts are changing or focus is unavailable", () => {
+    render(
+      <TaskList
+        focusActionDisabled
+        live
+        onStartFocus={vi.fn()}
+        onStartTask={vi.fn()}
+        quickActionsDisabled
+        quickActionPendingId={task.id}
+        tasks={[task]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: `开始执行任务：${task.title}` }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: `开始专注：${task.title}` }),
+    ).toBeDisabled();
+  });
+
   it("uses the status control only to open details for every lifecycle state", () => {
     const statuses = [
       ["todo", "待办"],

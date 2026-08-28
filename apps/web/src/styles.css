@@ -1471,6 +1471,31 @@ kbd {
   color: var(--text);
 }
 
+.task-order-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.task-order-actions button.task-quick-action {
+  opacity: 0;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.task-row:hover .task-quick-action,
+.task-row:focus-within .task-quick-action,
+.task-row-quick-action-pending .task-quick-action {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .task-order-actions button.task-quick-action {
+    opacity: 1;
+  }
+}
+
 .task-plan-modal {
   display: grid;
   gap: 12px;

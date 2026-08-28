@@ -28,10 +28,31 @@ const mocks = vi.hoisted(() => ({
   setNewTaskOpen: vi.fn(),
   planTask: vi.fn(),
   resetPlanTask: vi.fn(),
+  lifecycleTask: vi.fn(),
+  resetLifecycleTask: vi.fn(),
+  lifecycleError: null as unknown,
+  lifecyclePending: false,
+  createFocus: vi.fn(),
+  resetCreateFocus: vi.fn(),
+  createFocusError: null as unknown,
+  createFocusPending: false,
+  beginFocus: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: mocks.inbox,
+  useActiveFocusSessionQuery: () => ({
+    data: { session: null },
+    isFetching: false,
+    isSuccess: true,
+  }),
+  useCreateFocusSession: () => ({
+    error: mocks.createFocusError,
+    isPending: mocks.createFocusPending,
+    mutate: mocks.createFocus,
+    reset: mocks.resetCreateFocus,
+    variables: undefined,
+  }),
   useTodayStatsQuery: mocks.stats,
   useTodayTaskGroupsQuery: mocks.taskGroups,
   useMoveTaskWithinPlan: () => ({
@@ -66,6 +87,23 @@ vi.mock("../api/hooks", () => ({
     mutateAsync: mocks.planTask,
     reset: mocks.resetPlanTask,
   }),
+  useTaskLifecycleCommand: () => ({
+    error: mocks.lifecycleError,
+    isPending: mocks.lifecyclePending,
+    mutate: mocks.lifecycleTask,
+    reset: mocks.resetLifecycleTask,
+    variables: undefined,
+  }),
+}));
+
+vi.mock("../store/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({ focusMinutes: 25, cycles: 4 }),
+}));
+
+vi.mock("../store/focus", () => ({
+  useFocusCycleStore: (selector: (state: unknown) => unknown) =>
+    selector({ beginWork: mocks.beginFocus, phase: "idle" }),
 }));
 
 vi.mock("../store/ui", () => ({
@@ -81,6 +119,10 @@ describe("TodayPage Inbox overview", () => {
     mocks.movePending = false;
     mocks.dragError = null;
     mocks.dragPending = false;
+    mocks.lifecycleError = null;
+    mocks.lifecyclePending = false;
+    mocks.createFocusError = null;
+    mocks.createFocusPending = false;
     vi.useRealTimers();
   });
 
@@ -213,6 +255,105 @@ describe("TodayPage Inbox overview", () => {
     expect(
       screen.getByRole("button", { name: "安排任务日期：逾期任务" }),
     ).toBeVisible();
+  });
+
+  it("runs versioned lifecycle shortcuts and starts a bound focus session", () => {
+    const makeTask = (
+      id: string,
+      title: string,
+      status: "todo" | "in_progress",
+      reviewPolicy: "none" | "manual" = "none",
+    ) => ({
+      id,
+      title,
+      description: "",
+      kind: "work",
+      status,
+      reviewPolicy,
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate: "2026-08-28",
+      estimatedMinutes: 25,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: id === "todo" ? 3 : 7,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    });
+    const todo = makeTask("todo", "准备交付", "todo");
+    const progress = makeTask("progress", "完成交付", "in_progress");
+    const manual = makeTask(
+      "manual",
+      "等待验收的工作",
+      "in_progress",
+      "manual",
+    );
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [todo, progress, manual],
+        thisWeek: [],
+        unscheduled: [],
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "开始执行任务：准备交付" }),
+    );
+    expect(mocks.lifecycleTask).toHaveBeenCalledWith({
+      id: "todo",
+      input: { action: "start", expectedVersion: 3 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "完成任务：完成交付" }));
+    expect(mocks.lifecycleTask).toHaveBeenCalledWith({
+      id: "progress",
+      input: { action: "complete", expectedVersion: 7 },
+    });
+    expect(
+      screen.queryByRole("button", { name: "完成任务：等待验收的工作" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "开始专注：准备交付" }));
+    expect(mocks.createFocus).toHaveBeenCalledWith(
+      { taskId: "todo", plannedSeconds: 1_500 },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    const focusCallbacks = mocks.createFocus.mock.calls.at(-1)?.[1] as {
+      onSuccess: () => void;
+    };
+    focusCallbacks.onSuccess();
+    expect(mocks.beginFocus).toHaveBeenCalledWith("todo", 4, "准备交付");
   });
 
   it("switches the queried date and can return to today", () => {

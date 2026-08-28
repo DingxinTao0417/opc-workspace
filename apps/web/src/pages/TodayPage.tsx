@@ -18,12 +18,17 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
+  useActiveFocusSessionQuery,
+  useCreateFocusSession,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
   useResetTaskOrder,
+  useTaskLifecycleCommand,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
 } from "../api/hooks";
+import { useFocusCycleStore } from "../store/focus";
+import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskList } from "../components/TaskList";
@@ -60,6 +65,23 @@ function reorderErrorText(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof ApiError) return error.message;
   return "无法保存任务顺序，请重试。";
+}
+
+const quickActionMessages: Record<string, string> = {
+  TASK_ASSIGNEE_REQUIRED: "开始执行前需要先在任务详情中设置负责人。",
+  TASK_REVIEW_REQUIRED: "此任务必须走受控验收流程，不能直接完成。",
+  TASK_TRANSITION_NOT_ALLOWED: "任务状态已经变化，请按最新状态重试。",
+  VERSION_CONFLICT: "任务已经被更新，最新状态正在刷新，请重试。",
+  ACTIVE_FOCUS_SESSION_EXISTS: "已有专注会话，请先在右侧专注栏处理。",
+};
+
+function quickActionErrorText(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof ApiError) {
+    const message = quickActionMessages[error.code] ?? error.message;
+    return error.requestId ? `${message} · 请求 ${error.requestId}` : message;
+  }
+  return "快捷操作失败，请刷新本地状态后重试。";
 }
 
 function applyOptimisticOrder(tasks: Task[], orderedIds?: string[]): Task[] {
@@ -100,12 +122,19 @@ export function TodayPage() {
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
   const statsQuery = useTodayStatsQuery(dateKey);
   const inboxStatsQuery = useInboxStatsQuery();
+  const focusQuery = useActiveFocusSessionQuery();
+  const lifecycleMutation = useTaskLifecycleCommand();
+  const createFocusMutation = useCreateFocusSession();
   const moveMutation = useMoveTaskWithinPlan();
   const dragMutation = useReorderActiveTasksWithinPlan();
   const resetOrderMutation = useResetTaskOrder();
   const [optimisticOrders, setOptimisticOrders] = useState<
     Record<string, string[]>
   >({});
+  const focusMinutes = useSettingsStore((state) => state.focusMinutes);
+  const focusCycles = useSettingsStore((state) => state.cycles);
+  const focusPhase = useFocusCycleStore((state) => state.phase);
+  const beginFocusWork = useFocusCycleStore((state) => state.beginWork);
   const live = taskGroupsQuery.isSuccess;
   const reorderReady =
     live &&
@@ -117,6 +146,24 @@ export function TodayPage() {
     reorderErrorText(dragMutation.error) ??
     reorderErrorText(moveMutation.error) ??
     reorderErrorText(resetOrderMutation.error);
+  const quickActionError =
+    quickActionErrorText(lifecycleMutation.error) ??
+    quickActionErrorText(createFocusMutation.error);
+  const quickActionPendingId = lifecycleMutation.isPending
+    ? (lifecycleMutation.variables?.id ?? null)
+    : createFocusMutation.isPending
+      ? (createFocusMutation.variables?.taskId ?? null)
+      : null;
+  const quickActionsDisabled =
+    taskGroupsQuery.isFetching ||
+    lifecycleMutation.isPending ||
+    createFocusMutation.isPending ||
+    !reorderReady;
+  const focusActionDisabled =
+    !focusQuery.isSuccess ||
+    focusQuery.isFetching ||
+    Boolean(focusQuery.data?.session) ||
+    focusPhase !== "idle";
   const groups = taskGroupsQuery.data ?? {
     overdue: [],
     today: [],
@@ -230,6 +277,36 @@ export function TodayPage() {
       { plannedDate, orderedTaskIds },
       { onSettled: () => clearOptimisticOrder(orderKey) },
     );
+  };
+  const runLifecycleAction = (task: Task, action: "start" | "complete") => {
+    createFocusMutation.reset();
+    lifecycleMutation.reset();
+    lifecycleMutation.mutate({
+      id: task.id,
+      input: { action, expectedVersion: task.version },
+    });
+  };
+  const startFocus = (task: Task) => {
+    lifecycleMutation.reset();
+    createFocusMutation.reset();
+    if (focusActionDisabled) return;
+    createFocusMutation.mutate(
+      {
+        taskId: task.id,
+        plannedSeconds: focusMinutes * 60,
+      },
+      {
+        onSuccess: () => beginFocusWork(task.id, focusCycles, task.title),
+      },
+    );
+  };
+  const taskQuickActionProps = {
+    focusActionDisabled,
+    onCompleteTask: (task: Task) => runLifecycleAction(task, "complete"),
+    onStartFocus: startFocus,
+    onStartTask: (task: Task) => runLifecycleAction(task, "start"),
+    quickActionPendingId,
+    quickActionsDisabled,
   };
 
   return (
@@ -382,6 +459,24 @@ export function TodayPage() {
         </div>
       ) : null}
 
+      {lifecycleMutation.isPending ||
+      createFocusMutation.isPending ||
+      quickActionError ? (
+        <div className="task-order-banner today-order-status">
+          {lifecycleMutation.isPending ? (
+            <span role="status">正在更新任务状态…</span>
+          ) : null}
+          {createFocusMutation.isPending ? (
+            <span role="status">正在开始专注…</span>
+          ) : null}
+          {quickActionError ? (
+            <span className="task-batch-error" role="alert">
+              {quickActionError}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {groups.overdue.length > 0 ? (
         <section className="task-section">
           <div className="section-heading compact-heading">
@@ -392,6 +487,7 @@ export function TodayPage() {
             <span className="section-count">{groups.overdue.length}</span>
           </div>
           <TaskList
+            {...taskQuickActionProps}
             compact
             live={live}
             onPlanTask={setPlanningTask}
@@ -442,6 +538,7 @@ export function TodayPage() {
           />
         ) : (
           <TaskList
+            {...taskQuickActionProps}
             allowReorder
             allowDrag
             compact
@@ -481,6 +578,7 @@ export function TodayPage() {
             <SkeletonRows count={2} />
           ) : (
             <TaskList
+              {...taskQuickActionProps}
               compact
               live={live}
               onPlanTask={setPlanningTask}
@@ -511,6 +609,7 @@ export function TodayPage() {
             </div>
           </div>
           <TaskList
+            {...taskQuickActionProps}
             allowReorder
             allowDrag
             compact

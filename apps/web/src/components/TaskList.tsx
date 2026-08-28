@@ -12,6 +12,8 @@ import {
   Clock3,
   Eye,
   GripVertical,
+  Play,
+  Timer,
 } from "lucide-react";
 import { useState, type DragEvent } from "react";
 import { useTaskPageQuery } from "../api/hooks";
@@ -62,6 +64,12 @@ interface TaskListProps {
   onDropTask?: (source: Task, target: Task) => void;
   onPlanTask?: (task: Task) => void;
   planPendingId?: string | null;
+  onStartTask?: (task: Task) => void;
+  onCompleteTask?: (task: Task) => void;
+  onStartFocus?: (task: Task) => void;
+  quickActionPendingId?: string | null;
+  quickActionsDisabled?: boolean;
+  focusActionDisabled?: boolean;
 }
 
 function TaskRow({
@@ -87,6 +95,12 @@ function TaskRow({
   onTaskDrop,
   onPlanTask,
   planPendingId,
+  onStartTask,
+  onCompleteTask,
+  onStartFocus,
+  quickActionPendingId,
+  quickActionsDisabled,
+  focusActionDisabled,
 }: Required<
   Pick<
     TaskListProps,
@@ -139,12 +153,21 @@ function TaskRow({
     !childrenQuery.isFetching;
   const childTotal = childrenQuery.data?.meta.total ?? 0;
   const childPages = Math.max(1, Math.ceil(childTotal / 100));
+  const canQuickStart = task.status === "todo" && Boolean(onStartTask);
+  const canQuickComplete =
+    task.status === "in_progress" &&
+    task.reviewPolicy === "none" &&
+    Boolean(onCompleteTask);
+  const hasQuickActions =
+    canQuickStart || canQuickComplete || Boolean(onStartFocus);
+  const quickActionBusy = quickActionPendingId === task.id;
 
   return (
     <div className="task-tree-node">
       <article
+        aria-busy={quickActionBusy || undefined}
         aria-level={hierarchical ? level : undefined}
-        className={`task-row task-${task.status}${isSelected ? " task-row-selected" : ""}${draggingId === task.id ? " task-row-dragging" : ""}${dragOverId === task.id ? " task-row-drag-over" : ""}`}
+        className={`task-row task-${task.status}${isSelected ? " task-row-selected" : ""}${draggingId === task.id ? " task-row-dragging" : ""}${dragOverId === task.id ? " task-row-drag-over" : ""}${quickActionBusy ? " task-row-quick-action-pending" : ""}`}
         onDragOver={
           allowDrag ? (event) => onTaskDragOver?.(event, task) : undefined
         }
@@ -257,8 +280,46 @@ function TaskRow({
             </span>
           </span>
         </button>
-        {(allowReorder && onMove) || onPlanTask ? (
+        {(allowReorder && onMove) || onPlanTask || hasQuickActions ? (
           <div className="task-order-actions">
+            {canQuickStart ? (
+              <button
+                aria-label={`开始执行任务：${task.title}`}
+                className="task-quick-action"
+                disabled={!live || quickActionsDisabled}
+                onClick={() => onStartTask?.(task)}
+                title="开始执行"
+                type="button"
+              >
+                <Play size={12} />
+              </button>
+            ) : null}
+            {canQuickComplete ? (
+              <button
+                aria-label={`完成任务：${task.title}`}
+                className="task-quick-action"
+                disabled={!live || quickActionsDisabled}
+                onClick={() => onCompleteTask?.(task)}
+                title="完成任务"
+                type="button"
+              >
+                <Check size={12} />
+              </button>
+            ) : null}
+            {onStartFocus ? (
+              <button
+                aria-label={`开始专注：${task.title}`}
+                className="task-quick-action"
+                disabled={!live || quickActionsDisabled || focusActionDisabled}
+                onClick={() => onStartFocus(task)}
+                title={
+                  focusActionDisabled ? "当前专注状态不可开始" : "开始专注"
+                }
+                type="button"
+              >
+                <Timer size={12} />
+              </button>
+            ) : null}
             {onPlanTask ? (
               <button
                 aria-label={`安排任务日期：${task.title}`}
@@ -319,8 +380,14 @@ function TaskRow({
               level={level + 1}
               live={childrenLive}
               onMove={onMove}
+              onCompleteTask={onCompleteTask}
               onPlanTask={onPlanTask}
+              onStartFocus={onStartFocus}
+              onStartTask={onStartTask}
               onSelectionChange={onSelectionChange}
+              quickActionPendingId={quickActionPendingId}
+              quickActionsDisabled={quickActionsDisabled}
+              focusActionDisabled={focusActionDisabled}
               reorderPendingId={reorderPendingId}
               planPendingId={planPendingId}
               selectedIds={selectedIds}
@@ -378,6 +445,12 @@ export function TaskList({
   onDropTask,
   onPlanTask,
   planPendingId = null,
+  onStartTask,
+  onCompleteTask,
+  onStartFocus,
+  quickActionPendingId = null,
+  quickActionsDisabled = false,
+  focusActionDisabled = false,
 }: TaskListProps) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -407,7 +480,10 @@ export function TaskList({
           level={level}
           live={live}
           onMove={onMove}
+          onCompleteTask={onCompleteTask}
           onPlanTask={onPlanTask}
+          onStartFocus={onStartFocus}
+          onStartTask={onStartTask}
           onTaskDragEnd={endDrag}
           onTaskDragOver={(event, target) => {
             if (!draggingId || draggingId === target.id || dragPending) return;
@@ -433,6 +509,9 @@ export function TaskList({
           onSelectionChange={onSelectionChange}
           reorderPendingId={reorderPendingId}
           planPendingId={planPendingId}
+          quickActionPendingId={quickActionPendingId}
+          quickActionsDisabled={quickActionsDisabled}
+          focusActionDisabled={focusActionDisabled}
           selectedIds={selectedIds}
           selectionLimitReached={selectionLimitReached}
           showParent={showParent}
