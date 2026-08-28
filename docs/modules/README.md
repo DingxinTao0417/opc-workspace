@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.9](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.0](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -16,7 +16,7 @@
 - [专注与工时](focus.md)（Core A 事实迁移、B API/事务、C 前端接入已交付；历史/报告/原生桌面反馈 D 延后）
 - [设置](settings.md)
 - [命令面板与搜索](command-search.md)
-- [数据、受控文件、备份与恢复](data-management.md)（Artifact store、手动一致性备份创建/列表/校验、隔离演练、重启恢复和确认删除已交付；导出仍待开发）
+- [数据、受控文件、备份与恢复](data-management.md)（Artifact store、手动一致性备份完整闭环和基础业务 JSON 导出已交付；导入/含文件外部包仍待开发）
 - [桌面平台与发布](desktop-platform.md)
 
 ## v0.2 本地编排

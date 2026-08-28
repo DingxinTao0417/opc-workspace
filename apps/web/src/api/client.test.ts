@@ -13,6 +13,7 @@ import {
   deleteTask,
   deleteTaskSavedView,
   drillBackupRestore,
+  downloadBusinessDataExport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -1518,6 +1519,36 @@ describe("verified local backups", () => {
       `/api/v1/backups/${backupPayload.id}?confirm=true`,
     );
     expect(fetchMock.mock.calls[5][1]?.method).toBe("DELETE");
+  });
+
+  it("downloads a versioned business JSON package with a safe filename", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response('{"format_version":1}', {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Disposition":
+              'attachment; filename="opc-workspace-business-20260828T120000Z.json"',
+            "X-Export-Format-Version": "1",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await downloadBusinessDataExport();
+    expect(result.fileName).toBe(
+      "opc-workspace-business-20260828T120000Z.json",
+    );
+    expect(result.formatVersion).toBe(1);
+    expect(result.blob).toBeInstanceOf(Blob);
+    expect(result.blob.size).toBeGreaterThan(0);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/exports/business-data",
+    );
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Accept")).toBe(
+      "application/json",
+    );
   });
 });
 

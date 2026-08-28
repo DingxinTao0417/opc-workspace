@@ -1192,3 +1192,9 @@ export interface ScheduledBackupRestoreResult {
   requestedAt: string;
   restartRequired: true;
 }
+
+export interface BusinessDataExportDownload {
+  blob: Blob;
+  fileName: string;
+  formatVersion: 1;
+}

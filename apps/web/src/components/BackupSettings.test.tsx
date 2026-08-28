@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   drill: vi.fn(),
   restore: vi.fn(),
   deleteBackup: vi.fn(),
+  exportData: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
 }));
@@ -84,6 +85,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useExportBusinessData: () => ({
+    mutate: mocks.exportData,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
@@ -93,6 +100,7 @@ describe("BackupSettings", () => {
     mocks.drill.mockClear();
     mocks.restore.mockClear();
     mocks.deleteBackup.mockClear();
+    mocks.exportData.mockClear();
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
   });
@@ -147,6 +155,12 @@ describe("BackupSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
     expect(mocks.deleteBackup).toHaveBeenCalledWith(
       backup.id,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    expect(mocks.exportData).toHaveBeenCalledWith(
+      undefined,
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 

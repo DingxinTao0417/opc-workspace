@@ -31,6 +31,7 @@ import {
   deleteTaskArtifact,
   cancelReminder,
   downloadTaskArtifact,
+  downloadBusinessDataExport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -220,6 +221,10 @@ export function useDeleteBackup() {
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
   });
+}
+
+export function useExportBusinessData() {
+  return useMutation({ mutationFn: downloadBusinessDataExport });
 }
 
 export function useAppSettingsQuery(enabled = true) {

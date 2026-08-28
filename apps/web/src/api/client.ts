@@ -12,6 +12,7 @@ import type {
   BackupSummary,
   BackupRestoreDrillResult,
   BackupVerificationStatus,
+  BusinessDataExportDownload,
   ScheduledBackupRestoreResult,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
@@ -3798,6 +3799,31 @@ export async function deleteBackup(id: string): Promise<void> {
   await apiRequest<unknown>(
     `/api/v1/backups/${encodeURIComponent(id)}?confirm=true`,
     { method: "DELETE" },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+}
+
+export async function downloadBusinessDataExport(): Promise<BusinessDataExportDownload> {
+  return apiFetch(
+    "/api/v1/exports/business-data",
+    async (response) => {
+      if (
+        response.headers.get("X-Export-Format-Version") !== "1" ||
+        !response.headers.get("Content-Type")?.startsWith("application/json")
+      ) {
+        return invalidResponse("业务数据导出响应格式无效");
+      }
+      return {
+        blob: await response.blob(),
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          "opc-workspace-business-export.json",
+        ),
+        formatVersion: 1,
+      };
+    },
+    {},
+    "application/json",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
 }

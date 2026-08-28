@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复和确认删除已经实现；导入、导出、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.0](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -47,11 +47,12 @@
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）与 objects 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
-- 设置“数据与备份”提供说明、创建、加载/空/错误状态、备份摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后明确要求关闭并重新打开应用。长操作使用 180 秒客户端窗口。当前没有自动重启或导出按钮，避免以无行为控件暗示能力。
+- `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。表、列和行顺序稳定；文件 Artifact 的元数据保留，正文不嵌入并以 active 数量/字节摘要声明。schema migrations、workspace identity、幂等响应、删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
+- 设置“数据与备份”提供业务 JSON 下载，以及备份说明、创建、加载/空/错误状态、摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后明确要求关闭并重新打开应用。长操作使用 180 秒客户端窗口。当前没有自动重启、导入或含文件导出按钮，避免以无行为控件暗示能力。
 
 ### 仍未实现
 
-- 基础 JSON 导出、导入预览/执行；
+- 导入预览/执行、包含 Artifact 文件正文的外部包；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 破坏性迁移前产品化自动备份；
 - 计划备份、保留策略、增量备份、加密和云目标。
@@ -199,7 +200,9 @@ appLogDir/
 
 ### 导出/导入
 
-基础导出目标是版本化 JSON 业务包和可选 Artifact 文件，不包含会话令牌、绝对路径或未来 Agent secret。导入必须预览冲突、支持取消、使用新 UUID 或显式映射，并在一个可回滚作业中完成。当前没有冻结 API 或 UI。
+基础业务 JSON 已实现：顶层记录 `format_version / exported_at / source / artifact_files / excluded_operational_tables / tables`；每张表携带稳定 `columns` 和二维 `rows`，便于后续导入器在不依赖 JSON 对象键顺序的前提下映射。当前格式不包含 Artifact 文件正文，会明确声明 `artifact_files.included=false`，因此它不是可直接恢复的备份替代品。
+
+导入必须预览冲突、支持取消、使用新 UUID 或显式映射，并在一个可回滚作业中完成。含文件导出包需先定义 manifest、hash 和相对路径契约，继续排除会话令牌、绝对路径或未来 Agent secret。当前没有导入 API/UI。
 
 ### 计划备份（v0.3）
 
@@ -209,16 +212,17 @@ appLogDir/
 
 当前创建和校验是同步本地命令，API 只在完整成功后返回；前端使用 180 秒超时并展示进行中状态。已实现：
 
-| 方法与路径                         | 当前契约                                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/backups`              | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                    |
-| `POST /api/v1/backups`             | 可选 `note`（最多 200 字）和 `Idempotency-Key`；冻结写入、创建、完整校验并原子发布 SQLite+Artifact 包                     |
-| `POST /api/v1/backups/:id/verify`  | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact |
-| `POST /api/v1/backups/:id/drill`   | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                    |
-| `POST /api/v1/backups/:id/restore` | 严格确认后重验目标、创建当前状态回滚包并挂起计划；下一次 Sidecar 启动前原子替换并最终复验，失败恢复旧资源                 |
-| `DELETE /api/v1/backups/:id`       | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝           |
+| 方法与路径                          | 当前契约                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/backups`               | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                    |
+| `POST /api/v1/backups`              | 可选 `note`（最多 200 字）和 `Idempotency-Key`；冻结写入、创建、完整校验并原子发布 SQLite+Artifact 包                     |
+| `POST /api/v1/backups/:id/verify`   | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact |
+| `POST /api/v1/backups/:id/drill`    | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                    |
+| `POST /api/v1/backups/:id/restore`  | 严格确认后重验目标、创建当前状态回滚包并挂起计划；下一次 Sidecar 启动前原子替换并最终复验，失败恢复旧资源                 |
+| `DELETE /api/v1/backups/:id`        | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝           |
+| `GET /api/v1/exports/business-data` | 单事务生成 format v1 业务 JSON attachment；显式白名单、稳定结构，文件仅元数据，排除运行维护事实和机器私有信息             |
 
-导出/导入尚无路由。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
+导入与含文件导出尚无路由。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把同步 JSON 导出和其他长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
 
 当前备份事实只存在于备份包的 manifest，不写 `workflow_events`，避免把机器维护动作伪装成 Task/Project 业务事件。未来若增加诊断事件，最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
 
@@ -253,12 +257,13 @@ appLogDir/
 - [x] 恢复安排再次演练目标并创建完整自动回滚包，发布后冻结业务写入；同目标请求可安全重放，不同 pending 目标被拒绝。
 - [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。
 - [x] 备份永久删除要求明确确认，支持有效/损坏 UUID 包，原子移入可续删隐藏态后清理和同步；拒绝 symlink/reparse、非普通文件及 pending 恢复期间删除。
+- [x] 基础业务 JSON 在单事务内按显式白名单、稳定表/列/行结构生成；包含文件元数据但不含正文，排除令牌、绝对路径及运行维护表，失败不返回部分包。
 
 ### 仍未实现
 
 - [ ] 桌面层一键安全重启、启动恢复进度页和 applied 清理警告诊断。
 - [ ] 破坏性迁移前自动备份。
-- [ ] 导入/导出、保留策略、计划备份和跨版本兼容矩阵。
+- [ ] 数据导入、含文件导出包、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
@@ -278,6 +283,7 @@ appLogDir/
 - [隔离恢复演练](../../services/sidecar/internal/api/backup_drill.go)
 - [重启前安全恢复](../../services/sidecar/internal/api/backup_restore.go)
 - [确认删除](../../services/sidecar/internal/api/backup_delete.go)
+- [业务 JSON 导出](../../services/sidecar/internal/api/business_export.go)
 - [设置备份界面](../../apps/web/src/components/BackupSettings.tsx)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)

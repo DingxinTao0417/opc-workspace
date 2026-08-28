@@ -2,6 +2,8 @@ import {
   AlertCircle,
   Archive,
   DatabaseBackup,
+  Download,
+  FileJson,
   LoaderCircle,
   RefreshCw,
   RotateCcw,
@@ -16,6 +18,7 @@ import {
   useCreateBackup,
   useDeleteBackup,
   useDrillBackupRestore,
+  useExportBusinessData,
   useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
@@ -44,6 +47,7 @@ function formatLocalTime(value: string): string {
 }
 
 function backupErrorText(error: unknown): string {
+  if (typeof error === "string") return error;
   if (error instanceof ApiError) {
     if (error.code === "BACKUP_INVALID") {
       return "备份完整性校验失败，请勿用它恢复数据。";
@@ -77,6 +81,9 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "BACKUP_DELETE_FAILED") {
       return "备份删除未完整结束，请对同一备份重试。";
+    }
+    if (error.code === "DATA_EXPORT_FAILED") {
+      return "无法生成一致的业务数据导出，请重试。";
     }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
@@ -193,6 +200,7 @@ export function BackupSettings() {
   const drillMutation = useDrillBackupRestore();
   const restoreMutation = useScheduleBackupRestore();
   const deleteMutation = useDeleteBackup();
+  const exportMutation = useExportBusinessData();
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
@@ -206,22 +214,32 @@ export function BackupSettings() {
     rollbackBackupId: string;
   } | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const pending =
     createMutation.isPending ||
     verifyMutation.isPending ||
     drillMutation.isPending ||
     restoreMutation.isPending ||
-    deleteMutation.isPending;
+    deleteMutation.isPending ||
+    exportMutation.isPending;
   const locked = pending || scheduledRestore !== null;
   const mutationError =
     createMutation.error ??
     verifyMutation.error ??
     drillMutation.error ??
     restoreMutation.error ??
-    deleteMutation.error;
+    deleteMutation.error ??
+    exportMutation.error ??
+    downloadError;
+
+  const resetExportFeedback = () => {
+    setDownloadError(null);
+    exportMutation.reset();
+  };
 
   const create = () => {
     setSuccess(null);
+    resetExportFeedback();
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
@@ -242,6 +260,7 @@ export function BackupSettings() {
 
   const verify = (id: string) => {
     setSuccess(null);
+    resetExportFeedback();
     setVerifyingId(id);
     createMutation.reset();
     verifyMutation.reset();
@@ -257,6 +276,7 @@ export function BackupSettings() {
 
   const drill = (id: string) => {
     setSuccess(null);
+    resetExportFeedback();
     setDrillingId(id);
     createMutation.reset();
     verifyMutation.reset();
@@ -275,6 +295,7 @@ export function BackupSettings() {
   const scheduleRestore = () => {
     if (!restoreCandidate) return;
     setSuccess(null);
+    resetExportFeedback();
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
@@ -295,6 +316,7 @@ export function BackupSettings() {
     setDeleteCandidate(null);
     setRestoreCandidate(backup);
     setSuccess(null);
+    resetExportFeedback();
     deleteMutation.reset();
   };
 
@@ -302,6 +324,7 @@ export function BackupSettings() {
     setRestoreCandidate(null);
     setDeleteCandidate(backup);
     setSuccess(null);
+    resetExportFeedback();
     restoreMutation.reset();
     deleteMutation.reset();
   };
@@ -318,6 +341,37 @@ export function BackupSettings() {
       onSuccess: () => {
         setDeleteCandidate(null);
         setSuccess(`备份 ${id.slice(0, 8)} 已永久删除。`);
+      },
+    });
+  };
+
+  const exportBusinessData = () => {
+    setSuccess(null);
+    setDownloadError(null);
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    restoreMutation.reset();
+    deleteMutation.reset();
+    exportMutation.reset();
+    exportMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        if (typeof URL.createObjectURL !== "function") {
+          setDownloadError(
+            "当前运行环境不支持保存导出文件，请在桌面应用中重试。",
+          );
+          return;
+        }
+        const url = URL.createObjectURL(result.blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.fileName;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        setSuccess(`业务数据已导出：${result.fileName}`);
       },
     });
   };
@@ -350,6 +404,7 @@ export function BackupSettings() {
               setNote(event.target.value);
               setSuccess(null);
               createMutation.reset();
+              resetExportFeedback();
             }}
             placeholder="例如：开始本周工作前"
             value={note}
@@ -367,6 +422,31 @@ export function BackupSettings() {
             <DatabaseBackup size={14} />
           )}
           {createMutation.isPending ? "创建并校验中…" : "立即备份"}
+        </button>
+      </div>
+
+      <div className="settings-group settings-backup-export">
+        <div className="settings-backup-intro">
+          <FileJson size={18} />
+          <div>
+            <strong>导出业务数据 JSON</strong>
+            <span>
+              下载版本化业务快照，包含业务表和文件产出元数据，不包含文件正文、会话令牌、机器绝对路径或运行维护表。
+            </span>
+          </div>
+        </div>
+        <button
+          className="button button-secondary settings-backup-export-button"
+          disabled={locked}
+          onClick={exportBusinessData}
+          type="button"
+        >
+          {exportMutation.isPending ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <Download size={14} />
+          )}
+          {exportMutation.isPending ? "正在生成…" : "下载 JSON"}
         </button>
       </div>
 
@@ -545,8 +625,8 @@ export function BackupSettings() {
       ) : null}
 
       <p className="settings-inline-note">
-        当前已开放创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；JSON
-        导出会在后续独立流程完成后启用。
+        当前已开放版本化业务 JSON
+        导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；文件产出正文需通过一致性备份保留。
       </p>
     </>
   );
