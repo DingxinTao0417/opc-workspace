@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.7
+> 文档版本：2.8
 > 日期：2026-08-28
-> 依据：[PRD v4.2](opc-workspace-PRD.md)
+> 依据：[PRD v4.3](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v16
 
 ## 1. 目的
@@ -49,7 +49,7 @@
 ### 3.1 当前实现
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
-- React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选。
+- React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、计划/截止日期范围、非法区间查询门禁、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选。
 - Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
 - SQLite 当前为 schema v16：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15 增加 Inbox 自动结清查询索引和数据库校验 trigger；schema v16 新增版本化 `app_settings`，不预置默认行。v15→v16 不改写既有事实，也不创建 demo 数据。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。

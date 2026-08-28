@@ -292,9 +292,12 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 				title = `Slash \ marker`
 			}
 			var plannedDate *string
+			var dueDate *string
 			if index < 2 {
 				value := fmt.Sprintf("2026-08-%02d", 20+index)
 				plannedDate = &value
+				dueValue := fmt.Sprintf("2026-08-%02dT18:00:00Z", 22+index)
+				dueDate = &dueValue
 			}
 			var parentID *string
 			if index == 100 {
@@ -306,7 +309,7 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 			}
 			task := models.Task{
 				ID: id, Title: title, Description: "", Kind: "work", Status: "todo", ReviewPolicy: "none", Priority: priority,
-				ParentTaskID: parentID, PlannedDate: plannedDate, ActualMinutes: 0, Version: 1,
+				ParentTaskID: parentID, PlannedDate: plannedDate, DueDate: dueDate, ActualMinutes: 0, Version: 1,
 				CreatedAt: createdAt, UpdatedAt: createdAt,
 			}
 			if err := tx.Create(&task).Error; err != nil {
@@ -394,6 +397,10 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 	if dateRange.Meta.Total != 2 {
 		t.Fatalf("planned range total = %d, want 2", dateRange.Meta.Total)
 	}
+	dueRange := readList("/api/v1/tasks?due_from=2026-08-22&due_to=2026-08-23")
+	if dueRange.Meta.Total != 2 {
+		t.Fatalf("due range total = %d, want 2", dueRange.Meta.Total)
+	}
 	if err := store.DB.Exec("UPDATE tasks SET status = 'done', completed_at = ?, version = version + 1 WHERE id = ?", createdAt, ids[97]).Error; err != nil {
 		t.Fatalf("mark terminal task done: %v", err)
 	}
@@ -416,6 +423,8 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 		"/api/v1/tasks?status=unknown",
 		"/api/v1/tasks?planned_state=unknown",
 		"/api/v1/tasks?planned_state=unscheduled&planned_from=2026-08-01",
+		"/api/v1/tasks?planned_from=2026-08-22&planned_to=2026-08-20",
+		"/api/v1/tasks?due_from=2026-08-22&due_to=2026-08-20",
 		"/api/v1/tasks?q=" + strings.Repeat("界", 201),
 	} {
 		invalidFilter := performRequest(router, http.MethodGet, path, nil, nil)

@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v4.2
+> **一人公司操作系统** · PRD v4.3
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v16
 
-> **v4.2 更新说明**：交付 T-07A 任务页精确计划组拖拽：只在选中单个精确计划日期、手动顺序且无其他筛选时启用，同状态任务可通过拖动手柄乐观调整相对位置。前端只提交源/目标及可见版本，hook 重新读取最多 1,000 项的完整计划组，校验日期、状态和版本后重建同状态槽位并原子提交完整顺序；分页不会把当前页误当完整集合，失败或冲突清除预览并刷新事实，上移/下移仍是键盘替代。
+> **v4.3 更新说明**：交付 T-07B 任务页日期范围筛选：计划日期支持精确值或起止范围二选一，截止日期支持起止范围；前端对倒置区间即时标错并暂停查询，合法条件进入服务端稳定分页。API 与 Web 契约补齐 `due_from / due_to`，Sidecar 对日期格式和起止顺序做统一校验，并以日期部分筛选含时间的截止值；正向计划/截止范围、序列化和非法范围均有自动测试。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -341,7 +341,7 @@ pnpm dev
    - ⌘N 快捷键唤起新建任务面板
    - 标题为唯一必填项，可通过键盘快速补充截止时间、优先级和预估时长
 3. **筛选与搜索**
-   - 当前任务页已支持项目、标签（多标签同时包含）、状态、优先级、类型和精确计划日期筛选；API 另支持计划/截止日期范围、父任务与根任务筛选
+   - 当前任务页已支持项目、标签（多标签同时包含）、状态、优先级、类型、精确计划日期、计划日期范围和截止日期范围筛选；API 另支持父任务与根任务筛选
    - 当前使用服务端 `LIKE` 搜索任务标题和描述；SQLite FTS 不在本纵切
 4. **批量操作**
    - 当前已支持事务化批量移动项目、设置/清除计划日期和添加/移除标签
@@ -902,7 +902,7 @@ v0.1 第一版可配置：
 
 **历史原型（已移除）**：`modal-filter.html`
 
-> **当前状态**：部分完成。任务页筛选按钮已接入状态、优先级、类型、项目、标签和精确计划日期，并由服务端分页查询；保存视图、客户筛选和计划/截止日期范围 UI 仍未实现（范围参数已由 API 提供）。
+> **当前状态**：部分完成。任务页筛选按钮已接入状态、优先级、类型、项目、标签、精确计划日期、计划日期范围和截止日期范围，并由服务端分页查询；倒置区间在前端阻断且由 API 二次校验。保存视图和客户筛选仍未实现。
 
 - 多维度筛选面板
 - 支持保存常用筛选为视图
@@ -932,7 +932,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v4.2 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v4.3 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1461,7 +1461,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v4.2 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v4.3 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1679,7 +1679,7 @@ pnpm dev
 | T-04 SQLite 初始化与迁移             | 已完成            | schema v16、PRAGMA、嵌入迁移、demo 清理、Project/Task/Actor、六状态、workspace identity、Submission/Artifact、Client、Focus Session/interval/精确 Task ledger、Inbox、Reminder 与 app_settings     |
 | T-05 前端 AppShell 与原型复刻        | 已完成            | Linear 深色三栏框架、导航、响应式和公共组件                                                                                                                                                        |
 | T-06 今日工作台                      | 部分完成          | 日期切换/回到今天、真实日期分组与完整分页、真实任务/统计、共享任务详情、活动 Focus 概览、IANA 当地日 completed-only Focus 汇总和反馈状态                                                           |
-| T-07 任务管理纵向闭环                | 部分完成          | 任务事实、关系/标签、版本/ETag、分页筛选、批量/排序、Assignment、六状态/时间线、D2 manual Submission/Artifact/受控文件及 Focus 自动工时已交付；T-07A 已交付任务页同状态计划组拖拽，任务看板待 v0.2 |
+| T-07 任务管理纵向闭环                | 部分完成          | 任务事实、关系/标签、版本/ETag、稳定分页、批量/排序、Assignment、六状态/时间线、D2 manual Submission/Artifact/受控文件及 Focus 自动工时已交付；T-07A 已交付任务页同状态计划组拖拽，T-07B 已交付计划/截止日期范围筛选，客户筛选与保存视图未完成，任务看板待 v0.2 |
 | T-08 项目管理                        | 部分完成          | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务聚合和客户选择/筛选                                                                                         |
 | T-09 客户管理                        | 部分完成          | 基础资料 CRUD、列表/基础详情、创建幂等、乐观锁、删除约束、项目数聚合和 Project 客户关联已交付；活动/附件/Actor 关联/回访/财务待实现                                                                |
 | T-10 收入、支出与发票                | 页面骨架          | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                                            |
@@ -1745,11 +1745,11 @@ pnpm dev
 #### 10.4.7 T-07 任务管理纵向闭环
 
 - **需求映射**：5.2、附录 C。
-- **用户流程**：用户按服务端条件搜索/筛选/分页任务；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建可选择 none/manual；详情仅在 todo 且无任何 Submission 历史时允许改策略。manual Task 具备 active assignee 与 owner reviewer 后可填写摘要、text/link/structured/file 混合产出，提交待审后由 owner 接受或填写原因返工；历史批次分页查看，正文按需打开，文件安全下载，非 pending Artifact 可确认软删。
-- **实现方法**：schema v6 增加 Task facts/version，v8 扩展六状态，v9 增加 workspace identity、Submission/Artifact/deletion tombstone/current pointer/Event 关联。通用 Task、生命周期、Assignment 和 D2 命令共享 Task `ETag`/`If-Match`；D2 可选稳定幂等快照。Sidecar 用数据库绑定 marker、进程级 root 锁与 `.staging/objects/.trash/.quarantine` 管理文件，固定相对路径为 `objects/<artifact-id>`，流式限制大小、计算 SHA-256、耐久同步关键文件/目录项、下载复验完整性，并为软删与 Task 硬删提供补偿。提交事务报错后仅清除能由数据库证明无引用的 object，模糊 COMMIT 保留给 reconcile；删除事务写 immutable tombstone，active trash 恢复前校验 size/SHA，错配隔离并记 mismatch。严格 JSON body、首 part multipart manifest 与 structured object 各限 1 MiB，单文件 50 MiB、完整 multipart 100 MiB；服务端 HTTP read/write timeout 180 秒，前端上传/下载超时 120 秒。物理文件缺失不会阻断确认软删或 Task 聚合硬删，软删记录 missing。前端严格解析响应，用 Query/Mutation 管理分页历史及 cache invalidation；所有 Task 写入互斥，冲突时刷新并保留 summary、text、link、structured 和浏览器 File 草稿，要求用户再次明确提交。
+- **用户流程**：用户按服务端条件搜索/筛选/分页任务；计划日期可选精确值或起止范围，截止日期可选起止范围，倒置区间就地提示且不发请求；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建可选择 none/manual；详情仅在 todo 且无任何 Submission 历史时允许改策略。manual Task 具备 active assignee 与 owner reviewer 后可填写摘要、text/link/structured/file 混合产出，提交待审后由 owner 接受或填写原因返工；历史批次分页查看，正文按需打开，文件安全下载，非 pending Artifact 可确认软删。
+- **实现方法**：schema v6 增加 Task facts/version，v8 扩展六状态，v9 增加 workspace identity、Submission/Artifact/deletion tombstone/current pointer/Event 关联。通用 Task、生命周期、Assignment 和 D2 命令共享 Task `ETag`/`If-Match`；D2 可选稳定幂等快照。任务列表把 `planned_from / planned_to / due_from / due_to` 纳入版本化查询契约，服务端校验 ISO 日期和起止顺序，截止日期按已存时间戳的日期部分比较；Web 保持精确计划日期与计划范围互斥，并在非法范围时停用 Query。Sidecar 用数据库绑定 marker、进程级 root 锁与 `.staging/objects/.trash/.quarantine` 管理文件，固定相对路径为 `objects/<artifact-id>`，流式限制大小、计算 SHA-256、耐久同步关键文件/目录项、下载复验完整性，并为软删与 Task 硬删提供补偿。提交事务报错后仅清除能由数据库证明无引用的 object，模糊 COMMIT 保留给 reconcile；删除事务写 immutable tombstone，active trash 恢复前校验 size/SHA，错配隔离并记 mismatch。严格 JSON body、首 part multipart manifest 与 structured object 各限 1 MiB，单文件 50 MiB、完整 multipart 100 MiB；服务端 HTTP read/write timeout 180 秒，前端上传/下载超时 120 秒。物理文件缺失不会阻断确认软删或 Task 聚合硬删，软删记录 missing。前端严格解析响应，用 Query/Mutation 管理分页历史及 cache invalidation；所有 Task 写入互斥，冲突时刷新并保留 summary、text、link、structured 和浏览器 File 草稿，要求用户再次明确提交。
 - **Actor/状态语义**：Artifact producer 从 active assignee 派生；Submission submitter 与 Artifact recorder 固定 owner；owner 审核/撤回/删除。submit → waiting_review/pending；accept → done/accepted 并结束 Assignment；request_changes → in_progress/changes_requested；waiting-review cancel → withdrawn；reopen 清 current pointer 但保留历史。
 - **关键路径**：`services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql`、`internal/api/tasks.go`、`internal/api/task_outputs.go`、`internal/api/artifact_store.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`components/NewTaskModal.tsx`、`components/TaskDetailModal.tsx`、`components/TaskOutputsSection.tsx`、`components/TaskArtifactCard.tsx`。
-- **验证/剩余**：Go 测试覆盖 D1/D2 状态、JSON/multipart、限制、Actor 归属、并发/幂等、补偿、软/硬删除与文件完整性；数据库迁移套件通过。前端测试覆盖 manual 前置、混合提交、接受/返工、冲突保留 File、下载错误、软删确认及任务页同状态计划组拖拽。Focus 自动工时已由 schema v11/T-12 接入；任务看板以及 Today/任务页指针拖拽、日期控件和窄屏专项真实浏览器验收仍未完成。
+- **验证/剩余**：Go 测试覆盖 D1/D2 状态、JSON/multipart、限制、Actor 归属、并发/幂等、补偿、软/硬删除、文件完整性，以及计划/截止日期范围与非法区间；数据库迁移套件通过。前端测试覆盖 manual 前置、混合提交、接受/返工、冲突保留 File、下载错误、软删确认、任务页同状态计划组拖拽和日期范围查询门禁。Focus 自动工时已由 schema v11/T-12 接入；客户筛选、保存视图、任务看板以及日期控件和窄屏专项真实浏览器验收仍未完成。
 
 #### 10.4.8 T-08 项目管理
 
@@ -1828,7 +1828,7 @@ pnpm dev
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v4.2 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v4.3 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -2210,3 +2210,4 @@ pnpm build:desktop
 | v4.0     | 2026-08-28 | 交付 T-06G Today 跨分组拖拽：四个可见组共享拖拽源，具体任务提供真实目标日期与相对位置，空的所选日期/未排期提供组级末尾落点；同日提交完整 reorder，跨日期先以 batch+版本/模糊验证确认改期，再分别保存源/目标完整顺序，部分失败明确区分且刷新事实；行内编辑/删除继续延期                                   |
 | v4.1     | 2026-08-28 | 交付 T-06H Today 行内编辑/删除入口：编辑复用共享完整任务详情；删除使用独立不可恢复确认、当前 Task 版本和既有确认删除 API，成功刷新 Task/Project/Today/Inbox，版本冲突刷新事实，活动 Inbox 关系保护显示解除指引；真实浏览器 hover/focus/窄屏验收继续延期                                                  |
 | v4.2     | 2026-08-28 | 交付 T-07A 任务页精确计划组拖拽：仅单一精确计划日期、手动顺序和无其他筛选时启用；同状态行乐观预览，hook 回读最多 1,000 项完整计划组并校验源/目标日期、状态和版本，重建同状态槽位后原子提交；分页不冒充完整集合，失败清除预览并刷新，上移/下移保留为键盘替代                                              |
+| v4.3     | 2026-08-28 | 交付 T-07B 任务页日期范围筛选：计划精确日期与计划范围互斥，计划/截止起止条件进入稳定服务端分页；Web 对倒置区间即时标错并停用查询，API 校验格式与顺序并按日期部分筛选含时间截止值；补齐 due 范围客户端契约、合法计划/截止范围、序列化与非法范围测试；客户筛选和保存视图仍待开发 |

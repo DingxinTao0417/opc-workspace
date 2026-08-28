@@ -254,6 +254,14 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 			}
 		}
 	}
+	if filters.PlannedFrom != "" && filters.PlannedTo != "" && filters.PlannedFrom > filters.PlannedTo {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "planned_from must not be after planned_to")
+		return taskListFilters{}, false
+	}
+	if filters.DueFrom != "" && filters.DueTo != "" && filters.DueFrom > filters.DueTo {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_from must not be after due_to")
+		return taskListFilters{}, false
+	}
 	seenTags := make(map[string]struct{})
 	for _, rawTagID := range c.QueryArray("tag_id") {
 		tagID := strings.TrimSpace(rawTagID)

@@ -622,6 +622,8 @@ export interface TaskListParams {
   plannedFrom?: string;
   plannedTo?: string;
   plannedState?: "scheduled" | "unscheduled";
+  dueFrom?: string;
+  dueTo?: string;
   parentTaskId?: string;
   rootOnly?: boolean;
   sort?: string;

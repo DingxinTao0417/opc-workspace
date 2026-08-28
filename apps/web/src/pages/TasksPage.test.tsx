@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   resetOrder: vi.fn(),
   resetResetOrder: vi.fn(),
   taskQueries: [] as TaskListParams[],
+  taskQueryEnabled: [] as boolean[],
   taskItems: null as Task[] | null,
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
@@ -58,8 +59,9 @@ const task: Task = {
 };
 
 vi.mock("../api/hooks", () => ({
-  useTaskPageQuery: (input: TaskListParams) => {
+  useTaskPageQuery: (input: TaskListParams, enabled = true) => {
     mocks.taskQueries.push(input);
+    mocks.taskQueryEnabled.push(enabled);
     return {
       data: {
         items: mocks.taskItems ?? [{ ...task, status: mocks.taskStatus }],
@@ -135,9 +137,19 @@ function lastPageQuery(): TaskListParams | undefined {
     .find((input) => input.pageSize === 50);
 }
 
+function lastPageQueryEnabled(): boolean | undefined {
+  for (let index = mocks.taskQueries.length - 1; index >= 0; index -= 1) {
+    if (mocks.taskQueries[index]?.pageSize === 50) {
+      return mocks.taskQueryEnabled[index];
+    }
+  }
+  return undefined;
+}
+
 describe("TasksPage", () => {
   beforeEach(() => {
     mocks.taskQueries.length = 0;
+    mocks.taskQueryEnabled.length = 0;
     mocks.batch.mockClear();
     mocks.move.mockClear();
     mocks.resetMove.mockClear();
@@ -243,6 +255,46 @@ describe("TasksPage", () => {
       plannedDate: task.plannedDate,
       direction: "up",
     });
+  });
+
+  it("sends valid plan and due date ranges and blocks inverted ranges", () => {
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    fireEvent.change(screen.getByLabelText("计划日期从"), {
+      target: { value: "2026-08-20" },
+    });
+    fireEvent.change(screen.getByLabelText("计划日期到"), {
+      target: { value: "2026-08-25" },
+    });
+    fireEvent.change(screen.getByLabelText("截止日期从"), {
+      target: { value: "2026-08-21" },
+    });
+    fireEvent.change(screen.getByLabelText("截止日期到"), {
+      target: { value: "2026-08-30" },
+    });
+
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({
+        plannedDate: undefined,
+        plannedFrom: "2026-08-20",
+        plannedTo: "2026-08-25",
+        dueFrom: "2026-08-21",
+        dueTo: "2026-08-30",
+        rootOnly: false,
+      }),
+    );
+    expect(lastPageQueryEnabled()).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("计划日期从"), {
+      target: { value: "2026-08-28" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "计划日期起点不能晚于终点",
+    );
+    expect(lastPageQueryEnabled()).toBe(false);
+    expect(
+      screen.queryByRole("button", { name: `查看任务：${task.title}` }),
+    ).not.toBeInTheDocument();
   });
 
   it("previews and persists pointer drag within an exact plan status group", () => {

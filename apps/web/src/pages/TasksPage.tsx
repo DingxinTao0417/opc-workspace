@@ -101,6 +101,10 @@ export function TasksPage() {
   const [projectId, setProjectId] = useState("");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [plannedDate, setPlannedDate] = useState("");
+  const [plannedFrom, setPlannedFrom] = useState("");
+  const [plannedTo, setPlannedTo] = useState("");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
   const [sort, setSort] = useState("");
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TaskStatus>>(
     () => new Set(["cancelled"]),
@@ -124,6 +128,13 @@ export function TasksPage() {
   }, [searchInput]);
 
   const tagKey = tagIds.join(",");
+  const dateRangeError =
+    plannedFrom && plannedTo && plannedFrom > plannedTo
+      ? "计划日期起点不能晚于终点。"
+      : dueFrom && dueTo && dueFrom > dueTo
+        ? "截止日期起点不能晚于终点。"
+        : null;
+  const filtersValid = dateRangeError === null;
   const hasFilters = Boolean(
     queryText ||
     status ||
@@ -131,22 +142,33 @@ export function TasksPage() {
     kind ||
     projectId ||
     tagIds.length ||
-    plannedDate,
+    plannedDate ||
+    plannedFrom ||
+    plannedTo ||
+    dueFrom ||
+    dueTo,
   );
   const hierarchical = !hasFilters;
-  const query = useTaskPageQuery({
-    page,
-    pageSize: 50,
-    q: queryText || undefined,
-    status: status || undefined,
-    priority: priority || undefined,
-    kind: kind || undefined,
-    projectId: projectId || undefined,
-    tagIds,
-    plannedDate: plannedDate || undefined,
-    rootOnly: hierarchical,
-    sort: sort || undefined,
-  });
+  const query = useTaskPageQuery(
+    {
+      page,
+      pageSize: 50,
+      q: queryText || undefined,
+      status: status || undefined,
+      priority: priority || undefined,
+      kind: kind || undefined,
+      projectId: projectId || undefined,
+      tagIds,
+      plannedDate: plannedDate || undefined,
+      plannedFrom: plannedFrom || undefined,
+      plannedTo: plannedTo || undefined,
+      dueFrom: dueFrom || undefined,
+      dueTo: dueTo || undefined,
+      rootOnly: hierarchical,
+      sort: sort || undefined,
+    },
+    filtersValid,
+  );
   const projectsQuery = useProjectOptionsQuery(true);
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
@@ -173,7 +195,8 @@ export function TasksPage() {
     Number(Boolean(kind)) +
     Number(Boolean(projectId)) +
     tagIds.length +
-    Number(Boolean(plannedDate));
+    Number(Boolean(plannedDate || plannedFrom || plannedTo)) +
+    Number(Boolean(dueFrom || dueTo));
   const onlyPlanFilter =
     Boolean(plannedDate) &&
     !(
@@ -183,10 +206,15 @@ export function TasksPage() {
       priority ||
       kind ||
       projectId ||
-      tagIds.length
+      tagIds.length ||
+      plannedFrom ||
+      plannedTo ||
+      dueFrom ||
+      dueTo
     );
   const allowReorder = sort === "manual_order" && onlyPlanFilter;
   const writeReady =
+    filtersValid &&
     query.isSuccess &&
     !query.isPlaceholderData &&
     !query.isFetching &&
@@ -218,6 +246,10 @@ export function TasksPage() {
     projectId,
     tagKey,
     plannedDate,
+    plannedFrom,
+    plannedTo,
+    dueFrom,
+    dueTo,
     sort,
   ]);
 
@@ -239,6 +271,10 @@ export function TasksPage() {
     setProjectId("");
     setTagIds([]);
     setPlannedDate("");
+    setPlannedFrom("");
+    setPlannedTo("");
+    setDueFrom("");
+    setDueTo("");
     setSearchInput("");
     setQueryText("");
     setPage(1);
@@ -337,8 +373,10 @@ export function TasksPage() {
         meta={
           <span className="page-count">
             {query.isPending
-              ? "读取中"
-              : query.isSuccess
+              ? filtersValid
+                ? "读取中"
+                : "筛选条件无效"
+              : query.isSuccess && filtersValid
                 ? `${total} ${hierarchical ? "个根任务" : "项"}${query.isFetching ? " · 更新中" : ""}`
                 : "数据不可用"}
           </span>
@@ -479,14 +517,76 @@ export function TasksPage() {
             </select>
           </label>
           <label>
-            <span>计划日期</span>
+            <span>精确计划日期</span>
             <input
+              aria-label="计划日期"
               onChange={(event) => {
-                setPlannedDate(event.target.value);
+                const value = event.target.value;
+                setPlannedDate(value);
+                if (value) {
+                  setPlannedFrom("");
+                  setPlannedTo("");
+                }
                 setPage(1);
               }}
               type="date"
               value={plannedDate}
+            />
+          </label>
+          <label>
+            <span>计划日期从</span>
+            <input
+              aria-invalid={Boolean(dateRangeError?.startsWith("计划"))}
+              max={plannedTo || undefined}
+              onChange={(event) => {
+                const value = event.target.value;
+                setPlannedFrom(value);
+                if (value) setPlannedDate("");
+                setPage(1);
+              }}
+              type="date"
+              value={plannedFrom}
+            />
+          </label>
+          <label>
+            <span>计划日期到</span>
+            <input
+              aria-invalid={Boolean(dateRangeError?.startsWith("计划"))}
+              min={plannedFrom || undefined}
+              onChange={(event) => {
+                const value = event.target.value;
+                setPlannedTo(value);
+                if (value) setPlannedDate("");
+                setPage(1);
+              }}
+              type="date"
+              value={plannedTo}
+            />
+          </label>
+          <label>
+            <span>截止日期从</span>
+            <input
+              aria-invalid={Boolean(dateRangeError?.startsWith("截止"))}
+              max={dueTo || undefined}
+              onChange={(event) => {
+                setDueFrom(event.target.value);
+                setPage(1);
+              }}
+              type="date"
+              value={dueFrom}
+            />
+          </label>
+          <label>
+            <span>截止日期到</span>
+            <input
+              aria-invalid={Boolean(dateRangeError?.startsWith("截止"))}
+              min={dueFrom || undefined}
+              onChange={(event) => {
+                setDueTo(event.target.value);
+                setPage(1);
+              }}
+              type="date"
+              value={dueTo}
             />
           </label>
           <div className="task-filter-tags">
@@ -543,6 +643,11 @@ export function TasksPage() {
             <X size={13} />
             清除条件
           </button>
+          {dateRangeError ? (
+            <p className="form-error task-filter-range-error" role="alert">
+              {dateRangeError}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -681,15 +786,15 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {query.isError ? (
+      {filtersValid && query.isError ? (
         <ErrorState
           message="无法连接任务 API；请确认本地服务已启动后重试。"
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      {query.isPending ? <SkeletonRows count={7} /> : null}
+      {filtersValid && query.isPending ? <SkeletonRows count={7} /> : null}
 
-      {query.isSuccess && tasks.length === 0 ? (
+      {filtersValid && query.isSuccess && tasks.length === 0 ? (
         <EmptyState
           action={
             hasFilters ? (
@@ -720,7 +825,7 @@ export function TasksPage() {
         />
       ) : null}
 
-      {tasks.length > 0 ? (
+      {filtersValid && tasks.length > 0 ? (
         <div className="task-groups">
           {groups.map((group) => {
             const groupedTasks = applyTaskOrder(
@@ -809,7 +914,7 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {query.isSuccess && totalPages > 1 ? (
+      {filtersValid && query.isSuccess && totalPages > 1 ? (
         <nav aria-label="任务分页" className="pagination task-pagination">
           <button
             className="button button-secondary"
