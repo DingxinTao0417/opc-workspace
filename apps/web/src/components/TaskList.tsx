@@ -62,6 +62,8 @@ interface TaskListProps {
   allowDrag?: boolean;
   dragPending?: boolean;
   onDropTask?: (source: Task, target: Task) => void;
+  sharedDraggingTask?: Task | null;
+  onSharedDraggingTaskChange?: (task: Task | null) => void;
   onPlanTask?: (task: Task) => void;
   planPendingId?: string | null;
   onStartTask?: (task: Task) => void;
@@ -443,6 +445,8 @@ export function TaskList({
   allowDrag = false,
   dragPending = false,
   onDropTask,
+  sharedDraggingTask,
+  onSharedDraggingTaskChange,
   onPlanTask,
   planPendingId = null,
   onStartTask,
@@ -456,10 +460,15 @@ export function TaskList({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const taskById = new Map(tasks.map((task) => [task.id, task]));
   const dragEnabled = allowDrag && Boolean(onDropTask);
+  const activeDraggingTask =
+    sharedDraggingTask ??
+    (draggingId ? (taskById.get(draggingId) ?? null) : null);
+  const activeDraggingId = activeDraggingTask?.id ?? null;
 
   const endDrag = () => {
     setDraggingId(null);
     setDragOverId(null);
+    onSharedDraggingTaskChange?.(null);
   };
 
   return (
@@ -474,7 +483,7 @@ export function TaskList({
           compact={compact}
           dragOverId={dragOverId}
           dragPending={dragPending}
-          draggingId={draggingId}
+          draggingId={activeDraggingId}
           hierarchical={hierarchical}
           key={task.id}
           level={level}
@@ -486,7 +495,12 @@ export function TaskList({
           onStartTask={onStartTask}
           onTaskDragEnd={endDrag}
           onTaskDragOver={(event, target) => {
-            if (!draggingId || draggingId === target.id || dragPending) return;
+            if (
+              !activeDraggingId ||
+              activeDraggingId === target.id ||
+              dragPending
+            )
+              return;
             event.preventDefault();
             event.dataTransfer.dropEffect = "move";
             setDragOverId(target.id);
@@ -499,10 +513,12 @@ export function TaskList({
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", source.id);
             setDraggingId(source.id);
+            onSharedDraggingTaskChange?.(source);
           }}
           onTaskDrop={(event, target) => {
             event.preventDefault();
-            const source = draggingId ? taskById.get(draggingId) : undefined;
+            event.stopPropagation();
+            const source = activeDraggingTask ?? undefined;
             endDrag();
             if (source && source.id !== target.id) onDropTask?.(source, target);
           }}

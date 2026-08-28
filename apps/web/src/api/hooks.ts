@@ -1675,48 +1675,250 @@ function isAmbiguousTaskWrite(error: unknown): boolean {
   );
 }
 
+async function setTaskPlannedDateVerified({
+  taskId,
+  expectedVersion,
+  plannedDate,
+}: {
+  taskId: string;
+  expectedVersion: number;
+  plannedDate: string | null;
+}) {
+  try {
+    return await batchUpdateTasks({
+      action: "set_planned_date",
+      items: [{ id: taskId, expectedVersion }],
+      plannedDate,
+    });
+  } catch (error) {
+    if (!isAmbiguousTaskWrite(error)) throw error;
+    try {
+      const latest = await getTask(taskId);
+      if (
+        latest.plannedDate === plannedDate &&
+        latest.version > expectedVersion
+      ) {
+        return {
+          action: "set_planned_date" as const,
+          changed: 1,
+          tasks: [latest],
+        };
+      }
+    } catch {
+      // Preserve the original ambiguous write error. A failed verification
+      // must not be reported as a confirmed plan change.
+    }
+    throw error;
+  }
+}
+
 export function useSetTaskPlannedDate() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({
-      taskId,
-      expectedVersion,
-      plannedDate,
-    }: {
+    mutationFn: (input: {
       taskId: string;
       expectedVersion: number;
       plannedDate: string | null;
-    }) => {
-      try {
-        return await batchUpdateTasks({
-          action: "set_planned_date",
-          items: [{ id: taskId, expectedVersion }],
-          plannedDate,
-        });
-      } catch (error) {
-        if (!isAmbiguousTaskWrite(error)) throw error;
-        try {
-          const latest = await getTask(taskId);
-          if (
-            latest.plannedDate === plannedDate &&
-            latest.version > expectedVersion
-          ) {
-            return {
-              action: "set_planned_date" as const,
-              changed: 1,
-              tasks: [latest],
-            };
-          }
-        } catch {
-          // Preserve the original ambiguous write error. A failed verification
-          // must not be reported as a confirmed plan change.
-        }
-        throw error;
-      }
-    },
+    }) => setTaskPlannedDateVerified(input),
     onSuccess: async (result) => {
       for (const task of result.tasks)
         setTaskDetailIfNotOlder(queryClient, task);
+      await invalidateTaskFacts(queryClient);
+    },
+    onError: async (error) => {
+      if (isTaskFactsStale(error) || isAmbiguousTaskWrite(error)) {
+        await invalidateTaskFacts(queryClient);
+      }
+    },
+  });
+}
+
+function isTerminalTask(task: Task): boolean {
+  return task.status === "done" || task.status === "cancelled";
+}
+
+async function getPlanTasks(plannedDate: string | null): Promise<Task[]> {
+  const tasks = await getAllTasks({
+    plannedDate: plannedDate ?? undefined,
+    sort: "manual_order",
+  });
+  return plannedDate === null
+    ? tasks.filter((task) => task.plannedDate === null)
+    : tasks;
+}
+
+function insertActiveTaskRelativeToTarget(
+  scoped: Task[],
+  source: Task,
+  targetId: string | null,
+  position: "before" | "after" | "end",
+): Task[] {
+  const active = scoped.filter(
+    (task) => !isTerminalTask(task) && task.id !== source.id,
+  );
+  if (position === "end" || targetId === null) {
+    active.push(source);
+  } else {
+    const targetIndex = active.findIndex((task) => task.id === targetId);
+    if (targetIndex < 0) {
+      throw new ApiError("目标任务已不在活动计划组，请刷新后重试", {
+        code: "TASK_REORDER_SET_CHANGED",
+      });
+    }
+    active.splice(targetIndex + (position === "after" ? 1 : 0), 0, source);
+  }
+  let activeIndex = 0;
+  const ordered: Task[] = [];
+  for (const task of scoped) {
+    if (isTerminalTask(task)) {
+      ordered.push(task);
+      continue;
+    }
+    const next = active[activeIndex++];
+    if (next) ordered.push(next);
+  }
+  ordered.push(...active.slice(activeIndex));
+  return ordered;
+}
+
+export interface MoveTaskAcrossPlansResult {
+  plannedDateChanged: boolean;
+  task: Task;
+  orderWarnings: string[];
+}
+
+export function useMoveTaskAcrossPlans() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      source,
+      target,
+      targetPlannedDate,
+      position,
+    }: {
+      source: Task;
+      target: Task | null;
+      targetPlannedDate: string | null;
+      position: "before" | "after" | "end";
+    }) => {
+      if (target && source.id === target.id) {
+        return {
+          plannedDateChanged: false,
+          task: source,
+          orderWarnings: [],
+        } satisfies MoveTaskAcrossPlansResult;
+      }
+      const sourceDate = source.plannedDate;
+      const targetDate = targetPlannedDate;
+      const [sourcePlan, targetPlan] =
+        sourceDate === targetDate
+          ? [await getPlanTasks(sourceDate), null]
+          : await Promise.all([
+              getPlanTasks(sourceDate),
+              getPlanTasks(targetDate),
+            ]);
+      if (sourcePlan.length > 1_000 || (targetPlan?.length ?? 0) >= 1_000) {
+        throw new ApiError("源或目标计划日期达到 1000 项，暂时无法跨组拖拽", {
+          code: "TASK_REORDER_LIMIT",
+        });
+      }
+      const latestSource = sourcePlan.find((task) => task.id === source.id);
+      const latestTarget = target
+        ? (targetPlan ?? sourcePlan).find((task) => task.id === target.id)
+        : null;
+      if (
+        !latestSource ||
+        latestSource.version !== source.version ||
+        isTerminalTask(latestSource) ||
+        (target !== null &&
+          (!latestTarget ||
+            latestTarget.version !== target.version ||
+            isTerminalTask(latestTarget)))
+      ) {
+        throw new ApiError("任务集合已经变化，请刷新后重试", {
+          code: "TASK_REORDER_SET_CHANGED",
+        });
+      }
+
+      if (sourceDate === targetDate) {
+        const ordered = insertActiveTaskRelativeToTarget(
+          sourcePlan,
+          latestSource,
+          target?.id ?? null,
+          position,
+        );
+        const reordered = await reorderTasks({
+          plannedDate: sourceDate,
+          mode: "manual",
+          items: ordered.map((task) => ({
+            id: task.id,
+            expectedVersion: task.version,
+          })),
+        });
+        return {
+          plannedDateChanged: false,
+          task:
+            reordered.tasks.find((task) => task.id === source.id) ??
+            latestSource,
+          orderWarnings: [],
+        } satisfies MoveTaskAcrossPlansResult;
+      }
+
+      const planResult = await setTaskPlannedDateVerified({
+        taskId: source.id,
+        expectedVersion: source.version,
+        plannedDate: targetDate,
+      });
+      const moved = planResult.tasks.find((task) => task.id === source.id);
+      if (!moved) {
+        throw new ApiError("改期响应缺少目标任务，请刷新后核对", {
+          code: "INVALID_RESPONSE",
+        });
+      }
+      const sourceOrder = sourcePlan.filter((task) => task.id !== source.id);
+      const targetOrder = insertActiveTaskRelativeToTarget(
+        targetPlan!,
+        moved,
+        target?.id ?? null,
+        position,
+      );
+      const [sourceOrderResult, targetOrderResult] = await Promise.allSettled([
+        reorderTasks({
+          plannedDate: sourceDate,
+          mode: "manual",
+          items: sourceOrder.map((task) => ({
+            id: task.id,
+            expectedVersion: task.version,
+          })),
+        }),
+        reorderTasks({
+          plannedDate: targetDate,
+          mode: "manual",
+          items: targetOrder.map((task) => ({
+            id: task.id,
+            expectedVersion: task.version,
+          })),
+        }),
+      ]);
+      const orderWarnings: string[] = [];
+      if (sourceOrderResult.status === "rejected")
+        orderWarnings.push("源日期顺序未能保存");
+      if (targetOrderResult.status === "rejected")
+        orderWarnings.push("目标日期顺序未能保存");
+      const finalMoved =
+        targetOrderResult.status === "fulfilled"
+          ? (targetOrderResult.value.tasks.find(
+              (task) => task.id === source.id,
+            ) ?? moved)
+          : moved;
+      return {
+        plannedDateChanged: true,
+        task: finalMoved,
+        orderWarnings,
+      } satisfies MoveTaskAcrossPlansResult;
+    },
+    onSuccess: async (result) => {
+      setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskFacts(queryClient);
     },
     onError: async (error) => {

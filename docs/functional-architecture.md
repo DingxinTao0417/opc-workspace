@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.4
+> 文档版本：2.5
 > 日期：2026-08-28
-> 依据：[PRD v3.9](opc-workspace-PRD.md)
+> 依据：[PRD v4.0](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v16
 
 ## 1. 目的
@@ -49,7 +49,7 @@
 ### 3.1 当前实现
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
-- React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量和计划组排序，Today 已接精确日期/未排期活动组排序、所有活动行的版本化任意日期/未排期安排，以及策略安全的开始/完成/开始专注快捷操作，Project 已接 Client 选择/筛选。
+- React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量和计划组排序，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排，以及策略安全的开始/完成/开始专注快捷操作，Project 已接 Client 选择/筛选。
 - Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
 - SQLite 当前为 schema v16：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15 增加 Inbox 自动结清查询索引和数据库校验 trigger；schema v16 新增版本化 `app_settings`，不预置默认行。v15→v16 不改写既有事实，也不创建 demo 数据。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
@@ -101,7 +101,7 @@
 
 | 模块                                       | 主要输入                                                                      | 自己负责                                                                                                    | 主要输出 / 下游                                                                         |
 | ------------------------------------------ | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [今日](modules/today.md)                   | Task、Focus、Inbox 派生统计                                                   | 当日执行入口、聚合展示、精确计划组排序、行内版本化改期，以及受策略约束的生命周期/专注快捷操作               | 原子任务排序/改期、版本化开始/完成、绑定 Focus、打开收件箱                              |
+| [今日](modules/today.md)                   | Task、Focus、Inbox 派生统计                                                   | 当日执行入口、聚合展示、完整计划组排序、同日/跨日期拖拽、版本化改期，以及受策略约束的生命周期/专注快捷操作  | 计划日期事实、源/目标组顺序结果、版本化开始/完成、绑定 Focus、打开收件箱                |
 | [任务](modules/tasks.md)                   | Project、Actor、未来 Inbox 来源                                               | 唯一工单、六态生命周期、完成条件、Submission/Artifact 与 manual 验收                                        | Project 进度、Task 事件、后续 Inbox 进度与 Focus 工时                                   |
 | [项目](modules/projects.md)                | Client、Task                                                                  | 当前已实现资料、受控生命周期、归档恢复和任务聚合                                                            | 项目级产出聚合、附件、时间线和 Inbox 事件仍待实现；Task Artifact 已可从共享任务详情使用 |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity                                                    | 当前已实现基础资料、状态、项目数聚合和 Project 关联；活动/附件/Actor 关联仍待实现                           | 回访、发票和 Inbox 来源仍属后续纵切                                                     |
@@ -322,7 +322,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → 已交付：已有 Task 活动/历史关系 / 实时进度 / 软解除 / 删除互锁
   → 已交付：一次性 Reminder / 启动补偿 / 到期 Inbox 投影
   → 已交付：批量拆分 / 人工分派 / 自动解决；来源投影继续
-  → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式及同组拖拽排序、行内任意日期改期，以及安全的开始/完成/开始专注快捷操作；跨分组拖拽与行内编辑/删除继续
+  → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期改期，以及安全的开始/完成/开始专注快捷操作；行内编辑/删除继续
   → 备份恢复 / 桌面日志与故障恢复
   → v0.2 本地 Agent / 预设自动化 / Task 看板
   → v0.3 路线图 / 内容日历 / 高级数据管理

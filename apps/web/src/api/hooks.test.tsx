@@ -34,6 +34,7 @@ import {
   useTaskLifecycleCommand,
   useSubmitTaskOutput,
   useReviewTaskSubmission,
+  useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
   useSetTaskPlannedDate,
@@ -457,6 +458,179 @@ describe("task queries", () => {
     });
     expect(caught).toMatchObject({ code: "TASK_REORDER_SET_CHANGED" });
     expect(reorderTasksMock).not.toHaveBeenCalled();
+  });
+
+  it("moves a task to another plan and reports target-order partial success", async () => {
+    const target = {
+      ...task,
+      id: "target",
+      title: "目标日期任务",
+      plannedDate: "2026-08-28",
+      version: 8,
+    };
+    const sourceTail = {
+      ...task,
+      id: "source-tail",
+      title: "源日期剩余任务",
+      version: 6,
+    };
+    const targetDone = {
+      ...target,
+      id: "target-done",
+      status: "done" as const,
+      version: 9,
+    };
+    getAllTasksMock.mockImplementation(
+      async (input: { plannedDate?: string }) =>
+        input.plannedDate === "2026-08-28"
+          ? [target, targetDone]
+          : [task, sourceTail],
+    );
+    const moved = {
+      ...task,
+      plannedDate: "2026-08-28",
+      version: task.version + 1,
+    };
+    batchUpdateTasksMock.mockResolvedValue({
+      action: "set_planned_date",
+      changed: 1,
+      tasks: [moved],
+    });
+    reorderTasksMock
+      .mockResolvedValueOnce({
+        plannedDate: "2026-08-27",
+        mode: "manual",
+        changed: 1,
+        tasks: [sourceTail],
+      })
+      .mockRejectedValueOnce(
+        new ApiError("目标组已变化", { code: "TASK_REORDER_SET_CHANGED" }),
+      );
+    const { result } = renderHook(() => useMoveTaskAcrossPlans(), {
+      wrapper: createWrapper(),
+    });
+
+    let response: Awaited<ReturnType<typeof result.current.mutateAsync>>;
+    await act(async () => {
+      response = await result.current.mutateAsync({
+        source: task,
+        target,
+        targetPlannedDate: target.plannedDate,
+        position: "before",
+      });
+    });
+
+    expect(batchUpdateTasksMock).toHaveBeenCalledWith({
+      action: "set_planned_date",
+      items: [{ id: task.id, expectedVersion: task.version }],
+      plannedDate: "2026-08-28",
+    });
+    expect(reorderTasksMock).toHaveBeenNthCalledWith(1, {
+      plannedDate: "2026-08-27",
+      mode: "manual",
+      items: [{ id: sourceTail.id, expectedVersion: sourceTail.version }],
+    });
+    expect(reorderTasksMock).toHaveBeenNthCalledWith(2, {
+      plannedDate: "2026-08-28",
+      mode: "manual",
+      items: [
+        { id: moved.id, expectedVersion: moved.version },
+        { id: targetDone.id, expectedVersion: targetDone.version },
+        { id: target.id, expectedVersion: target.version },
+      ],
+    });
+    expect(response!).toMatchObject({
+      plannedDateChanged: true,
+      task: moved,
+      orderWarnings: ["目标日期顺序未能保存"],
+    });
+  });
+
+  it("reorders tasks from an aggregate view within their exact plan date", async () => {
+    const target = {
+      ...task,
+      id: "same-date-target",
+      title: "同日目标",
+      version: 6,
+    };
+    const done = {
+      ...task,
+      id: "same-date-done",
+      status: "done" as const,
+      version: 7,
+    };
+    getAllTasksMock.mockResolvedValue([target, done, task]);
+    reorderTasksMock.mockImplementation(async (input) => ({
+      plannedDate: input.plannedDate,
+      mode: input.mode,
+      changed: 2,
+      tasks: [task, done, target],
+    }));
+    const { result } = renderHook(() => useMoveTaskAcrossPlans(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        source: task,
+        target,
+        targetPlannedDate: target.plannedDate,
+        position: "before",
+      });
+    });
+
+    expect(batchUpdateTasksMock).not.toHaveBeenCalled();
+    expect(reorderTasksMock).toHaveBeenCalledWith({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      items: [
+        { id: task.id, expectedVersion: task.version },
+        { id: done.id, expectedVersion: done.version },
+        { id: target.id, expectedVersion: target.version },
+      ],
+    });
+  });
+
+  it("moves a task into an empty explicit plan group", async () => {
+    getAllTasksMock.mockImplementation(
+      async (input: { plannedDate?: string }) =>
+        input.plannedDate === task.plannedDate ? [task] : [],
+    );
+    const moved = { ...task, plannedDate: null, version: task.version + 1 };
+    batchUpdateTasksMock.mockResolvedValue({
+      action: "set_planned_date",
+      changed: 1,
+      tasks: [moved],
+    });
+    reorderTasksMock.mockImplementation(async (input) => ({
+      plannedDate: input.plannedDate,
+      mode: input.mode,
+      changed: input.items.length,
+      tasks: input.items.length ? [moved] : [],
+    }));
+    const { result } = renderHook(() => useMoveTaskAcrossPlans(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        source: task,
+        target: null,
+        targetPlannedDate: null,
+        position: "end",
+      });
+    });
+
+    expect(reorderTasksMock).toHaveBeenNthCalledWith(1, {
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      items: [],
+    });
+    expect(reorderTasksMock).toHaveBeenNthCalledWith(2, {
+      plannedDate: null,
+      mode: "manual",
+      items: [{ id: moved.id, expectedVersion: moved.version }],
+    });
   });
 
   it("loads assignment history pages under a task-scoped query key", async () => {

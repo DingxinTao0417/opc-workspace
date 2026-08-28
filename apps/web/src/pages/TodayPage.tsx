@@ -13,15 +13,15 @@ import {
   RotateCcw,
   Target,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
   useActiveFocusSessionQuery,
   useCreateFocusSession,
+  useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
-  useReorderActiveTasksWithinPlan,
   useResetTaskOrder,
   useTaskLifecycleCommand,
   useTodayTaskGroupsQuery,
@@ -84,31 +84,77 @@ function quickActionErrorText(error: unknown): string | null {
   return "快捷操作失败，请刷新本地状态后重试。";
 }
 
-function applyOptimisticOrder(tasks: Task[], orderedIds?: string[]): Task[] {
-  if (!orderedIds || orderedIds.length !== tasks.length) return tasks;
-  const byId = new Map(tasks.map((task) => [task.id, task]));
-  if (orderedIds.some((id) => !byId.has(id))) return tasks;
-  return orderedIds.map((id) => byId.get(id)!);
+interface TodayTaskGroups {
+  overdue: Task[];
+  today: Task[];
+  thisWeek: Task[];
+  unscheduled: Task[];
 }
 
-function moveTaskId(
-  tasks: Task[],
-  sourceId: string,
-  targetId: string,
-): string[] {
-  const ids = tasks.map((task) => task.id);
-  const sourceIndex = ids.indexOf(sourceId);
-  const targetIndex = ids.indexOf(targetId);
-  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)
-    return ids;
-  const [source] = ids.splice(sourceIndex, 1);
-  const targetAfterRemoval = ids.indexOf(targetId);
-  ids.splice(
-    targetAfterRemoval + (sourceIndex < targetIndex ? 1 : 0),
-    0,
-    source,
+const todayGroupKeys = [
+  "overdue",
+  "today",
+  "thisWeek",
+  "unscheduled",
+] as const satisfies readonly (keyof TodayTaskGroups)[];
+
+function previewTaskDrop(
+  groups: TodayTaskGroups,
+  source: Task,
+  target: Task,
+): { groups: TodayTaskGroups; position: "before" | "after" } | null {
+  const sourceGroup = todayGroupKeys.find((key) =>
+    groups[key].some((task) => task.id === source.id),
   );
-  return ids;
+  const targetGroup = todayGroupKeys.find((key) =>
+    groups[key].some((task) => task.id === target.id),
+  );
+  if (!sourceGroup || !targetGroup) return null;
+  const sourceIndex = groups[sourceGroup].findIndex(
+    (task) => task.id === source.id,
+  );
+  const targetIndex = groups[targetGroup].findIndex(
+    (task) => task.id === target.id,
+  );
+  const position =
+    sourceGroup === targetGroup && sourceIndex < targetIndex
+      ? "after"
+      : "before";
+  const next: TodayTaskGroups = {
+    overdue: groups.overdue.filter((task) => task.id !== source.id),
+    today: groups.today.filter((task) => task.id !== source.id),
+    thisWeek: groups.thisWeek.filter((task) => task.id !== source.id),
+    unscheduled: groups.unscheduled.filter((task) => task.id !== source.id),
+  };
+  const destination = [...next[targetGroup]];
+  const nextTargetIndex = destination.findIndex(
+    (task) => task.id === target.id,
+  );
+  destination.splice(nextTargetIndex + (position === "after" ? 1 : 0), 0, {
+    ...source,
+    plannedDate: target.plannedDate,
+  });
+  next[targetGroup] = destination;
+  return { groups: next, position };
+}
+
+function previewTaskDropToGroup(
+  groups: TodayTaskGroups,
+  source: Task,
+  targetGroup: keyof TodayTaskGroups,
+  targetPlannedDate: string | null,
+): TodayTaskGroups {
+  const next: TodayTaskGroups = {
+    overdue: groups.overdue.filter((task) => task.id !== source.id),
+    today: groups.today.filter((task) => task.id !== source.id),
+    thisWeek: groups.thisWeek.filter((task) => task.id !== source.id),
+    unscheduled: groups.unscheduled.filter((task) => task.id !== source.id),
+  };
+  next[targetGroup] = [
+    ...next[targetGroup],
+    { ...source, plannedDate: targetPlannedDate },
+  ];
+  return next;
 }
 
 export function TodayPage() {
@@ -126,11 +172,12 @@ export function TodayPage() {
   const lifecycleMutation = useTaskLifecycleCommand();
   const createFocusMutation = useCreateFocusSession();
   const moveMutation = useMoveTaskWithinPlan();
-  const dragMutation = useReorderActiveTasksWithinPlan();
+  const crossPlanMutation = useMoveTaskAcrossPlans();
   const resetOrderMutation = useResetTaskOrder();
-  const [optimisticOrders, setOptimisticOrders] = useState<
-    Record<string, string[]>
-  >({});
+  const [sharedDraggingTask, setSharedDraggingTask] = useState<Task | null>(
+    null,
+  );
+  const [dragPreview, setDragPreview] = useState<TodayTaskGroups | null>(null);
   const focusMinutes = useSettingsStore((state) => state.focusMinutes);
   const focusCycles = useSettingsStore((state) => state.cycles);
   const focusPhase = useFocusCycleStore((state) => state.phase);
@@ -140,12 +187,15 @@ export function TodayPage() {
     live &&
     !taskGroupsQuery.isFetching &&
     !moveMutation.isPending &&
-    !dragMutation.isPending &&
+    !crossPlanMutation.isPending &&
     !resetOrderMutation.isPending;
   const reorderError =
-    reorderErrorText(dragMutation.error) ??
+    reorderErrorText(crossPlanMutation.error) ??
     reorderErrorText(moveMutation.error) ??
     reorderErrorText(resetOrderMutation.error);
+  const crossPlanWarning = crossPlanMutation.data?.orderWarnings.length
+    ? `任务已改期；${crossPlanMutation.data.orderWarnings.join("、")}，当前已刷新为服务端实际顺序。`
+    : null;
   const quickActionError =
     quickActionErrorText(lifecycleMutation.error) ??
     quickActionErrorText(createFocusMutation.error);
@@ -164,23 +214,14 @@ export function TodayPage() {
     focusQuery.isFetching ||
     Boolean(focusQuery.data?.session) ||
     focusPhase !== "idle";
-  const groups = taskGroupsQuery.data ?? {
+  const serverGroups = taskGroupsQuery.data ?? {
     overdue: [],
     today: [],
     thisWeek: [],
     unscheduled: [],
   };
+  const groups = dragPreview ?? serverGroups;
   const realStats = statsQuery.data;
-  const todayOrderKey = `date:${dateKey}`;
-  const unscheduledOrderKey = "unscheduled";
-  const orderedTodayTasks = applyOptimisticOrder(
-    groups.today,
-    optimisticOrders[todayOrderKey],
-  );
-  const orderedUnscheduledTasks = applyOptimisticOrder(
-    groups.unscheduled,
-    optimisticOrders[unscheduledOrderKey],
-  );
   const estimated = realStats
     ? Math.round((realStats.tasks.estimatedMinutes / 60) * 10) / 10
     : 0;
@@ -235,7 +276,7 @@ export function TodayPage() {
     plannedDate: string | null,
     direction: "up" | "down",
   ) => {
-    dragMutation.reset();
+    crossPlanMutation.reset();
     resetOrderMutation.reset();
     moveMutation.mutate({
       taskId,
@@ -244,42 +285,63 @@ export function TodayPage() {
       scope: "active",
     });
   };
-  const clearOptimisticOrder = (key: string) => {
-    setOptimisticOrders((current) => {
-      if (!(key in current)) return current;
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-  };
-  const resetPlanOrder = (plannedDate: string | null, orderKey: string) => {
-    clearOptimisticOrder(orderKey);
-    dragMutation.reset();
+  const resetPlanOrder = (plannedDate: string | null) => {
+    setDragPreview(null);
+    crossPlanMutation.reset();
     moveMutation.reset();
     resetOrderMutation.mutate(plannedDate);
   };
-  const dropTask = (
-    source: Task,
-    target: Task,
-    tasks: Task[],
-    plannedDate: string | null,
-    orderKey: string,
-  ) => {
-    const orderedTaskIds = moveTaskId(tasks, source.id, target.id);
-    if (orderedTaskIds.every((id, index) => id === tasks[index]?.id)) return;
+  const dropTask = (source: Task, target: Task) => {
+    const preview = previewTaskDrop(serverGroups, source, target);
+    if (!preview) return;
     moveMutation.reset();
     resetOrderMutation.reset();
-    setOptimisticOrders((current) => ({
-      ...current,
-      [orderKey]: orderedTaskIds,
-    }));
-    dragMutation.mutate(
-      { plannedDate, orderedTaskIds },
-      { onSettled: () => clearOptimisticOrder(orderKey) },
+    crossPlanMutation.reset();
+    setDragPreview(preview.groups);
+    crossPlanMutation.mutate(
+      {
+        source,
+        target,
+        targetPlannedDate: target.plannedDate,
+        position: preview.position,
+      },
+      { onSettled: () => setDragPreview(null) },
     );
+  };
+  const dropTaskToGroup = (
+    source: Task,
+    targetGroup: "today" | "unscheduled",
+    targetPlannedDate: string | null,
+  ) => {
+    moveMutation.reset();
+    resetOrderMutation.reset();
+    crossPlanMutation.reset();
+    setDragPreview(
+      previewTaskDropToGroup(
+        serverGroups,
+        source,
+        targetGroup,
+        targetPlannedDate,
+      ),
+    );
+    crossPlanMutation.mutate(
+      {
+        source,
+        target: null,
+        targetPlannedDate,
+        position: "end",
+      },
+      { onSettled: () => setDragPreview(null) },
+    );
+  };
+  const acceptGroupDrag = (event: DragEvent<HTMLElement>) => {
+    if (!sharedDraggingTask || crossPlanMutation.isPending) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
   };
   const runLifecycleAction = (task: Task, action: "start" | "complete") => {
     createFocusMutation.reset();
+    crossPlanMutation.reset();
     lifecycleMutation.reset();
     lifecycleMutation.mutate({
       id: task.id,
@@ -289,6 +351,7 @@ export function TodayPage() {
   const startFocus = (task: Task) => {
     lifecycleMutation.reset();
     createFocusMutation.reset();
+    crossPlanMutation.reset();
     if (focusActionDisabled) return;
     createFocusMutation.mutate(
       {
@@ -441,12 +504,13 @@ export function TodayPage() {
         />
       ) : null}
 
-      {dragMutation.isPending ||
+      {crossPlanMutation.isPending ||
       moveMutation.isPending ||
       resetOrderMutation.isPending ||
-      reorderError ? (
+      reorderError ||
+      crossPlanWarning ? (
         <div className="task-order-banner today-order-status">
-          {dragMutation.isPending ||
+          {crossPlanMutation.isPending ||
           moveMutation.isPending ||
           resetOrderMutation.isPending ? (
             <span role="status">正在保存任务顺序…</span>
@@ -454,6 +518,11 @@ export function TodayPage() {
           {reorderError ? (
             <span className="task-batch-error" role="alert">
               {reorderError}
+            </span>
+          ) : null}
+          {crossPlanWarning ? (
+            <span className="task-batch-warning" role="status">
+              {crossPlanWarning}
             </span>
           ) : null}
         </div>
@@ -488,15 +557,32 @@ export function TodayPage() {
           </div>
           <TaskList
             {...taskQuickActionProps}
+            allowDrag
             compact
-            live={live}
+            dragPending={crossPlanMutation.isPending}
+            live={reorderReady}
+            onDropTask={dropTask}
             onPlanTask={setPlanningTask}
+            onSharedDraggingTaskChange={(task) => {
+              if (task) crossPlanMutation.reset();
+              setSharedDraggingTask(task);
+            }}
+            sharedDraggingTask={sharedDraggingTask}
             tasks={groups.overdue}
           />
         </section>
       ) : null}
 
-      <section className="task-section">
+      <section
+        className={`task-section${sharedDraggingTask ? " task-section-drag-target" : ""}`}
+        onDragOver={acceptGroupDrag}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (sharedDraggingTask)
+            dropTaskToGroup(sharedDraggingTask, "today", dateKey);
+          setSharedDraggingTask(null);
+        }}
+      >
         <div className="section-heading compact-heading">
           <div>
             <span className="section-kicker">
@@ -510,7 +596,7 @@ export function TodayPage() {
               <button
                 className="button button-quiet today-reset-order"
                 disabled={!reorderReady}
-                onClick={() => resetPlanOrder(dateKey, todayOrderKey)}
+                onClick={() => resetPlanOrder(dateKey)}
                 type="button"
               >
                 <RotateCcw size={12} />
@@ -521,6 +607,10 @@ export function TodayPage() {
         </div>
         {taskGroupsQuery.isPending ? (
           <SkeletonRows count={3} />
+        ) : sharedDraggingTask && groups.today.length === 0 ? (
+          <div className="task-group-drop-target">
+            拖到此处安排到{isToday ? "今天" : "所选日期"}
+          </div>
         ) : taskGroupsQuery.isSuccess && groups.today.length === 0 ? (
           <EmptyState
             action={
@@ -542,7 +632,7 @@ export function TodayPage() {
             allowReorder
             allowDrag
             compact
-            dragPending={dragMutation.isPending}
+            dragPending={crossPlanMutation.isPending}
             live={reorderReady}
             onMove={(task, direction) => moveTask(task.id, dateKey, direction)}
             onPlanTask={setPlanningTask}
@@ -551,16 +641,13 @@ export function TodayPage() {
                 ? (moveMutation.variables?.taskId ?? null)
                 : null
             }
-            onDropTask={(source, target) =>
-              dropTask(
-                source,
-                target,
-                orderedTodayTasks,
-                dateKey,
-                todayOrderKey,
-              )
-            }
-            tasks={orderedTodayTasks}
+            onDropTask={dropTask}
+            onSharedDraggingTaskChange={(task) => {
+              if (task) crossPlanMutation.reset();
+              setSharedDraggingTask(task);
+            }}
+            sharedDraggingTask={sharedDraggingTask}
+            tasks={groups.today}
           />
         )}
       </section>
@@ -579,17 +666,34 @@ export function TodayPage() {
           ) : (
             <TaskList
               {...taskQuickActionProps}
+              allowDrag
               compact
-              live={live}
+              dragPending={crossPlanMutation.isPending}
+              live={reorderReady}
+              onDropTask={dropTask}
               onPlanTask={setPlanningTask}
+              onSharedDraggingTaskChange={(task) => {
+                if (task) crossPlanMutation.reset();
+                setSharedDraggingTask(task);
+              }}
+              sharedDraggingTask={sharedDraggingTask}
               tasks={groups.thisWeek}
             />
           )}
         </section>
       ) : null}
 
-      {groups.unscheduled.length > 0 ? (
-        <section className="task-section">
+      {groups.unscheduled.length > 0 || sharedDraggingTask ? (
+        <section
+          className={`task-section${sharedDraggingTask ? " task-section-drag-target" : ""}`}
+          onDragOver={acceptGroupDrag}
+          onDrop={(event) => {
+            event.preventDefault();
+            if (sharedDraggingTask)
+              dropTaskToGroup(sharedDraggingTask, "unscheduled", null);
+            setSharedDraggingTask(null);
+          }}
+        >
           <div className="section-heading compact-heading">
             <div>
               <span className="section-kicker">待安排</span>
@@ -597,42 +701,45 @@ export function TodayPage() {
             </div>
             <div className="today-task-heading-actions">
               <span className="section-count">{groups.unscheduled.length}</span>
-              <button
-                className="button button-quiet today-reset-order"
-                disabled={!reorderReady}
-                onClick={() => resetPlanOrder(null, unscheduledOrderKey)}
-                type="button"
-              >
-                <RotateCcw size={12} />
-                恢复默认顺序
-              </button>
+              {groups.unscheduled.length > 0 ? (
+                <button
+                  className="button button-quiet today-reset-order"
+                  disabled={!reorderReady}
+                  onClick={() => resetPlanOrder(null)}
+                  type="button"
+                >
+                  <RotateCcw size={12} />
+                  恢复默认顺序
+                </button>
+              ) : null}
             </div>
           </div>
-          <TaskList
-            {...taskQuickActionProps}
-            allowReorder
-            allowDrag
-            compact
-            dragPending={dragMutation.isPending}
-            live={reorderReady}
-            onMove={(task, direction) => moveTask(task.id, null, direction)}
-            onPlanTask={setPlanningTask}
-            reorderPendingId={
-              moveMutation.isPending
-                ? (moveMutation.variables?.taskId ?? null)
-                : null
-            }
-            onDropTask={(source, target) =>
-              dropTask(
-                source,
-                target,
-                orderedUnscheduledTasks,
-                null,
-                unscheduledOrderKey,
-              )
-            }
-            tasks={orderedUnscheduledTasks}
-          />
+          {groups.unscheduled.length === 0 ? (
+            <div className="task-group-drop-target">拖到此处设为未排期</div>
+          ) : (
+            <TaskList
+              {...taskQuickActionProps}
+              allowReorder
+              allowDrag
+              compact
+              dragPending={crossPlanMutation.isPending}
+              live={reorderReady}
+              onMove={(task, direction) => moveTask(task.id, null, direction)}
+              onPlanTask={setPlanningTask}
+              reorderPendingId={
+                moveMutation.isPending
+                  ? (moveMutation.variables?.taskId ?? null)
+                  : null
+              }
+              onDropTask={dropTask}
+              onSharedDraggingTaskChange={(task) => {
+                if (task) crossPlanMutation.reset();
+                setSharedDraggingTask(task);
+              }}
+              sharedDraggingTask={sharedDraggingTask}
+              tasks={groups.unscheduled}
+            />
+          )}
         </section>
       ) : null}
       <TaskPlanModal
