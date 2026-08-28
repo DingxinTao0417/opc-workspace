@@ -251,6 +251,57 @@ func TestTaskOutputJSONSubmitReviewAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestTaskArtifactFollowupSourceProtectsTaskDeleteAndKeepsSnapshot(t *testing.T) {
+	router, store, _ := newTaskOutputTestAPI(t)
+	task, _ := setupManualReviewTask(t, router)
+	submitted := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/submit-output",
+		[]byte(`{"summary":"Follow-up delivery","artifacts":[{"client_ref":"brief","storage_kind":"text","name":"Publish brief","content_text":"private","requires_followup":true}]}`),
+		map[string]string{"If-Match": `"3"`, "Idempotency-Key": "followup-task-delete-submit"},
+	)
+	if submitted.Code != http.StatusCreated {
+		t.Fatalf("submit follow-up output = %d: %s", submitted.Code, submitted.Body.String())
+	}
+	output := decodeSubmitOutputResponse(t, submitted.Body.Bytes())
+	if len(output.Artifacts) != 1 {
+		t.Fatalf("follow-up output Artifacts = %#v", output.Artifacts)
+	}
+	accepted := performRequest(router, http.MethodPost, "/api/v1/tasks/"+task.ID+"/review", []byte(`{"decision":"accept"}`), map[string]string{"If-Match": `"4"`})
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("accept follow-up output = %d: %s", accepted.Code, accepted.Body.String())
+	}
+	blockedDelete := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+task.ID, nil, map[string]string{"If-Match": `"5"`})
+	if blockedDelete.Code != http.StatusConflict || responseErrorCode(t, blockedDelete.Body.Bytes()) != "TASK_HAS_ACTIVE_INBOX_SOURCES" {
+		t.Fatalf("Task delete with active source = %d: %s", blockedDelete.Code, blockedDelete.Body.String())
+	}
+	var inbox models.InboxItem
+	if err := store.DB.First(&inbox, "source_entity_id = ? AND source_entity_type = 'task_artifact'", output.Artifacts[0].ID).Error; err != nil {
+		t.Fatalf("load source Inbox Item: %v", err)
+	}
+	dismissed := performRequest(router, http.MethodPost, "/api/v1/inbox-items/"+inbox.ID+"/dismiss", []byte(`{"reason":"no longer needed"}`), map[string]string{"If-Match": `"1"`})
+	if dismissed.Code != http.StatusOK {
+		t.Fatalf("dismiss source Inbox Item = %d: %s", dismissed.Code, dismissed.Body.String())
+	}
+	deleted := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+task.ID, nil, map[string]string{"If-Match": `"5"`})
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete Task after source archive = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	if err := store.DB.First(&inbox, "id = ?", inbox.ID).Error; err != nil || inbox.SourceDeletedAt == nil || inbox.Version != 3 {
+		t.Fatalf("source Inbox snapshot after Task delete=%#v err=%v", inbox, err)
+	}
+	if !strings.Contains(inbox.PayloadJSON, task.ID) || !strings.Contains(inbox.PayloadJSON, "Publish brief") {
+		t.Fatalf("source Inbox payload lost Task/Artifact snapshot: %s", inbox.PayloadJSON)
+	}
+	var sourceDeletedEvents int64
+	if err := store.DB.Model(&models.WorkflowEvent{}).
+		Where("aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_deleted'", inbox.ID).
+		Count(&sourceDeletedEvents).Error; err != nil || sourceDeletedEvents != 1 {
+		t.Fatalf("source_deleted events=%d err=%v", sourceDeletedEvents, err)
+	}
+}
+
 func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	router, store, artifactDir := newTaskOutputTestAPI(t)
 	task, _ := setupManualReviewTask(t, router)
@@ -264,6 +315,31 @@ func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	if artifact.SubmissionStatus != "pending_review" || artifact.SizeBytes == nil || *artifact.SizeBytes != int64(len("controlled file body")) || artifact.SHA256 == nil ||
 		artifact.MimeType == nil || artifact.IntegrityStatus != "verified" {
 		t.Fatalf("file metadata = %#v", artifact)
+	}
+	var sourceInbox models.InboxItem
+	if err := store.DB.First(&sourceInbox, "source_event_key = ?", taskArtifactFollowupEventKey(artifact.ID)).Error; err != nil {
+		t.Fatalf("load projected follow-up Inbox Item: %v", err)
+	}
+	if sourceInbox.Kind != "event" || sourceInbox.SourceEntityType != taskArtifactInboxSourceType ||
+		sourceInbox.SourceEntityID == nil || *sourceInbox.SourceEntityID != artifact.ID ||
+		sourceInbox.Status != "open" || sourceInbox.Priority != task.Priority {
+		t.Fatalf("projected follow-up Inbox Item = %#v", sourceInbox)
+	}
+	var sourceEvents int64
+	if err := store.DB.Model(&models.WorkflowEvent{}).
+		Where("aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_projected'", sourceInbox.ID).
+		Count(&sourceEvents).Error; err != nil || sourceEvents != 1 {
+		t.Fatalf("source projection event count=%d err=%v", sourceEvents, err)
+	}
+	replayedSubmit := performMultipartRequest(router, "/api/v1/tasks/"+task.ID+"/submit-output", manifest, map[string][]byte{"report": []byte("controlled file body")}, map[string]string{"If-Match": `"3"`, "Idempotency-Key": "multipart-submit-1"})
+	if replayedSubmit.Code != http.StatusCreated || replayedSubmit.Header().Get("Idempotency-Replayed") != "true" || replayedSubmit.Body.String() != created.Body.String() {
+		t.Fatalf("multipart submit replay = %d headers=%v: %s", replayedSubmit.Code, replayedSubmit.Header(), replayedSubmit.Body.String())
+	}
+	var sourceInboxCount int64
+	if err := store.DB.Model(&models.InboxItem{}).
+		Where("source_event_key = ?", taskArtifactFollowupEventKey(artifact.ID)).
+		Count(&sourceInboxCount).Error; err != nil || sourceInboxCount != 1 {
+		t.Fatalf("source projection count after replay=%d err=%v", sourceInboxCount, err)
 	}
 	var relativePath string
 	if err := store.SQL.QueryRow("SELECT relative_path FROM task_artifacts WHERE id = ?", artifact.ID).Scan(&relativePath); err != nil {
@@ -315,6 +391,14 @@ func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	if changes.Code != http.StatusOK {
 		t.Fatalf("request changes = %d: %s", changes.Code, changes.Body.String())
 	}
+	activeSourceDelete := performRequest(router, http.MethodDelete, "/api/v1/artifacts/"+artifact.ID+"?confirm=true", []byte(`{"reason":"source still active"}`), map[string]string{"If-Match": `"5"`})
+	if activeSourceDelete.Code != http.StatusConflict || responseErrorCode(t, activeSourceDelete.Body.Bytes()) != "ARTIFACT_HAS_ACTIVE_INBOX_SOURCE" {
+		t.Fatalf("active source delete = %d: %s", activeSourceDelete.Code, activeSourceDelete.Body.String())
+	}
+	dismissedSource := performRequest(router, http.MethodPost, "/api/v1/inbox-items/"+sourceInbox.ID+"/dismiss", []byte(`{"reason":"no follow-up required"}`), map[string]string{"If-Match": `"1"`})
+	if dismissedSource.Code != http.StatusOK {
+		t.Fatalf("dismiss source Inbox Item = %d: %s", dismissedSource.Code, dismissedSource.Body.String())
+	}
 
 	if err := store.DB.Exec(`CREATE TRIGGER fail_artifact_delete_event BEFORE INSERT ON workflow_events WHEN NEW.action = 'task_artifact_deleted' BEGIN SELECT RAISE(ABORT, 'TEST_EVENT_FAILURE'); END`).Error; err != nil {
 		t.Fatalf("install failure trigger: %v", err)
@@ -337,6 +421,9 @@ func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	if err := store.DB.Exec("DROP TRIGGER fail_artifact_delete_event").Error; err != nil {
 		t.Fatalf("drop failure trigger: %v", err)
 	}
+	if err := store.DB.First(&sourceInbox, "id = ?", sourceInbox.ID).Error; err != nil || sourceInbox.SourceDeletedAt != nil || sourceInbox.Version != 2 {
+		t.Fatalf("failed delete changed source Inbox Item=%#v err=%v", sourceInbox, err)
+	}
 
 	deleteHeaders := map[string]string{"If-Match": `"5"`, "Idempotency-Key": "delete-artifact-1"}
 	deleted := performRequest(router, http.MethodDelete, "/api/v1/artifacts/"+artifact.ID+"?confirm=true", []byte(`{"reason":"Superseded"}`), deleteHeaders)
@@ -348,6 +435,9 @@ func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	}
 	if _, err := os.Stat(livePath); !os.IsNotExist(err) {
 		t.Fatalf("deleted file still exists: %v", err)
+	}
+	if err := store.DB.First(&sourceInbox, "id = ?", sourceInbox.ID).Error; err != nil || sourceInbox.SourceDeletedAt == nil || sourceInbox.Version != 3 {
+		t.Fatalf("coordinated source deletion Inbox Item=%#v err=%v", sourceInbox, err)
 	}
 	var tombstone models.ArtifactDeletionTombstone
 	if err := store.DB.First(&tombstone, "artifact_id = ?", artifact.ID).Error; err != nil ||

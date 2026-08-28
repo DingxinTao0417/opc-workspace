@@ -81,6 +81,9 @@ function mutationErrorMessage(error: unknown): string | null {
     if (error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS") {
       return "该任务仍被收件箱条目关联。请先到收件箱解除活动关联，再删除任务。";
     }
+    if (error.code === "TASK_HAS_ACTIVE_INBOX_SOURCES") {
+      return "该任务仍有产出作为活动收件箱事项的来源。请先解决或忽略这些跟进项，再删除任务。";
+    }
     const suffix = error.requestId ? ` · 请求 ${error.requestId}` : "";
     return `${error.message}${suffix}`;
   }

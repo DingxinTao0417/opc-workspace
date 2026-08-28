@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v22（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v17 新增保存视图表，schema v18–v20 新增客户活动/附件/person 关联，schema v21–v22 新增项目笔记/附件，均不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v23（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23 为显式 follow-up Artifact 增加 Inbox 来源投影与删除协调 guards，不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder，以及显式 follow-up Artifact→Inbox 已交付。任务临期/阻塞来源、自动建 Reminder、本地 Agent Run、Focus 高级分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.1](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.2](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -19,7 +19,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - Submission 批次、四种 Artifact、受控文件下载、审计软删除及 Task 聚合硬删除；
 - 所有真实页面的加载、空数据、错误、重试、版本冲突和草稿保留。
 
-当前不负责：Inbox 的业务来源消费、Agent Runtime、远程协作/通知、自动生成产出、AI 分析、知识库或备份/恢复。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令在同一事务内调用 Inbox reconciliation，但 Inbox 仍拥有关系和结清策略。
+Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通知、自动生成产出、AI 分析或知识库。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令调用 Inbox reconciliation。schema v23 仅在产出提交事务内调用 Inbox 领域投影器消费显式 follow-up 标记，Inbox 仍拥有来源、关系和结清策略。
 
 ## 已实现状态
 
@@ -84,7 +84,7 @@ Submission 的 Task、序号、摘要、提交人、提交时间和 inferred 标
 | payload                           | text→`content_text`，link→`reference_url`，structured→`structured_json`，file→受控 `relative_path = objects/<artifact-id>`；四者严格互斥 |
 | `name`                            | trim 后 1–255 个安全字符，不允许控制字符                                                                                                 |
 | `mime_type / size_bytes / sha256` | 仅文件需要；SHA-256 为 64 位小写十六进制                                                                                                 |
-| `requires_followup`               | 人工标记需要后续动作；当前只展示，不自动生成 Task                                                                                        |
+| `requires_followup`               | 人工标记需要后续动作；true 时同事务投影一个稳定去重 Inbox Item，不自动生成 Task                                                          |
 | `produced_by_actor_id`            | 提交瞬间的活动 assignee，由服务端派生，客户端不能指定                                                                                    |
 | `recorded_by_actor_id`            | 固定内置 owner，表达“我代录”                                                                                                             |
 | `integrity_status`                | `unverified / verified / missing / mismatch`；unverified 的检查时间必须为空，其他状态必须有检查时间                                      |
@@ -194,6 +194,8 @@ done / cancelled ──reopen──> todo
 
 服务端不接受 `produced_by_actor_id`。成功返回 `{data:{task,submission,artifacts,event}}` 并附新版 Task `ETag`。
 
+本批次每个 `requires_followup=true` Artifact 都在同一 SQLite 事务中生成一个 `kind=event / source_entity_type=task_artifact` Inbox Item，并追加 system `source_projected` 事件；稳定键为 `task-artifact:<artifact-id>:followup`。快照只含来源导航/解释字段，不含正文或文件。提交或投影任一步失败时 Submission、Artifact、Task 状态、Inbox、事件和幂等快照全部回滚；同一提交幂等重放不重复投影。未标记 Artifact 不创建 Inbox Item。
+
 提交限制：summary 最长 10,000 字符；最多 20 Artifact；`client_ref` 1–100 且同批唯一；文本最多 500,000 字符；HTTP(S) 链接最多 4,096 bytes、必须有 host 且不能含 userinfo；structured 必须是 JSON object 且编码后最多 1 MiB；严格 JSON body 与 multipart `manifest` 各最多 1 MiB；单文件非空且最多 50 MiB；完整 multipart 请求最多 100 MiB。Sidecar HTTP read/write timeout 为 180 秒；前端对提交和文件下载使用 120 秒端到端超时，并在发起 multipart 前估算 manifest 与文件总量，避免明知超过服务端边界仍上传。
 
 ### 验收
@@ -231,7 +233,9 @@ reason 最长 1,000 字符。只有 manual + waiting_review + current pending Su
 
 `DELETE /api/v1/artifacts/:id?confirm=true` 要求 Task `If-Match`、可选稳定幂等键和 `{ "reason": "1–1000 字符" }`。pending-review 批次禁止删除。非文件只写软删除元数据；file 删除在同一事务写不可变 tombstone，存在的文件先移入 `.trash/`，事务失败恢复，成功提交后清除 trash 文件。若物理文件已经缺失，确认软删除仍成功，并将完整性记录为 `missing` 及检查时间。列表可用 `include_deleted=true` 审计，详情隐藏已删 payload，文件下载返回 410。
 
-Task DELETE 是聚合硬删除：服务端先确认没有关联的 active/paused/recovery_pending Focus Session，也没有任何 `unlinked_at IS NULL` 的活动 Inbox 关系；命中时分别返回 `TASK_HAS_OPEN_FOCUS_SESSION` 或 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，并且不移动文件、不删除部分事实。用户必须先在 Inbox 中带原因软解除活动关系。通过检查后，同一事务为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，终态 Focus Session 按外键 `SET NULL` 保留；已解除 Inbox 关系的 nullable `task_id` 置空，但 `task_ref_id / task_title_snapshot` 和关系事件保留。失败恢复已移动文件，提交后物理清理。它不是单 Artifact 删除或关系解除的替代入口。
+若 Artifact 是尚处于 `open/tracking` 的 follow-up Inbox 来源，删除返回 `409 ARTIFACT_HAS_ACTIVE_INBOX_SOURCE`；用户必须先解决或忽略来源项。随后删除在同一事务先写 Inbox `source_deleted_at`、递增 Inbox 版本并追加 `source_deleted` 事件，再软删 Artifact；任何后续文件、数据库或事件失败都会整体回滚。
+
+Task DELETE 是聚合硬删除：服务端先确认没有开放 Focus Session、`unlinked_at IS NULL` 的活动 Inbox 关系，也没有 `open/tracking` 的 Artifact 来源 Inbox；命中时分别返回 `TASK_HAS_OPEN_FOCUS_SESSION`、`TASK_HAS_ACTIVE_INBOX_RELATIONS` 或 `TASK_HAS_ACTIVE_INBOX_SOURCES`，且不移动文件、不删除部分事实。用户必须先解除关系并解决/忽略来源项。通过检查后，同一事务先给终态来源项写 `source_deleted_at` 和审计，再为 active file 写 `deletion_scope = task` tombstone并移入 trash；随后级联删除 Task 聚合。终态 Focus Session、已解除关系快照和来源 Inbox 快照继续保留；失败恢复文件并回滚来源标记，提交后清理物理文件。
 
 ## 受控文件目录
 
@@ -285,6 +289,8 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 
 schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约，只新增关系表及 Task 删除保护。关系 GET 实时 JOIN `tasks`；A2 不新增 Task.version→Inbox.version trigger。Task 删除前由 API/数据库共同拒绝活动关系，已解除历史关系使用 nullable FK `SET NULL` 并保留原 ID/标题快照。
 
+schema v23 的 `023_task_artifact_inbox_projection.sql` 不重建 Task/Submission/Artifact/Inbox 表，也不回填历史 `requires_followup`。它增加 Artifact 来源索引和 insert/update/delete guards：只允许存在且未删的 follow-up Artifact 建立规范来源；来源身份/payload 不可变；Artifact 软删或聚合硬删前必须先完成 Inbox 来源协调。下一迁移从 `024_*` 开始。
+
 ## 已验证与后续
 
 当前自动验证覆盖：
@@ -298,15 +304,18 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
 - 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
+- schema v22→v23 不发明 Inbox 数据；follow-up Artifact 提交/幂等重放/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调和来源快照保留。
 
-仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus Session 历史/周报/高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；受控文件基础备份恢复、Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联已经交付。
+仍属后续：任务临期/阻塞和其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact 来源已经交付。
 
 ## 相关代码/PRD 链接
 
 - [PRD 任务需求与 T-18D](../opc-workspace-PRD.md)
 - [schema v9 迁移](../../services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql)
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
+- [schema v23 Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
+- [Inbox 来源投影服务](../../services/sidecar/internal/api/inbox_source_projections.go)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)

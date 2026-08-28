@@ -109,6 +109,8 @@ const outputErrorLabels: Record<string, string> = {
   TASK_TRANSITION_NOT_ALLOWED: "当前任务状态不允许执行此操作。",
   ARTIFACT_PENDING_REVIEW: "待验收批次的产出不能删除。",
   ARTIFACT_ALREADY_DELETED: "这项产出已经删除。",
+  ARTIFACT_HAS_ACTIVE_INBOX_SOURCE:
+    "这项产出仍是活动收件箱跟进事项的来源。请先解决或忽略对应条目，再删除产出。",
   ARTIFACT_DELETED: "这项产出已经删除。",
   ARTIFACT_CONTENT_UNAVAILABLE: "这项产出没有可下载的文件内容。",
   ARTIFACT_FILE_MISSING: "受控文件已缺失，无法下载。",

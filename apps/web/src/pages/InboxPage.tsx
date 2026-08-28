@@ -4,6 +4,7 @@ import {
   CheckCheck,
   ChevronRight,
   Inbox,
+  FileCheck2,
   Plus,
   Search,
 } from "lucide-react";
@@ -102,7 +103,12 @@ function InboxRow({
         ? item.status === "resolved"
           ? `已解决${item.resolutionReason ? ` · ${item.resolutionReason}` : ""}`
           : `已忽略${item.dismissReason ? ` · ${item.dismissReason}` : ""}`
-        : item.summary || (item.kind === "reminder" ? "本地提醒" : "手工记录");
+        : item.summary ||
+          (item.kind === "reminder"
+            ? "本地提醒"
+            : item.kind === "event"
+              ? "任务产出跟进"
+              : "手工记录");
   return (
     <button
       aria-label={`查看 ${item.title}`}
@@ -122,6 +128,8 @@ function InboxRow({
           <Archive size={15} />
         ) : item.kind === "reminder" ? (
           <BellRing size={15} />
+        ) : item.kind === "event" ? (
+          <FileCheck2 size={15} />
         ) : (
           <Inbox size={15} />
         )}

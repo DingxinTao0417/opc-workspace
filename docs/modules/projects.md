@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v22。schema v21 新增独立、版本化且可追溯软删除的 `project_notes`；schema v22 新增受控 `project_attachments`、完整性事实和不可变删除墓碑。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v23。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23 新增显式 follow-up Task Artifact→Inbox 来源投影与删除协调。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑项目笔记、受控项目附件、所属 Task Artifact 产出聚合和追加式项目活动时间线已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但产出来源投影、批量拆分和自动分诊尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线和显式 follow-up 产出→Inbox 已实现，模块仍为**部分完成**；任务临期/阻塞、项目节点来源、任务树和高级分析尚未交付。
 
 ## 定位与边界
 
@@ -18,11 +18,11 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、可编辑人工笔记、受控项目附件、所属 Task Artifact 产出聚合、追加式审计时间线、列表和详情纵切。
+当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、人工笔记、受控附件、所属 Task Artifact 聚合、显式 follow-up 产出→Inbox、追加式审计时间线、列表和详情纵切。
 
 ### 已实现
 
-- SQLite schema v22 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`、文件完整性事实、不可变删除墓碑、跨 Task/Client/Project object ID 唯一保护和 Project 聚合版本传播，不改写既有项目事实或创建 demo 数据。
+- SQLite schema v23 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`、文件完整性事实、不可变删除墓碑、跨 Task/Client/Project object ID 唯一保护和 Project 聚合版本传播；v23 新增显式 follow-up Task Artifact→Inbox 来源与删除协调，不改写既有项目事实或创建 demo 数据。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -50,7 +50,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选、任务树或内嵌 Assignment/Submission 控件；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子、并发版本、Assignment 与 manual Submission/Artifact 验收已在共享任务详情交付。
 - 项目工时对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目级 Session 历史和高级分析仍未实现。
 - 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
-- schema v9 已有 Task 活动时间线与 `task_artifacts`；Project 现在已有事件生产器、读取时间线、Task Artifact 聚合和独立受控附件，但仍没有 Inbox Item 来源投影。
+- schema v23 已接显式 follow-up Task Artifact→Inbox；Task 临期/阻塞、Project 交付/验收/开票节点仍没有来源投影。
 - 没有项目里程碑、真实收入/成本聚合或开票操作。
 
 ## 当前用户流程
@@ -96,6 +96,13 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 3. owner 可切换删除历史；已删除项只展示墓碑摘要和原因。点击“打开任务”进入共享任务详情完成正文查看、文件下载、删除和验收。
 4. 归档项目仍可读取历史产出；Task 的后续合法变化会通过既有聚合 trigger 使 Project 版本失效，列表响应返回同事务读取的 `ETag` 和 `project_version`。
 
+### 从项目产出发起后续工作
+
+1. owner 在项目所属的 manual Task 提交产出，并只对确实需要下一步工作的 Artifact 勾选 `requires_followup`。
+2. Sidecar 在提交事务内为每个标记 Artifact 创建一条稳定去重 Inbox Item；条目保存 Artifact/Task/Submission 及 Project ID/名称快照，不复制正文或项目状态。
+3. owner 在 Inbox 查看来源，复用已交付的关联或拆分面板创建修改、发布、客户确认等 Task，并按需要启用自动结清策略。
+4. 来源项仍活动时 Artifact 或来源 Task 不可删除；解决/忽略来源项后才可删除，Inbox 会保留快照并显示来源已删除。
+
 ### 管理项目附件
 
 1. 非归档项目可选择一个本地文件，先在页面预览原文件名、可编辑附件名称和大小，再明确确认上传；浏览器 File 草稿在请求前不写入数据库。
@@ -108,7 +115,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v22 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实。
+- 当前 schema v23 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实；v23 不改变这些 Project 表字段。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -168,6 +175,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 - 将任务页已交付的分页、筛选、标签、任务树、Assignment、完整生命周期和 Artifact 验收能力按项目范围复用到项目详情；事实和共享任务详情已由 Task/Actor 纵切交付，当前缺口是 Project 详情内的聚合入口与交互复用。
 - 项目交付类 Task 提交 Artifact，或 owner 显式标记 `requires_followup` 时，才可按稳定事件键幂等生成 Inbox Item。
+- 上述显式标记链路已由 schema v23 交付：每个 Artifact 一条稳定来源，项目名称只作为不可变导航快照，不把 Project 状态复制到 Inbox。
 - owner 在收件箱把产出拆成修改、发布、客户确认等工单并分派给 owner/person；v0.2 才可选择健康且隔离已验证的本地 agent。
 - 项目达到交付、验收或开票节点的自动事件必须等 Workflow Event、Inbox 规则和对应业务模块交付后再启用。
 
@@ -183,7 +191,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 任务      | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；项目详情内的任务树仍待接入。              |
 | 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取、人工活动时间线、受控附件和 person 显式关联；外部活动来源仍待实现。 |
-| 收件箱    | 项目产出、阻塞、交付和后续工单的目标承接者；Project 自身审计事件已交付，但尚未投影为 Inbox 来源。                                                                                             |
+| 收件箱    | 显式 follow-up Task Artifact 已投影并携带 Project 快照；任务阻塞、Project 节点与自身审计事件尚未投影。                                                                                        |
 | Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                |
 | 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目级 Session 历史和高级分析仍待实现。                                                    |
 | 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                                            |
@@ -193,14 +201,14 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v22 保留 schema v3–v20 的 Project 结构与聚合 trigger，并新增独立 `project_notes` 与受控 `project_attachments`；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v23 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments` 和 follow-up Artifact Inbox 来源协调；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
-8. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收、项目级只读产出聚合，以及 Inbox 手工关联已有 Task 已交付；Inbox 来源投影、批量拆分和来源事件去重仍待实现。
+8. **产出与 Inbox 协作（部分实现）**：Task Artifact、Workflow Event、分派/验收、项目级产出聚合、Inbox 任务编排，以及显式 follow-up Artifact 稳定投影/来源删除协调已交付；任务临期/阻塞和项目节点来源仍待实现。
 9. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径
@@ -227,7 +235,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 - Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；外部活动来源、回访与财务不属于已交付客户纵切。
 - 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和项目级 Focus 历史/分析仍待验收。Focus → Task → Project 的整数分钟传播已有自动化覆盖。
-- 项目时间线和 Workflow Event 的事务、幂等重放与失败回滚已有自动化覆盖；产出聚合的项目范围、分页、删除历史和 Task 直达已有自动化覆盖；项目附件的迁移约束、上传/重放、分页、下载、软删历史、归档只读、父项目删除、备份恢复和业务导出已有自动化覆盖；Inbox Item 来源投影仍待验收。
+- 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出投影另覆盖稳定事件键、事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调与快照保留。任务临期/阻塞和项目节点来源仍待验收。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
 ## 相关代码/PRD 链接
@@ -256,3 +264,4 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [schema v6 任务事实迁移](../../services/sidecar/internal/database/migrations/006_task_facts.sql)
 - [schema v21 项目笔记迁移](../../services/sidecar/internal/database/migrations/021_project_notes.sql)
 - [schema v22 项目附件迁移](../../services/sidecar/internal/database/migrations/022_project_attachments.sql)
+- [schema v23 Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)

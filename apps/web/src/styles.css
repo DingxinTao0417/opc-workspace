@@ -7937,6 +7937,84 @@ kbd {
   font-size: 11px;
 }
 
+.inbox-source-context {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 13px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+}
+
+.inbox-source-context-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.inbox-source-context-heading > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--accent-light);
+}
+
+.inbox-source-context-heading strong,
+.inbox-source-context-heading small {
+  display: block;
+}
+
+.inbox-source-context-heading strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.inbox-source-context-heading small {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.inbox-source-context dl {
+  display: grid;
+  width: 100%;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.inbox-source-context dt {
+  margin-bottom: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.inbox-source-context dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.inbox-source-missing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--orange) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--orange) 10%, transparent);
+  color: var(--orange);
+  font-size: 11px;
+}
+
 .inbox-detail-actions {
   flex-wrap: wrap;
   padding-top: 2px;

@@ -5,6 +5,7 @@ import {
   Check,
   Edit3,
   Eye,
+  FileCheck2,
   Inbox,
   RotateCcw,
   Save,
@@ -25,6 +26,7 @@ import type {
 } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { InboxItemEventsSection } from "./InboxItemEventsSection";
+import { InboxSourceContext } from "./InboxSourceContext";
 import { InboxItemTasksSection } from "./InboxItemTasksSection";
 import { Modal } from "./Modal";
 
@@ -343,6 +345,8 @@ export function InboxItemDetailModal({
             <span aria-hidden="true" className="inbox-detail-icon">
               {item.kind === "reminder" ? (
                 <BellRing size={17} />
+              ) : item.kind === "event" ? (
+                <FileCheck2 size={17} />
               ) : (
                 <Inbox size={17} />
               )}
@@ -355,8 +359,12 @@ export function InboxItemDetailModal({
                 </span>
               </div>
               <p>
-                {item.kind === "reminder" ? "本地提醒" : "手工录入"} ·
-                仅保存在本机
+                {item.kind === "reminder"
+                  ? "本地提醒"
+                  : item.kind === "event"
+                    ? "任务产出跟进"
+                    : "手工录入"}{" "}
+                · 仅保存在本机
               </p>
             </div>
           </div>
@@ -478,6 +486,8 @@ export function InboxItemDetailModal({
               </dl>
             </>
           )}
+
+          {!editing ? <InboxSourceContext item={item} /> : null}
 
           {!editing ? (
             <section aria-label="条目操作" className="inbox-detail-actions">

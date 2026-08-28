@@ -2239,8 +2239,10 @@ function asInboxItemStatus(value: unknown): InboxItemStatus {
   return invalidResponse("收件箱状态响应无效");
 }
 
-function asInboxItemKind(value: unknown): "manual" | "reminder" {
-  if (value === "manual" || value === "reminder") return value;
+function asInboxItemKind(value: unknown): "manual" | "reminder" | "event" {
+  if (value === "manual" || value === "reminder" || value === "event") {
+    return value;
+  }
   return invalidResponse("收件箱类型响应无效");
 }
 
@@ -2290,7 +2292,9 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     !createdAt ||
     !updatedAt ||
     typeof rawSummary !== "string" ||
-    (sourceEntityType !== "manual" && sourceEntityType !== "reminder") ||
+    (sourceEntityType !== "manual" &&
+      sourceEntityType !== "reminder" &&
+      sourceEntityType !== "task_artifact") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
         sourceEntityId !== null ||
@@ -2299,6 +2303,17 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       (sourceEntityType !== "reminder" ||
         !sourceEntityId ||
         !sourceEventKey)) ||
+    (kind === "event" &&
+      (sourceEntityType !== "task_artifact" ||
+        !sourceEntityId ||
+        !sourceEventKey ||
+        !isRecord(rawPayload) ||
+        rawPayload.artifact_id !== sourceEntityId ||
+        typeof rawPayload.artifact_name !== "string" ||
+        typeof rawPayload.task_id !== "string" ||
+        typeof rawPayload.task_title !== "string" ||
+        typeof rawPayload.submission_id !== "string" ||
+        typeof rawPayload.submission_sequence !== "number")) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==
         "all_required_tasks_done") ||

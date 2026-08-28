@@ -175,6 +175,45 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Task Artifact follow-up source snapshots", () => {
+    const artifactId = "018f0000-0000-7000-8000-000000000812";
+    const taskId = "018f0000-0000-7000-8000-000000000813";
+    const submissionId = "018f0000-0000-7000-8000-000000000814";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "task_artifact",
+      source_entity_id: artifactId,
+      source_event_key: `task-artifact:${artifactId}:followup`,
+      payload_json: {
+        artifact_id: artifactId,
+        artifact_name: "交付清单",
+        storage_kind: "text",
+        task_id: taskId,
+        task_title: "准备项目交付",
+        submission_id: submissionId,
+        submission_sequence: 1,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "task_artifact",
+      sourceEntityId: artifactId,
+      payloadJson: { task_id: taskId, artifact_name: "交付清单" },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, artifact_id: "wrong" },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_entity_type: "task",
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

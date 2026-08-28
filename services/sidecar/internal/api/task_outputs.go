@@ -838,6 +838,11 @@ func (a *API) submitTaskOutput(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		if err := projectTaskArtifactFollowups(
+			tx, updated, submission, requestIDFromContext(c), now,
+		); err != nil {
+			return err
+		}
 		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestIDFromContext(c), now); err != nil {
 			return err
 		}
@@ -1121,6 +1126,16 @@ func (a *API) deleteTaskArtifact(c *gin.Context) {
 			return newProjectRequestError(http.StatusConflict, "ARTIFACT_PENDING_REVIEW", "Artifacts cannot be deleted while their submission is pending review")
 		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
+		if err := coordinateTaskArtifactInboxSourceDeletion(
+			tx,
+			[]string{row.ID},
+			"ARTIFACT_HAS_ACTIVE_INBOX_SOURCE",
+			"Resolve or dismiss the Artifact follow-up Inbox Item before deleting this Artifact",
+			requestIDFromContext(c),
+			now,
+		); err != nil {
+			return err
+		}
 		fileMissing := false
 		if row.StorageKind == "file" {
 			if a.artifactStore == nil || row.RelativePath == nil {

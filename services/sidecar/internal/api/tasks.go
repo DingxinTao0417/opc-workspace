@@ -822,6 +822,23 @@ func (a *API) deleteTask(c *gin.Context) {
 			)
 		}
 		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
+		var sourceArtifactIDs []string
+		if err := tx.Model(&models.TaskArtifact{}).
+			Where("task_id = ?", id).
+			Order("id ASC").
+			Pluck("id", &sourceArtifactIDs).Error; err != nil {
+			return err
+		}
+		if err := coordinateTaskArtifactInboxSourceDeletion(
+			tx,
+			sourceArtifactIDs,
+			"TASK_HAS_ACTIVE_INBOX_SOURCES",
+			"Resolve or dismiss all Artifact follow-up Inbox Items before deleting this Task",
+			requestIDFromContext(c),
+			deletedAt,
+		); err != nil {
+			return err
+		}
 		var err error
 		movedArtifactFiles, err = a.trashTaskArtifactFiles(tx, id, deletedAt)
 		if err != nil {

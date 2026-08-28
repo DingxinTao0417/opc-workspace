@@ -23,7 +23,7 @@ func decodeProjectArtifactList(t *testing.T, body []byte) ([]projectArtifactOutp
 }
 
 func TestProjectArtifactAggregationUsesTaskArtifactFacts(t *testing.T) {
-	router, _, _ := newTaskOutputTestAPI(t)
+	router, store, _ := newTaskOutputTestAPI(t)
 	project := createProjectForTest(t, router, `{"name":"Delivery project"}`, nil)
 	task := createTaskForTaskFacts(t, router, fmt.Sprintf(
 		`{"title":"Prepare delivery","project_id":%q,"review_policy":"manual"}`,
@@ -50,6 +50,10 @@ func TestProjectArtifactAggregationUsesTaskArtifactFacts(t *testing.T) {
 		t.Fatalf("submit output = %d: %s", submitted.Code, submitted.Body.String())
 	}
 	output := decodeSubmitOutputResponse(t, submitted.Body.Bytes())
+	var sourceInbox models.InboxItem
+	if err := store.DB.First(&sourceInbox, "source_entity_id = ? AND source_entity_type = 'task_artifact'", output.Artifacts[0].ID).Error; err != nil {
+		t.Fatalf("load Artifact source Inbox Item: %v", err)
+	}
 
 	listed := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID+"/artifacts?page=1&page_size=1", nil, nil)
 	if listed.Code != http.StatusOK {
@@ -77,6 +81,10 @@ func TestProjectArtifactAggregationUsesTaskArtifactFacts(t *testing.T) {
 	reviewed := performRequest(router, http.MethodPost, "/api/v1/tasks/"+task.ID+"/review", []byte(`{"decision":"accept"}`), map[string]string{"If-Match": `"4"`})
 	if reviewed.Code != http.StatusOK {
 		t.Fatalf("accept output = %d: %s", reviewed.Code, reviewed.Body.String())
+	}
+	dismissed := performRequest(router, http.MethodPost, "/api/v1/inbox-items/"+sourceInbox.ID+"/dismiss", []byte(`{"reason":"delivery accepted"}`), map[string]string{"If-Match": `"1"`})
+	if dismissed.Code != http.StatusOK {
+		t.Fatalf("dismiss Artifact source Inbox Item = %d: %s", dismissed.Code, dismissed.Body.String())
 	}
 	deleted := performRequest(router, http.MethodDelete, "/api/v1/artifacts/"+output.Artifacts[0].ID+"?confirm=true", []byte(`{"reason":"Superseded"}`), map[string]string{"If-Match": `"5"`})
 	if deleted.Code != http.StatusOK {

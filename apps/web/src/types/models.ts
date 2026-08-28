@@ -1178,7 +1178,7 @@ export interface DeleteClientActorLinkInput {
   expectedVersion: number;
 }
 
-export type InboxItemKind = "manual" | "reminder";
+export type InboxItemKind = "manual" | "reminder" | "event";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
 export type InboxItemView = "inbox" | "snoozed" | "archive";
@@ -1200,7 +1200,7 @@ export interface InboxItem {
   kind: InboxItemKind;
   title: string;
   summary: string;
-  sourceEntityType: "manual" | "reminder";
+  sourceEntityType: "manual" | "reminder" | "task_artifact";
   sourceEntityId: string | null;
   sourceEventKey: string | null;
   sourceDeletedAt: string | null;

@@ -6,6 +6,7 @@ import {
   Clock3,
   Edit3,
   Eye,
+  FileCheck2,
   History,
   Inbox,
   LoaderCircle,
@@ -46,6 +47,8 @@ const eventPresentations: Record<string, EventPresentation> = {
   resolved: { icon: Check, label: "标记为已解决" },
   dismissed: { icon: XCircle, label: "忽略并归档" },
   reopened: { icon: RotateCcw, label: "重新打开" },
+  source_projected: { icon: FileCheck2, label: "从任务产出创建" },
+  source_deleted: { icon: AlertTriangle, label: "来源产出已删除" },
 };
 
 function formatEventTime(value: string): string {

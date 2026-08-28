@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v22（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v23（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 与 Client Attachment 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.1](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -152,7 +152,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 
 ## SQLite 迁移契约
 
-当前 schema v22：
+当前 schema v23：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -161,7 +161,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment、完整性状态、不可变删除墓碑、object ID 唯一保护和 Project 版本传播；不改写 v21 事实，也不创建附件/demo 数据。后续迁移从 `023_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment、完整性状态、不可变删除墓碑、object ID 唯一保护和 Project 版本传播；schema v23 增加 Task Artifact Inbox 来源身份和删除协调；均不改写既有事实或创建附件/demo 数据。后续迁移从 `024_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -181,7 +181,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `023_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `024_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## v0.1 备份/恢复目标与当前进度
 
