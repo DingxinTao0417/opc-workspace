@@ -10,6 +10,7 @@ import { useRef } from "react";
 import {
   ApiError,
   batchUpdateTasks,
+  createBackup,
   cancelFocusSession,
   createClient,
   createFocusSession,
@@ -35,6 +36,7 @@ import {
   getAllProjects,
   getAllTags,
   getAllTasks,
+  getBackups,
   getInboxStats,
   getActor,
   getActors,
@@ -89,10 +91,12 @@ import {
   updateReminder,
   updateAppSettings,
   unlinkInboxItemTask,
+  verifyBackup,
 } from "./client";
 import type {
   ActorListParams,
   AppSettingUpdate,
+  CreateBackupInput,
   BatchUpdateTasksInput,
   CreateTaskSavedViewInput,
   ClientInput,
@@ -147,6 +151,47 @@ import type {
 } from "../types/models";
 
 export const settingsQueryKey = ["settings"] as const;
+
+export const backupQueryKey = ["backups"] as const;
+
+export function useBackupsQuery(enabled = true) {
+  return useQuery({
+    queryKey: backupQueryKey,
+    queryFn: getBackups,
+    enabled,
+    retry: 1,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateBackup() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateBackupInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createBackup(input, attempt.current.key);
+    },
+    onSuccess: async () => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
+    },
+  });
+}
+
+export function useVerifyBackup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => verifyBackup(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
+    },
+  });
+}
 
 export function useAppSettingsQuery(enabled = true) {
   return useQuery({

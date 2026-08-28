@@ -108,6 +108,7 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("option", { name: /收入/ })).toBeNull();
     expect(screen.queryByRole("option", { name: /发票/ })).toBeNull();
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
   });
 
   it("opens the requested settings module directly", () => {
@@ -130,6 +131,29 @@ describe("CommandPalette", () => {
       commandPaletteOpen: false,
       settingsOpen: true,
       settingsModule: "focus",
+    });
+  });
+
+  it("opens the data and backup settings module directly", () => {
+    mocks.taskQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("option", { name: /数据与备份/ }));
+
+    expect(useUiStore.getState()).toMatchObject({
+      commandPaletteOpen: false,
+      settingsOpen: true,
+      settingsModule: "data",
     });
   });
 

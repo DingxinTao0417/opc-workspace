@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  createBackup,
   createPersonActor,
   createTag,
   createTask,
@@ -16,6 +17,7 @@ import {
   getActors,
   getAllProjects,
   getAllTasks,
+  getBackups,
   getTags,
   getTaskPage,
   getTaskSavedViews,
@@ -27,6 +29,7 @@ import {
   downloadTaskArtifact,
   normalizeActor,
   normalizeActorSummary,
+  normalizeBackupSummary,
   normalizeHealthResponse,
   normalizeTaskAssignment,
   normalizeTaskAssignmentListResult,
@@ -49,6 +52,7 @@ import {
   updateTask,
   updateTaskSavedView,
   updateActor,
+  verifyBackup,
 } from "./client";
 
 describe("health response normalization", () => {
@@ -1363,6 +1367,92 @@ describe("task saved views", () => {
     expect(
       new Headers(fetchMock.mock.calls[3][1]?.headers).get("If-Match"),
     ).toBe('"3"');
+  });
+});
+
+const backupPayload = {
+  id: "018f0000-0000-7000-8000-000000001701",
+  created_at: "2026-08-28T12:00:00Z",
+  verified_at: "2026-08-28T12:00:02Z",
+  verification_status: "verified",
+  note: "提交前检查点",
+  app_version: "0.1.0",
+  api_version: "v1",
+  schema_version: 17,
+  artifact_count: 2,
+  artifact_bytes: 4096,
+  database_bytes: 65536,
+  total_bytes: 69720,
+};
+
+describe("verified local backups", () => {
+  it("strictly normalizes valid and invalid backup summaries", () => {
+    expect(normalizeBackupSummary(backupPayload)).toEqual({
+      id: backupPayload.id,
+      createdAt: "2026-08-28T12:00:00Z",
+      verifiedAt: "2026-08-28T12:00:02Z",
+      verificationStatus: "verified",
+      note: "提交前检查点",
+      appVersion: "0.1.0",
+      apiVersion: "v1",
+      schemaVersion: 17,
+      artifactCount: 2,
+      artifactBytes: 4096,
+      databaseBytes: 65536,
+      totalBytes: 69720,
+      error: null,
+    });
+    expect(
+      normalizeBackupSummary({
+        id: backupPayload.id,
+        verification_status: "invalid",
+        error: "备份清单无效",
+      }),
+    ).toMatchObject({
+      id: backupPayload.id,
+      verificationStatus: "invalid",
+      schemaVersion: 0,
+      error: "备份清单无效",
+    });
+    expect(() =>
+      normalizeBackupSummary({ ...backupPayload, total_bytes: -1 }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeBackupSummary({
+        ...backupPayload,
+        verification_status: "unknown",
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("lists, creates with a stable key, and verifies backups", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        jsonResponse(
+          init?.method === "POST"
+            ? { data: backupPayload }
+            : { data: [backupPayload] },
+          init?.method === "POST" ? 201 : 200,
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await getBackups()).toHaveLength(1);
+    await createBackup({ note: "提交前检查点" }, "backup-key-1");
+    await verifyBackup(backupPayload.id);
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/backups");
+    expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get("Idempotency-Key"),
+    ).toBe("backup-key-1");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      note: "提交前检查点",
+    });
+    expect(String(fetchMock.mock.calls[2][0])).toContain(
+      `/api/v1/backups/${backupPayload.id}/verify`,
+    );
+    expect(fetchMock.mock.calls[2][1]?.method).toBe("POST");
   });
 });
 

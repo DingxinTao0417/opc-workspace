@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v17。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17 保存视图不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据/备份和完整桌面诊断入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v17。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17 保存视图不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“数据与备份”已接手动一致性备份创建/列表/校验，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、备份恢复/删除/导出和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -25,12 +25,13 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
+- 数据与备份：从真实 `/api/v1/backups` 读取本机备份，支持可选说明的幂等创建、展示 schema/Artifact 数量/大小和显式重新完整校验；具备加载、空、错误、进行中与成功状态。该模块没有设置“保存”按钮，也不伪造尚未实现的恢复、删除或导出。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取四个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
 - 当前设置状态明确分为三层：服务端确认值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存成功后才以服务端规范化响应替换 committed；取消丢弃 preview。
 - Zustand persist 新键 `opc-settings-local-v1` 只保留尚未受控文件化的头像 Data URL，不再持久化工作区名称、通用、外观或专注设置。
 - Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
-- 命令面板可分别直达个人资料、通用、外观、专注、人员与责任和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
+- 命令面板可分别直达个人资料、通用、外观、专注、人员与责任、数据与备份和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
 - 活动 Session 的 `planned_seconds` 是服务端事实。修改、保存或取消 Focus draft/preview 都不会重置、缩短或改写当前 Session；保存后的 break、cycle、自动开始与提示音配置最早在当前工作段结束后的本地转场生效。
 
 当前 Sidecar 设置事实层已实现：
@@ -46,7 +47,7 @@
 - 四个非敏感设置模块已经以 SQLite 为统一事实源；头像仍以 Data URL 存入当前浏览器或 WebView 的 localStorage，尚未迁入受控文件目录，因此头像暂不跨前端运行容器共享。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、完整诊断或 Agent 设置页。
+- 已有 Actor 设置页和手动备份创建/列表/校验，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、备份恢复/删除/导出、快捷键、完整诊断或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
@@ -140,6 +141,15 @@
 4. person 没有活动 Assignment 时可停用或重新启用；存在活动 Assignment 时返回冲突并保持原状态。
 5. 当前没有 Actor 硬删除入口；person 可在任务详情用于新分派，停用前必须先结束或改派其活动记录。
 
+### 创建并校验手动备份
+
+1. owner 打开“数据与备份”，页面读取内部 backup root 的已发布 UUID 包；损坏 manifest 显示 invalid，而不是从文件名猜测成功。
+2. owner 可填写最多 200 字说明并点击“立即备份”；前端为同一次尝试保留稳定 Idempotency-Key，显示长操作进行中并阻止重复点击。
+3. Sidecar 获取维护写锁，等待普通业务请求、Focus heartbeat 与 Reminder 扫描结束；随后用 `VACUUM INTO` 创建 SQLite 一致性快照并复制全部 active file Artifact 和身份 marker。
+4. staging 包只有在逐项 size/SHA-256、预期文件全集、数据库 quick/foreign-key/schema/identity/active Artifact 校验全部通过后才原子发布；失败不改变当前数据库或 Artifact root。
+5. 页面刷新列表并展示创建时间、说明、schema、文件数量和总大小；owner 可点击“重新校验”再次逐字节验证并刷新 `verified_at`。
+6. 当前界面不提供恢复、删除或 JSON 导出；这些破坏性或跨边界流程必须在各自纵切完成后才出现真实入口。
+
 ### 数据恢复
 
 1. 用户在“数据与备份”选择本地归档。
@@ -171,9 +181,11 @@
 | PATCH /api/v1/settings         | **已实现**：原子更新 1–4 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
 | GET / POST /api/v1/actors      | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
 | GET / PATCH /api/v1/actors/:id | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
+| GET / POST /api/v1/backups      | **已实现**：列出本地包，或在维护写锁内幂等创建并完整校验 SQLite+Artifact 备份                              |
+| POST /api/v1/backups/:id/verify | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                         |
 | GET /health                    | 提供真实 app、commit、API 和 schema 版本                                                                        |
 
-备份、桌面能力与 Agent Adapter 通过各自模块 API 或 Tauri command 提供；设置页不建立第二份状态。
+备份由数据管理 API 提供，设置页只通过 Query/Mutation 展示服务端返回事实，不建立第二份备份状态。恢复、桌面能力与 Agent Adapter 继续由各自模块 API 或 Tauri command 提供。
 
 ### 前端状态
 
@@ -183,7 +195,7 @@
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
-当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何 Workflow Event。
+当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。备份创建/校验事实当前只写备份 manifest，不进入 Task/Project `workflow_events`；未来诊断事件需单独设计。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何事件。
 
 ## 与其他模块协作
 
@@ -211,7 +223,7 @@
 
 ### v0.1-C：设置页面补齐
 
-- “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和完整诊断模块待实现。
+- “人员与责任”的 Actor 管理、任务详情 Assignment 入口，以及“数据与备份”的创建/列表/校验已完成；通知、备份恢复/删除/导出、快捷键和完整诊断模块待实现。
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
 - **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
 - **已完成（组件层）**：持久化设置加载、保存中、保存失败和冲突提示；仍需真实浏览器/窄屏的键盘、焦点和视觉验收。
@@ -239,6 +251,7 @@
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
 - person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v17 延续。schema v12–v17 的 Inbox、Reminder、编排、设置与保存视图迁移均不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
+- “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证后显示成功；列表、空态、读取失败、创建中、创建失败、重新校验和 invalid 包均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
 - 在线 Updater 不作为当前设置项、启动依赖或默认网络行为出现。
@@ -256,8 +269,12 @@
 - [设置 API 契约测试](../../apps/web/src/api/settings.test.ts)
 - [当前 Actor 设置](../../apps/web/src/components/ActorSettings.tsx)
 - [当前 Actor 设置测试](../../apps/web/src/components/ActorSettings.test.tsx)
+- [当前备份设置](../../apps/web/src/components/BackupSettings.tsx)
+- [当前备份设置测试](../../apps/web/src/components/BackupSettings.test.tsx)
 - [当前通用 Modal](../../apps/web/src/components/Modal.tsx)
 - [当前健康 API](../../services/sidecar/internal/api/router.go)
 - [当前设置 API](../../services/sidecar/internal/api/settings.go)
 - [schema v16 设置迁移](../../services/sidecar/internal/database/migrations/016_app_settings.sql)
 - [设置 API 测试](../../services/sidecar/internal/api/settings_test.go)
+- [备份 API](../../services/sidecar/internal/api/backups.go)
+- [备份 API 测试](../../services/sidecar/internal/api/backups_test.go)

@@ -11,6 +11,7 @@ const pnpmCli = process.env.npm_execpath;
 const devDataDir = join(repoRoot, ".local", "dev-data");
 const databasePath = join(devDataDir, "opc-workspace.db");
 const artifactDir = join(devDataDir, "artifacts");
+const backupDir = join(devDataDir, "backups");
 const apiBaseUrl = "http://127.0.0.1:9876";
 const webBaseUrl = "http://127.0.0.1:1420";
 const sessionToken = process.env.OPC_SESSION_TOKEN ?? "opc-workspace-local-dev";
@@ -19,6 +20,7 @@ let shuttingDown = false;
 
 mkdirSync(devDataDir, { recursive: true });
 mkdirSync(artifactDir, { recursive: true });
+mkdirSync(backupDir, { recursive: true });
 
 function assertCommand(command, displayName, versionArgs = ["--version"]) {
   const probe = spawnSync(command, versionArgs, { stdio: "ignore" });
@@ -135,6 +137,8 @@ async function main() {
       databasePath,
       "--artifacts",
       artifactDir,
+      "--backups",
+      backupDir,
       "--port",
       "9876",
       "--dev",

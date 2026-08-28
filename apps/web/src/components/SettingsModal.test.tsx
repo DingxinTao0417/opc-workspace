@@ -453,6 +453,52 @@ describe("SettingsModal", () => {
     );
   });
 
+  it("opens the data module with real local backup facts and no settings save action", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/api/v1/backups")) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: "018f0000-0000-7000-8000-000000001701",
+                  created_at: "2026-08-28T12:00:00Z",
+                  verified_at: "2026-08-28T12:00:02Z",
+                  verification_status: "verified",
+                  note: "发布前",
+                  app_version: "0.1.0",
+                  api_version: "v1",
+                  schema_version: 17,
+                  artifact_count: 0,
+                  artifact_bytes: 0,
+                  database_bytes: 65536,
+                  total_bytes: 65648,
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify(savedSettingsPayload(init)), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+    useUiStore.setState({ settingsOpen: true, settingsModule: "data" });
+    renderSettings();
+
+    expect(
+      await screen.findByRole("heading", { name: "数据与备份" }),
+    ).toBeVisible();
+    expect(await screen.findByText("发布前")).toBeVisible();
+    expect(screen.getByRole("button", { name: "立即备份" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    expect(
+      screen.getByText("关闭", { selector: ".modal-footer button" }),
+    ).toBeVisible();
+  });
+
   it("opens local actor management without implying an online account", async () => {
     vi.stubGlobal(
       "fetch",

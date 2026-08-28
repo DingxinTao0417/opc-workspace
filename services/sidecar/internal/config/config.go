@@ -23,6 +23,7 @@ var defaultOrigins = []string{
 type Config struct {
 	DatabasePath   string
 	ArtifactDir    string
+	BackupDir      string
 	Port           int
 	SessionToken   string
 	AllowedOrigins []string
@@ -62,6 +63,8 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	databasePath := fs.String("db", strings.TrimSpace(databaseDefault), "SQLite database path")
 	artifactDefault := strings.TrimSpace(getenv("OPC_ARTIFACT_DIR"))
 	artifactDir := fs.String("artifacts", artifactDefault, "controlled Task Artifact directory")
+	backupDefault := strings.TrimSpace(getenv("OPC_BACKUP_DIR"))
+	backupDir := fs.String("backups", backupDefault, "local verified backup package directory")
 	portFlag := fs.Int("port", port, "loopback port; 0 selects a free port")
 	devFlag := fs.Bool("dev", dev, "enable explicit development-only relaxations")
 	seedFlag := fs.Bool("seed", seed, "seed idempotent development data (requires --dev)")
@@ -108,6 +111,27 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 		return Config{}, errors.New("artifact directory must not be the database file")
 	}
 
+	backups := strings.TrimSpace(*backupDir)
+	if backups == "" {
+		if path == ":memory:" {
+			return Config{}, errors.New("backup directory is required with an in-memory database")
+		}
+		backups = filepath.Join(filepath.Dir(path), "backups")
+	}
+	backups, err = filepath.Abs(backups)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve backup directory: %w", err)
+	}
+	if path != ":memory:" && strings.EqualFold(filepath.Clean(backups), filepath.Clean(path)) {
+		return Config{}, errors.New("backup directory must not be the database file")
+	}
+	if path != ":memory:" && pathsOverlap(backups, path) {
+		return Config{}, errors.New("backup directory must not contain the database file")
+	}
+	if pathsOverlap(backups, artifacts) {
+		return Config{}, errors.New("backup directory and artifact directory must not overlap")
+	}
+
 	host := strings.TrimSpace(getenv("OPC_HOST"))
 	if host != "" && host != "127.0.0.1" {
 		return Config{}, errors.New("OPC_HOST must be 127.0.0.1; the Sidecar never binds to a public interface")
@@ -125,12 +149,25 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	return Config{
 		DatabasePath:   path,
 		ArtifactDir:    artifacts,
+		BackupDir:      backups,
 		Port:           *portFlag,
 		SessionToken:   token,
 		AllowedOrigins: origins,
 		DevMode:        *devFlag,
 		Seed:           *seedFlag,
 	}, nil
+}
+
+func pathsOverlap(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	for _, pair := range [][2]string{{left, right}, {right, left}} {
+		relative, err := filepath.Rel(pair[0], pair[1])
+		if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

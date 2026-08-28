@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表和完整校验已经实现；恢复、备份删除、导入、导出、迁移前自动备份、计划备份和跨版本恢复仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -15,7 +15,7 @@
 - 开发数据、正式数据和测试数据隔离；
 - 未来一致性备份、验证、恢复、导入导出和保留策略。
 
-本模块不负责云同步、多设备合并、在线账号、远程文件服务、SQLCipher 或自动上传。v0.1 当前没有“备份成功”按钮或恢复 API，不能把数据库文件复制说明写成已交付功能。
+本模块不负责云同步、多设备合并、在线账号、远程文件服务、SQLCipher 或自动上传。当前“备份成功”只表示 SQLite 快照、active Artifact、marker、manifest 与数据库一致性已经在 staging 中完整校验并原子发布；它不表示恢复、导出或外部介质复制已经完成。
 
 ## 当前实现状态
 
@@ -37,13 +37,19 @@
 - 启动时清理普通 staging 残留、协调中断的已知 trash move，并用 tombstone 区分授权删除与未知候选。active trash 恢复前必须匹配数据库 size/SHA-256；错配移入 quarantine 并记录 mismatch。无引用且没有可验证删除授权的受控 UUID object/trash 候选同样只进 quarantine，不自动永久删除，也不递归跟随异常目录或链接。
 - Artifact 软删除和 Task 聚合硬删除使用 trash 做文件/数据库补偿：事务失败恢复，提交后清除临时 trash 文件；物理 object 已缺失时仍允许确认软删或聚合硬删，软删同时记录 missing 完整性事实。
 - 下载前重新验证 size 与 SHA-256；missing/mismatch 状态写回数据库并拒绝输出内容。
+- Sidecar 从 `--backups` / `OPC_BACKUP_DIR` 获取备份根；统一开发脚本显式使用 `.local/dev-data/backups/`，文件数据库未显式配置时默认使用数据库同级 `backups/`。备份根必须是安全的专用目录，不得为卷根、包含数据库文件或与 Artifact root 重叠。
+- `POST /api/v1/backups` 在进程内维护写锁中执行：所有普通 API 请求、Focus heartbeat 与 Reminder 扫描先完成或等待，避免数据库事实与 Artifact 文件跨写入边界漂移；同一时间只执行一个备份操作。
+- SQLite 通过同一连接执行 `VACUUM INTO` 得到包含 WAL 已提交事实的一致性快照；active file Artifact 按数据库记录逐个复制并同时校验 size/SHA-256，marker 必须匹配不可变 `database_id / artifact_store_id`。
+- 备份先写同一 backup root 下的 `.staging-<uuid>`，manifest 记录 app/commit/API/schema、创建与校验时间、可选说明、数据库/marker/Artifact 相对路径及 size/SHA-256；`quick_check`、`foreign_key_check`、schema、身份、active Artifact 元数据、文件全集和总量均通过后才原子重命名为 `backups/<backup-id>/`。
+- 创建支持可选 `Idempotency-Key`；Sidecar 只在备份 manifest 保存 key 的 SHA-256 与规范请求摘要。模糊响应可安全重放同一包，不同说明复用同一 key 返回冲突。
+- `GET /api/v1/backups` 只读取已发布 UUID 包并展示上次校验记录；损坏清单以 invalid 项显示。`POST /api/v1/backups/:id/verify` 重新逐字节校验完整包并刷新 `verified_at`，篡改、缺失、额外文件、路径或数据库事实不一致均拒绝。
+- 设置“数据与备份”提供说明、创建、加载/空/错误状态、备份摘要和显式重新校验；长操作使用 180 秒客户端窗口。当前没有恢复、删除或导出按钮，避免以无行为控件暗示能力。
 
-### 未实现
+### 仍未实现
 
-- SQLite Online Backup API 或等价一致性快照；
-- 包含数据库与 Artifact objects 的原子备份包；
-- backup manifest、校验、临时恢复演练与原子替换；
-- 设置页中的手动备份/恢复、导入/导出进度和诊断；
+- 原子恢复、恢复前回滚备份及 Sidecar 重启接管；
+- 备份删除、基础 JSON 导出、导入预览/执行；
+- 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 破坏性迁移前产品化自动备份；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
@@ -63,7 +69,12 @@ appDataDir/
     .trash/                     # 删除事务补偿区；非用户回收站
     .quarantine/                # 无引用候选隔离区；不自动永久删除
   invoices/                    # 预留；PDF 业务尚未实现
-  backups/                     # 预留；备份功能尚未实现
+  backups/
+    <backup-id>/               # 已发布且创建时完成全量校验的备份包
+      manifest.json
+      database/opc-workspace.db
+      artifacts/.opc-artifact-store-v1
+      artifacts/objects/<artifact-id>
   config/                      # 预留；当前部分设置仍在前端 localStorage
 
 appLogDir/
@@ -82,6 +93,7 @@ appLogDir/
     objects/
     .trash/
     .quarantine/
+  backups/                     # 与正式备份完全隔离
 ```
 
 `attachments/` 与 `artifacts/` 不是同一协议：当前只有 Task Artifact 已经受 Sidecar 管理；客户/项目附件仍待单独设计。`.trash/` 是提交前后短暂补偿目录，不是可由用户浏览或恢复的长期回收站；`.quarantine/` 保留无法安全自动归属的受控候选，当前没有用户级查看或清理入口。
@@ -155,11 +167,11 @@ appLogDir/
 
 新增 schema 只能从 `018_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
-## 未来 v0.1 备份/恢复目标
+## v0.1 备份/恢复目标与当前进度
 
 ### 一致性备份
 
-备份必须同时包含：
+当前已实现的手动备份同时包含：
 
 - SQLite 一致性快照，而不是仅复制可能仍有 WAL 的主文件；
 - 所有 active file Artifact objects；
@@ -167,11 +179,11 @@ appLogDir/
 - app/API/schema/export format 版本；
 - 创建时间、平台与可选说明。
 
-备份进行时需要定义写入冻结或快照边界，避免数据库引用与 Artifact objects 跨时点不一致。`attachments/`、`invoices/` 在业务实现后也必须进入同一清单。
+当前通过进程内维护写锁冻结普通 API、Focus heartbeat 和 Reminder 扫描，再依次完成 SQLite 快照与 Artifact 复制，避免数据库引用与 objects 跨时点不一致。只读 health 仍可响应；备份列表/校验由独立备份文件锁串行化。`attachments/`、`invoices/` 在业务实现后也必须进入同一清单。
 
 ### 验证与恢复
 
-目标流程：
+恢复仍未实现，目标流程：
 
 1. 在临时目录展开备份，验证 manifest、文件 size/hash，并校验 Artifact marker 的 format/database/store ID 与恢复数据库的 `workspace_identity` 一致。
 2. 打开临时数据库，运行 `quick_check`/`foreign_key_check` 与 schema 兼容检查。
@@ -190,18 +202,26 @@ appLogDir/
 
 后续再评审定时计划、保留数量、磁盘空间阈值、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
 
-## 目标状态与 API（未实现）
+## 当前 API 与后续作业状态
 
-建议作业状态：`queued / running / verifying / succeeded / failed / cancelled`。建议命令/API 在实现前另写 ADR，至少覆盖：创建备份、列出备份、验证、恢复、导出、导入预览/执行、取消和删除。PRD 出现这些名称不代表当前路由存在。
+当前创建和校验是同步本地命令，API 只在完整成功后返回；前端使用 180 秒超时并展示进行中状态。已实现：
 
-未来事件应最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
+| 方法与路径                        | 当前契约                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/backups`             | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                     |
+| `POST /api/v1/backups`            | 可选 `note`（最多 200 字）和 `Idempotency-Key`；冻结写入、创建、完整校验并原子发布 SQLite+Artifact 包                       |
+| `POST /api/v1/backups/:id/verify` | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact |
+
+恢复、删除、导出/导入尚无路由。数据量增长后再把长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
+
+当前备份事实只存在于备份包的 manifest，不写 `workflow_events`，避免把机器维护动作伪装成 Task/Project 业务事件。未来若增加诊断事件，最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
 
 ## 与其他模块协作
 
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、停写协调和重启；Sidecar 负责 SQLite 与 Artifact 一致性。
-- [设置](settings.md)：未来展示备份作业、路径选择和错误；当前没有真实入口。
+- [设置](settings.md)：当前发起手动创建、列出备份和重新校验；未来再接恢复确认、删除、路径选择和作业诊断。
 - [客户](clients.md) / [财务与发票](finance-invoices.md)：文件业务实现后扩展备份清单。
 
 ## 验收状态
@@ -219,14 +239,16 @@ appLogDir/
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
 - [x] Artifact 软删除和 Task 硬删除的文件/数据库补偿。
+- [x] 维护写锁覆盖普通 API、Focus heartbeat 和 Reminder 扫描，备份期间不会产生新的数据库/Artifact 写入。
+- [x] 创建同时包含 SQLite `VACUUM INTO` 一致性快照、身份 marker 和全部 active file Artifact 的同卷 staging 包，并在校验后原子发布。
+- [x] manifest 记录版本、身份、相对路径、size/SHA-256 与总量；临时数据库执行 quick/foreign-key/schema/identity/active Artifact 交叉校验，并拒绝缺失、篡改、额外文件和路径漂移。
+- [x] 创建幂等重放、列表、显式重新校验，以及设置页加载/空/错误/成功状态已有 API、客户端和组件测试。
 
-### 未实现
+### 仍未实现
 
-- [ ] 创建一个同时包含数据库与 Artifact 的一致性备份包。
-- [ ] 在临时数据库和目录完整验证备份。
 - [ ] 原子恢复及失败回滚。
 - [ ] 破坏性迁移前自动备份。
-- [ ] 导入/导出、保留策略、计划备份和跨版本兼容矩阵。
+- [ ] 备份删除、导入/导出、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
@@ -241,6 +263,9 @@ appLogDir/
 - [schema v14 Reminder 迁移](../../services/sidecar/internal/database/migrations/014_reminders.sql)
 - [schema v15 Inbox 编排迁移](../../services/sidecar/internal/database/migrations/015_inbox_task_orchestration.sql)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
+- [备份 API 与校验器](../../services/sidecar/internal/api/backups.go)
+- [备份 API 测试](../../services/sidecar/internal/api/backups_test.go)
+- [设置备份界面](../../apps/web/src/components/BackupSettings.tsx)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
 - [统一开发脚本](../../scripts/dev.mjs)

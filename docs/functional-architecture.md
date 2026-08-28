@@ -2,7 +2,7 @@
 
 > 文档版本：2.10
 > 日期：2026-08-28
-> 依据：[PRD v4.5](opc-workspace-PRD.md)
+> 依据：[PRD v4.6](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v17
 
 ## 1. 目的
@@ -52,6 +52,7 @@
 - React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选。
 - Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
 - SQLite 当前为 schema v17：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15 增加 Inbox 自动结清查询索引和数据库校验 trigger；schema v16 新增版本化 `app_settings`；schema v17 新增版本化 `task_saved_views`。v16→v17 不改写既有事实，也不创建 demo 数据。
+- 手动一致性备份已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份取得写锁；SQLite 快照、active Artifact、marker 和 manifest 在同卷 staging 中完整校验后原子发布。设置页只发起/展示数据管理 API，不复制备份事实。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -69,7 +70,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<artifact-id>`，下载前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
+- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime 和备份恢复/删除/导出，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
@@ -112,7 +113,7 @@
 | [专注](modules/focus.md)                   | 当前 Task                                                                     | 活动 Session 和有效工时                                                                                     | Task actual_minutes、今日/统计数据                                                      |
 | [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API 与 `/health` | 本地偏好界面、版本化非敏感设置事实、person 管理和只读运行诊断；头像受控文件、备份与完整诊断待实现           | 布局、主题、Focus 默认值、Actor、运行版本、备份和桌面行为                               |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/Inbox 索引                                                | 统一查找与快捷操作入口                                                                                      | 跳转详情或触发受控命令                                                                  |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移和受控 Artifact 一致性；备份、恢复、导入导出仍规划                                                | 当前文件安全；未来恢复后的完整应用状态和诊断包                                          |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移、受控 Artifact 一致性和手动备份创建/列表/校验；恢复、删除、导入导出仍规划                        | 当前文件安全与已校验备份；未来恢复后的完整应用状态和诊断包                              |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                       | 原生窗口、进程、权限、运行日志和发布                                                                        | 可运行、可诊断的本地应用环境                                                            |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                   | 财务与发票业务事实                                                                                          | 本地提醒、Inbox Item、客户聚合                                                          |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                       | 本地回访计划与结果                                                                                          | Inbox 到期项、客户活动                                                                  |
@@ -299,7 +300,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | ------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sidecar 启动失败                | 桌面平台                  | 展示全局恢复页；业务页面不得显示伪数据；shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止                                                                                                                                                                                |
 | Agent 中断                      | 本地 Agent + 自动化投影器 | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                         |
-| 备份失败                        | 数据管理                  | 通过桌面日志管线记录 request ID，并产生 system_maintenance Inbox Item                                                                                                                                                                                                                                         |
+| 备份失败                        | 数据管理                  | 当前同步命令保留现有数据库/Artifact、清理未发布 staging，并返回带 request ID 的错误；桌面日志落盘和 system_maintenance Inbox 投影仍未实现                                                                                                                                                                     |
 | 恢复进入 applying               | 数据管理 + 桌面平台       | 获取维护锁、阻止普通退出；强制终止后依据 journal 完成或回滚                                                                                                                                                                                                                                                   |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox          | 尚未实现；未来 open/tracking 时默认限制，允许删除后保留快照并显示来源不存在。不要与 schema v13 已交付的“关联 Task 删除互锁”混为一谈                                                                                                                                                                           |
 | 关联 Task 硬删除                | Task + Inbox              | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                   |

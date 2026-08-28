@@ -1154,3 +1154,25 @@ export interface CancelReminderInput {
   reason: string;
   expectedVersion: number;
 }
+
+export type BackupVerificationStatus = "verified" | "unverified" | "invalid";
+
+export interface BackupSummary {
+  id: string;
+  createdAt: string;
+  verifiedAt: string | null;
+  verificationStatus: BackupVerificationStatus;
+  note: string;
+  appVersion: string;
+  apiVersion: string;
+  schemaVersion: number;
+  artifactCount: number;
+  artifactBytes: number;
+  databaseBytes: number;
+  totalBytes: number;
+  error: string | null;
+}
+
+export interface CreateBackupInput {
+  note: string;
+}

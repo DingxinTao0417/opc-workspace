@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v4.5
+> **一人公司操作系统** · PRD v4.6
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v17
 
-> **v4.5 更新说明**：交付 T-07D 任务保存视图：schema v17 新增独立、空的 `task_saved_views`，最多 20 个、名称大小写不敏感唯一、定义 JSON/schema/version/大小受约束，不改写 Task 或 app_settings。API 提供严格定义规范化、版本化更新与确认删除；任务页支持保存完整条件、选择即应用、更新所选和二次确认删除，页码/选择/结果不进入视图。迁移、API、客户端契约和交互均有自动测试。
+> **v4.6 更新说明**：交付 T-04B 手动一致性备份第一段闭环，不增加 SQLite schema。Sidecar 新增专用 backup root、进程内维护写锁和同步创建/列表/校验 API；创建时用 `VACUUM INTO` 快照 SQLite，并复制身份 marker 与全部 active file Artifact，经 size/SHA-256、文件全集、`quick_check`、`foreign_key_check`、schema、database/store identity 和 Artifact 元数据交叉验证后从同卷 staging 原子发布。设置新增“数据与备份”，支持说明、创建、列表和重新校验；恢复、删除、JSON 导出和迁移前自动备份继续拆为后续安全纵切。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -226,7 +226,7 @@ opc-workspace 是**一人公司的全栈操作系统**，是独立创业者每�
 - **Tauri vs Electron**：Tauri 复用系统 WebView，应用运行时无需携带完整浏览器内核，更符合轻量桌面应用目标；实际包体、启动时间和内存以三平台验收测试为准。
 - **Sidecar vs Docker**：Sidecar 随安装包交付，用户无需安装 Docker Desktop，也不需要拉取镜像或管理容器；Tauri 统一负责启动、健康检查、异常提示和退出清理。
 - **Go vs Node.js**：Go 可编译为单二进制并按平台交叉构建，适合作为 Tauri Sidecar；业务逻辑与前端仍通过清晰的 API 边界解耦。
-- **SQLite vs PostgreSQL**：单用户场景不需要网络数据库。SQLite 文件保存在系统应用数据目录，使用 WAL 提升并发读取，并通过 Online Backup API 生成一致性备份。
+- **SQLite vs PostgreSQL**：单用户场景不需要网络数据库。SQLite 文件保存在系统应用数据目录，使用 WAL 提升并发读取；当前手动备份在维护写锁内通过 `VACUUM INTO` 生成一致快照，恢复和迁移前自动备份继续独立实现。
 
 ### 4.4 本地开发与构建
 
@@ -932,7 +932,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v4.5 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v4.6 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1371,7 +1371,8 @@ appDataDir/
 │  ├─ .trash/                # 删除事务补偿，不是用户回收站
 │  └─ .quarantine/           # 无引用受控候选隔离，不自动永久删除
 ├─ invoices/                 # 预留；发票 PDF 未实现
-├─ backups/                  # 预留；备份/恢复未实现
+├─ backups/                  # 已实现创建/列表/校验；恢复/删除/导出待实现
+│  └─ <backup-id>/           # manifest + database snapshot + marker + active Artifact objects
 └─ config/                   # 预留；部分设置仍在 localStorage
 
 appLogDir/
@@ -1393,13 +1394,14 @@ appLogDir/
 
 ### 7.3 备份策略
 
-版本边界：以下均为尚未实现的发布目标。v0.1 必须交付手动一致性备份、迁移前备份、基础 JSON 导出、数据库与 Artifact 清单/校验、临时恢复验证和原子替换；v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级导入工具。
+版本边界：手动一致性备份的创建、内部列表和完整校验已经交付；v0.1 仍须交付迁移前备份、基础 JSON 导出、恢复前临时验证和原子替换。v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级导入工具。
 
 1. **v0.1 一致性快照基础**
-   - 使用 SQLite Online Backup API 或 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件
-   - 支持用户手动创建和破坏性迁移前自动创建；v0.1 不提供每日调度
-   - 快照写入 `appDataDir/backups/`，每个备份包含 SQLite 一致性快照、active file Artifact objects，以及 app/API/schema 版本、文件清单和 SHA-256 manifest
-   - 创建后至少执行一次 `integrity_check`、`foreign_key_check` 和可打开性验证
+   - **已实现（手动）**：在维护写锁中使用 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件；普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁
+   - **部分实现**：用户可手动创建，破坏性迁移前自动创建仍待完成；v0.1 不提供每日调度
+   - **已实现**：快照先写 backup root 同卷 `.staging-<uuid>`；每个备份包含 SQLite 一致性快照、身份 marker、active file Artifact objects，以及 app/commit/API/schema 版本、相对路径、大小和 SHA-256 manifest
+   - **已实现**：发布前执行 `quick_check`、`foreign_key_check`、schema/identity/active Artifact 元数据交叉校验并拒绝缺失、篡改或额外文件；通过后原子重命名为 `backups/<backup-id>/`
+   - **已实现**：创建支持可选幂等键，列表展示上次校验事实，显式校验可重新逐字节验证并刷新 `verified_at`；绝对路径和幂等键明文不进入响应/manifest
 
 2. **v0.1 基础手动导出**
    - 随时导出带 `schema_version` 的完整 JSON 数据包，覆盖任务、Actor、分派、收件箱、提醒和审计事实
@@ -1467,7 +1469,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v4.5 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v4.6 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1519,7 +1521,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决        | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；非 Reminder 来源投影待实现                                                                                                                  |
 | 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                      | **Core A+B+C 已完成，D 延后**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总与共享 UI 已实现；历史、周报、Streak、原生通知/托盘/DND 待实现                                                                              |
 | 全局功能         | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查                         | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现                                                                                                                                                  |
-| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控 Artifact、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v17、重建迁移安全、版本化非敏感设置与任务保存视图事实，以及数据库身份强绑定、进程独占、耐久同步并带 staging/objects/trash/quarantine 的 Artifact store 已实现；一致性备份、恢复和导入导出仍待实现；每日计划和高级导入归 v0.3 |
+| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控 Artifact、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v17、重建迁移安全、设置/保存视图事实、数据库身份强绑定和 Artifact store 已实现；手动 SQLite+Artifact 备份创建/列表/完整校验已交付；迁移前备份、恢复、删除和导入导出仍待实现；每日计划和高级导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 
@@ -1560,7 +1562,8 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 - [ ] 生产环境 Sidecar 仅绑定 `127.0.0.1` 动态端口，未携带有效会话令牌的请求被拒绝
 - [ ] 应用正常退出后不遗留 Sidecar 进程；Sidecar 异常退出时可诊断并按策略重启
 - [ ] 应用升级、Sidecar 重启和程序文件替换后，`appDataDir` 中数据完整保留
-- [ ] WAL 模式下生成的备份可通过校验，并能在临时数据库中完整恢复
+- [x] WAL 模式下生成的手动备份通过 SQLite quick/foreign-key/schema/identity 与 Artifact size/SHA-256/全集校验
+- [ ] 已校验备份能在临时数据根演练并原子恢复，失败不覆盖当前数据
 - [ ] 首次启动后的所有核心功能在断网环境可用
 - [ ] 离线更新只接受签名有效、平台/架构正确且版本兼容的安装包；在线 Updater 不属于当前阶段
 - [x] ⌘K 命令面板可搜索已交付页面和完整 Task 集合，直达 Task 详情/指定设置模块，并具备焦点圈闭与关闭后恢复；多实体统一搜索仍待开发
@@ -1575,7 +1578,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/T-18B/T-18C、T-18D D1/D2、T-12 Focus Core A+B+C，以及 T-11A1/T-11A2/T-11A3/T-11B 手工 Inbox、已有 Task 关系和一次性 Reminder 已交付，但这不代表第 9.1 节的完整 MVP、Focus D、Inbox Task 拆分/分派/自动解决、非 Reminder 来源投影、Agent 或备份恢复已经交付。
+> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C、T-11A1/A2/A3/B/C/F、T-06A–H、T-07A–D 和 T-04B 手动备份创建/列表/校验已经交付，但这不代表第 9.1 节的完整 MVP、Focus D、非 Reminder 来源投影、Agent、备份恢复/删除/导出或迁移前自动备份已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1631,7 +1634,7 @@ pnpm dev
 `scripts/dev.mjs` 的实际流程：
 
 1. 检查 Go 和 pnpm，创建 `.local/dev-data/` 与其 `artifacts/` 子目录。
-2. 以 `--dev --db .local/dev-data/opc-workspace.db --artifacts .local/dev-data/artifacts --port 9876` 启动 Sidecar。
+2. 以 `--dev --db .local/dev-data/opc-workspace.db --artifacts .local/dev-data/artifacts --backups .local/dev-data/backups --port 9876` 启动 Sidecar。
 3. 注入开发会话令牌和精确 Origin 白名单，轮询带鉴权的 `/health`。
 4. Sidecar 就绪后启动 Vite；Vite 固定监听 `127.0.0.1:1420`，代理 `/api` 和 `/health`。
 5. `pnpm dev` 再启动 `tauri dev`，通过 `OPC_SIDECAR_URL` 复用同一个开发 Sidecar，避免重复打开数据库。
@@ -1683,6 +1686,7 @@ pnpm dev
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成          | 窗口、单实例、动态端口、令牌、ready/health、退出清理                                                                                                                                               |
 | T-03 Go 健康检查与 API 基础          | 已完成            | 版本化路由、安全中间件、统一错误和健康检查                                                                                                                                                         |
 | T-04 SQLite 初始化与迁移             | 已完成            | schema v17、PRAGMA、嵌入迁移、demo 清理、Project/Task/Actor、六状态、workspace identity、Submission/Artifact、Client、Focus Session/interval/精确 Task ledger、Inbox、Reminder、app_settings 与 task_saved_views |
+| T-04B 手动一致性备份                | 第一段完成        | 专用 backup root、维护写锁、SQLite `VACUUM INTO`、active Artifact+marker+manifest、完整校验、同卷原子发布、创建幂等、列表/重新校验及设置 UI 已交付；恢复/删除/导出和迁移前自动备份待后续纵切 |
 | T-05 前端 AppShell 与原型复刻        | 已完成            | Linear 深色三栏框架、导航、响应式和公共组件                                                                                                                                                        |
 | T-06 今日工作台                      | 部分完成          | 日期切换/回到今天、真实日期分组与完整分页、真实任务/统计、共享任务详情、活动 Focus 概览、IANA 当地日 completed-only Focus 汇总和反馈状态                                                           |
 | T-07 任务管理纵向闭环                | 部分完成          | 任务事实、关系/标签、版本/ETag、稳定分页、批量/排序、Assignment、六状态/时间线、D2 manual Submission/Artifact/受控文件及 Focus 自动工时已交付；T-07A–D 已交付任务页计划组拖拽、日期/客户筛选和版本化保存视图；任务看板待 v0.2 |
@@ -1692,7 +1696,7 @@ pnpm dev
 | T-11 收件箱与工作编排中心            | 部分完成          | T-11A1/A2/A3/B/C/F 已交付受理分诊、Reminder、Task 关系与拆分编排、Today/Sidebar 运营计数；非 Reminder 来源投影待实现                                                                               |
 | T-12 专注设置与全局计时              | Core 完成，D 延后 | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时、Today 汇总与共享前端已交付；D 的历史/周报/Streak/通知/托盘/DND 延后                              |
 | T-13 命令面板与基础反馈              | 部分完成          | WebView 快捷键、已交付页面命令、服务端 Task 搜索/详情打开、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护及加载/错误/重试/空状态                                                          |
-| T-14 设置持久化                      | 核心闭环完成      | schema v16、四模块严格 schema、原子 PATCH、乐观锁、Query committed、启动门禁、按变化保存和旧 localStorage 缺失模块迁移已交付；受控头像文件待开发                                                   |
+| T-14 设置持久化                      | 核心闭环完成      | schema v16、四模块严格 schema、原子 PATCH、乐观锁、Query committed、启动门禁、旧值迁移和数据备份模块已交付；受控头像文件、备份恢复/删除/导出待开发                                                |
 | T-20 测试、构建与桌面验收            | 部分完成          | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制                                                                                                                                    |
 | T-15 AI 助手                         | 未开始            | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码                                                                                                                                   |
 | T-16 本地知识库                      | 未开始            | 已登记导入、FTS 检索、引用与删除要求，尚无数据结构或页面                                                                                                                                           |
@@ -1730,7 +1734,15 @@ pnpm dev
 - **用户流程**：首次启动自动创建数据库并迁移；后续启动只执行尚未应用的版本；开发和正式数据互不影响。
 - **实现方法**：GORM 使用纯 Go SQLite 驱动和单物理连接，启用外键、WAL 与 5 秒 busy timeout。schema v1–v14 依次建立核心、Project、Task、Actor/Assignment/Event、Submission/Artifact、Client、Focus、Inbox、Inbox–Task 关系与 Reminder；schema v15 增加 Inbox 自动结清索引和数据库校验 trigger；schema v16 新增空的版本化 `app_settings`；schema v17 新增空的版本化 `task_saved_views` 及 JSON/大小/schema/version/唯一名称约束，不改写既有模块事实。不可变 `database_id`、一次性 `artifact_store_id` 与 marker 的 database/store ID 双向绑定，阻止错库接管或数据库静默换文件根。标有 foreign-keys-off 的迁移在同连接事务外关外键、事务内校验 `foreign_key_check`，再提交或整体回滚并恢复。开发数据库/Artifact 位于 `.local/dev-data/`，生产数据位于 Tauri `appDataDir`。
 - **关键路径**：`services/sidecar/internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/017_task_saved_views.sql`。
-- **验证/剩余**：迁移测试覆盖连续旧版本数据保留、Task/Project/Client 版本与关系、Submission/Artifact 约束、Client 空值/索引/trigger、Focus interval/ledger，以及 v16→v17 保存视图事实保留和数据库约束。产品化自动备份、一致性快照、恢复和导入导出仍未实现。
+- **验证/剩余**：迁移测试覆盖连续旧版本数据保留、Task/Project/Client 版本与关系、Submission/Artifact 约束、Client 空值/索引/trigger、Focus interval/ledger，以及 v16→v17 保存视图事实保留和数据库约束。手动一致性快照见 T-04B；迁移前自动备份、恢复和导入导出仍未实现。
+
+#### 10.4.4A T-04B 手动一致性备份
+
+- **需求映射**：7.1–7.4、9.1、10.3.3。
+- **用户流程**：设置 → 数据与备份读取真实本地包；用户可填写说明并创建，成功后查看创建/校验时间、schema、Artifact 数和总大小，也可对任一包重新执行完整校验。
+- **实现方法**：`--backups` / `OPC_BACKUP_DIR` 声明与数据库同级且不和 Artifact 重叠的安全 root。所有普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份取得写锁；用 `VACUUM INTO` 创建 WAL 一致性 SQLite 快照，复制数据库绑定 marker 与数据库当前全部 active file Artifact，在同卷 `.staging-<uuid>` 中校验预期文件全集、size/SHA-256、`quick_check`、`foreign_key_check`、schema、database/store identity 和 Artifact 元数据，再原子重命名为 UUID 包。创建可选 Idempotency-Key 只以 hash 写 manifest，模糊响应可安全重放。
+- **关键路径**：`services/sidecar/internal/api/backups.go`、`backups_test.go`、`internal/config/config.go`、`scripts/dev.mjs`、`apps/web/src/components/BackupSettings.tsx`、`api/client.ts`、`api/hooks.ts`。
+- **验证/剩余**：Go 集成测试覆盖含真实 file Artifact 的快照边界、包结构、列表、幂等重放/冲突、显式校验、额外文件和数据库篡改拒绝、未配置状态及输入校验；前端覆盖严格契约、API 序列化和设置入口交互。恢复、删除、JSON 导出、迁移前备份、大数据量进度/取消和真实桌面磁盘故障仍未实现。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -1834,7 +1846,7 @@ pnpm dev
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v4.5 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v4.6 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -1945,7 +1957,7 @@ pnpm build:desktop
 3. **收口客户基础事实并推进真实扩展**：schema v10、Client CRUD/搜索/删除约束、基础详情和 Project 客户关联已交付；继续做真实浏览器/大数据量验收，再按独立纵切实现客户活动、附件和 Actor 显式关联。回访与财务仍属于 v0.4。
 4. **继续收件箱人工编排**：T-11A1/T-11B 的手工受理分诊与 T-11A2 的已有 Task 关系、实时进度、软解除、状态联动和删除互锁已交付；下一步可独立实现 Reminder，再做 T-11C 批量拆分/Assignment/统一 reconciliation 与自动解决，最后接项目产出、任务临期/阻塞和系统故障来源投影。
 5. **扩展 Focus D**：Core A+B+C 的持久化、恢复、精确工时和 Today 统计已交付；后续独立实现 Session 历史、周报/Streak/高级分析和经平台验收的原生通知、托盘、DND 引导。
-6. **补数据安全链路**：一致性备份、恢复、导入导出、Task Artifact 归档、维护锁和诊断包内容选择。
+6. **补数据安全链路**：手动一致性备份的创建、列表、完整校验、维护写锁与原子发布已经交付；下一步依次实现临时根恢复演练与原子替换、确认删除、基础 JSON 导出、迁移前自动备份和诊断包内容选择。
 7. **补桌面可靠性与发布能力**：Sidecar 故障恢复、统一日志落盘/轮转、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页逐项最小授权实现。
 8. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、复用 D2 产出命令、取消/重试和审核返工。
 9. **实现本地规划与预设自动化**：路线图、内容日历和规则引擎只创建本地收件箱项/任务，不自动对外发送。
@@ -1965,8 +1977,8 @@ pnpm build:desktop
 | 5    | 收件箱人工编排            | **T-11A1/A2/A3/B/C/F 已交付**：schema v12–v15 的 Inbox/关系/Reminder/编排事实，manual 受理、Task 拆分分派、自动结清/重开和实时运营计数；其他来源投影待开发                       | **已交付**：三视图、详情/分诊、Reminder、Task 关系/拆分、强制例外、风险筛选、Sidebar 徽标和 Today 风险卡                                                   | 当前覆盖离线、迁移、幂等/并发、事务回滚、实时进度、Task 删除互锁、Reminder 去重、拆分全回滚、自动结清/重开和计数口径；完整纵切仍需其他来源去重与删除可解释                                  |
 | 6    | 今日                      | 按本地日期、逾期和本周范围查询；完整计划组排序事务；版本化单任务改期/生命周期/删除命令；Focus Session 幂等创建；按 IANA 时区计算 UTC 边界；收件箱派生计数                        | 日期导航、真实分组、按钮/同日/跨日期拖拽、空精确日期/未排期落点、任意日期安排、安全执行快捷操作及编辑/确认删除入口已交付；财务卡标后续                     | 已覆盖完整分页、排序集合/版本、终态槽位、跨组乐观回滚、空组、改期冲突/模糊响应、排序部分成功、快捷策略和删除保护；仍需真实浏览器验证 hover/focus、日期控件、指针拖拽、窄屏及午夜/夏令时边界 |
 | 7    | 专注                      | **Core A+B 已交付**：A 为 schema v11 Session/interval/ledger 事实迁移；B 为状态 API、绝对时间、心跳/恢复、幂等并发、Task 工时事务与 IANA Today 统计                              | **Core C 已交付**：任务选择、无绑定确认、共享活动快照、恢复弹窗、设置隔离与循环/休息；历史/周报/Streak/系统集成为 D                                        | 自动化已覆盖跨午夜/DST、并发/重复 stop、恢复、余秒和事务；真实三平台后台/睡眠及 D 能力后续验收                                                                                              |
-| 8    | 设置与命令面板            | Actor API、health/version、schema v16 app_settings、GET/PATCH、Query committed 和旧 localStorage 缺失模块迁移已接入；头像文件引用和统一 search API 待实现                        | “人员与责任”支持 owner/person；设置支持启动加载、即时预览、按变化保存、取消恢复和错误保留，“关于”展示真实运行事实；通知、数据/备份、快捷键和完整诊断待实现 | 已覆盖严格契约、原子保存/回滚、乐观锁、启动门禁、兼容迁移、失败草稿、Focus 隔离、Task 搜索、IME、焦点恢复和 health；仍需真实 WebView/窄屏验收                                               |
-| 9    | 数据安全                  | v0.1 一致性快照、manifest/SHA-256、迁移前备份、临时库验证、原子恢复和基础导入导出；v0.3 增加计划/映射                                                                            | 手动备份/恢复、进度、确认、失败诊断；v0.3 增加外部目录和高级导入                                                                                           | WAL 活跃、低磁盘、损坏/未知 schema/校验失败均不覆盖当前数据；备份实际恢复验证                                                                                                               |
+| 8    | 设置与命令面板            | Actor API、health/version、schema v16 app_settings、GET/PATCH、Query committed、旧 localStorage 缺失模块迁移和手动备份 API 已接入；头像文件引用和统一 search API 待实现         | “人员与责任”支持 owner/person；设置支持 7 个左栏模块、启动加载、即时预览、按变化保存、取消恢复和错误保留；“关于”展示真实运行事实，“数据与备份”支持创建、列表和重新校验 | 已覆盖严格契约、原子保存/回滚、乐观锁、启动门禁、兼容迁移、失败草稿、Focus 隔离、备份交互、Task 搜索、IME、焦点恢复和 health；仍需真实 WebView/窄屏验收，通知/快捷键/完整诊断仍为说明态 |
+| 9    | 数据安全                  | 已交付 v0.1 手动一致性快照、manifest/SHA-256、维护写锁、临时库完整验证和同卷原子发布；迁移前备份、原子恢复、删除和基础 JSON 导出待实现；v0.3 增加计划/映射                         | 已交付手动创建、列表、重新校验、进行中与失败诊断；恢复、删除和导出入口将在对应安全纵切实现时开放                                                           | 已覆盖 WAL 活跃、真实 Artifact、幂等、篡改/额外文件/未知包拒绝且不改当前数据；仍须覆盖备份实际恢复、低磁盘和桌面磁盘故障                                                                     |
 | 10   | 桌面与发布                | Sidecar 自动/手动恢复、孤儿治理、日志、版本兼容；托盘/通知/全局快捷键/文件对话框/自启/签名离线更新；三平台 CI                                                                    | 全局服务状态、恢复页、托盘语义、权限引导、离线安装/更新反馈                                                                                                | 崩溃/超时/退出无残留；签名、公证、干净机、性能和数据保留逐平台验证后才宣称支持                                                                                                              |
 | 11   | 本地 Agent（v0.2）        | Adapter ADR、专用鉴权、短时令牌、跨平台沙箱/网络边界、Agent Run、取消/重试/中断恢复                                                                                              | 只显示健康且隔离已验证的 Agent；启动、运行、输出、失败、重试、待验收和返工                                                                                 | 无任意 Shell/数据库/目录；禁网无法验证时执行保持禁用；成功进入 waiting_review；产出校验和历史完整                                                                                           |
 | 12   | 预设自动化（v0.2）        | 规则和执行记录表，以 Workflow Event 触发，只允许创建本地 Inbox Item/Task/提醒，`rule_id + event_id` 去重                                                                         | 规则开关、下一次触发、运行日志和失败详情                                                                                                                   | 用户时区、漏执行补偿、去重、禁用、失败重试和递归循环防护；不自动对外发送                                                                                                                    |
@@ -1989,7 +2001,7 @@ pnpm build:desktop
   → 已交付：手工 Inbox Item / 受理 / 分诊 / 归档事件
   → 已交付：Inbox 已有 Task 活动/历史关系；Reminder / 来源投影 / 拆分 / 人工分派与自动解决继续
   → 已交付：Focus Core 持久化/工时/Today 统计与今日完整日期编排、执行快捷操作和编辑/确认删除入口；真实浏览器验收继续
-  → 备份恢复、桌面日志和故障恢复
+  → 已交付手动备份创建/列表/完整校验；继续备份恢复、桌面日志和故障恢复
   → 本地 Agent
   → 预设自动化与后续业务事件源
 ```
@@ -2133,6 +2145,9 @@ pnpm build:desktop
 | POST                 | /api/v1/focus-sessions/:id/stop        | 完成并幂等累计绑定 Task 工时                                                             | 已实现；active/paused，强制 `If-Match`，支持 `Idempotency-Key`；匹配的 completed 终态可稳定重放且只记账一次                                                                                                                                              |
 | POST                 | /api/v1/focus-sessions/:id/cancel      | 取消且不累计工时                                                                         | 已实现；active/paused，强制 `If-Match`，支持 `Idempotency-Key`；匹配的 cancelled 终态可稳定重放                                                                                                                                                          |
 | GET / PATCH          | /api/v1/settings                       | 查询、更新版本化非敏感设置                                                               | 已实现；前端启动、保存与旧值兼容迁移均已接入                                                                                                                                                                                                             |
+| GET                  | /api/v1/backups                        | 列出本机已发布备份包和最近完整校验结果                                                   | 已实现；只接受 canonical UUID 包，损坏 manifest 以 invalid 项返回，不暴露本机绝对路径                                                                                                                                                                   |
+| POST                 | /api/v1/backups                        | 创建并完整校验 SQLite 与 active file Artifact 一致性备份                                 | 已实现；维护写锁内同步执行，支持最多 200 字说明和 `Idempotency-Key`；经完整校验后才从同卷 staging 原子发布，失败不改变当前数据                                                                                                                            |
+| POST                 | /api/v1/backups/:id/verify             | 对指定备份包重新执行完整校验                                                             | 已实现；校验 manifest/预期文件全集、size/SHA-256、marker、SQLite quick/foreign-key/schema/identity 和 Artifact 元数据，仅成功时刷新 `verified_at`                                                                                                         |
 | GET                  | /api/v1/stats/today?date=&timezone=    | 今日任务和专注统计                                                                       | 已实现；IANA 本地日、DST 安全 interval overlap、completed-only；兼容 `timezone_offset_minutes`，未指定按 UTC                                                                                                                                             |
 | GET                  | /api/v1/stats/income                   | 收入/支出与净现金流统计                                                                  | v0.4 规划中                                                                                                                                                                                                                                              |
 | GET                  | /api/v1/search?q=                      | 统一多实体全局搜索                                                                       | 规划中；当前 Task Provider 复用 `/api/v1/tasks?q=` 在完整任务集合中查询并直达详情，Project/Client/Inbox 尚未统一                                                                                                                                         |
@@ -2221,3 +2236,4 @@ pnpm build:desktop
 | v4.3     | 2026-08-28 | 交付 T-07B 任务页日期范围筛选：计划精确日期与计划范围互斥，计划/截止起止条件进入稳定服务端分页；Web 对倒置区间即时标错并停用查询，API 校验格式与顺序并按日期部分筛选含时间截止值；补齐 due 范围客户端契约、合法计划/截止范围、序列化与非法范围测试；客户筛选和保存视图仍待开发 |
 | v4.4     | 2026-08-28 | 交付 T-07C 任务客户筛选：不复制客户事实，API 严格校验 client_id 并以 Task→Project→Client EXISTS 条件保持稳定计数/排序/分页；Web 复用真实 Client options，客户与项目等条件显式 AND，纳入分页、条件计数、清除和排序门禁；接口、序列化与页面测试覆盖，保存视图仍待开发 |
 | v4.5     | 2026-08-28 | 将基线推进到 schema v17，交付 T-07D 任务保存视图：独立空表、20 项上限、名称唯一、JSON/schema/version/大小约束；API 严格规范化完整筛选定义并提供版本化更新/确认删除；Web 支持保存、选择即应用、更新所选和二次确认删除，不保存页码/选择/结果；迁移、API、客户端与交互测试覆盖 |
+| v4.6     | 2026-08-28 | 交付 T-04B 手动一致性备份第一段：专用 backup root 和维护写锁，`VACUUM INTO` SQLite 快照、active file Artifact 与 marker/manifest 打包，经文件全集、哈希、数据库事实和身份完整校验后同卷原子发布；API 与设置页支持幂等创建、列表和重新校验；恢复、删除、JSON 导出和迁移前自动备份继续独立实现 |

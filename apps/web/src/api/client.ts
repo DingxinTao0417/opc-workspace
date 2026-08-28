@@ -9,6 +9,8 @@ import type {
   ActorListResult,
   ActorSummary,
   AssignmentRole,
+  BackupSummary,
+  BackupVerificationStatus,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
   Client,
@@ -17,6 +19,7 @@ import type {
   ClientListResult,
   ClientStatus,
   CreateFocusSessionInput,
+  CreateBackupInput,
   CreateReminderInput,
   CreatePersonActorInput,
   CreateTaskSavedViewInput,
@@ -130,6 +133,7 @@ const DEV_TOKEN =
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 const ARTIFACT_TRANSFER_TIMEOUT_MS = 120_000;
+const BACKUP_OPERATION_TIMEOUT_MS = 180_000;
 const MAX_JSON_REQUEST_BYTES = 1_024 * 1_024;
 const MAX_ARTIFACT_FILE_BYTES = 50 * 1_024 * 1_024;
 const MAX_MULTIPART_REQUEST_BYTES = 100 * 1_024 * 1_024;
@@ -3602,6 +3606,104 @@ export async function deleteTaskSavedView(
     return invalidResponse("任务保存视图删除响应格式无效");
   }
   return { deletedId: String(body.deleted_id ?? body.deletedId ?? id) };
+}
+
+export function normalizeBackupSummary(value: unknown): BackupSummary {
+  if (!isRecord(value)) {
+    return invalidResponse("本地备份响应格式无效");
+  }
+  const id = stringField(value, "id");
+  const createdAt = stringField(value, "created_at", "createdAt") ?? "";
+  const verifiedAt = fieldValue(value, "verified_at", "verifiedAt");
+  const verificationStatus = fieldValue(
+    value,
+    "verification_status",
+    "verificationStatus",
+  );
+  const note = fieldValue(value, "note");
+  const error = fieldValue(value, "error");
+  const appVersion = fieldValue(value, "app_version", "appVersion");
+  const apiVersion = fieldValue(value, "api_version", "apiVersion");
+  if (
+    !id ||
+    (createdAt === "" && verificationStatus !== "invalid") ||
+    !["verified", "unverified", "invalid"].includes(
+      String(verificationStatus),
+    ) ||
+    (verifiedAt !== undefined && typeof verifiedAt !== "string") ||
+    (note !== undefined && typeof note !== "string") ||
+    (error !== undefined && typeof error !== "string") ||
+    (appVersion !== undefined && typeof appVersion !== "string") ||
+    (apiVersion !== undefined && typeof apiVersion !== "string")
+  ) {
+    return invalidResponse("本地备份响应格式无效");
+  }
+  const invalid = verificationStatus === "invalid";
+  const readCount = (snake: string, camel: string, label: string) =>
+    nonNegativeInteger(
+      fieldValue(value, snake, camel),
+      label,
+      invalid ? 0 : undefined,
+    );
+  return {
+    id,
+    createdAt,
+    verifiedAt:
+      typeof verifiedAt === "string" && verifiedAt ? verifiedAt : null,
+    verificationStatus: verificationStatus as BackupVerificationStatus,
+    note: typeof note === "string" ? note : "",
+    appVersion: typeof appVersion === "string" ? appVersion : "",
+    apiVersion: typeof apiVersion === "string" ? apiVersion : "",
+    schemaVersion: readCount(
+      "schema_version",
+      "schemaVersion",
+      "备份数据库版本",
+    ),
+    artifactCount: readCount("artifact_count", "artifactCount", "备份文件数量"),
+    artifactBytes: readCount("artifact_bytes", "artifactBytes", "备份文件大小"),
+    databaseBytes: readCount(
+      "database_bytes",
+      "databaseBytes",
+      "备份数据库大小",
+    ),
+    totalBytes: readCount("total_bytes", "totalBytes", "备份总大小"),
+    error: typeof error === "string" && error ? error : null,
+  };
+}
+
+export async function getBackups(): Promise<BackupSummary[]> {
+  const payload = await apiRequest<unknown>("/api/v1/backups");
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("本地备份列表响应格式无效");
+  }
+  return payload.data.map(normalizeBackupSummary);
+}
+
+export async function createBackup(
+  input: CreateBackupInput,
+  idempotencyKey: string,
+): Promise<BackupSummary> {
+  const payload = await apiRequest<unknown>(
+    "/api/v1/backups",
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ note: input.note }),
+    },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeBackupSummary(body);
+}
+
+export async function verifyBackup(id: string): Promise<BackupSummary> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/backups/${encodeURIComponent(id)}/verify`,
+    { method: "POST", body: "{}" },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeBackupSummary(body);
 }
 
 export async function getTags(

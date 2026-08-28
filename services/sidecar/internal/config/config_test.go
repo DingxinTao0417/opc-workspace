@@ -26,6 +26,46 @@ func TestParseAllowsDynamicPortAndDevDatabase(t *testing.T) {
 	if cfg.ArtifactDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "artifacts") {
 		t.Fatalf("ArtifactDir = %q, want database sibling artifacts", cfg.ArtifactDir)
 	}
+	if cfg.BackupDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "backups") {
+		t.Fatalf("BackupDir = %q, want database sibling backups", cfg.BackupDir)
+	}
+}
+
+func TestParseAcceptsExplicitBackupDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "verified-backups")
+	cfg, err := Parse([]string{"--dev", "--backups", directory}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	want, _ := filepath.Abs(directory)
+	if cfg.BackupDir != want {
+		t.Fatalf("BackupDir = %q, want %q", cfg.BackupDir, want)
+	}
+}
+
+func TestParseRejectsOverlappingBackupAndArtifactDirectories(t *testing.T) {
+	root := t.TempDir()
+	_, err := Parse([]string{
+		"--dev",
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--backups", filepath.Join(root, "artifacts", "backups"),
+	}, func(string) string { return "" })
+	if err == nil {
+		t.Fatal("expected overlapping directories error")
+	}
+}
+
+func TestParseRejectsBackupDirectoryContainingDatabase(t *testing.T) {
+	root := t.TempDir()
+	_, err := Parse([]string{
+		"--dev",
+		"--db", filepath.Join(root, "data", "workspace.db"),
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--backups", root,
+	}, func(string) string { return "" })
+	if err == nil {
+		t.Fatal("expected backup directory containing database error")
+	}
 }
 
 func TestParseAcceptsExplicitArtifactDirectory(t *testing.T) {

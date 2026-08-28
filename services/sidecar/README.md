@@ -8,7 +8,7 @@ From this directory:
 
 ```powershell
 $env:OPC_SESSION_TOKEN = 'opc-workspace-local-dev'
-go run ./cmd/server --dev --db ../../.local/dev-data/opc-workspace.db --artifacts ../../.local/dev-data/artifacts --port 9876
+go run ./cmd/server --dev --db ../../.local/dev-data/opc-workspace.db --artifacts ../../.local/dev-data/artifacts --backups ../../.local/dev-data/backups --port 9876
 ```
 
 Development starts with empty business data. `--seed` is an explicit, idempotent development-only option and is rejected without `--dev`. Production Tauri supplies absolute app-data paths and uses `--port 0`, allowing the operating system to choose an available loopback port.
@@ -17,13 +17,14 @@ Development starts with empty business data. `--seed` is an explicit, idempotent
 | ------------------------ | ------------------- | --------------------- |
 | SQLite path              | `--db`              | `OPC_DB_PATH`         |
 | Controlled Artifact root | `--artifacts`       | `OPC_ARTIFACT_DIR`    |
+| Verified backup root     | `--backups`         | `OPC_BACKUP_DIR`      |
 | Loopback port            | `--port`            | `OPC_PORT`            |
 | Session token            | —                   | `OPC_SESSION_TOKEN`   |
 | Exact Origin allowlist   | `--allowed-origins` | `OPC_ALLOWED_ORIGINS` |
 | Development mode         | `--dev`             | `OPC_DEV`             |
 | Development seed         | `--seed`            | `OPC_DEV_SEED`        |
 
-When `--artifacts` is omitted for a file-backed database, the default is an `artifacts` sibling of the database. An in-memory database requires an explicit Artifact directory. The root cannot be a filesystem volume root or the database file.
+When omitted for a file-backed database, Artifact and backup roots default to `artifacts` and `backups` siblings of the database. An in-memory database requires both directories explicitly, but verified backup creation still requires a file-backed database. The roots cannot be filesystem volume roots, the database file, or overlap each other.
 
 Outside explicit development mode a non-empty session token is required. Every endpoint, including `/health`, then requires `Authorization: Bearer <token>`. Browser requests must carry an exact allowlisted `Origin`; native Tauri probes may omit browser fetch headers. The process binds only `127.0.0.1`.
 
@@ -41,7 +42,7 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "version": "0.1.0",
   "app_version": "0.1.0",
   "api_version": "v1",
-  "schema_version": 16
+  "schema_version": 17
 }
 ```
 
@@ -63,10 +64,14 @@ The Sidecar exposes:
 - one-time local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, periodic due scanning, and exactly-once Reminder-to-Inbox projection;
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands and today aggregation;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
+- synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active file Artifact through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
 
 ```text
 GET    /api/v1/settings
 PATCH  /api/v1/settings
+GET    /api/v1/backups
+POST   /api/v1/backups
+POST   /api/v1/backups/:id/verify
 POST   /api/v1/tasks/:id/submit-output
 POST   /api/v1/tasks/:id/review
 GET    /api/v1/tasks/:id/submissions
@@ -211,4 +216,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v4.5 / schema v17 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Settings frontend migration, Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v4.6 / schema v17 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, verified SQLite+Artifact backup creation/list/replay/re-verification/tamper rejection, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Settings frontend migration, Client activities/attachments, follow-ups, finance, backup restore/delete/JSON export, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

@@ -43,6 +43,7 @@ const settingsCommands: {
   { id: "settings-appearance", label: "外观设置", module: "appearance" },
   { id: "settings-focus", label: "专注设置", module: "focus" },
   { id: "settings-actors", label: "人员与责任设置", module: "actors" },
+  { id: "settings-data", label: "数据与备份", module: "data" },
   { id: "settings-about", label: "关于", module: "about" },
 ];
 

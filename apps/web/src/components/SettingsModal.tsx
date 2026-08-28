@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   CheckCircle2,
+  DatabaseBackup,
   Focus,
   ImagePlus,
   Info,
@@ -49,6 +50,7 @@ import {
 import { useUiStore, type SettingsModule } from "../store/ui";
 import type { AppSettingUpdate } from "../types/models";
 import { ActorSettings } from "./ActorSettings";
+import { BackupSettings } from "./BackupSettings";
 import { Modal } from "./Modal";
 
 interface SettingsModalProps {
@@ -61,6 +63,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "appearance", label: "外观", icon: Palette },
   { id: "focus", label: "专注", icon: Focus },
   { id: "actors", label: "人员与责任", icon: UsersRound },
+  { id: "data", label: "数据与备份", icon: DatabaseBackup },
   { id: "about", label: "关于", icon: Info },
 ];
 
@@ -662,6 +665,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       return <ActorSettings />;
     }
 
+    if (activeModule === "data") {
+      return <BackupSettings />;
+    }
+
     if (healthQuery.isPending) {
       return (
         <>
@@ -792,7 +799,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   return (
     <Modal
       footer={
-        activeModule === "actors" || activeModule === "about" ? (
+        activeModule === "actors" ||
+        activeModule === "data" ||
+        activeModule === "about" ? (
           <>
             {activeModule === "actors" ? (
               <span className="settings-actor-footer-note">
@@ -880,6 +889,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         >
           {moduleContent}
           {activeModule !== "actors" &&
+          activeModule !== "data" &&
           activeModule !== "about" &&
           !settingsQuery.data &&
           settingsQuery.isError ? (
@@ -892,6 +902,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </div>
           ) : null}
           {activeModule !== "actors" &&
+          activeModule !== "data" &&
           activeModule !== "about" &&
           saveError ? (
             <div className="settings-state-error" role="alert">

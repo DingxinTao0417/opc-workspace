@@ -26,6 +26,8 @@ type Options struct {
 	AllowedOrigins         []string
 	Logger                 *log.Logger
 	ArtifactDir            string
+	DatabasePath           string
+	BackupDir              string
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration
 	ReminderScanInterval   time.Duration
@@ -35,6 +37,8 @@ type API struct {
 	db            *gorm.DB
 	options       Options
 	artifactStore *artifactStore
+	backupStore   *backupStore
+	maintenance   *sync.RWMutex
 }
 
 type Router struct {
@@ -144,7 +148,21 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("recover active Focus Sessions: %w", err)
 	}
-	service := &API{db: db, options: options, artifactStore: artifacts}
+	var backups *backupStore
+	if options.BackupDir != "" || options.DatabasePath != "" {
+		var err error
+		backups, err = newBackupStore(options.BackupDir, options.DatabasePath, artifacts)
+		if err != nil {
+			if artifacts != nil {
+				_ = artifacts.close()
+			}
+			return nil, err
+		}
+	}
+	service := &API{
+		db: db, options: options, artifactStore: artifacts, backupStore: backups,
+		maintenance: &sync.RWMutex{},
+	}
 	if err := service.projectDueReminders(context.Background()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
@@ -153,7 +171,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
+	v1.Use(service.maintenanceReadMiddleware())
 	{
+		v1.GET("/backups", service.listBackups)
+		v1.POST("/backups", service.createBackup)
+		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.GET("/settings", service.listSettings)
 		v1.PATCH("/settings", service.updateSettings)
 		v1.GET("/actors", service.listActors)
@@ -252,7 +274,10 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if err := service.refreshActiveFocusHeartbeat(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+					service.maintenance.RLock()
+					err := service.refreshActiveFocusHeartbeat(ctx)
+					service.maintenance.RUnlock()
+					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
 						options.Logger.Printf("Focus Session heartbeat failed: %v", err)
 					}
 				}
@@ -272,7 +297,10 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if err := service.projectDueReminders(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+					service.maintenance.RLock()
+					err := service.projectDueReminders(ctx)
+					service.maintenance.RUnlock()
+					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
 						options.Logger.Printf("Reminder scan failed: %v", err)
 					}
 				}
