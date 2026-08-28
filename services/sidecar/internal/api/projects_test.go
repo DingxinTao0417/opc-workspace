@@ -78,6 +78,18 @@ func responseErrorCode(t *testing.T, body []byte) string {
 	return response.Code
 }
 
+func decodeProjectEvents(t *testing.T, body []byte) ([]projectWorkflowEventOutput, projectWorkflowEventMeta) {
+	t.Helper()
+	var envelope struct {
+		Data []projectWorkflowEventOutput `json:"data"`
+		Meta projectWorkflowEventMeta     `json:"meta"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode project events: %v", err)
+	}
+	return envelope.Data, envelope.Meta
+}
+
 func insertTestClient(t *testing.T, store *database.Store, id, name string) {
 	t.Helper()
 	if err := store.DB.Exec(`
@@ -240,6 +252,172 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 	)
 	if allClientProjects.Code != http.StatusOK || !strings.Contains(allClientProjects.Body.String(), created.ID) {
 		t.Fatalf("complete client project list misses archived project: %d %s", allClientProjects.Code, allClientProjects.Body.String())
+	}
+}
+
+func TestProjectWorkflowEventsRecordMutationsAndPaginate(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	headers := map[string]string{"Idempotency-Key": "project-event-create"}
+	created := createProjectForTest(t, router, `{"name":"活动时间线项目","description":"第一版"}`, headers)
+
+	// A safe create replay returns its original snapshot and must not append a second event.
+	replayed := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/projects",
+		[]byte(`{"name":"活动时间线项目","description":"第一版"}`),
+		headers,
+	)
+	if replayed.Code != http.StatusCreated || replayed.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("project create replay = %d: %s", replayed.Code, replayed.Body.String())
+	}
+
+	updatedRecorder := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/projects/"+created.ID,
+		[]byte(`{"name":"活动时间线项目二版","description":"第二版"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if updatedRecorder.Code != http.StatusOK {
+		t.Fatalf("update project for events = %d: %s", updatedRecorder.Code, updatedRecorder.Body.String())
+	}
+	updated := decodeProjectResponse(t, updatedRecorder.Body.Bytes())
+	started := transitionProjectForTest(t, router, created.ID, updated.Version, `{"action":"start"}`)
+	paused := transitionProjectForTest(t, router, created.ID, started.Version, `{"action":"pause"}`)
+
+	firstPageRecorder := performRequest(
+		router,
+		http.MethodGet,
+		"/api/v1/projects/"+created.ID+"/events?page=1&page_size=2",
+		nil,
+		nil,
+	)
+	if firstPageRecorder.Code != http.StatusOK {
+		t.Fatalf("list project events page 1 = %d: %s", firstPageRecorder.Code, firstPageRecorder.Body.String())
+	}
+	firstPage, firstMeta := decodeProjectEvents(t, firstPageRecorder.Body.Bytes())
+	if len(firstPage) != 2 || firstMeta.Total != 4 || firstMeta.ProjectVersion != paused.Version ||
+		firstPageRecorder.Header().Get("ETag") != fmt.Sprintf(`"%d"`, paused.Version) {
+		t.Fatalf("project events page 1 = data %#v meta %#v ETag %q", firstPage, firstMeta, firstPageRecorder.Header().Get("ETag"))
+	}
+
+	secondPageRecorder := performRequest(
+		router,
+		http.MethodGet,
+		"/api/v1/projects/"+created.ID+"/events?page=2&page_size=2",
+		nil,
+		nil,
+	)
+	secondPage, secondMeta := decodeProjectEvents(t, secondPageRecorder.Body.Bytes())
+	if len(secondPage) != 2 || secondMeta.Total != 4 || firstPage[0].ID == secondPage[0].ID {
+		t.Fatalf("project events page 2 = data %#v meta %#v", secondPage, secondMeta)
+	}
+
+	actions := map[string]projectWorkflowEventOutput{}
+	for _, event := range append(firstPage, secondPage...) {
+		actions[event.Action] = event
+		if event.Actor == nil || event.Actor.ID != "00000000-0000-5000-8000-000000000001" || event.Actor.DisplayName == "" {
+			t.Fatalf("project event actor = %#v", event.Actor)
+		}
+		if event.RequestID == nil || *event.RequestID == "" || event.CreatedAt == "" {
+			t.Fatalf("project event request/timestamp = %#v", event)
+		}
+	}
+	for _, action := range []string{"project_created", "project_updated", "project_started", "project_paused"} {
+		if _, found := actions[action]; !found {
+			t.Fatalf("project event action %q missing from %#v", action, actions)
+		}
+	}
+	createdEvent := actions["project_created"]
+	if createdEvent.Previous != nil || createdEvent.Current["name"] != "活动时间线项目" || createdEvent.Current["version"] != float64(1) {
+		t.Fatalf("project created event snapshot = %#v", createdEvent)
+	}
+	updatedEvent := actions["project_updated"]
+	if updatedEvent.Previous["name"] != "活动时间线项目" || updatedEvent.Current["name"] != "活动时间线项目二版" ||
+		updatedEvent.Previous["version"] != float64(1) || updatedEvent.Current["version"] != float64(2) {
+		t.Fatalf("project updated event snapshot = %#v", updatedEvent)
+	}
+	if got := actions["project_paused"].Current["status"]; got != "paused" {
+		t.Fatalf("project paused current status = %#v", got)
+	}
+
+	var eventCount int64
+	if err := store.DB.Table("workflow_events").
+		Where("aggregate_type = 'project' AND aggregate_id = ?", created.ID).
+		Count(&eventCount).Error; err != nil || eventCount != 4 {
+		t.Fatalf("project workflow event count = %d, err = %v", eventCount, err)
+	}
+}
+
+func TestProjectWorkflowEventFailuresRollBackCommands(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	if err := store.DB.Exec(`
+		CREATE TRIGGER fail_project_created_event
+		BEFORE INSERT ON workflow_events
+		WHEN NEW.aggregate_type = 'project' AND NEW.action = 'project_created'
+		BEGIN SELECT RAISE(ABORT, 'TEST_PROJECT_CREATED_EVENT_FAILURE'); END
+	`).Error; err != nil {
+		t.Fatalf("create project event failure trigger: %v", err)
+	}
+	failedCreate := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/projects",
+		[]byte(`{"name":"不应创建的项目"}`),
+		nil,
+	)
+	if failedCreate.Code != http.StatusInternalServerError {
+		t.Fatalf("failed project create = %d: %s", failedCreate.Code, failedCreate.Body.String())
+	}
+	var projectCount int64
+	if err := store.DB.Table("projects").Where("name = ?", "不应创建的项目").Count(&projectCount).Error; err != nil || projectCount != 0 {
+		t.Fatalf("rolled back project count = %d, err = %v", projectCount, err)
+	}
+	if err := store.DB.Exec("DROP TRIGGER fail_project_created_event").Error; err != nil {
+		t.Fatalf("drop project create failure trigger: %v", err)
+	}
+
+	created := createProjectForTest(t, router, `{"name":"事务项目"}`, nil)
+	if err := store.DB.Exec(`
+		CREATE TRIGGER fail_project_updated_event
+		BEFORE INSERT ON workflow_events
+		WHEN NEW.aggregate_type = 'project' AND NEW.action = 'project_updated'
+		BEGIN SELECT RAISE(ABORT, 'TEST_PROJECT_UPDATED_EVENT_FAILURE'); END
+	`).Error; err != nil {
+		t.Fatalf("create project update failure trigger: %v", err)
+	}
+	failedUpdate := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/projects/"+created.ID,
+		[]byte(`{"name":"不应保留的名称"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if failedUpdate.Code != http.StatusInternalServerError {
+		t.Fatalf("failed project update = %d: %s", failedUpdate.Code, failedUpdate.Body.String())
+	}
+	currentRecorder := performRequest(router, http.MethodGet, "/api/v1/projects/"+created.ID, nil, nil)
+	current := decodeProjectResponse(t, currentRecorder.Body.Bytes())
+	if current.Name != created.Name || current.Version != created.Version {
+		t.Fatalf("project update was not rolled back: %#v", current)
+	}
+}
+
+func TestProjectWorkflowEventsValidateProjectAndPagination(t *testing.T) {
+	router, _ := newProjectTestAPI(t)
+	invalidID := performRequest(router, http.MethodGet, "/api/v1/projects/not-a-uuid/events", nil, nil)
+	if invalidID.Code != http.StatusBadRequest || responseErrorCode(t, invalidID.Body.Bytes()) != "INVALID_PROJECT_ID" {
+		t.Fatalf("invalid project event id = %d: %s", invalidID.Code, invalidID.Body.String())
+	}
+	missing := performRequest(router, http.MethodGet, "/api/v1/projects/"+uuid.NewString()+"/events", nil, nil)
+	if missing.Code != http.StatusNotFound || responseErrorCode(t, missing.Body.Bytes()) != "PROJECT_NOT_FOUND" {
+		t.Fatalf("missing project events = %d: %s", missing.Code, missing.Body.String())
+	}
+	project := createProjectForTest(t, router, `{"name":"分页校验项目"}`, nil)
+	invalidPage := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID+"/events?page_size=101", nil, nil)
+	if invalidPage.Code != http.StatusBadRequest {
+		t.Fatalf("invalid project event page size = %d: %s", invalidPage.Code, invalidPage.Body.String())
 	}
 }
 
@@ -845,8 +1023,25 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	if detachedInvoiceProjectID != nil {
 		t.Fatalf("invoice project_id = %q, want null", *detachedInvoiceProjectID)
 	}
+	var deletedEvent struct {
+		PreviousJSON *string `gorm:"column:previous_json"`
+		CurrentJSON  *string `gorm:"column:current_json"`
+	}
+	if err := store.DB.Table("workflow_events").
+		Select("previous_json, current_json").
+		Where("aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_deleted'", project.ID).
+		Take(&deletedEvent).Error; err != nil {
+		t.Fatalf("read retained project deletion event: %v", err)
+	}
+	if deletedEvent.PreviousJSON == nil || !strings.Contains(*deletedEvent.PreviousJSON, `"status":"archived"`) || deletedEvent.CurrentJSON != nil {
+		t.Fatalf("project deletion event = %#v", deletedEvent)
+	}
 	missing := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID, nil, nil)
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("deleted project detail = %d: %s", missing.Code, missing.Body.String())
+	}
+	missingEvents := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID+"/events", nil, nil)
+	if missingEvents.Code != http.StatusNotFound {
+		t.Fatalf("deleted project events = %d: %s", missingEvents.Code, missingEvents.Body.String())
 	}
 }

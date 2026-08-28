@@ -78,6 +78,7 @@ import {
   getTasks,
   getTodayStats,
   getProject,
+  getProjectEvents,
   getProjects,
   pauseFocusSession,
   createInboxItem,
@@ -148,6 +149,7 @@ import type {
   CancelReminderInput,
   NewTaskInput,
   ProjectInput,
+  ProjectEventListParams,
   ProjectListParams,
   ProjectTransitionAction,
   ReminderListParams,
@@ -2782,6 +2784,8 @@ export function useDeleteTag() {
 export const projectQueryKey = ["projects"] as const;
 export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
+export const projectEventQueryKey = (id: string) =>
+  [...projectDetailQueryKey(id), "events"] as const;
 
 export function useProjectsQuery(
   input: ProjectListParams = {},
@@ -2815,6 +2819,31 @@ export function useProjectQuery(id: string | null) {
     queryFn: () => getProject(id!),
     enabled: Boolean(id),
     retry: 1,
+  });
+}
+
+export function useProjectEventsQuery(
+  projectId: string | null,
+  input: Omit<ProjectEventListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = { pageSize: input.pageSize ?? 20 };
+  return useInfiniteQuery({
+    queryKey: [
+      ...projectEventQueryKey(projectId ?? "missing"),
+      "timeline",
+      query,
+    ],
+    queryFn: ({ pageParam }) =>
+      getProjectEvents(projectId!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(projectId) && enabled,
+    retry: 1,
+    staleTime: 10_000,
   });
 }
 

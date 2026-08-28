@@ -19,6 +19,7 @@ import {
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
+import { ProjectEventsSection } from "../components/ProjectEventsSection";
 import { TaskList } from "../components/TaskList";
 import { useUiStore } from "../store/ui";
 import type { ProjectStatus, ProjectTransitionAction } from "../types/models";
@@ -371,6 +372,8 @@ export function ProjectDetailPage() {
         ) : null}
       </section>
 
+      <ProjectEventsSection projectId={project.id} />
+
       {project.status === "archived" ? (
         <section className="project-detail-section project-danger-zone">
           <div>
@@ -416,7 +419,7 @@ export function ProjectDetailPage() {
 
       <section className="project-future-note">
         <Clock3 size={15} />
-        项目产出、附件、时间线、发票与收入将在对应模块完成后接入，不展示模拟数据。
+        项目产出、附件、发票与收入将在对应模块完成后接入，不展示模拟数据。
       </section>
 
       <ProjectFormModal

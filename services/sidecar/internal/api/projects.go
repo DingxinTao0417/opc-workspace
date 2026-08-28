@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,6 +115,38 @@ type deletedProjectResponse struct {
 	DeletedID        string `json:"deleted_id"`
 	DetachedTasks    int64  `json:"detached_tasks"`
 	DetachedInvoices int64  `json:"detached_invoices"`
+}
+
+type projectWorkflowEventOutput struct {
+	ID        string                  `json:"id"`
+	Action    string                  `json:"action"`
+	Actor     *assignmentActorSummary `json:"actor"`
+	RequestID *string                 `json:"request_id"`
+	Previous  map[string]any          `json:"previous"`
+	Current   map[string]any          `json:"current"`
+	CreatedAt string                  `json:"created_at"`
+}
+
+type projectWorkflowEventRow struct {
+	ID             string  `gorm:"column:id"`
+	Action         string  `gorm:"column:action"`
+	ActorID        *string `gorm:"column:actor_id"`
+	RequestID      *string `gorm:"column:request_id"`
+	PreviousJSON   *string `gorm:"column:previous_json"`
+	CurrentJSON    *string `gorm:"column:current_json"`
+	CreatedAt      string  `gorm:"column:created_at"`
+	ActorType      *string `gorm:"column:actor_type"`
+	ActorName      *string `gorm:"column:actor_display_name"`
+	ActorStatus    *string `gorm:"column:actor_status"`
+	ActorIsBuiltin *bool   `gorm:"column:actor_is_builtin"`
+	ActorVersion   *int64  `gorm:"column:actor_version"`
+}
+
+type projectWorkflowEventMeta struct {
+	Page           int   `json:"page"`
+	PageSize       int   `json:"page_size"`
+	Total          int64 `json:"total"`
+	ProjectVersion int64 `json:"project_version"`
 }
 
 type projectRequestError struct {
@@ -264,6 +297,17 @@ func (a *API) createProject(c *gin.Context) {
 		if err := tx.Create(&project).Error; err != nil {
 			return fmt.Errorf("create project: %w", err)
 		}
+		if err := recordProjectWorkflowEvent(
+			tx,
+			project.ID,
+			"project_created",
+			nil,
+			projectEventState(project),
+			requestIDFromContext(c),
+			project.CreatedAt,
+		); err != nil {
+			return err
+		}
 		row, err := loadProjectRow(tx, project.ID)
 		if err != nil {
 			return fmt.Errorf("load created project: %w", err)
@@ -318,6 +362,67 @@ func (a *API) getProject(c *gin.Context) {
 	response := projectResponseFromRow(row)
 	setProjectETag(c, response.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func (a *API) listProjectWorkflowEvents(c *gin.Context) {
+	id, ok := projectID(c)
+	if !ok {
+		return
+	}
+	page, ok := queryInt(c, "page", 1, 1, 1_000_000)
+	if !ok {
+		return
+	}
+	pageSize, ok := queryInt(c, "page_size", 20, 1, 100)
+	if !ok {
+		return
+	}
+
+	var project models.Project
+	var rows []projectWorkflowEventRow
+	var total int64
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select("id", "version").First(&project, "id = ?", id).Error; err != nil {
+			return err
+		}
+		base := tx.Model(&models.WorkflowEvent{}).
+			Where("aggregate_type = 'project' AND aggregate_id = ?", id)
+		if err := base.Count(&total).Error; err != nil {
+			return err
+		}
+		return projectWorkflowEventRowsQuery(tx).
+			Where("event.aggregate_type = 'project' AND event.aggregate_id = ?", id).
+			Order("julianday(event.created_at) DESC").
+			Order("event.command_seq DESC").
+			Order("event.id DESC").
+			Offset((page - 1) * pageSize).
+			Limit(pageSize).
+			Find(&rows).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
+	events := make([]projectWorkflowEventOutput, len(rows))
+	for index, row := range rows {
+		event, err := projectWorkflowEventOutputFromRow(row)
+		if err != nil {
+			writeDatabaseError(c)
+			return
+		}
+		events[index] = event
+	}
+	setProjectETag(c, project.Version)
+	c.JSON(http.StatusOK, gin.H{
+		"data": events,
+		"meta": projectWorkflowEventMeta{
+			Page: page, PageSize: pageSize, Total: total, ProjectVersion: project.Version,
+		},
+	})
 }
 
 func (a *API) updateProject(c *gin.Context) {
@@ -382,6 +487,17 @@ func (a *API) updateProject(c *gin.Context) {
 		}
 		row, err := loadProjectRow(tx, id)
 		if err != nil {
+			return err
+		}
+		if err := recordProjectWorkflowEvent(
+			tx,
+			id,
+			"project_updated",
+			projectEventState(project),
+			projectEventState(row.Project),
+			requestIDFromContext(c),
+			updatedAt,
+		); err != nil {
 			return err
 		}
 		response = projectResponseFromRow(row)
@@ -449,10 +565,11 @@ func (a *API) transitionProject(c *gin.Context) {
 			}
 		}
 
+		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		updates := map[string]any{
 			"status":               target,
 			"archived_from_status": archivedFrom,
-			"updated_at":           time.Now().UTC().Format(time.RFC3339Nano),
+			"updated_at":           updatedAt,
 			"version":              gorm.Expr("version + 1"),
 		}
 		result := tx.Model(&models.Project{}).
@@ -466,6 +583,22 @@ func (a *API) transitionProject(c *gin.Context) {
 		}
 		row, err := loadProjectRow(tx, id)
 		if err != nil {
+			return err
+		}
+		action := map[string]string{
+			"start": "project_started", "pause": "project_paused", "resume": "project_resumed",
+			"complete": "project_completed", "reopen": "project_reopened",
+			"archive": "project_archived", "restore": "project_restored",
+		}[input.Action]
+		if err := recordProjectWorkflowEvent(
+			tx,
+			id,
+			action,
+			projectEventState(project),
+			projectEventState(row.Project),
+			requestIDFromContext(c),
+			updatedAt,
+		); err != nil {
 			return err
 		}
 		response = projectResponseFromRow(row)
@@ -511,12 +644,24 @@ func (a *API) deleteProject(c *gin.Context) {
 		if project.Status != "archived" {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
 		}
-		detachedTasks, err := bumpTasksForProject(tx, id, time.Now().UTC().Format(time.RFC3339Nano))
+		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		detachedTasks, err := bumpTasksForProject(tx, id, deletedAt)
 		if err != nil {
 			return err
 		}
 		deleted.DetachedTasks = detachedTasks
 		if err := tx.Table("invoices").Where("project_id = ?", id).Count(&deleted.DetachedInvoices).Error; err != nil {
+			return err
+		}
+		if err := recordProjectWorkflowEvent(
+			tx,
+			id,
+			"project_deleted",
+			projectEventState(project),
+			nil,
+			requestIDFromContext(c),
+			deletedAt,
+		); err != nil {
 			return err
 		}
 		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.Project{})
@@ -536,6 +681,104 @@ func (a *API) deleteProject(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": deleted})
+}
+
+func projectEventState(project models.Project) map[string]any {
+	return map[string]any{
+		"id": project.ID, "name": project.Name, "description": project.Description,
+		"client_id": project.ClientID, "status": project.Status,
+		"start_date": project.StartDate, "due_date": project.DueDate,
+		"amount_minor": project.AmountMinor, "color": project.Color,
+		"version": project.Version, "archived_from_status": project.ArchivedFromStatus,
+	}
+}
+
+func recordProjectWorkflowEvent(
+	tx *gorm.DB,
+	projectIDValue,
+	action string,
+	previous,
+	current map[string]any,
+	requestID,
+	createdAt string,
+) error {
+	encode := func(value map[string]any) (*string, error) {
+		if value == nil {
+			return nil, nil
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		text := string(encoded)
+		return &text, nil
+	}
+	previousJSON, err := encode(previous)
+	if err != nil {
+		return fmt.Errorf("encode previous project workflow state: %w", err)
+	}
+	currentJSON, err := encode(current)
+	if err != nil {
+		return fmt.Errorf("encode current project workflow state: %w", err)
+	}
+	actorID := models.BuiltinOwnerActorID
+	commandSequence := 1
+	event := models.WorkflowEvent{
+		ID: uuid.NewString(), AggregateType: "project", AggregateID: projectIDValue,
+		Action: action, ActorID: &actorID, CommandSeq: &commandSequence,
+		PreviousJSON: previousJSON, CurrentJSON: currentJSON, CreatedAt: createdAt,
+	}
+	if requestID != "" {
+		event.RequestID = &requestID
+	}
+	if err := tx.Create(&event).Error; err != nil {
+		return fmt.Errorf("record project workflow event: %w", err)
+	}
+	return nil
+}
+
+func projectWorkflowEventRowsQuery(db *gorm.DB) *gorm.DB {
+	return db.Table("workflow_events AS event").
+		Select(`
+			event.id,
+			event.action,
+			event.actor_id,
+			event.request_id,
+			event.previous_json,
+			event.current_json,
+			event.created_at,
+			actor.type AS actor_type,
+			actor.display_name AS actor_display_name,
+			actor.status AS actor_status,
+			actor.is_builtin AS actor_is_builtin,
+			actor.version AS actor_version
+		`).
+		Joins("LEFT JOIN actors AS actor ON actor.id = event.actor_id")
+}
+
+func projectWorkflowEventOutputFromRow(row projectWorkflowEventRow) (projectWorkflowEventOutput, error) {
+	previous, err := decodeWorkflowEventObject(row.PreviousJSON)
+	if err != nil {
+		return projectWorkflowEventOutput{}, err
+	}
+	current, err := decodeWorkflowEventObject(row.CurrentJSON)
+	if err != nil {
+		return projectWorkflowEventOutput{}, err
+	}
+	var actor *assignmentActorSummary
+	if row.ActorID != nil {
+		if row.ActorType == nil || row.ActorName == nil || row.ActorStatus == nil || row.ActorIsBuiltin == nil || row.ActorVersion == nil {
+			return projectWorkflowEventOutput{}, errors.New("project workflow event actor is missing")
+		}
+		actor = &assignmentActorSummary{
+			ID: *row.ActorID, Type: *row.ActorType, DisplayName: *row.ActorName,
+			Status: *row.ActorStatus, IsBuiltin: *row.ActorIsBuiltin, Version: *row.ActorVersion,
+		}
+	}
+	return projectWorkflowEventOutput{
+		ID: row.ID, Action: row.Action, Actor: actor, RequestID: row.RequestID,
+		Previous: previous, Current: current, CreatedAt: normalizeTimestamp(row.CreatedAt),
+	}, nil
 }
 
 func projectFromCreateRequest(input createProjectRequest) (models.Project, error) {

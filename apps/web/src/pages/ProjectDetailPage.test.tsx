@@ -49,6 +49,22 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     refetch: projectRefetch,
   }),
+  useProjectEventsQuery: () => ({
+    data: {
+      pages: [
+        {
+          items: [],
+          meta: { page: 1, pageSize: 20, total: 0, projectVersion: 2 },
+        },
+      ],
+    },
+    fetchNextPage: vi.fn(),
+    hasNextPage: false,
+    isError: false,
+    isFetchingNextPage: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
   useTasksQuery: () => ({
     data: [],
     isError: false,

@@ -775,6 +775,30 @@ export interface ProjectListResult {
   meta: PageMeta;
 }
 
+export interface ProjectWorkflowEvent {
+  id: string;
+  action: string;
+  actor: ActorSummary | null;
+  requestId: string | null;
+  previous: Record<string, unknown> | null;
+  current: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface ProjectEventListParams {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ProjectEventListMeta extends PageMeta {
+  projectVersion: number;
+}
+
+export interface ProjectEventListResult {
+  items: ProjectWorkflowEvent[];
+  meta: ProjectEventListMeta;
+}
+
 export interface ProjectListParams {
   page?: number;
   pageSize?: number;

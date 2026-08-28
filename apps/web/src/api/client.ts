@@ -88,6 +88,9 @@ import type {
   ProjectInput,
   ProjectListParams,
   ProjectListResult,
+  ProjectEventListParams,
+  ProjectEventListResult,
+  ProjectWorkflowEvent,
   ProjectStatus,
   ProjectTransitionAction,
   Reminder,
@@ -802,6 +805,68 @@ export function normalizeProject(value: unknown): Project {
         )
       : [],
   };
+}
+
+export function normalizeProjectWorkflowEvent(
+  value: unknown,
+): ProjectWorkflowEvent {
+  if (!isRecord(value)) return invalidResponse("项目事件响应格式无效");
+  const id = stringField(value, "id");
+  const action = stringField(value, "action");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const rawActor = value.actor;
+  const requestId = nullableEventString(
+    fieldValue(value, "request_id", "requestId"),
+    "项目事件请求 ID",
+  );
+  if (
+    !id ||
+    !action ||
+    action.length > 100 ||
+    !createdAt ||
+    Number.isNaN(Date.parse(createdAt)) ||
+    (rawActor !== null && !isRecord(rawActor)) ||
+    (requestId !== null && requestId.length > 128)
+  ) {
+    return invalidResponse("项目事件响应格式无效");
+  }
+  return {
+    id,
+    action,
+    actor: rawActor === null ? null : normalizeActorSummary(rawActor),
+    requestId,
+    previous: nullableEventSnapshot(value.previous, "项目事件旧快照"),
+    current: nullableEventSnapshot(value.current, "项目事件新快照"),
+    createdAt,
+  };
+}
+
+export function normalizeProjectEventListResult(
+  value: unknown,
+): ProjectEventListResult {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.meta)) {
+    return invalidResponse("项目事件列表响应格式无效");
+  }
+  const items = value.data.map(normalizeProjectWorkflowEvent);
+  const result: ProjectEventListResult = {
+    items,
+    meta: {
+      page: positiveInteger(value.meta.page, "项目事件页码"),
+      pageSize: positiveInteger(
+        fieldValue(value.meta, "page_size", "pageSize"),
+        "项目事件分页大小",
+      ),
+      total: nonNegativeInteger(value.meta.total, "项目事件总数"),
+      projectVersion: positiveInteger(
+        fieldValue(value.meta, "project_version", "projectVersion"),
+        "项目事件项目版本",
+      ),
+    },
+  };
+  if (items.length > result.meta.pageSize || items.length > result.meta.total) {
+    return invalidResponse("项目事件分页响应不一致");
+  }
+  return result;
 }
 
 export function normalizeClient(value: unknown): Client {
@@ -4348,6 +4413,20 @@ export async function getProject(id: string): Promise<Project> {
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeProject(body);
+}
+
+export async function getProjectEvents(
+  projectId: string,
+  input: ProjectEventListParams = {},
+): Promise<ProjectEventListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/events?${params}`,
+  );
+  return normalizeProjectEventListResult(payload);
 }
 
 export async function createProject(

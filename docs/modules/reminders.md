@@ -4,7 +4,7 @@
 >
 > 版本边界：T-11A3 一次性本地 Reminder 已交付。重复提醒、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.6](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.7](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 

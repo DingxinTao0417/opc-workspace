@@ -2415,6 +2415,108 @@ kbd {
   font-size: 10px;
 }
 
+.project-events-heading {
+  align-items: center;
+}
+
+.project-events-heading > .button {
+  height: 29px;
+  padding: 0 7px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.project-events-panel {
+  padding: 0 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.project-events-state {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.project-events-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 11px 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger-text) 28%, var(--border));
+  border-radius: var(--radius-md);
+  color: var(--danger-text);
+  font-size: 10px;
+}
+
+.project-events-error span {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-event-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-event-timeline li {
+  display: flex;
+  gap: 10px;
+  padding: 11px 0;
+}
+
+.project-event-timeline li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.project-event-icon {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--accent-light);
+}
+
+.project-event-timeline li > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-event-timeline strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.project-event-timeline p,
+.project-event-timeline small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.project-events-load-more {
+  width: 100%;
+  height: 30px;
+  margin: 0 0 11px;
+  font-size: 9px;
+}
+
 .table-panel {
   overflow: hidden;
 }

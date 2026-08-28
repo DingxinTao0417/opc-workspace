@@ -17,6 +17,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
+- 项目活动时间线：创建、资料编辑、七种生命周期转换与永久删除同事务追加不可变事件；详情稳定分页展示 owner、时间、状态或资料字段变化，创建幂等重放不重复事件
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看 Submission/Artifact 历史
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
@@ -32,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B 命令面板、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、项目事件/非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.6](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、项目追加式活动时间线、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B 命令面板、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、项目产出/附件/人工笔记、非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.7](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -54,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v5.6）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v5.7）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -232,6 +233,7 @@ DELETE /api/v1/tags/:id?confirm=true
 GET    /api/v1/projects
 POST   /api/v1/projects
 GET    /api/v1/projects/:id
+GET    /api/v1/projects/:id/events
 PATCH  /api/v1/projects/:id
 POST   /api/v1/projects/:id/transitions
 DELETE /api/v1/projects/:id?confirm=true
@@ -312,4 +314,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v5.6](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Client/Project 基础纵切、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v5.7](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 基础纵切与追加式活动时间线、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、项目产出/附件/人工笔记、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
