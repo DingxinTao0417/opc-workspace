@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
     isError: false,
     refetch: vi.fn(),
   },
+  reportHook: vi.fn(),
   create: vi.fn(),
   pause: vi.fn(),
   resume: vi.fn(),
@@ -80,7 +81,10 @@ vi.mock("../api/hooks", () => ({
     data: { focus: { sessions: 1, minutes: 25 } },
   }),
   useFocusSessionHistoryQuery: () => mocks.historyQuery,
-  useFocusReportQuery: () => mocks.reportQuery,
+  useFocusReportQuery: (...args: unknown[]) => {
+    mocks.reportHook(...args);
+    return mocks.reportQuery;
+  },
 }));
 
 beforeEach(() => {
@@ -196,5 +200,42 @@ describe("FocusPage", () => {
     expect(screen.getByText("整理交付")).toBeInTheDocument();
     expect(screen.getByText("25:00")).toBeInTheDocument();
     expect(screen.getByText("4 天")).toBeInTheDocument();
+  });
+
+  it("switches local report ranges without changing active focus state", () => {
+    render(<FocusPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "30 天" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        dateTo: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      }),
+      true,
+    );
+    expect(screen.getByText("最近 30 天")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "本月" }));
+    expect(screen.getByRole("button", { name: "本月" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(useFocusCycleStore.getState().phase).toBe("idle");
+  });
+
+  it("keeps an invalid custom date range local until it is valid", () => {
+    render(<FocusPage />);
+    fireEvent.click(screen.getByRole("button", { name: "自定义" }));
+    fireEvent.change(screen.getByLabelText("专注回顾结束日期"), {
+      target: { value: "2026-01-01" },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "结束日期不能早于开始日期。",
+    );
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      false,
+    );
   });
 });

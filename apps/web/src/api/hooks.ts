@@ -1690,10 +1690,11 @@ export function useFocusSessionHistoryQuery(
   });
 }
 
-export function useFocusReportQuery(input: FocusReportParams) {
+export function useFocusReportQuery(input: FocusReportParams, enabled = true) {
   return useQuery({
     queryKey: ["stats", "focus", input],
     queryFn: () => getFocusReport(input),
+    enabled,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,

@@ -3891,6 +3891,76 @@ kbd {
   font-weight: 600;
 }
 
+.focus-report-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 14px;
+}
+
+.focus-report-range-button {
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.focus-report-range-button:hover,
+.focus-report-range-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.focus-report-range-button.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-light);
+}
+
+.focus-report-custom-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.focus-report-custom-range label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.focus-report-custom-range input {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.focus-report-custom-range > span {
+  min-height: 28px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.focus-report-range-error {
+  margin: 8px 0 0;
+}
+
 .focus-report-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3925,9 +3995,10 @@ kbd {
 .focus-bars {
   display: grid;
   height: 126px;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--focus-days, 7), minmax(24px, 1fr));
   gap: 8px;
   margin-top: 16px;
+  overflow-x: auto;
 }
 
 .focus-bar-column {

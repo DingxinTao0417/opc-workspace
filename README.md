@@ -27,13 +27,13 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块，具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护
-- Focus Core A+B+C+D1+D2a：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、七日趋势与 Streak、Task 详情按需专注记录，以及共享前端循环/恢复 UI
+- Focus Core A+B+C+D1+D2a 和 D2b 日期范围回顾：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、7/30 天/本月/最多 93 天自定义趋势与 Streak、Task 详情按需专注记录，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
 - Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core、Today、统一本地搜索、设置、备份恢复/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；schema v23–v25 进一步交付显式 follow-up Artifact、Task 阻塞与 Task 临期来源投影、上下文和删除协调。受控头像文件、Focus D2b、客户外部来源/回访/财务、系统故障来源、重复提醒、迁移前自动备份、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v6.4](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、备份恢复/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；schema v23–v25 进一步交付显式 follow-up Artifact、Task 阻塞与 Task 临期来源投影、上下文和删除协调。受控头像文件、Focus 高级分析/原生反馈、客户外部来源/回访/财务、系统故障来源、重复提醒、迁移前自动备份、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v6.5](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v6.4）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v6.5）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -322,4 +322,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v6.4](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core、Today、统一本地搜索、设置、手工一致性备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞与提前 24 小时 Task 临期来源投影/删除协调；明确未交付受控头像文件、Focus D2b、任务/项目看板、内容日历、客户外部活动/回访/财务、系统故障来源、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。
+[PRD v6.5](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、手工一致性备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞与提前 24 小时 Task 临期来源投影/删除协调；明确未交付受控头像文件、Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、系统故障来源、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。

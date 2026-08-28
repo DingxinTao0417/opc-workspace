@@ -15,6 +15,7 @@ import {
   Square,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import type { FocusReportParams } from "../types/models";
 import { ApiError } from "../api/client";
 import {
   useActiveFocusSessionQuery,
@@ -51,6 +52,76 @@ function recentDateRange(now = new Date()) {
   const start = new Date(end);
   start.setDate(start.getDate() - 6);
   return { dateFrom: localDateKey(start), dateTo: localDateKey(end) };
+}
+
+type FocusReportRangeKind = "seven_days" | "thirty_days" | "month" | "custom";
+
+interface FocusReportRange extends FocusReportParams {
+  label: string;
+}
+
+const maxFocusReportDays = 93;
+
+function addLocalDays(date: Date, days: number): Date {
+  const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function focusReportRange(
+  kind: Exclude<FocusReportRangeKind, "custom">,
+  now = new Date(),
+): FocusReportRange {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateTo = localDateKey(today);
+  if (kind === "month") {
+    return {
+      dateFrom: localDateKey(
+        new Date(today.getFullYear(), today.getMonth(), 1),
+      ),
+      dateTo,
+      timezone: "",
+      label: "本月",
+    };
+  }
+  const days = kind === "seven_days" ? 7 : 30;
+  return {
+    dateFrom: localDateKey(addLocalDays(today, 1 - days)),
+    dateTo,
+    timezone: "",
+    label: `最近 ${days} 天`,
+  };
+}
+
+function localDateDistance(dateFrom: string, dateTo: string): number | null {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)
+  ) {
+    return null;
+  }
+  const from = new Date(`${dateFrom}T12:00:00`);
+  const to = new Date(`${dateTo}T12:00:00`);
+  if (
+    Number.isNaN(from.getTime()) ||
+    Number.isNaN(to.getTime()) ||
+    localDateKey(from) !== dateFrom ||
+    localDateKey(to) !== dateTo
+  ) {
+    return null;
+  }
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1;
+}
+
+function focusReportDayLabel(date: string, days: number): string {
+  const parsed = new Date(`${date}T12:00:00`);
+  if (days > 14) {
+    return new Intl.DateTimeFormat("zh-CN", {
+      month: "numeric",
+      day: "numeric",
+    }).format(parsed);
+  }
+  return new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(parsed);
 }
 
 function focusHistoryStatus(status: string): string {
@@ -91,10 +162,37 @@ export function FocusPage() {
   const stopFocus = useStopFocusSession();
   const cancelFocus = useCancelFocusSession();
   const todayStats = useTodayStatsQuery(localDateKey(new Date()));
-  const [historyPage, setHistoryPage] = useState(1);
-  const reportRange = useMemo(() => recentDateRange(), []);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const focusReport = useFocusReportQuery({ ...reportRange, timezone });
+  const initialReportRange = useMemo(() => recentDateRange(), []);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [reportRangeKind, setReportRangeKind] =
+    useState<FocusReportRangeKind>("seven_days");
+  const [customReportRange, setCustomReportRange] =
+    useState(initialReportRange);
+  const selectedReportRange = useMemo(() => {
+    if (reportRangeKind === "custom") {
+      return { ...customReportRange, timezone, label: "自定义范围" };
+    }
+    return { ...focusReportRange(reportRangeKind), timezone };
+  }, [customReportRange, reportRangeKind, timezone]);
+  const customRangeDays = localDateDistance(
+    customReportRange.dateFrom,
+    customReportRange.dateTo,
+  );
+  const customRangeError =
+    reportRangeKind !== "custom"
+      ? null
+      : customRangeDays === null
+        ? "请选择有效的起止日期。"
+        : customRangeDays < 1
+          ? "结束日期不能早于开始日期。"
+          : customRangeDays > maxFocusReportDays
+            ? `自定义范围最多 ${maxFocusReportDays} 天。`
+            : null;
+  const focusReport = useFocusReportQuery(
+    selectedReportRange,
+    !customRangeError,
+  );
   const focusHistory = useFocusSessionHistoryQuery({
     page: historyPage,
     pageSize: 6,
@@ -473,17 +571,84 @@ export function FocusPage() {
             <div className="focus-panel focus-report-panel">
               <div className="focus-panel-heading">
                 <div>
-                  <span className="eyebrow">最近 7 天</span>
+                  <span className="eyebrow">{selectedReportRange.label}</span>
                   <h2>专注趋势</h2>
                 </div>
                 <BarChart3 size={18} />
               </div>
-              {focusReport.isPending ? (
+              <div className="focus-report-range" aria-label="专注回顾范围">
+                {(
+                  [
+                    ["seven_days", "7 天"],
+                    ["thirty_days", "30 天"],
+                    ["month", "本月"],
+                    ["custom", "自定义"],
+                  ] as Array<[FocusReportRangeKind, string]>
+                ).map(([kind, label]) => (
+                  <button
+                    aria-pressed={reportRangeKind === kind}
+                    className={
+                      reportRangeKind === kind
+                        ? "focus-report-range-button is-active"
+                        : "focus-report-range-button"
+                    }
+                    key={kind}
+                    onClick={() => setReportRangeKind(kind)}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {reportRangeKind === "custom" ? (
+                <div className="focus-report-custom-range">
+                  <label>
+                    开始日期
+                    <input
+                      aria-label="专注回顾开始日期"
+                      max={customReportRange.dateTo}
+                      onChange={(event) =>
+                        setCustomReportRange((current) => ({
+                          ...current,
+                          dateFrom: event.target.value,
+                        }))
+                      }
+                      type="date"
+                      value={customReportRange.dateFrom}
+                    />
+                  </label>
+                  <label>
+                    结束日期
+                    <input
+                      aria-label="专注回顾结束日期"
+                      min={customReportRange.dateFrom}
+                      onChange={(event) =>
+                        setCustomReportRange((current) => ({
+                          ...current,
+                          dateTo: event.target.value,
+                        }))
+                      }
+                      type="date"
+                      value={customReportRange.dateTo}
+                    />
+                  </label>
+                  <span>
+                    {customRangeDays && customRangeDays > 0
+                      ? `${customRangeDays} 天`
+                      : "等待有效范围"}
+                  </span>
+                </div>
+              ) : null}
+              {customRangeError ? (
+                <p className="form-error focus-report-range-error" role="alert">
+                  {customRangeError}
+                </p>
+              ) : focusReport.isPending ? (
                 <LoadingState label="正在统计本地专注记录…" />
               ) : focusReport.isError ? (
                 <ErrorState
                   compact
-                  message="七日专注统计暂时不可用。"
+                  message="本地专注统计暂时不可用。"
                   onRetry={() => void focusReport.refetch()}
                 />
               ) : focusReport.data ? (
@@ -509,10 +674,20 @@ export function FocusPage() {
                   {focusReport.data.totals.seconds === 0 ? (
                     <div className="focus-empty-inline">
                       <CalendarDays size={18} />
-                      <span>最近七天还没有已完成的专注记录。</span>
+                      <span>
+                        {selectedReportRange.label}还没有已完成的专注记录。
+                      </span>
                     </div>
                   ) : (
-                    <div className="focus-bars" aria-label="每日专注分钟数">
+                    <div
+                      className="focus-bars"
+                      aria-label="每日专注分钟数"
+                      style={
+                        {
+                          "--focus-days": focusReport.data.days.length,
+                        } as React.CSSProperties
+                      }
+                    >
                       {focusReport.data.days.map((day) => {
                         const maxMinutes = Math.max(
                           ...focusReport.data.days.map((item) => item.minutes),
@@ -529,11 +704,10 @@ export function FocusPage() {
                               />
                             </div>
                             <small>
-                              {new Date(
-                                `${day.date}T12:00:00`,
-                              ).toLocaleDateString("zh-CN", {
-                                weekday: "short",
-                              })}
+                              {focusReportDayLabel(
+                                day.date,
+                                focusReport.data.days.length,
+                              )}
                             </small>
                           </div>
                         );
