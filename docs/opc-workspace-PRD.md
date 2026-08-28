@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v3.1
+> **一人公司操作系统** · PRD v3.2
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v15
 
-> **v3.1 更新说明**：交付 T-13A 命令面板 Task 搜索基线：输入 200 ms 防抖后调用服务端完整 Task 集合搜索，查询限制 200 字符并安全转义 LIKE，返回最近更新的前 12 条匹配项；选择结果直接打开精确 Task 详情，具备加载、错误、重试与空态。收入/发票业务未交付，因此不再注册为可执行命令。统一多实体搜索、稳定详情路由、焦点恢复和 OS 全局快捷键仍未交付。
+> **v3.2 更新说明**：交付 T-13B 命令面板键盘与设置直达基线：个人资料、通用、外观、专注、人员与责任和关于均可直接打开；面板采用 combobox/listbox 活动项关联，具备初始聚焦、Tab 圈闭、背景滚动锁定、关闭后焦点恢复和输入法组合保护。统一多实体搜索、稳定详情路由、真实浏览器/桌面验收和 OS 全局快捷键仍未交付。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -931,7 +931,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v3.1 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v3.2 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1460,7 +1460,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v3.1 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v3.2 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1556,7 +1556,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 - [ ] WAL 模式下生成的备份可通过校验，并能在临时数据库中完整恢复
 - [ ] 首次启动后的所有核心功能在断网环境可用
 - [ ] 离线更新只接受签名有效、平台/架构正确且版本兼容的安装包；在线 Updater 不属于当前阶段
-- [x] ⌘K 命令面板可搜索已交付页面和完整 Task 集合，并直达 Task 详情；多实体统一搜索仍待开发
+- [x] ⌘K 命令面板可搜索已交付页面和完整 Task 集合，直达 Task 详情/指定设置模块，并具备焦点圈闭与关闭后恢复；多实体统一搜索仍待开发
 - [x] Focus Core 以服务端绝对时间计时，completed Session 的新增完整分钟自动且幂等记录到绑定任务；真实三平台后台/休眠专项验收仍单列为后续风险
 - [x] 手工 Inbox 受理/分诊可离线使用；全局未读、时间截止式全部已读、稍后到期、原因归档、终态已读、重开和事件均以真实 API/SQLite 为事实
 - [ ] 单机仅存在一个 owner；person 分派明确为本地责任记录，不产生登录、发送或同步行为
@@ -1684,7 +1684,7 @@ pnpm dev
 | T-10 收入、支出与发票                | 页面骨架          | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                          |
 | T-11 收件箱与工作编排中心            | 部分完成          | T-11A1/A2/A3/B/C/F 已交付受理分诊、Reminder、Task 关系与拆分编排、Today/Sidebar 运营计数；非 Reminder 来源投影待实现                                        |
 | T-12 专注设置与全局计时              | Core 完成，D 延后 | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时、Today 汇总与共享前端已交付；D 的历史/周报/Streak/通知/托盘/DND 延后            |
-| T-13 命令面板与基础反馈              | 部分完成          | WebView 快捷键、已交付页面命令、服务端 Task 搜索/详情打开、加载/错误/重试/空状态                                                                                                  |
+| T-13 命令面板与基础反馈              | 部分完成          | WebView 快捷键、已交付页面命令、服务端 Task 搜索/详情打开、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护及加载/错误/重试/空状态                                            |
 | T-14 测试、构建与桌面验收            | 部分完成          | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制                                                                                                                  |
 | T-15 AI 助手                         | 未开始            | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码                                                                                                                 |
 | T-16 本地知识库                      | 未开始            | 已登记导入、FTS 检索、引用与删除要求，尚无数据结构或页面                                                                                                                         |
@@ -1798,19 +1798,19 @@ pnpm dev
 
 - **需求映射**：5.7。
 - **完成范围**：Core A 事实迁移、Core B API/状态机/事务、Core C 前端接入与恢复已完成；Core D 历史/报告/系统集成延后。Today completed-only 统计属于已交付的后端/前端闭环。
-- **用户流程**：用户在 Focus 页选择非 cancelled Task 或二次确认无绑定启动；可暂停、继续、停止完成或取消。刷新会重新查询服务端活动 Session；启动发现 recovery_pending 时全局不可关闭弹窗要求选择计入间隔继续、排除间隔继续或中断。Focus 页齿轮直达 focus 设置；命令面板尚只打开通用设置。
+- **用户流程**：用户在 Focus 页选择非 cancelled Task 或二次确认无绑定启动；可暂停、继续、停止完成或取消。刷新会重新查询服务端活动 Session；启动发现 recovery_pending 时全局不可关闭弹窗要求选择计入间隔继续、排除间隔继续或中断。Focus 页齿轮和命令面板“专注设置”均直达 focus 设置。
 - **实现方法**：schema v11 以 `focus_sessions`、`focus_session_intervals`、`task_focus_totals` 保存事实。API 快照统一返回 `session/server_now/elapsed_seconds/remaining_seconds` 并为 Session 返回 ETag；现有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`。Sidecar 启动把 active 转为 recovery_pending，每 15 秒刷新 heartbeat 且不递增 version。stop→completed 在一个事务内结算 interval、累计精确秒数、只把新增完整分钟写入 Task并每次递增 Task version；只有 `actual_minutes` 实际增加时既有 trigger 才递增 Project 聚合版本。cancel/interrupted 不入账。前端 TanStack Query 共享活动快照，本地 persist store 只保存 work/break/cycle 编排与绝对休息截止时间。
 - **设置隔离**：`store/settings.ts` 的持久值是 committed，`SettingsModal` 表单是 draft，store `preview` 只控制可逆预览。Session 创建和全局 ticker 读取 committed；draft/preview 的修改、保存或取消都不改变活动 Session 的服务端计划时长与进度。
 - **关键路径**：`services/sidecar/internal/database/migrations/011_focus_sessions.sql`、`internal/api/focus_sessions.go`、`internal/api/stats.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`store/settings.ts`、`store/focus.ts`、`components/FocusTicker.tsx`、`components/FocusRecoveryModal.tsx`、`pages/FocusPage.tsx`。
-- **验证/当前限制**：自动化测试覆盖迁移、状态机、绝对时间、心跳、恢复、并发创建/停止、幂等重放、事务回滚、跨 Session 余秒、Task/Project 版本以及 IANA/DST/跨午夜 completed-only 统计。除 Actor 外设置仍在 localStorage；Session 历史 API/UI、周报、Streak、高级分析、原生通知、托盘、系统勿扰和命令面板直达 focus 均未实现；真实三平台后台/睡眠场景仍需桌面验收。
+- **验证/当前限制**：自动化测试覆盖迁移、状态机、绝对时间、心跳、恢复、并发创建/停止、幂等重放、事务回滚、跨 Session 余秒、Task/Project 版本以及 IANA/DST/跨午夜 completed-only 统计。除 Actor 外设置仍在 localStorage；Session 历史 API/UI、周报、Streak、高级分析、原生通知、托盘和系统勿扰均未实现；真实三平台后台/睡眠场景仍需桌面验收。
 
 #### 10.4.13 T-13 命令面板、快捷键与反馈状态
 
 - **需求映射**：5.9。
-- **用户流程**：`Ctrl/Cmd+K` 打开命令面板，`Ctrl/Cmd+N` 打开新建任务；面板可搜索已交付页面、真实本地 Task、新建任务和设置，支持方向键、Enter 和 Esc。选择 Task 直接打开对应详情。
-- **实现方法**：全局键盘监听仅在当前 WebView 内生效；页面/安全操作命令在前端过滤，Task 输入 200 ms 后调用 `GET /api/v1/tasks?q=&page_size=12&sort=-updated_at`。服务端查询完整任务集合、参数化并转义 LIKE，`q` 最多 200 字符；前端显示加载、错误重试和空态。收入/发票仅有骨架，不注册命令。
-- **关键路径**：`App.tsx`、`components/CommandPalette.tsx`、`components/feedback.tsx`。
-- **当前限制**：不是操作系统全局快捷键；没有统一 `/search`、最近使用排序、项目/客户/收件箱搜索、稳定可复制 Task 详情路由、焦点恢复、桌面启动恢复页和全局错误边界。
+- **用户流程**：`Ctrl/Cmd+K` 打开命令面板，`Ctrl/Cmd+N` 打开新建任务；面板可搜索已交付页面、真实本地 Task、新建任务和设置，支持方向键、Enter、Esc 与 Tab。选择 Task 直接打开对应详情，设置命令直接打开指定模块；关闭后焦点返回原触发元素。
+- **实现方法**：全局键盘监听仅在当前 WebView 内生效，IME composition/229 期间不执行；页面/安全操作命令在前端过滤，Task 输入 200 ms 后调用 `GET /api/v1/tasks?q=&page_size=12&sort=-updated_at`。服务端查询完整任务集合、参数化并转义 LIKE，`q` 最多 200 字符；前端显示加载、错误重试和空态。面板使用 combobox/listbox 与 `aria-activedescendant`，打开时聚焦输入框、锁定背景滚动、圈闭 Tab，卸载时恢复触发焦点。收入/发票仅有骨架，不注册命令。
+- **关键路径**：`App.tsx`、`components/GlobalShortcuts.tsx`、`components/GlobalShortcuts.test.tsx`、`components/CommandPalette.tsx`、`components/CommandPalette.test.tsx`、`components/feedback.tsx`。
+- **当前限制**：不是操作系统全局快捷键；没有统一 `/search`、最近使用排序、项目/客户/收件箱搜索、稳定可复制 Task 详情路由、桌面启动恢复页和全局错误边界；焦点行为仍需真实浏览器和桌面 WebView 验收。
 
 #### 10.4.14 T-14 测试、构建与桌面验收
 
@@ -1837,7 +1837,7 @@ pnpm build:desktop
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v3.1 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v3.2 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -1948,7 +1948,7 @@ pnpm build:desktop
 | 5    | 收件箱人工编排            | **T-11A1/A2/A3/B/C/F 已交付**：schema v12–v15 的 Inbox/关系/Reminder/编排事实，manual 受理、Task 拆分分派、自动结清/重开和实时运营计数；其他来源投影待开发 | **已交付**：三视图、详情/分诊、Reminder、Task 关系/拆分、强制例外、风险筛选、Sidebar 徽标和 Today 风险卡 | 当前覆盖离线、迁移、幂等/并发、事务回滚、实时进度、Task 删除互锁、Reminder 去重、拆分全回滚、自动结清/重开和计数口径；完整纵切仍需其他来源去重与删除可解释 |
 | 6    | 今日                      | 按本地日期、逾期和本周范围查询；排序事务；按 IANA 时区计算 UTC 边界；增加收件箱派生计数                                                                                                                              | 日期切换与真实分组已交付；拖拽/回滚、恢复默认排序、编辑/删除/专注快捷操作待开发；未上线的财务卡标后续                                                                  | 超过 100 项、午夜/夏令时、排序刷新、列表与统计一致；真实浏览器验证拖拽、键盘和窄屏                                                                                              |
 | 7    | 专注                      | **Core A+B 已交付**：A 为 schema v11 Session/interval/ledger 事实迁移；B 为状态 API、绝对时间、心跳/恢复、幂等并发、Task 工时事务与 IANA Today 统计                                                                  | **Core C 已交付**：任务选择、无绑定确认、共享活动快照、恢复弹窗、设置隔离与循环/休息；历史/周报/Streak/系统集成为 D                                                   | 自动化已覆盖跨午夜/DST、并发/重复 stop、恢复、余秒和事务；真实三平台后台/睡眠及 D 能力后续验收                                                                                  |
-| 8    | 设置与命令面板            | Actor API 已接入；版本化 app_settings、旧 localStorage 一次性迁移、头像文件引用、统一 search API 和真实 health/version 展示待实现                                                                                    | “人员与责任”已支持 owner/person；Focus 页直达 focus 且 committed/draft/preview 不改活动 Session；通知、数据/备份、快捷键、诊断与命令面板目标模块直达待实现            | 已覆盖 Focus 设置取消/保存与活动 Session 隔离；仍需验证旧设置迁移不覆盖新值、搜索定位、键盘、焦点恢复和服务不可用                                                               |
+| 8    | 设置与命令面板            | Actor API 已接入；版本化 app_settings、旧 localStorage 一次性迁移、头像文件引用、统一 search API 和真实 health/version 展示待实现                                                                                    | “人员与责任”已支持 owner/person；Focus 页与命令面板可直达指定设置模块，committed/draft/preview 不改活动 Session；通知、数据/备份、快捷键和诊断待实现                   | 已覆盖 Focus 设置隔离、Task 搜索定位、IME、键盘圈闭和焦点恢复；仍需验证旧设置迁移、服务不可用及真实浏览器/WebView 键盘与窄屏                                                       |
 | 9    | 数据安全                  | v0.1 一致性快照、manifest/SHA-256、迁移前备份、临时库验证、原子恢复和基础导入导出；v0.3 增加计划/映射                                                                                                                | 手动备份/恢复、进度、确认、失败诊断；v0.3 增加外部目录和高级导入                                                                                                      | WAL 活跃、低磁盘、损坏/未知 schema/校验失败均不覆盖当前数据；备份实际恢复验证                                                                                                   |
 | 10   | 桌面与发布                | Sidecar 自动/手动恢复、孤儿治理、日志、版本兼容；托盘/通知/全局快捷键/文件对话框/自启/签名离线更新；三平台 CI                                                                                                        | 全局服务状态、恢复页、托盘语义、权限引导、离线安装/更新反馈                                                                                                           | 崩溃/超时/退出无残留；签名、公证、干净机、性能和数据保留逐平台验证后才宣称支持                                                                                                  |
 | 11   | 本地 Agent（v0.2）        | Adapter ADR、专用鉴权、短时令牌、跨平台沙箱/网络边界、Agent Run、取消/重试/中断恢复                                                                                                                                  | 只显示健康且隔离已验证的 Agent；启动、运行、输出、失败、重试、待验收和返工                                                                                            | 无任意 Shell/数据库/目录；禁网无法验证时执行保持禁用；成功进入 waiting_review；产出校验和历史完整                                                                               |
@@ -2188,3 +2188,4 @@ pnpm build:desktop
 | v2.9     | 2026-08-28 | 交付 T-06A Today 真实计划日期分组：Task 列表新增 active 与 scheduled/unscheduled 服务端筛选，前端按本地日期分页拉全逾期、今天、本周稍后和未排期活动任务，移除前 3/后 3 与 100 条静默截断；日期切换、Today 持久排序/拖拽与快捷操作继续延期                         |
 | v3.0     | 2026-08-28 | 交付 T-06B Today 日期导航：支持前一天、后一天、回到今天，任务四分组与 Today 统计统一消费所选日期，非当天视图使用“所选日期”语义；Today 持久排序/拖拽、行内快捷操作、项目/客户/财务概览继续延期                                                                 |
 | v3.1     | 2026-08-28 | 交付 T-13A 命令面板 Task 搜索：200 ms 防抖服务端查询完整 Task 集合、200 字符/安全 LIKE 边界、最近更新前 12 项、精确详情打开、加载/错误/重试/空态；移除未交付收入/发票命令。统一多实体搜索、稳定详情路由、焦点恢复和 OS 全局快捷键继续延期                  |
+| v3.2     | 2026-08-28 | 交付 T-13B 命令面板键盘与设置直达：6 个当前设置模块精确打开，combobox/listbox 活动项关联、初始聚焦、Tab 圈闭、背景滚动锁定、关闭后焦点恢复和 IME composition/229 保护；统一多实体搜索、稳定详情路由、真实浏览器/WebView 验收和 OS 全局快捷键继续延期 |

@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -48,7 +49,12 @@ describe("CommandPalette", () => {
     cleanup();
     vi.useRealTimers();
     vi.clearAllMocks();
-    useUiStore.setState({ commandPaletteOpen: false, taskDetailId: null });
+    useUiStore.setState({
+      commandPaletteOpen: false,
+      settingsOpen: false,
+      settingsModule: "general",
+      taskDetailId: null,
+    });
   });
 
   it("debounces a server task search and opens the exact task detail", () => {
@@ -68,7 +74,7 @@ describe("CommandPalette", () => {
         <CommandPalette />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索页面或任务" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "搜索页面或任务" }), {
       target: { value: "跨页" },
     });
     expect(screen.getByText("正在搜索本地任务…")).toBeVisible();
@@ -104,6 +110,116 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
   });
 
+  it("opens the requested settings module directly", () => {
+    mocks.taskQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("option", { name: /专注设置/ }));
+
+    expect(useUiStore.getState()).toMatchObject({
+      commandPaletteOpen: false,
+      settingsOpen: true,
+      settingsModule: "focus",
+    });
+  });
+
+  it("keeps input focus while arrows select an option and Enter executes it", () => {
+    mocks.taskQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole("combobox", { name: "搜索页面或任务" });
+    fireEvent.change(input, { target: { value: "设置" } });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      "command-result-settings-focus",
+    );
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(useUiStore.getState()).toMatchObject({
+      commandPaletteOpen: false,
+      settingsOpen: true,
+      settingsModule: "focus",
+    });
+  });
+
+  it("traps focus and restores it to the opener after closing", async () => {
+    mocks.taskQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    const opener = document.createElement("button");
+    opener.textContent = "打开命令";
+    document.body.appendChild(opener);
+    opener.focus();
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole("combobox", { name: "搜索页面或任务" });
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+    expect(input).toHaveFocus();
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input).toHaveFocus();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => expect(opener).toHaveFocus());
+    expect(useUiStore.getState().commandPaletteOpen).toBe(false);
+    opener.remove();
+  });
+
+  it("does not execute the active command while an IME composition is active", () => {
+    mocks.taskQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(screen.getByRole("combobox"), {
+      isComposing: true,
+      key: "Enter",
+    });
+
+    expect(useUiStore.getState().commandPaletteOpen).toBe(true);
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+  });
+
   it("shows a retryable task-search error without hiding local commands", () => {
     vi.useFakeTimers();
     mocks.taskQuery.mockImplementation((input: { q?: string }) => ({
@@ -119,7 +235,7 @@ describe("CommandPalette", () => {
         <CommandPalette />
       </MemoryRouter>,
     );
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索页面或任务" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "搜索页面或任务" }), {
       target: { value: "不存在的任务" },
     });
     act(() => vi.advanceTimersByTime(200));

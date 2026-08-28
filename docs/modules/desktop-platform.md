@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v15（2026-08-28）。schema v12 新增 Sidecar/SQLite 内的手工 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增 Sidecar 内一次性 Reminder、启动补偿和周期扫描；均不改变 Tauri 桌面生命周期契约。桌面基座、Task Artifact 运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.1](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.2](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

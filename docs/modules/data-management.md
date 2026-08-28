@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.1](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 

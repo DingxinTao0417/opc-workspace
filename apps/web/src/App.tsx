@@ -1,9 +1,9 @@
-import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
 import { FocusRecoveryModal } from "./components/FocusRecoveryModal";
+import { GlobalShortcuts } from "./components/GlobalShortcuts";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { TaskDetailModal } from "./components/TaskDetailModal";
@@ -21,31 +21,6 @@ import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TodayPage } from "./pages/TodayPage";
 import { useSettingsStore } from "./store/settings";
-import { useUiStore } from "./store/ui";
-
-function GlobalShortcuts() {
-  const setCommandPaletteOpen = useUiStore(
-    (state) => state.setCommandPaletteOpen,
-  );
-  const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
-      if (event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandPaletteOpen(true);
-      } else if (event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        setNewTaskOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setCommandPaletteOpen, setNewTaskOpen]);
-
-  return null;
-}
 
 export default function App() {
   const defaultRoute = useSettingsStore(

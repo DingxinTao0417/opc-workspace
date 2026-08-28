@@ -186,7 +186,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [今日](today.md)：RightOverview 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
 - [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Session 不复制 Project 状态。
 - [设置](settings.md)：committed 参数用于新 Session 与自动下一轮；draft/preview 不改写活动 Session。
-- [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，也可打开设置弹窗，但“专注设置”尚未直达 focus 模块；从命令结果直接绑定任务也未交付。
+- [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，并可让“专注设置”直达 focus 模块；从命令结果直接绑定任务仍未交付。
 - [桌面平台](desktop-platform.md)：原生通知、托盘和系统勿扰仍待实现。
 - [数据管理](data-management.md)：备份/恢复必须同时覆盖 Session、interval、Task Focus 余数账本、Task 工时和事件。
 

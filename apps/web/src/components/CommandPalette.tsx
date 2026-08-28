@@ -14,7 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTaskPageQuery } from "../api/hooks";
-import { useUiStore } from "../store/ui";
+import { useUiStore, type SettingsModule } from "../store/ui";
 
 interface Command {
   id: string;
@@ -23,6 +23,28 @@ interface Command {
   icon: LucideIcon;
   run: () => void;
 }
+
+const focusableSelector = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+const settingsCommands: {
+  id: string;
+  label: string;
+  module: SettingsModule;
+}[] = [
+  { id: "settings", label: "打开设置", module: "general" },
+  { id: "settings-profile", label: "个人资料设置", module: "profile" },
+  { id: "settings-appearance", label: "外观设置", module: "appearance" },
+  { id: "settings-focus", label: "专注设置", module: "focus" },
+  { id: "settings-actors", label: "人员与责任设置", module: "actors" },
+  { id: "settings-about", label: "关于", module: "about" },
+];
 
 export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
@@ -35,6 +57,7 @@ export function CommandPalette() {
   const [taskQuery, setTaskQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const normalizedQuery = query.trim();
   const tasksQuery = useTaskPageQuery(
     { q: taskQuery, page: 1, pageSize: 12, sort: "-updated_at" },
@@ -100,16 +123,16 @@ export function CommandPalette() {
           setNewTaskOpen(true);
         },
       },
-      {
-        id: "focus-settings",
-        label: "打开设置",
-        hint: "设置",
+      ...settingsCommands.map(({ id, label, module }) => ({
+        id,
+        label,
+        hint: `设置 · ${label === "打开设置" ? "通用" : label.replace(/设置$/, "")}`,
         icon: Settings2,
         run: () => {
           setOpen(false);
-          setSettingsOpen(true);
+          setSettingsOpen(true, module);
         },
-      },
+      })),
     ];
     return pageCommands;
   }, [navigate, setNewTaskOpen, setOpen, setSettingsOpen]);
@@ -138,7 +161,10 @@ export function CommandPalette() {
     );
   }, [commands, query]);
 
-  const results = taskQuery ? [...filtered, ...taskCommands] : filtered;
+  const results = useMemo(
+    () => (taskQuery ? [...filtered, ...taskCommands] : filtered),
+    [filtered, taskCommands, taskQuery],
+  );
 
   useEffect(() => {
     if (!open || !normalizedQuery) {
@@ -151,22 +177,70 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     setQuery("");
     setTaskQuery("");
     setActiveIndex(0);
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
   }, [open]);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [query]);
 
+  useEffect(() => {
+    setActiveIndex((index) =>
+      results.length ? Math.min(index, results.length - 1) : 0,
+    );
+  }, [results.length]);
+
+  useEffect(() => {
+    const activeResult = results[activeIndex];
+    if (!activeResult) return;
+    document
+      .getElementById(`command-result-${activeResult.id}`)
+      ?.scrollIntoView?.({ block: "nearest" });
+  }, [activeIndex, results]);
+
   if (!open) return null;
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       setOpen(false);
+    } else if (event.key === "Tab") {
+      const focusable = panelRef.current
+        ? Array.from(
+            panelRef.current.querySelectorAll<HTMLElement>(focusableSelector),
+          ).filter((element) => element.tabIndex >= 0)
+        : [];
+      if (!focusable.length) {
+        event.preventDefault();
+        panelRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((index) =>
@@ -193,20 +267,31 @@ export function CommandPalette() {
         aria-label="命令面板"
         aria-modal="true"
         className="command-panel"
+        ref={panelRef}
         role="dialog"
+        tabIndex={-1}
       >
         <div className="command-search">
           <Search size={18} />
           <input
+            aria-activedescendant={
+              results[activeIndex]
+                ? `command-result-${results[activeIndex].id}`
+                : undefined
+            }
+            aria-autocomplete="list"
+            aria-controls="command-results"
+            aria-expanded="true"
             aria-label="搜索页面或任务"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索页面、任务或操作…"
             ref={inputRef}
+            role="combobox"
             value={query}
           />
           <kbd>Esc</kbd>
         </div>
-        <div className="command-list" role="listbox">
+        <div className="command-list" id="command-results" role="listbox">
           {results.length ? (
             results.map((command, index) => {
               const Icon = command.icon;
@@ -214,10 +299,12 @@ export function CommandPalette() {
                 <button
                   aria-selected={activeIndex === index}
                   className={`command-item${activeIndex === index ? " command-item-active" : ""}`}
+                  id={`command-result-${command.id}`}
                   key={command.id}
                   onClick={command.run}
                   onMouseEnter={() => setActiveIndex(index)}
                   role="option"
+                  tabIndex={-1}
                   type="button"
                 >
                   <span className="command-icon">
