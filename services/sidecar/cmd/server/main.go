@@ -53,6 +53,26 @@ func run(args []string) int {
 		logger.Printf("configuration error: %v", err)
 		return 2
 	}
+	latestSchema, err := database.LatestSchemaVersion()
+	if err != nil {
+		logger.Printf("read embedded schema version failed: %v", err)
+		return 1
+	}
+	restoreResult, err := api.ApplyPendingRestore(cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, latestSchema)
+	if err != nil {
+		logger.Printf("pending restore failed safely before database startup: %v", err)
+		return 1
+	}
+	if restoreResult.Applied {
+		logger.Printf(
+			"pending restore applied backup_id=%s rollback_backup_id=%s",
+			restoreResult.BackupID,
+			restoreResult.RollbackBackupID,
+		)
+		if restoreResult.CleanupWarning != "" {
+			logger.Printf("pending restore cleanup warning: %s", restoreResult.CleanupWarning)
+		}
+	}
 
 	store, err := database.Open(cfg.DatabasePath)
 	if err != nil {

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   verify: vi.fn(),
   drill: vi.fn(),
+  restore: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
 }));
@@ -70,6 +71,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useScheduleBackupRestore: () => ({
+    mutate: mocks.restore,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
@@ -77,6 +84,7 @@ describe("BackupSettings", () => {
     mocks.create.mockClear();
     mocks.verify.mockClear();
     mocks.drill.mockClear();
+    mocks.restore.mockClear();
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
   });
@@ -116,6 +124,14 @@ describe("BackupSettings", () => {
         onSuccess: expect.any(Function),
         onSettled: expect.any(Function),
       }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /恢复备份 018f0000/ }));
+    expect(screen.getByText(/确认恢复到“提交前检查点”/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "确认并安排恢复" }));
+    expect(mocks.restore).toHaveBeenCalledWith(
+      backup.id,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "刷新备份列表" }));

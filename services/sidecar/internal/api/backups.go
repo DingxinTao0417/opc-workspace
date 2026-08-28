@@ -142,6 +142,19 @@ func pathContains(parent, candidate string) bool {
 
 func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if a.restorePending.Load() {
+			backupRootPath := "/api/" + Version + "/backups"
+			isRestoreReplay := c.Request.Method == http.MethodPost &&
+				strings.HasPrefix(c.Request.URL.Path, backupRootPath+"/") &&
+				strings.HasSuffix(c.Request.URL.Path, "/restore")
+			if (c.Request.Method == http.MethodGet && c.Request.URL.Path == backupRootPath) || isRestoreReplay {
+				c.Next()
+				return
+			}
+			writeError(c, http.StatusServiceUnavailable, "RESTORE_RESTART_REQUIRED", "A verified restore is pending; restart the application to apply it")
+			c.Abort()
+			return
+		}
 		if strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/backups") {
 			c.Next()
 			return

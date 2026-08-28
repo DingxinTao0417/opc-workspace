@@ -25,6 +25,20 @@ type migration struct {
 	foreignKeysOff bool
 }
 
+// LatestSchemaVersion reports the newest embedded migration without opening or
+// changing a workspace database. Startup recovery uses it to reject a backup
+// created by a newer, incompatible Sidecar before replacing any live file.
+func LatestSchemaVersion() (int, error) {
+	migrations, err := loadMigrations()
+	if err != nil {
+		return 0, err
+	}
+	if len(migrations) == 0 {
+		return 0, errors.New("no embedded database migrations")
+	}
+	return migrations[len(migrations)-1].version, nil
+}
+
 func applyMigrations(db *sql.DB) (int, error) {
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)

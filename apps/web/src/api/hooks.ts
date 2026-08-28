@@ -77,6 +77,7 @@ import {
   reassignTaskAssignment,
   resumeFocusSession,
   reviewTaskSubmission,
+  scheduleBackupRestore,
   submitTaskOutput,
   splitInboxItem,
   stopFocusSession,
@@ -197,6 +198,16 @@ export function useVerifyBackup() {
 export function useDrillBackupRestore() {
   return useMutation({
     mutationFn: (id: string) => drillBackupRestore(id),
+  });
+}
+
+export function useScheduleBackupRestore() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => scheduleBackupRestore(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
+    },
   });
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	glebarezsqlite "github.com/glebarez/sqlite"
+	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -39,6 +41,29 @@ func newBackupTestAPI(t *testing.T) (*gin.Engine, *database.Store, string, strin
 	}
 	t.Cleanup(func() { _ = router.Close() })
 	return router.Engine, store, artifactDir, backupDir
+}
+
+func newBackupRestoreTestRuntime(t *testing.T, root string) (*Router, *database.Store, string, string, string) {
+	t.Helper()
+	databasePath := filepath.Join(root, "workspace.db")
+	artifactDir := filepath.Join(root, "artifacts")
+	backupDir := filepath.Join(root, "backups")
+	store, err := database.Open(databasePath)
+	if err != nil {
+		t.Fatalf("database.Open() error = %v", err)
+	}
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "0.1.0-test", Commit: "restore-test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
+		DatabasePath: databasePath, BackupDir: backupDir,
+		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
+	})
+	if err != nil {
+		_ = store.Close()
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	return router, store, databasePath, artifactDir, backupDir
 }
 
 func decodeBackupSummary(t *testing.T, body []byte) backupSummary {
@@ -217,5 +242,166 @@ func TestBackupAPIValidatesConfigurationAndRequests(t *testing.T) {
 	invalidKey := performRequest(configured, http.MethodPost, "/api/v1/backups", []byte(`{}`), map[string]string{"Idempotency-Key": "has space"})
 	if invalidKey.Code != http.StatusBadRequest || responseErrorCode(t, invalidKey.Body.Bytes()) != "INVALID_IDEMPOTENCY_KEY" {
 		t.Fatalf("invalid backup idempotency key = %d: %s", invalidKey.Code, invalidKey.Body.String())
+	}
+	confirmation := performRequest(configured, http.MethodPost, "/api/v1/backups/018f0000-0000-7000-8000-000000001701/restore", []byte(`{"confirm":false}`), nil)
+	if confirmation.Code != http.StatusUnprocessableEntity || responseErrorCode(t, confirmation.Body.Bytes()) != "RESTORE_CONFIRMATION_REQUIRED" {
+		t.Fatalf("restore confirmation = %d: %s", confirmation.Code, confirmation.Body.String())
+	}
+	missingRestore := performRequest(configured, http.MethodPost, "/api/v1/backups/018f0000-0000-7000-8000-000000001701/restore", []byte(`{"confirm":true}`), nil)
+	if missingRestore.Code != http.StatusNotFound || responseErrorCode(t, missingRestore.Body.Bytes()) != "BACKUP_NOT_FOUND" {
+		t.Fatalf("missing restore target = %d: %s", missingRestore.Code, missingRestore.Body.String())
+	}
+}
+
+func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *testing.T) {
+	root := t.TempDir()
+	router, store, databasePath, artifactDir, backupDir := newBackupRestoreTestRuntime(t, root)
+	task, _ := setupManualReviewTask(t, router.Engine)
+	manifest := `{"summary":"Restore file","artifacts":[{"client_ref":"upload","storage_kind":"file","name":"restore.txt","file_field":"file"}]}`
+	uploaded := performMultipartRequest(router.Engine, "/api/v1/tasks/"+task.ID+"/submit-output", manifest, map[string][]byte{"file": []byte("restored artifact body")}, map[string]string{"If-Match": `"3"`})
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("submit restore fixture = %d: %s", uploaded.Code, uploaded.Body.String())
+	}
+	artifactID := decodeSubmitOutputResponse(t, uploaded.Body.Bytes()).Artifacts[0].ID
+	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"restore target"}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create restore target = %d: %s", created.Code, created.Body.String())
+	}
+	target := decodeBackupSummary(t, created.Body.Bytes())
+	lateTask := createTaskForTaskFacts(t, router.Engine, `{"title":"must be rolled back"}`)
+
+	scheduled := performRequest(router, http.MethodPost, "/api/v1/backups/"+target.ID+"/restore", []byte(`{"confirm":true}`), nil)
+	if scheduled.Code != http.StatusAccepted {
+		t.Fatalf("schedule restore = %d: %s", scheduled.Code, scheduled.Body.String())
+	}
+	var scheduledEnvelope struct {
+		Data scheduledRestoreResult `json:"data"`
+	}
+	if err := json.Unmarshal(scheduled.Body.Bytes(), &scheduledEnvelope); err != nil {
+		t.Fatalf("decode scheduled restore: %v", err)
+	}
+	if scheduledEnvelope.Data.BackupID != target.ID || scheduledEnvelope.Data.RollbackBackupID == "" || !scheduledEnvelope.Data.RestartRequired {
+		t.Fatalf("scheduled restore result = %#v", scheduledEnvelope.Data)
+	}
+	replayed := performRequest(router, http.MethodPost, "/api/v1/backups/"+target.ID+"/restore", []byte(`{"confirm":true}`), nil)
+	if replayed.Code != http.StatusAccepted {
+		t.Fatalf("replay scheduled restore = %d: %s", replayed.Code, replayed.Body.String())
+	}
+	var replayEnvelope struct {
+		Data scheduledRestoreResult `json:"data"`
+	}
+	if err := json.Unmarshal(replayed.Body.Bytes(), &replayEnvelope); err != nil || replayEnvelope.Data != scheduledEnvelope.Data {
+		t.Fatalf("scheduled restore replay = %#v err=%v", replayEnvelope.Data, err)
+	}
+	differentID := uuid.NewString()
+	different := performRequest(router, http.MethodPost, "/api/v1/backups/"+differentID+"/restore", []byte(`{"confirm":true}`), nil)
+	if different.Code != http.StatusConflict || responseErrorCode(t, different.Body.Bytes()) != "RESTORE_ALREADY_PENDING" {
+		t.Fatalf("different pending restore = %d: %s", different.Code, different.Body.String())
+	}
+	blocked := performRequest(router, http.MethodGet, "/api/v1/tasks", nil, nil)
+	if blocked.Code != http.StatusServiceUnavailable || responseErrorCode(t, blocked.Body.Bytes()) != "RESTORE_RESTART_REQUIRED" {
+		t.Fatalf("request after scheduled restore = %d: %s", blocked.Code, blocked.Body.String())
+	}
+	if err := router.Close(); err != nil {
+		t.Fatalf("close router before restore: %v", err)
+	}
+	if err := store.Checkpoint(); err != nil {
+		t.Fatalf("checkpoint before restore: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close database before restore: %v", err)
+	}
+
+	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 17)
+	if err != nil {
+		t.Fatalf("ApplyPendingRestore() error = %v", err)
+	}
+	if !result.Applied || result.BackupID != target.ID || result.RollbackBackupID != scheduledEnvelope.Data.RollbackBackupID {
+		t.Fatalf("startup restore result = %#v", result)
+	}
+	if result.CleanupWarning != "" {
+		t.Fatalf("startup restore cleanup warning = %q", result.CleanupWarning)
+	}
+	reopened, err := database.Open(databasePath)
+	if err != nil {
+		t.Fatalf("open restored database: %v", err)
+	}
+	restoredRouter, err := NewRouter(reopened.DB, Options{
+		AppVersion: "0.1.0-test", Commit: "restore-test", SchemaVersion: reopened.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
+		DatabasePath: databasePath, BackupDir: backupDir,
+		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
+	})
+	if err != nil {
+		_ = reopened.Close()
+		t.Fatalf("open restored router: %v", err)
+	}
+	defer restoredRouter.Close()
+	defer reopened.Close()
+	if got := performRequest(restoredRouter, http.MethodGet, "/api/v1/tasks/"+task.ID, nil, nil); got.Code != http.StatusOK {
+		t.Fatalf("target task after restore = %d: %s", got.Code, got.Body.String())
+	}
+	if got := performRequest(restoredRouter, http.MethodGet, "/api/v1/tasks/"+lateTask.ID, nil, nil); got.Code != http.StatusNotFound {
+		t.Fatalf("late task after restore = %d: %s", got.Code, got.Body.String())
+	}
+	content := performRequest(restoredRouter, http.MethodGet, "/api/v1/artifacts/"+artifactID+"/content", nil, nil)
+	if content.Code != http.StatusOK || content.Body.String() != "restored artifact body" {
+		t.Fatalf("restored Artifact = %d: %q", content.Code, content.Body.String())
+	}
+
+	rollbackDatabase := filepath.Join(backupDir, result.RollbackBackupID, "database", "opc-workspace.db")
+	rollback, err := gorm.Open(glebarezsqlite.Open("file:"+filepath.ToSlash(rollbackDatabase)+"?mode=ro&immutable=1"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open rollback backup: %v", err)
+	}
+	rollbackSQL, _ := rollback.DB()
+	defer rollbackSQL.Close()
+	var lateCount int64
+	if err := rollback.Table("tasks").Where("id = ?", lateTask.ID).Count(&lateCount).Error; err != nil || lateCount != 1 {
+		t.Fatalf("rollback backup late task count=%d err=%v", lateCount, err)
+	}
+	if _, err := os.Lstat(filepath.Join(backupDir, pendingRestoreDirectory)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pending restore was not cleaned: %v", err)
+	}
+	for _, pattern := range []string{
+		filepath.Join(filepath.Dir(databasePath), ".opc-restore-new-*.db"),
+		filepath.Join(filepath.Dir(databasePath), ".opc-restore-old-*.db"),
+		filepath.Join(artifactDir, ".restore-*-objects-*"),
+	} {
+		matches, _ := filepath.Glob(pattern)
+		if len(matches) != 0 {
+			t.Fatalf("restore left temporary paths for %s: %v", pattern, matches)
+		}
+	}
+}
+
+func TestRollbackRestoreSwapRecoversPartiallyMovedSQLiteSidecars(t *testing.T) {
+	root := t.TempDir()
+	artifactRoot := filepath.Join(root, "artifacts")
+	if err := os.MkdirAll(artifactRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	paths := restoreSwapPaths{
+		database:    filepath.Join(root, "workspace.db"),
+		databaseOld: filepath.Join(root, ".opc-restore-old-test.db"),
+		objects:     filepath.Join(artifactRoot, "objects"),
+		objectsOld:  filepath.Join(artifactRoot, ".restore-old-objects-test"),
+	}
+	if err := os.WriteFile(paths.database+"-wal", []byte("partial-new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.databaseOld+"-wal", []byte("original-wal"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rollbackRestoreSwap(paths); err != nil {
+		t.Fatalf("rollbackRestoreSwap() error = %v", err)
+	}
+	content, err := os.ReadFile(paths.database + "-wal")
+	if err != nil || string(content) != "original-wal" {
+		t.Fatalf("restored WAL = %q err=%v", content, err)
+	}
+	if _, err := os.Lstat(paths.databaseOld + "-wal"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old WAL was not consumed: %v", err)
 	}
 }

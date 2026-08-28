@@ -48,6 +48,7 @@ import {
   resetRuntimeConnection,
   reassignTaskAssignment,
   reviewTaskSubmission,
+  scheduleBackupRestore,
   submitTaskOutput,
   updateTag,
   updateTask,
@@ -1426,7 +1427,7 @@ describe("verified local backups", () => {
     ).toThrow(ApiError);
   });
 
-  it("lists, creates with a stable key, verifies, and drills backups", async () => {
+  it("lists, creates with a stable key, verifies, drills, and schedules restores", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).endsWith(`/backups/${backupPayload.id}/drill`)) {
@@ -1440,6 +1441,19 @@ describe("verified local backups", () => {
               temporary_data_cleaned: true,
             },
           });
+        }
+        if (String(input).endsWith(`/backups/${backupPayload.id}/restore`)) {
+          return jsonResponse(
+            {
+              data: {
+                backup_id: backupPayload.id,
+                rollback_backup_id: "018f0000-0000-7000-8000-000000001702",
+                requested_at: "2026-08-28T12:06:00Z",
+                restart_required: true,
+              },
+            },
+            202,
+          );
         }
         return jsonResponse(
           init?.method === "POST"
@@ -1462,6 +1476,12 @@ describe("verified local backups", () => {
       artifactCount: 2,
       temporaryDataCleaned: true,
     });
+    expect(await scheduleBackupRestore(backupPayload.id)).toEqual({
+      backupId: backupPayload.id,
+      rollbackBackupId: "018f0000-0000-7000-8000-000000001702",
+      requestedAt: "2026-08-28T12:06:00Z",
+      restartRequired: true,
+    });
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/backups");
     expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
@@ -1479,6 +1499,13 @@ describe("verified local backups", () => {
       `/api/v1/backups/${backupPayload.id}/drill`,
     );
     expect(fetchMock.mock.calls[3][1]?.method).toBe("POST");
+    expect(String(fetchMock.mock.calls[4][0])).toContain(
+      `/api/v1/backups/${backupPayload.id}/restore`,
+    );
+    expect(fetchMock.mock.calls[4][1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[4][1]?.body))).toEqual({
+      confirm: true,
+    });
   });
 });
 

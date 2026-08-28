@@ -6,6 +6,13 @@ import (
 )
 
 func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
+	latest, err := LatestSchemaVersion()
+	if err != nil {
+		t.Fatalf("LatestSchemaVersion() error = %v", err)
+	}
+	if latest != 17 {
+		t.Fatalf("LatestSchemaVersion() = %d, want 17", latest)
+	}
 	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)

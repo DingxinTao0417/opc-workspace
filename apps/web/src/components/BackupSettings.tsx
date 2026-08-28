@@ -6,6 +6,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Undo2,
 } from "lucide-react";
 import { useState } from "react";
 import { ApiError } from "../api/client";
@@ -13,6 +14,7 @@ import {
   useBackupsQuery,
   useCreateBackup,
   useDrillBackupRestore,
+  useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
 import type { BackupSummary } from "../types/models";
@@ -50,6 +52,24 @@ function backupErrorText(error: unknown): string {
     if (error.code === "BACKUP_NOT_RESTORABLE") {
       return "备份无法在隔离临时数据根完成恢复演练，请勿用它替换当前数据。";
     }
+    if (error.code === "RESTORE_CONFIRMATION_REQUIRED") {
+      return "必须明确确认后才能安排恢复。";
+    }
+    if (error.code === "RESTORE_ROLLBACK_BACKUP_FAILED") {
+      return "无法为当前数据创建自动回滚点，恢复没有被安排。";
+    }
+    if (error.code === "RESTORE_SCHEDULE_FAILED") {
+      return "无法安全挂起恢复，当前数据没有改变。";
+    }
+    if (error.code === "RESTORE_WORKSPACE_MISMATCH") {
+      return "这个备份不属于当前工作区，不能覆盖当前数据。";
+    }
+    if (error.code === "RESTORE_ALREADY_PENDING") {
+      return "已有另一个备份等待恢复，请先关闭并重新打开应用。";
+    }
+    if (error.code === "RESTORE_RESTART_REQUIRED") {
+      return "恢复已经挂起，请关闭并重新打开应用后继续。";
+    }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
       : error.message;
@@ -63,6 +83,7 @@ function BackupCard({
   drillingId,
   verifyingId,
   onDrill,
+  onRestore,
   onVerify,
 }: {
   backup: BackupSummary;
@@ -70,6 +91,7 @@ function BackupCard({
   drillingId: string | null;
   verifyingId: string | null;
   onDrill: (id: string) => void;
+  onRestore: (backup: BackupSummary) => void;
   onVerify: (id: string) => void;
 }) {
   const invalid = backup.verificationStatus === "invalid";
@@ -129,6 +151,16 @@ function BackupCard({
           )}
           {drilling ? "演练中…" : "恢复演练"}
         </button>
+        <button
+          aria-label={`恢复备份 ${backup.id.slice(0, 8)}`}
+          className="button button-danger settings-backup-restore"
+          disabled={busy || invalid}
+          onClick={() => onRestore(backup)}
+          type="button"
+        >
+          <Undo2 size={13} />
+          恢复此备份
+        </button>
       </div>
     </article>
   );
@@ -139,22 +171,35 @@ export function BackupSettings() {
   const createMutation = useCreateBackup();
   const verifyMutation = useVerifyBackup();
   const drillMutation = useDrillBackupRestore();
+  const restoreMutation = useScheduleBackupRestore();
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
+  const [restoreCandidate, setRestoreCandidate] =
+    useState<BackupSummary | null>(null);
+  const [scheduledRestore, setScheduledRestore] = useState<{
+    backupId: string;
+    rollbackBackupId: string;
+  } | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const pending =
     createMutation.isPending ||
     verifyMutation.isPending ||
-    drillMutation.isPending;
+    drillMutation.isPending ||
+    restoreMutation.isPending;
+  const locked = pending || scheduledRestore !== null;
   const mutationError =
-    createMutation.error ?? verifyMutation.error ?? drillMutation.error;
+    createMutation.error ??
+    verifyMutation.error ??
+    drillMutation.error ??
+    restoreMutation.error;
 
   const create = () => {
     setSuccess(null);
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
+    restoreMutation.reset();
     createMutation.mutate(
       { note: note.trim() },
       {
@@ -174,6 +219,7 @@ export function BackupSettings() {
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
+    restoreMutation.reset();
     verifyMutation.mutate(id, {
       onSuccess: (backup) =>
         setSuccess(`备份 ${backup.id.slice(0, 8)} 完整性校验通过。`),
@@ -187,12 +233,31 @@ export function BackupSettings() {
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
+    restoreMutation.reset();
     drillMutation.mutate(id, {
       onSuccess: (result) =>
         setSuccess(
           `备份 ${result.backupId.slice(0, 8)} 已在隔离临时数据根完成恢复演练：schema v${result.sourceSchemaVersion} → v${result.resultSchemaVersion}，${result.artifactCount} 个受控文件。`,
         ),
       onSettled: () => setDrillingId(null),
+    });
+  };
+
+  const scheduleRestore = () => {
+    if (!restoreCandidate) return;
+    setSuccess(null);
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    restoreMutation.reset();
+    restoreMutation.mutate(restoreCandidate.id, {
+      onSuccess: (result) => {
+        setScheduledRestore({
+          backupId: result.backupId,
+          rollbackBackupId: result.rollbackBackupId,
+        });
+        setRestoreCandidate(null);
+      },
     });
   };
 
@@ -218,7 +283,7 @@ export function BackupSettings() {
           <input
             aria-label="备份说明"
             className="settings-text-input"
-            disabled={pending}
+            disabled={locked}
             maxLength={200}
             onChange={(event) => {
               setNote(event.target.value);
@@ -231,7 +296,7 @@ export function BackupSettings() {
         </label>
         <button
           className="button button-primary settings-backup-create-button"
-          disabled={pending}
+          disabled={locked}
           onClick={create}
           type="button"
         >
@@ -264,7 +329,7 @@ export function BackupSettings() {
         <button
           aria-label="刷新备份列表"
           className="button button-quiet"
-          disabled={backupsQuery.isFetching || pending}
+          disabled={backupsQuery.isFetching || locked}
           onClick={() => void backupsQuery.refetch()}
           type="button"
         >
@@ -306,10 +371,11 @@ export function BackupSettings() {
           {backupsQuery.data.map((backup) => (
             <BackupCard
               backup={backup}
-              busy={pending}
+              busy={locked}
               drillingId={drillingId}
               key={backup.id}
               onDrill={drill}
+              onRestore={setRestoreCandidate}
               onVerify={verify}
               verifyingId={verifyingId}
             />
@@ -317,9 +383,72 @@ export function BackupSettings() {
         </div>
       )}
 
+      {restoreCandidate ? (
+        <section
+          aria-label="确认恢复备份"
+          className="settings-backup-restore-confirm"
+        >
+          <AlertCircle size={18} />
+          <div>
+            <strong>确认恢复到“{restoreCandidate.note || "手动备份"}”？</strong>
+            <p>
+              Sidecar
+              会先再次演练并为当前状态创建自动回滚备份，然后挂起所有业务操作。关闭并重新打开应用后，才会在数据库打开前替换当前数据。
+            </p>
+            <small>
+              目标：{formatLocalTime(restoreCandidate.createdAt)} · ID{" "}
+              {restoreCandidate.id.slice(0, 8)}
+            </small>
+          </div>
+          <div className="settings-backup-restore-confirm-actions">
+            <button
+              className="button button-secondary"
+              disabled={restoreMutation.isPending}
+              onClick={() => setRestoreCandidate(null)}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="button button-danger"
+              disabled={restoreMutation.isPending}
+              onClick={scheduleRestore}
+              type="button"
+            >
+              {restoreMutation.isPending ? (
+                <LoaderCircle className="animate-spin" size={13} />
+              ) : (
+                <Undo2 size={13} />
+              )}
+              {restoreMutation.isPending
+                ? "创建回滚点并安排中…"
+                : "确认并安排恢复"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {scheduledRestore ? (
+        <section
+          aria-live="assertive"
+          className="settings-backup-restore-ready"
+          role="status"
+        >
+          <ShieldCheck size={18} />
+          <div>
+            <strong>恢复已安全挂起，请关闭并重新打开应用</strong>
+            <p>
+              重启前业务写入已停止。启动时将应用备份{" "}
+              {scheduledRestore.backupId.slice(0, 8)}；当前状态的自动回滚点为{" "}
+              {scheduledRestore.rollbackBackupId.slice(0, 8)}。
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <p className="settings-inline-note">
-        当前已开放创建、查看、完整性校验和隔离恢复演练；实际替换当前数据、删除与
-        JSON 导出会在后续独立安全流程完成后启用。
+        当前已开放创建、查看、完整性校验、隔离演练和重启前安全恢复安排；删除与
+        JSON 导出会在后续独立流程完成后启用。
       </p>
     </>
   );

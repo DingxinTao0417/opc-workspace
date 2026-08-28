@@ -12,6 +12,7 @@ import type {
   BackupSummary,
   BackupRestoreDrillResult,
   BackupVerificationStatus,
+  ScheduledBackupRestoreResult,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
   Client,
@@ -3754,6 +3755,43 @@ export async function drillBackupRestore(
     artifactCount,
     temporaryDataCleaned,
   };
+}
+
+export async function scheduleBackupRestore(
+  id: string,
+): Promise<ScheduledBackupRestoreResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/backups/${encodeURIComponent(id)}/restore`,
+    { method: "POST", body: JSON.stringify({ confirm: true }) },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) {
+    return invalidResponse("备份恢复安排响应格式无效");
+  }
+  const backupId = stringField(body, "backup_id", "backupId");
+  const rollbackBackupId = stringField(
+    body,
+    "rollback_backup_id",
+    "rollbackBackupId",
+  );
+  const requestedAt = stringField(body, "requested_at", "requestedAt");
+  const restartRequired = fieldValue(
+    body,
+    "restart_required",
+    "restartRequired",
+  );
+  if (
+    !backupId ||
+    !rollbackBackupId ||
+    backupId === rollbackBackupId ||
+    !requestedAt ||
+    Number.isNaN(Date.parse(requestedAt)) ||
+    restartRequired !== true
+  ) {
+    return invalidResponse("备份恢复安排响应格式无效");
+  }
+  return { backupId, rollbackBackupId, requestedAt, restartRequired };
 }
 
 export async function getTags(

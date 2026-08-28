@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,11 +35,12 @@ type Options struct {
 }
 
 type API struct {
-	db            *gorm.DB
-	options       Options
-	artifactStore *artifactStore
-	backupStore   *backupStore
-	maintenance   *sync.RWMutex
+	db             *gorm.DB
+	options        Options
+	artifactStore  *artifactStore
+	backupStore    *backupStore
+	maintenance    *sync.RWMutex
+	restorePending atomic.Bool
 }
 
 type Router struct {
@@ -177,6 +179,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/backups", service.createBackup)
 		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.POST("/backups/:id/drill", service.drillBackupRestore)
+		v1.POST("/backups/:id/restore", service.scheduleBackupRestore)
 		v1.GET("/settings", service.listSettings)
 		v1.PATCH("/settings", service.updateSettings)
 		v1.GET("/actors", service.listActors)
@@ -275,6 +278,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					if service.restorePending.Load() {
+						continue
+					}
 					service.maintenance.RLock()
 					err := service.refreshActiveFocusHeartbeat(ctx)
 					service.maintenance.RUnlock()
@@ -298,6 +304,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					if service.restorePending.Load() {
+						continue
+					}
 					service.maintenance.RLock()
 					err := service.projectDueReminders(ctx)
 					service.maintenance.RUnlock()

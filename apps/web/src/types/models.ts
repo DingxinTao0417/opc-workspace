@@ -1185,3 +1185,10 @@ export interface BackupRestoreDrillResult {
   artifactCount: number;
   temporaryDataCleaned: boolean;
 }
+
+export interface ScheduledBackupRestoreResult {
+  backupId: string;
+  rollbackBackupId: string;
+  requestedAt: string;
+  restartRequired: true;
+}
