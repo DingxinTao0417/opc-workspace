@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -18,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   moveError: null as unknown,
   movePending: false,
   resetMove: vi.fn(),
+  dragTask: vi.fn(),
+  dragError: null as unknown,
+  dragPending: false,
+  resetDrag: vi.fn(),
   resetOrder: vi.fn(),
   resetResetOrder: vi.fn(),
   setNewTaskOpen: vi.fn(),
@@ -40,6 +45,12 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.resetOrder,
     reset: mocks.resetResetOrder,
   }),
+  useReorderActiveTasksWithinPlan: () => ({
+    error: mocks.dragError,
+    isPending: mocks.dragPending,
+    mutate: mocks.dragTask,
+    reset: mocks.resetDrag,
+  }),
   useTaskPageQuery: () => ({
     data: undefined,
     isFetching: false,
@@ -59,6 +70,8 @@ describe("TodayPage Inbox overview", () => {
     vi.clearAllMocks();
     mocks.moveError = null;
     mocks.movePending = false;
+    mocks.dragError = null;
+    mocks.dragPending = false;
     vi.useRealTimers();
   });
 
@@ -366,5 +379,102 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "计划组已变化，请重新操作",
     );
+  });
+
+  it("optimistically reorders a dragged exact-date group and clears it after settling", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    const first = {
+      id: "drag-1",
+      title: "拖拽第一项",
+      description: "",
+      kind: "work",
+      status: "todo",
+      reviewPolicy: "none",
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate: "2026-08-28",
+      estimatedMinutes: null,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: 1,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    };
+    const second = { ...first, id: "drag-2", title: "拖拽第二项", version: 2 };
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [first, second],
+        thisWeek: [],
+        unscheduled: [],
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      setData: vi.fn(),
+    };
+    const source = screen.getByTitle("拖动排序：拖拽第一项");
+    const target = screen
+      .getByRole("button", { name: "查看任务：拖拽第二项" })
+      .closest("article");
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(target!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer });
+
+    expect(mocks.dragTask).toHaveBeenCalledWith(
+      {
+        plannedDate: "2026-08-28",
+        orderedTaskIds: ["drag-2", "drag-1"],
+      },
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    );
+    expect(
+      screen
+        .getAllByRole("button", { name: /查看任务：拖拽/ })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["查看任务：拖拽第二项", "查看任务：拖拽第一项"]);
+
+    const callbacks = mocks.dragTask.mock.calls[0][1] as {
+      onSettled: () => void;
+    };
+    act(() => callbacks.onSettled());
+    expect(
+      screen
+        .getAllByRole("button", { name: /查看任务：拖拽/ })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["查看任务：拖拽第一项", "查看任务：拖拽第二项"]);
   });
 });

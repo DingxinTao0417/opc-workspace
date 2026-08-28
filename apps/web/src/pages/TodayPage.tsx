@@ -19,6 +19,7 @@ import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
   useMoveTaskWithinPlan,
+  useReorderActiveTasksWithinPlan,
   useResetTaskOrder,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
@@ -26,6 +27,7 @@ import {
 import { useUiStore } from "../store/ui";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskList } from "../components/TaskList";
+import type { Task } from "../types/models";
 
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -59,6 +61,33 @@ function reorderErrorText(error: unknown): string | null {
   return "无法保存任务顺序，请重试。";
 }
 
+function applyOptimisticOrder(tasks: Task[], orderedIds?: string[]): Task[] {
+  if (!orderedIds || orderedIds.length !== tasks.length) return tasks;
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  if (orderedIds.some((id) => !byId.has(id))) return tasks;
+  return orderedIds.map((id) => byId.get(id)!);
+}
+
+function moveTaskId(
+  tasks: Task[],
+  sourceId: string,
+  targetId: string,
+): string[] {
+  const ids = tasks.map((task) => task.id);
+  const sourceIndex = ids.indexOf(sourceId);
+  const targetIndex = ids.indexOf(targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)
+    return ids;
+  const [source] = ids.splice(sourceIndex, 1);
+  const targetAfterRemoval = ids.indexOf(targetId);
+  ids.splice(
+    targetAfterRemoval + (sourceIndex < targetIndex ? 1 : 0),
+    0,
+    source,
+  );
+  return ids;
+}
+
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const today = new Date();
@@ -70,14 +99,20 @@ export function TodayPage() {
   const statsQuery = useTodayStatsQuery(dateKey);
   const inboxStatsQuery = useInboxStatsQuery();
   const moveMutation = useMoveTaskWithinPlan();
+  const dragMutation = useReorderActiveTasksWithinPlan();
   const resetOrderMutation = useResetTaskOrder();
+  const [optimisticOrders, setOptimisticOrders] = useState<
+    Record<string, string[]>
+  >({});
   const live = taskGroupsQuery.isSuccess;
   const reorderReady =
     live &&
     !taskGroupsQuery.isFetching &&
     !moveMutation.isPending &&
+    !dragMutation.isPending &&
     !resetOrderMutation.isPending;
   const reorderError =
+    reorderErrorText(dragMutation.error) ??
     reorderErrorText(moveMutation.error) ??
     reorderErrorText(resetOrderMutation.error);
   const groups = taskGroupsQuery.data ?? {
@@ -87,6 +122,16 @@ export function TodayPage() {
     unscheduled: [],
   };
   const realStats = statsQuery.data;
+  const todayOrderKey = `date:${dateKey}`;
+  const unscheduledOrderKey = "unscheduled";
+  const orderedTodayTasks = applyOptimisticOrder(
+    groups.today,
+    optimisticOrders[todayOrderKey],
+  );
+  const orderedUnscheduledTasks = applyOptimisticOrder(
+    groups.unscheduled,
+    optimisticOrders[unscheduledOrderKey],
+  );
   const estimated = realStats
     ? Math.round((realStats.tasks.estimatedMinutes / 60) * 10) / 10
     : 0;
@@ -141,6 +186,7 @@ export function TodayPage() {
     plannedDate: string | null,
     direction: "up" | "down",
   ) => {
+    dragMutation.reset();
     resetOrderMutation.reset();
     moveMutation.mutate({
       taskId,
@@ -149,9 +195,39 @@ export function TodayPage() {
       scope: "active",
     });
   };
-  const resetPlanOrder = (plannedDate: string | null) => {
+  const clearOptimisticOrder = (key: string) => {
+    setOptimisticOrders((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+  const resetPlanOrder = (plannedDate: string | null, orderKey: string) => {
+    clearOptimisticOrder(orderKey);
+    dragMutation.reset();
     moveMutation.reset();
     resetOrderMutation.mutate(plannedDate);
+  };
+  const dropTask = (
+    source: Task,
+    target: Task,
+    tasks: Task[],
+    plannedDate: string | null,
+    orderKey: string,
+  ) => {
+    const orderedTaskIds = moveTaskId(tasks, source.id, target.id);
+    if (orderedTaskIds.every((id, index) => id === tasks[index]?.id)) return;
+    moveMutation.reset();
+    resetOrderMutation.reset();
+    setOptimisticOrders((current) => ({
+      ...current,
+      [orderKey]: orderedTaskIds,
+    }));
+    dragMutation.mutate(
+      { plannedDate, orderedTaskIds },
+      { onSettled: () => clearOptimisticOrder(orderKey) },
+    );
   };
 
   return (
@@ -286,11 +362,14 @@ export function TodayPage() {
         />
       ) : null}
 
-      {moveMutation.isPending ||
+      {dragMutation.isPending ||
+      moveMutation.isPending ||
       resetOrderMutation.isPending ||
       reorderError ? (
         <div className="task-order-banner today-order-status">
-          {moveMutation.isPending || resetOrderMutation.isPending ? (
+          {dragMutation.isPending ||
+          moveMutation.isPending ||
+          resetOrderMutation.isPending ? (
             <span role="status">正在保存任务顺序…</span>
           ) : null}
           {reorderError ? (
@@ -328,7 +407,7 @@ export function TodayPage() {
               <button
                 className="button button-quiet today-reset-order"
                 disabled={!reorderReady}
-                onClick={() => resetPlanOrder(dateKey)}
+                onClick={() => resetPlanOrder(dateKey, todayOrderKey)}
                 type="button"
               >
                 <RotateCcw size={12} />
@@ -357,7 +436,9 @@ export function TodayPage() {
         ) : (
           <TaskList
             allowReorder
+            allowDrag
             compact
+            dragPending={dragMutation.isPending}
             live={reorderReady}
             onMove={(task, direction) => moveTask(task.id, dateKey, direction)}
             reorderPendingId={
@@ -365,7 +446,16 @@ export function TodayPage() {
                 ? (moveMutation.variables?.taskId ?? null)
                 : null
             }
-            tasks={groups.today}
+            onDropTask={(source, target) =>
+              dropTask(
+                source,
+                target,
+                orderedTodayTasks,
+                dateKey,
+                todayOrderKey,
+              )
+            }
+            tasks={orderedTodayTasks}
           />
         )}
       </section>
@@ -399,7 +489,7 @@ export function TodayPage() {
               <button
                 className="button button-quiet today-reset-order"
                 disabled={!reorderReady}
-                onClick={() => resetPlanOrder(null)}
+                onClick={() => resetPlanOrder(null, unscheduledOrderKey)}
                 type="button"
               >
                 <RotateCcw size={12} />
@@ -409,7 +499,9 @@ export function TodayPage() {
           </div>
           <TaskList
             allowReorder
+            allowDrag
             compact
+            dragPending={dragMutation.isPending}
             live={reorderReady}
             onMove={(task, direction) => moveTask(task.id, null, direction)}
             reorderPendingId={
@@ -417,7 +509,16 @@ export function TodayPage() {
                 ? (moveMutation.variables?.taskId ?? null)
                 : null
             }
-            tasks={groups.unscheduled}
+            onDropTask={(source, target) =>
+              dropTask(
+                source,
+                target,
+                orderedUnscheduledTasks,
+                null,
+                unscheduledOrderKey,
+              )
+            }
+            tasks={orderedUnscheduledTasks}
           />
         </section>
       ) : null}

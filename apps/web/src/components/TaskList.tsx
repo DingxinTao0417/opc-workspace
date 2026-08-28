@@ -10,8 +10,9 @@ import {
   CircleDotDashed,
   Clock3,
   Eye,
+  GripVertical,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import { useTaskPageQuery } from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
@@ -55,6 +56,9 @@ interface TaskListProps {
   allowReorder?: boolean;
   onMove?: (task: Task, direction: "up" | "down") => void;
   reorderPendingId?: string | null;
+  allowDrag?: boolean;
+  dragPending?: boolean;
+  onDropTask?: (source: Task, target: Task) => void;
 }
 
 function TaskRow({
@@ -70,6 +74,14 @@ function TaskRow({
   allowReorder,
   onMove,
   reorderPendingId,
+  allowDrag,
+  dragPending,
+  draggingId,
+  dragOverId,
+  onTaskDragStart,
+  onTaskDragEnd,
+  onTaskDragOver,
+  onTaskDrop,
 }: Required<
   Pick<
     TaskListProps,
@@ -79,6 +91,8 @@ function TaskRow({
     | "level"
     | "showParent"
     | "allowReorder"
+    | "allowDrag"
+    | "dragPending"
   >
 > &
   Omit<
@@ -92,6 +106,12 @@ function TaskRow({
     | "allowReorder"
   > & {
     task: Task;
+    draggingId: string | null;
+    dragOverId: string | null;
+    onTaskDragStart?: (event: DragEvent<HTMLElement>, task: Task) => void;
+    onTaskDragEnd?: () => void;
+    onTaskDragOver?: (event: DragEvent<HTMLElement>, task: Task) => void;
+    onTaskDrop?: (event: DragEvent<HTMLElement>, task: Task) => void;
   }) {
   const [expanded, setExpanded] = useState(false);
   const [childPage, setChildPage] = useState(1);
@@ -119,11 +139,27 @@ function TaskRow({
     <div className="task-tree-node">
       <article
         aria-level={hierarchical ? level : undefined}
-        className={`task-row task-${task.status}${isSelected ? " task-row-selected" : ""}`}
+        className={`task-row task-${task.status}${isSelected ? " task-row-selected" : ""}${draggingId === task.id ? " task-row-dragging" : ""}${dragOverId === task.id ? " task-row-drag-over" : ""}`}
+        onDragOver={
+          allowDrag ? (event) => onTaskDragOver?.(event, task) : undefined
+        }
+        onDrop={allowDrag ? (event) => onTaskDrop?.(event, task) : undefined}
         role={hierarchical ? "treeitem" : undefined}
         style={hierarchical ? { paddingLeft: 9 + (level - 1) * 18 } : undefined}
       >
         <div className="task-leading">
+          {allowDrag ? (
+            <span
+              aria-hidden="true"
+              className="task-drag-handle"
+              draggable={live && !dragPending}
+              onDragEnd={onTaskDragEnd}
+              onDragStart={(event) => onTaskDragStart?.(event, task)}
+              title={`拖动排序：${task.title}`}
+            >
+              <GripVertical size={13} />
+            </span>
+          ) : null}
           {onSelectionChange ? (
             <input
               aria-label={`选择任务：${task.title}`}
@@ -315,7 +351,20 @@ export function TaskList({
   allowReorder = false,
   onMove,
   reorderPendingId = null,
+  allowDrag = false,
+  dragPending = false,
+  onDropTask,
 }: TaskListProps) {
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const dragEnabled = allowDrag && Boolean(onDropTask);
+
+  const endDrag = () => {
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
   return (
     <div
       className={compact ? "task-list task-list-compact" : "task-list"}
@@ -324,12 +373,38 @@ export function TaskList({
       {tasks.map((task) => (
         <TaskRow
           allowReorder={allowReorder}
+          allowDrag={dragEnabled}
           compact={compact}
+          dragOverId={dragOverId}
+          dragPending={dragPending}
+          draggingId={draggingId}
           hierarchical={hierarchical}
           key={task.id}
           level={level}
           live={live}
           onMove={onMove}
+          onTaskDragEnd={endDrag}
+          onTaskDragOver={(event, target) => {
+            if (!draggingId || draggingId === target.id || dragPending) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+            setDragOverId(target.id);
+          }}
+          onTaskDragStart={(event, source) => {
+            if (!live || dragPending) {
+              event.preventDefault();
+              return;
+            }
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", source.id);
+            setDraggingId(source.id);
+          }}
+          onTaskDrop={(event, target) => {
+            event.preventDefault();
+            const source = draggingId ? taskById.get(draggingId) : undefined;
+            endDrag();
+            if (source && source.id !== target.id) onDropTask?.(source, target);
+          }}
           onSelectionChange={onSelectionChange}
           reorderPendingId={reorderPendingId}
           selectedIds={selectedIds}

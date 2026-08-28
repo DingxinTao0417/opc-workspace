@@ -10,7 +10,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态并支持重试
 - SQLite schema v15、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12 追加手工 Inbox Item，v13 追加 Inbox–Task 活动/历史关系与删除互锁，v14 追加一次性本地 Reminder，v15 追加 Inbox 自动编排校验
-- 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组手动排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令；Today 已消费所选精确日期/未排期活动组的上移、下移和恢复默认
+- 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组手动排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令；Today 已消费所选精确日期/未排期活动组的按钮式及同组拖拽排序、恢复默认和失败回滚
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
 - 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情与 Project 客户选择、改绑、解除及筛选已接真实 API
@@ -28,7 +28,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；committed/draft/preview 已隔离，预览或取消不会改写活动 Session
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C Today 日期分组/导航/按钮式计划组排序、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置“关于”真实健康/版本展示，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/非 Reminder Inbox 来源投影、重复提醒、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v3.4](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D Today 日期分组/导航/按钮及同组拖拽计划组排序、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置“关于”真实健康/版本展示，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/非 Reminder Inbox 来源投影、重复提醒、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v3.5](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -50,7 +50,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v3.4）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v3.5）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -281,4 +281,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v3.4](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航及精确日期/未排期按钮式排序、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置“关于”真实健康/版本展示、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Focus D、Today 拖拽/跨日期改期、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v3.5](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航及精确日期/未排期按钮式与同组拖拽排序、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置“关于”真实健康/版本展示、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Focus D、Today 跨日期改期、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

@@ -35,6 +35,7 @@ import {
   useSubmitTaskOutput,
   useReviewTaskSubmission,
   useMoveTaskWithinPlan,
+  useReorderActiveTasksWithinPlan,
   useDeleteTaskArtifact,
   useTaskPageQuery,
   useTodayTaskGroupsQuery,
@@ -386,6 +387,70 @@ describe("task queries", () => {
         { id: task.id, expectedVersion: task.version },
       ],
     });
+  });
+
+  it("persists an explicit active drag order without moving terminal slots", async () => {
+    const done = { ...task, id: "done", status: "done" as const, version: 5 };
+    const blocked = {
+      ...task,
+      id: "blocked",
+      status: "blocked" as const,
+      version: 6,
+    };
+    getAllTasksMock.mockResolvedValue([task, done, blocked]);
+    reorderTasksMock.mockResolvedValue({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      changed: 2,
+      tasks: [],
+    });
+    const { result } = renderHook(() => useReorderActiveTasksWithinPlan(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        plannedDate: task.plannedDate,
+        orderedTaskIds: [blocked.id, task.id],
+      });
+    });
+
+    expect(reorderTasksMock).toHaveBeenCalledWith({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      items: [
+        { id: blocked.id, expectedVersion: blocked.version },
+        { id: done.id, expectedVersion: done.version },
+        { id: task.id, expectedVersion: task.version },
+      ],
+    });
+  });
+
+  it("rejects a drag snapshot when the active plan set changed", async () => {
+    const blocked = {
+      ...task,
+      id: "blocked",
+      status: "blocked" as const,
+      version: 6,
+    };
+    getAllTasksMock.mockResolvedValue([task, blocked]);
+    const { result } = renderHook(() => useReorderActiveTasksWithinPlan(), {
+      wrapper: createWrapper(),
+    });
+
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          plannedDate: task.plannedDate,
+          orderedTaskIds: [task.id],
+        });
+      } catch (error) {
+        caught = error;
+      }
+    });
+    expect(caught).toMatchObject({ code: "TASK_REORDER_SET_CHANGED" });
+    expect(reorderTasksMock).not.toHaveBeenCalled();
   });
 
   it("loads assignment history pages under a task-scoped query key", async () => {

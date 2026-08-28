@@ -158,4 +158,39 @@ describe("TaskList", () => {
     expect(screen.getByText(secondPageChild.title)).toBeInTheDocument();
     expect(screen.getByText("2 / 2 · 共 101 项")).toBeInTheDocument();
   });
+
+  it("offers pointer drag sorting alongside the keyboard-friendly move buttons", () => {
+    const onDropTask = vi.fn();
+    const second = { ...task, id: "task-drag-2", title: "第二项任务" };
+    render(
+      <TaskList
+        allowDrag
+        allowReorder
+        live
+        onDropTask={onDropTask}
+        onMove={vi.fn()}
+        tasks={[task, second]}
+      />,
+    );
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      setData: vi.fn(),
+    };
+    const source = screen.getByTitle(`拖动排序：${task.title}`);
+    const target = screen
+      .getByRole("button", { name: `查看任务：${second.title}` })
+      .closest("article");
+    expect(target).not.toBeNull();
+
+    fireEvent.dragStart(source, { dataTransfer });
+    fireEvent.dragOver(target!, { dataTransfer });
+    fireEvent.drop(target!, { dataTransfer });
+
+    expect(dataTransfer.setData).toHaveBeenCalledWith("text/plain", task.id);
+    expect(onDropTask).toHaveBeenCalledWith(task, second);
+    expect(
+      screen.getByRole("button", { name: `下移任务：${task.title}` }),
+    ).toBeVisible();
+  });
 });

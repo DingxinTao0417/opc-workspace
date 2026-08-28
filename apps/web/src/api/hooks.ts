@@ -1730,6 +1730,66 @@ export function useMoveTaskWithinPlan() {
   });
 }
 
+export function useReorderActiveTasksWithinPlan() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      plannedDate,
+      orderedTaskIds,
+    }: {
+      plannedDate: string | null;
+      orderedTaskIds: string[];
+    }) => {
+      const tasks = await getAllTasks({
+        plannedDate: plannedDate ?? undefined,
+        sort: "manual_order",
+      });
+      const scoped = plannedDate
+        ? tasks
+        : tasks.filter((task) => task.plannedDate === null);
+      if (scoped.length > 1_000) {
+        throw new ApiError("同一计划日期超过 1000 项，暂时无法拖拽排序", {
+          code: "TASK_REORDER_LIMIT",
+        });
+      }
+      const active = scoped.filter(
+        (task) => task.status !== "done" && task.status !== "cancelled",
+      );
+      const uniqueIds = new Set(orderedTaskIds);
+      if (
+        uniqueIds.size !== orderedTaskIds.length ||
+        orderedTaskIds.length !== active.length ||
+        active.some((task) => !uniqueIds.has(task.id))
+      ) {
+        throw new ApiError("活动任务集合已变化，请刷新后重试", {
+          code: "TASK_REORDER_SET_CHANGED",
+        });
+      }
+      const activeById = new Map(active.map((task) => [task.id, task]));
+      let activeIndex = 0;
+      const ordered = scoped.map((task) =>
+        task.status === "done" || task.status === "cancelled"
+          ? task
+          : activeById.get(orderedTaskIds[activeIndex++])!,
+      );
+      return reorderTasks({
+        plannedDate,
+        mode: "manual",
+        items: ordered.map((task) => ({
+          id: task.id,
+          expectedVersion: task.version,
+        })),
+      });
+    },
+    onSuccess: async () => invalidateTaskFacts(queryClient),
+    onError: async (error) => {
+      if (isTaskFactsStale(error)) {
+        await invalidateTaskFacts(queryClient);
+      }
+    },
+  });
+}
+
 export function useResetTaskOrder() {
   const queryClient = useQueryClient();
   return useMutation({
