@@ -271,8 +271,24 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 	firstTag := createTagForTaskFacts(t, router, "Alpha", "#112233")
 	secondTag := createTagForTaskFacts(t, router, "Beta", "#445566")
 	createdAt := "2026-08-01T00:00:00Z"
+	clientID := uuid.NewString()
+	projectID := uuid.NewString()
 	ids := make([]string, 101)
 	err := store.DB.Transaction(func(tx *gorm.DB) error {
+		client := models.Client{
+			ID: clientID, Name: "Filter client", Status: "active", Version: 1,
+			CreatedAt: createdAt, UpdatedAt: createdAt,
+		}
+		if err := tx.Create(&client).Error; err != nil {
+			return err
+		}
+		project := models.Project{
+			ID: projectID, Name: "Filter project", Description: "", ClientID: &clientID,
+			Status: "planning", Version: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
+		}
+		if err := tx.Create(&project).Error; err != nil {
+			return err
+		}
 		for index := 0; index < 101; index++ {
 			id := uuid.NewString()
 			if index == 0 {
@@ -300,6 +316,10 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 				dueDate = &dueValue
 			}
 			var parentID *string
+			var taskProjectID *string
+			if index == 0 {
+				taskProjectID = &projectID
+			}
 			if index == 100 {
 				parentID = &ids[0]
 			}
@@ -309,7 +329,7 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 			}
 			task := models.Task{
 				ID: id, Title: title, Description: "", Kind: "work", Status: "todo", ReviewPolicy: "none", Priority: priority,
-				ParentTaskID: parentID, PlannedDate: plannedDate, DueDate: dueDate, ActualMinutes: 0, Version: 1,
+				ProjectID: taskProjectID, ParentTaskID: parentID, PlannedDate: plannedDate, DueDate: dueDate, ActualMinutes: 0, Version: 1,
 				CreatedAt: createdAt, UpdatedAt: createdAt,
 			}
 			if err := tx.Create(&task).Error; err != nil {
@@ -401,6 +421,10 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 	if dueRange.Meta.Total != 2 {
 		t.Fatalf("due range total = %d, want 2", dueRange.Meta.Total)
 	}
+	clientTasks := readList("/api/v1/tasks?client_id=" + clientID)
+	if clientTasks.Meta.Total != 1 || clientTasks.Data[0].ID != ids[0] {
+		t.Fatalf("client task filter = %#v", clientTasks)
+	}
 	if err := store.DB.Exec("UPDATE tasks SET status = 'done', completed_at = ?, version = version + 1 WHERE id = ?", createdAt, ids[97]).Error; err != nil {
 		t.Fatalf("mark terminal task done: %v", err)
 	}
@@ -425,6 +449,7 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 		"/api/v1/tasks?planned_state=unscheduled&planned_from=2026-08-01",
 		"/api/v1/tasks?planned_from=2026-08-22&planned_to=2026-08-20",
 		"/api/v1/tasks?due_from=2026-08-22&due_to=2026-08-20",
+		"/api/v1/tasks?client_id=not-a-uuid",
 		"/api/v1/tasks?q=" + strings.Repeat("界", 201),
 	} {
 		invalidFilter := performRequest(router, http.MethodGet, path, nil, nil)

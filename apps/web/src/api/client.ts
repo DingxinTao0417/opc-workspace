@@ -2685,6 +2685,7 @@ export async function getTaskPage(
   if (options.status) params.set("status", options.status);
   if (options.priority) params.set("priority", options.priority);
   if (options.projectId) params.set("project_id", options.projectId);
+  if (options.clientId) params.set("client_id", options.clientId);
   for (const tagId of new Set(options.tagIds?.map((id) => id.trim()))) {
     if (tagId) params.append("tag_id", tagId);
   }

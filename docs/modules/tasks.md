@@ -4,7 +4,7 @@
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.3](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.4](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -23,7 +23,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite；任务页支持精确计划日期、计划/截止日期范围，且在单一精确日期的手动顺序视图中支持同状态拖拽。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围，且在单一精确日期的手动顺序视图中支持同状态拖拽。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -242,6 +242,7 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 
 ## 前端交互与并发
 
+- 客户筛选复用 Client options，服务端沿 Task 的 Project 当前 `client_id` 过滤；Task 不保存客户副本。客户与项目、标签、状态及日期等条件取 AND，并完整保留到后续分页。
 - 计划日期支持精确值或起止范围二选一，截止日期支持独立起止范围；设置任一计划范围端点会清空精确值，设置精确值会清空计划范围。
 - 起点晚于终点时，对应日期控件显示无效状态和就地错误，主 Task Query 暂停，旧任务结果不继续展示；服务端仍二次校验格式和顺序，避免绕过 UI。
 - 任务页只有在选中一个精确计划日期、排序为 `manual_order` 且没有搜索、状态、优先级、类型、项目或标签筛选时启用排序；上移/下移与拖动手柄同时保留。
@@ -286,6 +287,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 - 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
+- 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
 
 仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 

@@ -81,6 +81,25 @@ vi.mock("../api/hooks", () => ({
     isError: false,
     isPending: false,
   }),
+  useClientOptionsQuery: () => ({
+    data: [
+      {
+        id: "client-1",
+        name: "示例客户",
+        contactName: null,
+        email: null,
+        phone: null,
+        notes: null,
+        status: "active",
+        version: 1,
+        projectCount: 1,
+        createdAt: "2026-08-27T08:00:00Z",
+        updatedAt: "2026-08-27T08:00:00Z",
+      },
+    ],
+    isError: false,
+    isPending: false,
+  }),
   useTagOptionsQuery: () => ({
     data: [],
     isError: false,
@@ -176,15 +195,26 @@ describe("TasksPage", () => {
     fireEvent.change(screen.getByLabelText("状态"), {
       target: { value: "todo" },
     });
+    fireEvent.change(screen.getByLabelText("客户"), {
+      target: { value: "client-1" },
+    });
 
     expect(lastPageQuery()).toEqual(
-      expect.objectContaining({ status: "todo", rootOnly: false }),
+      expect.objectContaining({
+        status: "todo",
+        clientId: "client-1",
+        rootOnly: false,
+      }),
     );
     expect(screen.getByText("101 项")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(lastPageQuery()).toEqual(
-      expect.objectContaining({ page: 2, status: "todo" }),
+      expect.objectContaining({
+        page: 2,
+        status: "todo",
+        clientId: "client-1",
+      }),
     );
   });
 

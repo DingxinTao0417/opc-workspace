@@ -125,6 +125,7 @@ type taskListFilters struct {
 	Priority     string
 	Kind         string
 	ProjectID    string
+	ClientID     string
 	PlannedDate  string
 	PlannedFrom  string
 	PlannedTo    string
@@ -189,6 +190,7 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 		Priority:     strings.TrimSpace(c.Query("priority")),
 		Kind:         strings.TrimSpace(c.Query("kind")),
 		ProjectID:    strings.TrimSpace(c.Query("project_id")),
+		ClientID:     strings.TrimSpace(c.Query("client_id")),
 		PlannedDate:  strings.TrimSpace(c.Query("planned_date")),
 		PlannedFrom:  strings.TrimSpace(c.Query("planned_from")),
 		PlannedTo:    strings.TrimSpace(c.Query("planned_to")),
@@ -231,6 +233,12 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 	if filters.ProjectID != "" {
 		if _, err := uuid.Parse(filters.ProjectID); err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "project_id filter must be a UUID")
+			return taskListFilters{}, false
+		}
+	}
+	if filters.ClientID != "" {
+		if _, err := uuid.Parse(filters.ClientID); err != nil {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "client_id filter must be a UUID")
 			return taskListFilters{}, false
 		}
 	}
@@ -308,6 +316,9 @@ func applyTaskFilters(query *gorm.DB, filters taskListFilters) *gorm.DB {
 	}
 	if filters.ProjectID != "" {
 		query = query.Where("tasks.project_id = ?", filters.ProjectID)
+	}
+	if filters.ClientID != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM projects WHERE projects.id = tasks.project_id AND projects.client_id = ?)", filters.ClientID)
 	}
 	if filters.PlannedDate != "" {
 		query = query.Where("tasks.planned_date = ?", filters.PlannedDate)

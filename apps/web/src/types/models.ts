@@ -617,6 +617,7 @@ export interface TaskListParams {
   status?: TaskStatus | "active";
   priority?: TaskPriority;
   projectId?: string;
+  clientId?: string;
   tagIds?: string[];
   plannedDate?: string;
   plannedFrom?: string;

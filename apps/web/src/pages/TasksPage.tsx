@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   useBatchUpdateTasks,
+  useClientOptionsQuery,
   useMoveTaskWithinPlan,
   useProjectOptionsQuery,
   useReorderTaskWithinPlanStatus,
@@ -99,6 +100,7 @@ export function TasksPage() {
   const [priority, setPriority] = useState<TaskPriority | "">("");
   const [kind, setKind] = useState<TaskKind | "">("");
   const [projectId, setProjectId] = useState("");
+  const [clientId, setClientId] = useState("");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [plannedDate, setPlannedDate] = useState("");
   const [plannedFrom, setPlannedFrom] = useState("");
@@ -141,6 +143,7 @@ export function TasksPage() {
     priority ||
     kind ||
     projectId ||
+    clientId ||
     tagIds.length ||
     plannedDate ||
     plannedFrom ||
@@ -158,6 +161,7 @@ export function TasksPage() {
       priority: priority || undefined,
       kind: kind || undefined,
       projectId: projectId || undefined,
+      clientId: clientId || undefined,
       tagIds,
       plannedDate: plannedDate || undefined,
       plannedFrom: plannedFrom || undefined,
@@ -170,6 +174,7 @@ export function TasksPage() {
     filtersValid,
   );
   const projectsQuery = useProjectOptionsQuery(true);
+  const clientsQuery = useClientOptionsQuery(true);
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
   const moveMutation = useMoveTaskWithinPlan();
@@ -194,6 +199,7 @@ export function TasksPage() {
     Number(Boolean(priority)) +
     Number(Boolean(kind)) +
     Number(Boolean(projectId)) +
+    Number(Boolean(clientId)) +
     tagIds.length +
     Number(Boolean(plannedDate || plannedFrom || plannedTo)) +
     Number(Boolean(dueFrom || dueTo));
@@ -206,6 +212,7 @@ export function TasksPage() {
       priority ||
       kind ||
       projectId ||
+      clientId ||
       tagIds.length ||
       plannedFrom ||
       plannedTo ||
@@ -244,6 +251,7 @@ export function TasksPage() {
     priority,
     kind,
     projectId,
+    clientId,
     tagKey,
     plannedDate,
     plannedFrom,
@@ -269,6 +277,7 @@ export function TasksPage() {
     setPriority("");
     setKind("");
     setProjectId("");
+    setClientId("");
     setTagIds([]);
     setPlannedDate("");
     setPlannedFrom("");
@@ -512,6 +521,24 @@ export function TasksPage() {
               {(projectsQuery.data ?? []).map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>客户</span>
+            <select
+              disabled={clientsQuery.isPending || clientsQuery.isError}
+              onChange={(event) => {
+                setClientId(event.target.value);
+                setPage(1);
+              }}
+              value={clientId}
+            >
+              <option value="">全部客户</option>
+              {(clientsQuery.data ?? []).map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
                 </option>
               ))}
             </select>
