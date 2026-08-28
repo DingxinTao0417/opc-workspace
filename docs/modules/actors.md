@@ -1,10 +1,10 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v11（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10/v11 不改写其契约。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v12（2026-08-28）；Actor/D2 结构仍分别由 schema v7/v9 引入，schema v10–v12 不改写其契约；v12 只新增独立 Inbox Item。
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 
@@ -115,7 +115,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 ## 与其他模块协作
 
 - [任务](tasks.md)：Assignment 是状态命令和 D2 提交的前置；Artifact 保存 producer/recorder。
-- [收件箱](inbox.md)：未来拆分后必须显式创建 Task Assignment；当前没有 Inbox 数据链路。
+- [收件箱](inbox.md)：独立的手工 Inbox Item 已交付；Inbox 拆分/关联 Task 后必须显式创建 Task Assignment，当前尚无这条数据链路。
 - [项目](projects.md)：Task 责任或产出变化通过 Task/Project cache 与版本关系呈现，不直接修改 Project 状态。
 - [本地 Agent](local-agents.md)：未来 agent Actor 只表达身份，实际执行必须由 Adapter/Run 管理。
 - [数据管理](data-management.md)：历史 Actor 引用与受控 Artifact 文件必须一起纳入未来备份/恢复。
@@ -127,7 +127,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 3. **T-18C（已完成）**：Assignment 查询、创建、改派、结束、Task 版本和责任 UI。
 4. **T-18D D1（已完成）**：schema v8 六状态、显式命令、事件顺序/不可变保护与时间线。
 5. **T-18D D2（已完成）**：schema v9、manual policy、Submission/Artifact、受控文件、提交/接受/返工/撤回/软删。
-6. **Inbox/Reminder（未实现）**：来源消费、拆分、分派和派生关闭。
+6. **Inbox/Reminder（部分实现）**：独立的手工 Inbox Item 与人工分诊已交付；来源消费、Task 拆分/关联/分派、Reminder 和派生关闭未实现。
 7. **T-19 v0.2（未实现）**：agent Adapter、Run、能力令牌、取消/重试与崩溃恢复。
 
 ## 验收状态
@@ -139,7 +139,8 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [x] owner reviewer 前置、接受/返工、取消撤回与终态 Assignment 联动均为事务化实现。
 - [x] Workflow Event 关联 Assignment/Submission/Artifact 并保持追加式历史。
 - [ ] agent Actor、Adapter/Run、能力令牌、权限撤销和实际本地执行。
-- [ ] Inbox/Reminder 事件消费与自动分派。
+- [x] 独立的手工 Inbox Item 与人工分诊，不隐式创建 Assignment。
+- [ ] Inbox 来源事件消费、Task 拆分/关联/分派、Reminder 与派生关闭。
 
 ## 相关代码/PRD 链接
 

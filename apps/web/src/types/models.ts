@@ -690,3 +690,130 @@ export interface DeleteClientResult {
   deletedId: string;
   detachedProjects: number;
 }
+
+export type InboxItemKind = "manual";
+export type InboxItemPriority = TaskPriority;
+export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
+export type InboxItemView = "inbox" | "snoozed" | "archive";
+export type InboxResolutionPolicy = "manual";
+export type InboxResolutionMode = "manual" | "forced";
+export type InboxItemAction =
+  "read" | "edit" | "snooze" | "unsnooze" | "resolve" | "dismiss" | "reopen";
+
+export interface InboxItem {
+  id: string;
+  kind: InboxItemKind;
+  title: string;
+  summary: string;
+  sourceEntityType: "manual";
+  sourceEntityId: string | null;
+  sourceEventKey: string | null;
+  sourceDeletedAt: string | null;
+  priority: InboxItemPriority;
+  status: InboxItemStatus;
+  resolutionPolicy: InboxResolutionPolicy;
+  dueAt: string | null;
+  readAt: string | null;
+  triagedAt: string | null;
+  snoozedUntil: string | null;
+  resolvedByActorId: string | null;
+  resolvedAt: string | null;
+  resolutionReason: string | null;
+  resolutionMode: InboxResolutionMode | null;
+  dismissedByActorId: string | null;
+  dismissedAt: string | null;
+  dismissReason: string | null;
+  payloadJson: Record<string, unknown>;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  availableActions: InboxItemAction[];
+}
+
+export interface InboxItemListParams {
+  view?: InboxItemView;
+  q?: string;
+  priority?: InboxItemPriority;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface InboxItemListMeta extends PageMeta {
+  unreadTotal: number;
+  snapshotAt: string;
+  serverNow: string;
+}
+
+export interface InboxItemListResult {
+  items: InboxItem[];
+  meta: InboxItemListMeta;
+}
+
+export interface CreateInboxItemInput {
+  title: string;
+  summary: string;
+  priority: InboxItemPriority;
+  dueAt: string | null;
+}
+
+export interface UpdateInboxItemInput {
+  title?: string;
+  summary?: string;
+  priority?: InboxItemPriority;
+  dueAt?: string | null;
+  expectedVersion: number;
+}
+
+export type InboxItemCommandInput =
+  | {
+      action: "read" | "unsnooze" | "reopen";
+      id: string;
+      expectedVersion: number;
+    }
+  | {
+      action: "snooze";
+      id: string;
+      snoozedUntil: string;
+      expectedVersion: number;
+    }
+  | {
+      action: "resolve" | "dismiss";
+      id: string;
+      reason: string;
+      expectedVersion: number;
+    };
+
+export interface MarkAllInboxReadInput {
+  throughCreatedAt: string;
+}
+
+export interface MarkAllInboxReadResult {
+  throughCreatedAt: string;
+  markedCount: number;
+}
+
+export interface InboxWorkflowEvent {
+  id: string;
+  action: string;
+  actorId: string | null;
+  actor: ActorSummary | null;
+  requestId: string | null;
+  previous: Record<string, unknown> | null;
+  current: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface InboxEventListParams {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface InboxEventListMeta extends PageMeta {
+  inboxItemVersion: number;
+}
+
+export interface InboxEventListResult {
+  items: InboxWorkflowEvent[];
+  meta: InboxEventListMeta;
+}

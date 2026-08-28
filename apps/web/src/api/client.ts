@@ -22,6 +22,18 @@ import type {
   FocusSession,
   FocusSessionSnapshot,
   HealthResponse,
+  InboxEventListParams,
+  InboxEventListResult,
+  InboxItem,
+  InboxItemAction,
+  InboxItemCommandInput,
+  InboxItemListParams,
+  InboxItemListResult,
+  InboxItemStatus,
+  InboxResolutionMode,
+  InboxWorkflowEvent,
+  CreateInboxItemInput,
+  MarkAllInboxReadResult,
   NewTaskInput,
   DeleteProjectResult,
   DeleteClientResult,
@@ -72,6 +84,7 @@ import type {
   TodayStats,
   UpdateActorInput,
   UpdateClientInput,
+  UpdateInboxItemInput,
   UpdateTagInput,
   UpdateTaskInput,
   UpdateProjectInput,
@@ -1483,6 +1496,214 @@ export function normalizeFocusSessionSnapshot(
   };
 }
 
+function asInboxItemStatus(value: unknown): InboxItemStatus {
+  if (
+    value === "open" ||
+    value === "tracking" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value;
+  }
+  return invalidResponse("收件箱状态响应无效");
+}
+
+function asInboxResolutionMode(value: unknown): InboxResolutionMode | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (value === "manual" || value === "forced") return value;
+  return invalidResponse("收件箱解决方式响应无效");
+}
+
+const inboxActions = new Set<InboxItemAction>([
+  "read",
+  "edit",
+  "snooze",
+  "unsnooze",
+  "resolve",
+  "dismiss",
+  "reopen",
+]);
+
+export function normalizeInboxItem(value: unknown): InboxItem {
+  if (!isRecord(value)) return invalidResponse("收件箱条目响应格式无效");
+  const id = stringField(value, "id");
+  const title = stringField(value, "title");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  const rawSummary = fieldValue(value, "summary");
+  const rawPayload = fieldValue(value, "payload_json", "payloadJson");
+  const rawActions = fieldValue(value, "available_actions", "availableActions");
+  if (
+    !id ||
+    !title ||
+    !createdAt ||
+    !updatedAt ||
+    typeof rawSummary !== "string" ||
+    value.kind !== "manual" ||
+    fieldValue(value, "source_entity_type", "sourceEntityType") !== "manual" ||
+    fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" ||
+    (rawPayload !== undefined && !isRecord(rawPayload)) ||
+    !Array.isArray(rawActions)
+  ) {
+    return invalidResponse("收件箱条目响应格式无效");
+  }
+
+  return {
+    id,
+    kind: "manual",
+    title,
+    summary: rawSummary,
+    sourceEntityType: "manual",
+    sourceEntityId: nullableString(
+      fieldValue(value, "source_entity_id", "sourceEntityId"),
+    ),
+    sourceEventKey: nullableString(
+      fieldValue(value, "source_event_key", "sourceEventKey"),
+    ),
+    sourceDeletedAt: nullableString(
+      fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
+    ),
+    priority: asTaskPriority(value.priority),
+    status: asInboxItemStatus(value.status),
+    resolutionPolicy: "manual",
+    dueAt: nullableString(fieldValue(value, "due_at", "dueAt")),
+    readAt: nullableString(fieldValue(value, "read_at", "readAt")),
+    triagedAt: nullableString(fieldValue(value, "triaged_at", "triagedAt")),
+    snoozedUntil: nullableString(
+      fieldValue(value, "snoozed_until", "snoozedUntil"),
+    ),
+    resolvedByActorId: nullableString(
+      fieldValue(value, "resolved_by_actor_id", "resolvedByActorId"),
+    ),
+    resolvedAt: nullableString(fieldValue(value, "resolved_at", "resolvedAt")),
+    resolutionReason: nullableString(
+      fieldValue(value, "resolution_reason", "resolutionReason"),
+    ),
+    resolutionMode: asInboxResolutionMode(
+      fieldValue(value, "resolution_mode", "resolutionMode"),
+    ),
+    dismissedByActorId: nullableString(
+      fieldValue(value, "dismissed_by_actor_id", "dismissedByActorId"),
+    ),
+    dismissedAt: nullableString(
+      fieldValue(value, "dismissed_at", "dismissedAt"),
+    ),
+    dismissReason: nullableString(
+      fieldValue(value, "dismiss_reason", "dismissReason"),
+    ),
+    payloadJson: isRecord(rawPayload) ? rawPayload : {},
+    version: positiveInteger(value.version, "收件箱条目版本"),
+    createdAt,
+    updatedAt,
+    availableActions: rawActions.filter(
+      (action): action is InboxItemAction =>
+        typeof action === "string" &&
+        inboxActions.has(action as InboxItemAction),
+    ),
+  };
+}
+
+export function normalizeInboxItemListResult(
+  value: unknown,
+): InboxItemListResult {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.meta)) {
+    return invalidResponse("收件箱列表响应格式无效");
+  }
+  const items = value.data.map(normalizeInboxItem);
+  const meta = value.meta;
+  const snapshotAt = stringField(meta, "snapshot_at", "snapshotAt");
+  const serverNow = stringField(meta, "server_now", "serverNow");
+  if (!snapshotAt || !serverNow) {
+    return invalidResponse("收件箱列表缺少服务端时间基准");
+  }
+  const result: InboxItemListResult = {
+    items,
+    meta: {
+      page: positiveInteger(meta.page, "收件箱页码"),
+      pageSize: positiveInteger(
+        fieldValue(meta, "page_size", "pageSize"),
+        "收件箱分页大小",
+      ),
+      total: nonNegativeInteger(meta.total, "收件箱总数"),
+      unreadTotal: nonNegativeInteger(
+        fieldValue(meta, "unread_total", "unreadTotal"),
+        "收件箱未读数",
+      ),
+      snapshotAt,
+      serverNow,
+    },
+  };
+  if (
+    result.items.length > result.meta.pageSize ||
+    result.meta.total < result.items.length
+  ) {
+    return invalidResponse("收件箱分页响应不一致");
+  }
+  return result;
+}
+
+export function normalizeInboxWorkflowEvent(
+  value: unknown,
+): InboxWorkflowEvent {
+  if (!isRecord(value)) return invalidResponse("收件箱事件响应格式无效");
+  const id = stringField(value, "id");
+  const action = stringField(value, "action");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const previous = fieldValue(value, "previous");
+  const current = fieldValue(value, "current");
+  const rawActor = fieldValue(value, "actor");
+  const actorId = nullableString(fieldValue(value, "actor_id", "actorId"));
+  if (
+    !id ||
+    !action ||
+    !createdAt ||
+    (previous !== null && previous !== undefined && !isRecord(previous)) ||
+    (current !== null && current !== undefined && !isRecord(current)) ||
+    (rawActor !== null && rawActor !== undefined && !isRecord(rawActor))
+  ) {
+    return invalidResponse("收件箱事件响应格式无效");
+  }
+  const actor = isRecord(rawActor) ? normalizeActorSummary(rawActor) : null;
+  if ((actor && actor.id !== actorId) || (!actor && actorId)) {
+    return invalidResponse("收件箱事件责任主体响应不一致");
+  }
+  return {
+    id,
+    action,
+    actorId,
+    actor,
+    requestId: nullableString(fieldValue(value, "request_id", "requestId")),
+    previous: isRecord(previous) ? previous : null,
+    current: isRecord(current) ? current : null,
+    reason: nullableString(value.reason),
+    createdAt,
+  };
+}
+
+export function normalizeInboxEventListResult(
+  value: unknown,
+): InboxEventListResult {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.meta)) {
+    return invalidResponse("收件箱事件列表响应格式无效");
+  }
+  const items = value.data.map(normalizeInboxWorkflowEvent);
+  return {
+    items,
+    meta: {
+      page: positiveInteger(value.meta.page, "收件箱事件页码"),
+      pageSize: positiveInteger(
+        fieldValue(value.meta, "page_size", "pageSize"),
+        "收件箱事件分页大小",
+      ),
+      total: nonNegativeInteger(value.meta.total, "收件箱事件总数"),
+      inboxItemVersion: positiveInteger(
+        fieldValue(value.meta, "inbox_item_version", "inboxItemVersion"),
+        "收件箱事件条目版本",
+      ),
+    },
+  };
+}
+
 export async function getHealth(): Promise<HealthResponse> {
   return apiRequest<HealthResponse>("/health");
 }
@@ -2731,6 +2952,130 @@ export async function deleteClient(
       "客户解绑项目数",
     ),
   };
+}
+
+export async function getInboxItems(
+  input: InboxItemListParams = {},
+): Promise<InboxItemListResult> {
+  const params = new URLSearchParams({
+    view: input.view ?? "inbox",
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.priority) params.set("priority", input.priority);
+  const payload = await apiRequest<unknown>(`/api/v1/inbox-items?${params}`);
+  return normalizeInboxItemListResult(payload);
+}
+
+export async function getInboxItem(id: string): Promise<InboxItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeInboxItem(body);
+}
+
+export async function createInboxItem(
+  input: CreateInboxItemInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<InboxItem> {
+  const payload = await apiRequest<unknown>("/api/v1/inbox-items", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      title: input.title,
+      summary: input.summary,
+      priority: input.priority,
+      due_at: input.dueAt,
+    }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeInboxItem(body);
+}
+
+export async function updateInboxItem(
+  id: string,
+  input: UpdateInboxItemInput,
+): Promise<InboxItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.summary === undefined ? {} : { summary: input.summary }),
+        ...(input.priority === undefined ? {} : { priority: input.priority }),
+        ...(input.dueAt === undefined ? {} : { due_at: input.dueAt }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeInboxItem(body);
+}
+
+export async function executeInboxItemCommand(
+  input: InboxItemCommandInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<InboxItem> {
+  let body: Record<string, unknown> = {};
+  if (input.action === "snooze") {
+    body = { snoozed_until: input.snoozedUntil };
+  } else if (input.action === "resolve" || input.action === "dismiss") {
+    body = { reason: input.reason };
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(input.id)}/${input.action}`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  const result =
+    isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeInboxItem(result);
+}
+
+export async function markAllInboxItemsRead(
+  throughCreatedAt: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<MarkAllInboxReadResult> {
+  const payload = await apiRequest<unknown>("/api/v1/inbox-items/read-all", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ through_created_at: throughCreatedAt }),
+  });
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("收件箱全部已读响应格式无效");
+  const cutoff = stringField(body, "through_created_at", "throughCreatedAt");
+  if (!cutoff) return invalidResponse("收件箱全部已读响应缺少截止时间");
+  return {
+    throughCreatedAt: cutoff,
+    markedCount: nonNegativeInteger(
+      fieldValue(body, "marked_count", "markedCount"),
+      "收件箱已读数量",
+    ),
+  };
+}
+
+export async function getInboxItemEvents(
+  id: string,
+  input: InboxEventListParams = {},
+): Promise<InboxEventListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(id)}/events?${params}`,
+  );
+  return normalizeInboxEventListResult(payload);
 }
 
 export async function getActiveFocusSession(): Promise<FocusSessionSnapshot> {

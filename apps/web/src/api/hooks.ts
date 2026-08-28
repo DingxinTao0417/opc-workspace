@@ -37,6 +37,9 @@ import {
   getClients,
   getActiveFocusSession,
   getHealth,
+  getInboxItem,
+  getInboxItemEvents,
+  getInboxItems,
   getTags,
   getTask,
   getTaskArtifact,
@@ -50,6 +53,9 @@ import {
   getProject,
   getProjects,
   pauseFocusSession,
+  createInboxItem,
+  executeInboxItemCommand,
+  markAllInboxItemsRead,
   recoverFocusSession,
   resetRuntimeConnection,
   reorderTasks,
@@ -59,6 +65,7 @@ import {
   submitTaskOutput,
   stopFocusSession,
   updateClient,
+  updateInboxItem,
   updateTag,
   updateTask,
   transitionProject,
@@ -77,6 +84,11 @@ import type {
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusSessionSnapshot,
+  CreateInboxItemInput,
+  InboxEventListParams,
+  InboxItemCommandInput,
+  InboxItemListParams,
+  MarkAllInboxReadInput,
   NewTaskInput,
   ProjectInput,
   ProjectListParams,
@@ -97,6 +109,7 @@ import type {
   RecoverFocusSessionInput,
   UpdateActorInput,
   UpdateClientInput,
+  UpdateInboxItemInput,
   UpdateTagInput,
   UpdateProjectInput,
   UpdateTaskInput,
@@ -270,6 +283,156 @@ export function useDeleteClient() {
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       }
+    },
+  });
+}
+
+export const inboxQueryKey = ["inbox-items"] as const;
+export const INBOX_LIST_REFRESH_INTERVAL_MS = 15_000;
+export const inboxDetailQueryKey = (id: string) =>
+  [...inboxQueryKey, "detail", id] as const;
+export const inboxEventQueryKey = (id: string) =>
+  [...inboxQueryKey, "events", id] as const;
+
+export function useInboxItemsQuery(
+  input: InboxItemListParams = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...inboxQueryKey, "list", input],
+    queryFn: () => getInboxItems(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+    refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useInboxItemQuery(id: string | null) {
+  return useQuery({
+    queryKey: inboxDetailQueryKey(id ?? "closed"),
+    queryFn: () => getInboxItem(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+export function useInboxItemEventsQuery(
+  id: string | null,
+  input: Omit<InboxEventListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = { pageSize: input.pageSize ?? 20 };
+  return useInfiniteQuery({
+    queryKey: [...inboxEventQueryKey(id ?? "closed"), "timeline", query],
+    queryFn: ({ pageParam }) =>
+      getInboxItemEvents(id!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(id) && enabled,
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+async function invalidateInboxFacts(
+  queryClient: QueryClient,
+  id?: string,
+): Promise<void> {
+  await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+  if (id) {
+    await queryClient.invalidateQueries({ queryKey: inboxEventQueryKey(id) });
+  }
+}
+
+function inboxFactsNeedRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 ||
+      error.status === 409 ||
+      error.code === "VERSION_CONFLICT")
+  );
+}
+
+export function useCreateInboxItem() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateInboxItemInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createInboxItem(input, attempt.current.key);
+    },
+    onSuccess: async (item) => {
+      attempt.current = null;
+      queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
+      await invalidateInboxFacts(queryClient, item.id);
+    },
+  });
+}
+
+export function useUpdateInboxItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateInboxItemInput }) =>
+      updateInboxItem(id, input),
+    onSuccess: async (item) => {
+      queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
+      await invalidateInboxFacts(queryClient, item.id);
+    },
+    onError: async (error, variables) => {
+      if (inboxFactsNeedRefresh(error)) {
+        await invalidateInboxFacts(queryClient, variables.id);
+      }
+    },
+  });
+}
+
+export function useInboxItemCommand() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: InboxItemCommandInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return executeInboxItemCommand(input, attempt.current.key);
+    },
+    onSuccess: async (item) => {
+      attempt.current = null;
+      queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
+      await invalidateInboxFacts(queryClient, item.id);
+    },
+    onError: async (error, variables) => {
+      if (inboxFactsNeedRefresh(error)) {
+        await invalidateInboxFacts(queryClient, variables.id);
+      }
+    },
+  });
+}
+
+export function useMarkAllInboxItemsRead() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: MarkAllInboxReadInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return markAllInboxItemsRead(input.throughCreatedAt, attempt.current.key);
+    },
+    onSuccess: async () => {
+      attempt.current = null;
+      await invalidateInboxFacts(queryClient);
     },
   });
 }

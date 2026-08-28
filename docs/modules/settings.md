@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v11。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/诊断和桌面设置入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v12。schema v12 只新增独立 Inbox Item，不改设置结构。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/诊断和桌面设置入口仍是后续范围。
 
 ## 定位与边界
 
@@ -229,7 +229,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮可直接打开 focus 模块；命令面板仍待达到同一行为。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v11 延续。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v12 延续。schema v12 只新增独立 Inbox Item，不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。

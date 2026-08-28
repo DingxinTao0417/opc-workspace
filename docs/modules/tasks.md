@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v11（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v10 不改写 Task 表，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v12（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟，schema v12 只新增独立 Inbox Item，不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收，以及 Focus Core 工时回写均已交付。Inbox/Reminder 消费、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收，以及 Focus Core 工时回写均已交付。手工 Inbox 受理分诊已独立交付，但 Inbox Task 关系/来源消费、Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 

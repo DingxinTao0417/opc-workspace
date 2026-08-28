@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v11（2026-08-28）。桌面基座、Task Artifact 运行目录接线和 Sidecar Focus heartbeat 生命周期已实现；完整异常恢复、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v12（2026-08-28）。schema v12 只新增 Sidecar/SQLite 内的手工 Inbox Item，不改变桌面生命周期契约。桌面基座、Task Artifact 运行目录接线和 Sidecar Focus heartbeat 生命周期已实现；完整异常恢复、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.4](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md)
 
 ## 定位与边界
 

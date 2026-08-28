@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v11。项目/任务/Actor、D2 Submission/Artifact、Client 基础事实与 Focus Core A+B+C 已接通；Focus D（历史、周报、Streak、高级分析和原生桌面反馈）、客户活动/附件、收件箱/提醒、本地 Agent、备份恢复、回访/财务及项目附件/事件仍是规划，不代表完整工作流已经交付。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v12。项目/任务/Actor、D2 Submission/Artifact、Client 基础事实、Focus Core A+B+C，以及 T-11A1/T-11B 手工 Inbox 受理分诊已接通；Focus D、客户活动/附件、Inbox Task 关联/拆分/分派/自动解决、Reminder/来源投影、本地 Agent、备份恢复、回访/财务及项目附件/事件仍是规划，不代表完整工作流已经交付。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v2.3）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v2.4）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -22,7 +22,7 @@
 | 任务管理       | 部分完成（事实层、D1 与 D2 manual 提交验收已交付）                        | v0.1；看板 v0.2           | [tasks.md](modules/tasks.md)       |
 | 项目管理       | 部分完成                                                                  | v0.1                      | [projects.md](modules/projects.md) |
 | 客户管理       | 部分完成（基础资料、基础详情与 Project 客户关联已交付）                   | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)   |
-| 收件箱工作编排 | 页面骨架                                                                  | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)       |
+| 收件箱工作编排 | 部分完成（手工受理、分诊、归档与事件已交付）                              | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)       |
 | Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现） | v0.1                      | [actors.md](modules/actors.md)     |
 | 专注与工时     | Core A+B+C 已完成；D 延后                                                 | v0.1                      | [focus.md](modules/focus.md)       |
 

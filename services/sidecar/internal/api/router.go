@@ -190,6 +190,18 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/focus-sessions/:id/recover", service.recoverFocusSession)
 		v1.POST("/focus-sessions/:id/stop", service.stopFocusSession)
 		v1.POST("/focus-sessions/:id/cancel", service.cancelFocusSession)
+		v1.GET("/inbox-items", service.listInboxItems)
+		v1.POST("/inbox-items", service.createInboxItem)
+		v1.POST("/inbox-items/read-all", service.readAllInboxItems)
+		v1.GET("/inbox-items/:id", service.getInboxItem)
+		v1.PATCH("/inbox-items/:id", service.updateInboxItem)
+		v1.GET("/inbox-items/:id/events", service.listInboxItemEvents)
+		v1.POST("/inbox-items/:id/read", service.readInboxItem)
+		v1.POST("/inbox-items/:id/snooze", service.snoozeInboxItem)
+		v1.POST("/inbox-items/:id/unsnooze", service.unsnoozeInboxItem)
+		v1.POST("/inbox-items/:id/resolve", service.resolveInboxItem)
+		v1.POST("/inbox-items/:id/dismiss", service.dismissInboxItem)
+		v1.POST("/inbox-items/:id/reopen", service.reopenInboxItem)
 		v1.GET("/stats/today", service.todayStats)
 	}
 	result := &Router{Engine: router, artifactStore: artifacts}
