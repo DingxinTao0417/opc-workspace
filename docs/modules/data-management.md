@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.0](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.1](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -48,7 +48,7 @@
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）与 objects 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
 - `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。表、列和行顺序稳定；文件 Artifact 的元数据保留，正文不嵌入并以 active 数量/字节摘要声明。schema migrations、workspace identity、幂等响应、删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
-- 设置“数据与备份”提供业务 JSON 下载，以及备份说明、创建、加载/空/错误状态、摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后明确要求关闭并重新打开应用。长操作使用 180 秒客户端窗口。当前没有自动重启、导入或含文件导出按钮，避免以无行为控件暗示能力。
+- 设置“数据与备份”提供业务 JSON 下载，以及备份说明、创建、加载/空/错误状态、摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后，桌面模式提供一键安全重启，浏览器开发模式明确提示手动停止并重启外部服务。长操作使用 180 秒客户端窗口。当前没有导入或含文件导出按钮，避免以无行为控件暗示能力。
 
 ### 仍未实现
 
@@ -194,7 +194,8 @@ appLogDir/
 3. **已实现**：声明隔离 Artifact store，校验每个 active file Artifact 都有对应 object、size/hash 匹配且没有额外对象或路径越界；关闭句柄后清理临时根。
 4. **已实现**：二次确认后取得维护写锁，重复演练目标，并完整备份当前正式数据作为自动回滚点；发布 pending 后冻结普通 API 与后台写入。
 5. **已实现**：下一次 Sidecar 启动在正式资源打开前，用同父目录 new/old 路径替换数据库、WAL/SHM 和完整 objects；任一步或最终验证失败都恢复旧资源并隔离失败计划。
-6. **已实现**：最终 schema、identity、数据库一致性与 Artifact 全集通过后，将 pending 原子推进为 applied 提交点，再清理旧副本；清理警告不会重复应用已成功恢复的数据。当前 UI 由用户手动关闭并重新打开应用，桌面层自动重启仍待实现。
+6. **已实现**：设置页仅在恢复计划成功挂起后显示“立即安全重启”。Tauri `restart_application` 只接受桌面管理的 Sidecar，发送优雅 shutdown、等待真实退出并在超时后只终止精确子进程；退出无法确认时取消重启并返回错误。外部开发 Sidecar 不由桌面壳终止。
+7. **已实现**：下一次启动完成最终 schema、identity、数据库一致性与 Artifact 全集验证后，将 pending 原子推进为 applied 提交点，再清理旧副本；清理警告不会重复应用已成功恢复的数据。
 
 恢复绝不能直接覆盖正在打开的 SQLite 文件或部分覆盖 `objects/`。
 
@@ -230,8 +231,8 @@ appLogDir/
 
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
-- [桌面平台](desktop-platform.md)：负责 appData/appLog 定位和 Sidecar 生命周期；当前用户手动关闭/重开触发恢复，自动重启入口待实现。Sidecar 负责停写、SQLite 与 Artifact 一致性。
-- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；未来再接导出、路径选择和作业诊断。
+- [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
+- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除和业务 JSON 导出；未来再接路径选择、导入和作业诊断。
 - [客户](clients.md) / [财务与发票](finance-invoices.md)：文件业务实现后扩展备份清单。
 
 ## 验收状态
@@ -258,10 +259,11 @@ appLogDir/
 - [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。
 - [x] 备份永久删除要求明确确认，支持有效/损坏 UUID 包，原子移入可续删隐藏态后清理和同步；拒绝 symlink/reparse、非普通文件及 pending 恢复期间删除。
 - [x] 基础业务 JSON 在单事务内按显式白名单、稳定表/列/行结构生成；包含文件元数据但不含正文，排除令牌、绝对路径及运行维护表，失败不返回部分包。
+- [x] 恢复挂起后桌面设置页可调用 `restart_application`；只在受管 Sidecar 真实退出后重启应用，浏览器/外部 Sidecar 明确降级为手动重启。
 
 ### 仍未实现
 
-- [ ] 桌面层一键安全重启、启动恢复进度页和 applied 清理警告诊断。
+- [ ] 启动恢复进度页和 applied 清理警告诊断。
 - [ ] 破坏性迁移前自动备份。
 - [ ] 数据导入、含文件导出包、保留策略、计划备份和跨版本兼容矩阵。
 

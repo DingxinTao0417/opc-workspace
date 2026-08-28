@@ -1,6 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BackupSummary } from "../types/models";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  BackupSummary,
+  ScheduledBackupRestoreResult,
+} from "../types/models";
 import { BackupSettings } from "./BackupSettings";
 
 const backup: BackupSummary = {
@@ -26,8 +35,13 @@ const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
   deleteBackup: vi.fn(),
   exportData: vi.fn(),
+  restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
+}));
+
+vi.mock("../api/desktop", () => ({
+  requestApplicationRestart: mocks.restartApplication,
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -94,6 +108,8 @@ vi.mock("../api/hooks", () => ({
 }));
 
 describe("BackupSettings", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     mocks.create.mockClear();
     mocks.verify.mockClear();
@@ -101,6 +117,8 @@ describe("BackupSettings", () => {
     mocks.restore.mockClear();
     mocks.deleteBackup.mockClear();
     mocks.exportData.mockClear();
+    mocks.restartApplication.mockReset();
+    mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
   });
@@ -166,5 +184,90 @@ describe("BackupSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "刷新备份列表" }));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a safe desktop restart after a restore is scheduled", async () => {
+    mocks.restore.mockImplementationOnce(
+      (
+        _id: string,
+        options: { onSuccess: (result: ScheduledBackupRestoreResult) => void },
+      ) => {
+        options.onSuccess({
+          backupId: backup.id,
+          rollbackBackupId: "018f0000-0000-7000-8000-000000001702",
+          requestedAt: "2026-08-28T12:05:00Z",
+          restartRequired: true,
+        });
+      },
+    );
+    render(<BackupSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: /恢复备份 018f0000/ }));
+    fireEvent.click(screen.getByRole("button", { name: "确认并安排恢复" }));
+    expect(screen.getByText(/恢复已安全挂起/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "立即安全重启" }));
+
+    await waitFor(() =>
+      expect(mocks.restartApplication).toHaveBeenCalledOnce(),
+    );
+    expect(
+      screen.getByRole("button", { name: "正在安全重启…" }),
+    ).toBeDisabled();
+  });
+
+  it("explains the manual fallback when the Sidecar is external", async () => {
+    mocks.restartApplication.mockResolvedValueOnce(false);
+    mocks.restore.mockImplementationOnce(
+      (
+        _id: string,
+        options: { onSuccess: (result: ScheduledBackupRestoreResult) => void },
+      ) => {
+        options.onSuccess({
+          backupId: backup.id,
+          rollbackBackupId: "018f0000-0000-7000-8000-000000001702",
+          requestedAt: "2026-08-28T12:05:00Z",
+          restartRequired: true,
+        });
+      },
+    );
+    render(<BackupSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: /恢复备份 018f0000/ }));
+    fireEvent.click(screen.getByRole("button", { name: "确认并安排恢复" }));
+    fireEvent.click(screen.getByRole("button", { name: "立即安全重启" }));
+
+    expect(
+      await screen.findByText(/浏览器开发模式不会接管 Sidecar/),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "立即安全重启" })).toBeEnabled();
+  });
+
+  it("keeps the application open and reports a rejected safe restart", async () => {
+    mocks.restartApplication.mockRejectedValueOnce(
+      new Error("Sidecar 未确认安全退出，已取消应用重启"),
+    );
+    mocks.restore.mockImplementationOnce(
+      (
+        _id: string,
+        options: { onSuccess: (result: ScheduledBackupRestoreResult) => void },
+      ) => {
+        options.onSuccess({
+          backupId: backup.id,
+          rollbackBackupId: "018f0000-0000-7000-8000-000000001702",
+          requestedAt: "2026-08-28T12:05:00Z",
+          restartRequired: true,
+        });
+      },
+    );
+    render(<BackupSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: /恢复备份 018f0000/ }));
+    fireEvent.click(screen.getByRole("button", { name: "确认并安排恢复" }));
+    fireEvent.click(screen.getByRole("button", { name: "立即安全重启" }));
+
+    expect(
+      await screen.findByText("Sidecar 未确认安全退出，已取消应用重启"),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "立即安全重启" })).toBeEnabled();
   });
 });

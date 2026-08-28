@@ -3995,6 +3995,16 @@ kbd {
   line-height: 1.55;
 }
 
+.settings-backup-restart-button,
+.settings-backup-restart-error {
+  grid-column: 2;
+  justify-self: flex-start;
+}
+
+.settings-backup-restart-error {
+  margin: 0;
+}
+
 .settings-backup-confirm small {
   display: block;
   margin-top: 5px;

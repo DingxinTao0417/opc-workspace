@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ApiError } from "../api/client";
+import { requestApplicationRestart } from "../api/desktop";
 import {
   useBackupsQuery,
   useCreateBackup,
@@ -215,6 +216,8 @@ export function BackupSettings() {
   } | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
   const pending =
     createMutation.isPending ||
     verifyMutation.isPending ||
@@ -374,6 +377,27 @@ export function BackupSettings() {
         setSuccess(`业务数据已导出：${result.fileName}`);
       },
     });
+  };
+
+  const restartApplication = async () => {
+    setRestartError(null);
+    setRestarting(true);
+    try {
+      const requested = await requestApplicationRestart();
+      if (!requested) {
+        setRestartError(
+          "浏览器开发模式不会接管 Sidecar，请手动停止并重新启动本地服务。",
+        );
+        setRestarting(false);
+      }
+    } catch (error) {
+      setRestartError(
+        error instanceof Error
+          ? error.message
+          : "桌面应用无法安全重启，请手动关闭后重新打开。",
+      );
+      setRestarting(false);
+    }
   };
 
   return (
@@ -614,13 +638,34 @@ export function BackupSettings() {
         >
           <ShieldCheck size={18} />
           <div>
-            <strong>恢复已安全挂起，请关闭并重新打开应用</strong>
+            <strong>恢复已安全挂起，需要重启应用</strong>
             <p>
               重启前业务写入已停止。启动时将应用备份{" "}
               {scheduledRestore.backupId.slice(0, 8)}；当前状态的自动回滚点为{" "}
               {scheduledRestore.rollbackBackupId.slice(0, 8)}。
             </p>
           </div>
+          <button
+            className="button button-primary settings-backup-restart-button"
+            disabled={restarting}
+            onClick={() => void restartApplication()}
+            type="button"
+          >
+            {restarting ? (
+              <LoaderCircle className="animate-spin" size={13} />
+            ) : (
+              <RefreshCw size={13} />
+            )}
+            {restarting ? "正在安全重启…" : "立即安全重启"}
+          </button>
+          {restartError ? (
+            <p
+              className="form-error settings-backup-restart-error"
+              role="alert"
+            >
+              {restartError}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

@@ -1,6 +1,6 @@
 mod sidecar;
 
-use sidecar::{SidecarManager, initialize_sidecar, sidecar_status};
+use sidecar::{SidecarManager, initialize_sidecar, restart_application, sidecar_status};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,7 +18,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .manage(sidecar)
-        .invoke_handler(tauri::generate_handler![sidecar_status])
+        .invoke_handler(tauri::generate_handler![
+            sidecar_status,
+            restart_application
+        ])
         .setup(move |app| {
             initialize_sidecar(app.handle(), setup_sidecar.clone());
             Ok(())

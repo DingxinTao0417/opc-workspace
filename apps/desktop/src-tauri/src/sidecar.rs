@@ -259,6 +259,27 @@ impl SidecarManager {
         self.shutdown_with_timeouts(GRACEFUL_SHUTDOWN_TIMEOUT, FORCED_TERMINATION_TIMEOUT);
     }
 
+    pub fn shutdown_for_restart(&self) -> Result<(), String> {
+        let has_managed_child = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .child
+            .is_some();
+        if !has_managed_child {
+            return Err("当前 Sidecar 不由桌面应用管理，请手动重启开发服务".to_owned());
+        }
+        self.shutdown();
+        if self.wait_for_exit(Duration::ZERO) {
+            return Ok(());
+        }
+        Err(self
+            .status()
+            .message
+            .unwrap_or_else(|| "Sidecar 未确认安全退出，已取消应用重启".to_owned()))
+    }
+
     fn shutdown_with_timeouts(&self, graceful_timeout: Duration, forced_timeout: Duration) {
         let (child, termination_requested) = {
             let mut state = self
@@ -334,6 +355,13 @@ impl SidecarManager {
 #[tauri::command]
 pub fn sidecar_status(state: State<'_, SidecarManager>) -> SidecarRuntimeStatus {
     state.status()
+}
+
+#[tauri::command]
+pub fn restart_application(app: AppHandle, state: State<'_, SidecarManager>) -> Result<(), String> {
+    state.shutdown_for_restart()?;
+    app.request_restart();
+    Ok(())
 }
 
 pub fn initialize_sidecar(app: &AppHandle, manager: SidecarManager) {
@@ -1140,5 +1168,38 @@ mod tests {
         assert!(message.contains("已发送强制终止请求"));
         assert!(message.contains("未收到 Sidecar 的真实退出确认"));
         assert!(!manager.wait_for_exit(Duration::ZERO));
+    }
+
+    #[test]
+    fn restart_shutdown_requires_a_managed_child_and_waits_for_real_exit() {
+        let external = SidecarManager::new();
+        let error = external
+            .shutdown_for_restart()
+            .expect_err("external development Sidecar must not be restarted implicitly");
+        assert!(error.contains("不由桌面应用管理"));
+        assert!(!external.is_shutting_down());
+
+        let manager = SidecarManager::new();
+        let child_state = install_fake_child(&manager, None, None);
+        let restart_manager = manager.clone();
+        let restart = thread::spawn(move || restart_manager.shutdown_for_restart());
+        wait_until(|| {
+            !child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .writes
+                .is_empty()
+        });
+        assert!(!restart.is_finished());
+        manager.mark_exited();
+        restart
+            .join()
+            .expect("restart shutdown thread should finish")
+            .expect("confirmed graceful exit should permit restart");
+        let state = child_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.writes, vec![b"shutdown\n".to_vec()]);
+        assert_eq!(state.kill_calls, 0);
     }
 }

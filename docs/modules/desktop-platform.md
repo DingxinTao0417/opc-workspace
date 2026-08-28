@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）。schema v12–v17 的 Inbox、Reminder、编排、app_settings 与任务保存视图事实均不改变 Tauri 桌面生命周期契约。桌面基座、Task Artifact 运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.0](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.1](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -33,6 +33,7 @@
 - Tauri 原生健康探测与前端 sidecar_status 连接握手。
 - Sidecar 状态当前为 starting、ready、error，并可返回 app/API/schema 版本。
 - 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited 或提前唤醒优雅等待，仍由 shutdown 完成等待与兜底终止。
+- 恢复计划挂起后，设置页可调用 `restart_application`：桌面壳先走同一安全关闭路径并等待受管 Sidecar 的真实退出确认，再请求 Tauri 重启应用；若 Sidecar 不由桌面管理或退出不能确认，则取消应用重启并返回可见错误。
 - Tauri capability 当前仅开放 core:default；前端不能任意调用 shell。
 - manual Task 文件产出通过 WebView 文件选择与鉴权 multipart 上传进入 Sidecar 受控目录；前端不能指定服务端 `relative_path`，下载也只能经过鉴权 content API。
 
@@ -187,12 +188,12 @@
 当前 command：
 
 - sidecar_status：返回当前状态、运行期 API 地址、会话令牌和版本。
+- restart_application：无业务参数；只在受管 Sidecar 真实退出后请求重启整个桌面应用，用于应用挂起的恢复计划。浏览器开发模式或外部 Sidecar 会被明确拒绝。
 
 规划 command 或事件职责：
 
 | 能力                        | 职责                                   |
 | --------------------------- | -------------------------------------- |
-| restart_sidecar             | 用户确认后执行有上限的精确重启         |
 | open_log_directory          | 打开应用日志目录                       |
 | select_import / export_path | 原生文件选择和受控路径授权             |
 | desktop_capabilities        | 返回托盘、通知、快捷键、自启和更新能力 |
@@ -263,6 +264,7 @@
 - [x] Tauri 创建 Artifact root 并通过 `OPC_ARTIFACT_DIR` 传给 Sidecar；开发脚本使用独立开发 root。
 - [x] Sidecar 在 ready 前验证数据库绑定 marker/目录、获取 root 进程级独占锁并协调 staging/objects/trash/quarantine；错库或第二 Sidecar 共用 root 时启动失败，文件读写只经过受控 API。
 - [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确子进程句柄；ready 超时与 shutdown 竞态不会伪造 exited。
+- [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，并且只有真实退出确认后才重启应用。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收

@@ -6,7 +6,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 
 ## 当前完成范围
 
-- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
+- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础；恢复计划挂起后可从设置页确认安全关闭受管 Sidecar 并重启桌面应用
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态并支持重试
 - SQLite schema v17、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本，v12 追加手工 Inbox Item，v13 追加 Inbox–Task 活动/历史关系与删除互锁，v14 追加一次性本地 Reminder，v15 追加 Inbox 自动编排校验，v16 追加版本化非敏感 app_settings，v17 追加任务保存视图
@@ -19,7 +19,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看 Submission/Artifact 历史
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
-- 手动一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将 active file Artifact 与身份 marker 写入同卷 staging，逐项验证后原子发布。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；关闭重开后在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用。删除把精确 UUID 包原子移入隐藏态后清理并同步，损坏包可删，不安全文件系统项会拒绝
+- 手动一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将 active file Artifact 与身份 marker 写入同卷 staging，逐项验证后原子发布。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；桌面模式可一键等待受管 Sidecar 真实退出后重启应用，浏览器开发模式明确要求手动重启服务。下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用。删除把精确 UUID 包原子移入隐藏态后清理并同步，损坏包可删，不安全文件系统项会拒绝
 - 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及 active file Artifact 摘要，保留文件元数据但不嵌入文件正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
@@ -30,7 +30,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、T-07A 任务页精确计划组拖拽、T-07B 计划/截止日期范围筛选、T-07C Task→Project→Client 客户筛选、T-07D 任务保存视图、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D/E/F/G/H Today 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及行内编辑/删除入口、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移、T-04B 手动一致性备份创建/列表/校验/恢复演练/重启应用恢复/确认删除/业务 JSON 导出，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。受控头像文件、Focus D、客户活动与附件、项目事件/非 Reminder Inbox 来源投影、重复提醒、迁移前自动备份、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.0](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、T-07A 任务页精确计划组拖拽、T-07B 计划/截止日期范围筛选、T-07C Task→Project→Client 客户筛选、T-07D 任务保存视图、客户基础资料/Project 客户关联、Focus Core A+B+C、T-06A/B/C/D/E/F/G/H Today 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及行内编辑/删除入口、T-13A/B 命令面板 Task 搜索与键盘/设置直达、设置前后端闭环与旧值迁移、T-04B 手动一致性备份创建/列表/校验/恢复演练/安全重启恢复/确认删除/业务 JSON 导出，以及 T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。受控头像文件、Focus D、客户活动与附件、项目事件/非 Reminder Inbox 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.1](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -52,7 +52,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v5.0）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v5.1）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -294,4 +294,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v5.0](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务页项目客户/日期范围筛选、SQLite 保存视图与精确计划组同状态拖拽、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航/排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期安排、安全的开始/完成/开始专注快捷操作及编辑/确认删除入口、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工一致性备份创建/列表/校验/隔离恢复演练/重启恢复/确认删除、版本化业务 JSON 导出、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付受控头像文件、Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v5.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务页项目客户/日期范围筛选、SQLite 保存视图与精确计划组同状态拖拽、Client/Project 基础纵切、Focus Core A+B+C、Today 真实日期分组/导航/排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期安排、安全的开始/完成/开始专注快捷操作及编辑/确认删除入口、命令面板 Task 搜索/详情直达/设置模块直达与键盘焦点管理、设置 SQLite 前后端闭环与旧值迁移、手工一致性备份创建/列表/校验/隔离恢复演练/安全重启恢复/确认删除、版本化业务 JSON 导出、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付受控头像文件、Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
