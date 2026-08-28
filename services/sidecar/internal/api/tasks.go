@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
+
+const createTaskEndpoint = "POST /api/v1/tasks"
 
 var (
 	validTaskStatuses = map[string]struct{}{"todo": {}, "in_progress": {}, "done": {}}
@@ -107,32 +110,32 @@ func (a *API) listTasks(c *gin.Context) {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
 			return
 		}
-		query = query.Where("status = ?", status)
+		query = query.Where("tasks.status = ?", status)
 	}
 	if priority := strings.TrimSpace(c.Query("priority")); priority != "" {
 		if _, valid := validPriorities[priority]; !valid {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "priority filter is invalid")
 			return
 		}
-		query = query.Where("priority = ?", priority)
+		query = query.Where("tasks.priority = ?", priority)
 	}
 	if projectID := strings.TrimSpace(c.Query("project_id")); projectID != "" {
 		if _, err := uuid.Parse(projectID); err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "project_id filter must be a UUID")
 			return
 		}
-		query = query.Where("project_id = ?", projectID)
+		query = query.Where("tasks.project_id = ?", projectID)
 	}
 	if plannedDate := strings.TrimSpace(c.Query("planned_date")); plannedDate != "" {
 		if !validDate(plannedDate) {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "planned_date filter must use YYYY-MM-DD")
 			return
 		}
-		query = query.Where("planned_date = ?", plannedDate)
+		query = query.Where("tasks.planned_date = ?", plannedDate)
 	}
 	if search := strings.TrimSpace(c.Query("q")); search != "" {
 		like := "%" + escapeLike(search) + "%"
-		query = query.Where("(title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')", like, like)
+		query = query.Where("(tasks.title LIKE ? ESCAPE '\\' OR tasks.description LIKE ? ESCAPE '\\')", like, like)
 	}
 
 	var total int64
@@ -146,7 +149,7 @@ func (a *API) listTasks(c *gin.Context) {
 		return
 	}
 	var tasks []models.Task
-	if err := ordered.Offset((page - 1) * pageSize).Limit(pageSize).Find(&tasks).Error; err != nil {
+	if err := withTaskProject(ordered).Offset((page - 1) * pageSize).Limit(pageSize).Find(&tasks).Error; err != nil {
 		writeDatabaseError(c)
 		return
 	}
@@ -165,34 +168,46 @@ func (a *API) createTask(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
-	if task.ProjectID != nil {
-		var count int64
-		if err := a.db.WithContext(c.Request.Context()).Table("projects").Where("id = ?", *task.ProjectID).Count(&count).Error; err != nil {
-			writeDatabaseError(c)
-			return
-		}
-		if count == 0 {
-			writeError(c, http.StatusUnprocessableEntity, "PROJECT_NOT_FOUND", "project_id does not reference an existing project")
-			return
-		}
-	}
-
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_IDEMPOTENCY_KEY", err.Error())
 		return
 	}
+	requestHash := ""
+	if idempotencyKey != "" {
+		requestHash, err = taskCreateRequestHash(task)
+		if err != nil {
+			writeDatabaseError(c)
+			return
+		}
+	}
+
 	replayed := false
+	statusCode := http.StatusCreated
+	var response models.Task
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if idempotencyKey != "" {
 			var existing models.IdempotencyKey
-			err := tx.Where("key = ? AND endpoint = ?", idempotencyKey, "POST /api/v1/tasks").First(&existing).Error
+			err := tx.Where("key = ? AND endpoint = ?", idempotencyKey, createTaskEndpoint).First(&existing).Error
 			if err == nil {
-				var existingTask models.Task
-				if err := tx.First(&existingTask, "id = ?", existing.ResourceID).Error; err != nil {
-					return fmt.Errorf("load idempotent task: %w", err)
+				if existing.RequestHash == nil || existing.ResponseBody == nil || existing.ResponseStatus == nil {
+					return newProjectRequestError(
+						http.StatusConflict,
+						"IDEMPOTENCY_REPLAY_UNAVAILABLE",
+						"This legacy Idempotency-Key cannot be replayed safely; use a new key",
+					)
 				}
-				task = existingTask
+				if *existing.RequestHash != requestHash {
+					return newProjectRequestError(
+						http.StatusConflict,
+						"IDEMPOTENCY_CONFLICT",
+						"Idempotency-Key was already used with a different task request",
+					)
+				}
+				if err := json.Unmarshal([]byte(*existing.ResponseBody), &response); err != nil {
+					return fmt.Errorf("decode idempotent task response: %w", err)
+				}
+				statusCode = *existing.ResponseStatus
 				replayed = true
 				return nil
 			}
@@ -200,12 +215,29 @@ func (a *API) createTask(c *gin.Context) {
 				return fmt.Errorf("read idempotency key: %w", err)
 			}
 		}
+		if task.ProjectID != nil {
+			if err := requireAssignableProject(tx, *task.ProjectID); err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(&task).Error; err != nil {
 			return fmt.Errorf("create task: %w", err)
 		}
+		if err := withTaskProject(tx).First(&response, "tasks.id = ?", task.ID).Error; err != nil {
+			return fmt.Errorf("load created task: %w", err)
+		}
+		normalizeTask(&response)
 		if idempotencyKey != "" {
+			responseBody, err := json.Marshal(response)
+			if err != nil {
+				return fmt.Errorf("encode idempotent task response: %w", err)
+			}
+			responseText := string(responseBody)
+			responseStatus := http.StatusCreated
 			record := models.IdempotencyKey{
-				Key: idempotencyKey, Endpoint: "POST /api/v1/tasks", ResourceID: task.ID, CreatedAt: task.CreatedAt,
+				Key: idempotencyKey, Endpoint: createTaskEndpoint, ResourceID: task.ID,
+				RequestHash: &requestHash, ResponseBody: &responseText, ResponseStatus: &responseStatus,
+				CreatedAt: task.CreatedAt,
 			}
 			if err := tx.Create(&record).Error; err != nil {
 				return fmt.Errorf("record idempotency key: %w", err)
@@ -214,16 +246,16 @@ func (a *API) createTask(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
 		writeDatabaseError(c)
 		return
 	}
-	normalizeTask(&task)
-	status := http.StatusCreated
 	if replayed {
-		status = http.StatusOK
 		c.Header("Idempotency-Replayed", "true")
 	}
-	c.JSON(status, gin.H{"data": task})
+	c.JSON(statusCode, gin.H{"data": response})
 }
 
 func (a *API) getTask(c *gin.Context) {
@@ -232,7 +264,7 @@ func (a *API) getTask(c *gin.Context) {
 		return
 	}
 	var task models.Task
-	if err := a.db.WithContext(c.Request.Context()).First(&task, "id = ?", id).Error; err != nil {
+	if err := withTaskProject(a.db.WithContext(c.Request.Context())).First(&task, "tasks.id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeError(c, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
 			return
@@ -288,15 +320,6 @@ func (a *API) updateTask(c *gin.Context) {
 				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "project_id must be a UUID")
 				return
 			}
-			var count int64
-			if err := a.db.WithContext(c.Request.Context()).Table("projects").Where("id = ?", projectID).Count(&count).Error; err != nil {
-				writeDatabaseError(c)
-				return
-			}
-			if count == 0 {
-				writeError(c, http.StatusUnprocessableEntity, "PROJECT_NOT_FOUND", "project_id does not reference an existing project")
-				return
-			}
 			updates["project_id"] = projectID
 		}
 	}
@@ -340,19 +363,39 @@ func (a *API) updateTask(c *gin.Context) {
 		return
 	}
 
-	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-	result := a.db.WithContext(c.Request.Context()).Model(&models.Task{}).Where("id = ?", id).Updates(updates)
-	if result.Error != nil {
-		writeDatabaseError(c)
-		return
-	}
-	if result.RowsAffected == 0 {
-		writeError(c, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-		return
-	}
-
 	var task models.Task
-	if err := a.db.WithContext(c.Request.Context()).First(&task, "id = ?", id).Error; err != nil {
+	updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if input.ProjectID.Set {
+			var current models.Task
+			if err := tx.Select("id", "project_id").First(&current, "id = ?", id).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
+				}
+				return err
+			}
+			if target, ok := updates["project_id"].(string); ok {
+				unchanged := current.ProjectID != nil && *current.ProjectID == target
+				if !unchanged {
+					if err := requireAssignableProject(tx, target); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		result := tx.Model(&models.Task{}).Where("id = ?", id).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
+		}
+		return withTaskProject(tx).First(&task, "tasks.id = ?", id).Error
+	})
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
 		writeDatabaseError(c)
 		return
 	}
@@ -391,7 +434,7 @@ func (a *API) updateTaskStatus(c *gin.Context) {
 		return
 	}
 	var task models.Task
-	if err := a.db.WithContext(c.Request.Context()).First(&task, "id = ?", id).Error; err != nil {
+	if err := withTaskProject(a.db.WithContext(c.Request.Context())).First(&task, "tasks.id = ?", id).Error; err != nil {
 		writeDatabaseError(c)
 		return
 	}
@@ -414,6 +457,30 @@ func (a *API) deleteTask(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func requireAssignableProject(db *gorm.DB, id string) error {
+	var project struct {
+		Status string `gorm:"column:status"`
+	}
+	if err := db.Table("projects").Select("status").Where("id = ?", id).Take(&project).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return newProjectRequestError(
+				http.StatusUnprocessableEntity,
+				"PROJECT_NOT_FOUND",
+				"project_id does not reference an existing project",
+			)
+		}
+		return err
+	}
+	if project.Status == "archived" {
+		return newProjectRequestError(
+			http.StatusConflict,
+			"PROJECT_ARCHIVED",
+			"Archived projects cannot accept new task links",
+		)
+	}
+	return nil
 }
 
 func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
@@ -480,6 +547,30 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 	}, nil
 }
 
+func taskCreateRequestHash(task models.Task) (string, error) {
+	payload := struct {
+		Title            string  `json:"title"`
+		Description      string  `json:"description"`
+		Status           string  `json:"status"`
+		Priority         string  `json:"priority"`
+		ProjectID        *string `json:"project_id"`
+		DueDate          *string `json:"due_date"`
+		PlannedDate      *string `json:"planned_date"`
+		EstimatedMinutes *int    `json:"estimated_minutes"`
+		ManualOrder      *int    `json:"manual_order"`
+	}{
+		Title: task.Title, Description: task.Description, Status: task.Status, Priority: task.Priority,
+		ProjectID: task.ProjectID, DueDate: task.DueDate, PlannedDate: task.PlannedDate,
+		EstimatedMinutes: task.EstimatedMinutes, ManualOrder: task.ManualOrder,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode task request hash: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest), nil
+}
+
 func taskID(c *gin.Context) (string, bool) {
 	id := strings.TrimSpace(c.Param("id"))
 	if _, err := uuid.Parse(id); err != nil {
@@ -505,17 +596,17 @@ func queryInt(c *gin.Context, key string, fallback, minimum, maximum int) (int, 
 func applyTaskSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 	if strings.TrimSpace(raw) == "" {
 		return query.
-			Order("CASE WHEN manual_order IS NULL THEN 1 ELSE 0 END ASC").
-			Order("manual_order ASC").
-			Order("CASE priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END ASC").
-			Order("CASE WHEN due_date IS NULL THEN 1 ELSE 0 END ASC").
-			Order("due_date ASC").
-			Order("created_at ASC"), true
+			Order("CASE WHEN tasks.manual_order IS NULL THEN 1 ELSE 0 END ASC").
+			Order("tasks.manual_order ASC").
+			Order("CASE tasks.priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END ASC").
+			Order("CASE WHEN tasks.due_date IS NULL THEN 1 ELSE 0 END ASC").
+			Order("tasks.due_date ASC").
+			Order("tasks.created_at ASC"), true
 	}
 	allowed := map[string]string{
-		"manual_order": "manual_order", "priority": "priority", "due_date": "due_date",
-		"planned_date": "planned_date", "created_at": "created_at", "updated_at": "updated_at",
-		"title": "title", "status": "status",
+		"manual_order": "tasks.manual_order", "priority": "tasks.priority", "due_date": "tasks.due_date",
+		"planned_date": "tasks.planned_date", "created_at": "tasks.created_at", "updated_at": "tasks.updated_at",
+		"title": "tasks.title", "status": "tasks.status",
 	}
 	for _, part := range strings.Split(raw, ",") {
 		field := strings.TrimSpace(part)
@@ -531,6 +622,13 @@ func applyTaskSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 		query = query.Order(column + " " + direction)
 	}
 	return query, true
+}
+
+func withTaskProject(query *gorm.DB) *gorm.DB {
+	return query.
+		Model(&models.Task{}).
+		Select("tasks.*, projects.name AS project_name").
+		Joins("LEFT JOIN projects ON projects.id = tasks.project_id")
 }
 
 func validDate(value string) bool {

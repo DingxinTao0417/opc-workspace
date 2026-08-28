@@ -12,8 +12,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 2 {
-		t.Fatalf("SchemaVersion = %d, want 2", store.SchemaVersion)
+	if store.SchemaVersion != 5 {
+		t.Fatalf("SchemaVersion = %d, want 5", store.SchemaVersion)
 	}
 
 	checks := map[string]int{
@@ -35,6 +35,71 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	if journalMode != "wal" {
 		t.Fatalf("journal_mode = %q, want wal", journalMode)
+	}
+
+	const projectID = "018f0000-0000-7000-8000-000000000301"
+	if err := store.DB.Exec(`
+		INSERT INTO projects(id, name, status, created_at, updated_at)
+		VALUES (?, '迁移验证项目', 'planning', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, projectID).Error; err != nil {
+		t.Fatalf("insert project with lifecycle defaults: %v", err)
+	}
+	var lifecycle struct {
+		Version            int64
+		ArchivedFromStatus *string
+	}
+	if err := store.DB.Table("projects").
+		Select("version, archived_from_status").
+		Where("id = ?", projectID).
+		Take(&lifecycle).Error; err != nil {
+		t.Fatalf("read project lifecycle defaults: %v", err)
+	}
+	if lifecycle.Version != 1 || lifecycle.ArchivedFromStatus != nil {
+		t.Fatalf("project lifecycle defaults = %#v, want version 1 and no archived source", lifecycle)
+	}
+	var projectIndexCount int64
+	if err := store.DB.Table("sqlite_master").
+		Where("type = 'index' AND name IN ?", []string{"idx_projects_status", "idx_projects_due_date"}).
+		Count(&projectIndexCount).Error; err != nil {
+		t.Fatalf("count project lifecycle indexes: %v", err)
+	}
+	if projectIndexCount != 2 {
+		t.Fatalf("project lifecycle index count = %d, want 2", projectIndexCount)
+	}
+	var idempotencyColumns int64
+	if err := store.DB.Raw(`
+		SELECT COUNT(*)
+		FROM pragma_table_info('idempotency_keys')
+		WHERE name IN ('request_hash', 'response_body', 'response_status')
+	`).Scan(&idempotencyColumns).Error; err != nil {
+		t.Fatalf("read idempotency snapshot columns: %v", err)
+	}
+	if idempotencyColumns != 3 {
+		t.Fatalf("idempotency snapshot column count = %d, want 3", idempotencyColumns)
+	}
+	const taskID = "018f0000-0000-7000-8000-000000000302"
+	if err := store.DB.Exec(`
+		INSERT INTO tasks(id, title, status, priority, project_id, created_at, updated_at)
+		VALUES (?, '聚合版本验证任务', 'todo', 'P2', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, taskID, projectID).Error; err != nil {
+		t.Fatalf("insert aggregate version task: %v", err)
+	}
+	if err := store.DB.Table("projects").Select("version").Where("id = ?", projectID).
+		Scan(&lifecycle.Version).Error; err != nil {
+		t.Fatalf("read version after task insert: %v", err)
+	}
+	if lifecycle.Version != 2 {
+		t.Fatalf("project version after task insert = %d, want 2", lifecycle.Version)
+	}
+	if err := store.DB.Table("tasks").Where("id = ?", taskID).Update("status", "done").Error; err != nil {
+		t.Fatalf("update aggregate version task: %v", err)
+	}
+	if err := store.DB.Table("projects").Select("version").Where("id = ?", projectID).
+		Scan(&lifecycle.Version).Error; err != nil {
+		t.Fatalf("read version after task update: %v", err)
+	}
+	if lifecycle.Version != 3 {
+		t.Fatalf("project version after task update = %d, want 3", lifecycle.Version)
 	}
 }
 

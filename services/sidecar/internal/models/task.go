@@ -7,6 +7,7 @@ type Task struct {
 	Status           string  `gorm:"column:status" json:"status"`
 	Priority         string  `gorm:"column:priority" json:"priority"`
 	ProjectID        *string `gorm:"column:project_id" json:"project_id"`
+	ProjectName      *string `gorm:"column:project_name;->" json:"project_name,omitempty"`
 	DueDate          *string `gorm:"column:due_date" json:"due_date"`
 	PlannedDate      *string `gorm:"column:planned_date" json:"planned_date"`
 	EstimatedMinutes *int    `gorm:"column:estimated_minutes" json:"estimated_minutes"`
@@ -20,10 +21,13 @@ type Task struct {
 func (Task) TableName() string { return "tasks" }
 
 type IdempotencyKey struct {
-	Key        string `gorm:"column:key;primaryKey"`
-	Endpoint   string `gorm:"column:endpoint;primaryKey"`
-	ResourceID string `gorm:"column:resource_id"`
-	CreatedAt  string `gorm:"column:created_at"`
+	Key            string  `gorm:"column:key;primaryKey"`
+	Endpoint       string  `gorm:"column:endpoint;primaryKey"`
+	ResourceID     string  `gorm:"column:resource_id"`
+	RequestHash    *string `gorm:"column:request_hash"`
+	ResponseBody   *string `gorm:"column:response_body"`
+	ResponseStatus *int    `gorm:"column:response_status"`
+	CreatedAt      string  `gorm:"column:created_at"`
 }
 
 func (IdempotencyKey) TableName() string { return "idempotency_keys" }

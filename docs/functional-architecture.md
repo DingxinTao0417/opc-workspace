@@ -3,7 +3,7 @@
 > 文档版本：1.0
 > 日期：2026-08-27
 > 依据：[PRD v1.6](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v2
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v5
 
 ## 1. 目的
 
@@ -49,13 +49,16 @@
 ### 3.1 当前实现
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
-- React 已具备三栏框架、今日/任务/专注基础能力、设置和命令面板。
-- Go 目前只提供健康检查、任务基础 API 和今日统计。
-- SQLite schema v2 已有 tasks、projects、clients、invoices、focus_sessions 等基础表。
+- React 已具备三栏框架、今日/任务/专注基础能力、项目卡片与详情、设置和命令面板。
+- Go 已提供健康检查、任务基础 API、项目 CRUD/生命周期 API 和今日统计。
+- SQLite schema v5 已有 tasks、projects、clients、invoices、focus_sessions 等基础表；v3 为 Project 增加生命周期版本，v4 增加安全幂等快照，v5 用触发器在任务/发票关联与聚合字段、客户名称或删除变化时原子递增 `projects.version`。
+- 任务可关联项目；任务读取返回 `project_name`，项目读取从关联任务派生进度及 `actual_minutes` 合计。
+- 归档项目不再接受新任务关联；schema v5 让任务、发票和客户聚合事实变化同步失效 Project `ETag`，避免基于旧汇总完成、归档或硬删除。
+- 当前仍未实现 Client CRUD、项目产出/附件/Workflow Event/Inbox 集成、Actor/Assignment 和 Focus Session 持久化，因此项目模块仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：完整任务事实层、项目、客户、Actor/人工分派、收件箱人工编排、专注持久化、基础备份恢复和桌面可靠性。
+- v0.1：在已交付的项目基础纵切上，继续完成任务事实层、客户、Actor/人工分派、项目产出与收件箱人工编排、专注持久化、基础备份恢复和桌面可靠性。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
@@ -84,7 +87,7 @@
 |------|----------|----------|-----------------|
 | [今日](modules/today.md) | Task、Focus、Inbox 派生统计 | 当日执行入口和聚合展示 | 任务操作、开始专注、打开收件箱 |
 | [任务](modules/tasks.md) | Project、Actor、Inbox 来源 | 唯一工单、状态、完成条件、产出 | Project 进度、Inbox 进度、Focus 工时 |
-| [项目](modules/projects.md) | Client、Task | 项目生命周期和任务聚合 | 交付 Artifact、里程碑和 Inbox 事件 |
+| [项目](modules/projects.md) | Client、Task | 当前已实现资料、受控生命周期、归档恢复和任务聚合 | 交付 Artifact、附件、时间线和 Inbox 事件仍待实现 |
 | [客户](modules/clients.md) | Project、Invoice、Activity | 客户资料和本地业务关系 | 回访、发票和 Inbox 来源 |
 | [收件箱](modules/inbox.md) | 项目产出、Reminder、Task/Agent/系统事件 | 受理、拆分、关联、跟进和解决 | Task 与 Assignment；今日待处理统计 |
 | [Actor](modules/actors.md) | 设置中的本地配置 | owner/person/agent/system 责任身份 | Assignment、审核人和审计主体 |
@@ -162,6 +165,8 @@ Reminder 是调度事实；Inbox Item 是到期后的处理事实。两者不复
 
 Task 是否完成仍由任务模块决定，专注结束不能自动完成任务。
 
+当前项目详情已经读取任务 `actual_minutes` 的合计，但 Focus Session 尚未持久化，也不会自动更新该字段；上述停止事务仍是后续目标契约。
+
 ### 6.5 本地 Agent 执行（v0.2）
 
 ```text
@@ -213,6 +218,8 @@ Task 已分派给健康 agent Actor
 - 同 key 不同请求摘要返回 `409 CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
+当前 Task 与 Project 创建已实现该原则的基础版本：schema v4 保存规范化请求 SHA-256、首次资源响应快照与原始 `201` 状态，因此资源后续编辑或删除不影响同请求重放；不同请求复用 key 会冲突，旧记录缺少快照时拒绝不安全重放。schema v5 再把 Project 聚合依赖纳入版本冲突检测。Actor 作用域和 Workflow Event 去重仍属于后续编排实现。
+
 ## 9. 本地安全与权限边界
 
 - WebView 使用启动期随机 Bearer Token 调用普通业务 API。
@@ -232,15 +239,17 @@ Task 已分派给健康 agent Actor
 | 备份失败 | 数据管理 | 通过桌面日志管线记录 request ID，并产生 system_maintenance Inbox Item |
 | 恢复进入 applying | 数据管理 + 桌面平台 | 获取维护锁、阻止普通退出；强制终止后依据 journal 完成或回滚 |
 | 来源资源删除 | 来源模块 + Inbox | open/tracking 时默认限制；允许删除后保留快照并显示来源不存在 |
-| 并发旧写入 | Sidecar 领域服务 | 返回 409；前端刷新并提示用户重新确认 |
+| 并发旧写入 | Sidecar 领域服务 | Project 资料、状态或任务/发票/客户聚合事实变化都会使旧 `If-Match` 返回 409；前端刷新并提示用户重新确认 |
 | Artifact 文件缺失 | Task/Agent + 数据管理 | 保留元数据和审计，标记损坏，不把 Task 静默视为完成 |
 
 ## 11. 实施依赖顺序
 
+已落地的基础纵切是 Task 三态 CRUD/项目关联，以及 Project CRUD、乐观锁、受控状态、归档恢复和任务聚合。后续依赖顺序为：
+
 ```text
-Task 基础 CRUD / 分页 / 标签 / 父子关系
+Task 分页 UI / 标签 / 父子关系 / 基础乐观锁
   → Actor / Assignment / 受控 Task 状态 / Artifact / Workflow Event
-  → Project / Client
+  → Client CRUD / Project 客户选择、产出、附件与事件
   → Inbox Item / Reminder / 拆分 / 人工分派与验收
   → Today 正确日期聚合 / Focus 持久化
   → 备份恢复 / 桌面日志与故障恢复

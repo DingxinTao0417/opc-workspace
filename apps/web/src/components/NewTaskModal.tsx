@@ -1,5 +1,5 @@
-import { useMemo, useState, type FormEvent } from "react";
-import { useCreateTask } from "../api/hooks";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCreateTask, useProjectOptionsQuery } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
 import type { TaskPriority } from "../types/models";
@@ -14,6 +14,7 @@ const priorities: { value: TaskPriority; label: string }[] = [
 
 export function NewTaskModal() {
   const open = useUiStore((state) => state.newTaskOpen);
+  const preselectedProjectId = useUiStore((state) => state.newTaskProjectId);
   const setOpen = useUiStore((state) => state.setNewTaskOpen);
   const mutation = useCreateTask();
   const [title, setTitle] = useState("");
@@ -21,6 +22,12 @@ export function NewTaskModal() {
   const [plannedDate, setPlannedDate] = useState("");
   const [estimatedMinutes, setEstimatedMinutes] = useState("50");
   const [priority, setPriority] = useState<TaskPriority>("P2");
+  const [projectId, setProjectId] = useState("");
+  const projectsQuery = useProjectOptionsQuery(open);
+
+  useEffect(() => {
+    if (open) setProjectId(preselectedProjectId ?? "");
+  }, [open, preselectedProjectId]);
 
   const errorMessage = useMemo(() => {
     if (!mutation.error) return null;
@@ -42,14 +49,14 @@ export function NewTaskModal() {
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const cleanTitle = title.trim();
-    if (!cleanTitle) return;
+    if (cleanTitle.length < 2) return;
     mutation.mutate(
       {
         title: cleanTitle,
         description: description.trim(),
         status: "todo",
         priority,
-        projectId: null,
+        projectId: projectId || null,
         plannedDate: plannedDate || null,
         estimatedMinutes: Number(estimatedMinutes) || null,
       },
@@ -60,6 +67,7 @@ export function NewTaskModal() {
           setPlannedDate("");
           setEstimatedMinutes("50");
           setPriority("P2");
+          setProjectId("");
           setOpen(false);
         },
       },
@@ -80,7 +88,7 @@ export function NewTaskModal() {
           </button>
           <button
             className="button button-primary"
-            disabled={!title.trim() || mutation.isPending}
+            disabled={title.trim().length < 2 || mutation.isPending}
             form="new-task-form"
             type="submit"
           >
@@ -105,9 +113,36 @@ export function NewTaskModal() {
         <div className="form-grid">
           <label className="form-field">
             <span>项目</span>
-            <select disabled value="">
-              <option value="">未归项目 · 项目 API 接入后可选</option>
+            <select
+              disabled={projectsQuery.isPending || projectsQuery.isError}
+              onChange={(event) => setProjectId(event.target.value)}
+              value={projectId}
+            >
+              <option value="">
+                {projectsQuery.isPending
+                  ? "正在读取项目…"
+                  : projectsQuery.isError
+                    ? "项目暂不可用"
+                    : "未归项目"}
+              </option>
+              {(projectsQuery.data ?? []).map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
             </select>
+            {projectsQuery.isError ? (
+              <span className="form-field-error" role="alert">
+                项目列表读取失败。
+                <button
+                  className="form-inline-action"
+                  onClick={() => void projectsQuery.refetch()}
+                  type="button"
+                >
+                  重新读取
+                </button>
+              </span>
+            ) : null}
           </label>
           <label className="form-field">
             <span>计划日期</span>

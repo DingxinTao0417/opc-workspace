@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
 const testToken = "test-session-token"
@@ -101,7 +103,7 @@ func TestTaskCreateListStatusAndTodayStats(t *testing.T) {
 	}
 
 	replayed := performRequest(router, http.MethodPost, "/api/v1/tasks", body, map[string]string{"Idempotency-Key": "task-create-1"})
-	if replayed.Code != http.StatusOK || replayed.Header().Get("Idempotency-Replayed") != "true" {
+	if replayed.Code != http.StatusCreated || replayed.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("idempotency replay status=%d header=%q body=%s", replayed.Code, replayed.Header().Get("Idempotency-Replayed"), replayed.Body.String())
 	}
 
@@ -139,6 +141,80 @@ func TestTaskCreateListStatusAndTodayStats(t *testing.T) {
 	}
 	if todayResponse.Data.Tasks.Total != 1 || todayResponse.Data.Tasks.Completed != 1 {
 		t.Fatalf("today stats = %s", stats.Body.String())
+	}
+}
+
+func TestTaskCreateIdempotencyReplaysOriginalResponseAfterMutationAndDeletion(t *testing.T) {
+	router := newTestAPI(t)
+	project := createProjectForTest(t, router, `{"name":"Idempotency project"}`, nil)
+	body := []byte(fmt.Sprintf(
+		`{"title":"Original task","priority":"P1","project_id":%q,"estimated_minutes":30}`,
+		project.ID,
+	))
+	headers := map[string]string{"Idempotency-Key": "task-durable-replay-1"}
+
+	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/tasks", body, headers)
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	var created struct {
+		Data models.Task `json:"data"`
+	}
+	if err := json.Unmarshal(createdRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Data.ProjectName == nil || *created.Data.ProjectName != project.Name {
+		t.Fatalf("created project name = %#v", created.Data.ProjectName)
+	}
+
+	updated := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/tasks/"+created.Data.ID,
+		[]byte(`{"title":"Mutated task"}`),
+		nil,
+	)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("mutate task status = %d: %s", updated.Code, updated.Body.String())
+	}
+
+	replayed := performRequest(router, http.MethodPost, "/api/v1/tasks", body, headers)
+	if replayed.Code != http.StatusCreated || replayed.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay status=%d header=%q body=%s", replayed.Code, replayed.Header().Get("Idempotency-Replayed"), replayed.Body.String())
+	}
+	var replayedTask struct {
+		Data models.Task `json:"data"`
+	}
+	if err := json.Unmarshal(replayed.Body.Bytes(), &replayedTask); err != nil {
+		t.Fatalf("decode replay response: %v", err)
+	}
+	if replayedTask.Data.ID != created.Data.ID || replayedTask.Data.Title != created.Data.Title ||
+		replayedTask.Data.ProjectName == nil || *replayedTask.Data.ProjectName != project.Name {
+		t.Fatalf("replayed task = %#v, original = %#v", replayedTask.Data, created.Data)
+	}
+
+	deleted := performRequest(router, http.MethodDelete, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete task status = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	replayedAfterDelete := performRequest(router, http.MethodPost, "/api/v1/tasks", body, headers)
+	if replayedAfterDelete.Code != http.StatusCreated || replayedAfterDelete.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay after delete status=%d header=%q body=%s", replayedAfterDelete.Code, replayedAfterDelete.Header().Get("Idempotency-Replayed"), replayedAfterDelete.Body.String())
+	}
+	missing := performRequest(router, http.MethodGet, "/api/v1/tasks/"+created.Data.ID, nil, nil)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("replay recreated deleted task: %d: %s", missing.Code, missing.Body.String())
+	}
+
+	conflict := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks",
+		[]byte(`{"title":"Different task"}`),
+		headers,
+	)
+	if conflict.Code != http.StatusConflict || responseErrorCode(t, conflict.Body.Bytes()) != "IDEMPOTENCY_CONFLICT" {
+		t.Fatalf("conflicting replay status = %d: %s", conflict.Code, conflict.Body.String())
 	}
 }
 

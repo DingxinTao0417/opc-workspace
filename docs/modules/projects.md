@@ -1,8 +1,8 @@
 # 项目管理模块
 
-> 实现基线：`HEAD 471f814`（2026-08-27）
+> 实现状态截止：2026-08-27（依据当前未提交工作树）
 >
-> 版本边界：当前只有数据表和页面骨架；以下 CRUD、详情、进度与收件箱联动均为规划。
+> 版本边界：项目资料、基础生命周期和任务聚合纵切已实现，模块仍为**部分完成**；客户 CRUD、项目产出/附件/事件与 Inbox 联动尚未交付。
 
 ## 定位与边界
 
@@ -10,148 +10,177 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 - Project 保存自己的业务状态，不把任务、收件箱或发票状态复制为项目状态。
 - 项目进度从关联任务派生，不在项目表维护第二份可写百分比。
-- 项目产出、阻塞、交付、验收和开票节点可以生成 Inbox Item，但 Inbox Item 只跟进下一步，不替代项目生命周期。
+- 项目产出、阻塞、交付、验收和开票节点未来可以生成 Inbox Item，但 Inbox Item 只跟进下一步，不替代项目生命周期。
 - 任务可不归属项目；项目可暂时不关联客户。
-- 发票、收入、成本、客户回访等后续业务由各自模块管理，项目详情只聚合读取。
+- 发票、收入、成本、客户回访等后续业务由各自模块管理，项目详情只聚合读取已落地的事实。
 
 ## 当前实现状态
 
-当前状态为**页面骨架**。
+当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、列表和详情纵切。
 
 ### 已实现
 
-- SQLite `projects` 表，包含名称、描述、可选客户、状态、开始/截止日期、合同金额、颜色和时间戳。
-- `tasks.project_id`、`invoices.project_id` 已建立可选外键，删除项目时当前 schema 均为 `SET NULL`。
-- `/projects` 路由、页面标题、“新建项目”外观、固定 `0 个` 和空状态。
+- SQLite schema v5 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`；原有任务和发票外键仍使用 `ON DELETE SET NULL`。
+- Go Project model、路由、输入校验和集成测试已经存在。
+- 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
+- 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
+- 创建接口接受可选 `Idempotency-Key`：服务端对规范化请求计算 SHA-256，并保存首次响应快照；同键同请求即使资源后来已编辑或删除也重放首次响应，同键不同请求返回 `409 IDEMPOTENCY_CONFLICT`，旧版无快照记录则拒绝不安全重放。
+- 编辑、状态流转和永久删除必须携带 `If-Match`；资源响应返回 `ETag`，旧版本写入返回 `409 VERSION_CONFLICT`。归档项目资料必须先恢复再编辑，否则 PATCH 返回 `409 PROJECT_ARCHIVED`。版本不仅覆盖项目资料和状态，也覆盖任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除等会改变聚合响应或删除确认范围的事实。
+- 状态只能通过 `start / pause / resume / complete / reopen / archive / restore` 命令流转。完成仍有未完成任务的项目需要显式确认，且不会修改任何任务状态。
+- 归档会保存原状态，恢复时回到该状态；缺少历史归档来源的旧数据恢复到 `planning`。
+- 永久删除只允许已归档项目，同时要求 `confirm=true` 和最新版本；删除会解除任务、发票的项目外键并返回解除数量，不会删除这些记录。
+- 项目响应从关联任务实时派生总数、已完成数、进行中数、剩余数、完成百分比及 `actual_minutes` 合计，并返回客户名、发票数和当前允许操作。
+- 项目页使用真实 API 展示卡片、服务端搜索、状态筛选和每页 12 条分页，并覆盖加载、空、错误和重试状态。
+- 项目详情通过串行分页读取全部关联任务，支持资料编辑、从项目内新建并预选项目的任务、派生进度/工时、状态操作、归档恢复，以及带二次确认的永久删除；版本冲突会刷新详情事实。
+- 新建任务和任务详情已接项目选择器；任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
+- 归档项目拒绝新建任务关联或把其他任务改入，返回 `409 PROJECT_ARCHIVED`；既有关联任务仍可编辑且保持原关联。归档转换进行中时，详情页的新建任务入口会禁用。
 
 ### 已知缺口
 
-- 没有 Go Project model、Repository/Service、API 或测试。
-- “新建项目”按钮没有行为；无创建、编辑、删除、归档或状态流转。
-- 没有卡片列表、分页、搜索、筛选、加载、错误或重试状态。
-- 没有项目详情、任务树、派生进度、工时、产出、附件或时间线。
-- 没有客户选择与关联流程；项目金额没有真实 UI。
-- 没有任何项目事件进入收件箱，也没有去重键或审计记录。
+- 客户模块仍只有页面骨架和预留表，没有 Client API/CRUD；因此项目表单的客户选择器保持禁用。后端可校验已有 `client_id` 并返回 `client_name`，但当前 UI 不能新建或改选客户，也没有客户筛选控件。
+- 项目任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但没有可见分页、状态筛选或任务树；大数据量下的请求次数与响应性能仍待验证。标签、父子任务、Assignment 和受控任务验收也未实现。
+- 项目工时只是对任务表当前 `actual_minutes` 求和；专注会话尚未持久化或自动累计工时。
+- 没有项目产出、附件、笔记、发票明细或活动时间线；当前只返回发票计数，用于解释硬删除影响。
+- 没有 `task_artifacts`、`workflow_events`、项目事件生产器或 Inbox Item 集成；项目状态变更目前没有追加式审计记录。
+- 没有项目里程碑、真实收入/成本聚合或开票操作。
 
-## 目标功能
-
-### 项目列表与资料
-
-- 卡片网格展示名称、客户、状态、日期、颜色、派生任务进度和风险。
-- 支持创建、编辑、分页、搜索、按状态/客户筛选、归档和恢复。
-- 项目名称 2–100 字符；金额使用最小货币单位整数；日期使用 `YYYY-MM-DD`。
-- 默认用归档代替硬删除；硬删除必须解释任务、发票、产出等关联处理策略。
-
-### 生命周期
-
-```text
-planning → in_progress → completed → archived
-                 ↓            ↑
-               paused ────────┘
-```
-
-- 状态变化使用显式命令或受约束服务方法，并记录 Workflow Event。
-- “项目完成”只表示项目业务生命周期完成，不自动把未完成任务标记完成。
-- 项目重新打开或归档不改写关联任务历史。
-
-### 项目详情
-
-- 基本信息、客户链接和状态操作。
-- 关联任务列表/任务树，可按状态筛选并新建项目任务。
-- 从 Focus Session 派生的总工时及分布。
-- 任务产出、项目附件、笔记和本地活动时间线。
-- 发票模块交付后显示关联发票；财务模块交付后显示真实收入/成本。
-
-### 产出与后续工作
-
-- 项目交付类 Task 提交 Artifact，或 owner 显式标记 `requires_followup` 时，可幂等生成收件箱项。
-- owner 在收件箱把产出拆成修改、发布、客户确认等工单，并分派给 owner/person；v0.2 才可选择健康的本地 agent。
-- 项目达到交付、验收或开票节点的自动事件必须等收件箱规则和对应业务模块交付后再启用。
-
-## 关键用户流程
+## 当前用户流程
 
 ### 创建并启动项目
 
-1. owner 输入名称，可选客户、日期、金额和颜色，创建 `planning` 项目。
-2. 在项目详情添加或关联任务。
-3. 执行“开始项目”，状态进入 `in_progress` 并写审计事件。
-4. 项目卡片从任务数据实时计算完成进度。
+1. owner 输入名称，可选日期、金额和颜色；前端为同一次失败重试复用 `Idempotency-Key`，服务端保存规范化请求摘要和首次 `planning` 项目响应快照。
+2. 在项目详情新建任务时，任务弹窗自动预选当前项目；也可在普通任务新建/编辑中选择非归档项目。
+3. owner 执行“开始项目”，服务端校验 `If-Match` 后从 `planning` 进入 `in_progress`。
+4. 项目卡片和详情从任务数据实时计算完成进度与 `actual_minutes` 合计。
 
-### 交付产出并拆分后续工单
+### 完成、归档与恢复
 
-1. 项目任务提交本地 Artifact，owner 标记需要后续处理。
-2. Sidecar 以 Artifact ID 形成稳定事件键，创建一条 Inbox Item。
-3. owner 查看来源和产出，拆成必需/可选任务并分派 Actor。
-4. 收件箱跟踪工单直至完成；Project 保持自身状态，是否完成由 owner 单独确认。
+1. `in_progress` 或 `paused` 项目可完成；仍有未完成任务时，前后端都要求显式确认。
+2. 完成项目只改变项目状态，不会自动完成、恢复或删除关联任务。
+3. 任一非归档状态可归档；归档项目从默认列表隐藏，可通过“已归档”筛选找到。
+4. 恢复项目回到归档前状态，并保留任务、任务工时和发票关联。
 
-### 完成、归档与重新打开
+### 永久删除
 
-1. owner 检查未完成任务和待验收产出，确认项目完成。
-2. 若仍有必需工作，界面应给出风险而非静默完成关联任务。
-3. 完成后的项目可生成开票工作项（v0.4 发票模块交付后）。
-4. 归档项目从默认活跃列表隐藏；恢复不丢任务、工时、产出和事件历史。
+1. 只有已归档项目才显示永久删除入口。
+2. UI 展示将被解除关联的任务和发票数量，并要求二次确认。
+3. Sidecar 再次校验 `If-Match`、`confirm=true` 和项目归档状态。
+4. 删除项目后，关联任务和发票保留，但其 `project_id` 被置空；永久删除本身不可恢复。
 
-## 数据/API/状态与事件
+## 数据、API 与状态机
 
 ### 当前数据
 
-- `projects(id, name, description, client_id, status, start_date, due_date, amount_minor, color, created_at, updated_at)` 已存在。
+- schema v5 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 通过 SQLite trigger 维护聚合版本，不另存可写进度。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
-- 当前只有表结构，没有 Project API 或前端数据访问层。
+- `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
+- 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
 
-### 规划 API
+### 当前 API
 
-- `GET/POST /api/v1/projects`：分页、搜索、筛选和创建。
-- `GET/PATCH/DELETE /api/v1/projects/:id`：详情、非生命周期编辑和受约束删除。
-- 规划显式状态操作：开始、暂停、完成、重新打开、归档、恢复；具体路径在实现前统一 ADR/API 规范。
-- 项目详情可通过独立聚合端点或组合 Query 获取任务、工时、产出与时间线，避免返回无限嵌套对象。
-- 写入使用 `Idempotency-Key` 与 `expected_version`/`If-Match`，并发旧写入返回 `409`。
+| 方法 | 路径 | 当前行为 |
+|------|------|----------|
+| GET | `/api/v1/projects` | `page` 默认 1，`page_size` 默认 50/最大 100；`q` 搜索名称/描述（最多 200 字符），`status/client_id` 筛选，`sort` 白名单排序；默认隐藏归档项目 |
+| POST | `/api/v1/projects` | 创建 `planning` 项目；可选 `Idempotency-Key` 保存规范化请求 SHA-256 与首次响应快照，同请求可稳定重放并拒绝不同请求复用 |
+| GET | `/api/v1/projects/:id` | 返回项目资料、派生任务汇总、发票数、允许操作和 `ETag` |
+| PATCH | `/api/v1/projects/:id` | 仅编辑非归档项目的资料字段；状态字段不能通过通用 PATCH 修改；缺少 `If-Match` 返回 428，旧版本或归档状态返回 409 |
+| POST | `/api/v1/projects/:id/transitions` | 执行 `start/pause/resume/complete/reopen/archive/restore`；缺少 `If-Match` 返回 428，旧版本返回 409 |
+| DELETE | `/api/v1/projects/:id?confirm=true` | 仅永久删除已归档项目；必须携带 `If-Match`，返回 `deleted_id/detached_tasks/detached_invoices` |
+| GET | `/api/v1/tasks?project_id=:id` | 读取项目任务；任务资源读取与编辑/状态响应包含可选 `project_name`；归档项目不接受新的任务关联 |
 
-### 规划事件
+项目创建和编辑会校验名称 2–100 字符、描述最多 10000 字符、日期格式与先后顺序、非负金额、`#RRGGBB` 颜色和已有客户外键。
 
-- `project_created / project_updated / project_status_changed` 写入 Workflow Event。
-- `task_output_submitted` 仅对项目交付类或显式 follow-up Artifact 生成收件箱项，去重键包含 Artifact ID。
-- `project_milestone_reached` 在里程碑模块交付后启用。
-- 项目完成后的开票提醒在 v0.4 发票业务交付后启用，不直接创建或发送发票。
+### 当前状态流转
+
+```text
+planning --start--> in_progress --pause--> paused --resume--> in_progress
+                          \                   /
+                           --complete--------> completed --reopen--> in_progress
+
+planning / in_progress / paused / completed --archive--> archived
+archived --restore--> archived_from_status（缺失时回到 planning）
+
+独立 DELETE：archived + If-Match + confirm=true --> permanently deleted
+```
+
+归档、恢复和完成均不改写关联任务状态。`available_actions` 只返回当前允许的生命周期转换；归档状态只返回 `restore`，永久删除是独立且额外确认的 `DELETE`，前端不把它混作状态命令。
+
+项目 `version` 是整个响应的并发令牌：直接项目写入会显式递增，任务插入/删除、项目关联/状态/`actual_minutes` 变化、发票关联/增删，以及客户名称/删除由 schema v5 trigger 原子递增。这样用户在看到旧任务数、工时、发票数或客户名时，完成、归档、编辑和硬删除都会因旧 `If-Match` 被拒绝并刷新。
+
+## 后续目标
+
+### 客户与项目资料
+
+- Client CRUD 交付后启用客户选择和客户筛选，同时保持客户删除/停用后的项目解释性。
+- 项目列表可继续补充风险信号和更完整排序交互，但不新增可写进度字段。
+
+### 任务、产出与后续工作
+
+- 补项目任务分页、筛选和任务树；完整任务生命周期、Assignment、Artifact 与验收由任务/Actor 纵切提供。
+- 项目交付类 Task 提交 Artifact，或 owner 显式标记 `requires_followup` 时，才可按稳定事件键幂等生成 Inbox Item。
+- owner 在收件箱把产出拆成修改、发布、客户确认等工单并分派给 owner/person；v0.2 才可选择健康且隔离已验证的本地 agent。
+- 项目达到交付、验收或开票节点的自动事件必须等 Workflow Event、Inbox 规则和对应业务模块交付后再启用。
+
+### 项目详情增强
+
+- 任务产出、项目附件、笔记和追加式活动时间线。
+- Focus Session 持久化后，从真实 Session 幂等累计任务工时，再由项目聚合。
+- 发票模块交付后显示关联发票；财务模块交付后显示真实收入/成本。
 
 ## 与其他模块协作
 
-| 模块 | 协作方式 |
-|------|----------|
-| 任务 | 项目组织 Task；进度、风险和工时均从任务及 Session 派生。 |
-| 客户 | `client_id` 可选关联客户；客户删除/停用不能破坏项目解释性。 |
-| 收件箱 | 承接项目产出、阻塞、交付和后续工单；状态彼此独立。 |
-| Actor | 项目本身不分派，项目内可执行工作必须落为 Task 后通过 Assignment 分派。 |
-| 专注 | 汇总项目任务的持久化 Focus Session。 |
-| 发票/财务 | 后续从已完成项目预填发票，项目详情只读取真实发票与账本聚合。 |
-| 今日 | 展示项目名、临近节点和项目任务，不维护项目状态。 |
+| 模块 | 当前与后续协作方式 |
+|------|--------------------|
+| 任务 | 当前已支持项目选择、项目名展示、项目任务列表和派生进度/工时；任务树、产出和验收待实现。 |
+| 客户 | 数据/API 已支持可选 `client_id` 和名称聚合；Client CRUD 与项目客户选择尚未实现。 |
+| 收件箱 | 项目产出、阻塞、交付和后续工单的目标承接者；当前没有事件或 Inbox 集成。 |
+| Actor | 项目本身不分派；项目内可执行工作必须落为 Task，再通过未来的 Assignment 分派。 |
+| 专注 | 当前只汇总 Task `actual_minutes`；持久化 Focus Session 与自动累计尚未实现。 |
+| 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。 |
+| 今日 | 可展示已有任务项目名；项目节点和风险聚合尚未接入。 |
 
 整体协作关系参见[整体功能架构](../functional-architecture.md)。
 
 ## 分阶段实施
 
-1. **v0.1 项目事实层**：Go model、迁移补充、CRUD、校验、分页/搜索/筛选、乐观锁和测试。
-2. **v0.1 前端纵切**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、归档恢复。
-3. **v0.1 任务协作**：项目选择器、项目任务列表/树、派生进度和工时汇总。
-4. **v0.1 收件箱协作**：在 Inbox 基础完成后接项目产出事件、拆分/分派/验收和事件去重。
-5. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理交付。
+1. **项目事实与 API（已实现）**：schema v5、Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除。
+2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
+3. **任务协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、派生进度和 `actual_minutes` 已接通；可见分页/筛选、任务树、专注持久化和大数据量性能验证仍待实现。
+4. **客户协作（待实现）**：Client CRUD、项目客户选择及客户筛选。
+5. **产出与 Inbox 协作（待实现）**：Artifact、附件、Workflow Event、拆分/分派/验收和事件去重。
+6. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
-## 验收标准
+## 验收口径
 
-- 创建、编辑、查询、筛选、状态流转、归档和恢复均持久化且可重试。
-- 名称、日期、金额、客户外键和状态转换均有服务端校验。
-- 项目进度与关联任务一致；删除、取消任务后口径明确且无第二份可写进度。
-- 归档/恢复不丢任务、工时、产出或历史；有关联时的删除行为可解释并有确认。
-- 项目完成不会隐式完成任务、解决收件箱或确认付款。
-- 同一产出跨扫描/重启最多生成一个 Inbox Item；失败不留下部分关联。
-- 列表和详情具备加载、空、错误、重试；真实浏览器验证卡片、键盘、窄屏和返回定位。
+### 当前基础纵切
 
-## 相关代码/PRD链接
+- 创建、编辑、查询、分页、搜索、状态筛选、状态流转、归档和恢复均持久化且可重试。
+- 名称、日期、金额、客户外键、版本和状态转换均由服务端校验。
+- 项目进度和工时汇总与关联任务一致，且没有第二份可写进度。
+- 完成项目不会隐式完成任务；归档/恢复保留关联；硬删除仅在归档和双重确认后解除关联。
+- 旧 `If-Match` 写入被拒绝；同幂等键不同创建请求被拒绝。
+- 任务/发票/客户聚合事实变化会使旧项目版本失效；归档项目不能接受新的任务关联，既有关联任务编辑不被误拒绝。
+- 列表和详情具备加载、空、错误和重试状态。
+
+### 完整模块仍待验收
+
+- Client CRUD 与项目客户选择。
+- 超过 100 条项目任务与项目选项已避免截断，但可见分页/筛选、任务树、大数据量性能和 Focus Session 自动工时累计仍待验收。
+- 产出、附件、时间线、Workflow Event 与 Inbox Item 的事务、去重和失败恢复。
+- 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
+
+## 相关代码/PRD 链接
 
 - [PRD：项目管理](../opc-workspace-PRD.md#53-项目管理)
 - [PRD：Project 数据表](../opc-workspace-PRD.md#主要数据表)
 - [整体功能架构](../functional-architecture.md)
 - [ProjectsPage.tsx](../../apps/web/src/pages/ProjectsPage.tsx)
-- [任务新建弹窗中的项目占位](../../apps/web/src/components/NewTaskModal.tsx)
-- [初始数据库迁移](../../services/sidecar/internal/database/migrations/001_initial_schema.sql)
-- [当前 API 路由](../../services/sidecar/internal/api/router.go)
+- [ProjectDetailPage.tsx](../../apps/web/src/pages/ProjectDetailPage.tsx)
+- [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
+- [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
+- [项目 API](../../services/sidecar/internal/api/projects.go)
+- [项目 API 测试](../../services/sidecar/internal/api/projects_test.go)
+- [Project model](../../services/sidecar/internal/models/project.go)
+- [schema v3 项目迁移](../../services/sidecar/internal/database/migrations/003_project_lifecycle.sql)
+- [schema v4 幂等快照迁移](../../services/sidecar/internal/database/migrations/004_idempotency_snapshots.sql)
+- [schema v5 聚合版本迁移](../../services/sidecar/internal/database/migrations/005_project_aggregate_versions.sql)

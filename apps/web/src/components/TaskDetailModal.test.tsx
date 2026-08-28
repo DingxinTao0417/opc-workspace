@@ -15,6 +15,7 @@ const apiMocks = vi.hoisted(() => ({
   getTask: vi.fn(),
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
+  getAllProjects: vi.fn(),
 }));
 
 vi.mock("../api/client", async () => {
@@ -59,6 +60,7 @@ describe("TaskDetailModal", () => {
       priority: "P1",
     });
     apiMocks.deleteTask.mockResolvedValue(undefined);
+    apiMocks.getAllProjects.mockResolvedValue([]);
     useUiStore.setState({ taskDetailId: task.id });
   });
 

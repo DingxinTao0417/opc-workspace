@@ -1,7 +1,12 @@
 import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
-import { useDeleteTask, useTaskQuery, useUpdateTask } from "../api/hooks";
+import {
+  useDeleteTask,
+  useProjectOptionsQuery,
+  useTaskQuery,
+  useUpdateTask,
+} from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type { TaskPriority, TaskStatus } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
@@ -66,9 +71,11 @@ export function TaskDetailModal() {
   const [plannedDate, setPlannedDate] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [estimatedMinutes, setEstimatedMinutes] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const task = query.data;
+  const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
   const busy = updateMutation.isPending || deleteMutation.isPending;
 
   useEffect(() => {
@@ -81,6 +88,7 @@ export function TaskDetailModal() {
     setEstimatedMinutes(
       task.estimatedMinutes === null ? "" : String(task.estimatedMinutes),
     );
+    setProjectId(task.projectId ?? "");
     setConfirmingDelete(false);
     setValidationError(null);
   }, [task]);
@@ -134,6 +142,7 @@ export function TaskDetailModal() {
           title: cleanTitle,
           description,
           priority,
+          projectId: projectId || null,
           plannedDate: plannedDate || null,
           dueDate: normalizedDueDate,
           estimatedMinutes: parsedMinutes,
@@ -285,14 +294,45 @@ export function TaskDetailModal() {
           <div className="form-grid">
             <label className="form-field">
               <span>项目</span>
-              <select disabled value="">
+              <select
+                disabled={projectsQuery.isPending || projectsQuery.isError}
+                onChange={(event) => setProjectId(event.target.value)}
+                value={projectId}
+              >
                 <option value="">
-                  {task.projectName ??
-                    (task.projectId
-                      ? `已关联项目 ${task.projectId.slice(0, 8)}… · 项目管理完成后可编辑`
-                      : "未归项目 · 项目管理完成后可编辑")}
+                  {projectsQuery.isPending
+                    ? "正在读取项目…"
+                    : projectsQuery.isError
+                      ? "项目暂不可用"
+                      : "未归项目"}
                 </option>
+                {task.projectId &&
+                !(projectsQuery.data ?? []).some(
+                  (project) => project.id === task.projectId,
+                ) ? (
+                  <option value={task.projectId}>
+                    {task.projectName ??
+                      `已归档项目 ${task.projectId.slice(0, 8)}…`}
+                  </option>
+                ) : null}
+                {(projectsQuery.data ?? []).map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
               </select>
+              {projectsQuery.isError ? (
+                <span className="form-field-error" role="alert">
+                  项目列表读取失败。
+                  <button
+                    className="form-inline-action"
+                    onClick={() => void projectsQuery.refetch()}
+                    type="button"
+                  >
+                    重新读取
+                  </button>
+                </span>
+              ) : null}
             </label>
             <label className="form-field">
               <span>预计时长</span>

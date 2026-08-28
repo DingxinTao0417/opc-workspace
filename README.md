@@ -9,13 +9,14 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单
-- SQLite WAL、外键、busy timeout 和嵌入式版本化迁移
-- 任务列表、新建、详情、非状态字段编辑、状态更新、删除及今日统计 API；任务页和今日页均可打开详情、编辑并经二次确认删除
-- React 三栏应用框架、今日/任务/专注基础页面；项目、客户、收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
+- SQLite schema v5、WAL、外键、busy timeout 和嵌入式版本化迁移；v3 增加项目生命周期字段，v4 增加幂等快照，v5 让项目聚合变化原子递增版本
+- 任务列表、快照式幂等新建、详情、非状态字段编辑、状态更新、删除及今日统计 API；任务可在新建/编辑时关联项目，列表与详情读取真实 `project_name`
+- 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
+- React 三栏应用框架、今日/任务/项目/专注基础页面；客户、收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口，以及加载、错误、重试和空状态
 - 全局专注/休息计时状态机，以及可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置
 
-项目和基础客户的完整 CRUD、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v1.6](docs/opc-workspace-PRD.md) 已规划本地 Actor、收件箱工作受理/拆分/分派/验收和本地 Agent 执行生命周期，但当前代码尚未实现这些对象或 API；第一阶段不引入多人登录、云同步、远程通知或线上 Agent。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页在 Sidecar 可用时优先读取真实 SQLite 数据。
+基础客户 CRUD、项目客户选择、项目产出/附件/事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v1.6](docs/opc-workspace-PRD.md) 已规划本地 Actor、收件箱工作受理/拆分/分派/验收和本地 Agent 执行生命周期，但当前代码尚未实现这些对象或 API；第一阶段不引入多人登录、云同步、远程通知或线上 Agent。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页和项目页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
 
 ## 目录结构
 
@@ -155,12 +156,20 @@ GET    /api/v1/tasks/:id
 PATCH  /api/v1/tasks/:id
 PATCH  /api/v1/tasks/:id/status
 DELETE /api/v1/tasks/:id
+GET    /api/v1/projects
+POST   /api/v1/projects
+GET    /api/v1/projects/:id
+PATCH  /api/v1/projects/:id
+POST   /api/v1/projects/:id/transitions
+DELETE /api/v1/projects/:id?confirm=true
 GET    /api/v1/stats/today?date=YYYY-MM-DD
 ```
 
+项目修改、状态流转和硬删除必须携带 `If-Match` 版本；任务/发票/客户聚合事实变化也会递增该版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。
+
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。启动时按文件版本顺序执行，并记录到 `schema_migrations`。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v5；启动时按文件版本顺序执行，并记录到 `schema_migrations`。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`

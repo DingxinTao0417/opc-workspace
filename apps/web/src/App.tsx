@@ -15,6 +15,7 @@ import { InvoicesPage } from "./pages/InvoicesPage";
 import { LaterPage } from "./pages/LaterPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TodayPage } from "./pages/TodayPage";
 import { useSettingsStore } from "./store/settings";
@@ -60,6 +61,7 @@ export default function App() {
           <Route element={<TodayPage />} path="today" />
           <Route element={<TasksPage />} path="tasks" />
           <Route element={<ProjectsPage />} path="projects" />
+          <Route element={<ProjectDetailPage />} path="projects/:projectId" />
           <Route element={<ClientsPage />} path="clients" />
           <Route element={<IncomePage />} path="income" />
           <Route element={<InvoicesPage />} path="invoices" />

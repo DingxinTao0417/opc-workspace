@@ -63,6 +63,12 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 		v1.PATCH("/tasks/:id", service.updateTask)
 		v1.PATCH("/tasks/:id/status", service.updateTaskStatus)
 		v1.DELETE("/tasks/:id", service.deleteTask)
+		v1.GET("/projects", service.listProjects)
+		v1.POST("/projects", service.createProject)
+		v1.GET("/projects/:id", service.getProject)
+		v1.PATCH("/projects/:id", service.updateProject)
+		v1.POST("/projects/:id/transitions", service.transitionProject)
+		v1.DELETE("/projects/:id", service.deleteProject)
 		v1.GET("/stats/today", service.todayStats)
 	}
 	return router, nil
