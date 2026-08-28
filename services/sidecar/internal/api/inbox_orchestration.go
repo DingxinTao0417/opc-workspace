@@ -630,9 +630,13 @@ func recordInboxWorkflowEventAs(
 	}
 	currentText := string(encoded)
 	sequence := 1
+	var requestIDValue *string
+	if requestID != "" {
+		requestIDValue = &requestID
+	}
 	event := models.WorkflowEvent{
 		ID: uuid.NewString(), AggregateType: "inbox_item", AggregateID: inboxID,
-		Action: action, ActorID: &actorID, RequestID: &requestID, CommandSeq: &sequence,
+		Action: action, ActorID: &actorID, RequestID: requestIDValue, CommandSeq: &sequence,
 		PreviousJSON: previousText, CurrentJSON: &currentText, CreatedAt: createdAt,
 	}
 	if err := tx.Create(&event).Error; err != nil {

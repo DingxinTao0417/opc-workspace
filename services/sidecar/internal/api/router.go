@@ -171,6 +171,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("project due Reminders: %w", err)
 	}
+	if err := service.projectDueTasks(context.Background()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("project due Tasks: %w", err)
+	}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
 	v1.Use(service.maintenanceReadMiddleware())
@@ -339,9 +345,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					}
 					service.maintenance.RLock()
 					err := service.projectDueReminders(ctx)
+					if err == nil {
+						err = service.projectDueTasks(ctx)
+					}
 					service.maintenance.RUnlock()
 					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
-						options.Logger.Printf("Reminder scan failed: %v", err)
+						options.Logger.Printf("due source scan failed: %v", err)
 					}
 				}
 			}

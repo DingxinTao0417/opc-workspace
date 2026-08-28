@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v24（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23 为显式 follow-up Artifact 增加 Inbox 来源保护，schema v24 为 Task 阻塞事件增加投影与删除协调 guards，不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v25（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder，以及显式 follow-up Artifact/Task 阻塞→Inbox 已交付。任务临期来源、自动建 Reminder、本地 Agent Run、Focus 高级分析和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder、本地 Agent Run、Focus 高级分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.3](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.4](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -19,7 +19,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - Submission 批次、四种 Artifact、受控文件下载、审计软删除及 Task 聚合硬删除；
 - 所有真实页面的加载、空数据、错误、重试、版本冲突和草稿保留。
 
-Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通知、自动生成产出、AI 分析或知识库。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令调用 Inbox reconciliation。schema v23 在产出提交事务内消费显式 follow-up 标记，schema v24 在 block 生命周期事务内消费本次阻塞事实；Inbox 仍拥有来源、关系和结清策略。
+Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通知、自动生成产出、AI 分析或知识库。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令调用 Inbox reconciliation。schema v23 在产出提交事务内消费显式 follow-up 标记，schema v24 在 block 生命周期事务内消费本次阻塞事实；schema v25 的本地扫描器消费当前 Task 截止时间事实。Inbox 仍拥有来源、关系和结清策略。
 
 ## 已实现状态
 
@@ -292,7 +292,9 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 
 schema v23 的 `023_task_artifact_inbox_projection.sql` 不重建 Task/Submission/Artifact/Inbox 表，也不回填历史 `requires_followup`。它增加 Artifact 来源索引和 insert/update/delete guards：只允许存在且未删的 follow-up Artifact 建立规范来源；来源身份/payload 不可变；Artifact 软删或聚合硬删前必须先完成 Inbox 来源协调。
 
-schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻塞 Task。它以阻塞后的 Task version 区分每次 block，约束 `source_entity_type=task` 的事件键和最小快照，冻结来源身份；活动来源阻止 Task 硬删除，来源项终态后删除事务先写 `source_deleted_at` 与 Inbox 审计，再删除 Task。下一迁移从 `025_*` 开始。
+schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻塞 Task。它以阻塞后的 Task version 区分每次 block，约束 `source_entity_type=task` 的事件键和最小快照，冻结来源身份；活动来源阻止 Task 硬删除，来源项终态后删除事务先写 `source_deleted_at` 与 Inbox 审计，再删除 Task。
+
+schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入临期窗口的 Task。Sidecar ready 前及运行中每 15 秒扫描状态非终态且截止时间不晚于未来 24 小时的 Task，以 `task:<task-id>:due:<due-at>` 为稳定键；每批最多 100 条且排除已投影截止事实，积压可持续推进。改期形成新截止事实，已生成事项不随完成/取消/改期自动归档。活动来源阻止 Task 删除，来源项终态后复用统一删除协调保留快照。下一迁移从 `026_*` 开始。
 
 ## 已验证与后续
 
@@ -309,8 +311,9 @@ schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻�
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
 - schema v22→v23 不发明 Inbox 数据；follow-up Artifact 提交/幂等重放/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调和来源快照保留。
 - schema v23→v24 不回填既有 blocked Task；每次 block 的稳定来源、幂等重放、重复阻塞、前端来源上下文、活动删除阻止及终态后 Task 删除协调和快照保留。
+- schema v24→v25 不回填既有 Task；提前 24 小时/启动补偿扫描、逾期分类、稳定 Task+截止时间来源键、100 条批次推进、改期独立来源、事务回滚、前端上下文和 Task 删除协调。
 
-仍属后续：任务临期和其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact 与 Task 阻塞来源已经交付。
+仍属后续：其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact、Task 阻塞与 Task 临期来源已经交付。
 
 ## 相关代码/PRD 链接
 
@@ -319,8 +322,10 @@ schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻�
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
 - [schema v23 Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)
 - [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
+- [schema v25 Task 临期来源迁移](../../services/sidecar/internal/database/migrations/025_task_due_inbox_projection.sql)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Inbox 来源投影服务](../../services/sidecar/internal/api/inbox_source_projections.go)
+- [Task 临期扫描服务](../../services/sidecar/internal/api/task_due_projections.go)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)

@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v24。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23 新增显式 follow-up Task Artifact→Inbox 来源投影与删除协调，schema v24 新增 Task 阻塞→Inbox 来源投影与 Task 删除协调。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v25。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、显式 follow-up 产出和 Task 阻塞→Inbox 已实现，模块仍为**部分完成**；任务临期、项目节点来源、任务树和高级分析尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、显式 follow-up、Task 阻塞和 Task 临期→Inbox 已实现，模块仍为**部分完成**；项目自身节点来源、任务树和高级分析尚未交付。
 
 ## 定位与边界
 
@@ -22,7 +22,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已实现
 
-- SQLite schema v24 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`、文件完整性事实、不可变删除墓碑、跨 Task/Client/Project object ID 唯一保护和 Project 聚合版本传播；v23–v24 新增显式 follow-up Artifact 与 Task 阻塞→Inbox 来源和删除协调，不改写既有项目事实或创建 demo 数据。
+- SQLite schema v25 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`、文件完整性事实、不可变删除墓碑、跨 Task/Client/Project object ID 唯一保护和 Project 聚合版本传播；v23–v25 新增显式 follow-up Artifact、Task 阻塞与 Task 临期→Inbox 来源和删除协调，不改写既有项目事实或创建 demo 数据。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -50,7 +50,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选、任务树或内嵌 Assignment/Submission 控件；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子、并发版本、Assignment 与 manual Submission/Artifact 验收已在共享任务详情交付。
 - 项目工时对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目级 Session 历史和高级分析仍未实现。
 - 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
-- schema v23–v24 已接显式 follow-up Task Artifact 与 Task 阻塞→Inbox；Task 临期、Project 交付/验收/开票节点仍没有来源投影。
+- schema v23–v25 已接显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox；Project 交付/验收/开票节点仍没有来源投影。
 - 没有项目里程碑、真实收入/成本聚合或开票操作。
 
 ## 当前用户流程
@@ -115,7 +115,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v24 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实；v23–v24 不改变这些 Project 表字段。
+- 当前 schema v25 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实；v23–v25 不改变这些 Project 表字段。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -201,14 +201,14 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v24 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact 与 Task 阻塞 Inbox 来源协调；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v25 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞与 Task 临期 Inbox 来源协调；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
-8. **产出与 Inbox 协作（部分实现）**：Task Artifact、Workflow Event、分派/验收、项目级产出聚合、Inbox 任务编排，以及显式 follow-up Artifact/Task 阻塞稳定投影与来源删除协调已交付；任务临期和项目节点来源仍待实现。
+8. **产出与 Inbox 协作（部分实现）**：Task Artifact、Workflow Event、分派/验收、项目级产出聚合、Inbox 任务编排，以及显式 follow-up Artifact/Task 阻塞/Task 临期稳定投影与来源删除协调已交付；项目自身节点来源仍待实现。
 9. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径
@@ -235,7 +235,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 - Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；外部活动来源、回访与财务不属于已交付客户纵切。
 - 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和项目级 Focus 历史/分析仍待验收。Focus → Task → Project 的整数分钟传播已有自动化覆盖。
-- 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出与 Task 阻塞投影另覆盖稳定事件键、事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调与快照保留。任务临期和项目节点来源仍待验收。
+- 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出、Task 阻塞与 Task 临期投影另覆盖稳定事件键、扫描/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调与快照保留。项目自身节点来源仍待验收。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
 ## 相关代码/PRD 链接
@@ -266,3 +266,4 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [schema v22 项目附件迁移](../../services/sidecar/internal/database/migrations/022_project_attachments.sql)
 - [schema v23 Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)
 - [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
+- [schema v25 Task 临期来源迁移](../../services/sidecar/internal/database/migrations/025_task_due_inbox_projection.sql)

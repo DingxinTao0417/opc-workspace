@@ -188,6 +188,23 @@ func coordinateTaskBlockedInboxSourceDeletion(
 	)
 }
 
+func coordinateTaskDueInboxSourceDeletion(
+	tx *gorm.DB,
+	taskID string,
+	requestID string,
+	now string,
+) error {
+	return coordinateInboxSourceDeletion(
+		tx,
+		taskDueInboxSourceType,
+		[]string{taskID},
+		"TASK_HAS_ACTIVE_INBOX_SOURCES",
+		"Resolve or dismiss all Task source Inbox Items before deleting this Task",
+		requestID,
+		now,
+	)
+}
+
 func coordinateInboxSourceDeletion(
 	tx *gorm.DB,
 	sourceType string,

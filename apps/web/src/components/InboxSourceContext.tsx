@@ -1,4 +1,9 @@
-import { ExternalLink, FileCheck2, TriangleAlert } from "lucide-react";
+import {
+  CalendarClock,
+  ExternalLink,
+  FileCheck2,
+  TriangleAlert,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import type { InboxItem } from "../types/models";
 
@@ -21,6 +26,16 @@ interface TaskBlockedSourceSnapshot {
   blockedAt: string;
   blockedFromStatus: "todo" | "in_progress" | "waiting_review";
   blockVersion: number;
+  projectId: string | null;
+  projectName: string | null;
+}
+
+interface TaskDueSourceSnapshot {
+  taskId: string;
+  taskTitle: string;
+  dueAt: string;
+  projectedAt: string;
+  dueState: "due_soon" | "overdue";
   projectId: string | null;
   projectName: string | null;
 }
@@ -106,6 +121,42 @@ function taskBlockedSnapshot(
   };
 }
 
+function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
+  if (item.sourceEntityType !== "task_due") return null;
+  const payload = item.payloadJson;
+  const taskId = stringValue(payload, "task_id");
+  const taskTitle = stringValue(payload, "task_title");
+  const dueAt = stringValue(payload, "due_at");
+  const projectedAt = stringValue(payload, "projected_at");
+  const dueState = payload.due_state;
+  if (
+    !taskId ||
+    !taskTitle ||
+    !dueAt ||
+    !projectedAt ||
+    (dueState !== "due_soon" && dueState !== "overdue") ||
+    payload.lead_minutes !== 1440
+  ) {
+    return null;
+  }
+  return {
+    taskId,
+    taskTitle,
+    dueAt,
+    projectedAt,
+    dueState,
+    projectId: stringValue(payload, "project_id"),
+    projectName: stringValue(payload, "project_name"),
+  };
+}
+
+function localTimestamp(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString("zh-CN", { hour12: false });
+}
+
 const storageKindLabels: Record<string, string> = {
   text: "文本",
   link: "链接",
@@ -114,6 +165,60 @@ const storageKindLabels: Record<string, string> = {
 };
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
+  const dueSource = taskDueSnapshot(item);
+  if (dueSource) {
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <CalendarClock size={15} />
+          </span>
+          <div>
+            <strong>
+              {dueSource.dueState === "overdue" ? "任务逾期" : "任务临期"}
+            </strong>
+            <small>提前 24 小时进入收件箱</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源任务已删除；以下截止时间快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>来源任务</dt>
+            <dd>{dueSource.taskTitle}</dd>
+          </div>
+          <div>
+            <dt>截止时间</dt>
+            <dd>{localTimestamp(dueSource.dueAt)}</dd>
+          </div>
+          <div>
+            <dt>进入收件箱</dt>
+            <dd>{localTimestamp(dueSource.projectedAt)}</dd>
+          </div>
+          {dueSource.projectName ? (
+            <div>
+              <dt>所属项目</dt>
+              <dd>{dueSource.projectName}</dd>
+            </div>
+          ) : null}
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link
+            className="button button-secondary"
+            to={`/tasks/${dueSource.taskId}`}
+          >
+            查看来源任务
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
+      </section>
+    );
+  }
+
   const blockedSource = taskBlockedSnapshot(item);
   if (blockedSource) {
     const statusLabels = {
@@ -121,10 +226,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
       in_progress: "进行中",
       waiting_review: "待验收",
     } as const;
-    const blockedDate = new Date(blockedSource.blockedAt);
-    const blockedTime = Number.isNaN(blockedDate.getTime())
-      ? blockedSource.blockedAt
-      : blockedDate.toLocaleString("zh-CN", { hour12: false });
+    const blockedTime = localTimestamp(blockedSource.blockedAt);
     return (
       <section aria-label="来源上下文" className="inbox-source-context">
         <div className="inbox-source-context-heading">

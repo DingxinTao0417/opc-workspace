@@ -120,4 +120,50 @@ describe("InboxSourceContext", () => {
     expect(screen.getByRole("status")).toHaveTextContent("来源任务已删除");
     expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
   });
+
+  it("shows a Task due snapshot and keeps it after source deletion", () => {
+    const dueItem: InboxItem = {
+      ...sourceItem,
+      title: "任务临期：准备项目交付",
+      sourceEntityType: "task_due",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000807",
+      sourceEventKey:
+        "task:018f0000-0000-7000-8000-000000000807:due:2026-08-29T10:00:00Z",
+      dueAt: "2026-08-29T10:00:00Z",
+      payloadJson: {
+        task_id: "018f0000-0000-7000-8000-000000000807",
+        task_title: "准备项目交付",
+        due_at: "2026-08-29T10:00:00Z",
+        projected_at: "2026-08-28T10:00:00Z",
+        due_state: "due_soon",
+        lead_minutes: 1440,
+        project_name: "官网升级",
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={dueItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("任务临期")).toBeTruthy();
+    expect(screen.getByText("提前 24 小时进入收件箱")).toBeTruthy();
+    expect(screen.getByText("准备项目交付")).toBeTruthy();
+    expect(screen.getByText("官网升级")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源任务/ })).toHaveAttribute(
+      "href",
+      "/tasks/018f0000-0000-7000-8000-000000000807",
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{ ...dueItem, sourceDeletedAt: "2026-08-30T10:00:00Z" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源任务已删除");
+    expect(screen.getByText("准备项目交付")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
+  });
 });

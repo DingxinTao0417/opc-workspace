@@ -2312,6 +2312,18 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     (rawPayload.block_version as number) >= 2 &&
     sourceEventKey ===
       `task:${sourceEntityId}:blocked:${String(rawPayload.block_version)}`;
+  const validTaskDueEvent =
+    sourceEntityType === "task_due" &&
+    !!sourceEntityId &&
+    isRecord(rawPayload) &&
+    rawPayload.task_id === sourceEntityId &&
+    typeof rawPayload.task_title === "string" &&
+    typeof rawPayload.due_at === "string" &&
+    typeof rawPayload.projected_at === "string" &&
+    (rawPayload.due_state === "due_soon" ||
+      rawPayload.due_state === "overdue") &&
+    rawPayload.lead_minutes === 1440 &&
+    sourceEventKey === `task:${sourceEntityId}:due:${rawPayload.due_at}`;
   if (
     !id ||
     !title ||
@@ -2321,7 +2333,8 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     (sourceEntityType !== "manual" &&
       sourceEntityType !== "reminder" &&
       sourceEntityType !== "task_artifact" &&
-      sourceEntityType !== "task") ||
+      sourceEntityType !== "task" &&
+      sourceEntityType !== "task_due") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
         sourceEntityId !== null ||
@@ -2330,7 +2343,10 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       (sourceEntityType !== "reminder" ||
         !sourceEntityId ||
         !sourceEventKey)) ||
-    (kind === "event" && !validTaskArtifactEvent && !validTaskBlockedEvent) ||
+    (kind === "event" &&
+      !validTaskArtifactEvent &&
+      !validTaskBlockedEvent &&
+      !validTaskDueEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==
         "all_required_tasks_done") ||

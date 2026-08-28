@@ -1200,7 +1200,8 @@ export interface InboxItem {
   kind: InboxItemKind;
   title: string;
   summary: string;
-  sourceEntityType: "manual" | "reminder" | "task_artifact" | "task";
+  sourceEntityType:
+    "manual" | "reminder" | "task_artifact" | "task" | "task_due";
   sourceEntityId: string | null;
   sourceEventKey: string | null;
   sourceDeletedAt: string | null;

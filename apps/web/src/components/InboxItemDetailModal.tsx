@@ -346,6 +346,8 @@ export function InboxItemDetailModal({
             <span aria-hidden="true" className="inbox-detail-icon">
               {item.kind === "reminder" ? (
                 <BellRing size={17} />
+              ) : item.sourceEntityType === "task_due" ? (
+                <CalendarClock size={17} />
               ) : item.sourceEntityType === "task" ? (
                 <TriangleAlert size={17} />
               ) : item.kind === "event" ? (
@@ -364,9 +366,13 @@ export function InboxItemDetailModal({
               <p>
                 {item.kind === "reminder"
                   ? "本地提醒"
-                  : item.kind === "event"
-                    ? "任务产出跟进"
-                    : "手工录入"}{" "}
+                  : item.sourceEntityType === "task_due"
+                    ? "任务临期"
+                    : item.sourceEntityType === "task"
+                      ? "任务阻塞"
+                      : item.kind === "event"
+                        ? "任务产出跟进"
+                        : "手工录入"}{" "}
                 · 仅保存在本机
               </p>
             </div>

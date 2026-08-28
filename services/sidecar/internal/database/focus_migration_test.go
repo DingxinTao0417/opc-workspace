@@ -47,8 +47,8 @@ func TestFocusSessionMigrationUpgradesV10WithoutChangingTaskActualMinutes(t *tes
 		t.Fatalf("upgrade v10 Focus database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 24 {
-		t.Fatalf("SchemaVersion = %d, want 24", store.SchemaVersion)
+	if store.SchemaVersion != 25 {
+		t.Fatalf("SchemaVersion = %d, want 25", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT actual_minutes FROM tasks WHERE id = ?", focusMigrationTaskID); got != 77 {
 		t.Fatalf("historical task actual_minutes = %d, want unchanged 77", got)

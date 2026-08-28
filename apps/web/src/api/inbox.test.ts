@@ -257,6 +257,49 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Task due source snapshots and event keys", () => {
+    const taskId = "018f0000-0000-7000-8000-000000000816";
+    const dueAt = "2026-08-29T10:00:00Z";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "task_due",
+      source_entity_id: taskId,
+      source_event_key: `task:${taskId}:due:${dueAt}`,
+      due_at: dueAt,
+      payload_json: {
+        task_id: taskId,
+        task_title: "准备项目交付",
+        due_at: dueAt,
+        projected_at: "2026-08-28T10:00:00Z",
+        due_state: "due_soon",
+        lead_minutes: 1440,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "task_due",
+      sourceEntityId: taskId,
+      dueAt,
+      payloadJson: {
+        task_title: "准备项目交付",
+        due_state: "due_soon",
+        lead_minutes: 1440,
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `task:${taskId}:due:2026-08-30T10:00:00Z`,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, lead_minutes: 60 },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

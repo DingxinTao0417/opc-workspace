@@ -1,6 +1,7 @@
 import {
   Archive,
   BellRing,
+  CalendarClock,
   CheckCheck,
   ChevronRight,
   Inbox,
@@ -32,7 +33,7 @@ const viewLabels: Record<InboxItemView, string> = {
 };
 
 const viewDescriptions: Record<InboxItemView, string> = {
-  inbox: "手工记录和已到期的本地提醒会显示在这里。",
+  inbox: "手工记录、本地提醒和需要处理的业务来源会显示在这里。",
   snoozed: "设置恢复时间后，条目会暂存在这里。",
   archive: "已解决和已忽略的条目会保留在这里。",
 };
@@ -129,6 +130,8 @@ function InboxRow({
           <Archive size={15} />
         ) : item.kind === "reminder" ? (
           <BellRing size={15} />
+        ) : item.sourceEntityType === "task_due" ? (
+          <CalendarClock size={15} />
         ) : item.sourceEntityType === "task" ? (
           <TriangleAlert size={15} />
         ) : item.kind === "event" ? (
