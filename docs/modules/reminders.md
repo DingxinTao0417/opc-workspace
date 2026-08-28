@@ -4,7 +4,7 @@
 >
 > 版本边界：T-11A3 一次性本地 Reminder 已交付。重复提醒、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.7](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.8](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 
@@ -112,6 +112,6 @@ Inbox Item 继承 Reminder 的标题、摘要、优先级和触发时间，`sour
 - 原生系统通知、托盘/角标、声音及 DND 引导；
 - 重复提醒、日历/时区规则和批量改期；
 - Task、Project、Client 回访、发票等业务来源自动创建 Reminder；
-- Today/Sidebar 的 Reminder 或 Inbox 派生计数；
+- Reminder 到期后已自然进入 Today/Sidebar 的 Inbox 派生计数；独立“待提醒/即将提醒”计数仍未实现；
 - 用户可配置扫描频率、产品化历史清理或导出；
 - 任何远程推送、邮件、短信、第三方日历或云同步。

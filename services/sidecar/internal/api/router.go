@@ -230,6 +230,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.PATCH("/reminders/:id", service.updateReminder)
 		v1.DELETE("/reminders/:id", service.cancelReminder)
 		v1.GET("/stats/today", service.todayStats)
+		v1.GET("/stats/inbox", service.inboxStats)
 	}
 	result := &Router{Engine: router, artifactStore: artifacts}
 	if options.FocusHeartbeatInterval > 0 {

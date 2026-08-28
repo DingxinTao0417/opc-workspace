@@ -26,6 +26,53 @@ type focusStats struct {
 	Minutes  int   `json:"minutes" gorm:"column:minutes"`
 }
 
+type inboxStats struct {
+	Pending       int `json:"pending" gorm:"column:pending"`
+	Unread        int `json:"unread" gorm:"column:unread"`
+	Tracking      int `json:"tracking" gorm:"column:tracking"`
+	Blocked       int `json:"blocked" gorm:"column:blocked"`
+	WaitingReview int `json:"waiting_review" gorm:"column:waiting_review"`
+}
+
+func (a *API) inboxStats(c *gin.Context) {
+	now := a.inboxNow()
+	nowText := formatInboxTimestamp(now)
+	var stats inboxStats
+	err := a.db.WithContext(c.Request.Context()).Raw(`
+		WITH actionable AS (
+			SELECT id, status, read_at
+			FROM inbox_items
+			WHERE status IN ('open', 'tracking')
+			  AND (snoozed_until IS NULL OR julianday(snoozed_until) <= julianday(?))
+		)
+		SELECT
+			COUNT(DISTINCT actionable.id) AS pending,
+			COUNT(DISTINCT CASE WHEN actionable.read_at IS NULL THEN actionable.id END) AS unread,
+			COUNT(DISTINCT CASE WHEN actionable.status = 'tracking' THEN actionable.id END) AS tracking,
+			COUNT(DISTINCT CASE WHEN relation.is_required = 1 AND task.status = 'blocked' THEN actionable.id END) AS blocked,
+			COUNT(DISTINCT CASE WHEN relation.is_required = 1 AND task.status = 'waiting_review' THEN actionable.id END) AS waiting_review
+		FROM actionable
+		LEFT JOIN inbox_item_tasks relation
+		  ON relation.inbox_item_id = actionable.id
+		 AND relation.unlinked_at IS NULL
+		LEFT JOIN tasks task ON task.id = relation.task_id
+	`, nowText).Scan(&stats).Error
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"server_now":     nowText,
+			"pending":        stats.Pending,
+			"unread":         stats.Unread,
+			"tracking":       stats.Tracking,
+			"blocked":        stats.Blocked,
+			"waiting_review": stats.WaitingReview,
+		},
+	})
+}
+
 func (a *API) todayStats(c *gin.Context) {
 	location, ok := statsLocation(c)
 	if !ok {

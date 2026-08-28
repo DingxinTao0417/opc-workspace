@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import type { InboxItem } from "../types/models";
 import { InboxPage } from "./InboxPage";
 
@@ -163,6 +164,13 @@ vi.mock("../api/hooks", () => ({
 }));
 
 describe("InboxPage", () => {
+  const renderInbox = (initialEntry = "/inbox") =>
+    render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <InboxPage />
+      </MemoryRouter>,
+    );
+
   beforeEach(() => {
     hooks.items.mockReturnValue({
       data: {
@@ -196,7 +204,7 @@ describe("InboxPage", () => {
   });
 
   it("renders the prototype hierarchy with real unread facts and opens details", () => {
-    render(<InboxPage />);
+    renderInbox();
 
     expect(screen.getByText("1 条未读")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "今天" })).toBeTruthy();
@@ -211,7 +219,7 @@ describe("InboxPage", () => {
   });
 
   it("passes view, search, priority, and paging facts to the server query", () => {
-    render(<InboxPage />);
+    renderInbox();
 
     fireEvent.click(screen.getByRole("tab", { name: "稍后" }));
     fireEvent.change(screen.getByLabelText("搜索收件箱"), {
@@ -233,7 +241,7 @@ describe("InboxPage", () => {
   });
 
   it("uses the exact server snapshot when marking visible items read", () => {
-    render(<InboxPage />);
+    renderInbox();
 
     fireEvent.click(screen.getByRole("button", { name: "全部标为已读" }));
     expect(hooks.markAll.mutate).toHaveBeenCalledWith({
@@ -263,7 +271,7 @@ describe("InboxPage", () => {
         refetch: vi.fn(),
       }),
     );
-    const view = render(<InboxPage />);
+    const view = renderInbox();
 
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(hooks.items).toHaveBeenLastCalledWith(
@@ -271,12 +279,27 @@ describe("InboxPage", () => {
     );
 
     total = 30;
-    view.rerender(<InboxPage />);
+    view.rerender(
+      <MemoryRouter>
+        <InboxPage />
+      </MemoryRouter>,
+    );
 
     await waitFor(() =>
       expect(hooks.items).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1 }),
       ),
     );
+  });
+
+  it("applies a risk deep link and exposes the matching filter", async () => {
+    renderInbox("/inbox?risk=blocked");
+
+    await waitFor(() =>
+      expect(hooks.items).toHaveBeenLastCalledWith(
+        expect.objectContaining({ view: "inbox", risk: "blocked" }),
+      ),
+    );
+    expect(screen.getByLabelText("跟进状态")).toHaveValue("blocked");
   });
 });

@@ -39,6 +39,7 @@ import type {
   InboxTaskProgress,
   InboxTaskSummary,
   InboxSplitTaskResult,
+  InboxStats,
   InboxResolutionMode,
   InboxWorkflowEvent,
   CreateInboxItemInput,
@@ -3501,6 +3502,7 @@ export async function getInboxItems(
   });
   if (input.q?.trim()) params.set("q", input.q.trim());
   if (input.priority) params.set("priority", input.priority);
+  if (input.risk) params.set("risk", input.risk);
   const payload = await apiRequest<unknown>(`/api/v1/inbox-items?${params}`);
   return normalizeInboxItemListResult(payload);
 }
@@ -4009,4 +4011,29 @@ export async function getTodayStats(
       minutes: numeric(data.focus.minutes),
     },
   };
+}
+
+export async function getInboxStats(): Promise<InboxStats> {
+  const payload = await apiRequest<unknown>("/api/v1/stats/inbox");
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("收件箱统计响应格式无效");
+  const serverNow = fieldValue(body, "server_now", "serverNow");
+  if (typeof serverNow !== "string" || !serverNow) {
+    return invalidResponse("收件箱统计响应格式无效");
+  }
+  const counts = {
+    pending: numeric(body.pending, -1),
+    unread: numeric(body.unread, -1),
+    tracking: numeric(body.tracking, -1),
+    blocked: numeric(body.blocked, -1),
+    waitingReview: numeric(
+      fieldValue(body, "waiting_review", "waitingReview"),
+      -1,
+    ),
+  };
+  if (Object.values(counts).some((count) => count < 0)) {
+    return invalidResponse("收件箱统计响应格式无效");
+  }
+  return { serverNow, ...counts };
 }

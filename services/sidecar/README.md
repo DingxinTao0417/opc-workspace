@@ -77,6 +77,7 @@ GET    /api/v1/clients/:id
 PATCH  /api/v1/clients/:id
 DELETE /api/v1/clients/:id?confirm=true
 GET    /api/v1/inbox-items/:id/tasks?page=1&page_size=50
+GET    /api/v1/stats/inbox
 POST   /api/v1/inbox-items/:id/tasks/:task_id
 PATCH  /api/v1/inbox-items/:id/tasks/:task_id
 DELETE /api/v1/inbox-items/:id/tasks/:task_id
@@ -94,6 +95,8 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 ### Inbox Item–Task relationship contract
 
 `GET /api/v1/inbox-items/:id/tasks` returns `{ "data": { "active", "history" }, "meta": { "page", "page_size", "total", "inbox_item_version", "progress" } }` and the current Inbox Item `ETag`. `active` is the complete position-ordered active set and is capped at 100; `history` alone is paginated newest-unlinked-first, so `meta.total` is the history total. Every active relation joins the current Task summary at read time. Progress is therefore derived from current Task status without copying Task state or propagating Task version changes into the Inbox Item version.
+
+`GET /api/v1/stats/inbox` derives `pending`, `unread`, `tracking`, `blocked`, and `waiting_review` from currently visible active Inbox Items and active required Task relationships. `GET /api/v1/inbox-items` accepts `risk=tracking|blocked|waiting_review` for the matching deep links; the global unread total remains independent of list filters.
 
 `POST /api/v1/inbox-items/:id/split` requires Inbox `If-Match` and optionally accepts `Idempotency-Key`. It atomically creates 1–20 ordered Tasks, batch-local parent links, tags, owner/person assignments, owner reviewers for manual-review Tasks, `created` Inbox relationships, and audit events. `POST /api/v1/inbox-items/:id/force-resolve` is restricted to `all_required_tasks_done` items and requires `{ "confirm": true, "reason": "..." }`; it records a forced terminal fact instead of pretending incomplete required Tasks are done.
 
@@ -199,4 +202,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v2.7 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v2.8 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

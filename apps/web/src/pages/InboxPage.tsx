@@ -8,6 +8,7 @@ import {
   Search,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useInboxItemsQuery, useMarkAllInboxItemsRead } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -18,6 +19,7 @@ import { ReminderManagerModal } from "../components/ReminderManagerModal";
 import type {
   InboxItem,
   InboxItemPriority,
+  InboxItemRisk,
   InboxItemView,
 } from "../types/models";
 
@@ -152,9 +154,11 @@ function mutationErrorMessage(error: unknown): string | null {
 }
 
 export function InboxPage() {
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState<InboxItemView>("inbox");
   const [search, setSearch] = useState("");
   const [priority, setPriority] = useState<InboxItemPriority | "">("");
+  const [risk, setRisk] = useState<InboxItemRisk | "">("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [managingReminders, setManagingReminders] = useState(false);
@@ -163,6 +167,7 @@ export function InboxPage() {
     view,
     q: search,
     priority: priority || undefined,
+    risk: view === "inbox" ? risk || undefined : undefined,
     page,
     pageSize: 30,
   });
@@ -175,7 +180,22 @@ export function InboxPage() {
       (query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 30),
     ),
   );
-  const hasFilters = Boolean(search.trim() || priority);
+  const hasFilters = Boolean(search.trim() || priority || risk);
+
+  useEffect(() => {
+    const nextRisk = searchParams.get("risk");
+    if (
+      nextRisk === "tracking" ||
+      nextRisk === "blocked" ||
+      nextRisk === "waiting_review"
+    ) {
+      setView("inbox");
+      setRisk(nextRisk);
+      setPage(1);
+    } else {
+      setRisk("");
+    }
+  }, [searchParams]);
   const groupedItems = useMemo(() => {
     const serverNow = query.data?.meta.serverNow ?? new Date().toISOString();
     return {
@@ -296,6 +316,24 @@ export function InboxPage() {
             <option value="P3">P3 · 低</option>
           </select>
         </label>
+        {view === "inbox" ? (
+          <label className="toolbar-select">
+            <span className="sr-only">跟进状态</span>
+            <select
+              aria-label="跟进状态"
+              onChange={(event) => {
+                setRisk(event.target.value as InboxItemRisk | "");
+                setPage(1);
+              }}
+              value={risk}
+            >
+              <option value="">全部跟进状态</option>
+              <option value="tracking">跟进中</option>
+              <option value="waiting_review">待验收</option>
+              <option value="blocked">有阻塞</option>
+            </select>
+          </label>
+        ) : null}
       </div>
 
       {markAllError ? (

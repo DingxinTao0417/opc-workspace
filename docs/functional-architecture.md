@@ -2,7 +2,7 @@
 
 > 文档版本：1.8
 > 日期：2026-08-28
-> 依据：[PRD v2.7](opc-workspace-PRD.md)
+> 依据：[PRD v2.8](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v15
 
 ## 1. 目的
@@ -68,7 +68,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<artifact-id>`，下载前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Sidebar/Today Inbox 计数、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
+- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
@@ -104,7 +104,7 @@
 | [任务](modules/tasks.md)                   | Project、Actor、未来 Inbox 来源                                         | 唯一工单、六态生命周期、完成条件、Submission/Artifact 与 manual 验收                                                                        | Project 进度、Task 事件、后续 Inbox 进度与 Focus 工时                                   |
 | [项目](modules/projects.md)                | Client、Task                                                            | 当前已实现资料、受控生命周期、归档恢复和任务聚合                                                                                            | 项目级产出聚合、附件、时间线和 Inbox 事件仍待实现；Task Artifact 已可从共享任务详情使用 |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity                                              | 当前已实现基础资料、状态、项目数聚合和 Project 关联；活动/附件/Actor 关联仍待实现                                                           | 回访、发票和 Inbox 来源仍属后续纵切                                                     |
-| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有/新建 Task；项目/Agent/其他系统投影待开发 | 已交付手工受理分诊、Reminder、Task 关系、原子拆分/分派、实时进度、自动结清/重开和强制例外 | 输出 Inbox/Task/Assignment Event 与实时派生进度；今日待处理统计待后续接通             |
+| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有/新建 Task；项目/Agent/其他系统投影待开发 | 已交付受理分诊、Reminder、Task 编排、自动结清/重开、强制例外和运营计数/风险深链       | 输出 Event、实时进度及 Today/Sidebar 计数；更多来源待 T-11E                        |
 | [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                              | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                                                      | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                |
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                           | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                                 | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                   |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                 | 单次受控执行                                                                                                                                | Agent Run、Task Artifact、待验收或失败事件                                              |

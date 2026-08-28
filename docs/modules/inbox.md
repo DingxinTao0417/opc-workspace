@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v15。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder，以及 T-11C 批量拆分/分派/自动结清已交付；非 Reminder 来源投影和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.7](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工条目的本地受理、查看、编辑、分诊和归档闭环，已有 Task 的活动/历史关系，一次性 Reminder 到期投影，以及批量 Task 拆分、父子层级、初始 Assignment、自动结清/重开和例外强制解决均已接真实 SQLite/API/UI。非 Reminder 自动事件来源、Sidebar/Today Inbox 计数和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决，以及 T-11F Sidebar/Today 运营计数与风险深链筛选均已接真实 SQLite/API/UI。非 Reminder 自动事件来源和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -78,12 +78,18 @@
 - 普通 `resolve` 不能绕过自动策略的未完成必需任务。危险操作 `force-resolve` 只用于自动策略，要求显式 `confirm=true` 和原因，并以 owner Actor、`forced` mode 与 `force_resolved` 事件留下不可变审计；手工/强制解决不会因后续 Task 变化自动重开。
 - 前端失败时保留拆分草稿；写命令使用 Inbox `If-Match` 与稳定幂等键，成功后统一失效 Inbox、关系、Task、Today 和 Project 查询。
 
+### 已交付：T-11F 运营计数与风险深链
+
+- `GET /api/v1/stats/inbox` 在查询时从当前可见的 `open / tracking` 条目与活动必需 Task 实时派生 `pending / unread / tracking / blocked / waiting_review`；返回同一服务端 `server_now`。
+- `snoozed_until > server_now` 的未来稍后项、resolved/dismissed 归档项、已解除关系、可选 Task 和已删除 Task 不进入相应当前风险计数；同一 Inbox 有多个同状态 Task 只计一次。
+- 列表新增 `risk=tracking|blocked|waiting_review` 服务端筛选，blocked/waiting_review 使用活动必需关系和实时 Task 状态；全局 `unread_total` 继续不受 risk/search/priority 缩小。
+- Sidebar 显示待处理徽标，Today 显示待处理/跟进中/待验收/有阻塞并跳转风险深链；统计 Query 位于 Inbox Query 前缀下，写入后统一失效并每 15 秒刷新。
+
 ### 明确未交付
 
 - 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
 - Task/Project/Client/Invoice/系统故障等来源投影、Artifact `requires_followup` 消费和稳定事件扫描；
 - `source_entity_type=task` 等多态来源删除协调、Inbox Item 硬删除；
-- Sidebar 与 Today 的 Inbox 计数和带筛选跳转；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
 
@@ -209,7 +215,8 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 
 | 方法   | 路径                                     | 契约摘要                                                                                               |
 | ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| GET    | `/api/v1/inbox-items`                    | 三视图、搜索、优先级、分页、稳定排序；返回全局待处理未读数与快照时间                                   |
+| GET    | `/api/v1/inbox-items`                    | 三视图、搜索、优先级、risk、分页、稳定排序；返回全局待处理未读数与快照时间                              |
+| GET    | `/api/v1/stats/inbox`                    | 实时派生 pending/unread/tracking/blocked/waiting_review 与 server_now                                  |
 | POST   | `/api/v1/inbox-items`                    | 新建 manual 条目；可选 `Idempotency-Key`；返回 `201`、数据和 `ETag`                                    |
 | POST   | `/api/v1/inbox-items/read-all`           | 以 `through_created_at` 批量已读；可选幂等键；不受当前筛选缩小                                         |
 | GET    | `/api/v1/inbox-items/:id`                | 详情、可用动作和 `ETag`                                                                                |
@@ -256,7 +263,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | 客户     | 当前没有客户活动或回访来源                                                          | v0.4 回访到期生成去重 Inbox Item                               |
 | 发票     | 当前没有财务来源                                                                    | v0.4 临期/逾期及开票节点生成本地待办                           |
 | Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开       | Agent Actor 仍延后                                             |
-| 今日     | 当前没有 Inbox 派生计数                                                             | 后续展示待处理/跟进/阻塞/待验收计数与筛选跳转                  |
+| 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                              | 随 T-11E 来源投影自然纳入更多业务事件                           |
 | 系统维护 | 当前不投影备份、迁移或 Sidecar 故障                                                 | 对应故障链路完成后生成可追踪维护项                             |
 | Agent    | 未实现                                                                              | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件               |
 
@@ -270,9 +277,10 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 4. **T-11A2 Task 关系事实（已完成）**：schema v13、活动/历史关系、实时进度、已有 Task 关联、required 修改、带原因软解除、状态联动、事件，以及关联 Task 硬删除互锁和历史快照。多态来源删除协调不属于 A2。
 5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派（已完成）**：原子多任务/父子拆分、owner/person Assignment、统一 reconciliation、自动解决/重开和 force-resolve。
-7. **T-11E v0.1 来源投影**：显式 follow-up 产出、任务临期/阻塞和系统故障；逐项验证稳定事件键。
-8. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
-9. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
+7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
+8. **T-11E v0.1 来源投影**：显式 follow-up 产出、任务临期/阻塞和系统故障；逐项验证稳定事件键。
+9. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
+10. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
 
 ## 验收状态
 
@@ -298,7 +306,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [x] Reminder 跨扫描、跨重启只生成一条 Inbox Item；其他来源事件仍待 T-11E 逐项验收。
 - [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
 - [ ] T-11E 多态来源删除保留快照并可解释；不要以关联 Task 删除互锁冒充来源协调。
-- [ ] Sidebar/Today 计数、真实浏览器键盘/焦点、长列表和窄屏视觉完成专项验收。
+- [x] Sidebar/Today 计数与 risk 深链已接真实统计；真实浏览器键盘/焦点、长列表和窄屏视觉仍需专项验收。
 - [ ] v0.2 Agent 成功只进入 `waiting_review`，只有 owner 可接受，重试保留全部 Run 与 Artifact。
 
 ## 相关代码/PRD 链接

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   forceResolveInboxItem,
+  getInboxStats,
   normalizeInboxItem,
   resetRuntimeConnection,
   splitInboxItem,
@@ -283,5 +284,31 @@ describe("Inbox orchestration API contract", () => {
       reason: "业务例外",
     });
     expect(new Headers(init.headers).get("Idempotency-Key")).toBe("force-key");
+  });
+
+  it("normalizes derived Inbox operational counts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          server_now: "2026-08-28T10:04:00Z",
+          pending: 7,
+          unread: 4,
+          tracking: 3,
+          blocked: 1,
+          waiting_review: 2,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getInboxStats()).resolves.toEqual({
+      serverNow: "2026-08-28T10:04:00Z",
+      pending: 7,
+      unread: 4,
+      tracking: 3,
+      blocked: 1,
+      waitingReview: 2,
+    });
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/v1/stats/inbox");
   });
 });

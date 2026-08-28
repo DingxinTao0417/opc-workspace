@@ -33,6 +33,7 @@ import {
   getAllProjects,
   getAllTags,
   getAllTasks,
+  getInboxStats,
   getActor,
   getActors,
   getClient,
@@ -309,6 +310,18 @@ export function useDeleteClient() {
 }
 
 export const inboxQueryKey = ["inbox-items"] as const;
+export const inboxStatsQueryKey = [...inboxQueryKey, "stats"] as const;
+
+export function useInboxStatsQuery() {
+  return useQuery({
+    queryKey: inboxStatsQueryKey,
+    queryFn: getInboxStats,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+}
 export const INBOX_LIST_REFRESH_INTERVAL_MS = 15_000;
 export const inboxDetailQueryKey = (id: string) =>
   [...inboxQueryKey, "detail", id] as const;

@@ -395,6 +395,15 @@ export interface TodayStats {
   };
 }
 
+export interface InboxStats {
+  serverNow: string;
+  pending: number;
+  unread: number;
+  tracking: number;
+  blocked: number;
+  waitingReview: number;
+}
+
 export type FocusSessionStatus =
   | "planned"
   | "active"
@@ -695,6 +704,7 @@ export type InboxItemKind = "manual" | "reminder";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
 export type InboxItemView = "inbox" | "snoozed" | "archive";
+export type InboxItemRisk = "tracking" | "blocked" | "waiting_review";
 export type InboxResolutionPolicy = "manual" | "all_required_tasks_done";
 export type InboxResolutionMode = "manual" | "forced" | "automatic";
 export type InboxItemAction =
@@ -741,6 +751,7 @@ export interface InboxItemListParams {
   view?: InboxItemView;
   q?: string;
   priority?: InboxItemPriority;
+  risk?: InboxItemRisk;
   page?: number;
   pageSize?: number;
 }

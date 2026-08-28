@@ -27,7 +27,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；committed/draft/preview 已隔离，预览或取消不会改写活动 Session
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-11A1/A2/B 手工 Inbox 受理分诊与已有 Task 关系、T-11A3 一次性本地提醒，以及 T-11C 批量拆分/分派/自动结清已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/非 Reminder Inbox 来源投影、重复提醒、Sidebar/Today Inbox 计数、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.7](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库归入更后续版本。
+受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联、Focus Core A+B+C、T-11A1/A2/A3/B/C/F 的 Inbox 受理、Reminder、Task 编排和 Today/Sidebar 运营计数已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/非 Reminder Inbox 来源投影、重复提醒、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v2.8](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -49,7 +49,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v2.7）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v2.8）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -227,6 +227,7 @@ POST   /api/v1/inbox-items/:id/resolve
 POST   /api/v1/inbox-items/:id/dismiss
 POST   /api/v1/inbox-items/:id/reopen
 GET    /api/v1/inbox-items/:id/tasks
+GET    /api/v1/stats/inbox
 POST   /api/v1/inbox-items/:id/tasks/:task_id
 PATCH  /api/v1/inbox-items/:id/tasks/:task_id
 DELETE /api/v1/inbox-items/:id/tasks/:task_id
@@ -261,7 +262,7 @@ Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `
 
 当前 Inbox 创建 API 只接受 `kind / source_entity_type / resolution_policy = manual` 的手工条目，不接受来源 ID 或事件键。列表支持 `inbox / snoozed / archive` 三视图、标题/摘要搜索、优先级和分页；`meta.unread_total` 始终统计全局当前待处理视图的未读，不受当前视图或筛选影响。`read_at`、`snoozed_until` 与主状态相互独立；resolve/dismiss 要求 1–2,000 字符原因、清除稍后但不隐式已读，未读终态仍可直接 read。reopen 清除终态和稍后事实，保留 read/triaged，并按是否存在活动 Task 关系进入 `tracking / open`。PATCH 与单条命令使用 `ETag`/`If-Match`；创建、命令和 read-all 支持幂等快照。read-all 提交列表 `snapshot_at` 作为 `through_created_at` 时间截止，只标记创建与最后更新时间均不晚于 cutoff、且按该 cutoff 仍属于待处理可见范围的未读；截止后变化的条目保守跳过。
 
-Task 关系 GET 返回全部 active、分页 history、Inbox version 和服务端实时 progress；Task 状态通过 JOIN 派生，不复制到 Inbox。单条 POST/PATCH/DELETE 负责关联、required 修改和软解除。`POST /api/v1/inbox-items/:id/split` 可原子创建 1–20 个父子 Task、owner/person Assignment、manual reviewer、created 关系与事件；自动策略在至少一个活动必需 Task 且全部 done 时由 system 结清，并在依赖失效后重开。`force-resolve` 只处理显式确认且有原因的例外。当前没有非 Reminder 来源投影或 Inbox 删除路由。
+Task 关系 GET 返回实时 progress；split 可原子创建父子 Task、Assignment、reviewer、关系与事件；自动策略由 system 结清/重开，force-resolve 记录例外。`GET /api/v1/stats/inbox` 实时派生当前 pending/unread/tracking/blocked/waiting_review；Inbox 列表支持对应 risk 深链，Sidebar 与 Today 读取同一事实。当前没有非 Reminder 来源投影或 Inbox 删除路由。
 
 Reminder API 提供一次性本地提醒的分页/搜索/状态列表、创建、详情、并发安全编辑和带原因软取消。公开创建固定为 manual 来源且触发时间必须晚于服务端当前时间；创建和取消支持幂等快照，PATCH/DELETE 使用 `ETag`/`If-Match`，fired/cancelled 为不可变终态。Sidecar 启动先补扫到期项，随后每 15 秒扫描最多 100 条；稳定 `source_event_key`、条件更新和单事务保证 Reminder、Reminder Inbox Item 及 Workflow Event 恰好一次投影。当前没有重复提醒、系统原生通知、远程推送或业务来源自动建提醒。
 
@@ -279,4 +280,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v2.7](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v2.8](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切、Focus Core A+B+C、手工 Inbox 受理/分诊、已有 Task 关系、一次性本地 Reminder，以及 Inbox 批量拆分/分派/自动结清；明确未交付 Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、非 Reminder 业务来源投影、重复/原生通知、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

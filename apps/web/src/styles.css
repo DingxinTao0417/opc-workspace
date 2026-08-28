@@ -1127,6 +1127,57 @@ kbd {
   font-size: 9px;
 }
 
+.today-inbox-overview {
+  margin-top: 22px;
+}
+
+.today-inbox-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.today-inbox-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  min-height: 54px;
+  gap: 10px;
+  padding: 0 13px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--panel);
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.today-inbox-card:hover {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+}
+
+.today-inbox-card > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.today-inbox-card strong {
+  color: var(--text);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-inbox-card.danger > span,
+.today-inbox-card.danger strong {
+  color: var(--danger-text);
+}
+
 .task-section + .task-section {
   margin-top: 16px;
 }
@@ -6836,6 +6887,10 @@ kbd {
 }
 
 @media (max-width: 860px) {
+  .today-inbox-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .stats-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6895,6 +6950,10 @@ kbd {
 }
 
 @media (max-width: 680px) {
+  .today-inbox-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-shell {
     grid-template-columns: 64px minmax(0, 1fr);
   }

@@ -2,12 +2,21 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ChevronRight,
+  ClipboardCheck,
+  GitBranch,
   Hourglass,
+  Inbox as InboxIcon,
   List,
   Plus,
   Target,
 } from "lucide-react";
-import { useTodayStatsQuery, useTasksQuery } from "../api/hooks";
+import { Link } from "react-router-dom";
+import {
+  useInboxStatsQuery,
+  useTodayStatsQuery,
+  useTasksQuery,
+} from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type { Task } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -44,6 +53,7 @@ export function TodayPage() {
   const now = new Date();
   const dateKey = localDateKey(now);
   const statsQuery = useTodayStatsQuery(dateKey);
+  const inboxStatsQuery = useInboxStatsQuery();
   const live = tasksQuery.isSuccess;
   const displayTasks = tasksQuery.data ?? [];
   const groups = taskSplit(displayTasks);
@@ -62,6 +72,33 @@ export function TodayPage() {
       icon: AlertTriangle,
       value: realStats?.tasks.overdue ?? 0,
       label: "项已逾期",
+      danger: true,
+    },
+  ];
+  const inboxStats = [
+    {
+      icon: InboxIcon,
+      label: "待处理",
+      value: inboxStatsQuery.data?.pending ?? 0,
+      to: "/inbox",
+    },
+    {
+      icon: GitBranch,
+      label: "跟进中",
+      value: inboxStatsQuery.data?.tracking ?? 0,
+      to: "/inbox?risk=tracking",
+    },
+    {
+      icon: ClipboardCheck,
+      label: "待验收",
+      value: inboxStatsQuery.data?.waitingReview ?? 0,
+      to: "/inbox?risk=waiting_review",
+    },
+    {
+      icon: AlertTriangle,
+      label: "有阻塞",
+      value: inboxStatsQuery.data?.blocked ?? 0,
+      to: "/inbox?risk=blocked",
       danger: true,
     },
   ];
@@ -115,6 +152,43 @@ export function TodayPage() {
             <span style={{ width: "0%" }} />
           </div>
         </div>
+      </section>
+
+      <section aria-label="收件箱概览" className="today-inbox-overview">
+        <div className="section-heading compact-heading">
+          <div>
+            <span className="section-kicker">工作受理</span>
+            <h2>收件箱</h2>
+          </div>
+          <span className="section-count">
+            {inboxStatsQuery.data?.unread ?? 0} 未读
+          </span>
+        </div>
+        {inboxStatsQuery.isPending ? (
+          <SkeletonRows count={1} />
+        ) : inboxStatsQuery.isError ? (
+          <ErrorState
+            compact
+            message="无法读取收件箱概览。"
+            onRetry={() => void inboxStatsQuery.refetch()}
+          />
+        ) : (
+          <div className="today-inbox-grid">
+            {inboxStats.map(({ icon: Icon, label, value, to, danger }) => (
+              <Link
+                className={`today-inbox-card${danger ? " danger" : ""}`}
+                key={label}
+                to={to}
+              >
+                <span>
+                  <Icon size={15} /> {label}
+                </span>
+                <strong>{value}</strong>
+                <ChevronRight aria-hidden="true" size={14} />
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {tasksQuery.isError ? (

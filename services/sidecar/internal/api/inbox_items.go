@@ -191,6 +191,11 @@ func (a *API) listInboxItems(c *gin.Context) {
 			return
 		}
 	}
+	risk := strings.TrimSpace(c.Query("risk"))
+	if risk != "" && risk != "tracking" && risk != "blocked" && risk != "waiting_review" {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "risk filter is invalid")
+		return
+	}
 	search := strings.TrimSpace(c.Query("q"))
 	if utf8.RuneCountInString(search) > 200 {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "q cannot exceed 200 characters")
@@ -206,6 +211,19 @@ func (a *API) listInboxItems(c *gin.Context) {
 		base := inboxListQuery(tx.Model(&models.InboxItem{}), view, nowText)
 		if priority != "" {
 			base = base.Where("priority = ?", priority)
+		}
+		switch risk {
+		case "tracking":
+			base = base.Where("status = 'tracking'")
+		case "blocked", "waiting_review":
+			base = base.Where(`EXISTS (
+				SELECT 1 FROM inbox_item_tasks relation
+				JOIN tasks task ON task.id = relation.task_id
+				WHERE relation.inbox_item_id = inbox_items.id
+				  AND relation.unlinked_at IS NULL
+				  AND relation.is_required = 1
+				  AND task.status = ?
+			)`, risk)
 		}
 		if search != "" {
 			like := "%" + escapeLike(search) + "%"

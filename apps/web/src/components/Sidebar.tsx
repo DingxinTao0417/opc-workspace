@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useTasksQuery } from "../api/hooks";
+import { useInboxStatsQuery, useTasksQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 
@@ -70,6 +70,7 @@ const groups: { label: string; items: NavItem[] }[] = [
 
 export function Sidebar() {
   const tasksQuery = useTasksQuery();
+  const inboxStatsQuery = useInboxStatsQuery();
   const displayName = useSettingsStore(
     (state) => state.preview?.profile.displayName ?? state.displayName,
   );
@@ -87,6 +88,11 @@ export function Sidebar() {
   const completedPercent = taskCount
     ? Math.round((completedCount / taskCount) * 100)
     : 0;
+  const inboxBadge = inboxStatsQuery.data?.pending
+    ? inboxStatsQuery.data.pending > 99
+      ? "99+"
+      : String(inboxStatsQuery.data.pending)
+    : undefined;
 
   return (
     <aside className="left-sidebar" aria-label="主导航">
@@ -130,8 +136,17 @@ export function Sidebar() {
               >
                 <Icon className="nav-icon" size={17} />
                 <span className="sidebar-copy nav-text">{label}</span>
-                {badge ? (
-                  <span className="sidebar-copy nav-badge">{badge}</span>
+                {(to === "/inbox" ? inboxBadge : badge) ? (
+                  <span
+                    aria-label={
+                      to === "/inbox"
+                        ? `${inboxStatsQuery.data?.pending ?? 0} 项待处理`
+                        : undefined
+                    }
+                    className="sidebar-copy nav-badge"
+                  >
+                    {to === "/inbox" ? inboxBadge : badge}
+                  </span>
                 ) : null}
                 {later ? (
                   <span className="sidebar-copy later-badge">后续</span>
