@@ -2,7 +2,7 @@
 
 > 文档版本：2.10
 > 日期：2026-08-28
-> 依据：[PRD v4.6](opc-workspace-PRD.md)
+> 依据：[PRD v4.7](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v17
 
 ## 1. 目的
@@ -113,7 +113,7 @@
 | [专注](modules/focus.md)                   | 当前 Task                                                                     | 活动 Session 和有效工时                                                                                     | Task actual_minutes、今日/统计数据                                                      |
 | [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API 与 `/health` | 本地偏好界面、版本化非敏感设置事实、person 管理和只读运行诊断；头像受控文件、备份与完整诊断待实现           | 布局、主题、Focus 默认值、Actor、运行版本、备份和桌面行为                               |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/Inbox 索引                                                | 统一查找与快捷操作入口                                                                                      | 跳转详情或触发受控命令                                                                  |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移、受控 Artifact 一致性和手动备份创建/列表/校验；恢复、删除、导入导出仍规划                        | 当前文件安全与已校验备份；未来恢复后的完整应用状态和诊断包                              |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移、受控 Artifact 一致性、手动备份创建/列表/校验和隔离恢复演练；实际替换、删除、导入导出仍规划       | 当前文件安全、已校验备份与临时根可恢复性；未来恢复后的完整应用状态和诊断包               |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                       | 原生窗口、进程、权限、运行日志和发布                                                                        | 可运行、可诊断的本地应用环境                                                            |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                   | 财务与发票业务事实                                                                                          | 本地提醒、Inbox Item、客户聚合                                                          |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                       | 本地回访计划与结果                                                                                          | Inbox 到期项、客户活动                                                                  |

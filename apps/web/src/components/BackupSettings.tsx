@@ -4,6 +4,7 @@ import {
   DatabaseBackup,
   LoaderCircle,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
@@ -11,6 +12,7 @@ import { ApiError } from "../api/client";
 import {
   useBackupsQuery,
   useCreateBackup,
+  useDrillBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
 import type { BackupSummary } from "../types/models";
@@ -45,6 +47,9 @@ function backupErrorText(error: unknown): string {
     if (error.code === "IDEMPOTENCY_CONFLICT") {
       return "这次创建请求与上一次内容不一致，请重新操作。";
     }
+    if (error.code === "BACKUP_NOT_RESTORABLE") {
+      return "备份无法在隔离临时数据根完成恢复演练，请勿用它替换当前数据。";
+    }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
       : error.message;
@@ -54,15 +59,22 @@ function backupErrorText(error: unknown): string {
 
 function BackupCard({
   backup,
+  busy,
+  drillingId,
   verifyingId,
+  onDrill,
   onVerify,
 }: {
   backup: BackupSummary;
+  busy: boolean;
+  drillingId: string | null;
   verifyingId: string | null;
+  onDrill: (id: string) => void;
   onVerify: (id: string) => void;
 }) {
   const invalid = backup.verificationStatus === "invalid";
   const verifying = verifyingId === backup.id;
+  const drilling = drillingId === backup.id;
   return (
     <article
       className="settings-backup-card"
@@ -88,20 +100,36 @@ function BackupCard({
         )}
         <small title={backup.id}>ID {backup.id.slice(0, 8)}</small>
       </div>
-      <button
-        aria-label={`重新校验备份 ${backup.id.slice(0, 8)}`}
-        className="button button-secondary settings-backup-verify"
-        disabled={verifying}
-        onClick={() => onVerify(backup.id)}
-        type="button"
-      >
-        {verifying ? (
-          <LoaderCircle className="animate-spin" size={13} />
-        ) : (
-          <ShieldCheck size={13} />
-        )}
-        {verifying ? "校验中…" : "重新校验"}
-      </button>
+      <div className="settings-backup-card-actions">
+        <button
+          aria-label={`重新校验备份 ${backup.id.slice(0, 8)}`}
+          className="button button-secondary settings-backup-verify"
+          disabled={busy}
+          onClick={() => onVerify(backup.id)}
+          type="button"
+        >
+          {verifying ? (
+            <LoaderCircle className="animate-spin" size={13} />
+          ) : (
+            <ShieldCheck size={13} />
+          )}
+          {verifying ? "校验中…" : "重新校验"}
+        </button>
+        <button
+          aria-label={`恢复演练备份 ${backup.id.slice(0, 8)}`}
+          className="button button-secondary settings-backup-drill"
+          disabled={busy || invalid}
+          onClick={() => onDrill(backup.id)}
+          type="button"
+        >
+          {drilling ? (
+            <LoaderCircle className="animate-spin" size={13} />
+          ) : (
+            <RotateCcw size={13} />
+          )}
+          {drilling ? "演练中…" : "恢复演练"}
+        </button>
+      </div>
     </article>
   );
 }
@@ -110,16 +138,23 @@ export function BackupSettings() {
   const backupsQuery = useBackupsQuery();
   const createMutation = useCreateBackup();
   const verifyMutation = useVerifyBackup();
+  const drillMutation = useDrillBackupRestore();
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
+  const [drillingId, setDrillingId] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const pending = createMutation.isPending || verifyMutation.isPending;
-  const mutationError = createMutation.error ?? verifyMutation.error;
+  const pending =
+    createMutation.isPending ||
+    verifyMutation.isPending ||
+    drillMutation.isPending;
+  const mutationError =
+    createMutation.error ?? verifyMutation.error ?? drillMutation.error;
 
   const create = () => {
     setSuccess(null);
     createMutation.reset();
     verifyMutation.reset();
+    drillMutation.reset();
     createMutation.mutate(
       { note: note.trim() },
       {
@@ -138,10 +173,26 @@ export function BackupSettings() {
     setVerifyingId(id);
     createMutation.reset();
     verifyMutation.reset();
+    drillMutation.reset();
     verifyMutation.mutate(id, {
       onSuccess: (backup) =>
         setSuccess(`备份 ${backup.id.slice(0, 8)} 完整性校验通过。`),
       onSettled: () => setVerifyingId(null),
+    });
+  };
+
+  const drill = (id: string) => {
+    setSuccess(null);
+    setDrillingId(id);
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    drillMutation.mutate(id, {
+      onSuccess: (result) =>
+        setSuccess(
+          `备份 ${result.backupId.slice(0, 8)} 已在隔离临时数据根完成恢复演练：schema v${result.sourceSchemaVersion} → v${result.resultSchemaVersion}，${result.artifactCount} 个受控文件。`,
+        ),
+      onSettled: () => setDrillingId(null),
     });
   };
 
@@ -255,7 +306,10 @@ export function BackupSettings() {
           {backupsQuery.data.map((backup) => (
             <BackupCard
               backup={backup}
+              busy={pending}
+              drillingId={drillingId}
               key={backup.id}
+              onDrill={drill}
               onVerify={verify}
               verifyingId={verifyingId}
             />
@@ -264,8 +318,8 @@ export function BackupSettings() {
       )}
 
       <p className="settings-inline-note">
-        当前已开放创建、查看和完整性校验；恢复、删除与 JSON
-        导出会在后续独立安全流程完成后启用。
+        当前已开放创建、查看、完整性校验和隔离恢复演练；实际替换当前数据、删除与
+        JSON 导出会在后续独立安全流程完成后启用。
       </p>
     </>
   );

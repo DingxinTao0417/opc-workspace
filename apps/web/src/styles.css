@@ -3936,6 +3936,16 @@ kbd {
   white-space: nowrap;
 }
 
+.settings-backup-card-actions {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+
+.settings-backup-drill {
+  white-space: nowrap;
+}
+
 .settings-backup-empty {
   display: grid;
   min-height: 128px;
@@ -4376,8 +4386,14 @@ kbd {
     gap: 2px;
   }
 
-  .settings-backup-verify {
+  .settings-backup-card-actions {
     grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .settings-backup-verify,
+  .settings-backup-drill {
+    width: 100%;
     justify-self: stretch;
   }
 

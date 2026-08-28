@@ -72,6 +72,7 @@ PATCH  /api/v1/settings
 GET    /api/v1/backups
 POST   /api/v1/backups
 POST   /api/v1/backups/:id/verify
+POST   /api/v1/backups/:id/drill
 POST   /api/v1/tasks/:id/submit-output
 POST   /api/v1/tasks/:id/review
 GET    /api/v1/tasks/:id/submissions
@@ -105,6 +106,12 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 `GET /api/v1/settings` always returns the four keys `workspace`, `general`, `appearance`, and `focus` in that order. A missing database row is represented by the service default with `stored=false`, `version=0`, and null update metadata; reading defaults does not insert rows. Stored rows include their normalized value, schema version 1, optimistic version, owner actor, and UTC update time.
 
 `PATCH /api/v1/settings` accepts `{ "updates": [...] }` with 1–4 unique modules. Every update requires `key`, `expected_version`, and a complete `value` object. Creation requires expected version 0; subsequent writes require the exact current version. Unknown, missing, null non-nullable, or out-of-range fields are rejected. Workspace avatars are null or controlled `avatars/<uuid>.png|jpg|webp` references; Data URLs, tokens, API keys, and arbitrary paths are not accepted. All modules are saved in one transaction, so `409 SETTINGS_VERSION_CONFLICT` or any validation/database failure leaves every row unchanged. Each successful module appends one `settings_updated` Workflow Event containing only stored/version/schema metadata, never the setting value.
+
+### Verified backup and restore-drill contract
+
+`POST /api/v1/backups` freezes ordinary API traffic and background writers, creates a `VACUUM INTO` SQLite snapshot, copies the ownership marker and all active file Artifacts, then verifies hashes, the exact file set, SQLite integrity/schema/identity, and Artifact metadata before publishing a UUID package. `GET /api/v1/backups` lists recorded verification facts; `POST /api/v1/backups/:id/verify` performs the complete verification again.
+
+`POST /api/v1/backups/:id/drill` does not replace live data. It verifies the source package again, copies it into a unique temporary data root, opens and migrates the copied database with the current migration runner, validates final SQLite facts, claims an isolated Artifact store, and checks every active file object. Database and lease handles are closed before the temporary root is removed. A successful response therefore proves the package can be opened by this Sidecar while leaving the source package and current workspace unchanged; live replacement and rollback remain separate work.
 
 ### Inbox Item–Task relationship contract
 
@@ -216,4 +223,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v4.6 / schema v17 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, verified SQLite+Artifact backup creation/list/replay/re-verification/tamper rejection, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Settings frontend migration, Client activities/attachments, follow-ups, finance, backup restore/delete/JSON export, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v4.7 / schema v17 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, verified SQLite+Artifact backup creation/list/replay/re-verification/tamper rejection plus isolated restore drills, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Settings frontend migration, Client activities/attachments, follow-ups, finance, live backup replacement/delete/JSON export, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

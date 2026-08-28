@@ -129,6 +129,35 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	if verified.Code != http.StatusOK || decodeBackupSummary(t, verified.Body.Bytes()).VerificationStatus != "verified" {
 		t.Fatalf("verify backup = %d: %s", verified.Code, verified.Body.String())
 	}
+	snapshotBefore, err := inspectFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("inspect snapshot before drill: %v", err)
+	}
+	drilled := performRequest(router, http.MethodPost, "/api/v1/backups/"+summary.ID+"/drill", []byte(`{}`), nil)
+	if drilled.Code != http.StatusOK {
+		t.Fatalf("restore drill = %d: %s", drilled.Code, drilled.Body.String())
+	}
+	var drillEnvelope struct {
+		Data backupRestoreDrillResult `json:"data"`
+	}
+	if err := json.Unmarshal(drilled.Body.Bytes(), &drillEnvelope); err != nil {
+		t.Fatalf("decode restore drill: %v", err)
+	}
+	if drillEnvelope.Data.BackupID != summary.ID ||
+		drillEnvelope.Data.SourceSchema != store.SchemaVersion ||
+		drillEnvelope.Data.ResultSchema != store.SchemaVersion ||
+		drillEnvelope.Data.ArtifactCount != 1 ||
+		!drillEnvelope.Data.TemporaryDataClean {
+		t.Fatalf("restore drill result = %#v", drillEnvelope.Data)
+	}
+	snapshotAfter, err := inspectFile(snapshotPath)
+	if err != nil || snapshotAfter != snapshotBefore {
+		t.Fatalf("restore drill changed source snapshot before=%#v after=%#v err=%v", snapshotBefore, snapshotAfter, err)
+	}
+	entries, err = os.ReadDir(backupDir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != summary.ID {
+		t.Fatalf("restore drill cleanup entries=%v err=%v", entries, err)
+	}
 }
 
 func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
@@ -176,6 +205,10 @@ func TestBackupAPIValidatesConfigurationAndRequests(t *testing.T) {
 	invalidID := performRequest(configured, http.MethodPost, "/api/v1/backups/not-an-id/verify", []byte(`{}`), nil)
 	if invalidID.Code != http.StatusBadRequest || responseErrorCode(t, invalidID.Body.Bytes()) != "INVALID_ID" {
 		t.Fatalf("invalid backup id = %d: %s", invalidID.Code, invalidID.Body.String())
+	}
+	invalidDrillID := performRequest(configured, http.MethodPost, "/api/v1/backups/not-an-id/drill", []byte(`{}`), nil)
+	if invalidDrillID.Code != http.StatusBadRequest || responseErrorCode(t, invalidDrillID.Body.Bytes()) != "INVALID_ID" {
+		t.Fatalf("invalid restore drill id = %d: %s", invalidDrillID.Code, invalidDrillID.Body.String())
 	}
 	invalidJSON := performRequest(configured, http.MethodPost, "/api/v1/backups", []byte(`{"unknown":true}`), nil)
 	if invalidJSON.Code != http.StatusBadRequest || responseErrorCode(t, invalidJSON.Body.Bytes()) != "INVALID_JSON" {

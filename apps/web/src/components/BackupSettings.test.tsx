@@ -22,6 +22,7 @@ const backup: BackupSummary = {
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   verify: vi.fn(),
+  drill: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
 }));
@@ -63,12 +64,19 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useDrillBackupRestore: () => ({
+    mutate: mocks.drill,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
   beforeEach(() => {
     mocks.create.mockClear();
     mocks.verify.mockClear();
+    mocks.drill.mockClear();
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
   });
@@ -92,6 +100,17 @@ describe("BackupSettings", () => {
       screen.getByRole("button", { name: /重新校验备份 018f0000/ }),
     );
     expect(mocks.verify).toHaveBeenCalledWith(
+      backup.id,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onSettled: expect.any(Function),
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /恢复演练备份 018f0000/ }),
+    );
+    expect(mocks.drill).toHaveBeenCalledWith(
       backup.id,
       expect.objectContaining({
         onSuccess: expect.any(Function),

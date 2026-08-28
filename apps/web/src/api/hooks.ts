@@ -11,6 +11,7 @@ import {
   ApiError,
   batchUpdateTasks,
   createBackup,
+  drillBackupRestore,
   cancelFocusSession,
   createClient,
   createFocusSession,
@@ -190,6 +191,12 @@ export function useVerifyBackup() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
+  });
+}
+
+export function useDrillBackupRestore() {
+  return useMutation({
+    mutationFn: (id: string) => drillBackupRestore(id),
   });
 }
 

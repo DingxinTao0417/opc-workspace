@@ -11,6 +11,7 @@ import {
   deleteTag,
   deleteTask,
   deleteTaskSavedView,
+  drillBackupRestore,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -1425,21 +1426,42 @@ describe("verified local backups", () => {
     ).toThrow(ApiError);
   });
 
-  it("lists, creates with a stable key, and verifies backups", async () => {
+  it("lists, creates with a stable key, verifies, and drills backups", async () => {
     const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, init?: RequestInit) =>
-        jsonResponse(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith(`/backups/${backupPayload.id}/drill`)) {
+          return jsonResponse({
+            data: {
+              backup_id: backupPayload.id,
+              drilled_at: "2026-08-28T12:05:00Z",
+              source_schema_version: 17,
+              result_schema_version: 17,
+              artifact_count: 2,
+              temporary_data_cleaned: true,
+            },
+          });
+        }
+        return jsonResponse(
           init?.method === "POST"
             ? { data: backupPayload }
             : { data: [backupPayload] },
           init?.method === "POST" ? 201 : 200,
-        ),
+        );
+      },
     );
     vi.stubGlobal("fetch", fetchMock);
 
     expect(await getBackups()).toHaveLength(1);
     await createBackup({ note: "提交前检查点" }, "backup-key-1");
     await verifyBackup(backupPayload.id);
+    expect(await drillBackupRestore(backupPayload.id)).toEqual({
+      backupId: backupPayload.id,
+      drilledAt: "2026-08-28T12:05:00Z",
+      sourceSchemaVersion: 17,
+      resultSchemaVersion: 17,
+      artifactCount: 2,
+      temporaryDataCleaned: true,
+    });
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/backups");
     expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
@@ -1453,6 +1475,10 @@ describe("verified local backups", () => {
       `/api/v1/backups/${backupPayload.id}/verify`,
     );
     expect(fetchMock.mock.calls[2][1]?.method).toBe("POST");
+    expect(String(fetchMock.mock.calls[3][0])).toContain(
+      `/api/v1/backups/${backupPayload.id}/drill`,
+    );
+    expect(fetchMock.mock.calls[3][1]?.method).toBe("POST");
   });
 });
 

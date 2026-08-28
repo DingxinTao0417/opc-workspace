@@ -1176,3 +1176,12 @@ export interface BackupSummary {
 export interface CreateBackupInput {
   note: string;
 }
+
+export interface BackupRestoreDrillResult {
+  backupId: string;
+  drilledAt: string;
+  sourceSchemaVersion: number;
+  resultSchemaVersion: number;
+  artifactCount: number;
+  temporaryDataCleaned: boolean;
+}

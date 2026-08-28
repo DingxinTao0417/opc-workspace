@@ -10,6 +10,7 @@ import type {
   ActorSummary,
   AssignmentRole,
   BackupSummary,
+  BackupRestoreDrillResult,
   BackupVerificationStatus,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
@@ -3704,6 +3705,55 @@ export async function verifyBackup(id: string): Promise<BackupSummary> {
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeBackupSummary(body);
+}
+
+export async function drillBackupRestore(
+  id: string,
+): Promise<BackupRestoreDrillResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/backups/${encodeURIComponent(id)}/drill`,
+    { method: "POST", body: "{}" },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) {
+    return invalidResponse("备份恢复演练响应格式无效");
+  }
+  const backupId = stringField(body, "backup_id", "backupId");
+  const drilledAt = stringField(body, "drilled_at", "drilledAt");
+  const sourceSchemaVersion = positiveInteger(
+    fieldValue(body, "source_schema_version", "sourceSchemaVersion"),
+    "恢复演练来源数据库版本",
+  );
+  const resultSchemaVersion = positiveInteger(
+    fieldValue(body, "result_schema_version", "resultSchemaVersion"),
+    "恢复演练结果数据库版本",
+  );
+  const artifactCount = nonNegativeInteger(
+    fieldValue(body, "artifact_count", "artifactCount"),
+    "恢复演练文件数量",
+  );
+  const temporaryDataCleaned = fieldValue(
+    body,
+    "temporary_data_cleaned",
+    "temporaryDataCleaned",
+  );
+  if (
+    !backupId ||
+    !drilledAt ||
+    Number.isNaN(Date.parse(drilledAt)) ||
+    temporaryDataCleaned !== true
+  ) {
+    return invalidResponse("备份恢复演练响应格式无效");
+  }
+  return {
+    backupId,
+    drilledAt,
+    sourceSchemaVersion,
+    resultSchemaVersion,
+    artifactCount,
+    temporaryDataCleaned,
+  };
 }
 
 export async function getTags(
