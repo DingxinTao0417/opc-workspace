@@ -427,6 +427,9 @@ describe("InboxItemDetailModal", () => {
     expect(screen.getAllByText("系统维护").length).toBeGreaterThan(0);
     expect(screen.getByText("本地备份创建失败")).toBeTruthy();
     expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    expect(screen.getByLabelText("截止时间")).toBeDisabled();
+    expect(screen.getByLabelText("优先级")).not.toBeDisabled();
   });
 
   it("labels a backup-verify maintenance item as system maintenance", () => {

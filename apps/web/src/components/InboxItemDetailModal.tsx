@@ -421,7 +421,13 @@ export function InboxItemDetailModal({
                 <label className="form-field">
                   <span>截止时间</span>
                   <input
+                    disabled={item.sourceEntityType === "system_maintenance"}
                     onChange={(event) => setDueAt(event.target.value)}
+                    title={
+                      item.sourceEntityType === "system_maintenance"
+                        ? "系统维护项不设置截止时间"
+                        : undefined
+                    }
                     type="datetime-local"
                     value={dueAt}
                   />

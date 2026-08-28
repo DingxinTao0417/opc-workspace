@@ -310,6 +310,7 @@ describe("inbox API contract", () => {
       source_entity_id: "backup:create",
       source_event_key:
         "system:backup:create:018f0000-0000-7000-8000-000000000817",
+      priority: "P2",
       due_at: null,
       payload_json: {
         component: "backup",
@@ -324,6 +325,7 @@ describe("inbox API contract", () => {
       kind: "event",
       sourceEntityType: "system_maintenance",
       sourceEntityId: "backup:create",
+      priority: "P2",
       dueAt: null,
       sourceDeletedAt: null,
       payloadJson: {
@@ -368,6 +370,7 @@ describe("inbox API contract", () => {
       source_entity_id: "backup:verify",
       source_event_key:
         "system:backup:verify:018f0000-0000-7000-8000-000000000819",
+      priority: "P3",
       due_at: null,
       payload_json: {
         component: "backup",
@@ -382,6 +385,7 @@ describe("inbox API contract", () => {
       kind: "event",
       sourceEntityType: "system_maintenance",
       sourceEntityId: "backup:verify",
+      priority: "P3",
       dueAt: null,
       payloadJson: {
         component: "backup",

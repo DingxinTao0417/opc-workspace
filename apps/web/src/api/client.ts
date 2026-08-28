@@ -2337,7 +2337,6 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     sourceEntityId === "backup:create" &&
     dueAt === null &&
     sourceDeletedAt === null &&
-    (value.priority === "P0" || value.priority === "P1") &&
     isRecord(rawPayload) &&
     Object.keys(rawPayload).length === 5 &&
     rawPayload.component === "backup" &&
@@ -2354,7 +2353,6 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     sourceEntityId === "backup:verify" &&
     dueAt === null &&
     sourceDeletedAt === null &&
-    (value.priority === "P0" || value.priority === "P1") &&
     isRecord(rawPayload) &&
     Object.keys(rawPayload).length === 5 &&
     rawPayload.component === "backup" &&

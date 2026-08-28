@@ -112,7 +112,7 @@
 
 ### 已交付：T-11E 第四项——备份创建失败的系统维护来源
 
-- schema v26 通过 `026_system_maintenance_inbox_projection.sql` 约束 `source_entity_type=system_maintenance` 的来源身份：`kind=event`、`source_entity_id=component:operation`、`source_event_key` 匹配 `system:<source-id>:<incident-id>`、P0/P1、无截止时间、payload 只含 `component / operation / failure_code / occurred_at / message`，并禁止写入 `source_deleted_at`。升级保留既有 Inbox 事实，不回填或创建 demo incident。
+- schema v26 通过 `026_system_maintenance_inbox_projection.sql` 约束 `source_entity_type=system_maintenance` 的来源身份：`kind=event`、`source_entity_id=component:operation`、`source_event_key` 匹配 `system:<source-id>:<incident-id>`、投影初始优先级 P0/P1、无截止时间、payload 只含 `component / operation / failure_code / occurred_at / message`，并禁止写入 `source_deleted_at`。owner 仍可把条目重新分级为 P0–P3；升级保留既有 Inbox 事实，不回填或创建 demo incident。
 - `POST /api/v1/backups` 失败仍向调用端返回 `BACKUP_CREATE_FAILED`；现有数据保持不变。Sidecar 随后尽力投影一条 Inbox Item。投影失败只记内部维护日志，不改变备份错误响应，也不把底层 Go error 暴露给收件箱。
 - 当前只支持 `component=backup`、`operation=create`、`failure_code=backup_create_failed`。标题固定为“本地备份需要处理”，message 固定说明无法创建已验证备份且现有数据未被修改。payload 不保存 Go error、本机路径、备份 note、Token、request ID 或请求正文。
 - 同一 `backup:create` 在 `open/tracking` 且未标记来源删除时只允许一个活动 incident；重复失败复用既有条目。resolve/dismiss 后再次失败使用新的 incident ID 和 `source_event_key` 开新条目。system Actor 追加 `source_projected` Event。
@@ -215,10 +215,10 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 | `id`                                | UUID 主键                                                                                                       |
 | `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 使用 reminder，其余已交付业务来源使用 event |
 | `title / summary`                   | 标题 2–200；摘要最多 10,000                                                                                     |
-| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task/task_due/system_maintenance                                       |
-| `source_entity_id`                  | 当前手工项必须为 null；系统维护项为 `backup:create` 或 `backup:verify`                                                               |
-| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact、Task 阻塞、Task 临期和系统维护分别使用各自稳定键                           |
-| `source_deleted_at`                 | 手工/Reminder/系统维护为 null；Artifact/Task/Task due 来源归档后删除时原子写入，且不可再次修改                          |
+| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task/task_due/system_maintenance                    |
+| `source_entity_id`                  | 当前手工项必须为 null；系统维护项为 `backup:create` 或 `backup:verify`                                          |
+| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact、Task 阻塞、Task 临期和系统维护分别使用各自稳定键                  |
+| `source_deleted_at`                 | 手工/Reminder/系统维护为 null；Artifact/Task/Task due 来源归档后删除时原子写入，且不可再次修改                  |
 | `priority`                          | P0 / P1 / P2 / P3                                                                                               |
 | `status`                            | open / tracking / resolved / dismissed                                                                          |
 | `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略                                   |
@@ -261,7 +261,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | POST   | `/api/v1/inbox-items`                    | 新建 manual 条目；可选 `Idempotency-Key`；返回 `201`、数据和 `ETag`                                    |
 | POST   | `/api/v1/inbox-items/read-all`           | 以 `through_created_at` 批量已读；可选幂等键；不受当前筛选缩小                                         |
 | GET    | `/api/v1/inbox-items/:id`                | 详情、可用动作和 `ETag`                                                                                |
-| PATCH  | `/api/v1/inbox-items/:id`                | 编辑标题/摘要/优先级/截止时间；强制 `If-Match`；终态拒绝；`system_maintenance` 不能设置截止时间         |
+| PATCH  | `/api/v1/inbox-items/:id`                | 编辑标题/摘要/优先级/截止时间；强制 `If-Match`；终态拒绝；`system_maintenance` 不能设置截止时间        |
 | GET    | `/api/v1/inbox-items/:id/events`         | 分页时间线，默认 50/最大 100；返回 `ETag` 与 `meta.inbox_item_version`                                 |
 | POST   | `/api/v1/inbox-items/:id/read`           | 单条已读；强制 `If-Match`，可选幂等键                                                                  |
 | POST   | `/api/v1/inbox-items/:id/snooze`         | 设置未来 `snoozed_until`；强制 `If-Match`，可选幂等键                                                  |
@@ -297,16 +297,16 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 
 ## 与其他模块协作
 
-| 模块     | 当前协作事实                                                                                     | 后续扩展                                         |
-| -------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| 任务     | 可关联/拆分 Task；写入触发 reconciliation；follow-up、阻塞与提前 24 小时临期来源已投影并协调删除 | 更多筛选与跨模块统计继续扩展                     |
-| 项目     | 所属 Task 的显式 follow-up 产出已携带 Project 快照投影                                           | 项目节点继续使用独立稳定事件键投影               |
-| 客户     | 当前没有客户活动或回访来源                                                                       | v0.4 回访到期生成去重 Inbox Item                 |
-| 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办             |
-| Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                               |
-| 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                          | 随 T-11E 来源投影自然纳入更多业务事件            |
+| 模块     | 当前协作事实                                                                                     | 后续扩展                                                      |
+| -------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| 任务     | 可关联/拆分 Task；写入触发 reconciliation；follow-up、阻塞与提前 24 小时临期来源已投影并协调删除 | 更多筛选与跨模块统计继续扩展                                  |
+| 项目     | 所属 Task 的显式 follow-up 产出已携带 Project 快照投影                                           | 项目节点继续使用独立稳定事件键投影                            |
+| 客户     | 当前没有客户活动或回访来源                                                                       | v0.4 回访到期生成去重 Inbox Item                              |
+| 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办                          |
+| Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                                            |
+| 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                          | 随 T-11E 来源投影自然纳入更多业务事件                         |
 | 系统维护 | 备份创建失败与校验失败已投影安全 Inbox Item，并提供打开数据与备份入口                            | 迁移失败、Sidecar 启动前失败、数据库不可写、恢复/演练失败仍待 |
-| Agent    | 未实现                                                                                           | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件 |
+| Agent    | 未实现                                                                                           | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件              |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
 
