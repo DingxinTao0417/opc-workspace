@@ -22,6 +22,7 @@ var defaultOrigins = []string{
 
 type Config struct {
 	DatabasePath   string
+	ArtifactDir    string
 	Port           int
 	SessionToken   string
 	AllowedOrigins []string
@@ -59,6 +60,8 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	fs.SetOutput(io.Discard)
 	databaseDefault := firstNonEmpty(getenv("OPC_DB_PATH"), getenv("OPC_DATABASE_PATH"))
 	databasePath := fs.String("db", strings.TrimSpace(databaseDefault), "SQLite database path")
+	artifactDefault := strings.TrimSpace(getenv("OPC_ARTIFACT_DIR"))
+	artifactDir := fs.String("artifacts", artifactDefault, "controlled Task Artifact directory")
 	portFlag := fs.Int("port", port, "loopback port; 0 selects a free port")
 	devFlag := fs.Bool("dev", dev, "enable explicit development-only relaxations")
 	seedFlag := fs.Bool("seed", seed, "seed idempotent development data (requires --dev)")
@@ -90,6 +93,21 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 		}
 	}
 
+	artifacts := strings.TrimSpace(*artifactDir)
+	if artifacts == "" {
+		if path == ":memory:" {
+			return Config{}, errors.New("artifact directory is required with an in-memory database")
+		}
+		artifacts = filepath.Join(filepath.Dir(path), "artifacts")
+	}
+	artifacts, err = filepath.Abs(artifacts)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve artifact directory: %w", err)
+	}
+	if path != ":memory:" && strings.EqualFold(filepath.Clean(artifacts), filepath.Clean(path)) {
+		return Config{}, errors.New("artifact directory must not be the database file")
+	}
+
 	host := strings.TrimSpace(getenv("OPC_HOST"))
 	if host != "" && host != "127.0.0.1" {
 		return Config{}, errors.New("OPC_HOST must be 127.0.0.1; the Sidecar never binds to a public interface")
@@ -106,6 +124,7 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 
 	return Config{
 		DatabasePath:   path,
+		ArtifactDir:    artifacts,
 		Port:           *portFlag,
 		SessionToken:   token,
 		AllowedOrigins: origins,

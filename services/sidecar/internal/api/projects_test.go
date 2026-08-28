@@ -30,7 +30,8 @@ func newProjectTestAPI(t *testing.T) (*gin.Engine, *database.Store) {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	return router, store
+	t.Cleanup(func() { _ = router.Close() })
+	return router.Engine, store
 }
 
 func createProjectForTest(t *testing.T, router http.Handler, body string, headers map[string]string) projectResponse {

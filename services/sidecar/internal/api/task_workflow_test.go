@@ -474,6 +474,19 @@ func seedTaskForLifecycleMatrix(t *testing.T, db *gorm.DB, title, status string)
 	if err := db.Create(&task).Error; err != nil {
 		t.Fatalf("seed %s lifecycle Task: %v", status, err)
 	}
+	if status == "waiting_review" {
+		submission := models.TaskSubmission{
+			ID: uuid.NewString(), TaskID: task.ID, Sequence: 1, Status: "pending_review",
+			Summary: "matrix submission", SubmittedByActorID: models.BuiltinOwnerActorID, SubmittedAt: now,
+		}
+		if err := db.Create(&submission).Error; err != nil {
+			t.Fatalf("seed waiting-review submission: %v", err)
+		}
+		if err := db.Model(&models.Task{}).Where("id = ?", task.ID).UpdateColumn("current_submission_id", submission.ID).Error; err != nil {
+			t.Fatalf("link waiting-review submission: %v", err)
+		}
+		task.CurrentSubmissionID = &submission.ID
+	}
 	return task
 }
 

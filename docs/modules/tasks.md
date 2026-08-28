@@ -1,223 +1,292 @@
 # 任务管理模块
 
-> 实现状态截止：2026-08-27
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）
 >
-> 版本边界：任务事实层已在 SQLite schema v6 和 API v1 中交付，schema v7 增加 Actor/Assignment/Event，当前 schema v8 已交付 T-18D D1 的六状态、六个受控命令和 Task 活动时间线。`review_policy = manual` 的创建/编辑入口、Artifact、提交验收/返工仍属于 T-18D D2；Agent 执行为 v0.2 规划。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线，以及 T-18D D2 manual Submission/Artifact 提交验收均已交付。Inbox/Reminder 消费、本地 Agent Run、专注工时回写和任务看板属于后续纵切。
+
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
-Task 是系统中唯一的**可执行工单**，回答“具体要完成什么、当前执行到哪一步、怎样才算完成”。
+Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和 Agent 都只能关联或驱动 Task，不能另建一套互不一致的完成状态。
 
-- Inbox Item 说明“为什么需要处理”，不能替代 Task，也不能直接被分派。
-- Assignment 保存“由谁负责”及改派历史；Task 不复制负责人事实。
-- Agent Run 保存一次本地执行尝试；Run 成功不等于 Task 完成。
-- Task Artifact 保存实际产出；Artifact 本身不决定验收是否通过。
-- Project 是任务的组织上下文，Focus Session 是工时来源，Workflow Event 是追加式审计。
+当前模块负责：
 
-父子任务只表达真实的完成层级。项目产出产生的“修改、发布、客户确认”等下游工单默认由收件箱关联，不因来源关系自动成为原任务的子任务。
+- Task 事实、父子关系、标签、Project 关联、计划与完成标准；
+- assignee/reviewer 的当前责任与历史 Assignment；
+- 六状态受控生命周期和追加式 Workflow Event；
+- `none` 直接完成与 `manual` 提交验收两种策略；
+- Submission 批次、四种 Artifact、受控文件下载、审计软删除及 Task 聚合硬删除；
+- 所有真实页面的加载、空数据、错误、重试、版本冲突和草稿保留。
 
-## 当前实现状态
+当前不负责：Inbox 的来源消费与自动拆分、Agent Runtime、远程协作/通知、自动生成产出、AI 分析、知识库、备份/恢复或专注计时写入。
 
-当前状态为**部分完成**。任务事实、层级、标签、分页筛选、批量安全操作、计划组排序、责任分派、受控生命周期 D1 和活动时间线已经形成可运行纵切；Artifact、manual 提交验收和专注工时仍未接入。
+## 已实现状态
 
-### 已实现
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite。
+- `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
+- `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
+- Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
+- manual Task 可从 `todo / in_progress` 提交摘要及最多 20 个文本、链接、结构化 JSON 或文件 Artifact；混合文件与非文件提交使用 multipart manifest。
+- Task 详情“产出与验收”模块展示 manual 前置条件、草稿、当前批次、接受/返工、分页历史、Artifact 详情、文件安全下载和确认软删除。
+- `none` 策略明确提示无需产出验收，可使用直接完成命令；manual 缺 assignee 或 owner reviewer 时显示具体前置条件，不提交无效请求。
+- 所有 Task 写命令使用 Task `ETag / If-Match`。输出、审核、删除、Assignment、生命周期和事实编辑在 UI 上互斥，避免同时对旧版本写入。
+- 输出冲突会刷新最新 Task，但保留摘要、文本、链接、结构化 JSON 和原浏览器 `File` 对象；用户查看最新事实后必须再次明确提交。取消未保存设置/草稿不会静默写服务端。
+- 成功写入会立即失效 Task、Submission、Artifact、Assignment、Event、Project 和 Today 相关 Query，避免等待缓存自然过期。
+- Task 时间线已覆盖策略变化、提交、接受、返工、等待验收时撤回、Artifact 删除及 v9 迁移回填文案。
 
-- SQLite schema v8 在保留 v7 全部任务事实、版本、关系、索引和触发器的前提下安全重建 `tasks`，将状态扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled`，并增加 `review_policy`、阻塞来源/原因/时间及提交/验收时间字段；旧任务保持原版本和关系，默认 `review_policy = none`。
-- schema v8 的重建迁移在固定物理连接上于事务外临时关闭外键，事务提交前执行 `PRAGMA foreign_key_check`，成功或失败都恢复外键；迁移失败整体回滚，不留下已登记但关系损坏的半成品。
-- 新建、详情和编辑已接入项目、父任务、完成标准、标签、计划日期、截止时间、预计时长等事实；读取返回 `project_name`、`parent_task_title`、标签和子任务完成数。
-- 父任务约束由 API 校验和数据库递归 trigger 双重保护，禁止自引用和循环。删除父任务时子任务按外键规则解除父级，不删除子任务；父级、子级标题/状态/关系变化会递增受影响任务版本，使嵌套列表缓存失效。
-- 标签提供分页/搜索/排序、幂等新建、编辑和确认删除 API；名称按大小写不敏感唯一，颜色为 `#RRGGBB`，单任务最多 20 个标签。标签重命名、改色或删除会递增所有受影响任务的版本。
-- 任务列表 API 默认每页 50、最大 100，支持状态、优先级、类型、项目、精确计划日期、计划/截止日期范围、重复 `tag_id`、父任务、根任务、标题/描述关键词和白名单排序。多个标签采用“同时包含”语义；排序始终以 `id` 兜底，空日期/空手动顺序排在末尾。
-- 列表的计数、任务行、标签水合在同一只读事务中读取，避免返回相互矛盾的版本和标签快照。
-- 任务页使用服务端分页和防抖搜索；支持状态、优先级、类型、项目、标签和精确计划日期筛选。无筛选时分页展示根任务并按需展开子任务；筛选结果使用父任务面包屑，任务行展示标签和子任务进度。
-- `POST /tasks` 使用规范化 v2 请求摘要，覆盖类型、父任务、完成标准和排序后的标签 ID；保留对旧 v1 请求摘要的安全兼容。同 key 同请求在资源编辑或删除后仍重放首次 `201` 快照，异体复用返回 `409 IDEMPOTENCY_CONFLICT`。
-- `GET /tasks/:id` 与创建响应返回 `ETag`；任务非状态编辑、删除和生命周期命令都必须携带 `If-Match`。缺少版本返回 `428`，旧版本返回 `409 VERSION_CONFLICT`；详情弹窗保留事实草稿和生命周期原因，允许载入最新版后再次明确提交。
-- 任务详情可查询当前 assignee/reviewer 与分页结束历史，并执行首次分派、改派和结束。Assignment 写入同样使用 Task `If-Match`，成功递增 Task 版本；冲突时保留选择和原因并要求用户刷新确认。
-- Task 状态只允许通过 `start / block / unblock / complete / cancel / reopen` 显式命令改变。新建固定为 `todo`，非 todo 创建返回 `422 LIFECYCLE_COMMAND_REQUIRED`；旧 `PATCH /tasks/:id/status` 固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED`。
-- `start` 要求活动 assignee；`block` 和 `cancel` 要求 1–1000 字符原因；`unblock` 只能恢复服务端保存的 `blocked_from_status`；`complete` 只允许 `review_policy = none` 的 `todo / in_progress`。每个命令只递增一次 Task 版本，并可用稳定 `Idempotency-Key` 重放首次响应而不重复写事件。
-- Task 转为 `done` 或 `cancelled` 时，在同一事务结束全部活动 Assignment 并逐条写 `assignment_ended`，Task 主事件最后写入；重新打开回到 `todo`，保留事件但不会恢复旧分派。显式结束 Assignment 不改变 Task 状态，终态 Task 不能新建或改派 Assignment。
-- `GET /tasks/:id/events` 返回 Task 聚合的生命周期、Assignment 和历史迁移事件，默认每页 50、最大 100，并返回 Task `ETag` 与 `meta.task_version`。同一命令内以 `command_seq` 稳定排序；历史 v7 事件允许序号为空。schema v8 trigger 拒绝修改或删除事件，仅允许外键在 Task 硬删除时把关联 Assignment ID 置空。
-- 任务详情的生命周期区会根据当前状态展示可用操作；事实表单有未保存修改时禁止状态命令，避免把旧草稿和新状态混合提交。活动时间线默认折叠并按需加载，覆盖加载、空、错误、重试和分页。
-- `PATCH /api/v1/tasks/batch` 在单事务内执行 1–100 条任务的移动项目、设置/清除计划日期、添加标签或移除标签。所有任务 ID 和 `expected_version` 先整体校验，任一任务不存在、版本过期、项目不可分配、标签不存在或超过 20 标签时全部回滚。
-- `PUT /api/v1/tasks/reorder` 对一个完整 `planned_date` 组（包括无计划日期组）原子写入手动顺序或恢复默认顺序。请求必须提交组内完整 ID/版本集合，组成员或版本变化时返回冲突；手动顺序以 1000 为间隔保存。
-- 任务页在选择一个精确计划日期、清除其他筛选并切换“手动顺序”后，可通过上移/下移持久调整该计划组，并可恢复默认排序。当前尚未实现拖拽。
-- 项目关联继续遵守归档约束；创建、单项编辑和批量移动都不能把任务新关联到已归档项目，既有关联任务仍可编辑未变更字段。
-- 任务响应嵌入的 `project_name` 也受版本保护：项目名称变化或项目硬删除会递增关联任务版本；删除项目时外键置空后，旧任务 `If-Match` 不再可写。
+## 数据模型与约束
 
-### 已知缺口
+### Task
 
-- `review_policy`、`submitted_at` 和 `reviewed_at` 已进入 schema/model/响应，但 D1 不接受创建或编辑 manual 策略；当前新建与迁移任务都为 `none`。`submit-output / accept / request_changes`、Artifact 和产出 UI 留给 D2，因此 `waiting_review` 已可查询和展示，但当前公开 D1 命令不会把普通任务推进到该状态。
-- `completion_criteria` 已保存和编辑，但不会自动判定完成；manual 提交验收上线前，现有普通任务只能走 `review_policy = none` 的直接完成链路。
-- 父任务仍只展示子任务统计，不会因子任务完成/取消而自动推进；所有子任务取消不自动完成的目标规则尚未实现。
-- 批量 API 只允许移动项目、改计划日期、加/删标签，不批量改状态或删除，避免在受控生命周期上线前形成绕过入口。
-- 任务页实现了按钮式计划组排序，今日页尚未消费该纵切，仍没有真实日期分组、跨日期改期或拖拽回滚。
-- 项目/父任务选择器会串行拉取最多每页 100 条的全部选项，没有选择器内搜索；大数据量性能仍需专项验证。
-- 看板、任务依赖和绑定专注工时未实现；`actual_minutes` 字段与项目聚合已存在，但 Focus Session 尚不会自动累计。
-- Task/Tag 创建和 Task 生命周期幂等仍没有调用 Actor 作用域或过期清理；事件重放已保证不重复，完整作用域随本地工作编排实现。
+| 字段 | 当前约束 |
+| --- | --- |
+| `status` | `todo / in_progress / blocked / waiting_review / done / cancelled` |
+| `review_policy` | `none / manual`；策略改变只允许 `todo` 且 Submission 历史为 0 |
+| `current_submission_id` | 指向同一 Task 的最新 Submission；接受、返工、取消后保留，reopen 清空 |
+| `submitted_at / reviewed_at` | 当前/最近一次提交流程的快速状态时间；reopen 清空，历史以 Submission 为准 |
+| `blocked_from_status` | block 时由服务端保存，unblock 只能恢复这个状态 |
+| `version` | 任一影响 Task 聚合呈现或决策的写入递增，用作 ETag 和乐观锁 |
 
-## 当前数据与约束
+Task 创建仍只允许 `todo`；非 `todo` 创建返回 `LIFECYCLE_COMMAND_REQUIRED`。状态不能经通用 PATCH 修改。
 
-| 字段 | 当前契约 |
-|------|----------|
-| `kind` | `work / review / followup / reminder`，默认 `work` |
-| `status` | `todo / in_progress / blocked / waiting_review / done / cancelled`；只由生命周期命令改变 |
-| `review_policy` | `none / manual`；schema/model 已实现，当前新建与编辑入口只产生/保留 `none`，manual 待 D2 开放 |
-| `blocked_reason / blocked_at / blocked_from_status` | 仅 `blocked` 状态非空；解除阻塞恢复服务端保存的 todo/in_progress/waiting_review 后清空 |
-| `completed_at` | 仅 `done` 非空；取消和重新打开时为空 |
-| `submitted_at / reviewed_at` | schema/model 已实现；D1 不提供写入命令，D2 提交验收使用 |
-| `parent_task_id` | 可空，自外键 `ON DELETE SET NULL`，禁止自引用与循环 |
-| `completion_criteria` | 最多 10000 字符，默认空字符串 |
-| `tag_ids` / `tags` | 写入使用最多 20 个 UUID；读取返回按名称稳定排序的完整标签 |
-| `version` | 从 1 开始；任务事实、状态、父子聚合或嵌入标签变化时递增 |
-| `manual_order` | 可空；计划组手动排序使用 1000、2000……；改计划日期时清空 |
-| `due_date` | 可空 RFC 3339 时间戳，服务端规范化为 UTC |
-| `planned_date` | 可空 `YYYY-MM-DD` 纯日期 |
+### TaskSubmission
 
-`title` 为 2–200 字符；描述与完成标准分别最多 10000 字符；预计时长不得为负数。通用 PATCH 不接受 `status`、`review_policy` 或生命周期时间。
+| 字段 | 含义 |
+| --- | --- |
+| `id / task_id / sequence` | UUID、所属 Task、Task 内从 1 递增且唯一的批次序号 |
+| `status` | `pending_review / accepted / changes_requested / withdrawn`；每个 Task 至多一条 pending |
+| `summary` | 可为空但最长 10,000 字符；提交时 summary 与 Artifact 至少一个存在 |
+| `submitted_by_actor_id / submitted_at` | 当前实现固定内置 owner 代录及提交时间 |
+| `reviewed_by_actor_id / reviewed_at / review_reason` | 接受或返工时由内置 owner 记录；返工原因必填 |
+| `withdrawn_by_actor_id / withdrawn_at` | waiting-review Task 取消时由内置 owner 记录 |
+| `is_inferred` | schema v9 从无歧义旧 manual 状态回填的批次为 true |
 
-## 当前 API
+Submission 的 Task、序号、摘要、提交人、提交时间和 inferred 标记不可修改；只有 `pending_review` 可一次性转为 accepted、changes_requested 或 withdrawn。Task 仍存在时禁止直接硬删 Submission。
 
-| 方法 | 路径 | 当前行为 |
-|------|------|----------|
-| GET | `/api/v1/tasks` | 分页、搜索、筛选和稳定排序；可查询根任务或指定父任务 |
-| POST | `/api/v1/tasks` | 创建完整任务事实，状态只能为 todo；非 todo 返回 `LIFECYCLE_COMMAND_REQUIRED`；可选 `Idempotency-Key`；返回 `ETag` |
-| GET | `/api/v1/tasks/:id` | 返回项目/父任务标题、标签、子任务统计和 `ETag` |
-| PATCH | `/api/v1/tasks/:id` | `If-Match` 保护的非生命周期编辑 |
-| PATCH | `/api/v1/tasks/:id/status` | 已废弃；固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED` |
-| POST | `/api/v1/tasks/:id/start` | `todo → in_progress`；要求活动 assignee、Task `If-Match`，可选幂等键 |
-| POST | `/api/v1/tasks/:id/block` | 从 todo/in_progress/waiting_review 进入 blocked；原因必填 |
-| POST | `/api/v1/tasks/:id/unblock` | 只恢复服务端保存的 blocked_from_status；客户端不可指定目标 |
-| POST | `/api/v1/tasks/:id/complete` | todo/in_progress → done；只允许 `review_policy = none` |
-| POST | `/api/v1/tasks/:id/cancel` | 从活动状态进入 cancelled；原因必填并结束活动 Assignment |
-| POST | `/api/v1/tasks/:id/reopen` | done/cancelled → todo；不恢复旧 Assignment |
-| GET | `/api/v1/tasks/:id/events` | Task 活动时间线；分页返回 actor/assignment/request/前后快照/原因/command_seq、Task `ETag` 和版本 |
-| GET | `/api/v1/tasks/:id/assignments` | 当前 assignee/reviewer、分页结束历史、Task 版本与 `ETag` |
-| POST | `/api/v1/tasks/:id/assignments` | Task `If-Match` 保护的首次分派；可选幂等键 |
-| POST | `/api/v1/tasks/:id/reassign` | 原子结束旧分派、创建新分派并写事件；要求原因、Task `If-Match` 和可选幂等键 |
-| POST | `/api/v1/assignments/:id/end` | 结束活动分派并保留历史；要求原因、所属 Task `If-Match` 和可选幂等键 |
-| DELETE | `/api/v1/tasks/:id` | `If-Match` 保护；父任务删除时只解除子任务父级 |
-| PATCH | `/api/v1/tasks/batch` | 原子 `set_project / set_planned_date / add_tags / remove_tags` |
-| PUT | `/api/v1/tasks/reorder` | 原子保存或清除一个完整计划组的 `manual_order` |
-| GET | `/api/v1/tags` | 分页、搜索和排序 |
-| POST | `/api/v1/tags` | 幂等新建标签 |
-| PATCH | `/api/v1/tags/:id` | `If-Match` 保护的名称/颜色编辑 |
-| DELETE | `/api/v1/tags/:id?confirm=true` | `If-Match` + 明确确认，解除任务关联并失效任务版本 |
+### TaskArtifact
 
-任务筛选参数包括 `page`、`page_size`、`q`、`status`、`priority`、`kind`、`project_id`、`planned_date`、`planned_from`、`planned_to`、`due_from`、`due_to`、重复 `tag_id`、`parent_task_id`、`root_only` 和 `sort`。排序字段为 `manual_order / priority / due_date / planned_date / created_at / updated_at / title / status / kind`，前缀 `-` 表示倒序。
+| 字段 | 含义与约束 |
+| --- | --- |
+| `position` | 批次内从 1 开始且唯一，保持客户端提交顺序 |
+| `submission_status`（API 派生） | 必填 `pending_review / accepted / changes_requested / withdrawn`，由父 Submission JOIN 得出；不是第二份可写状态 |
+| `storage_kind` | `text / link / structured / file` |
+| payload | text→`content_text`，link→`reference_url`，structured→`structured_json`，file→受控 `relative_path = objects/<artifact-id>`；四者严格互斥 |
+| `name` | trim 后 1–255 个安全字符，不允许控制字符 |
+| `mime_type / size_bytes / sha256` | 仅文件需要；SHA-256 为 64 位小写十六进制 |
+| `requires_followup` | 人工标记需要后续动作；当前只展示，不自动生成 Task |
+| `produced_by_actor_id` | 提交瞬间的活动 assignee，由服务端派生，客户端不能指定 |
+| `recorded_by_actor_id` | 固定内置 owner，表达“我代录” |
+| `integrity_status` | `unverified / verified / missing / mismatch`；unverified 的检查时间必须为空，其他状态必须有检查时间 |
+| `deleted_*` | owner 软删除时间、操作人和 1–1,000 字符原因，三者同为空或同为非空 |
 
-## 当前 Assignment、生命周期与后续产出
+Artifact 的事实与 payload 创建后不可编辑；仅完整性检查状态和首次软删除元数据允许受控变化。Task 仍存在时禁止直接硬删 Artifact；硬删除整个 Task 聚合时由外键级联清理数据库成员。
 
-- 当前每个任务可有 assignee 和 reviewer；同一 role 同时只能有一个活动 Assignment。
-- v0.1 已支持 active owner/person assignee 和 owner reviewer；person 仅是本地责任记录，由 owner 回填线下进度和产出。system/agent 当前不可作为 assignee。
-- T-18D D1 已扩展六状态，并交付 `start / block / unblock / complete / cancel / reopen`、并发/幂等保护、Assignment 终态联动和 Task 活动时间线。
-- T-18D D2 将开放 `review_policy = manual`，实现 `submit-output / accept / request_changes`，并支持文本、受控本地文件、链接引用和结构化摘要，区分产出者与录入者。
-- v0.2 才支持健康的本地 agent Actor；每次执行形成独立 Agent Run，成功后进入 `waiting_review`。
+schema v9 的 `artifact_deletion_tombstones` 保存 file Artifact ID、Task ID、固定相对路径、size、SHA-256、删除范围 `artifact / task` 与时间。单 Artifact 软删或 Task 聚合硬删会在同一事务写入；记录不可修改或删除，也不引用将被级联删除的 Task/Artifact，因此启动恢复能区分已授权删除与未知候选。
 
-## 关键用户流程
+### WorkflowEvent
 
-### 当前：组织与整理任务
+事件是追加式事实，包含 Task 聚合、actor、可空 assignment/submission/artifact 关联、request ID、前后 JSON 快照、`command_seq` 和创建时间。关联对象随 Task 聚合硬删除时外键 ID 可安全置空，快照继续保留；其余更新/删除由 trigger 拒绝。
 
-1. 用户创建任务，选择类型、项目、父任务、标签、计划/截止时间和完成标准。
-2. 任务页按服务端条件筛选和分页；无筛选时展开父子层级，筛选时显示父级面包屑。
-3. 用户在详情修改事实；请求携带当前 `If-Match`，冲突时保留草稿并选择重新载入或重试。
-4. 用户可选择多条任务原子改项目、计划日期或标签；任一版本失效时整批不写入。
-5. 用户在精确计划日期组内调整顺序；服务端只接受该组完整且版本一致的集合。
+D2 新增事件：
 
-### 当前：执行、阻塞、取消与重新打开
+- `task_review_policy_changed`
+- `task_output_submitted`
+- `task_review_accepted`
+- `task_changes_requested`
+- `task_submission_withdrawn`
+- `task_artifact_deleted`
+- `migration_submission_backfill`（system Actor，schema v9 inferred 历史）
 
-1. 用户先在责任区设置活动负责人，再在生命周期区点击“开始执行”；没有活动 assignee 时服务端拒绝。
-2. todo/in_progress/waiting_review 可填写原因后阻塞；解除阻塞不让客户端选择任意状态，只恢复服务端记录的阻塞前状态。
-3. `review_policy = none` 的 todo/in_progress 可直接完成；完成与取消都原子结束当前负责人和审核人，Task 版本只递增一次。
-4. done/cancelled 可重新打开到 todo；旧分派不会恢复，需要用户按当前事实重新分派。
-5. 任务详情按需展开活动时间线，查看状态、分派和迁移事件；版本冲突时保留操作草稿，刷新后由用户重新确认。
+## 状态机
 
-### 后续：提交产出并验收
+```text
+todo ──start──> in_progress
+  │                 │
+  ├──── block ──────┼──> blocked ──unblock──> 服务端记录的来源状态
+  │                 │
+  ├─ complete ──────┴──> done                 （仅 policy none）
+  │
+  └─ submit-output ─────> waiting_review      （仅 policy manual）
+                             ├─ accept ──────> done
+                             ├─ request_changes -> in_progress
+                             ├─ block/unblock -> blocked/waiting_review
+                             └─ cancel ──────> cancelled + Submission withdrawn
 
-1. 人工负责人完成工作；person 的线下结果由 owner 代录。
-2. `submit-output` 校验至少一个有效 Artifact 或结构化说明，任务进入 `waiting_review`。
-3. owner 接受则进入 `done`，要求返工则保留历史并回到 `in_progress`。
-4. 状态、分派、产出和审计在同一事务或可重放命令中保持一致。
+todo / in_progress / blocked / waiting_review ──cancel──> cancelled
+done / cancelled ──reopen──> todo
+```
 
-## 与其他模块协作
+规则：
 
-| 模块 | 协作方式 |
-|------|----------|
-| 今日 | 已复用六状态展示并从活跃列表排除 done/cancelled；统计总数/剩余/逾期/临期/预计排除 cancelled，actual_minutes 保留；真实日期分组和排序仍待接入。 |
-| 项目 | 当前已支持项目选择、`project_name` 和项目任务聚合；归档项目拒绝新关联，任务聚合变化会递增项目版本。 |
-| Actor | 当前由 Assignment 关联 Actor 与 Task；Task 状态保持唯一事实。 |
-| 收件箱 | 后续创建/关联 Task，并从必需任务派生进度；不复制 Task 状态。 |
-| 客户 | 任务通过 Project 间接获得客户上下文；客户联系人不会自动变成 Actor。 |
-| 专注 | Focus Session 后续绑定 Task，停止时幂等累计 `actual_minutes`。 |
-| 发票/回访 | 后续业务事件经收件箱生成待办任务，不直接改写任务状态。 |
+- start 需要 active assignee。
+- block/cancel 原因必填；unblock 不能由客户端选择目标状态。
+- `none` 可从 todo/in_progress 直接 complete；manual 必须提交并经 owner accept。
+- submit-output 只允许 manual 的 todo/in_progress，且同时需要 active assignee 与 active owner reviewer。
+- accept 在同一事务完成 Task 并结束所有活动 Assignment；request_changes 保留 Assignment 并返回 in_progress。
+- cancel 结束活动 Assignment；若当前是 waiting_review（包括从该状态 block 后），还会先把 pending Submission 撤回。
+- accept、request_changes、cancel 保留 `current_submission_id` 作为最近批次指针；reopen 清空指针和快速时间字段，但保留 Submission、Artifact 与 Event 历史，也不恢复旧 Assignment。
 
-整体依赖见[整体功能架构](../functional-architecture.md)。
+## API 契约
 
-## 分阶段实施
+### Task 与生命周期
 
-1. **任务基础事实（已交付）**：schema v6、类型、父子、完成标准、标签、版本/ETag、任务页服务端分页筛选、批量安全操作和计划组手动排序。
-2. **Actor 与 Assignment（已交付）**：Actor 管理、历史 owner 回填、Assignment API/UI、任务版本并发、幂等责任命令和责任事件。
-3. **T-18D D1 受控状态（已交付）**：schema v8、六状态、六命令、Task `If-Match`/幂等、终态 Assignment 联动、追加式事件与任务详情时间线。
-4. **T-18D D2 产出验收（待交付）**：开放 manual 策略，增加 Artifact、提交/接受/返工和受控文件能力。
-5. **收件箱集成**：支持原子拆分/关联、必需标记和由任务派生的收件箱解决规则。
-6. **今日与专注集成**：今日页接入日期范围与排序 API；持久化 Focus Session 并累计工时。
-7. **v0.2 增强**：任务看板、本地 Agent Run、取消/重试和返工闭环；任务依赖另行排期。
+| 方法 | 路径 | 关键约束 |
+| --- | --- | --- |
+| POST | `/api/v1/tasks` | 仅 todo；支持 `review_policy`; 可选稳定幂等键 |
+| GET | `/api/v1/tasks/:id` | 完整 Task、关系、版本和 `ETag` |
+| PATCH | `/api/v1/tasks/:id` | `If-Match`；不写 status；策略变化仅 todo+无历史 |
+| DELETE | `/api/v1/tasks/:id` | `If-Match`；硬删整个 Task 聚合并协调文件清理 |
+| POST | `/api/v1/tasks/:id/start|block|unblock|complete|cancel|reopen` | `If-Match`；可选稳定幂等键；显式状态机 |
+| GET | `/api/v1/tasks/:id/events` | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version` |
 
-## 验收标准
+### 提交
 
-### 当前任务事实层
+`POST /api/v1/tasks/:id/submit-output` 要求 Task `If-Match`，可选 `Idempotency-Key`。
 
-- CRUD、分页、筛选、排序和搜索均在真实 Sidecar/SQLite 上工作，超过 100 条不静默丢失。
-- 父任务不能指向自身或形成环；父任务删除后子任务保留且版本变化可见。
-- 任一任务/标签旧 `If-Match` 写入返回冲突，不覆盖新数据。
-- 标签大小写不敏感唯一；超过 20 个标签整次写入回滚。
-- 批量操作任一任务不存在、版本过期或约束失败时不产生部分写入。
-- 排序请求缺少完整计划组、成员变化或版本过期时拒绝写入；恢复默认后 `manual_order` 清空。
-- 非生命周期 PATCH 无法写入 `status` 或完成时间。
-- 归档 Project 不能接受新任务或改入任务，既有关联任务仍可编辑。
-- 加载、空、错误、重试、冲突、删除确认和分页状态有真实 UI。
+无文件时发送严格 JSON：
 
-### 当前 Assignment
+```json
+{
+  "summary": "交付说明",
+  "artifacts": [
+    {
+      "client_ref": "note-1",
+      "storage_kind": "text",
+      "name": "结论",
+      "content_text": "正文",
+      "requires_followup": false
+    },
+    {
+      "client_ref": "link-1",
+      "storage_kind": "link",
+      "name": "参考链接",
+      "reference_url": "https://example.com/result",
+      "requires_followup": true
+    },
+    {
+      "client_ref": "json-1",
+      "storage_kind": "structured",
+      "name": "结构化结果",
+      "structured_json": {"outcome":"ok"},
+      "requires_followup": false
+    }
+  ]
+}
+```
 
-- 同一任务同一 role 只有一个活动 Assignment；并发旧版本的创建、改派或结束被拒绝。
-- person 分派明确说明不发送、不登录、不同步；inactive person 不进入候选，停用后既有历史仍可查。
-- 幂等重放不重复 Assignment 或责任事件；完成或取消 Task 只递增一次 Task 版本并结束全部活动记录。
-- Assignment 没有独立 DELETE。Task 永久删除会级联删除 Assignment，保留 `assignment_id` 已置空且含 JSON 快照的 Workflow Event。
+有文件时发送 multipart：
 
-### 当前受控生命周期与时间线
+- 正好一个文本字段 `manifest`，内容是同一 JSON 契约且必须作为首个 part；
+- 此后只允许 manifest 中 file 项通过唯一 `file_field` 精确引用的同名文件 part；
+- 可以在同一 manifest 中混合 text/link/structured/file；
+- 未被引用、重复引用、一个字段多个文件或额外文本字段均拒绝。
 
-- 新任务只能为 todo；通用 PATCH 和已废弃 status 端点不能绕过显式命令。
-- 状态转换矩阵、活动 assignee、阻塞/取消原因和 review policy 由服务端校验，数据库 trigger 同时限制非法转换、终态活动 Assignment 和终态重新分派。
-- 六个命令使用 Task `If-Match`；同 key 同请求可安全重放，同 key 异体请求返回冲突，失败不留下部分 Assignment 或事件。
-- Task 时间线能分页读取生命周期、责任和迁移事件；同请求内顺序可解释，事件普通更新/删除被数据库拒绝。
-- cancelled 不计入 Today 活跃任务与计划工作统计，但其历史 actual_minutes 不被抹除；Project 仍只把 done 计作完成。
+服务端不接受 `produced_by_actor_id`。成功返回 `{data:{task,submission,artifacts,event}}` 并附新版 Task `ETag`。
 
-### 后续工作流
+提交限制：summary 最长 10,000 字符；最多 20 Artifact；`client_ref` 1–100 且同批唯一；文本最多 500,000 字符；HTTP(S) 链接最多 4,096 bytes、必须有 host 且不能含 userinfo；structured 必须是 JSON object 且编码后最多 1 MiB；严格 JSON body 与 multipart `manifest` 各最多 1 MiB；单文件非空且最多 50 MiB；完整 multipart 请求最多 100 MiB。Sidecar HTTP read/write timeout 为 180 秒；前端对提交和文件下载使用 120 秒端到端超时，并在发起 multipart 前估算 manifest 与文件总量，避免明知超过服务端边界仍上传。
 
-- manual、Agent 和高风险任务无法绕过“提交产出 → owner 验收”；该能力需 D2 完成后验收。
-- 并发验收拒绝旧写入，且受控状态不能绕过提交产出与 owner 验收。
-- Artifact 文件只从应用受控目录读取，包含元数据和 SHA-256；软删除可审计。
+### 验收
+
+`POST /api/v1/tasks/:id/review` 要求 Task `If-Match`、可选稳定幂等键，body 为：
+
+```json
+{"decision":"accept","reason":"可选说明"}
+```
+
+或：
+
+```json
+{"decision":"request_changes","reason":"必须说明返工原因"}
+```
+
+reason 最长 1,000 字符。只有 manual + waiting_review + current pending Submission + active owner reviewer 可审核。成功返回 `{data:{task,submission,event}}`。
+
+### 历史、详情与下载
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/v1/tasks/:id/submissions?page=&page_size=` | sequence DESC；每条带 Actor 摘要、Artifact 摘要和总数；包含已软删 Artifact 摘要 |
+| GET | `/api/v1/tasks/:id/artifacts?page=&page_size=&submission_id=&include_deleted=` | 默认隐藏软删；按批次倒序、position/id 正序 |
+| GET | `/api/v1/artifacts/:id` | 返回元数据及按类型的正文；软删详情仍 200，但 payload 全为 null |
+| GET | `/api/v1/artifacts/:id/content` | 仅 file；鉴权后校验大小和 SHA-256，再作为 attachment 下载 |
+
+两个列表默认 `page=1 / page_size=50`、最大 100，返回 `{data, meta:{page,page_size,total,task_version}}` 和 Task `ETag`。所有 Artifact 摘要和详情都必须带由父 Submission 派生的 `submission_status`；摘要不暴露正文或 `relative_path`。前端依据该必填状态禁用 pending-review 删除，但服务端仍执行最终授权校验。
+
+下载成功设置 Content-Type、Content-Length、安全 UTF-8 Content-Disposition、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store` 和 SHA-256 ETag。非 file 返回 `ARTIFACT_CONTENT_UNAVAILABLE`；已删/缺失为 410；大小或哈希不符为 `ARTIFACT_INTEGRITY_MISMATCH` 并禁止输出内容。
+
+前端对已冻结的 D2 错误码提供中文反馈：策略/提交/审核前置分别覆盖 `TASK_MANUAL_REVIEW_REQUIRED`、`TASK_ASSIGNEE_REQUIRED`、`TASK_REVIEWER_REQUIRED`、`TASK_SUBMISSION_NOT_ALLOWED`、`TASK_SUBMISSION_ALREADY_PENDING` 和 `TASK_REVIEW_NOT_ALLOWED`；Artifact 状态覆盖 `ARTIFACT_PENDING_REVIEW`、`ARTIFACT_ALREADY_DELETED`、`ARTIFACT_DELETED`、`ARTIFACT_FILE_MISSING` 与 `ARTIFACT_INTEGRITY_MISMATCH`。未识别错误仍显示服务端 message 和可重试边界，不吞掉 `request_id`。
+
+### 软删除与硬删除
+
+`DELETE /api/v1/artifacts/:id?confirm=true` 要求 Task `If-Match`、可选稳定幂等键和 `{ "reason": "1–1000 字符" }`。pending-review 批次禁止删除。非文件只写软删除元数据；file 删除在同一事务写不可变 tombstone，存在的文件先移入 `.trash/`，事务失败恢复，成功提交后清除 trash 文件。若物理文件已经缺失，确认软删除仍成功，并将完整性记录为 `missing` 及检查时间。列表可用 `include_deleted=true` 审计，详情隐藏已删 payload，文件下载返回 410。
+
+Task DELETE 是聚合硬删除：同一事务先为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，失败恢复已移动文件，提交后物理清理；tombstone 继续保留供启动恢复。它不是单 Artifact 删除的替代入口。
+
+## 受控文件目录
+
+```text
+artifacts/
+  .opc-artifact-store-v1
+  .opc-artifact-store.lock
+  .staging/
+  objects/
+  .trash/
+  .quarantine/
+```
+
+schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久不可变，`artifact_store_id` 只能从空值绑定一次。Sidecar 只接受自己声明过的 root：未绑定数据库声明空目录时写规范 JSON marker `{format_version,database_id,store_id}`，再把 store ID 写回数据库；后续格式/版本/数据库 ID/store ID 任一不符、已绑定数据库改用另一空 root、非空缺 marker、卷根、符号链接或 reparse point 路径均拒绝启动。启动协调前通过 `.opc-artifact-store.lock` 获取进程级非阻塞独占锁，并在 router 生命周期内持有；第二个指向同一 root 的 Sidecar 会启动失败。文件名使用服务端 Artifact UUID，数据库固定只保存 `objects/<artifact-id>` 相对路径。提交事务报错后先查数据库，只有能证明无引用才清除已提升 object；无法排除模糊 COMMIT 已落库时保留给启动 reconcile。marker、暂存文件、对象提升、移动/删除与关键目录项在返回成功前做耐久同步。启动恢复 active trash 前核对 size/SHA-256；错配候选移入 `.quarantine/` 并把 Artifact 标为 mismatch。tombstone 对应且校验一致的授权删除可清理，其余无引用受控候选进入 quarantine；意外目录、链接与无法识别的名称不会被递归跟随或清理。
+
+## 前端交互与并发
+
+- 新建与详情编辑提供 review policy；详情只有在 todo 且无 current/历史 Submission 时开放修改。
+- 输出编辑器允许 summary 加最多 20 个条目；文件草稿保留浏览器 `File`，不会先复制或上传。
+- waiting_review 展示当前批次和完整 Artifact 摘要，接受与返工互斥；返工原因空白时前端阻止提交。
+- Artifact 正文按需加载；missing/mismatch/deleted/corrupt 响应均有明确提示和重试边界，不将下载错误伪装为成功。
+- 上传与下载的 120 秒传输期间显示 busy 状态并锁定其他 Task 写入；超时或失败保留未提交草稿，不伪造成功。
+- 删除需要确认并填写原因；pending-review 项不显示可执行删除动作。
+- 所有 D2 写操作与事实编辑、Assignment、生命周期命令互斥。
+- 版本冲突时客户端保留完整草稿，刷新 Task/Assignment/Submission/Artifact/Event/Project/Today 缓存，再要求用户重新确认；不会用旧 `If-Match` 自动重试。
+- 成功提交或写命令使用同一稳定幂等 key；重新确认冲突后生成新命令上下文，避免把不同预期版本复用到旧 key。
+
+## 迁移与兼容
+
+schema v9 的 `009_task_submissions_artifacts.sql`：
+
+- 新建单例 `workspace_identity`：规范 UUID `database_id` 不可变，`artifact_store_id` 只允许从空值绑定一次，用于把受控 Artifact root 与当前数据库一一对应；
+- 新建 Submission/Artifact 表，以及跨聚合删除保留且不可变的 `artifact_deletion_tombstones`；
+- 给 Task 增加 `current_submission_id` 并要求只能指向同 Task 最新批次；
+- 给 Workflow Event 增加 nullable `submission_id / artifact_id`，校验聚合一致性并延续追加式保护；
+- 对 schema v8 已存在且无歧义的 manual 提交/审核事实生成 `is_inferred = 1` 的 sequence 1 Submission；
+- 用内置 owner 填提交/审核/撤回 Actor，按旧状态推断 pending/accepted/changes_requested/withdrawn；
+- 写一条 system Actor 的 `migration_submission_backfill` 事件；
+- 不为历史任务编造 Artifact。
+
+迁移在固定连接上事务外临时关闭外键，事务提交前运行 `foreign_key_check`，成功或失败都恢复外键；异常时整体回滚。
+
+## 已验证与后续
+
+当前自动验证覆盖：
+
+- migration v8→v9 数据保留、约束、inferred 回填、事件关联、重跑/回滚和外键恢复；
+- JSON 与 multipart 混合提交、Actor 归属、限制、并发、幂等重放和补偿；
+- 接受、返工、取消撤回、reopen、软删、Task 硬删、文件丢失/篡改和安全下载头；
+- 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
+- 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
+
+仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、专注工时持久化、Client/Finance 业务、AI 助手与知识库。
 
 ## 相关代码/PRD 链接
 
-- [PRD：任务管理](../opc-workspace-PRD.md#52-任务管理)
-- [PRD：任务表与编排规划表](../opc-workspace-PRD.md#主要数据表)
-- [整体功能架构](../functional-architecture.md)
-- [schema v6 迁移](../../services/sidecar/internal/database/migrations/006_task_facts.sql)
-- [schema v8 生命周期迁移](../../services/sidecar/internal/database/migrations/008_task_workflow.sql)
-- [任务 API](../../services/sidecar/internal/api/tasks.go)
-- [任务生命周期与事件 API](../../services/sidecar/internal/api/task_workflow.go)
-- [任务生命周期 API 测试](../../services/sidecar/internal/api/task_workflow_test.go)
-- [schema v8 迁移测试](../../services/sidecar/internal/database/task_workflow_migration_test.go)
-- [Assignment API](../../services/sidecar/internal/api/assignments.go)
-- [Assignment API 测试](../../services/sidecar/internal/api/assignments_test.go)
-- [任务批量与排序 API](../../services/sidecar/internal/api/task_operations.go)
-- [标签 API](../../services/sidecar/internal/api/tags.go)
-- [当前 Task model](../../services/sidecar/internal/models/task.go)
-- [TasksPage.tsx](../../apps/web/src/pages/TasksPage.tsx)
-- [TaskList.tsx](../../apps/web/src/components/TaskList.tsx)
-- [TaskDetailModal.tsx](../../apps/web/src/components/TaskDetailModal.tsx)
-- [TaskAssignmentsSection.tsx](../../apps/web/src/components/TaskAssignmentsSection.tsx)
-- [TaskLifecycleSection.tsx](../../apps/web/src/components/TaskLifecycleSection.tsx)
-- [TaskEventsSection.tsx](../../apps/web/src/components/TaskEventsSection.tsx)
-- [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
-- [前端 API client](../../apps/web/src/api/client.ts)
+- [PRD 任务需求与 T-18D](../opc-workspace-PRD.md)
+- [schema v9 迁移](../../services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql)
+- [Task output API](../../services/sidecar/internal/api/task_outputs.go)
+- [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
+- [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
+- [Task API](../../services/sidecar/internal/api/tasks.go)
+- [Task output model](../../services/sidecar/internal/models/artifact.go)
+- [前端 Task output 组件](../../apps/web/src/components/TaskOutputsSection.tsx)
+- [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
+- [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)
+- [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)
+- [前端 D2 测试](../../apps/web/src/components/TaskOutputsSection.test.tsx)

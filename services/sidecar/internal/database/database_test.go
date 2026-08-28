@@ -12,8 +12,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 8 {
-		t.Fatalf("SchemaVersion = %d, want 8", store.SchemaVersion)
+	if store.SchemaVersion != 9 {
+		t.Fatalf("SchemaVersion = %d, want 9", store.SchemaVersion)
 	}
 
 	checks := map[string]int{

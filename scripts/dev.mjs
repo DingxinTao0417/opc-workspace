@@ -10,6 +10,7 @@ const goCommand = process.platform === "win32" ? "go.exe" : "go";
 const pnpmCli = process.env.npm_execpath;
 const devDataDir = join(repoRoot, ".local", "dev-data");
 const databasePath = join(devDataDir, "opc-workspace.db");
+const artifactDir = join(devDataDir, "artifacts");
 const apiBaseUrl = "http://127.0.0.1:9876";
 const webBaseUrl = "http://127.0.0.1:1420";
 const sessionToken = process.env.OPC_SESSION_TOKEN ?? "opc-workspace-local-dev";
@@ -17,6 +18,7 @@ const children = new Set();
 let shuttingDown = false;
 
 mkdirSync(devDataDir, { recursive: true });
+mkdirSync(artifactDir, { recursive: true });
 
 function assertCommand(command, displayName, versionArgs = ["--version"]) {
   const probe = spawnSync(command, versionArgs, { stdio: "ignore" });
@@ -131,6 +133,8 @@ async function main() {
       "./cmd/server",
       "--db",
       databasePath,
+      "--artifacts",
+      artifactDir,
       "--port",
       "9876",
       "--dev",

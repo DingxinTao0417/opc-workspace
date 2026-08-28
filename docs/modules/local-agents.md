@@ -22,7 +22,7 @@
 
 当前状态为未开始：
 
-- SQLite schema v8 已有 Actor/Assignment、Task 六状态命令和可查询的 Workflow Event 时间线；但当前 API 明确拒绝 agent assignee，仓库也没有 `agent_adapters`、`agent_runs`、`task_artifacts` 或可执行 agent Actor 的注册与运行链路。
+- SQLite schema v9 已有 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线；但当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。
@@ -109,7 +109,7 @@
 | agent_adapters | 稳定标识、执行器引用、manifest、启停状态、隔离配置和最近健康结果 |
 | task_assignments | Task 当前 assignee；启动 Run 时必须指向同一个 agent Actor |
 | agent_runs | 一次执行的任务、分派、Agent、输入快照、状态、尝试次数、输出摘要和错误 |
-| task_artifacts | 受控文本、文件或引用的元数据、相对路径、SHA-256、产出者和 Run |
+| task_artifacts | 当前 D2 已有受控文本/文件/链接/结构化产出、相对路径、SHA-256 与 producer/recorder；未来 Run 来源通过新增显式关联或 Workflow Event 表达，不回写 schema v9 |
 | workflow_events | 注册、分派、启动、取消、失败、产出、验收和返工的追加式审计 |
 
 敏感凭据和单次能力令牌不进入上述表。
@@ -206,9 +206,9 @@ Agent Run 状态为：
 ## 相关代码/PRD链接
 
 - [PRD：收件箱与本地工作编排中心](../opc-workspace-PRD.md#56-收件箱与本地工作编排中心)
-- [PRD：本地工作编排规划表](../opc-workspace-PRD.md#本地工作编排规划表尚未实现)
+- [PRD：本地工作编排数据表](../opc-workspace-PRD.md#本地工作编排数据表taskactord2-已实现inboxagent-仍规划)
 - [PRD：T-19 本地 Agent 执行](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)
-- [PRD：API 约定](../opc-workspace-PRD.md#c-api-约定预览)
+- [PRD：API 约定](../opc-workspace-PRD.md#c-api-约定)
 - [当前 Sidecar 路由](../../services/sidecar/internal/api/router.go)
 - [当前 WebView 鉴权与 Origin 中间件](../../services/sidecar/internal/api/middleware.go)
 - [当前 Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)

@@ -40,6 +40,8 @@ type WorkflowEvent struct {
 	Action        string  `gorm:"column:action" json:"action"`
 	ActorID       *string `gorm:"column:actor_id" json:"actor_id"`
 	AssignmentID  *string `gorm:"column:assignment_id" json:"assignment_id"`
+	SubmissionID  *string `gorm:"column:submission_id" json:"submission_id"`
+	ArtifactID    *string `gorm:"column:artifact_id" json:"artifact_id"`
 	AgentRunID    *string `gorm:"column:agent_run_id" json:"agent_run_id"`
 	RequestID     *string `gorm:"column:request_id" json:"request_id"`
 	CommandSeq    *int    `gorm:"column:command_seq" json:"command_seq"`

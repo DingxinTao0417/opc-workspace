@@ -1,6 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 文档状态：桌面基座已实现，可靠性、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）。桌面基座与 Task Artifact 运行目录接线已实现，异常恢复、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md)
 
 ## 定位与边界
 
@@ -23,13 +25,16 @@
 - Tauri 2 桌面窗口、固定最小尺寸和内置 Web 前端。
 - single-instance 插件；再次启动时显示、取消最小化并聚焦主窗口。
 - 生产配置通过 externalBin 打包 opc-sidecar，开发可通过 OPC_SIDECAR_URL 连接外部 Sidecar。
-- Tauri 获取 appDataDir 和 appLogDir，创建数据库、附件、发票、备份和配置目录。
+- Tauri 获取 appDataDir 和 appLogDir，创建数据库、附件、Artifact、发票、备份和配置目录。
 - 每次启动生成随机会话令牌，以 127.0.0.1:0 启动 Sidecar。
+- Tauri 将 `appDataDir/opc-workspace.db` 作为 `OPC_DB_PATH`，将 `appDataDir/artifacts/` 作为 `OPC_ARTIFACT_DIR` 传给 Sidecar；路径只通过环境变量传递，不出现在命令行，也不写入文档或持久前端配置。
+- Sidecar 在监听前校验 Artifact root marker 的 `format_version / database_id / store_id`，用不可变数据库 ID 与一次性 `artifact_store_id` 做双向绑定，获取并持有进程级独占锁，再依据 Artifact 事实和 immutable deletion tombstone 协调 `.staging/`、`objects/`、`.trash/`、`.quarantine/`；数据库换 root、root 换数据库、错 marker 或任一步失败都会阻止 ready。同一 root 已由另一 Sidecar 使用时第二进程启动失败，避免双进程文件协调。
 - 解析 stdout ready JSON，拒绝非 loopback、端口 0、带凭据或带额外路径的地址。
 - Tauri 原生健康探测与前端 sidecar_status 连接握手。
 - Sidecar 状态当前为 starting、ready、error，并可返回 app/API/schema 版本。
-- 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。
+- 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited 或提前唤醒优雅等待，仍由 shutdown 完成等待与兜底终止。
 - Tauri capability 当前仅开放 core:default；前端不能任意调用 shell。
+- manual Task 文件产出通过 WebView 文件选择与鉴权 multipart 上传进入 Sidecar 受控目录；前端不能指定服务端 `relative_path`，下载也只能经过鉴权 content API。
 
 尚未实现：
 
@@ -39,7 +44,7 @@
 - 系统托盘、原生通知、OS 全局快捷键、开机启动和业务文件对话框。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
 - Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
-- 当前主机上的历史检查不足以证明真实 Sidecar 生命周期、安装包或三平台支持。
+- 当前主机上的 Rust 单元测试与源码检查不能替代真实 Sidecar 生命周期、安装包或三平台支持；当前环境缺少 MSVC `link.exe`，完整 Tauri 链接仍受环境限制。
 
 ## 目标功能
 
@@ -84,6 +89,7 @@
 
 ### 文件对话框与路径授权
 
+- 当前 Task 文件 Artifact 使用 WebView 文件选择器取得浏览器 `File`，以 multipart 上传；Sidecar 只接收字节流并复制到受控 Artifact store，不接收客户端本机绝对路径。
 - 导入、导出、恢复、附件、发票和 Adapter 选择均使用原生文件对话框。
 - 前端只获得受控文件引用或经过校验的用户选择，不接受任意路径字符串直接读写。
 - 路径在 Rust 和 Sidecar 边界规范化，防止目录逃逸和符号链接攻击。
@@ -116,9 +122,9 @@
 
 ### 正常启动
 
-1. Tauri 获取单实例锁并初始化 appDataDir / appLogDir。
+1. Tauri 获取单实例锁并初始化 appDataDir / appLogDir，包括 `artifacts/` 目录。
 2. 生成启动期随机令牌并以端口 0 启动内置 Sidecar。
-3. Sidecar 打开数据库、检查兼容、执行安全迁移并输出 ready。
+3. Tauri 注入数据库和 Artifact root；Sidecar 打开数据库、执行安全迁移、读取数据库身份、校验/创建绑定 marker、获取 Artifact root 独占锁并协调受控 store，全部成功后才输出 ready。
 4. Tauri 校验 loopback 地址并携带令牌调用 /health。
 5. 版本与 schema 兼容后，WebView 取得当前进程内连接信息并加载业务页面。
 6. 核心功能从首次启动起可离线使用。
@@ -202,6 +208,7 @@
 - 浏览器请求要求允许的 Origin 和 Bearer Token。
 - 日志通过 request ID 关联 Tauri、Sidecar 和前端错误。
 - Sidecar 重启使旧令牌失效，前端清除缓存连接后重新获取。
+- 数据库路径和 Artifact root 由桌面层在每次启动时注入；WebView 不持有内部 `objects/<artifact-id>` 路径，也不能绕过 Sidecar 读取或删除文件。Sidecar HTTP read/write timeout 为 180 秒；Task 文件上传和下载采用 120 秒客户端端到端超时，普通小型 JSON API 继续使用较短超时。
 
 ## 与其他模块协作
 
@@ -245,23 +252,26 @@
 - 在线 Updater 若未来进入范围，必须单独 ADR 和用户开关；当前实现、设置和权限中保持关闭。
 - 新平台、远程连接或云同步需要独立安全与数据边界评审。
 
-## 验收标准
+## 验收状态
 
-- 生产 Sidecar 只绑定 127.0.0.1 动态端口；无有效令牌或 Origin 不匹配的请求被拒绝。
-- 再次启动应用只聚焦现有窗口，不启动第二个写同一数据库的 Sidecar。
-- ready 地址为非 loopback、端口 0、带凭据或路径时立即拒绝。
-- Sidecar 异常退出有明确状态、有上限重启和手动恢复；不会无限循环。
-- 正常退出、强制超时和应用崩溃场景均不遗留由本应用启动的 Sidecar 或 Agent 子进程。
-- 服务不可用时前端显示恢复页或全局错误，不展示伪造业务成功状态。
-- 日志落盘、轮转且可通过 request ID 关联，不包含令牌或敏感正文。
-- 托盘隐藏与真正退出语义明确；退出会关闭 Sidecar 和数据库。
-- 通知拒绝或系统不支持时，应用内提醒仍可用且业务状态不丢失。
-- OS 全局快捷键只有注册成功后生效；冲突时给出说明并保留 WebView 内快捷键。
-- 文件操作只访问用户通过原生对话框授权或应用控制的目录。
-- 离线更新只接受签名、平台、架构和版本兼容均有效的包，更新前已有验证备份。
-- 在线 Updater 不发起检查、下载或作为启动依赖。
-- Windows、macOS、Linux 的支持声明分别有对应签名/公证、干净机、备份恢复、更新和性能证据。
-- 首次启动无需下载业务运行时，在断网环境可以完成核心流程。
+### 当前已验证
+
+- [x] 生产 Sidecar 配置只接受 127.0.0.1，动态端口、会话令牌与精确 Origin 契约已有测试。
+- [x] single-instance 只聚焦现有窗口，不有意启动第二个桌面 Sidecar。
+- [x] ready 地址为非 loopback、端口 0、带凭据或路径时被拒绝。
+- [x] Tauri 创建 Artifact root 并通过 `OPC_ARTIFACT_DIR` 传给 Sidecar；开发脚本使用独立开发 root。
+- [x] Sidecar 在 ready 前验证数据库绑定 marker/目录、获取 root 进程级独占锁并协调 staging/objects/trash/quarantine；错库或第二 Sidecar 共用 root 时启动失败，文件读写只经过受控 API。
+- [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确子进程句柄；ready 超时与 shutdown 竞态不会伪造 exited。
+- [x] 在线 Updater 未启用，也不是启动依赖。
+
+### 仍待验收
+
+- [ ] Sidecar 异常退出后的有上限重启、手动恢复与孤儿治理。
+- [ ] 全局服务恢复页、日志落盘/轮转和脱敏诊断包。
+- [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
+- [ ] 签名离线更新、迁移前验证备份与失败回退。
+- [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。
+- [ ] 当前主机补齐 MSVC `link.exe` 后的完整 `cargo test` / Tauri 链接与安装包检查。
 
 ## 相关代码/PRD链接
 
@@ -274,5 +284,6 @@
 - [当前 Tauri 配置](../../apps/desktop/src-tauri/tauri.conf.json)
 - [当前最小 capability](../../apps/desktop/src-tauri/capabilities/default.json)
 - [当前 Sidecar 进程入口](../../services/sidecar/cmd/server/main.go)
+- [当前 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [当前 API 安全中间件](../../services/sidecar/internal/api/middleware.go)
 - [当前前端连接发现](../../apps/web/src/api/client.ts)

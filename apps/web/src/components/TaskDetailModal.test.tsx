@@ -24,6 +24,13 @@ const apiMocks = vi.hoisted(() => ({
   endTaskAssignment: vi.fn(),
   executeTaskLifecycleCommand: vi.fn(),
   getTaskEvents: vi.fn(),
+  getTaskSubmissions: vi.fn(),
+  getTaskArtifacts: vi.fn(),
+  getTaskArtifact: vi.fn(),
+  submitTaskOutput: vi.fn(),
+  reviewTaskSubmission: vi.fn(),
+  deleteTaskArtifact: vi.fn(),
+  downloadTaskArtifact: vi.fn(),
   getAllProjects: vi.fn(),
   getAllTags: vi.fn(),
   getAllTasks: vi.fn(),
@@ -62,6 +69,7 @@ const task: Task = {
   completedAt: null,
   submittedAt: null,
   reviewedAt: null,
+  currentSubmissionId: null,
   tags: [],
 };
 
@@ -111,6 +119,10 @@ describe("TaskDetailModal", () => {
       items: [],
       meta: { page: 1, pageSize: 20, total: 0, taskVersion: task.version },
     });
+    apiMocks.getTaskSubmissions.mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 10, total: 0, taskVersion: task.version },
+    });
     useUiStore.setState({ taskDetailId: task.id });
   });
 
@@ -134,6 +146,12 @@ describe("TaskDetailModal", () => {
     fireEvent.change(screen.getByLabelText("预计时长"), {
       target: { value: "90" },
     });
+    await waitFor(() =>
+      expect(screen.getByLabelText("验收策略")).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText("验收策略"), {
+      target: { value: "manual" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "高" }));
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
 
@@ -144,6 +162,7 @@ describe("TaskDetailModal", () => {
           title: "整理最终项目简报",
           description: "核对范围与交付时间",
           priority: "P1",
+          reviewPolicy: "manual",
           plannedDate: "2026-08-30",
           estimatedMinutes: 90,
         }),

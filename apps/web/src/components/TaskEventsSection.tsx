@@ -6,7 +6,10 @@ import {
   History,
   LoaderCircle,
   RotateCcw,
+  Send,
   ShieldAlert,
+  SlidersHorizontal,
+  Trash2,
   UserRound,
   UserRoundCog,
   XCircle,
@@ -33,12 +36,25 @@ const eventPresentations: Record<string, EventPresentation> = {
   task_completed: { icon: Check, label: "完成任务" },
   task_cancelled: { icon: XCircle, label: "取消任务" },
   task_reopened: { icon: RotateCcw, label: "重新打开任务" },
+  task_review_policy_changed: {
+    icon: SlidersHorizontal,
+    label: "修改验收策略",
+  },
+  task_output_submitted: { icon: Send, label: "提交任务产出" },
+  task_review_accepted: { icon: Check, label: "接受产出并完成任务" },
+  task_changes_requested: { icon: RotateCcw, label: "要求返工" },
+  task_submission_withdrawn: { icon: XCircle, label: "撤回待验收提交" },
+  task_artifact_deleted: { icon: Trash2, label: "软删除任务产出" },
   assignment_created: { icon: UserRound, label: "创建责任分派" },
   assignment_reassigned: { icon: UserRoundCog, label: "改派责任人" },
   assignment_ended: { icon: UserRoundCog, label: "结束责任分派" },
   migration_assignment_backfill: {
     icon: History,
     label: "迁移推定历史负责人",
+  },
+  migration_submission_backfill: {
+    icon: History,
+    label: "迁移推定历史提交",
   },
 };
 
@@ -55,6 +71,7 @@ const internalReasonLabels: Record<string, string> = {
   "Task completed": "任务完成后自动结束",
   "Task cancelled": "任务取消后自动结束",
   schema_v7_migration_inferred_owner: "历史责任记录由迁移推定",
+  schema_v9_migration_inferred_submission: "历史提交记录由迁移推定",
 };
 
 function formatEventTime(value: string): string {
@@ -82,6 +99,9 @@ function eventReason(event: TaskWorkflowEvent): string | null {
   if (event.action === "migration_assignment_backfill") {
     return "历史责任记录由迁移推定";
   }
+  if (event.action === "migration_submission_backfill") {
+    return "历史提交记录由迁移推定";
+  }
   if (!event.reason) return null;
   return internalReasonLabels[event.reason] ?? event.reason;
 }
@@ -104,6 +124,7 @@ function EventRow({ event }: { event: TaskWorkflowEvent }) {
   const previousStatus = snapshotStatus(event.previous);
   const currentStatus = snapshotStatus(event.current);
   const reason = eventReason(event);
+  const inferred = event.action.startsWith("migration_");
   return (
     <li>
       <span className="task-event-icon">
@@ -112,9 +133,7 @@ function EventRow({ event }: { event: TaskWorkflowEvent }) {
       <div>
         <div className="task-event-title">
           <strong>{presentation.label}</strong>
-          {event.action === "migration_assignment_backfill" ? (
-            <em>迁移推定</em>
-          ) : null}
+          {inferred ? <em>迁移推定</em> : null}
         </div>
         <p>
           <Clock3 size={11} />

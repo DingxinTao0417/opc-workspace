@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v2.0
+> **一人公司操作系统** · PRD v2.1
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-27
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v8
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v9
 
-> **v2.0 更新说明**：完成 T-18D D1。SQLite schema v8 安全重建 Task 六状态，增加 `review_policy`、阻塞/提交/验收字段、Workflow Event `command_seq` 与不可变保护；API/UI 接通开始、阻塞、解除阻塞、完成、取消、重新打开和分页 Task 活动时间线。新建只允许 todo，旧 status 端点返回 410；完成/取消原子结束活动 Assignment，reopen 不恢复。`review_policy = manual` 的创建/编辑入口、Artifact 与提交验收/返工明确留给 D2。
+> **v2.1 更新说明**：完成 T-18D D2。SQLite schema v9 新增带不可变 database ID/一次性 store 绑定的 `workspace_identity`、Submission、四种互斥 payload 的 Artifact、不可变 deletion tombstone、Task `current_submission_id` 与 Workflow Event 的 Submission/Artifact 关联，并对无歧义 schema-v8 manual 历史做 inferred 回填。API/UI 已开放受限 manual policy、JSON/multipart 混合产出提交、owner 接受/返工、分页历史、按需正文、安全文件下载、确认软删除和 Task 聚合硬删除补偿；Tauri/开发脚本接入数据库身份强绑定、进程独占、耐久同步并带 quarantine 的受控 Artifact store。Inbox/Reminder、Agent Runtime、备份恢复、Client/Finance 等仍是后续范围。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -287,7 +287,7 @@ pnpm dev
 
 **历史原型（已移除）**：`tasks-linear.html`
 
-> **当前状态**：部分完成。schema v8 延续任务事实与 Actor/Assignment，交付 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态、六个显式命令和 Task 活动时间线；任务页支持六状态筛选/分组，详情支持责任管理、生命周期冲突草稿和分页事件。manual policy 入口、Artifact、提交验收/返工、今日页排序接入和拖拽仍未实现。
+> **当前状态**：部分完成。schema v9 延续任务事实、Actor/Assignment 与 D1 六状态，已交付 manual policy、Submission/Artifact、提交/接受/返工、等待验收取消撤回、受控文件与完整时间线；任务详情支持产出草稿、当前批次、分页历史、按需正文、安全下载及确认软删除。今日页排序接入、拖拽/看板、Inbox 与 Agent 仍未实现。
 
 目标提供全量任务视图；v0.1 先完成列表视图，任务看板归入 v0.2。
 
@@ -316,7 +316,8 @@ pnpm dev
 | 关联项目 | 外键 | 否 | 关联到项目 |
 | 父任务 | 外键 | 否 | 用于项目产出后的工单拆分和任务树 |
 | 完成条件 | 文本 | 否 | 用于人工验收或 Agent 输出检查 |
-| 验收策略 | 枚举 | 是 | none / manual；普通快速任务默认 none，Agent 和高风险任务强制 manual |
+| 验收策略 | 枚举 | 是 | none / manual；默认 none；创建时可选，既有任务只在 todo 且无提交历史时可改 |
+| 当前提交 | 外键 | 自动 | 指向同 Task 最新 Submission；接受/返工/取消后保留，reopen 清空 |
 | 截止日期 | 日期时间 | 否 | 含时间 |
 | 预估时长 | 时长 | 否 | 分钟为单位 |
 | 实际时长 | 时长 | 自动 | 专注模式自动累计 |
@@ -345,7 +346,8 @@ pnpm dev
    - `person` 仅记录线下责任归属，不代表对方能够登录或远程操作应用
 6. **任务产出**
    - 支持文本、文件、链接和结构化摘要，文件保存在应用控制的本地目录
-   - 产出记录来源 Task、Actor、Agent Run、校验值和创建时间，可作为后续收件箱项的来源
+   - 当前人工提交由活动 assignee 作为 producer，内置 owner 作为 recorder/submitter；未来 Agent Run 可在保持同一审计语义下接入
+   - 产出记录来源 Task、Submission、Actor、校验值、完整性与创建时间；`requires_followup` 当前只展示，未来可作为收件箱项来源
 7. **任务依赖**（MVP 后）
    - 设置前置任务，前置任务完成后才出现在待办中
 
@@ -369,7 +371,9 @@ pnpm dev
 | cancel | todo / in_progress / blocked / waiting_review | cancelled | 原因必填；不等同完成 |
 | reopen | done / cancelled | todo | 清除终态时间，保留历史事件和产出 |
 
-当前 D1 已交付 `start / block / unblock / complete / cancel / reopen`，均要求 Task `If-Match`，支持可选幂等快照并追加 Workflow Event。开始前必须有活动 assignee；完成/取消会在同一事务结束全部活动 Assignment；重新打开不恢复旧分派。`submit-output / accept / request_changes` 属于 D2，且当前 API/UI 不开放把普通任务设置为 `review_policy = manual`；`waiting_review` 已进入数据约束、列表筛选和时间线显示，以便 D2 延续，而不是当前可完整使用的验收链路。
+当前 D1 与 D2 均已交付。所有生命周期、Assignment、submit-output、review 和 Artifact 删除写命令要求 Task `If-Match`，并可选稳定幂等键；同请求重放首次响应且不重复事件，同键异体请求冲突。manual 提交前必须有 active assignee 与 active owner reviewer；accept 在同一事务结束活动 Assignment，request_changes 回到 in_progress。waiting_review 取消会把 pending Submission 标记 withdrawn。accept、request_changes、cancel 保留最近 `current_submission_id`，reopen 才清空指针与快速提交时间，历史 Submission/Artifact/Event 始终保留。
+
+产出提交最多 20 个 Artifact；摘要最长 10,000 字符。text 最多 500,000 字符；link 仅允许无凭据 HTTP(S)、最多 4,096 bytes；structured 必须为 JSON object 且编码后最多 1 MiB；严格 JSON body 与 multipart `manifest` 各最多 1 MiB；单文件非空且最多 50 MiB，完整 multipart 请求最多 100 MiB。无文件使用严格 JSON；有文件时唯一 `manifest` JSON 必须是首个 part，其后只允许被 manifest 通过唯一 `file_field` 精确引用的文件 part，并可在 manifest 混合非文件项。客户端不得传 producer Actor，服务端从活动 assignee 派生；前端提交与文件下载使用 120 秒端到端超时。
 
 #### 键盘快捷键
 
@@ -390,7 +394,7 @@ pnpm dev
 
 **历史原型（已移除）**：`projects-linear.html`
 
-> **当前状态**：部分完成。当前 schema v8 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合；Client CRUD、客户选择、项目产出/附件/事件和 Inbox 集成仍未实现。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
+> **当前状态**：部分完成。当前 schema v9 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合；schema v9 的 Task Submission/Artifact 不等于项目级产出集成，Client CRUD、客户选择、项目附件/事件和 Inbox 集成仍未实现。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
 
 项目采用卡片式网格布局，是任务的上层组织单位。
 
@@ -589,7 +593,7 @@ planning --start--> in_progress --pause--> paused --resume--> in_progress
 
 #### 本地 Actor 模型
 
-> **当前实现**：T-18A/T-18B 已交付 Actor 身份、历史 Assignment 回填、Actor API 和设置页“人员与责任”，T-18C 已交付任务负责人/审核人及责任历史，T-18D D1 已在 schema v8 交付六状态命令、终态 Assignment 联动和 Task 活动时间线。Artifact 与 manual 提交验收仍未交付；agent Actor 仅保留数据类型边界，v0.1 API 不允许创建、编辑或分派 agent。
+> **当前实现**：T-18A/T-18B 已交付 Actor 身份、历史 Assignment 回填、Actor API 和设置页“人员与责任”，T-18C 已交付任务负责人/审核人及责任历史，T-18D D1 已在 schema v8 交付六状态命令、终态 Assignment 联动和 Task 活动时间线，T-18D D2 已在 schema v9 交付 manual Submission/Artifact 提交验收与责任审计。agent Actor 仍仅保留数据类型边界，v0.1 API 不允许创建、编辑或分派 agent。
 
 | Actor 类型 | 定义 | 目标能力 |
 |------------|------|--------------|
@@ -598,7 +602,7 @@ planning --start--> in_progress --pause--> paused --resume--> in_progress
 | `agent` | 由 Sidecar 管理且通过健康检查的本地执行器 | 在授权能力和本地资源范围内运行并提交产出，不能自行验收 |
 | `system` | 内置调度与规则主体 | 生成去重事件、派生进度、记录本地故障；不能替代用户完成高风险验收 |
 
-版本边界：v0.1 的 owner/person/system 身份管理和 owner/person 人工 Assignment 已经交付，受控验收闭环继续开发；agent Actor、Adapter 和实际 Run 归入 v0.2。界面明确提示：`person` 仅记录本机责任归属，不会向对方发送任务、创建账号或授予访问权限。客户联系人不自动成为 Actor，只有用户显式创建或关联后才能作为负责人。当前 API 直接拒绝 agent assignee；只有本地执行器注册、健康和隔离验证交付后，才可启用 agent 选项。
+版本边界：v0.1 的 owner/person/system 身份管理、owner/person 人工 Assignment 与 manual 受控验收闭环已经交付；agent Actor、Adapter 和实际 Run 归入 v0.2。界面明确提示：`person` 仅记录本机责任归属，不会向对方发送任务、创建账号或授予访问权限。客户联系人不自动成为 Actor，只有用户显式创建或关联后才能作为负责人。当前 API 直接拒绝 agent assignee；只有本地执行器注册、健康和隔离验证交付后，才可启用 agent 选项。
 
 #### 规划事件来源
 
@@ -880,7 +884,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v2.0 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v2.1 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -945,7 +949,7 @@ Task
  ├── Project（多对一）
  ├── TaskAssignment → Actor
  ├── AgentRun → agent Actor
- ├── TaskArtifact
+ ├── TaskSubmission → TaskArtifact
  ├── FocusSession
  └── WorkflowEvent
 
@@ -954,7 +958,7 @@ Client → Project / Invoice / Activity
 Invoice → Client / Project
 ```
 
-对象事实边界：Inbox Item 保存来源与分诊，Task 保存实际执行状态，Assignment 保存责任变化，Agent Run 保存单次本地执行，Task Artifact 保存产出，Workflow Event 保存追加式审计。禁止在多个表中复制同一个完成状态。
+对象事实边界：Inbox Item 保存来源与分诊，Task 保存实际执行状态和最近 Submission 指针，Assignment 保存责任变化，Task Submission 保存一次提交/审核批次，Task Artifact 保存产出事实，Agent Run 保存未来单次本地执行，Workflow Event 保存追加式审计。禁止在多个表中复制同一个完成状态。
 
 ### SQLite 存储约定
 
@@ -967,6 +971,17 @@ Invoice → Client / Project
 - 外键必须明确删除策略；客户、项目等仍被发票引用时默认 `RESTRICT`，可选关联默认 `SET NULL`
 
 ### 主要数据表
+
+**workspace_identity** - 数据库与受控文件根身份（schema v9 已实现）
+
+| 字段 | 类型 | 约束 / 说明 |
+|------|------|-------------|
+| singleton | INTEGER | PRIMARY KEY，固定为 1，保证每个数据库只有一条身份记录 |
+| database_id | TEXT | 不可变、唯一、规范小写 UUID；Artifact JSON marker 必须携带同一值 |
+| artifact_store_id | TEXT | 可空、唯一、规范小写 UUID；仅允许从空值绑定一次，之后必须与 marker `store_id` 相同 |
+| created_at | TEXT | 非空创建时间 |
+
+trigger 拒绝删除记录或改变身份事实，仅允许 `artifact_store_id` 从空值绑定一次。Sidecar 在 ready 前校验 Artifact root 的规范 `format_version + database_id + store_id` marker；首次声明空 root 后将 store ID 写回数据库，之后数据库不能静默换 root，root 也不能被另一数据库接管。
 
 **tasks** - 任务表
 
@@ -981,7 +996,8 @@ Invoice → Client / Project
 | project_id | TEXT | FOREIGN KEY → projects.id |
 | parent_task_id | TEXT | schema v6；FOREIGN KEY → tasks.id ON DELETE SET NULL；禁止自引用与循环 |
 | completion_criteria | TEXT | schema v6；最多 10000 字符，默认空字符串 |
-| review_policy | TEXT | schema v8：none / manual；当前 API/UI 只产生/保留 none，manual 待 D2 开放 |
+| review_policy | TEXT | schema v8：none / manual；schema v9 API/UI 已开放；改变只允许 todo 且无任何 Submission 历史 |
+| current_submission_id | TEXT | schema v9；FOREIGN KEY → task_submissions.id ON DELETE SET NULL；只能指向同 Task 最新批次 |
 | blocked_reason / blocked_at | TEXT | schema v8：阻塞原因与时间；只在 blocked 非空 |
 | blocked_from_status | TEXT | schema v8：解除阻塞时恢复的 todo / in_progress / waiting_review |
 | due_date | TEXT | RFC 3339 UTC |
@@ -992,8 +1008,49 @@ Invoice → Client / Project
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | updated_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | completed_at | TEXT | RFC 3339 UTC |
-| submitted_at / reviewed_at | TEXT | schema v8 字段；D1 不提供写入命令，D2 提交验收使用 |
+| submitted_at / reviewed_at | TEXT | schema v8 字段；D2 提交/审核维护的当前快速事实，reopen 清空；完整历史以 Submission 为准 |
 | version | INTEGER | schema v6；乐观并发版本，默认 1 |
+
+**task_submissions** - Task 产出提交批次（schema v9 已实现）
+
+| 字段 | 类型 | 约束 / 说明 |
+|------|------|-------------|
+| id / task_id | TEXT | UUID；Task 外键 ON DELETE CASCADE |
+| sequence | INTEGER | Task 内从 1 递增且唯一 |
+| status | TEXT | pending_review / accepted / changes_requested / withdrawn；每 Task 最多一个 pending |
+| summary | TEXT | 默认空；最多 10,000 字符 |
+| submitted_by_actor_id / submitted_at | TEXT | 当前固定内置 owner 和 UTC 时间 |
+| reviewed_by_actor_id / reviewed_at / review_reason | TEXT | accepted/changes_requested 使用；返工必须有原因 |
+| withdrawn_by_actor_id / withdrawn_at | TEXT | waiting-review cancel 使用，当前固定 owner |
+| is_inferred | INTEGER | schema v9 从无歧义旧事实回填时为 1 |
+
+Submission 创建事实不可修改；只允许 pending_review 一次性转为 accepted、changes_requested 或 withdrawn。Task 存在时禁止成员硬删除。
+
+**task_artifacts** - Task 产出（schema v9 已实现）
+
+| 字段 | 类型 | 约束 / 说明 |
+|------|------|-------------|
+| id / task_id / submission_id | TEXT | UUID 与同 Task Submission 外键；Task/Submission 聚合删除时 cascade |
+| position | INTEGER | Submission 内从 1 开始且唯一 |
+| submission_status | API 派生 | 必填 pending_review / accepted / changes_requested / withdrawn；由父 Submission JOIN 得出，不另存第二份可写状态 |
+| storage_kind | TEXT | text / file / link / structured |
+| name | TEXT | trim 后 1–255 个安全字符 |
+| content_text | TEXT | 仅 text；非空；API 最多 500,000 字符 |
+| reference_url | TEXT | 仅 link；API 限 HTTP(S)、无 userinfo、最多 4,096 bytes |
+| structured_json | TEXT | 仅 structured；合法 JSON object；编码后 API 最大 1 MiB |
+| relative_path / mime_type / size_bytes / sha256 | TEXT / INTEGER | 仅 file；相对路径固定 `objects/<artifact-id>`；单文件 API 最大 50 MiB |
+| requires_followup | INTEGER | 0/1；当前展示，未来 Inbox 投影使用 |
+| produced_by_actor_id | TEXT | 服务端从提交瞬间 active assignee 派生 |
+| recorded_by_actor_id | TEXT | 当前固定内置 owner |
+| integrity_status / integrity_checked_at | TEXT | unverified / verified / missing / mismatch；unverified 时检查时间为空，其他状态必须非空 |
+| deleted_at / deleted_by_actor_id / delete_reason | TEXT | owner 确认软删除；三者同为空或同为非空；原因 1–1,000 字符 |
+| created_at | TEXT | 非空 UTC 时间 |
+
+四种 payload 严格互斥；Artifact 事实创建后不可编辑，只允许受控完整性状态和首次软删除变化。所有 Artifact 摘要与详情都必须返回父批次派生的 `submission_status`，供客户端判断 pending 禁删；服务端仍做最终校验。API 摘要不返回 payload 或 `relative_path`；详情按需返回正文，软删除详情正文固定为 null；文件内容只通过鉴权下载端点提供。
+
+**artifact_deletion_tombstones** - 文件删除恢复事实（schema v9 已实现）
+
+每条记录保存 Artifact/Task ID、固定 `objects/<artifact-id>` 路径、size、SHA-256、`deletion_scope = artifact / task` 与删除时间。file Artifact 软删或 Task 聚合硬删在同一事务写入；记录无指向 Task/Artifact 的外键且由 trigger 禁止修改/删除，因此聚合消失后仍能让启动恢复区分授权删除与未知候选。
 
 **tags / task_tags** - 标签与任务标签关联
 
@@ -1062,7 +1119,7 @@ Invoice → Client / Project
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | updated_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 
-**focus_sessions** - 专注记录表（当前 schema v8 仍保留旧字段与规划扩展）
+**focus_sessions** - 专注记录表（当前 schema v9 仍保留旧字段与规划扩展）
 
 | 字段 | 类型 | 约束 |
 |------|------|------|
@@ -1070,8 +1127,8 @@ Invoice → Client / Project
 | task_id | TEXT | FOREIGN KEY |
 | started_at | TEXT | NOT NULL，RFC 3339 UTC |
 | ended_at | TEXT | RFC 3339 UTC |
-| duration_minutes | INTEGER | 当前 schema v8 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
-| completed | INTEGER | 当前 schema v8 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
+| duration_minutes | INTEGER | 当前 schema v9 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
+| completed | INTEGER | 当前 schema v9 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | status | TEXT | planned / active / paused / recovery_pending / completed / cancelled / interrupted；规划字段 |
 | planned_seconds | INTEGER | 本次计划时长；规划字段 |
@@ -1083,9 +1140,9 @@ Invoice → Client / Project
 
 规划迁移通过重建 `focus_sessions` 删除旧 `duration_minutes/completed`，不能让新旧字段并行可写。历史 `completed = 1` 迁为 status=completed；其他历史记录根据 ended_at 映射为 cancelled 或 interrupted；`accumulated_seconds = duration_minutes * 60`。同一迁移版本必须同步更新今日统计查询。迁移后同一数据库同时最多一个未结束 Session。新 Sidecar 发现属于旧进程的 active Session 时先原子转为 recovery_pending；用户再选择计入中断间隔恢复、只计到 last_heartbeat_at 后恢复，或结束为 interrupted。显示剩余时间时使用服务端绝对时间计算，前端 tick 不作为事实；pause/stop/cancel 在事务中结算当前区间，stop 与任务 `actual_minutes` 累计使用同一幂等事务。
 
-#### 本地工作编排数据表（部分实现）
+#### 本地工作编排数据表（Task/Actor/D2 已实现，Inbox/Agent 仍规划）
 
-schema v7 `007_actor_assignments.sql` 已在 schema v6 Task 事实层上新增 `actors`、`task_assignments` 和 `workflow_events`，并完成稳定内置主体与历史任务分派回填。schema v8 `008_task_workflow.sql` 在保留 v7 全部任务事实和版本的前提下重建 Task 六状态，增加 `review_policy`、阻塞/提交/验收字段，并为 Workflow Event 增加 `command_seq`、时间线索引和不可变保护。迁移器对标有 `foreign_keys=off` 的重建迁移使用同一物理连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键。`agent_adapters`、Inbox、Reminder、Artifact、Agent Run 和 `app_settings` 仍是规划；后续只能继续追加递增迁移，不得回写任何已发布迁移。
+schema v7 `007_actor_assignments.sql` 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填稳定责任；schema v8 `008_task_workflow.sql` 重建 Task 六状态并增加 lifecycle/command_seq/事件保护；schema v9 `009_task_submissions_artifacts.sql` 新增带不可变 database ID/一次性 store 绑定的 `workspace_identity`、`task_submissions`、`task_artifacts`、不可变 `artifact_deletion_tombstones`、Task 当前提交和事件关联，并回填无歧义 inferred manual 历史。迁移器对标有 `foreign_keys=off` 的迁移使用同一物理连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键。`agent_adapters`、Inbox、Reminder、Agent Run 和 `app_settings` 仍是规划；后续只能追加迁移，不得回写已发布版本。
 
 **actors** - 本地责任主体（schema v7 已实现）
 
@@ -1193,13 +1250,11 @@ Assignment 不设置自己的工作完成状态；同一任务、同一 role 同
 
 重试必须创建新记录，不覆盖失败或中断记录。
 
-**task_artifacts** - 人或 Agent 的本地产出
+Task Artifact 的已实现 schema 见本章 `task_artifacts` 主表。未来 Agent Run 不直接改写既有 Artifact facts；应通过同一 submit-output 领域服务创建 Submission/Artifact，并以 Workflow Event 或新增显式关联表达 Run 来源，具体 schema 需 T-19 ADR，不能回写 migration 009。
 
-字段至少包括 `id`、`task_id`、`agent_run_id`、`storage_kind`、`name`、`content_text`、`reference_url`、`relative_path`、`mime_type`、`size_bytes`、`sha256`、`requires_followup`、`produced_by_actor_id`、`recorded_by_actor_id`、`deleted_at`、`created_at`。person 的线下结果由 owner 录入时，前者记录 person、后者记录 owner；本地 Agent 产出必须关联 Agent Run。只有项目交付类产出或 owner 显式标记 `requires_followup = 1` 才能新建后续收件箱项。文件只能写入应用控制的产出目录，数据库只保存相对路径和校验值；外部 URL 只作为不可自动抓取的引用，`file:` 等本地路径必须先导入受控目录。
+**workflow_events** - 追加式工作流审计（schema v9 已实现 Task D2 时间线）
 
-**workflow_events** - 追加式工作流审计（schema v8 已实现 Task 时间线）
-
-当前字段包括 `id`、`aggregate_type`、`aggregate_id`、`action`、可选 `actor_id`、`assignment_id`、`agent_run_id`、`request_id`、`previous_json`、`current_json`、`command_seq` 和 `created_at`。Actor 创建/更新/停用、历史 Assignment 回填、Assignment 创建/改派/结束，以及 Task 开始/阻塞/解除阻塞/完成/取消/重新打开已经写入该表。`command_seq` 对同一命令内自动结束 Assignment 和最终 Task 状态事件排序；v7 历史事件允许为空。普通业务 API 不提供修改或删除事件，schema v8 trigger 也拒绝更新/删除，唯一例外是 Task 硬删除时外键将 `assignment_id` 置空。`GET /tasks/:id/events` 已分页查询 Task 聚合时间线；Artifact/Inbox/Agent 等其他聚合的生产与查询仍待各纵切接入。
+当前字段包括 `id`、`aggregate_type`、`aggregate_id`、`action`、可选 `actor_id`、`assignment_id`、`submission_id`、`artifact_id`、`agent_run_id`、`request_id`、`previous_json`、`current_json`、`command_seq` 和 `created_at`。Actor/Assignment、Task 六命令、策略变化、输出提交、接受、返工、待审撤回、Artifact 删除，以及 v7/v9 迁移回填都写入该表。`command_seq` 对同一命令内多个事件稳定排序；历史迁移事件允许为空。schema v9 校验 Submission/Artifact 与 Task 聚合及彼此批次一致。普通 API 不提供修改或删除，trigger 只允许 Task 聚合硬删除时因外键清空已删除成员的 assignment/submission/artifact ID，JSON 快照保持不变。`GET /tasks/:id/events` 已分页查询 Task 聚合时间线；Inbox/Agent 等其他聚合仍待各纵切接入。
 
 **reminders** - 本地提醒调度
 
@@ -1207,7 +1262,7 @@ Assignment 不设置自己的工作完成状态；同一任务、同一 role 同
 
 **idempotency_keys 增量字段** - 幂等重放契约
 
-schema v4 已在现有表上增加 `request_hash`、`response_status` 和 `response_body`；当前 Task、Project 与 person Actor 创建均用其保存规范化请求摘要、首次资源响应和原始 `201` 状态，实现同请求安全重放与异体冲突检测。Actor 以 `POST /api/v1/actors` endpoint 作用域保存 key，并保证重放不重复写 `actor_created` 事件。后续编排迁移再评审 `created_by_actor_id` 和 `expires_at`，把 key 的作用域扩展到调用 Actor、HTTP 方法和规范化路径；过期清理不得破坏仍需审计的 Workflow Event。完整契约中的 `response_body` 只保存有大小上限且已脱敏的资源响应，不缓存文件、Task Artifact 正文或 Agent 输入输出；除 Task/Project/Actor 创建外，其他规划写命令尚未获得这一保证。
+schema v4 已增加 `request_hash`、`response_status` 和 `response_body`。Task/Project/person 创建、Assignment 创建/改派/结束、Task 六命令，以及 D2 submit-output/review/Artifact delete 均保存规范化请求摘要和首次响应，安全重放不重复创建业务事实或 Event，异体复用返回冲突。文件提交摘要包含每项规范化 payload、MIME、size 和 SHA-256，不把文件正文写入幂等表。当前查询作用域为 key + endpoint，请求摘要包含 Task expected version；调用 Actor/过期策略仍待未来迁移评审。旧记录缺少安全快照时返回 `IDEMPOTENCY_REPLAY_UNAVAILABLE`。
 
 **app_settings** - 版本化非敏感用户设置（规划，尚未实现）
 
@@ -1224,14 +1279,20 @@ schema v4 已在现有表上增加 `request_hash`、`response_status` 和 `respo
 ```text
 appDataDir/
 ├─ opc-workspace.db          # SQLite 主数据库
-├─ attachments/              # 用户附件
-├─ artifacts/                # 人或本地 Agent 的任务产出
-├─ invoices/                 # 生成的发票 PDF
-├─ backups/                  # 本机操作性快照
-└─ config/                   # 非敏感应用配置
+├─ attachments/              # 预留；附件业务未实现
+├─ artifacts/                # 已实现：Task 受控产出根
+│  ├─ .opc-artifact-store-v1 # format_version + database_id + store_id marker
+│  ├─ .opc-artifact-store.lock # Sidecar 进程级独占 lease
+│  ├─ .staging/              # 上传暂存与启动清理
+│  ├─ objects/               # 固定 objects/<artifact-id> 文件对象
+│  ├─ .trash/                # 删除事务补偿，不是用户回收站
+│  └─ .quarantine/           # 无引用受控候选隔离，不自动永久删除
+├─ invoices/                 # 预留；发票 PDF 未实现
+├─ backups/                  # 预留；备份/恢复未实现
+└─ config/                   # 预留；部分设置仍在 localStorage
 
 appLogDir/
-└─ opc-workspace.log         # 脱敏运行日志
+└─ opc-workspace.log         # 规划；日志落盘管线尚未完成
 ```
 
 - 应用升级只替换程序文件，不覆盖 `appDataDir`
@@ -1240,21 +1301,21 @@ appLogDir/
 
 ### 7.2 SQLite 生命周期与迁移
 
-1. Tauri 启动时先获取单实例锁，避免多个 Sidecar 同时写同一数据库
-2. Tauri 将数据库路径和动态端口配置传给 Go Sidecar；随机会话令牌通过继承环境或进程管道传递，避免暴露在进程命令行
-3. Go Sidecar 建立连接后启用外键、WAL 和 `busy_timeout`，然后执行版本化数据库迁移
-4. 每次破坏性迁移前自动创建一致性备份；迁移失败时停止启动并进入恢复界面
-5. 应用退出时先停止接收新请求，等待进行中的写事务结束，执行必要 checkpoint 后再关闭数据库和 Sidecar
+1. Tauri 启动时先获取桌面单实例锁；Sidecar 另对 Artifact root 获取并持有进程级非阻塞独占锁，第二个指向同一 root 的 Sidecar 必须在 ready 前启动失败
+2. Tauri 通过环境传递数据库路径、`appDataDir/artifacts/`、动态端口和随机会话令牌，避免敏感值暴露在进程命令行
+3. Go Sidecar 建立 SQLite 连接、启用外键/WAL/`busy_timeout`、执行版本化迁移，再获取锁并依据 Artifact/tombstone 事实声明、校验和协调 Artifact store；全部成功后才输出 ready
+4. **目标、尚未实现**：每次破坏性迁移前自动创建一致性数据库+Artifact 备份；迁移失败时进入恢复界面。当前仅有事务回滚、`foreign_key_check` 和拒绝启动
+5. 应用退出时先停止接收新请求，等待进行中的写事务结束，执行必要 checkpoint 后再关闭数据库和 Sidecar；shutdown 已持有 child handle 时，ready 超时任务不伪造 exited，也不抢走优雅等待与兜底终止职责
 6. 数据库版本记录在 `schema_migrations` 表中；应用版本、Sidecar 版本和数据库版本必须建立兼容关系
 
 ### 7.3 备份策略
 
-版本边界：v0.1 必须交付手动一致性备份、迁移前备份、基础 JSON 导出、校验和、临时库验证和原子恢复，作为本地数据发布闸门；v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级导入工具，不重复定义基础恢复能力。
+版本边界：以下均为尚未实现的发布目标。v0.1 必须交付手动一致性备份、迁移前备份、基础 JSON 导出、数据库与 Artifact 清单/校验、临时恢复验证和原子替换；v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级导入工具。
 
 1. **v0.1 一致性快照基础**
    - 使用 SQLite Online Backup API 或 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件
    - 支持用户手动创建和破坏性迁移前自动创建；v0.1 不提供每日调度
-   - 快照写入 `appDataDir/backups/`，每个备份生成包含 app/API/schema 版本、文件清单和 SHA-256 的 manifest
+   - 快照写入 `appDataDir/backups/`，每个备份包含 SQLite 一致性快照、active file Artifact objects，以及 app/API/schema 版本、文件清单和 SHA-256 manifest
    - 创建后至少执行一次 `integrity_check`、`foreign_key_check` 和可打开性验证
 
 2. **v0.1 基础手动导出**
@@ -1276,9 +1337,10 @@ appLogDir/
 
 ### 7.4 数据安全
 
-- 当前阶段所有核心业务、Actor、任务分派、提醒、产出和 Agent Run 均仅保存在本地，不主动访问线上服务
+- 当前阶段已实现的核心业务、Actor、任务分派、Submission/Artifact 均仅保存在本地，不主动访问线上服务；Reminder、Inbox 和 Agent Run 尚未实现
 - Go Sidecar 仅绑定 `127.0.0.1` 动态端口，并校验由 Tauri 生成的启动期随机会话令牌
 - 数据目录使用当前操作系统用户权限，日志不得记录令牌、完整客户信息、发票内容或第三方连接器请求正文
+- Artifact root 必须带规范的 `format_version / database_id / store_id` JSON marker；database ID 不可变，store ID 首次声明后在数据库中一次性绑定，并由 Sidecar 进程独占锁定。数据库不能换用另一 root，root 不能被另一数据库接管；路径不能为卷根或穿越 symlink/reparse point。数据库只保存 `objects/<artifact-id>` 相对路径，下载前重验大小和 SHA-256；恢复 active trash 前同样核对 size/SHA，错配隔离并标记 mismatch。删除 tombstone 让授权删除可验证，无引用但无法验证授权的候选只移入 quarantine，不自动永久删除
 - person Actor 不包含登录凭据，也不会收到远程任务；本地 Agent 必须默认禁网并只访问单次 Run 明确授权的资源，跨平台沙箱/网络阻断未验证通过时正式执行保持禁用
 - 若未来引入更新检查、第三方连接器、远程模型或多人协作，必须另行评审网络访问、身份、权限、同步、密钥和数据外发边界，并由用户显式启用
 - 应用锁定用于阻止界面访问；数据库静态加密使用 SQLCipher，计划在 MVP 后提供
@@ -1322,7 +1384,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v2.0 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v2.1 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1368,13 +1430,13 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 模块 | MVP 目标功能 | 当前状态（2026-08-27） |
 |------|--------------|--------------------------|
 | 今日工作台 | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板 | **部分完成**：布局、真实任务/今日统计、共享任务详情和基础概览已接通；按日期筛选、拖拽排序、收入与客户动态待实现 |
-| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：schema v6/v7 事实与责任基础、schema v8 六状态/六命令/Task 时间线、快照式幂等、`ETag`/`If-Match`、服务端分页筛选、层级列表、批量安全操作、计划组按钮排序和 Assignment UI 已实现；manual Artifact/提交验收、拖拽和 Focus 工时待实现 |
+| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：schema v6–v9 事实、责任、六状态、时间线与 manual Submission/Artifact 验收，快照幂等、`ETag`/`If-Match`、分页筛选、层级、批量/排序和受控文件均已实现；拖拽/看板、Today 日期排序和 Focus 工时待实现 |
 | 项目管理 | 项目卡片、状态流转、项目进度、项目详情（任务列表） | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务派生进度/工时已实现；客户选择、产出/附件/事件/Inbox 集成待实现 |
 | 客户管理 | 客户列表表格、客户详情、基本 CRUD | **页面骨架**：可导航空状态已实现，CRUD 与详情未开始 |
-| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决 | **部分基础完成**：收件箱仍是空状态页面骨架；Actor/Assignment、schema v8 Task 生命周期与 Task 时间线已交付，Inbox Item/Reminder、收件箱拆分/分派消费、Artifact 与 manual 验收未开始 |
+| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决 | **部分基础完成**：收件箱仍是空状态页面骨架；Actor/Assignment、Task 生命周期/时间线和 manual Submission/Artifact 验收已交付，Inbox Item/Reminder 与收件箱拆分/关联/自动解决尚未开始 |
 | 专注模式 | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导 | **部分完成**：全局计时、专注/休息循环、设置、自动衔接、重置和提示音已实现；会话入库、任务工时、连续天数和通知控制待实现 |
 | 全局功能 | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查 | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现 |
-| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发数据隔离、WAL、外键、迁移入口和 schema v8 已实现；重建迁移已具备同连接外键开关、提交前检查与失败恢复，一致性备份、恢复和基础导入导出仍待实现；每日计划和高级导入归 v0.3 |
+| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、受控 Artifact、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v9、重建迁移安全，以及数据库身份强绑定、进程独占、耐久同步并带 staging/objects/trash/quarantine 的 Artifact store 已实现；一致性备份、恢复和导入导出仍待实现；每日计划和高级导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 - 看板视图（任务看板、项目看板）
@@ -1427,7 +1489,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-27。当前版本是可运行、可扩展的 v0.1 基座；T-18A/T-18B/T-18C 与 T-18D D1 已交付，但这不代表第 9.1 节的完整 MVP、Artifact/manual 验收或收件箱人工编排已经交付。
+> 状态截止：2026-08-27。当前版本是可运行、可扩展的 v0.1 基座；T-18A/T-18B/T-18C 与 T-18D D1/D2 已交付，但这不代表第 9.1 节的完整 MVP、收件箱人工编排、Agent 或备份恢复已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1445,9 +1507,9 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 前端 | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力及集中式 `styles.css` |
 | 桌面 | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件 |
 | Sidecar | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0` |
-| API / Schema | API v1；SQLite schema v8 |
+| API / Schema | API v1；SQLite schema v9 |
 | 数据默认值 | 开发数据库默认空白，不自动注入 demo 业务数据 |
-| 明确边界 | 当前代码不使用 Docker；已实现 Task 事实层、Actor/Assignment、D1 受控生命周期和 Task 时间线，但未实现 Artifact/manual 提交验收、完整工作编排、Agent 执行、AI 助手、知识库、客户回访或收入/支出/发票业务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
+| 明确边界 | 当前代码不使用 Docker；已实现 Task 事实层、Actor/Assignment、D1 生命周期、Task 时间线和 D2 manual Submission/Artifact/受控文件，但未实现完整 Inbox/Reminder 编排、Agent 执行、备份恢复、AI 助手、知识库、客户回访或收入/支出/发票业务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
 ### 10.2 单项任务统一开发流程
 
@@ -1482,14 +1544,14 @@ pnpm dev
 
 `scripts/dev.mjs` 的实际流程：
 
-1. 检查 Go 和 pnpm，创建 `.local/dev-data/`。
-2. 以 `--dev --db .local/dev-data/opc-workspace.db --port 9876` 启动 Sidecar。
+1. 检查 Go 和 pnpm，创建 `.local/dev-data/` 与其 `artifacts/` 子目录。
+2. 以 `--dev --db .local/dev-data/opc-workspace.db --artifacts .local/dev-data/artifacts --port 9876` 启动 Sidecar。
 3. 注入开发会话令牌和精确 Origin 白名单，轮询带鉴权的 `/health`。
 4. Sidecar 就绪后启动 Vite；Vite 固定监听 `127.0.0.1:1420`，代理 `/api` 和 `/health`。
 5. `pnpm dev` 再启动 `tauri dev`，通过 `OPC_SIDECAR_URL` 复用同一个开发 Sidecar，避免重复打开数据库。
 6. 必要子进程异常退出时，统一脚本关闭其余进程树。
 
-开发数据固定在 `.local/dev-data/opc-workspace.db`，正式桌面数据固定在 Tauri `appDataDir`，两者不得互用。默认启动不传 `--seed`；只有显式 `--dev --seed` 才能创建幂等测试数据。
+开发数据固定在 `.local/dev-data/opc-workspace.db` 与 `.local/dev-data/artifacts/`，正式桌面数据库和 Artifact 固定在 Tauri `appDataDir`，两者不得互用。默认启动不传 `--seed`；只有显式 `--dev --seed` 才能创建幂等测试数据。
 
 #### 10.3.2 API 开发约定
 
@@ -1513,11 +1575,11 @@ pnpm dev
 | 本地配置 | Zustand persist + `localStorage` | 个人资料、默认首页、右栏、主题、减少动效和专注参数；规划迁移到版本化本地配置 |
 | 运行态 | Zustand 内存状态机 | 当前专注阶段、剩余秒数、已完成循环 |
 
-API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统计缓存 10 秒且失败重试 2 次。Tauri 前端通过 `sidecar_status` 等待 `starting → ready`；当前全局壳没有展示 health 结果，只有部分业务页显示服务不可用，后续需补全局状态条、诊断和重连入口。
+普通 API 单次请求超时 8 秒；Artifact 上传和下载使用 120 秒客户端传输窗口，Sidecar HTTP 读写超时为 180 秒。健康检查每 15 秒刷新；任务和今日统计缓存 10 秒且失败重试 2 次。Tauri 前端通过 `sidecar_status` 等待 `starting → ready`；当前全局壳没有展示 health 结果，只有部分业务页显示服务不可用，后续需补全局状态条、诊断和重连入口。
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v8，新增结构只能追加如 `009_add_xxx.sql` 的递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v9，新增结构只能追加如 `010_add_xxx.sql` 的递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1525,7 +1587,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；`002_remove_default_demo_seed.sql` 只清理旧版本固定 UUID 的 demo 记录，不删除用户创建的数据；`003_project_lifecycle.sql` 增加项目生命周期；`004_idempotency_snapshots.sql` 增加幂等快照；`005_project_aggregate_versions.sql` 原子维护项目聚合版本；`006_task_facts.sql` 增加任务事实/版本/关系保护；`007_actor_assignments.sql` 新增 Actor、Assignment 和 Workflow Event 基础并回填历史 owner 责任；`008_task_workflow.sql` 安全重建 Task 六状态，增加 `review_policy`、阻塞/提交/验收字段，恢复全部任务/项目索引与 trigger，并为事件增加 `command_seq`、时间线索引和不可变保护。迁移文件首行可声明 `-- migration: foreign_keys=off`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–005 增加 Project 生命周期、幂等快照和聚合版本；006 增加 Task facts/关系保护；007 新增 Actor/Assignment/Event 并回填 owner 责任；008 安全重建六状态 Task 并增加 lifecycle/command_seq/事件保护；`009_task_submissions_artifacts.sql` 新增带不可变 database ID/一次性 store 绑定的 `workspace_identity`、Submission/Artifact、不可变 deletion tombstone、Task 当前提交、Event 关联和 inferred manual 历史回填，不虚构 Artifact。迁移文件首行可声明 `-- migration: foreign_keys=off`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -1534,21 +1596,21 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 | T-01 工程目录与统一脚本 | 已完成 | pnpm workspace、统一启动、Sidecar 构建脚本、开发数据隔离 |
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成 | 窗口、单实例、动态端口、令牌、ready/health、退出清理 |
 | T-03 Go 健康检查与 API 基础 | 已完成 | 版本化路由、安全中间件、统一错误和健康检查 |
-| T-04 SQLite 初始化与迁移 | 已完成 | schema v8、PRAGMA、嵌入式迁移、demo 清理、项目/Task/Actor 基础，以及可安全回滚并恢复外键的 Task 六状态重建与事件保护 |
+| T-04 SQLite 初始化与迁移 | 已完成 | schema v9、PRAGMA、嵌入迁移、demo 清理、Project/Task/Actor、六状态，以及 workspace identity、Submission/Artifact、不可变 deletion tombstone、事件关联和安全回填 |
 | T-05 前端 AppShell 与原型复刻 | 已完成 | Linear 深色三栏框架、导航、响应式和公共组件 |
 | T-06 今日工作台 | 部分完成 | 真实任务/统计、共享任务详情、右侧专注概览和反馈状态 |
-| T-07 任务管理纵向闭环 | 部分完成 | 任务事实、标签、父子/完成标准、版本/ETag、服务端分页筛选、层级列表、批量安全操作、计划组排序、Assignment、schema v8 六状态/六命令与 Task 时间线已交付；Artifact/manual 验收待实现 |
+| T-07 任务管理纵向闭环 | 部分完成 | 任务事实、关系/标签、版本/ETag、分页筛选、批量/排序、Assignment、六状态/时间线，以及 D2 manual Submission/Artifact/受控文件已交付；看板/拖拽、Today 日期排序与 Focus 工时待实现 |
 | T-08 项目管理 | 部分完成 | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务聚合 |
 | T-09 客户管理 | 页面骨架 | 路由、标题、新建入口外观和空状态 |
 | T-10 收入、支出与发票 | 页面骨架 | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4 |
-| T-11 收件箱与工作编排中心 | 页面骨架 | 当前仅有路由、全部已读入口外观和空状态；可复用已交付的 Actor/Assignment、六状态命令和 Task Event API，但 Inbox/Reminder、收件箱分派消费和任务编排均未实现 |
+| T-11 收件箱与工作编排中心 | 页面骨架 | 当前仅有路由、全部已读入口外观和空状态；可复用 Actor/Assignment、Task D1/D2 与 Event API，但 Inbox/Reminder、事件投影和拆分/关联/自动解决均未实现 |
 | T-12 专注设置与全局计时 | 部分完成 | 设置持久化、专注/休息循环、提示音、跨路由计时；未绑定任务或写入工时 |
 | T-13 命令面板与基础反馈 | 部分完成 | WebView 快捷键、页面/任务搜索、加载/错误/空状态 |
 | T-14 测试、构建与桌面验收 | 部分完成 | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制 |
 | T-15 AI 助手 | 未开始 | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码 |
 | T-16 本地知识库 | 未开始 | 已登记导入、FTS 检索、引用与删除要求，尚无数据结构或页面 |
 | T-17 客户回访 | 未开始 | 已登记回访计划、到期提醒、结果记录和后续开发顺序，属于 v0.4 |
-| T-18 本地 Actor 与任务分派 | 部分完成 | T-18A Actor/Event 基础、T-18B Actor 管理、T-18C Assignment 与 T-18D D1 受控生命周期/Task 时间线已交付；T-18D D2 Artifact/manual 提交验收待开发 |
+| T-18 本地 Actor 与任务分派 | 部分完成 | T-18A/B/C 和 T-18D D1/D2 已交付，包括 Actor、Assignment、生命周期、Submission/Artifact 与 manual 验收；agent Adapter/Run 属于 T-19 |
 | T-19 本地 Agent 执行 | 未开始 | Adapter、Run、产出、取消/重试、验收/返工和崩溃恢复规划，属于 v0.2 |
 
 #### 10.4.1 T-01 工程目录与统一脚本
@@ -1563,7 +1625,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 - **需求映射**：4.1、4.2、7.2、8.2。
 - **用户流程**：桌面应用启动后自动准备数据目录并连接本地服务；第二次启动复用单实例并聚焦主窗口；退出时先优雅关闭 Sidecar。
-- **实现方法**：生产配置通过 `externalBin` 内置 Go Sidecar，开发配置通过 `OPC_SIDECAR_URL` 连接外部 Sidecar。Rust 创建 `appDataDir`、`appLogDir` 及附件/发票/备份/配置目录，生成两个 UUID 拼接的会话令牌，以端口 `0` 启动 Sidecar，解析 stdout 的单行 ready JSON，并强制校验 `http://127.0.0.1:<非零端口>`。健康检查成功后通过 `sidecar_status` 向前端暴露连接状态和版本。退出时写入 `shutdown\n`，最多等待 7 秒，超时后终止精确子进程。
+- **实现方法**：生产配置通过 `externalBin` 内置 Go Sidecar，开发配置通过 `OPC_SIDECAR_URL` 连接外部 Sidecar。Rust 创建 `appDataDir`、`appLogDir` 及附件/Artifact/发票/备份/配置目录，通过环境注入数据库、`OPC_ARTIFACT_DIR`、动态端口和会话令牌；Sidecar 完成迁移，读取不可变数据库身份，校验/创建绑定 marker、取得 Artifact root 进程级独占锁并依据 Artifact/tombstone 协调 staging/objects/trash/quarantine 后输出 ready，错库或第二个共用 root 的进程启动失败。Tauri 强制校验 `http://127.0.0.1:<非零端口>`，健康成功后以 `sidecar_status` 暴露连接状态和版本。退出写入 `shutdown\n`，最多等待 7 秒，超时只终止精确子进程；shutdown 已持有 child 时 ready 超时不伪造 exited。
 - **关键路径**：`apps/desktop/src-tauri/src/lib.rs`、`apps/desktop/src-tauri/src/sidecar.rs`、`tauri.conf.json`、`tauri.dev.conf.json`。
 - **验证/剩余**：ready 解析、loopback 校验和状态序列化已有 Rust 单元测试；系统托盘、原生通知、自动启动、签名离线更新、OS 全局快捷键、异常自动重启和恢复页未实现；在线 Updater 不属于当前阶段。
 
@@ -1573,15 +1635,15 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 - **用户流程**：前端先确认 `/health`，再调用 `/api/v1`；服务不可用时显示可重试错误，而不是展示伪造业务数据。
 - **实现方法**：Gin 路由依次接入 request ID、Origin、Bearer 鉴权、访问日志和 panic recovery 中间件。`/health` 返回应用、API 和 schema 版本；任务和今日统计路由挂载在 `/api/v1`。Sidecar 只绑定 IPv4 loopback，支持动态端口，并在 stdout 输出机器可读 ready 事件。
 - **关键路径**：`services/sidecar/cmd/server/main.go`、`internal/api/router.go`、`middleware.go`、`errors.go`、`json.go`。
-- **验证/剩余**：鉴权、Origin、健康检查、错误和主任务链路已有 Go 集成测试；WebSocket、OpenAPI、文件/PDF 和业务调度服务未实现。
+- **验证/剩余**：鉴权、Origin、健康检查、错误、主任务链路和 Task 文件 Artifact 已有 Go 集成测试；WebSocket、OpenAPI、通用附件/PDF 和业务调度服务未实现。
 
 #### 10.4.4 T-04 SQLite 初始化、迁移与开发数据隔离
 
 - **需求映射**：6、7、9.1。
 - **用户流程**：首次启动自动创建数据库并迁移；后续启动只执行尚未应用的版本；开发和正式数据互不影响。
-- **实现方法**：GORM 使用纯 Go SQLite 驱动，连接池固定为一个物理连接；打开后启用外键、WAL 和 5 秒 busy timeout。SQL 迁移嵌入二进制并逐个事务执行。schema v1–v7 依次建立核心表、移除固定 demo、增加 Project/幂等/聚合/Task/Actor 基础；schema v8 在保留 Task facts、版本、父子/标签/Project 关系和幂等快照的前提下重建六状态 Task，并增加 Workflow Event 命令序号与不可变保护。重建迁移使用首行 marker，由迁移器在同一连接上事务外关闭外键、事务内校验 `foreign_key_check`，再提交或整体回滚并恢复外键。开发数据库位于 `.local/dev-data/`，生产数据库位于 Tauri `appDataDir`。
-- **关键路径**：`services/sidecar/internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/008_task_workflow.sql`。
-- **验证/剩余**：迁移测试覆盖真实 v5→v6、v6→v7 和 v7→v8 数据保留，Task/Project 版本、关系、幂等快照、索引/trigger/外键、六状态约束、事件顺序/不可变性，以及故意损坏的外键重建完整回滚与外键恢复；用户开发库已在启动前备份后迁移到 schema v8。破坏性迁移前的产品化自动备份、一致性快照、恢复和导入导出仍未实现。最终全量验证结果以 10.5 节本次更新为准。
+- **实现方法**：GORM 使用纯 Go SQLite 驱动和单物理连接，启用外键、WAL 与 5 秒 busy timeout。schema v1–v8 建立核心、Project/幂等/聚合、Task facts、Actor/Assignment/Event 和六状态；schema v9 新增 workspace identity、Submission/Artifact、current submission、Event 关联，并回填无歧义 inferred manual 历史。不可变 `database_id`、一次性 `artifact_store_id` 与 marker 的 database/store ID 双向绑定，阻止错库接管或数据库静默换文件根。标有 foreign-keys-off 的迁移在同连接事务外关外键、事务内校验 `foreign_key_check`，再提交或整体回滚并恢复。开发数据库/Artifact 位于 `.local/dev-data/`，生产数据位于 Tauri `appDataDir`。
+- **关键路径**：`services/sidecar/internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/009_task_submissions_artifacts.sql`。
+- **验证/剩余**：迁移测试覆盖真实 v5→v6、v6→v7、v7→v8、v8→v9 数据保留，Task/Project 版本与关系、Submission/Artifact 约束、inferred 回填、事件关联、故障回滚和外键恢复；database 套件重复 10 次通过。产品化自动备份、一致性快照、恢复和导入导出仍未实现。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -1602,10 +1664,11 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 #### 10.4.7 T-07 任务管理纵向闭环
 
 - **需求映射**：5.2、附录 C。
-- **用户流程**：用户按服务端条件搜索/筛选/分页任务；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建与详情可维护类型、项目、父任务、标签、完成标准和日期；可选择多条任务原子改项目/计划日期/标签，也可在一个精确计划日期组内上移、下移或恢复默认顺序。详情保存或删除发生版本冲突时保留草稿并重新获取最新版。
-- **实现方法**：schema v6 增加 Task 事实与版本；schema v8 扩展六状态和生命周期字段。Go 列表接口支持分页、多条件筛选和稳定排序；创建只允许 todo，非状态 PATCH/删除及六个生命周期命令使用 `ETag`/`If-Match`。旧 status 端点返回 410。生命周期命令校验活动 assignee、原因、来源状态和 review policy，可选幂等快照，并在同一事务结束终态 Assignment、递增一次 Task 版本及写有序事件。前端提供六状态筛选/分组、详情生命周期操作、冲突草稿和按需分页时间线；原有标签、批量安全操作和计划组排序继续复用。
-- **关键路径**：`services/sidecar/internal/api/tasks.go`、`apps/web/src/api/client.ts`、`apps/web/src/api/hooks.ts`、`apps/web/src/pages/TasksPage.tsx`、`apps/web/src/components/NewTaskModal.tsx`、`apps/web/src/components/TaskList.tsx`、`apps/web/src/components/TaskDetailModal.tsx`。
-- **验证/剩余**：Go 用例覆盖 Task 事实、六状态转换矩阵、活动负责人、原因校验、幂等/版本冲突、完成/取消的双角色联动、reopen 不恢复、事件分页/顺序、旧 status 410、Today cancelled 统计和 schema v8 迁移约束；前端 client/hooks/责任/生命周期/时间线已纳入全量 18 个测试文件、111 项测试并通过。Artifact、manual 提交验收、拖拽和 Focus 自动工时尚未实现；今日页尚未接入任务事实层的日期与排序能力，浏览器视觉验收也未完成。
+- **用户流程**：用户按服务端条件搜索/筛选/分页任务；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建可选择 none/manual；详情仅在 todo 且无任何 Submission 历史时允许改策略。manual Task 具备 active assignee 与 owner reviewer 后可填写摘要、text/link/structured/file 混合产出，提交待审后由 owner 接受或填写原因返工；历史批次分页查看，正文按需打开，文件安全下载，非 pending Artifact 可确认软删。
+- **实现方法**：schema v6 增加 Task facts/version，v8 扩展六状态，v9 增加 workspace identity、Submission/Artifact/deletion tombstone/current pointer/Event 关联。通用 Task、生命周期、Assignment 和 D2 命令共享 Task `ETag`/`If-Match`；D2 可选稳定幂等快照。Sidecar 用数据库绑定 marker、进程级 root 锁与 `.staging/objects/.trash/.quarantine` 管理文件，固定相对路径为 `objects/<artifact-id>`，流式限制大小、计算 SHA-256、耐久同步关键文件/目录项、下载复验完整性，并为软删与 Task 硬删提供补偿。提交事务报错后仅清除能由数据库证明无引用的 object，模糊 COMMIT 保留给 reconcile；删除事务写 immutable tombstone，active trash 恢复前校验 size/SHA，错配隔离并记 mismatch。严格 JSON body、首 part multipart manifest 与 structured object 各限 1 MiB，单文件 50 MiB、完整 multipart 100 MiB；服务端 HTTP read/write timeout 180 秒，前端上传/下载超时 120 秒。物理文件缺失不会阻断确认软删或 Task 聚合硬删，软删记录 missing。前端严格解析响应，用 Query/Mutation 管理分页历史及 cache invalidation；所有 Task 写入互斥，冲突时刷新并保留 summary、text、link、structured 和浏览器 File 草稿，要求用户再次明确提交。
+- **Actor/状态语义**：Artifact producer 从 active assignee 派生；Submission submitter 与 Artifact recorder 固定 owner；owner 审核/撤回/删除。submit → waiting_review/pending；accept → done/accepted 并结束 Assignment；request_changes → in_progress/changes_requested；waiting-review cancel → withdrawn；reopen 清 current pointer 但保留历史。
+- **关键路径**：`services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql`、`internal/api/tasks.go`、`internal/api/task_outputs.go`、`internal/api/artifact_store.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`components/NewTaskModal.tsx`、`components/TaskDetailModal.tsx`、`components/TaskOutputsSection.tsx`、`components/TaskArtifactCard.tsx`。
+- **验证/剩余**：Go 测试覆盖 D1/D2 状态、JSON/multipart、限制、Actor 归属、并发/幂等、补偿、软/硬删除与文件完整性；数据库 v8→v9 和重复 10 次套件通过。前端全量测试覆盖 manual 前置、混合提交、接受/返工、冲突保留 File、下载错误和软删确认；typecheck/build/format 通过。仍未实现拖拽/看板、Focus 自动工时、Today 真实日期/排序，以及专项浏览器视觉/窄屏验收。
 
 #### 10.4.8 T-08 项目管理
 
@@ -1614,7 +1677,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 - **用户流程**：用户可分页查看和搜索/按状态筛选项目，新建或编辑非归档项目资料，进入详情查看任务与派生进度/工时，从详情新建项目任务，执行受控状态命令，归档/恢复，并在已归档状态二次确认永久删除；归档项目必须恢复后才能编辑资料。
 - **实现方法**：schema v3 增加 `projects.version`、`archived_from_status` 和查询索引，schema v4 为幂等键增加请求摘要与响应快照，schema v5 用 trigger 把任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除纳入项目版本。Go Project API 提供 CRUD、分页/搜索/状态与客户筛选、白名单排序、基于规范化请求 SHA-256 和首次响应快照的创建幂等、覆盖聚合响应的 `If-Match` 乐观锁、显式 transition、归档来源恢复和受约束硬删除；同请求在资源编辑或删除后仍重放首次响应，异体复用 key 冲突。归档 Project 的资料 PATCH 返回 `409 PROJECT_ARCHIVED`，必须先恢复；归档项目也拒绝新增或改入任务关联，但既有关联任务仍可编辑。查询通过子查询派生任务总数/完成数/进行中数/剩余数、完成百分比与 `actual_minutes` 合计，并返回客户名、发票数和只含生命周期转换的 `available_actions`。前端用 Query/Mutation 接通卡片、表单和详情，串行分页拉全项目任务与任务表单项目选项；完成未结任务、归档和永久删除均有确认，转换期间禁用所有新建项目任务入口，版本冲突刷新详情，任务变更会失效项目缓存。
 - **关键路径**：`services/sidecar/internal/database/migrations/003_project_lifecycle.sql`、`migrations/004_idempotency_snapshots.sql`、`migrations/005_project_aggregate_versions.sql`、`internal/models/project.go`、`internal/api/projects.go`、`internal/api/projects_test.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`pages/ProjectsPage.tsx`、`pages/ProjectDetailPage.tsx`、`components/ProjectFormModal.tsx`。
-- **验证/剩余**：项目 API、schema v5 聚合版本和前端项目交互已有定向测试；schema v6 回归覆盖项目、任务和标签事实共同存在时的迁移与版本传播。完整 Go/前端/构建结果以 10.5 节本次最终验证为准。窄屏、完整键盘焦点和大数据量分页性能仍需专项验收；Client CRUD/客户选择、项目详情内的高级筛选/任务树、Focus 自动工时、Artifact/附件/Workflow Event/Inbox 集成仍未实现。
+- **验证/剩余**：项目 API、schema v5 聚合版本和前端项目交互已有定向测试；schema v6 回归覆盖项目、任务和标签事实共同存在时的迁移与版本传播。完整 Go/前端/构建结果以 10.5 节本次最终验证为准。窄屏、完整键盘焦点和大数据量分页性能仍需专项验收；Client CRUD/客户选择、项目详情内的高级筛选/任务树、Focus 自动工时、项目级 Artifact/附件/Workflow Event/Inbox 集成仍未实现（Task Artifact 已由共享任务详情提供）。
 
 #### 10.4.9 T-09 客户管理
 
@@ -1636,7 +1699,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 #### 10.4.11 T-11 收件箱与工作编排中心
 
 - **需求映射**：5.6。
-- **当前状态**：页面骨架；schema v8 已提供 Actor/Assignment、六状态命令和可查询的 Task Workflow Event 时间线，但尚无 Inbox Item、提醒或 Agent Run 表/API，也没有收件箱拆分/分派消费和 Inbox 事件查询；“全部标为已读”按钮暂无业务行为。
+- **当前状态**：页面骨架；schema v9 已提供 Actor/Assignment、六状态命令、manual Submission/Artifact 和可查询的 Task Workflow Event 时间线，但尚无 Inbox Item、提醒或 Agent Run 表/API，也没有收件箱拆分/分派消费、Artifact follow-up 投影和 Inbox 事件查询；“全部标为已读”按钮暂无业务行为。
 - **对象边界**：Inbox Item 管来源、分诊、已读、稍后和解决策略；Task 是唯一可执行工单；Assignment 管责任历史；Agent Run 管单次本地执行；Task Artifact 管产出；Workflow Event 管审计。
 - **分阶段纵切**：
   1. **T-11A 收件箱数据契约**：在 T-18 的 Actor/Task/Assignment/审计基础上新增 Inbox Item、关联表和 Reminder 迁移；T-11 不重复拥有 Actor 或 Task 状态迁移。
@@ -1688,7 +1751,7 @@ pnpm build:desktop
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v2.0 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v2.1 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -1727,15 +1790,16 @@ pnpm build:desktop
 #### 10.4.18 T-18 本地 Actor 与任务分派
 
 - **需求映射**：5.2、5.6、6、9.1。
-- **当前状态**：部分完成。T-18A、T-18B、T-18C 和 T-18D D1 已交付；任务已有负责人/审核人、六状态、六命令和通用 Task 时间线。`review_policy = manual` 的入口、Artifact、提交验收/返工仍待 D2。
+- **当前状态**：部分完成。T-18A、T-18B、T-18C 和 T-18D D1/D2 已交付；任务已有负责人/审核人、六状态/六命令、Submission/Artifact、manual 提交验收、受控文件和通用 Task 时间线。剩余编排依赖 Inbox/Reminder，实际 agent 执行归 T-19。
 - **T-18A（已完成）**：schema v7 新增 `actors`、`task_assignments` 和 `workflow_events`；使用固定 UUID 初始化唯一 owner/system，以 Task ID 确定性回填历史 owner assignee 和 `migration_assignment_backfill` 事件。未完成任务保持活动分派，已完成任务以 `completed_at`、缺失时 `updated_at` 结束；迁移重放不重复。数据库约束内置记录、活动 Actor/分派人、owner reviewer、同 Task/role 唯一活动记录、结束历史不可覆盖、外键与停用保护。Artifact 未在此迁移提前建表，避免脱离 T-18D 的受控存储、校验和验收事务单独落地。
 - **T-18B（已完成）**：实现 `GET/POST /api/v1/actors` 与 `GET/PATCH /api/v1/actors/:id`。列表支持分页、type/status 筛选和白名单稳定排序；v0.1 只允许创建 person。创建可携带 `Idempotency-Key`，保存规范化 SHA-256 与首次 `201` 快照，重放返回相同资源且不重复写事件；不同请求体复用 key 返回冲突。详情、创建和更新返回 `ETag`，PATCH 强制 `If-Match`：缺失为 `428 VERSION_REQUIRED`，格式错误为 `400 INVALID_VERSION`，旧版本为 `409 VERSION_CONFLICT`。owner 只可修改展示名，system 与 agent 不可编辑，person 可编辑展示名、备注、非敏感 metadata 和 active/inactive；存在活动 Assignment 时返回 `409 ACTOR_HAS_ACTIVE_ASSIGNMENTS`，失败不递增版本也不写事件。成功创建、更新和停用与 `actor_created / actor_updated / actor_deactivated` 事件同事务提交。
 - **设置页（已完成 T-18B 范围）**：“人员与责任”读取真实 API，展示内置主体和本地人员；支持新建/编辑/停用/重新启用 person、编辑 owner 展示名、错误重试、空状态、字段校验和版本冲突草稿。界面明确说明 person 只是本机记录，不发送、同步或创建线上账号；metadata 只接受 JSON object，并提示不得填写密码、令牌、API key 等敏感信息。该模块的写入独立保存，不代表其他设置已迁入 `app_settings`；本轮没有浏览器视觉验收证据。
 - **T-18C（已完成）**：实现 `GET/POST /api/v1/tasks/:id/assignments`、`POST /api/v1/tasks/:id/reassign` 与 `POST /api/v1/assignments/:id/end`。查询返回当前 assignee/reviewer、分页结束历史、`meta.task_version` 和 Task `ETag`；三个命令强制 Task `If-Match`，成功递增 Task 版本，并支持可选 `Idempotency-Key` 保存请求摘要、首次响应和状态码。安全重放不重复写事件，异体复用返回 `IDEMPOTENCY_CONFLICT`。v0.1 assignee 只允许 active owner/person，reviewer 只允许 active owner；system/agent 不可分派。改派原子结束旧记录、创建新记录并写前后快照事件。Task 转为 `done` 时在同一事务结束全部活动 Assignment，重新打开不恢复；Assignment 没有 DELETE，Task 永久删除按外键级联删除 Assignment，并保留 `assignment_id` 置空的事件 JSON 快照。
 - **T-18D D1（已完成）**：schema v8 扩展 Task 六状态与 lifecycle 字段，旧数据/版本/关系原样迁移；实现 start/block/unblock/complete/cancel/reopen、Task `If-Match`、可选幂等快照、活动 assignee/review policy 校验、完成/取消的 Assignment 原子联动，以及带 `command_seq` 的分页 Task 时间线与事件不可变保护。前端提供六状态分组、详情生命周期操作、冲突草稿和按需时间线。
-- **T-18D D2（待开发）**：开放 `review_policy = manual` 创建/编辑，新增 `task_artifacts` 与受控文件存储，提供 submit-output、owner accept/request_changes；Agent/Adapter/Run 仍属于 T-19。
-- **关键路径**：`services/sidecar/internal/database/migrations/007_actor_assignments.sql`、`services/sidecar/internal/models/actor.go`、`services/sidecar/internal/api/actors.go`、`services/sidecar/internal/api/assignments.go`、`services/sidecar/internal/api/tasks.go`、`apps/web/src/components/ActorSettings.tsx`、`apps/web/src/components/TaskAssignmentsSection.tsx`、`apps/web/src/components/TaskDetailModal.tsx`、`apps/web/src/api/client.ts`、`apps/web/src/api/hooks.ts`。
-- **验证/剩余**：数据库测试覆盖 v6→v7 与真实 v7→v8 数据保留、迁移失败回滚/外键恢复、索引/trigger/事件不可变；Go API 测试覆盖 Actor、Assignment、六状态转换、幂等/版本、终态联动、事件分页顺序和 Today cancelled 统计；前端 client/hooks、Actor/Assignment、生命周期和时间线交互纳入全量 18 个测试文件、111 项测试并通过。Artifact/manual 验收、Agent 和浏览器视觉验收仍未完成。
+- **T-18D D2（已完成）**：schema v9 新增带不可变 database ID/一次性 store 绑定的 `workspace_identity`、`task_submissions`、`task_artifacts`、不可变 `artifact_deletion_tombstones`、Task `current_submission_id` 和 Event `submission_id/artifact_id`；迁移对无歧义旧 manual 状态回填 inferred Submission 与 `migration_submission_backfill`，不编造 Artifact。创建/受限 PATCH 开放 none/manual；实现 JSON/multipart submit-output、owner accept/request_changes、列表/详情/content、确认软删除、Task 硬删除文件补偿，以及 `task_review_policy_changed / task_output_submitted / task_review_accepted / task_changes_requested / task_submission_withdrawn / task_artifact_deleted`。Artifact producer=active assignee；recorder/submission submitter/reviewer/withdrawer/deleter=owner。受控 root 使用 database/store 双向绑定 marker、进程级独占锁与 `.staging/objects/.trash/.quarantine`，file 路径固定 `objects/<artifact-id>`，关键文件/目录项耐久同步，文件下载复验 size/SHA-256；模糊 COMMIT 不误删对象，tombstone/哈希校验支持安全恢复，缺失 object 不阻断删除，无引用未知候选不自动永久删除。前端交付“产出与验收”模块、严格响应解析、分页历史、缺失/篡改/删除状态、120 秒安全传输和冲突草稿完整保留；服务端传输窗口为 180 秒。
+- **限制与互锁**：manual 策略变化仅 todo+无历史；提交只允许 todo/in_progress 且需要 active assignee + owner reviewer；每批 summary 或至少一项 Artifact，最多 20；accept/request_changes/cancel 后保留最近 Submission 指针，reopen 清空。所有 Task 写入在 UI 互斥，成功立即失效 Task/Submission/Artifact/Assignment/Event/Project/Today cache。
+- **关键路径**：`services/sidecar/internal/database/migrations/007_actor_assignments.sql`、`008_task_workflow.sql`、`009_task_submissions_artifacts.sql`、`internal/api/actors.go`、`assignments.go`、`tasks.go`、`task_outputs.go`、`artifact_store.go`、`apps/web/src/components/TaskAssignmentsSection.tsx`、`TaskOutputsSection.tsx`、`TaskArtifactCard.tsx`、`TaskDetailModal.tsx`、`apps/web/src/api/client.ts`、`hooks.ts`。
+- **验证/剩余**：数据库 v6→v9、迁移回滚/外键恢复、索引/trigger/不可变与 inferred 历史均有测试；Go 全包与 `go vet` 通过，database 重复 10 次通过。前端全量测试、typecheck/build/format 通过，覆盖 manual 前置、混合提交、accept/request_changes、冲突 File 草稿、下载错误和软删确认。Agent、Inbox 投影、Artifact 备份恢复和专项浏览器视觉验收仍未完成。
 
 #### 10.4.19 T-19 本地 Agent 执行
 
@@ -1751,38 +1815,34 @@ pnpm build:desktop
 
 | 检查 | 最近已知结果 | 说明 |
 |------|--------------|------|
-| 任务事实层定向验证 | 通过 | schema v6 真实 v5→v6 迁移、Task/Tag 创建快照、父子循环/删除、标签版本传播、101 条稳定分页、多条件筛选、批量原子性、计划组排序和版本冲突均有 Go 定向测试；前端 client/hooks、详情冲突和任务列表交互有定向回归 |
-| Actor / schema v7 定向验证 | 通过 | 数据库测试覆盖真实 v6→v7 数据保留、迁移重放幂等、已完成/未完成 Assignment 回填、固定 owner/system、约束和外键；Actor API 测试覆盖分页/筛选/稳定排序、创建快照幂等、字段校验、权限、`ETag`/`If-Match`、活动分派停用保护和事务化事件 |
-| Assignment API/UI 定向验证 | 通过 | Go 用例覆盖列表分页、创建/改派/结束、角色限制、Task 版本冲突、幂等快照、责任事件、done 自动结束和 Task DELETE 级联；前端 client/hooks/任务详情交互用例随全量套件通过，尚未宣称浏览器视觉验收完成 |
-| schema v8 / Task 生命周期定向验证 | 通过 | 真实 v7→v8 迁移保留 Task/Project 版本、关系、Assignment/Event/幂等快照；覆盖六状态矩阵、负责人/原因/review policy、幂等与并发、完成/取消联动、reopen、事件分页顺序/不可变、旧 status 410、Today cancelled 口径及故障迁移回滚/外键恢复 |
-| 格式与文档差异 | 通过 | T-18D D1 代码与文档通过格式、`git diff --check`、相对链接、绝对机器路径和过期状态措辞检查 |
-| `pnpm typecheck` | 通过 | TypeScript 编译覆盖六状态 model、生命周期/event client 与 hooks、任务详情操作/时间线及既有页面 |
-| 前端测试 | 通过 | `pnpm --filter @opc/web test` 共 18 个测试文件、111 个测试全部通过；覆盖生命周期响应、幂等键复用、冲突草稿、未保存事实互锁、事件分页/空错状态和 Assignment 终态联动，组件测试不替代浏览器视觉验收 |
-| Go 测试与静态检查 | 通过 | `go test -count=1 ./...`、`go test -count=10 ./internal/api ./internal/database` 和 `go vet ./...` 均通过 |
-| Web 生产构建 | 通过 | `pnpm build:web` 的 TypeScript 编译与 Vite 生产构建通过，覆盖任务详情生命周期与时间线交互 |
-| `pnpm build:sidecar` | 通过 | 已生成当前 Windows Rust target triple 对应的 Go Sidecar 二进制；产物位于忽略目录，不纳入提交 |
-| Rust 格式 | 通过 | `cargo fmt -- --check` 通过；Rust 共 6 个 ready/状态单元测试，未覆盖真实 Sidecar 生命周期 |
-| `cargo check` / Rust tests | 环境受限 | Rust 工具链可用，但本机缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK），依赖构建阶段即被阻断 |
-| 隔离迁移 / API 冒烟 | 通过 | 隔离 schema v8 HTTP 链覆盖只能 todo 创建、分派、start/block/unblock/complete、事件与幂等/版本，并验证旧 status 410；开发用户库在可恢复备份后迁移到 schema v8，未写入业务测试数据 |
-| 浏览器渲染 / 窄屏视觉 | 本次未验收 | 本轮没有执行 Actor 设置页或其他页面的真实浏览器视觉、键盘、焦点与窄屏核对；自动化组件测试不作为视觉证据 |
-| 桌面安装包与三平台验收 | 未执行 | 当前 Windows Sidecar target binary 已构建；Tauri 链接、安装包、签名环境和干净系统矩阵仍未完成 |
+| schema v9 迁移定向验证 | 通过 | 真实 v8→v9 数据保留、不可变 database ID/一次性 store 绑定、无歧义 inferred Submission、`migration_submission_backfill`、Task current pointer、Submission/Artifact/Event 约束、索引/trigger、外键检查、故障回滚与恢复均有 database 测试；`go test ./internal/database -count=10` 通过 |
+| D2 API / Artifact store | 通过 | Go 定向测试覆盖 manifest-first multipart、大小/类型/Actor 归属、提交/接受/返工/撤回、幂等/版本冲突、分页/详情、完整性下载、软删/Task 硬删 tombstone、数据库绑定 marker、进程锁、耐久同步、模糊 COMMIT、trash 哈希恢复、quarantine 和启动 reconcile |
+| 既有 Task/Actor/Assignment 回归 | 通过 | 六状态、策略锁定、Assignment 联动、Event 关联与不可变、旧 status 410、Task facts/Project 聚合及 Actor 权限由 Go 全量回归覆盖 |
+| `pnpm --filter @opc/web typecheck` | 通过 | 覆盖 Task `current_submission_id`、Submission/Artifact 严格 normalizer、D2 client/hooks 和任务详情组件 |
+| 前端测试 | 通过 | `pnpm --filter @opc/web test` 全量通过；覆盖 manual 前置、混合提交、accept/request_changes、冲突保留 text/link/structured/File 草稿、下载错误、软删确认、cache invalidation 与 Event 文案；组件测试不替代浏览器视觉验收 |
+| Web 生产构建 | 通过 | `pnpm --filter @opc/web build` / `pnpm build:web` 的 TypeScript 与 Vite 构建通过 |
+| 前端格式 | 通过 | Web 范围 Prettier format check 通过 |
+| Go 全量测试与静态检查 | 通过 | `go test ./... -count=1` 与 `go vet ./...` 均通过；不虚构未统计的用例总数 |
+| 文档链接/过期措辞/diff | 通过 | v2.1 文档更新完成后运行相对 Markdown 链接、绝对机器路径、schema v8/D2 待开发残留和 `git diff --check` 审计 |
+| Rust / Tauri 链接 | 环境受限 | 当前主机缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK）；无法把 `cargo check`/Rust tests 或完整桌面链接声明为通过 |
+| 浏览器渲染 / 窄屏视觉 | 本次未验收 | D2 由组件测试覆盖，尚无本轮真实浏览器键盘、焦点、长列表和窄屏视觉证据 |
+| 桌面安装包与三平台验收 | 未执行 | 安装包、签名/公证、干净系统、性能和三平台矩阵仍未完成 |
 
 根 `pnpm check` 当前只执行 TypeScript、Go 测试、Web 构建和 `cargo check`，没有覆盖前端测试、Rust 单元测试或格式检查；在修正聚合脚本前不得把单次 `pnpm check` 视为完整质量门禁。
 
 ### 10.6 已知限制与下一步顺序
 
-1. **受控生命周期 D1 已交付，继续 D2 产出验收**：schema v8 六状态、六命令、Task 并发/幂等、Assignment 终态联动与通用 Task 时间线已完成；下一步开放 `review_policy = manual`，交付 Artifact、submit-output 和 accept/request_changes。今日页仍需真正按 `planned_date` 查询并接入排序；当前任务页只有上移/下移，不是拖拽。
-2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务聚合已交付；继续验证大数据量串行分页、真实浏览器/窄屏/焦点，并保留客户、产出/附件/事件/Inbox 为明确缺口。
-3. **完成人工验收**：复用已交付的 owner/person、Assignment、六状态命令和事件时间线，补 Artifact、manual 提交/验收/返工及受控文件；没有本地执行器时 agent 不可选。
-4. **交付基础客户并补项目客户协作**：实现 Client CRUD、搜索、删除约束和项目客户选择/筛选；客户回访不混入这一阶段。
-5. **交付收件箱人工闭环**：实现 Inbox Item、手动提醒、已读/稍后、任务拆分/关联、分派、验收/返工、审计与自动解决，再接项目产出、任务临期/阻塞和系统故障事件源。
-6. **接通专注持久化**：新增 Focus Session API，将开始/暂停/停止写入 SQLite，以绝对时间校正，并在成功事务中累计任务 `actual_minutes`。
-7. **补数据安全链路**：一致性备份、恢复、导入导出、Task Artifact 归档、维护锁和诊断包内容选择。
-8. **补桌面可靠性与发布能力**：Sidecar 故障恢复、统一日志落盘/轮转、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页逐项最小授权实现。
-9. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、产出、取消/重试和审核返工。
-10. **实现本地规划与预设自动化**：路线图、内容日历和规则引擎只创建本地收件箱项/任务，不自动对外发送。
-11. **排期 v0.4 业务版**：实现客户回访、收入/支出/发票纵切及其本地事件源；先数据契约和 CRUD，再做提醒、统计图和 PDF。
-12. **最后评审知识库与 AI**：先完成本地 FTS、引用、删除和恢复，再单独评审模型、数据外发与权限；不得让 AI 阻塞核心本地工作流。
+1. **D1/D2 已交付，收口任务体验**：schema v8 生命周期与 schema v9 manual Submission/Artifact 已完成；继续做真实浏览器键盘/焦点/窄屏验收、长历史性能和错误恢复。今日页仍需真正按 `planned_date` 查询并接入排序；当前任务页只有上移/下移，不是拖拽。
+2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务聚合已交付；继续验证大数据量串行分页、真实浏览器/窄屏/焦点，并保留客户、项目附件/事件/Inbox 为明确缺口。
+3. **交付基础客户并补项目客户协作**：实现 Client CRUD、搜索、删除约束和项目客户选择/筛选；客户回访不混入这一阶段。
+4. **交付收件箱人工闭环**：实现 Inbox Item、手动提醒、已读/稍后、任务拆分/关联、分派、复用当前 Task 验收、审计与自动解决，再接项目产出、任务临期/阻塞和系统故障事件源。
+5. **接通专注持久化**：新增 Focus Session API，将开始/暂停/停止写入 SQLite，以绝对时间校正，并在成功事务中累计任务 `actual_minutes`。
+6. **补数据安全链路**：一致性备份、恢复、导入导出、Task Artifact 归档、维护锁和诊断包内容选择。
+7. **补桌面可靠性与发布能力**：Sidecar 故障恢复、统一日志落盘/轮转、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页逐项最小授权实现。
+8. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、复用 D2 产出命令、取消/重试和审核返工。
+9. **实现本地规划与预设自动化**：路线图、内容日历和规则引擎只创建本地收件箱项/任务，不自动对外发送。
+10. **排期 v0.4 业务版**：实现客户回访、收入/支出/发票纵切及其本地事件源；先数据契约和 CRUD，再做提醒、统计图和 PDF。
+11. **最后评审知识库与 AI**：先完成本地 FTS、引用、删除和恢复，再单独评审模型、数据外发与权限；不得让 AI 阻塞核心本地工作流。
 
 非敏感用户设置统一迁入版本化 SQLite `app_settings` 表；`appDataDir/config` 只保存数据库启动前必需的非敏感运行配置和迁移标记。首次升级兼容读取旧 `localStorage`，仅在服务端没有对应值时清洗迁移，成功后记录一次性迁移标记。专注运行态确定为持久化 Session：旧进程遗留的 active 会话先进入 recovery_pending，用户再选择计入中断间隔恢复、排除间隔恢复或结束为 interrupted；在该功能交付前继续明确显示“仅当前进程有效”。
 
@@ -1791,7 +1851,7 @@ pnpm build:desktop
 | 顺序 | 模块 | 后端与数据 | 前端与用户流程 | 完成验收 |
 |------|------|------------|----------------|----------|
 | 1 | 任务基础事实与生命周期 D1 | schema v6 事实、schema v8 六状态/六命令、非状态 PATCH、项目/父子/标签/完成标准、Task/Tag 版本、分页筛选、批量安全操作、计划组排序和 Task 时间线已交付 | 详情冲突草稿、六状态分组、生命周期操作、按需事件、标签/层级/筛选/批量/排序已交付；今日页接入与拖拽后置 | 覆盖 CRUD、转换矩阵、负责人/原因、幂等/并发、终态 Assignment、事件顺序/不可变、cancelled 统计；父任务自动推进仍待后续 |
-| 2 | Actor、分派与任务验收 D2 | T-18A/B/C 与 T-18D D1 已交付；D2 补 manual policy 入口、task_artifacts、submit-output 和 accept/request_changes | Actor/Assignment/生命周期/时间线已交付；Artifact 录入、受控文件和人工验收/返工待实现 | 当前已覆盖本地语义、角色限制、停用保护、唯一活动、Task 版本、幂等事件和终态联动；剩余验收 manual 不可绕过及产出历史 |
+| 2 | Actor、分派与任务验收 D2 | T-18A/B/C 与 T-18D D1/D2 均已交付：manual policy、Submission/Artifact、submit-output、accept/request_changes、受控文件和迁移回填 | Actor/Assignment/生命周期/时间线、混合 Artifact 草稿、当前批次、分页历史、安全下载与确认软删均已交付 | 已覆盖角色限制、manual 不可绕过、版本/幂等、Actor 归属、产出历史、文件补偿、冲突保留 File 草稿；剩余真实浏览器键盘/焦点/窄屏和长历史性能验收 |
 | 3 | 项目 | CRUD、schema v4 快照式创建幂等、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务派生进度/工时已交付；Client CRUD 后补客户选择，T-11 后启用产出/Inbox 事件 | 卡片、分页/搜索/状态筛选、新建/编辑、详情任务列表/工时和归档恢复已交付；任务树、产出、附件和时间线待实现 | 当前纵切继续验收聚合并发、幂等快照、分页拉全性能、归档/删除；T-11 后再验收项目产出→拆分→分派→验收和事件去重 |
 | 4 | 客户 | Client CRUD/搜索/状态、删除约束、项目数聚合；发票上线后再聚合收入 | 表格、新建/编辑、详情资料/项目/活动/附件；不伪造邮件打开或下载行为 | 可选字段校验、分页筛选、受约束删除和关联可解释；回访保持 v0.4 |
 | 5 | 收件箱人工编排 | T-11 交付 inbox_items、inbox_item_tasks、reminders、拆分/分派事务、source_event_key 去重和派生解决策略 | 列表/详情、Reminder、已读/稍后、拆分/关联任务、分派/改派、验收/返工、解决/忽略/重开 | 纯离线；零必需任务不自动解决；拆分失败全回滚；进度由任务派生；来源删除可解释；关联取消可审计 |
@@ -1868,7 +1928,7 @@ pnpm build:desktop
 - **圆角**：4px（小）→ 6px（中）→ 8px（大）→ 12px（卡片）
 - **间距**：4px 基准，8px 为单位递增
 
-### C. API 约定（预览）
+### C. API 约定
 
 健康检查使用 `/health`；业务 API 统一使用 `/api/v1`。生产环境所有请求（包括健康检查）都必须携带 Tauri 启动 Sidecar 时生成的会话令牌。
 
@@ -1876,9 +1936,9 @@ pnpm build:desktop
 |------|------|------|----------|
 | GET | /health | 健康检查，返回 app/API/schema 版本 | 已实现 |
 | GET | /api/v1/tasks | 分页查询任务 | 已实现；默认 50/最大 100，支持标题/描述搜索、状态/优先级/类型/项目、计划与截止范围、重复标签 AND、父级/根任务和稳定排序；返回项目/父任务标题、标签、子任务统计 |
-| POST | /api/v1/tasks | 新建任务 | 已实现；只允许 todo，非 todo 返回 `LIFECYCLE_COMMAND_REQUIRED`；支持类型、父任务、完成标准和标签；v2 `Idempotency-Key` 保存快照；返回 `ETag` |
-| GET / DELETE | /api/v1/tasks/:id | 获取、删除任务 | 已实现；读取返回完整任务事实与 `ETag`；删除要求 `If-Match`，父任务删除只解除子任务父级，删除整个 Task 聚合会级联删除 Assignment，并保留 `assignment_id` 置空的 Workflow Event JSON 快照 |
-| PATCH | /api/v1/tasks/:id | 更新非生命周期字段 | 已实现；支持标题、描述、类型、优先级、项目、父任务、完成标准、标签、截止/计划日期和预计时长；要求 `If-Match`，拒绝 `status` |
+| POST | /api/v1/tasks | 新建任务 | 已实现；只允许 todo，支持 `review_policy=none/manual`、类型、父任务、完成标准和标签；`Idempotency-Key` 保存快照；返回 `ETag` |
+| GET / DELETE | /api/v1/tasks/:id | 获取、删除任务 | 已实现；读取返回完整任务事实、`current_submission_id` 与 `ETag`；删除要求 `If-Match`，父任务删除只解除子任务父级，Task 聚合硬删会协调 present Artifact 文件、跳过 missing object，并级联 Assignment/Submission/Artifact；事件关联 ID 可置空但 JSON 快照保留 |
+| PATCH | /api/v1/tasks/:id | 更新非生命周期字段 | 已实现；支持 `review_policy` 与其他任务事实并要求 `If-Match`，拒绝 `status`；策略变化仅允许 todo 且无任何 Submission 历史 |
 | PATCH | /api/v1/tasks/:id/status | 旧任务状态入口 | 已废弃；固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED` |
 | PATCH | /api/v1/tasks/batch | 原子批量安全操作 | 已实现；1–100 条任务，支持 set_project/set_planned_date/add_tags/remove_tags；每项 expected_version，任一失败整批回滚 |
 | PUT | /api/v1/tasks/reorder | 原子保存手动排序 | 已实现；提交完整 planned_date 组和每项 expected_version，支持 manual/default；组成员或版本变化时拒绝 |
@@ -1914,12 +1974,13 @@ pnpm build:desktop
 | GET / POST | /api/v1/tasks/:id/assignments | 查询当前角色/分页结束历史，或创建活动分派 | 已实现；GET 默认 50/最大 100，返回 Task `ETag`/`meta.task_version`，role 只过滤结束历史；POST 强制 Task `If-Match`，可选 `Idempotency-Key`；assignee 仅 active owner/person，reviewer 仅 active owner |
 | POST | /api/v1/tasks/:id/reassign | 原子结束旧分派并创建新分派 | 已实现；要求原因、Task `If-Match` 和可选幂等键，成功递增 Task 版本并写 `assignment_reassigned` 前后快照 |
 | POST | /api/v1/assignments/:id/end | 结束当前分派 | 已实现；要求原因、所属 Task `If-Match` 和可选幂等键，不改变 Task 状态；Assignment 没有 DELETE 路由 |
-| POST | /api/v1/tasks/:id/submit-output | 提交产出并进入验收 | v0.1 规划中 |
-| POST | /api/v1/tasks/:id/review | 接受结果或要求返工 | v0.1 规划中 |
-| GET | /api/v1/tasks/:id/artifacts | 查询任务产出 | v0.1 规划中 |
-| GET | /api/v1/artifacts/:id | 获取产出元数据、文本或引用 | v0.1 规划中 |
-| GET | /api/v1/artifacts/:id/content | 通过鉴权读取受控目录中的本地文件 | v0.1 规划中 |
-| DELETE | /api/v1/artifacts/:id | owner 确认后软删除产出并写审计 | v0.1 规划中 |
+| POST | /api/v1/tasks/:id/submit-output | 提交产出并进入验收 | 已实现；Task `If-Match` + 可选稳定幂等键；严格 JSON 或单 manifest multipart；成功返回 Task/Submission/Artifact/Event 与新 `ETag` |
+| POST | /api/v1/tasks/:id/review | 接受结果或要求返工 | 已实现；owner reviewer 对 current pending Submission 执行 accept/request_changes，返工原因必填；返回 Task/Submission/Event |
+| GET | /api/v1/tasks/:id/submissions | 分页查询 Submission 历史 | 已实现；sequence 倒序，默认 50/最大 100，返回 Task `ETag`、`meta.task_version`、Actor 与 Artifact 摘要 |
+| GET | /api/v1/tasks/:id/artifacts | 分页查询任务产出 | 已实现；支持 `submission_id`、`include_deleted`，摘要含父批次派生的必填 `submission_status`，不暴露 payload 或内部路径，返回 Task `ETag`/版本 |
+| GET | /api/v1/artifacts/:id | 获取产出元数据与按需 payload | 已实现；必填 `submission_status`；text/link/structured 正文只在详情返回；已软删记录仍返回元数据但 payload 全为 null |
+| GET | /api/v1/artifacts/:id/content | 通过鉴权读取受控目录中的本地文件 | 已实现；重新校验 size/SHA-256，attachment + nosniff + no-store；已删/缺失拒绝，篡改返回冲突 |
+| DELETE | /api/v1/artifacts/:id?confirm=true | owner 确认后软删除产出并写审计 | 已实现；Task `If-Match`、稳定幂等键与 1–1,000 字符原因；pending 批次禁止，missing object 仍可删并记录 missing |
 | GET / POST | /api/v1/tasks/:id/agent-runs | 查询、启动本地 Agent Run | v0.2 规划中 |
 | GET | /api/v1/agent-runs/:id | 查看本地执行详情 | v0.2 规划中 |
 | POST | /api/v1/agent-runs/:id/cancel | 取消执行 | v0.2 规划中 |
@@ -1968,8 +2029,9 @@ pnpm build:desktop
 - 错误响应统一包含 `code`、`message`、`request_id`；日志通过 `request_id` 关联且不得包含敏感正文
 - 列表接口统一支持分页、排序和筛选；写操作使用事务，可能重试的创建操作支持幂等键
 - API 时间戳使用 RFC 3339 UTC，金额字段使用最小货币单位整数
-- 创建、拆分、分派、运行、验收、返工、解决和忽略均支持 `Idempotency-Key`；幂等记录必须包含请求摘要和可重放响应，同一 key 携带不同请求体返回 409。当前 Assignment 三个命令与 Task 六个生命周期命令已实现该契约，具体错误码为 `IDEMPOTENCY_CONFLICT`，旧无快照记录返回 `IDEMPOTENCY_REPLAY_UNAVAILABLE`
-- 状态变化携带 `expected_version` 或 `If-Match`；并发版本不一致时拒绝旧写入并返回 409。当前 Task/Assignment 使用 `VERSION_CONFLICT`，前端刷新后保留选择或原因草稿，必须由用户重新确认
+- 创建、拆分、分派、运行、验收、返工、解决和忽略均支持 `Idempotency-Key`；幂等记录必须包含请求摘要和可重放响应，同一 key 携带不同请求体返回 409。当前 Assignment 三个命令、Task 六个生命周期命令及 D2 submit/review/Artifact delete 已实现该契约，具体错误码为 `IDEMPOTENCY_CONFLICT`，旧无快照记录返回 `IDEMPOTENCY_REPLAY_UNAVAILABLE`
+- 状态变化携带 `expected_version` 或 `If-Match`；并发版本不一致时拒绝旧写入并返回 409。当前 Task/Assignment/D2 写入使用 `VERSION_CONFLICT`，前端刷新后保留 summary、text、link、structured 与浏览器 File 草稿，必须由用户重新确认，不能用旧版本自动重试
+- 输出严格 JSON body、multipart manifest 和单个 structured object 各限 1 MiB，单文件限 50 MiB、完整 multipart 限 100 MiB；Sidecar HTTP read/write timeout 为 180 秒，前端上传/下载采用 120 秒端到端超时
 - 本地调度事件以 `source_event_key` 建立唯一约束；幂等重放不得重复写 Workflow Event
 - Actor 详情、创建和更新返回 `ETag`；Actor PATCH 缺少 `If-Match` 返回 428，格式错误返回 400，旧版本返回 409。person 创建幂等重放不得重复写 `actor_created`；停用被活动 Assignment 拒绝时不得递增版本或写事件
 - Agent 不使用 WebView 会话令牌；Sidecar 为单次 Run 发放短时、能力受限且不可复用的本地令牌
@@ -2015,3 +2077,4 @@ pnpm build:desktop
 | v1.8 | 2026-08-27 | 将当前基线推进到 SQLite schema v7；交付 T-18A Actor/Assignment/Event 数据基础、固定 owner/system、历史任务幂等分派回填和约束保护，以及 T-18B Actor API、创建幂等、`ETag`/`If-Match`、审计事件与设置页 person 管理；Assignment API/UI、受控状态、Artifact/Agent、Inbox 编排和 app_settings 保留为后续纵切 |
 | v1.9 | 2026-08-27 | 在 schema v7 上交付 T-18C Assignment 查询/创建/改派/结束、Task `If-Match`/version、可选幂等快照、责任事件、done 自动结束/reopen 不恢复、Task DELETE 聚合语义和任务详情负责人/审核人/分页历史 UI；T-18D 受控状态/Artifact/验收、Inbox 消费与 Agent 保留为后续纵切 |
 | v2.0 | 2026-08-27 | 将基线推进到 schema v8，交付 T-18D D1 六状态、start/block/unblock/complete/cancel/reopen、Task 幂等/并发、完成/取消的 Assignment 原子联动、Task 活动时间线、command_seq 与事件不可变保护；manual policy 入口、Artifact、submit/review/返工明确留给 D2 |
+| v2.1 | 2026-08-27 | 将基线推进到 schema v9，交付 T-18D D2 manual Submission/Artifact、submit/review/历史/安全下载/确认软删、Actor 归属与迁移回填；受控文件根增加数据库/store 身份绑定、进程级独占锁、不可变 deletion tombstone、耐久同步、哈希恢复、quarantine 与软/硬删除补偿，前端交付冲突草稿保留和完整验收 UI |

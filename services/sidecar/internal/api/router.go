@@ -1,9 +1,13 @@
 package api
 
 import (
+	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,14 +23,35 @@ type Options struct {
 	DevMode        bool
 	AllowedOrigins []string
 	Logger         *log.Logger
+	ArtifactDir    string
 }
 
 type API struct {
-	db      *gorm.DB
-	options Options
+	db            *gorm.DB
+	options       Options
+	artifactStore *artifactStore
 }
 
-func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
+type Router struct {
+	*gin.Engine
+	artifactStore *artifactStore
+	closeOnce     sync.Once
+	closeErr      error
+}
+
+func (r *Router) Close() error {
+	if r == nil {
+		return nil
+	}
+	r.closeOnce.Do(func() {
+		if r.artifactStore != nil {
+			r.closeErr = r.artifactStore.close()
+		}
+	})
+	return r.closeErr
+}
+
+func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	if err := middlewareConfigurationError(options.SessionToken, options.DevMode, options.AllowedOrigins); err != nil {
 		return nil, err
 	}
@@ -53,7 +78,41 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 		writeError(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 	})
 
-	service := &API{db: db, options: options}
+	var artifacts *artifactStore
+	if options.ArtifactDir != "" {
+		var databaseID string
+		var boundStoreID sql.NullString
+		if err := db.Raw("SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&databaseID, &boundStoreID); err != nil {
+			return nil, err
+		}
+		var err error
+		artifacts, err = newArtifactStore(options.ArtifactDir, databaseID, boundStoreID.String)
+		if err != nil {
+			return nil, err
+		}
+		if !boundStoreID.Valid {
+			result := db.Exec(
+				"UPDATE workspace_identity SET artifact_store_id = ? WHERE singleton = 1 AND artifact_store_id IS NULL",
+				artifacts.storeID,
+			)
+			if result.Error != nil {
+				_ = artifacts.close()
+				return nil, fmt.Errorf("bind Artifact root to workspace database: %w", result.Error)
+			}
+			if result.RowsAffected == 0 {
+				var current string
+				if err := db.Raw("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&current); err != nil || current != artifacts.storeID {
+					_ = artifacts.close()
+					return nil, errors.New("workspace database was concurrently bound to a different Artifact root")
+				}
+			}
+		}
+		if err := artifacts.reconcile(db); err != nil {
+			_ = artifacts.close()
+			return nil, err
+		}
+	}
+	service := &API{db: db, options: options, artifactStore: artifacts}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
 	{
@@ -74,11 +133,18 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 		v1.POST("/tasks/:id/complete", service.completeTask)
 		v1.POST("/tasks/:id/cancel", service.cancelTask)
 		v1.POST("/tasks/:id/reopen", service.reopenTask)
+		v1.POST("/tasks/:id/submit-output", service.submitTaskOutput)
+		v1.POST("/tasks/:id/review", service.reviewTaskOutput)
+		v1.GET("/tasks/:id/submissions", service.listTaskSubmissions)
+		v1.GET("/tasks/:id/artifacts", service.listTaskArtifacts)
 		v1.GET("/tasks/:id/events", service.listTaskWorkflowEvents)
 		v1.GET("/tasks/:id/assignments", service.listTaskAssignments)
 		v1.POST("/tasks/:id/assignments", service.createTaskAssignment)
 		v1.POST("/tasks/:id/reassign", service.reassignTask)
 		v1.POST("/assignments/:id/end", service.endAssignment)
+		v1.GET("/artifacts/:id", service.getTaskArtifact)
+		v1.GET("/artifacts/:id/content", service.getTaskArtifactContent)
+		v1.DELETE("/artifacts/:id", service.deleteTaskArtifact)
 		v1.DELETE("/tasks/:id", service.deleteTask)
 		v1.GET("/tags", service.listTags)
 		v1.POST("/tags", service.createTag)
@@ -92,7 +158,7 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 		v1.DELETE("/projects/:id", service.deleteProject)
 		v1.GET("/stats/today", service.todayStats)
 	}
-	return router, nil
+	return &Router{Engine: router, artifactStore: artifacts}, nil
 }
 
 func (a *API) health(c *gin.Context) {

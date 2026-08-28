@@ -16,7 +16,7 @@
 ## 当前实现状态
 
 - 历史自动化视觉原型已移除；当前没有 React 入口、规则表、API、执行器、调度器或运行记录，后续以本文和 PRD 为准。
-- Workflow Event、Inbox Item、Reminder 和完整 Task 状态机仍处于规划阶段，是自动化的前置事实层。
+- Workflow Event、Task 六状态命令以及 manual Submission/Artifact 验收已经交付，可作为未来自动化的只读事实基础；Inbox Item、Reminder、自动化专用事件订阅与执行器仍处于规划阶段。
 - 当前代码没有外部工作流连接器，也没有后台网络发送能力。
 
 ## 目标功能
@@ -87,7 +87,7 @@ API 不提供任意 trigger/action 类型创建接口；所有枚举都由服务
 
 ## 分阶段实施
 
-1. **A1 前置事实层**：完成 Workflow Event、Inbox Item、Task、Reminder 和审计约定。
+1. **A1 前置事实层（部分完成）**：Workflow Event、Task 生命周期与 Submission/Artifact 审计已交付；继续实现 Inbox Item、Reminder 与自动化消费约定。
 2. **A2 ADR 与预设目录**：固化触发/动作白名单、时区、补偿、重试、递归和权限边界。
 3. **A3 数据/API**：新增规则与 Run 迁移，实现列表、配置、启停、预览和历史查询。
 4. **A4 事件执行器**：实现事务写入、`rule_id + event_id` 去重、失败分类和有界重试。

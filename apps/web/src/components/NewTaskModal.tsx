@@ -6,7 +6,7 @@ import {
 } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
-import type { TaskKind, TaskPriority } from "../types/models";
+import type { TaskKind, TaskPriority, TaskReviewPolicy } from "../types/models";
 import { Modal } from "./Modal";
 import { TaskTagPicker } from "./TaskTagPicker";
 
@@ -45,6 +45,7 @@ export function NewTaskModal() {
   const [projectId, setProjectId] = useState("");
   const [parentTaskId, setParentTaskId] = useState("");
   const [completionCriteria, setCompletionCriteria] = useState("");
+  const [reviewPolicy, setReviewPolicy] = useState<TaskReviewPolicy>("none");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const projectsQuery = useProjectOptionsQuery(open);
@@ -104,6 +105,7 @@ export function NewTaskModal() {
         projectId: projectId || null,
         parentTaskId: parentTaskId || null,
         completionCriteria: completionCriteria.trim(),
+        reviewPolicy,
         tagIds,
         dueDate: normalizedDueDate,
         plannedDate: plannedDate || null,
@@ -121,6 +123,7 @@ export function NewTaskModal() {
           setProjectId("");
           setParentTaskId("");
           setCompletionCriteria("");
+          setReviewPolicy("none");
           setTagIds([]);
           setValidationError(null);
           setOpen(false);
@@ -269,6 +272,24 @@ export function NewTaskModal() {
             </div>
           </label>
         </div>
+        <label className="form-field">
+          <span>验收策略</span>
+          <select
+            aria-label="验收策略"
+            onChange={(event) =>
+              setReviewPolicy(event.target.value as TaskReviewPolicy)
+            }
+            value={reviewPolicy}
+          >
+            <option value="none">无需验收 · 可直接完成</option>
+            <option value="manual">人工验收 · 提交产出后完成</option>
+          </select>
+          <small>
+            {reviewPolicy === "manual"
+              ? "创建后需设置负责人和所有者审核人，提交产出并验收。"
+              : "适合无需单独检查产出的快速任务。"}
+          </small>
+        </label>
         <fieldset className="form-field">
           <legend>优先级</legend>
           <div className="priority-segment">

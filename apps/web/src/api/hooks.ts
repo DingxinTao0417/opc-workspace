@@ -18,6 +18,8 @@ import {
   deleteProject,
   deleteTag,
   deleteTask,
+  deleteTaskArtifact,
+  downloadTaskArtifact,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -29,8 +31,11 @@ import {
   getHealth,
   getTags,
   getTask,
+  getTaskArtifact,
+  getTaskArtifacts,
   getTaskAssignments,
   getTaskEvents,
+  getTaskSubmissions,
   getTaskPage,
   getTasks,
   getTodayStats,
@@ -39,6 +44,8 @@ import {
   resetRuntimeConnection,
   reorderTasks,
   reassignTaskAssignment,
+  reviewTaskSubmission,
+  submitTaskOutput,
   updateTag,
   updateTask,
   transitionProject,
@@ -50,6 +57,7 @@ import type {
   BatchUpdateTasksInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
+  DeleteTaskArtifactInput,
   EndTaskAssignmentInput,
   NewTaskInput,
   ProjectInput,
@@ -59,10 +67,14 @@ import type {
   TagInput,
   TagListParams,
   Task,
+  TaskArtifactListParams,
   TaskAssignmentListParams,
   TaskEventListParams,
   TaskLifecycleCommandInput,
   TaskListParams,
+  TaskSubmissionListParams,
+  SubmitTaskOutputInput,
+  ReviewTaskSubmissionInput,
   ReassignTaskAssignmentInput,
   UpdateActorInput,
   UpdateTagInput,
@@ -200,6 +212,15 @@ export const taskAssignmentQueryKey = (taskId: string) =>
 export const taskEventQueryKey = (taskId: string) =>
   ["task-events", taskId] as const;
 
+export const taskSubmissionQueryKey = (taskId: string) =>
+  ["task-submissions", taskId] as const;
+
+export const taskArtifactQueryKey = (taskId: string) =>
+  ["task-artifacts", taskId] as const;
+
+export const taskArtifactDetailQueryKey = (artifactId: string) =>
+  ["task-artifact", artifactId] as const;
+
 export function useTaskEventsQuery(
   taskId: string | null,
   input: Omit<TaskEventListParams, "page"> = {},
@@ -218,6 +239,64 @@ export function useTaskEventsQuery(
     enabled: Boolean(taskId) && enabled,
     retry: 1,
     staleTime: 10_000,
+  });
+}
+
+export function useTaskSubmissionsQuery(
+  taskId: string | null,
+  input: Omit<TaskSubmissionListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = { pageSize: input.pageSize ?? 10 };
+  return useInfiniteQuery({
+    queryKey: [...taskSubmissionQueryKey(taskId ?? "closed"), "history", query],
+    queryFn: ({ pageParam }) =>
+      getTaskSubmissions(taskId!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(taskId) && enabled,
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+export function useTaskArtifactsQuery(
+  taskId: string | null,
+  input: Omit<TaskArtifactListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = {
+    pageSize: input.pageSize ?? 20,
+    submissionId: input.submissionId,
+    includeDeleted: input.includeDeleted ?? true,
+  };
+  return useInfiniteQuery({
+    queryKey: [...taskArtifactQueryKey(taskId ?? "closed"), "history", query],
+    queryFn: ({ pageParam }) =>
+      getTaskArtifacts(taskId!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(taskId) && enabled,
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+export function useTaskArtifactQuery(
+  artifactId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: taskArtifactDetailQueryKey(artifactId ?? "closed"),
+    queryFn: () => getTaskArtifact(artifactId!),
+    enabled: Boolean(artifactId) && enabled,
+    retry: 1,
   });
 }
 
@@ -473,15 +552,7 @@ export function useTaskLifecycleCommand() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-      await queryClient.invalidateQueries({
-        queryKey: taskAssignmentQueryKey(result.task.id),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: taskEventQueryKey(result.task.id),
-      });
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+      await invalidateTaskOutputAggregate(queryClient, result.task.id);
     },
     onError: async (error, variables) => {
       if (
@@ -495,11 +566,201 @@ export function useTaskLifecycleCommand() {
         await queryClient.invalidateQueries({
           queryKey: taskEventQueryKey(variables.id),
         });
+        await queryClient.invalidateQueries({
+          queryKey: taskSubmissionQueryKey(variables.id),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: taskArtifactQueryKey(variables.id),
+        });
         if (error.status === 409) {
           await queryClient.invalidateQueries({ queryKey: projectQueryKey });
           await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
         }
       }
+    },
+  });
+}
+
+function submitOutputFingerprint(
+  taskId: string,
+  input: SubmitTaskOutputInput,
+  fileToken: (file: File) => string,
+): string {
+  return JSON.stringify({
+    taskId,
+    expectedVersion: input.expectedVersion,
+    summary: input.summary,
+    artifacts: input.artifacts.map((artifact) => {
+      const common = {
+        clientRef: artifact.clientRef,
+        storageKind: artifact.storageKind,
+        name: artifact.name,
+        requiresFollowup: artifact.requiresFollowup,
+      };
+      switch (artifact.storageKind) {
+        case "text":
+          return { ...common, contentText: artifact.contentText };
+        case "link":
+          return { ...common, referenceUrl: artifact.referenceUrl };
+        case "structured":
+          return { ...common, structuredJson: artifact.structuredJson };
+        case "file":
+          return {
+            ...common,
+            file: {
+              token: fileToken(artifact.file),
+              name: artifact.file.name,
+              size: artifact.file.size,
+              type: artifact.file.type,
+              lastModified: artifact.file.lastModified,
+            },
+          };
+      }
+    }),
+  });
+}
+
+async function invalidateTaskOutputAggregate(
+  queryClient: QueryClient,
+  taskId: string,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({ queryKey: taskSubmissionQueryKey(taskId) }),
+    queryClient.invalidateQueries({ queryKey: taskArtifactQueryKey(taskId) }),
+    queryClient.invalidateQueries({ queryKey: taskAssignmentQueryKey(taskId) }),
+    queryClient.invalidateQueries({ queryKey: taskEventQueryKey(taskId) }),
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
+  ]);
+}
+
+function outputErrorNeedsRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 || error.status === 409 || error.status === 410)
+  );
+}
+
+export function useSubmitTaskOutput() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  const fileTokens = useRef(new WeakMap<File, string>());
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      input,
+    }: {
+      taskId: string;
+      input: SubmitTaskOutputInput;
+    }) => {
+      const fingerprint = submitOutputFingerprint(taskId, input, (file) => {
+        const existing = fileTokens.current.get(file);
+        if (existing) return existing;
+        const token = crypto.randomUUID();
+        fileTokens.current.set(file, token);
+        return token;
+      });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return submitTaskOutput(taskId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (outputErrorNeedsRefresh(error)) {
+        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+      }
+    },
+  });
+}
+
+export function useReviewTaskSubmission() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      input,
+    }: {
+      taskId: string;
+      input: ReviewTaskSubmissionInput;
+    }) => {
+      const fingerprint = JSON.stringify({ taskId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return reviewTaskSubmission(taskId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (outputErrorNeedsRefresh(error)) {
+        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+      }
+    },
+  });
+}
+
+export function useDeleteTaskArtifact() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      artifactId,
+      input,
+    }: {
+      taskId: string;
+      artifactId: string;
+      input: DeleteTaskArtifactInput;
+    }) => {
+      const fingerprint = JSON.stringify({ taskId, artifactId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return deleteTaskArtifact(artifactId, taskId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      queryClient.removeQueries({
+        queryKey: taskArtifactDetailQueryKey(result.artifact.id),
+      });
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (outputErrorNeedsRefresh(error)) {
+        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+      }
+    },
+  });
+}
+
+export function useDownloadTaskArtifact() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { taskId: string; id: string; name: string }) =>
+      downloadTaskArtifact(id, name),
+    onSettled: async (_data, _error, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: taskArtifactDetailQueryKey(variables.id),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: taskArtifactQueryKey(variables.taskId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: taskSubmissionQueryKey(variables.taskId),
+        }),
+      ]);
     },
   });
 }
@@ -518,9 +779,7 @@ export function useUpdateTask() {
       }),
     onSuccess: async (task) => {
       queryClient.setQueryData(taskDetailQueryKey(task.id), task);
-      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+      await invalidateTaskOutputAggregate(queryClient, task.id);
     },
   });
 }
@@ -544,6 +803,8 @@ export function useDeleteTask() {
       queryClient.removeQueries({ queryKey: taskDetailQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskAssignmentQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskEventQueryKey(id) });
+      queryClient.removeQueries({ queryKey: taskSubmissionQueryKey(id) });
+      queryClient.removeQueries({ queryKey: taskArtifactQueryKey(id) });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });

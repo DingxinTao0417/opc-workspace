@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v8 延续 schema v7 的 Actor 数据，“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
+> 文档状态：部分实现；当前 schema v9 延续 schema v7 的 Actor 数据并增加 Task Submission/Artifact（不改变设置存储），“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
 
 ## 定位与边界
 
@@ -226,7 +226,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - 各入口可直接打开指定设置模块。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v8 延续。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v9 延续。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
@@ -235,7 +235,7 @@
 ## 相关代码/PRD链接
 
 - [PRD：专注设置模态框](../opc-workspace-PRD.md#专注设置模态框)
-- [PRD：app_settings 规划](../opc-workspace-PRD.md#本地工作编排数据表部分实现)
+- [PRD：app_settings 规划](../opc-workspace-PRD.md#本地工作编排数据表taskactord2-已实现inboxagent-仍规划)
 - [PRD：各模块具体实施计划](../opc-workspace-PRD.md#107-各模块具体实施计划)
 - [当前设置 store](../../apps/web/src/store/settings.ts)
 - [当前设置弹窗](../../apps/web/src/components/SettingsModal.tsx)

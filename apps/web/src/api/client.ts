@@ -8,6 +8,8 @@ import type {
   BatchUpdateTasksResult,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
+  DeleteTaskArtifactInput,
+  DeleteTaskArtifactResult,
   DeleteTagResult,
   EndTaskAssignmentInput,
   HealthResponse,
@@ -28,6 +30,12 @@ import type {
   TagListParams,
   TagListResult,
   Task,
+  TaskArtifact,
+  TaskArtifactDownload,
+  TaskArtifactListParams,
+  TaskArtifactListResult,
+  TaskArtifactStorageKind,
+  TaskAggregateListMeta,
   TaskAssignment,
   TaskAssignmentListParams,
   TaskAssignmentListResult,
@@ -42,6 +50,13 @@ import type {
   TaskListResult,
   TaskPriority,
   TaskReviewPolicy,
+  TaskSubmission,
+  TaskSubmissionListParams,
+  TaskSubmissionListResult,
+  SubmitTaskOutputInput,
+  SubmitTaskOutputResult,
+  ReviewTaskSubmissionInput,
+  ReviewTaskSubmissionResult,
   TaskStatus,
   TaskWorkflowEvent,
   TodayStats,
@@ -53,6 +68,17 @@ import type {
 
 const DEV_TOKEN =
   import.meta.env.VITE_OPC_SESSION_TOKEN ?? "opc-workspace-local-dev";
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+const ARTIFACT_TRANSFER_TIMEOUT_MS = 120_000;
+const MAX_JSON_REQUEST_BYTES = 1_024 * 1_024;
+const MAX_ARTIFACT_FILE_BYTES = 50 * 1_024 * 1_024;
+const MAX_MULTIPART_REQUEST_BYTES = 100 * 1_024 * 1_024;
+// Browsers choose the multipart boundary and encode per-part headers after the
+// FormData has been built. Reserve enough space for that envelope so a request
+// that passes client validation does not immediately exceed the Sidecar limit.
+const MULTIPART_ENVELOPE_RESERVE_BYTES = 64 * 1_024;
+const MULTIPART_FILE_PART_RESERVE_BYTES = 2 * 1_024;
 
 interface RuntimeConnection {
   baseUrl: string;
@@ -191,27 +217,50 @@ export function resetRuntimeConnection(): void {
   runtimeConnectionPromise = undefined;
 }
 
-async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function readResponseJSON(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) return undefined;
+    throw error;
+  }
+}
+
+async function apiFetch<T>(
+  path: string,
+  consume: (response: Response) => Promise<T>,
+  init: RequestInit = {},
+  accept = "application/json",
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const connection = await getRuntimeConnection();
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type"))
+  headers.set("Accept", accept);
+  const multipart =
+    typeof FormData !== "undefined" && init.body instanceof FormData;
+  if (init.body && !multipart && !headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
   if (connection.token)
     headers.set("Authorization", `Bearer ${connection.token}`);
 
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8_000);
+  const upstreamSignal = init.signal;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal?.aborted) controller.abort();
+  else
+    upstreamSignal?.addEventListener("abort", abortFromUpstream, {
+      once: true,
+    });
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${connection.baseUrl}${path}`, {
       ...init,
       headers,
-      signal: init.signal ?? controller.signal,
+      signal: controller.signal,
     });
-    const body = (await response.json().catch(() => undefined)) as unknown;
-
     if (!response.ok) {
+      const body = await readResponseJSON(response);
       const errorBody = isRecord(body) ? body : {};
       throw new ApiError(
         stringField(errorBody, "message") ?? `请求失败（${response.status}）`,
@@ -223,16 +272,34 @@ async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
       );
     }
 
-    return body as T;
+    return await consume(response);
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") {
+    if (
+      controller.signal.aborted ||
+      (error instanceof DOMException && error.name === "AbortError")
+    ) {
       throw new ApiError("连接本地 Sidecar 超时", { code: "TIMEOUT" });
     }
     throw new ApiError("无法连接本地 Sidecar", { code: "NETWORK_ERROR" });
   } finally {
     window.clearTimeout(timeout);
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
   }
+}
+
+async function apiRequest<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  return apiFetch(
+    path,
+    async (response) => (await readResponseJSON(response)) as T,
+    init,
+    "application/json",
+    timeoutMs,
+  );
 }
 
 function invalidResponse(message: string): never {
@@ -737,7 +804,383 @@ export function normalizeTask(value: unknown): Task {
       fieldValue(value, "submitted_at", "submittedAt"),
     ),
     reviewedAt: nullableString(fieldValue(value, "reviewed_at", "reviewedAt")),
+    currentSubmissionId: nullableString(
+      fieldValue(value, "current_submission_id", "currentSubmissionId"),
+    ),
     tags: Array.isArray(rawTags) ? rawTags.map(normalizeTag) : [],
+  };
+}
+
+function asArtifactStorageKind(value: unknown): TaskArtifactStorageKind {
+  if (
+    value === "text" ||
+    value === "link" ||
+    value === "structured" ||
+    value === "file"
+  ) {
+    return value;
+  }
+  return invalidResponse("任务产出类型响应无效");
+}
+
+function asArtifactIntegrityStatus(
+  value: unknown,
+): TaskArtifact["integrityStatus"] {
+  if (
+    value === "unverified" ||
+    value === "verified" ||
+    value === "missing" ||
+    value === "mismatch"
+  ) {
+    return value;
+  }
+  return invalidResponse("任务产出完整性状态响应无效");
+}
+
+function asSubmissionStatus(value: unknown): TaskSubmission["status"] {
+  if (
+    value === "pending_review" ||
+    value === "accepted" ||
+    value === "changes_requested" ||
+    value === "withdrawn"
+  ) {
+    return value;
+  }
+  return invalidResponse("任务提交状态响应无效");
+}
+
+function nullableActorSummary(
+  value: unknown,
+  field: string,
+): ActorSummary | null {
+  if (value === null) return null;
+  if (!isRecord(value)) return invalidResponse(`${field}响应无效`);
+  return normalizeActorSummary(value);
+}
+
+function requiredNullableString(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  if (typeof value === "string" && value.length > 0) return value;
+  return invalidResponse(`${field}响应无效`);
+}
+
+export function normalizeTaskArtifactSummary(
+  value: unknown,
+): TaskArtifactListResult["items"][number] {
+  if (!isRecord(value)) return invalidResponse("任务产出摘要响应格式无效");
+  const id = stringField(value, "id");
+  const taskId = stringField(value, "task_id", "taskId");
+  const submissionId = stringField(value, "submission_id", "submissionId");
+  const submissionStatus = asSubmissionStatus(
+    fieldValue(value, "submission_status", "submissionStatus"),
+  );
+  const name = stringField(value, "name");
+  const producedByActorId = stringField(
+    value,
+    "produced_by_actor_id",
+    "producedByActorId",
+  );
+  const recordedByActorId = stringField(
+    value,
+    "recorded_by_actor_id",
+    "recordedByActorId",
+  );
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const rawRequiresFollowup = fieldValue(
+    value,
+    "requires_followup",
+    "requiresFollowup",
+  );
+  if (
+    !id ||
+    !taskId ||
+    !submissionId ||
+    !name ||
+    !producedByActorId ||
+    !recordedByActorId ||
+    !createdAt ||
+    typeof rawRequiresFollowup !== "boolean"
+  ) {
+    return invalidResponse("任务产出摘要响应格式无效");
+  }
+  const producedByActor = normalizeActorSummary(
+    fieldValue(value, "produced_by_actor", "producedByActor"),
+  );
+  const recordedByActor = normalizeActorSummary(
+    fieldValue(value, "recorded_by_actor", "recordedByActor"),
+  );
+  const deletedByActor = nullableActorSummary(
+    fieldValue(value, "deleted_by_actor", "deletedByActor"),
+    "任务产出删除人",
+  );
+  const deletedByActorId = requiredNullableString(
+    fieldValue(value, "deleted_by_actor_id", "deletedByActorId"),
+    "任务产出删除人 ID",
+  );
+  if (
+    producedByActor.id !== producedByActorId ||
+    recordedByActor.id !== recordedByActorId ||
+    (deletedByActor?.id ?? null) !== deletedByActorId
+  ) {
+    return invalidResponse("任务产出责任主体响应不一致");
+  }
+  const mimeType = requiredNullableString(
+    fieldValue(value, "mime_type", "mimeType"),
+    "任务产出 MIME 类型",
+  );
+  const sha256 = requiredNullableString(value.sha256, "任务产出校验值");
+  if (sha256 !== null && !/^[0-9a-f]{64}$/.test(sha256)) {
+    return invalidResponse("任务产出校验值响应无效");
+  }
+  const rawSizeBytes = fieldValue(value, "size_bytes", "sizeBytes");
+  if (rawSizeBytes === undefined) {
+    return invalidResponse("任务产出大小响应无效");
+  }
+  const sizeBytes =
+    rawSizeBytes === null
+      ? null
+      : nonNegativeInteger(rawSizeBytes, "任务产出大小");
+  const storageKind = asArtifactStorageKind(
+    fieldValue(value, "storage_kind", "storageKind"),
+  );
+  if (
+    (storageKind === "file" &&
+      (mimeType === null ||
+        sizeBytes === null ||
+        sizeBytes < 1 ||
+        sha256 === null)) ||
+    (storageKind !== "file" &&
+      (mimeType !== null || sizeBytes !== null || sha256 !== null))
+  ) {
+    return invalidResponse("任务产出存储元数据与类型不一致");
+  }
+  const integrityStatus = asArtifactIntegrityStatus(
+    fieldValue(value, "integrity_status", "integrityStatus"),
+  );
+  const integrityCheckedAt = requiredNullableString(
+    fieldValue(value, "integrity_checked_at", "integrityCheckedAt"),
+    "任务产出完整性检查时间",
+  );
+  if (
+    (integrityStatus === "unverified" && integrityCheckedAt !== null) ||
+    (integrityStatus !== "unverified" && integrityCheckedAt === null)
+  ) {
+    return invalidResponse("任务产出完整性状态响应不一致");
+  }
+  const deletedAt = requiredNullableString(
+    fieldValue(value, "deleted_at", "deletedAt"),
+    "任务产出删除时间",
+  );
+  const deleteReason = requiredNullableString(
+    fieldValue(value, "delete_reason", "deleteReason"),
+    "任务产出删除原因",
+  );
+  if (
+    (deletedAt === null &&
+      (deletedByActorId !== null || deleteReason !== null)) ||
+    (deletedAt !== null && (deletedByActorId === null || deleteReason === null))
+  ) {
+    return invalidResponse("任务产出删除状态响应不一致");
+  }
+  return {
+    id,
+    taskId,
+    submissionId,
+    submissionStatus,
+    position: positiveInteger(value.position, "任务产出位置"),
+    storageKind,
+    name,
+    mimeType,
+    sizeBytes,
+    sha256,
+    requiresFollowup: rawRequiresFollowup,
+    producedByActorId,
+    producedByActor,
+    recordedByActorId,
+    recordedByActor,
+    integrityStatus,
+    integrityCheckedAt,
+    deletedAt,
+    deletedByActorId,
+    deletedByActor,
+    deleteReason,
+    createdAt,
+  };
+}
+
+export function normalizeTaskArtifact(value: unknown): TaskArtifact {
+  if (!isRecord(value)) return invalidResponse("任务产出详情响应格式无效");
+  const summary = normalizeTaskArtifactSummary(value);
+  const contentText = requiredNullableString(
+    fieldValue(value, "content_text", "contentText"),
+    "任务文本产出",
+  );
+  const referenceUrl = requiredNullableString(
+    fieldValue(value, "reference_url", "referenceUrl"),
+    "任务链接产出",
+  );
+  const rawStructured = fieldValue(value, "structured_json", "structuredJson");
+  const structuredJson =
+    rawStructured === null
+      ? null
+      : isRecord(rawStructured)
+        ? rawStructured
+        : invalidResponse("任务结构化产出响应无效");
+  const activePayloads = [contentText, referenceUrl, structuredJson].filter(
+    (item) => item !== null,
+  ).length;
+  if (
+    (summary.deletedAt !== null && activePayloads !== 0) ||
+    (summary.deletedAt === null &&
+      ((summary.storageKind === "text" &&
+        (contentText === null || activePayloads !== 1)) ||
+        (summary.storageKind === "link" &&
+          (referenceUrl === null || activePayloads !== 1)) ||
+        (summary.storageKind === "structured" &&
+          (structuredJson === null || activePayloads !== 1)) ||
+        (summary.storageKind === "file" && activePayloads !== 0)))
+  ) {
+    return invalidResponse("任务产出详情与类型不一致");
+  }
+  return { ...summary, contentText, referenceUrl, structuredJson };
+}
+
+export function normalizeTaskSubmission(value: unknown): TaskSubmission {
+  if (!isRecord(value)) return invalidResponse("任务提交响应格式无效");
+  const id = stringField(value, "id");
+  const taskId = stringField(value, "task_id", "taskId");
+  const submittedByActorId = stringField(
+    value,
+    "submitted_by_actor_id",
+    "submittedByActorId",
+  );
+  const submittedAt = stringField(value, "submitted_at", "submittedAt");
+  if (
+    !id ||
+    !taskId ||
+    !submittedByActorId ||
+    !submittedAt ||
+    typeof value.summary !== "string" ||
+    typeof fieldValue(value, "is_inferred", "isInferred") !== "boolean" ||
+    !Array.isArray(value.artifacts)
+  ) {
+    return invalidResponse("任务提交响应格式无效");
+  }
+  const submittedByActor = normalizeActorSummary(
+    fieldValue(value, "submitted_by_actor", "submittedByActor"),
+  );
+  const reviewedByActorId = requiredNullableString(
+    fieldValue(value, "reviewed_by_actor_id", "reviewedByActorId"),
+    "任务审核人 ID",
+  );
+  const reviewedByActor = nullableActorSummary(
+    fieldValue(value, "reviewed_by_actor", "reviewedByActor"),
+    "任务审核人",
+  );
+  const withdrawnByActorId = requiredNullableString(
+    fieldValue(value, "withdrawn_by_actor_id", "withdrawnByActorId"),
+    "任务撤回人 ID",
+  );
+  const withdrawnByActor = nullableActorSummary(
+    fieldValue(value, "withdrawn_by_actor", "withdrawnByActor"),
+    "任务撤回人",
+  );
+  if (
+    submittedByActor.id !== submittedByActorId ||
+    (reviewedByActor?.id ?? null) !== reviewedByActorId ||
+    (withdrawnByActor?.id ?? null) !== withdrawnByActorId
+  ) {
+    return invalidResponse("任务提交责任主体响应不一致");
+  }
+  const status = asSubmissionStatus(value.status);
+  const artifacts = value.artifacts.map(normalizeTaskArtifactSummary);
+  if (
+    artifacts.some(
+      (artifact) =>
+        artifact.taskId !== taskId ||
+        artifact.submissionId !== id ||
+        artifact.submissionStatus !== status,
+    )
+  ) {
+    return invalidResponse("任务提交产出响应不一致");
+  }
+  return {
+    id,
+    taskId,
+    sequence: positiveInteger(value.sequence, "任务提交序号"),
+    status,
+    summary: value.summary,
+    submittedByActorId,
+    submittedByActor,
+    submittedAt,
+    reviewedByActorId,
+    reviewedByActor,
+    reviewedAt: requiredNullableString(
+      fieldValue(value, "reviewed_at", "reviewedAt"),
+      "任务审核时间",
+    ),
+    reviewReason: requiredNullableString(
+      fieldValue(value, "review_reason", "reviewReason"),
+      "任务审核原因",
+    ),
+    withdrawnByActorId,
+    withdrawnByActor,
+    withdrawnAt: requiredNullableString(
+      fieldValue(value, "withdrawn_at", "withdrawnAt"),
+      "任务撤回时间",
+    ),
+    isInferred: fieldValue(value, "is_inferred", "isInferred") as boolean,
+    artifacts,
+  };
+}
+
+function normalizeTaskAggregateMeta(
+  value: unknown,
+  itemCount: number,
+  label: string,
+): TaskAggregateListMeta {
+  if (!isRecord(value)) return invalidResponse(`${label}分页响应格式无效`);
+  const meta = {
+    page: positiveInteger(value.page, `${label}页码`),
+    pageSize: positiveInteger(
+      fieldValue(value, "page_size", "pageSize"),
+      `${label}分页大小`,
+    ),
+    total: nonNegativeInteger(value.total, `${label}总数`),
+    taskVersion: positiveInteger(
+      fieldValue(value, "task_version", "taskVersion"),
+      `${label}任务版本`,
+    ),
+  };
+  if (itemCount > meta.pageSize || itemCount > meta.total) {
+    return invalidResponse(`${label}分页响应不一致`);
+  }
+  return meta;
+}
+
+export function normalizeTaskSubmissionListResult(
+  value: unknown,
+): TaskSubmissionListResult {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    return invalidResponse("任务提交列表响应格式无效");
+  }
+  const items = value.data.map(normalizeTaskSubmission);
+  return {
+    items,
+    meta: normalizeTaskAggregateMeta(value.meta, items.length, "任务提交"),
+  };
+}
+
+export function normalizeTaskArtifactListResult(
+  value: unknown,
+): TaskArtifactListResult {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    return invalidResponse("任务产出列表响应格式无效");
+  }
+  const items = value.data.map(normalizeTaskArtifactSummary);
+  return {
+    items,
+    meta: normalizeTaskAggregateMeta(value.meta, items.length, "任务产出"),
   };
 }
 
@@ -798,6 +1241,14 @@ export function normalizeTaskWorkflowEvent(value: unknown): TaskWorkflowEvent {
     assignmentId: nullableEventString(
       fieldValue(value, "assignment_id", "assignmentId"),
       "任务事件分派 ID",
+    ),
+    submissionId: nullableEventString(
+      fieldValue(value, "submission_id", "submissionId"),
+      "任务事件提交 ID",
+    ),
+    artifactId: nullableEventString(
+      fieldValue(value, "artifact_id", "artifactId"),
+      "任务事件产出 ID",
     ),
     requestId,
     commandSeq,
@@ -1071,6 +1522,367 @@ export async function getTaskEvents(
   return normalizeTaskEventListResult(payload);
 }
 
+export async function getTaskSubmissions(
+  taskId: string,
+  input: TaskSubmissionListParams = {},
+): Promise<TaskSubmissionListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/submissions?${params}`,
+  );
+  const result = normalizeTaskSubmissionListResult(payload);
+  if (
+    result.items.some((submission) => submission.taskId !== taskId) ||
+    result.items.some(
+      (submission, index, items) =>
+        index > 0 && items[index - 1].sequence <= submission.sequence,
+    )
+  ) {
+    return invalidResponse("任务提交列表响应与请求不一致");
+  }
+  return result;
+}
+
+export async function getTaskArtifacts(
+  taskId: string,
+  input: TaskArtifactListParams = {},
+): Promise<TaskArtifactListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.submissionId) params.set("submission_id", input.submissionId);
+  if (input.includeDeleted !== undefined) {
+    params.set("include_deleted", String(input.includeDeleted));
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/artifacts?${params}`,
+  );
+  const result = normalizeTaskArtifactListResult(payload);
+  if (
+    result.items.some((artifact) => artifact.taskId !== taskId) ||
+    (input.submissionId &&
+      result.items.some(
+        (artifact) => artifact.submissionId !== input.submissionId,
+      )) ||
+    (!input.includeDeleted &&
+      result.items.some((artifact) => artifact.deletedAt !== null))
+  ) {
+    return invalidResponse("任务产出列表响应与请求不一致");
+  }
+  return result;
+}
+
+export async function getTaskArtifact(id: string): Promise<TaskArtifact> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/artifacts/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const artifact = normalizeTaskArtifact(body);
+  if (artifact.id !== id) return invalidResponse("任务产出详情与请求不一致");
+  return artifact;
+}
+
+function downloadFileName(
+  disposition: string | null,
+  fallback: string,
+): string {
+  let candidate = "";
+  const encoded = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      candidate = decodeURIComponent(encoded.trim());
+    } catch {
+      candidate = "";
+    }
+  }
+  if (!candidate) {
+    candidate = disposition?.match(/filename="?([^";]+)"?/i)?.[1]?.trim() ?? "";
+  }
+  const safe = (candidate || fallback)
+    .replace(/[\\/\u0000-\u001f\u007f]/g, "_")
+    .trim();
+  return safe || "artifact";
+}
+
+export async function downloadTaskArtifact(
+  id: string,
+  fallbackName: string,
+): Promise<TaskArtifactDownload> {
+  return apiFetch(
+    `/api/v1/artifacts/${encodeURIComponent(id)}/content`,
+    async (response) => {
+      const blob = await response.blob();
+      const mimeType = response.headers.get("Content-Type") ?? blob.type;
+      return {
+        blob,
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          fallbackName,
+        ),
+        mimeType: mimeType || "application/octet-stream",
+      };
+    },
+    {},
+    "application/octet-stream",
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+}
+
+function serializeNewArtifact(
+  artifact: SubmitTaskOutputInput["artifacts"][number],
+  fileField?: string,
+): Record<string, unknown> {
+  const common = {
+    client_ref: artifact.clientRef,
+    storage_kind: artifact.storageKind,
+    name: artifact.name,
+    requires_followup: artifact.requiresFollowup,
+  };
+  switch (artifact.storageKind) {
+    case "text":
+      return { ...common, content_text: artifact.contentText };
+    case "link":
+      return { ...common, reference_url: artifact.referenceUrl };
+    case "structured":
+      return { ...common, structured_json: artifact.structuredJson };
+    case "file":
+      if (!fileField)
+        throw new ApiError("文件产出缺少上传字段", { code: "INVALID_FILE" });
+      return { ...common, file_field: fileField };
+  }
+}
+
+function normalizeSubmitOutputResult(
+  value: unknown,
+  taskId: string,
+): SubmitTaskOutputResult {
+  if (
+    !isRecord(value) ||
+    !isRecord(value.data) ||
+    !Array.isArray(value.data.artifacts)
+  ) {
+    return invalidResponse("提交任务产出响应格式无效");
+  }
+  const task = normalizeTask(value.data.task);
+  const submission = normalizeTaskSubmission(value.data.submission);
+  const artifacts = value.data.artifacts.map(normalizeTaskArtifactSummary);
+  const event = normalizeTaskWorkflowEvent(value.data.event);
+  if (
+    task.id !== taskId ||
+    submission.taskId !== taskId ||
+    submission.id !== task.currentSubmissionId ||
+    event.action !== "task_output_submitted" ||
+    event.submissionId !== submission.id ||
+    event.artifactId !== null ||
+    artifacts.some(
+      (artifact) =>
+        artifact.taskId !== taskId ||
+        artifact.submissionId !== submission.id ||
+        artifact.submissionStatus !== submission.status,
+    ) ||
+    artifacts.length !== submission.artifacts.length
+  ) {
+    return invalidResponse("提交任务产出响应不一致");
+  }
+  return { task, submission, artifacts, event };
+}
+
+export async function submitTaskOutput(
+  taskId: string,
+  input: SubmitTaskOutputInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<SubmitTaskOutputResult> {
+  const files = input.artifacts.filter(
+    (
+      artifact,
+    ): artifact is Extract<
+      SubmitTaskOutputInput["artifacts"][number],
+      { storageKind: "file" }
+    > => artifact.storageKind === "file",
+  );
+  const headers = versionedCommandHeaders(
+    input.expectedVersion,
+    idempotencyKey,
+  );
+  let body: BodyInit;
+  if (files.length === 0) {
+    const jsonBody = JSON.stringify({
+      summary: input.summary,
+      artifacts: input.artifacts.map((artifact) =>
+        serializeNewArtifact(artifact),
+      ),
+    });
+    if (
+      new TextEncoder().encode(jsonBody).byteLength > MAX_JSON_REQUEST_BYTES
+    ) {
+      throw new ApiError("JSON 请求不能超过 1 MiB", {
+        code: "REQUEST_TOO_LARGE",
+        status: 413,
+      });
+    }
+    body = jsonBody;
+  } else {
+    const form = new FormData();
+    const fileFields = new Map<string, string>();
+    files.forEach((artifact, index) => {
+      const field = `artifact_file_${index + 1}`;
+      fileFields.set(artifact.clientRef, field);
+    });
+    const manifest = JSON.stringify({
+      summary: input.summary,
+      artifacts: input.artifacts.map((artifact) =>
+        serializeNewArtifact(artifact, fileFields.get(artifact.clientRef)),
+      ),
+    });
+    const manifestBytes = new TextEncoder().encode(manifest).byteLength;
+    if (manifestBytes > MAX_JSON_REQUEST_BYTES) {
+      throw new ApiError("文件提交清单不能超过 1 MiB", {
+        code: "REQUEST_TOO_LARGE",
+        status: 413,
+      });
+    }
+    for (const artifact of files) {
+      if (artifact.file.size < 1) {
+        throw new ApiError("文件产出不能为空", {
+          code: "VALIDATION_ERROR",
+          status: 422,
+        });
+      }
+      if (artifact.file.size > MAX_ARTIFACT_FILE_BYTES) {
+        throw new ApiError("单个文件产出不能超过 50 MiB", {
+          code: "ARTIFACT_FILE_TOO_LARGE",
+          status: 413,
+        });
+      }
+    }
+    const encoder = new TextEncoder();
+    const encodedRequestEstimate = files.reduce((total, artifact) => {
+      const field = fileFields.get(artifact.clientRef) ?? "";
+      const headerTextBytes =
+        encoder.encode(field).byteLength +
+        // Quoting or non-ASCII transport can expand a browser-generated
+        // Content-Disposition filename, so budget three times its UTF-8 size.
+        encoder.encode(artifact.file.name).byteLength * 3;
+      return (
+        total +
+        artifact.file.size +
+        MULTIPART_FILE_PART_RESERVE_BYTES +
+        headerTextBytes
+      );
+    }, manifestBytes + MULTIPART_ENVELOPE_RESERVE_BYTES);
+    if (encodedRequestEstimate > MAX_MULTIPART_REQUEST_BYTES) {
+      throw new ApiError("编码后的任务产出请求不能超过 100 MiB", {
+        code: "REQUEST_TOO_LARGE",
+        status: 413,
+      });
+    }
+    form.append("manifest", manifest);
+    files.forEach((artifact) => {
+      const field = fileFields.get(artifact.clientRef);
+      if (field !== undefined) {
+        form.append(field, artifact.file, artifact.file.name);
+      }
+    });
+    body = form;
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/submit-output`,
+    { method: "POST", headers, body },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  return normalizeSubmitOutputResult(payload, taskId);
+}
+
+function normalizeReviewTaskSubmissionResult(
+  value: unknown,
+  taskId: string,
+  decision: ReviewTaskSubmissionInput["decision"],
+): ReviewTaskSubmissionResult {
+  if (!isRecord(value) || !isRecord(value.data)) {
+    return invalidResponse("任务验收响应格式无效");
+  }
+  const task = normalizeTask(value.data.task);
+  const submission = normalizeTaskSubmission(value.data.submission);
+  const event = normalizeTaskWorkflowEvent(value.data.event);
+  const expectedStatus =
+    decision === "accept" ? "accepted" : "changes_requested";
+  const expectedTaskStatus = decision === "accept" ? "done" : "in_progress";
+  const expectedEvent =
+    decision === "accept" ? "task_review_accepted" : "task_changes_requested";
+  if (
+    task.id !== taskId ||
+    task.status !== expectedTaskStatus ||
+    task.currentSubmissionId !== submission.id ||
+    submission.taskId !== taskId ||
+    submission.status !== expectedStatus ||
+    event.action !== expectedEvent ||
+    event.submissionId !== submission.id ||
+    event.artifactId !== null
+  ) {
+    return invalidResponse("任务验收响应不一致");
+  }
+  return { task, submission, event };
+}
+
+export async function reviewTaskSubmission(
+  taskId: string,
+  input: ReviewTaskSubmissionInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ReviewTaskSubmissionResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/review`,
+    {
+      method: "POST",
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
+      body: JSON.stringify({
+        decision: input.decision,
+        ...(input.decision === "request_changes"
+          ? { reason: input.reason }
+          : {}),
+      }),
+    },
+  );
+  return normalizeReviewTaskSubmissionResult(payload, taskId, input.decision);
+}
+
+export async function deleteTaskArtifact(
+  artifactId: string,
+  taskId: string,
+  input: DeleteTaskArtifactInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<DeleteTaskArtifactResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/artifacts/${encodeURIComponent(artifactId)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("删除任务产出响应格式无效");
+  }
+  const task = normalizeTask(payload.data.task);
+  const artifact = normalizeTaskArtifactSummary(payload.data.artifact);
+  const event = normalizeTaskWorkflowEvent(payload.data.event);
+  if (
+    task.id !== taskId ||
+    artifact.id !== artifactId ||
+    artifact.taskId !== taskId ||
+    artifact.deletedAt === null ||
+    event.action !== "task_artifact_deleted" ||
+    event.submissionId !== artifact.submissionId ||
+    event.artifactId !== artifact.id
+  ) {
+    return invalidResponse("删除任务产出响应不一致");
+  }
+  return { task, artifact, event };
+}
+
 export async function getTaskAssignments(
   taskId: string,
   input: TaskAssignmentListParams = {},
@@ -1198,6 +2010,7 @@ export async function createTask(
       project_id: input.projectId ?? null,
       parent_task_id: input.parentTaskId ?? null,
       completion_criteria: input.completionCriteria ?? "",
+      review_policy: input.reviewPolicy ?? "none",
       tag_ids: input.tagIds ?? [],
       due_date: input.dueDate ?? null,
       planned_date: input.plannedDate ?? null,
@@ -1274,6 +2087,9 @@ export async function updateTask(
         ...(input.completionCriteria === undefined
           ? {}
           : { completion_criteria: input.completionCriteria }),
+        ...(input.reviewPolicy === undefined
+          ? {}
+          : { review_policy: input.reviewPolicy }),
         ...(input.tagIds === undefined ? {} : { tag_ids: input.tagIds }),
         due_date: input.dueDate,
         planned_date: input.plannedDate,
@@ -1289,10 +2105,22 @@ export async function deleteTask(
   id: string,
   expectedVersion: number,
 ): Promise<void> {
-  await apiRequest<void>(`/api/v1/tasks/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: expectedVersionHeader(expectedVersion),
-  });
+  try {
+    await apiRequest<void>(
+      `/api/v1/tasks/${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        headers: expectedVersionHeader(expectedVersion),
+      },
+      ARTIFACT_TRANSFER_TIMEOUT_MS,
+    );
+  } catch (error) {
+    // A Task aggregate delete may move controlled files before returning. If a
+    // successful response was lost, retrying a missing Task has reached the
+    // same desired state and is safe to treat as success in the desktop UI.
+    if (error instanceof ApiError && error.code === "TASK_NOT_FOUND") return;
+    throw error;
+  }
 }
 
 export async function batchUpdateTasks(

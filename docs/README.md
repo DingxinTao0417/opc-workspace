@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v8。项目管理基础纵切、任务事实层、Actor/Assignment，以及受控任务生命周期 D1（六状态、六命令、Task 活动时间线）已经接通；`review_policy = manual` 的编辑入口、Artifact、提交验收/返工、收件箱编排、本地 Agent、财务及项目附件/事件集成仍是规划，不代表完整工作流已经交付。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v9。项目管理基础纵切、任务事实层、Actor/Assignment、六状态生命周期、Task 时间线，以及 T-18D D2 的 manual Submission/Artifact 提交验收和受控文件已接通；收件箱/提醒编排、本地 Agent、备份恢复、客户/财务及项目附件/事件集成仍是规划，不代表完整工作流已经交付。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v2.0）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v2.1）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -19,11 +19,11 @@
 | 模块 | 当前状态 | 目标版本 | 文档 |
 |------|----------|----------|------|
 | 今日工作台 | 部分完成 | v0.1 | [today.md](modules/today.md) |
-| 任务管理 | 部分完成（事实层与受控生命周期 D1 已交付） | v0.1；看板 v0.2 | [tasks.md](modules/tasks.md) |
+| 任务管理 | 部分完成（事实层、D1 与 D2 manual 提交验收已交付） | v0.1；看板 v0.2 | [tasks.md](modules/tasks.md) |
 | 项目管理 | 部分完成 | v0.1 | [projects.md](modules/projects.md) |
 | 客户管理 | 页面骨架 | v0.1 | [clients.md](modules/clients.md) |
 | 收件箱工作编排 | 页面骨架 | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md) |
-| Actor 与分派 | 部分完成（Actor、Assignment 与生命周期 D1 已交付） | v0.1 | [actors.md](modules/actors.md) |
+| Actor 与分派 | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现） | v0.1 | [actors.md](modules/actors.md) |
 | 专注与工时 | 部分完成 | v0.1 | [focus.md](modules/focus.md) |
 
 ## 平台与共享能力
@@ -33,7 +33,7 @@
 | 本地 Agent Runtime | 未开始 | v0.2 | [local-agents.md](modules/local-agents.md) |
 | 设置 | 部分完成 | v0.1 / v0.2 | [settings.md](modules/settings.md) |
 | 命令面板与搜索 | 部分完成 | v0.1 | [command-search.md](modules/command-search.md) |
-| 数据、备份与恢复 | 基座部分完成 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md) |
+| 数据、受控文件、备份与恢复 | 迁移与 Artifact store 已交付；备份/恢复未实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md) |
 | 桌面平台与发布 | 基座部分完成 | v0.1 发布闸门 | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
@@ -53,6 +53,8 @@
 - 所有核心业务、Actor、任务、收件箱、提醒、产出和运行记录默认只保存在本机。
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
+- manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
+- Task 文件 Artifact 只保存在 Sidecar 声明的受控目录并经鉴权 API 下载；受控根通过不可变数据库身份 marker、进程独占锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用仍没有产品化备份/恢复能力。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。
@@ -80,7 +82,8 @@
 | Task | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略 |
 | Actor | 本地责任主体：owner、person、agent、system |
 | Assignment | Task 当前负责人和历史改派记录 |
+| Task Submission | 一次产出提交批次，保存摘要、pending/accepted/changes_requested/withdrawn 状态与操作责任 |
 | Agent Run | 本地 Agent 的一次执行尝试；成功不等于 Task 完成 |
-| Task Artifact | 人或 Agent 的本地产出，区分实际产出者与录入者 |
+| Task Artifact | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计 |
 | Reminder | 本地调度事实；到期后幂等生成 Inbox Item |
 | Workflow Event | 创建、拆分、分派、执行、验收和返工的追加式审计时间线 |

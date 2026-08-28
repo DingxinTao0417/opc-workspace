@@ -44,6 +44,7 @@ type createTaskRequest struct {
 	PlannedDate        *string  `json:"planned_date"`
 	EstimatedMinutes   *int     `json:"estimated_minutes"`
 	ManualOrder        *int     `json:"manual_order"`
+	ReviewPolicy       *string  `json:"review_policy"`
 }
 
 type nullableStringPatch struct {
@@ -110,6 +111,7 @@ type updateTaskRequest struct {
 	DueDate            nullableStringPatch `json:"due_date"`
 	PlannedDate        nullableStringPatch `json:"planned_date"`
 	EstimatedMinutes   nullableIntPatch    `json:"estimated_minutes"`
+	ReviewPolicy       *string             `json:"review_policy"`
 }
 
 type pageMeta struct {
@@ -342,16 +344,25 @@ func (a *API) createTask(c *gin.Context) {
 		return
 	}
 	requestHash := ""
-	legacyRequestHash := ""
-	legacyCompatible := task.Kind == "work" && task.ParentTaskID == nil && task.CompletionCriteria == "" && len(tagIDs) == 0
+	legacyV2RequestHash := ""
+	legacyV1RequestHash := ""
+	legacyV2Compatible := task.ReviewPolicy == "none"
+	legacyV1Compatible := legacyV2Compatible && task.Kind == "work" && task.ParentTaskID == nil && task.CompletionCriteria == "" && len(tagIDs) == 0
 	if idempotencyKey != "" {
 		requestHash, err = taskCreateRequestHash(task, tagIDs)
 		if err != nil {
 			writeDatabaseError(c)
 			return
 		}
-		if legacyCompatible {
-			legacyRequestHash, err = legacyTaskCreateRequestHash(task)
+		if legacyV2Compatible {
+			legacyV2RequestHash, err = legacyV2TaskCreateRequestHash(task, tagIDs)
+			if err != nil {
+				writeDatabaseError(c)
+				return
+			}
+		}
+		if legacyV1Compatible {
+			legacyV1RequestHash, err = legacyTaskCreateRequestHash(task)
 			if err != nil {
 				writeDatabaseError(c)
 				return
@@ -374,7 +385,8 @@ func (a *API) createTask(c *gin.Context) {
 						"This legacy Idempotency-Key cannot be replayed safely; use a new key",
 					)
 				}
-				legacyReplay := legacyCompatible && *existing.RequestHash == legacyRequestHash
+				legacyReplay := (legacyV2Compatible && *existing.RequestHash == legacyV2RequestHash) ||
+					(legacyV1Compatible && *existing.RequestHash == legacyV1RequestHash)
 				if *existing.RequestHash != requestHash && !legacyReplay {
 					return newProjectRequestError(
 						http.StatusConflict,
@@ -523,6 +535,14 @@ func (a *API) updateTask(c *gin.Context) {
 		}
 		updates["priority"] = priority
 	}
+	if input.ReviewPolicy != nil {
+		reviewPolicy := strings.TrimSpace(*input.ReviewPolicy)
+		if reviewPolicy != "none" && reviewPolicy != "manual" {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "review_policy must be none or manual")
+			return
+		}
+		updates["review_policy"] = reviewPolicy
+	}
 	if input.ProjectID.Set {
 		if input.ProjectID.Value == nil {
 			updates["project_id"] = nil
@@ -615,6 +635,21 @@ func (a *API) updateTask(c *gin.Context) {
 		if current.Version != expectedVersion {
 			return taskVersionConflict()
 		}
+		if input.ReviewPolicy != nil {
+			targetPolicy := updates["review_policy"].(string)
+			if targetPolicy != current.ReviewPolicy {
+				if current.Status != "todo" {
+					return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy can only be changed while the Task is todo")
+				}
+				var submissionCount int64
+				if err := tx.Model(&models.TaskSubmission{}).Where("task_id = ?", id).Count(&submissionCount).Error; err != nil {
+					return err
+				}
+				if submissionCount != 0 {
+					return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy cannot change after a submission exists")
+				}
+			}
+		}
 		if input.ProjectID.Set {
 			if target, ok := updates["project_id"].(string); ok {
 				unchanged := current.ProjectID != nil && *current.ProjectID == target
@@ -650,7 +685,8 @@ func (a *API) updateTask(c *gin.Context) {
 				updates["manual_order"] = nil
 			}
 		}
-		updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		updates["updated_at"] = now
 		updates["version"] = gorm.Expr("version + 1")
 		result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
 		if result.Error != nil {
@@ -666,6 +702,16 @@ func (a *API) updateTask(c *gin.Context) {
 		}
 		loaded, err := loadTask(tx, id)
 		task = loaded
+		if err != nil {
+			return err
+		}
+		if input.ReviewPolicy != nil && current.ReviewPolicy != task.ReviewPolicy {
+			_, err = recordTaskLifecycleEvent(
+				tx, "task_review_policy_changed", id,
+				taskLifecycleSnapshot(current, ""), taskLifecycleSnapshot(task, ""),
+				requestIDFromContext(c), now, 1,
+			)
+		}
 		return err
 	})
 	if err != nil {
@@ -697,6 +743,7 @@ func (a *API) deleteTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var movedArtifactFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var task models.Task
 		if err := tx.First(&task, "id = ?", id).Error; err != nil {
@@ -708,6 +755,12 @@ func (a *API) deleteTask(c *gin.Context) {
 		if task.Version != expectedVersion {
 			return taskVersionConflict()
 		}
+		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		var err error
+		movedArtifactFiles, err = a.trashTaskArtifactFiles(tx, id, deletedAt)
+		if err != nil {
+			return err
+		}
 		result := tx.Delete(&models.Task{}, "id = ?", id)
 		if result.Error != nil {
 			return result.Error
@@ -718,11 +771,17 @@ func (a *API) deleteTask(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if restoreErr := a.restoreTaskArtifactFiles(movedArtifactFiles); restoreErr != nil && a.options.Logger != nil {
+			a.options.Logger.Printf("Task delete Artifact compensation failed task_id=%s error=%v", id, restoreErr)
+		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
+	}
+	for _, moved := range movedArtifactFiles {
+		a.artifactStore.purgeTrashedFile(moved)
 	}
 	c.Status(http.StatusNoContent)
 }
@@ -777,6 +836,13 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 	if _, valid := validPriorities[priority]; !valid {
 		return models.Task{}, errors.New("priority must be P0, P1, P2, or P3")
 	}
+	reviewPolicy := "none"
+	if input.ReviewPolicy != nil {
+		reviewPolicy = strings.TrimSpace(*input.ReviewPolicy)
+	}
+	if reviewPolicy != "none" && reviewPolicy != "manual" {
+		return models.Task{}, errors.New("review_policy must be none or manual")
+	}
 	if input.ProjectID != nil {
 		projectID := strings.TrimSpace(*input.ProjectID)
 		if _, err := uuid.Parse(projectID); err != nil {
@@ -829,7 +895,7 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	return models.Task{
 		ID: uuid.NewString(), Title: title, Description: description, Kind: kind, Status: status, Priority: priority,
-		ReviewPolicy: "none",
+		ReviewPolicy: reviewPolicy,
 		ProjectID:    input.ProjectID, ParentTaskID: input.ParentTaskID, CompletionCriteria: completionCriteria,
 		DueDate: input.DueDate, PlannedDate: input.PlannedDate,
 		EstimatedMinutes: input.EstimatedMinutes, ActualMinutes: 0, ManualOrder: input.ManualOrder,
@@ -838,6 +904,38 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 }
 
 func taskCreateRequestHash(task models.Task, tagIDs []string) (string, error) {
+	payload := struct {
+		Title              string   `json:"title"`
+		Description        string   `json:"description"`
+		Kind               string   `json:"kind"`
+		Status             string   `json:"status"`
+		Priority           string   `json:"priority"`
+		ProjectID          *string  `json:"project_id"`
+		ParentTaskID       *string  `json:"parent_task_id"`
+		CompletionCriteria string   `json:"completion_criteria"`
+		TagIDs             []string `json:"tag_ids"`
+		DueDate            *string  `json:"due_date"`
+		PlannedDate        *string  `json:"planned_date"`
+		EstimatedMinutes   *int     `json:"estimated_minutes"`
+		ManualOrder        *int     `json:"manual_order"`
+		ReviewPolicy       string   `json:"review_policy"`
+	}{
+		Title: task.Title, Description: task.Description, Kind: task.Kind, Status: task.Status, Priority: task.Priority,
+		ProjectID: task.ProjectID, ParentTaskID: task.ParentTaskID,
+		CompletionCriteria: task.CompletionCriteria, TagIDs: tagIDs,
+		DueDate: task.DueDate, PlannedDate: task.PlannedDate,
+		EstimatedMinutes: task.EstimatedMinutes, ManualOrder: task.ManualOrder,
+		ReviewPolicy: task.ReviewPolicy,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("encode task request hash: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return "v3:" + fmt.Sprintf("%x", digest), nil
+}
+
+func legacyV2TaskCreateRequestHash(task models.Task, tagIDs []string) (string, error) {
 	payload := struct {
 		Title              string   `json:"title"`
 		Description        string   `json:"description"`
@@ -861,7 +959,7 @@ func taskCreateRequestHash(task models.Task, tagIDs []string) (string, error) {
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("encode task request hash: %w", err)
+		return "", fmt.Errorf("encode legacy v2 task request hash: %w", err)
 	}
 	digest := sha256.Sum256(encoded)
 	return "v2:" + fmt.Sprintf("%x", digest), nil

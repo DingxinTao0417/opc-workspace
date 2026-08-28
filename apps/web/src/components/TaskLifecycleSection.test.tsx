@@ -49,6 +49,7 @@ const task: Task = {
   completedAt: null,
   submittedAt: null,
   reviewedAt: null,
+  currentSubmissionId: null,
   tags: [],
 };
 
@@ -57,6 +58,8 @@ const event: TaskWorkflowEvent = {
   action: "task_blocked",
   actor: null,
   assignmentId: null,
+  submissionId: null,
+  artifactId: null,
   requestId: "request-1",
   commandSeq: 1,
   previous: { status: "todo", version: 4 },

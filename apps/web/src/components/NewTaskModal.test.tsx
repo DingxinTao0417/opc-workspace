@@ -59,12 +59,16 @@ describe("NewTaskModal", () => {
     fireEvent.change(screen.getByLabelText("任务名称"), {
       target: { value: "确认交付范围" },
     });
+    fireEvent.change(screen.getByLabelText("验收策略"), {
+      target: { value: "manual" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "确认交付范围",
         projectId: "project-1",
+        reviewPolicy: "manual",
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );

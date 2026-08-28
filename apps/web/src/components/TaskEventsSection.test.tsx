@@ -30,6 +30,8 @@ const event: TaskWorkflowEvent = {
     version: 1,
   },
   assignmentId: null,
+  submissionId: null,
+  artifactId: null,
   requestId: "request-1",
   commandSeq: 2,
   previous: { status: "in_progress", version: 4 },
@@ -93,14 +95,34 @@ describe("TaskEventsSection", () => {
           previous: null,
           current: { inferred: true },
         },
+        {
+          ...event,
+          id: "event-submission-migration",
+          action: "migration_submission_backfill",
+          submissionId: "submission-1",
+          commandSeq: null,
+          reason: "schema_v9_migration_inferred_submission",
+          previous: null,
+          current: { inferred: true },
+        },
+        {
+          ...event,
+          id: "event-output",
+          action: "task_output_submitted",
+          submissionId: "submission-2",
+          previous: { status: "in_progress" },
+          current: { status: "waiting_review" },
+        },
       ],
-      meta: { page: 1, pageSize: 20, total: 2, taskVersion: 5 },
+      meta: { page: 1, pageSize: 20, total: 4, taskVersion: 5 },
     });
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
 
     expect(await screen.findByText("原因：任务取消后自动结束")).toBeVisible();
     expect(screen.getByText("迁移推定历史负责人")).toBeVisible();
+    expect(screen.getByText("迁移推定历史提交")).toBeVisible();
+    expect(screen.getByText("提交任务产出")).toBeVisible();
     expect(screen.queryByText(/Task cancelled/)).toBeNull();
     expect(screen.queryByText(/schema_v7/)).toBeNull();
   });

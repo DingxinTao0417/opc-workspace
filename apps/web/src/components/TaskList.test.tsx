@@ -55,6 +55,7 @@ const task: Task = {
   completedAt: null,
   submittedAt: null,
   reviewedAt: null,
+  currentSubmissionId: null,
   tags: [],
 };
 

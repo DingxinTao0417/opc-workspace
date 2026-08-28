@@ -1,8 +1,6 @@
 # opc-workspace Go Sidecar
 
-The Sidecar is the local HTTP and SQLite boundary for opc-workspace. It is a
-Go 1.22+ binary, uses Gin and GORM, and uses the pure-Go `modernc.org/sqlite`
-stack through `github.com/glebarez/sqlite`; CGO and Docker are not required.
+The Sidecar is opc-workspace's local HTTP, SQLite, and controlled Task Artifact boundary. It is a Go 1.22+ binary built with Gin, GORM, and the pure-Go `modernc.org/sqlite` stack through `github.com/glebarez/sqlite`. Local development and desktop runtime do not require CGO or Docker.
 
 ## Run in development
 
@@ -10,114 +8,132 @@ From this directory:
 
 ```powershell
 $env:OPC_SESSION_TOKEN = 'opc-workspace-local-dev'
-go run ./cmd/server --dev --db ../../.local/dev-data/opc-workspace.db --port 9876
+go run ./cmd/server --dev --db ../../.local/dev-data/opc-workspace.db --artifacts ../../.local/dev-data/artifacts --port 9876
 ```
 
-Development starts with empty business data by default. For an explicit,
-temporary demo, append `--seed`; it is rejected unless `--dev` is also present,
-is idempotent, and should only be used with the repository-local development
-database. In production, Tauri passes an absolute app-data database path and
-uses `--port 0` so the operating system chooses an available loopback port.
-
-Configuration can be provided by flags or environment variables:
+Development starts with empty business data. `--seed` is an explicit, idempotent development-only option and is rejected without `--dev`. Production Tauri supplies absolute app-data paths and uses `--port 0`, allowing the operating system to choose an available loopback port.
 
 | Setting | Flag | Environment |
 | --- | --- | --- |
 | SQLite path | `--db` | `OPC_DB_PATH` |
+| Controlled Artifact root | `--artifacts` | `OPC_ARTIFACT_DIR` |
 | Loopback port | `--port` | `OPC_PORT` |
 | Session token | — | `OPC_SESSION_TOKEN` |
 | Exact Origin allowlist | `--allowed-origins` | `OPC_ALLOWED_ORIGINS` |
 | Development mode | `--dev` | `OPC_DEV` |
 | Development seed | `--seed` | `OPC_DEV_SEED` |
 
-Outside explicit development mode, a non-empty `OPC_SESSION_TOKEN` is
-required. When development mode has a token, authentication remains enabled;
-it is relaxed only when `--dev` is active and the token is empty. Every HTTP
-endpoint, including `/health`, otherwise requires `Authorization: Bearer
-<token>`. Browser requests must have an exact allowlisted `Origin`; native
-Tauri probes without browser fetch headers may omit it.
+When `--artifacts` is omitted for a file-backed database, the default is an `artifacts` sibling of the database. An in-memory database requires an explicit Artifact directory. The root cannot be a filesystem volume root or the database file.
 
-The process binds only `127.0.0.1`. Once migrations and listening succeed,
-stdout receives exactly one newline-terminated ready event; operational logs
-go to stderr:
+Outside explicit development mode a non-empty session token is required. Every endpoint, including `/health`, then requires `Authorization: Bearer <token>`. Browser requests must carry an exact allowlisted `Origin`; native Tauri probes may omit browser fetch headers. The process binds only `127.0.0.1`.
+
+After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event; operational logs go to stderr:
 
 ```json
-{"event":"ready","status":"ok","host":"127.0.0.1","address":"127.0.0.1:49152","url":"http://127.0.0.1:49152","port":49152,"pid":1234,"version":"0.1.0-dev","app_version":"0.1.0-dev","api_version":"v1","schema_version":6}
+{"event":"ready","status":"ok","host":"127.0.0.1","address":"127.0.0.1:49152","url":"http://127.0.0.1:49152","port":49152,"pid":1234,"version":"0.1.0-dev","app_version":"0.1.0-dev","api_version":"v1","schema_version":9}
 ```
 
-Tauri can gracefully stop the process by writing a line containing
-`shutdown` to stdin. The server drains active HTTP requests and checkpoints
-the WAL before closing the database.
+Writing `shutdown` to stdin drains active requests and checkpoints the WAL before closing SQLite.
 
-## Implemented API foundation
+## Implemented API
 
-- `GET /health`
-- `GET /api/v1/tasks` with paging; title/description search; status, priority, kind, project, plan/due range, repeated-tag AND, parent/root filtering; and stable allowlisted sorting
-- `POST /api/v1/tasks` with kind, parent, completion criteria and tags plus normalized v2 request SHA-256, legacy-safe snapshot compatibility, and conflict detection for optional `Idempotency-Key`
-- `GET /api/v1/tasks/:id` with project/parent names, tags, subtask counts and `ETag`
-- `PATCH /api/v1/tasks/:id`, `PATCH /api/v1/tasks/:id/status`, and `DELETE /api/v1/tasks/:id` protected by `If-Match`
-- `PATCH /api/v1/tasks/batch` for atomic 1–100 task `set_project`, `set_planned_date`, `add_tags`, or `remove_tags` operations with per-item expected versions
-- `PUT /api/v1/tasks/reorder` for atomic manual/default ordering of a complete planned-date group with per-item expected versions
-- `GET /api/v1/tags` with paging, search and stable sorting
-- `POST /api/v1/tags` with snapshot idempotency; `PATCH /api/v1/tags/:id` and confirmed `DELETE /api/v1/tags/:id?confirm=true` protected by `If-Match`
-- `GET /api/v1/projects` with paging, name/description search, status/client filtering, and allowlisted sorting
-- `POST /api/v1/projects` with normalized-request SHA-256, first-response snapshot replay, and conflict detection for `Idempotency-Key`
-- `GET /api/v1/projects/:id` and `PATCH /api/v1/projects/:id`
-- `POST /api/v1/projects/:id/transitions` for the allowlisted project lifecycle
-- `DELETE /api/v1/projects/:id?confirm=true` for confirmed hard deletion of archived projects
-- `GET /api/v1/stats/today?date=YYYY-MM-DD`
+The Sidecar exposes:
 
-Successful resource responses use `{ "data": ... }`; lists also include
-`meta`. Errors always use `{ "code", "message", "request_id" }`. API
-timestamps are RFC 3339 UTC, pure dates are `YYYY-MM-DD`, and monetary schema
-fields use integer minor units. Task reads return related project/parent names,
-ordered tags, subtask counts, and the current task version. Project reads include `client_name`,
-`task_summary` (including derived progress and summed task `actual_minutes`),
-`invoice_count`, and `available_actions`.
+- health, Task/Tag/Project CRUD and queries, Task batch/reorder, project lifecycle, and today statistics;
+- Actor person management with Actor `ETag`, snapshot idempotency, and protected built-in owner/system records;
+- Task Assignment query/create/reassign/end, using the containing Task's `If-Match` version;
+- explicit Task `start`, `block`, `unblock`, `complete`, `cancel`, and `reopen` commands; the legacy `PATCH /tasks/:id/status` always returns `410 TASK_STATUS_ENDPOINT_DEPRECATED`;
+- Task event history with actor summaries, request IDs, immutable snapshots, `command_seq`, and nullable Assignment/Submission/Artifact correlation IDs;
+- T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 
-Task, tag, and project create snapshots remain replayable with the original `201`
-response even if the resource is later edited or deleted; legacy keys without
-a safe snapshot return `409 IDEMPOTENCY_REPLAY_UNAVAILABLE`, while the same key with a different request
-returns `409 IDEMPOTENCY_CONFLICT`. Task update/status/delete, tag update/delete,
-and Project `PATCH`/transition/delete require `If-Match`; stale versions return
-`409 VERSION_CONFLICT`.
-Schema v5 also bumps the project version when
-task links/status/`actual_minutes`, invoice links/counts, or joined client names
-change, so aggregate and deletion-confirmation facts are covered by the same
-ETag. Schema v6 adds task and tag versions; parent/child aggregate changes and
-embedded tag edits/deletion bump the affected task versions. Task list rows,
-their tags, and pagination totals are read in one snapshot transaction.
-Transitions are limited to
-`start/pause/resume/complete/reopen/archive/restore`. Completing a project with
-unfinished tasks requires explicit confirmation and never changes task status.
-Archive remembers the previous state for restore. Hard deletion additionally
-requires `confirm=true`, only accepts archived projects, and detaches task and
-invoice references through the existing `SET NULL` foreign keys.
+```text
+POST   /api/v1/tasks/:id/submit-output
+POST   /api/v1/tasks/:id/review
+GET    /api/v1/tasks/:id/submissions
+GET    /api/v1/tasks/:id/artifacts
+GET    /api/v1/artifacts/:id
+GET    /api/v1/artifacts/:id/content
+DELETE /api/v1/artifacts/:id?confirm=true
+```
 
-Archived projects reject new task links with `409 PROJECT_ARCHIVED`; an
-existing linked task may still be edited without changing its project. Project
-profile `PATCH` also returns `409 PROJECT_ARCHIVED` until the project is restored.
+Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events, and reject key reuse with different input.
+
+### Manual review and output contract
+
+Task creation and non-lifecycle PATCH accept `review_policy: "none" | "manual"`. A changed policy is allowed only while the Task is `todo` and no Submission has ever existed. Direct `complete` remains limited to `none` tasks.
+
+A manual Task may submit output only from `todo` or `in_progress`, with one active assignee and an active built-in owner reviewer. The server derives Artifact `produced_by_actor_id` from the active assignee. The built-in owner is the Submission submitter and Artifact recorder, and performs review, withdrawal, and deletion actions. Clients must not send a producer ID.
+
+JSON submissions use:
+
+```json
+{
+  "summary": "What was delivered",
+  "artifacts": [
+    {
+      "client_ref": "draft-1",
+      "storage_kind": "text",
+      "name": "Notes",
+      "content_text": "Result",
+      "requires_followup": false
+    }
+  ]
+}
+```
+
+The four mutually exclusive payload fields are `content_text` for `text`, `reference_url` for `link`, `structured_json` for a JSON object, and a `file_field` reference for `file`. File submissions use `multipart/form-data`: the one text field named `manifest` must be the first part, and every later part must be a uniquely and exactly referenced file part. A multipart submission may mix file and non-file Artifacts. Unknown JSON fields, unused file parts, duplicate `client_ref`/`file_field`, or mismatched payload fields are rejected.
+
+Limits enforced by the API are:
+
+- summary: at most 10,000 Unicode characters; summary or at least one Artifact is required;
+- at most 20 Artifacts per Submission;
+- `client_ref`: 1–100 safe characters and unique within the Submission;
+- Artifact name: 1–255 safe characters;
+- text: non-empty and at most 500,000 Unicode characters;
+- link: at most 4,096 bytes, HTTP(S), with a host and no embedded credentials;
+- structured payload: a JSON object whose encoded value is at most 1 MiB;
+- strict JSON body and multipart `manifest`: at most 1 MiB each;
+- file: non-empty and at most 50 MiB; complete multipart request at most 100 MiB.
+
+The HTTP server allows 180 seconds for request reads and response writes. The web client applies a shorter 120-second end-to-end timeout to output upload and file download, leaving room for the server to terminate and report failures; normal small JSON requests retain their shorter client timeout.
+
+Submission changes the Task to `waiting_review`. Review body is `{ "decision": "accept" | "request_changes", "reason"?: string }`; a change request requires a non-empty reason and review/delete reasons are limited to 1,000 characters. Accept marks the Submission `accepted`, completes the Task, and ends all active Assignments in the same transaction. Requesting changes marks it `changes_requested` and returns the Task to `in_progress`. Cancelling a Task waiting for review marks the pending Submission `withdrawn`; accept, changes requested, and cancel retain `current_submission_id`. Reopen alone clears the pointer while retaining history.
+
+Submission and Artifact lists default to 50 items and allow at most 100, return `{ "data": [...], "meta": { "page", "page_size", "total", "task_version" } }` plus the Task `ETag`, and sort newest Submission first. Artifact listing accepts `submission_id` and `include_deleted=true`. Every Artifact summary and detail carries required `submission_status` (`pending_review | accepted | changes_requested | withdrawn`) derived by joining its parent Submission; clients use this authoritative value to suppress pending-review deletion. Summary responses omit text/link/structured payloads and controlled relative paths; `GET /artifacts/:id` returns the payload on demand. A deleted Artifact remains readable as metadata but all payload fields are null.
+
+File content is served only through the authenticated content endpoint after size and SHA-256 verification. Successful responses are attachments with safe UTF-8 filenames plus `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`, and SHA-256 `ETag`. Missing or mismatched files are refused and update `integrity_status` to `missing` or `mismatch`; valid reads set it to `verified`.
+
+Artifact deletion requires `confirm=true`, Task `If-Match`, and a 1–1,000 character reason. It is forbidden while the owning Submission is `pending_review`. Metadata is soft-deleted and remains auditable; the same transaction writes an immutable `artifact_deletion_tombstones` row before an existing file moves through controlled trash. Task hard deletion writes the same tombstone with `deletion_scope = task` before cascading the aggregate. Tombstones deliberately survive aggregate deletion so startup recovery can distinguish authorized deletion from an unknown candidate. If the physical object is already missing, confirmed deletion still succeeds; Artifact soft deletion records `integrity_status = missing` with a check time.
+
+## Controlled Artifact storage
+
+The Sidecar exclusively manages this layout:
+
+```text
+artifacts/
+  .opc-artifact-store-v1
+  .opc-artifact-store.lock
+  .staging/
+  objects/
+  .trash/
+  .quarantine/
+```
+
+Schema v9 creates one `workspace_identity` row with an immutable `database_id` and a nullable `artifact_store_id` that may be set exactly once. An unbound database may claim an empty root by writing `.opc-artifact-store-v1` as exact JSON containing `format_version`, that database ID, and a new `store_id`; the Sidecar then persists the same store ID in the database. Every later startup requires both identities and the canonical marker bytes to match, so a database cannot silently switch roots and a root cannot be adopted by another database. Before reconciliation, the Sidecar acquires a non-blocking process-level exclusive lease through `.opc-artifact-store.lock` and holds it for the router lifetime; a second Sidecar targeting the same root fails startup instead of risking concurrent file coordination. The root and child directories must be regular directories and cannot traverse symbolic links or Windows reparse points.
+
+Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores the fixed `objects/<artifact-id>` relative path, never an arbitrary client path. Uploads stream through `.staging/` while calculating MIME, size, and SHA-256, then use a no-replace hard-link promotion into `objects/`. If the enclosing Submission transaction reports an error, compensation first queries SQLite and removes only an object proven unreferenced; an inconclusive query preserves the object for startup reconciliation, avoiding data loss after an ambiguous COMMIT result. Marker creation, staged-file flush, object promotion, moves, removals, and critical directory entries are durably synchronized before success is reported. Startup removes regular staging orphans, reconciles interrupted known trash moves, and moves unreferenced controlled object/trash candidates into `.quarantine/` instead of permanently deleting unknown data. Before restoring trash for an active Artifact it verifies expected size and SHA-256; mismatches are quarantined and persisted as `integrity_status = mismatch`. Unexpected directories, links, and unrecognized names are never followed or recursively removed.
 
 ## Database and verification
 
-Numbered SQL migrations are embedded from `internal/database/migrations/` and
-recorded in `schema_migrations`. Startup enables foreign keys, WAL, and a
-5-second busy timeout. Add future schema changes as new numbered migration
-files; never edit a migration already shipped. Migration 002 removes only the
-four stable IDs used by the former default demo (two tasks, one project, and
-one client); all other development data is preserved. Migration 003 adds
-`projects.version`, `projects.archived_from_status`, and project
-status/due-date indexes. Migration 004 adds the request hash, response body,
-and response status used for safe idempotent replay. Migration 005 advances the
-schema to v5 with triggers that bump `projects.version` when task, invoice, or
-client-name facts used by a project response change. Migration 006 advances
-the current schema to v6: it adds task kind, parent, completion criteria and
-version, adds tag version, creates task fact indexes, rejects task-parent
-cycles in SQLite, and invalidates parent, child, and tag-embedded task versions
-when their rendered facts change.
+Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
+
+The current schema is v9. Migration 009 adds the singleton `workspace_identity` with immutable `database_id` and one-time `artifact_store_id`, `task_submissions`, `task_artifacts`, immutable `artifact_deletion_tombstones`, `tasks.current_submission_id`, and `workflow_events.submission_id/artifact_id`, with database/store identity binding, same-aggregate checks, one-pending-Submission uniqueness, immutable facts/history, controlled Artifact payload constraints, and recoverable deletion metadata. It backfills only unambiguous schema-v8 manual-review facts as `is_inferred = 1` Submission records plus `migration_submission_backfill` system events; it never invents Artifacts. The foreign-key-off migration path runs on a fixed connection, validates `PRAGMA foreign_key_check` before commit, and restores foreign keys on success or rollback.
 
 ```powershell
-go test ./...
+go test ./... -count=1
+go test ./internal/database -count=10
 go vet ./...
 go build ./cmd/server
 ```
+
+At the v2.1 documentation baseline, all Go tests, the repeated database suite, and `go vet` pass. Productized backup/restore, Inbox orchestration, Agent Runtime, and platform packaging remain separate future work.

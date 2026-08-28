@@ -80,11 +80,17 @@ func run(args []string) int {
 		DevMode:        cfg.DevMode,
 		AllowedOrigins: cfg.AllowedOrigins,
 		Logger:         logger,
+		ArtifactDir:    cfg.ArtifactDir,
 	})
 	if err != nil {
 		logger.Printf("router initialization failed: %v", err)
 		return 1
 	}
+	defer func() {
+		if err := router.Close(); err != nil {
+			logger.Printf("router close failed: %v", err)
+		}
+	}()
 
 	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
 	if err != nil {
@@ -102,8 +108,8 @@ func run(args []string) int {
 	httpServer := &http.Server{
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		ReadTimeout:       3 * time.Minute,
+		WriteTimeout:      3 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 

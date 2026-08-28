@@ -9,21 +9,32 @@ import type {
   Tag,
   TagInput,
   Task,
+  TaskArtifactSummary,
   TaskAssignment,
+  TaskSubmission,
   TaskWorkflowEvent,
 } from "../types/models";
 import { ApiError } from "./client";
 import {
   projectQueryKey,
   taskAssignmentQueryKey,
+  taskArtifactDetailQueryKey,
+  taskArtifactQueryKey,
   taskDetailQueryKey,
   taskEventQueryKey,
+  taskSubmissionQueryKey,
   useCreateProject,
   useCreateTag,
   useCreateTaskAssignment,
+  useDownloadTaskArtifact,
   useTaskAssignmentsQuery,
   useTaskEventsQuery,
+  useTaskArtifactsQuery,
+  useTaskSubmissionsQuery,
   useTaskLifecycleCommand,
+  useSubmitTaskOutput,
+  useReviewTaskSubmission,
+  useDeleteTaskArtifact,
   useTaskPageQuery,
   useTasksQuery,
 } from "./hooks";
@@ -31,10 +42,16 @@ import {
 const createProjectMock = vi.hoisted(() => vi.fn());
 const createTagMock = vi.hoisted(() => vi.fn());
 const createTaskAssignmentMock = vi.hoisted(() => vi.fn());
+const downloadTaskArtifactMock = vi.hoisted(() => vi.fn());
 const executeTaskLifecycleCommandMock = vi.hoisted(() => vi.fn());
 const getAllActorsMock = vi.hoisted(() => vi.fn());
 const getTaskAssignmentsMock = vi.hoisted(() => vi.fn());
 const getTaskEventsMock = vi.hoisted(() => vi.fn());
+const getTaskArtifactsMock = vi.hoisted(() => vi.fn());
+const getTaskSubmissionsMock = vi.hoisted(() => vi.fn());
+const submitTaskOutputMock = vi.hoisted(() => vi.fn());
+const reviewTaskSubmissionMock = vi.hoisted(() => vi.fn());
+const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 
@@ -45,10 +62,16 @@ vi.mock("./client", async () => {
     createProject: createProjectMock,
     createTag: createTagMock,
     createTaskAssignment: createTaskAssignmentMock,
+    downloadTaskArtifact: downloadTaskArtifactMock,
     executeTaskLifecycleCommand: executeTaskLifecycleCommandMock,
     getAllActors: getAllActorsMock,
     getTaskAssignments: getTaskAssignmentsMock,
     getTaskEvents: getTaskEventsMock,
+    getTaskArtifacts: getTaskArtifactsMock,
+    getTaskSubmissions: getTaskSubmissionsMock,
+    submitTaskOutput: submitTaskOutputMock,
+    reviewTaskSubmission: reviewTaskSubmissionMock,
+    deleteTaskArtifact: deleteTaskArtifactMock,
     getTaskPage: getTaskPageMock,
     getTasks: getTasksMock,
   };
@@ -112,6 +135,7 @@ const task: Task = {
   completedAt: null,
   submittedAt: null,
   reviewedAt: null,
+  currentSubmissionId: null,
   tags: [],
 };
 
@@ -148,12 +172,59 @@ const taskEvent: TaskWorkflowEvent = {
   action: "task_completed",
   actor: owner,
   assignmentId: null,
+  submissionId: null,
+  artifactId: null,
   requestId: "request-1",
   commandSeq: 1,
   previous: { status: "in_progress", version: 4 },
   current: { status: "done", version: 5 },
   reason: null,
   createdAt: "2026-08-27T02:00:00Z",
+};
+
+const artifact: TaskArtifactSummary = {
+  id: "artifact-1",
+  taskId: task.id,
+  submissionId: "submission-1",
+  submissionStatus: "pending_review",
+  position: 1,
+  storageKind: "text",
+  name: "交付说明",
+  mimeType: null,
+  sizeBytes: null,
+  sha256: null,
+  requiresFollowup: false,
+  producedByActorId: owner.id,
+  producedByActor: owner,
+  recordedByActorId: owner.id,
+  recordedByActor: owner,
+  integrityStatus: "unverified",
+  integrityCheckedAt: null,
+  deletedAt: null,
+  deletedByActorId: null,
+  deletedByActor: null,
+  deleteReason: null,
+  createdAt: "2026-08-27T02:00:00Z",
+};
+
+const submission: TaskSubmission = {
+  id: "submission-1",
+  taskId: task.id,
+  sequence: 1,
+  status: "pending_review",
+  summary: "请验收",
+  submittedByActorId: owner.id,
+  submittedByActor: owner,
+  submittedAt: "2026-08-27T02:00:00Z",
+  reviewedByActorId: null,
+  reviewedByActor: null,
+  reviewedAt: null,
+  reviewReason: null,
+  withdrawnByActorId: null,
+  withdrawnByActor: null,
+  withdrawnAt: null,
+  isInferred: false,
+  artifacts: [artifact],
 };
 
 const tagInput: TagInput = { name: "交付", color: "#6E7BF2" };
@@ -305,6 +376,63 @@ describe("task queries", () => {
       expect.objectContaining({ page: 2, pageSize: 1 }),
     );
   });
+
+  it("pages task submissions and deleted artifacts under separate keys", async () => {
+    getTaskSubmissionsMock.mockImplementation(
+      async (_taskId: string, input: { page: number }) => ({
+        items: [
+          {
+            ...submission,
+            id: `submission-${input.page}`,
+            sequence: 3 - input.page,
+          },
+        ],
+        meta: { page: input.page, pageSize: 1, total: 2, taskVersion: 5 },
+      }),
+    );
+    getTaskArtifactsMock.mockImplementation(
+      async (_taskId: string, input: { page: number }) => ({
+        items: [{ ...artifact, id: `artifact-${input.page}` }],
+        meta: { page: input.page, pageSize: 1, total: 2, taskVersion: 5 },
+      }),
+    );
+    const wrapper = createWrapper();
+    const submissionsHook = renderHook(
+      () => useTaskSubmissionsQuery(task.id, { pageSize: 1 }),
+      { wrapper },
+    );
+    const artifactsHook = renderHook(
+      () =>
+        useTaskArtifactsQuery(task.id, {
+          pageSize: 1,
+          includeDeleted: true,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() =>
+      expect(submissionsHook.result.current.isSuccess).toBe(true),
+    );
+    await waitFor(() =>
+      expect(artifactsHook.result.current.isSuccess).toBe(true),
+    );
+    await act(async () => {
+      await submissionsHook.result.current.fetchNextPage();
+      await artifactsHook.result.current.fetchNextPage();
+    });
+    expect(getTaskSubmissionsMock).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({ page: 2, pageSize: 1 }),
+    );
+    expect(getTaskArtifactsMock).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({
+        page: 2,
+        pageSize: 1,
+        includeDeleted: true,
+      }),
+    );
+  });
 });
 
 describe("controlled task lifecycle mutations", () => {
@@ -407,6 +535,214 @@ describe("controlled task lifecycle mutations", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["stats", "today"],
     });
+  });
+});
+
+describe("task output mutations", () => {
+  it.each([
+    { outcome: "成功", error: null },
+    {
+      outcome: "文件缺失",
+      error: new ApiError("文件缺失", {
+        code: "ARTIFACT_FILE_MISSING",
+        status: 410,
+      }),
+    },
+    {
+      outcome: "完整性不匹配",
+      error: new ApiError("文件校验不一致", {
+        code: "ARTIFACT_INTEGRITY_MISMATCH",
+        status: 409,
+      }),
+    },
+    {
+      outcome: "一般错误",
+      error: new ApiError("下载失败", {
+        code: "REQUEST_ERROR",
+        status: 500,
+      }),
+    },
+  ])("下载$outcome后刷新所有 Artifact 表示", async ({ error }) => {
+    if (error) {
+      downloadTaskArtifactMock.mockRejectedValue(error);
+    } else {
+      downloadTaskArtifactMock.mockResolvedValue({
+        blob: new Blob(["artifact"]),
+        fileName: artifact.name,
+        mimeType: "text/plain",
+      });
+    }
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useDownloadTaskArtifact(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        taskId: task.id,
+        id: artifact.id,
+        name: artifact.name,
+      }),
+    );
+    await waitFor(() =>
+      expect(error ? result.current.isError : result.current.isSuccess).toBe(
+        true,
+      ),
+    );
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskArtifactDetailQueryKey(artifact.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskArtifactQueryKey(task.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskSubmissionQueryKey(task.id),
+    });
+  });
+
+  it("keeps one idempotency key for a retried File draft and invalidates the aggregate", async () => {
+    const waitingTask: Task = {
+      ...task,
+      reviewPolicy: "manual",
+      status: "waiting_review",
+      currentSubmissionId: submission.id,
+      version: 5,
+    };
+    submitTaskOutputMock
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce({
+        task: waitingTask,
+        submission,
+        artifacts: [artifact],
+        event: { ...taskEvent, action: "task_output_submitted" },
+      });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useSubmitTaskOutput(), {
+      wrapper: wrapperFor(queryClient),
+    });
+    const file = new File(["hello"], "result.txt", {
+      type: "text/plain",
+      lastModified: 123,
+    });
+    const variables = {
+      taskId: task.id,
+      input: {
+        summary: "请验收",
+        artifacts: [
+          {
+            clientRef: "file-draft",
+            storageKind: "file" as const,
+            name: "result.txt",
+            file,
+            requiresFollowup: false,
+          },
+        ],
+        expectedVersion: task.version,
+      },
+    };
+
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(submitTaskOutputMock.mock.calls[0][2]).toBeTruthy();
+    expect(submitTaskOutputMock.mock.calls[1][2]).toBe(
+      submitTaskOutputMock.mock.calls[0][2],
+    );
+    expect(submitTaskOutputMock.mock.calls[1][1].artifacts[0].file).toBe(file);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskSubmissionQueryKey(task.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskArtifactQueryKey(task.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskAssignmentQueryKey(task.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskEventQueryKey(task.id),
+    });
+  });
+
+  it("uses stable review and delete keys and refreshes output caches", async () => {
+    const accepted = {
+      ...submission,
+      status: "accepted" as const,
+      reviewedByActorId: owner.id,
+      reviewedByActor: owner,
+      reviewedAt: "2026-08-27T03:00:00Z",
+      artifacts: submission.artifacts.map((item) => ({
+        ...item,
+        submissionStatus: "accepted" as const,
+      })),
+    };
+    reviewTaskSubmissionMock.mockResolvedValue({
+      task: {
+        ...task,
+        status: "done",
+        reviewPolicy: "manual",
+        currentSubmissionId: submission.id,
+        version: 5,
+      },
+      submission: accepted,
+      event: { ...taskEvent, action: "task_review_accepted" },
+    });
+    deleteTaskArtifactMock.mockResolvedValue({
+      task: { ...task, version: 6 },
+      artifact: {
+        ...artifact,
+        submissionStatus: "accepted",
+        deletedAt: "2026-08-27T04:00:00Z",
+        deletedByActorId: owner.id,
+        deletedByActor: owner,
+        deleteReason: "重复产出",
+      },
+      event: { ...taskEvent, action: "task_artifact_deleted" },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const wrapper = wrapperFor(queryClient);
+    const reviewHook = renderHook(() => useReviewTaskSubmission(), { wrapper });
+    const deleteHook = renderHook(() => useDeleteTaskArtifact(), { wrapper });
+
+    act(() =>
+      reviewHook.result.current.mutate({
+        taskId: task.id,
+        input: { decision: "accept", expectedVersion: task.version },
+      }),
+    );
+    await waitFor(() => expect(reviewHook.result.current.isSuccess).toBe(true));
+    act(() =>
+      deleteHook.result.current.mutate({
+        taskId: task.id,
+        artifactId: artifact.id,
+        input: { reason: "重复产出", expectedVersion: 5 },
+      }),
+    );
+    await waitFor(() => expect(deleteHook.result.current.isSuccess).toBe(true));
+
+    expect(reviewTaskSubmissionMock.mock.calls[0][2]).toEqual(
+      expect.any(String),
+    );
+    expect(deleteTaskArtifactMock.mock.calls[0][3]).toEqual(expect.any(String));
   });
 });
 

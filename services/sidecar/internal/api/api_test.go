@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,7 +35,47 @@ func newTestAPI(t *testing.T) *gin.Engine {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	return router
+	t.Cleanup(func() { _ = router.Close() })
+	return router.Engine
+}
+
+func TestRouterBindsAndReleasesArtifactStoreLifecycle(t *testing.T) {
+	root := t.TempDir()
+	store, err := database.Open(filepath.Join(root, "workspace.db"))
+	if err != nil {
+		t.Fatalf("database.Open() error = %v", err)
+	}
+	defer store.Close()
+	options := Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: filepath.Join(root, "artifacts"),
+	}
+	first, err := NewRouter(store.DB, options)
+	if err != nil {
+		t.Fatalf("create first Router: %v", err)
+	}
+	defer first.Close()
+	var boundStoreID string
+	if err := store.SQL.QueryRow("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Scan(&boundStoreID); err != nil || boundStoreID != first.artifactStore.storeID {
+		t.Fatalf("bound store id=%q want=%q err=%v", boundStoreID, first.artifactStore.storeID, err)
+	}
+
+	secondOptions := options
+	secondOptions.ArtifactDir = filepath.Join(root, "other-artifacts")
+	if _, err := NewRouter(store.DB, secondOptions); err == nil || !strings.Contains(err.Error(), "already bound") {
+		t.Fatalf("same database accepted second Artifact root: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first Router: %v", err)
+	}
+	reopened, err := NewRouter(store.DB, options)
+	if err != nil {
+		t.Fatalf("reopen bound Artifact root: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close reopened Router: %v", err)
+	}
 }
 
 func performRequest(router http.Handler, method, path string, body []byte, headers map[string]string) *httptest.ResponseRecorder {

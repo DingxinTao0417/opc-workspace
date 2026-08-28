@@ -1,270 +1,219 @@
-# 数据管理、备份与恢复模块
+# 数据管理、受控文件、备份与恢复模块
 
-> 文档状态：基础设施部分完成，业务能力未实现。v0.1 必须交付可验证的一致性备份与原子恢复；v0.3 才增加计划和高级导入。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v9（2026-08-27）
+>
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
+
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
-本模块负责 opc-workspace 本地数据的生命周期：数据库迁移、一致性快照、导出、导入、恢复、附件与产出归档、完整性验证和诊断包内容选择。运行日志落盘与轮转由桌面平台统一负责；本模块只通过 request ID 消费日志用于恢复诊断。它是本地优先产品的发布闸门，而不是附加工具。
+本模块负责本机数据的物理边界、迁移一致性和未来可恢复性：
 
-核心边界：
+- SQLite 业务事实与版本化 schema；
+- Task Artifact 文件与数据库元数据的一致性；
+- 开发数据、正式数据和测试数据隔离；
+- 未来一致性备份、验证、恢复、导入导出和保留策略。
 
-- 所有核心业务数据默认只保存在本机，不依赖线上存储或云备份。
-- 正在使用 WAL 的 SQLite 数据库不能通过普通文件复制生成可信备份。
-- v0.1 必须包含手动一致性备份、破坏性迁移前备份、基础 JSON 导出、manifest、SHA-256、临时库验证和原子恢复。
-- v0.3 才增加计划备份、外部目录、保留策略、CSV 映射和高级导入；不能把基础恢复延后到 v0.3。
-- 备份成功必须以完整性校验和实际可打开/可恢复验证为依据，不以“文件已生成”为依据。
-- 恢复失败不得覆盖当前可用数据；恢复前先创建当前状态快照。
-- 数据管理不改变 Task、Inbox Item、Assignment、Agent Run 等对象的事实边界，只保证它们作为一个一致集合被保存和恢复。
-- 当前阶段没有线上服务或在线 Updater，备份流程不得静默联网。
+本模块不负责云同步、多设备合并、在线账号、远程文件服务、SQLCipher 或自动上传。v0.1 当前没有“备份成功”按钮或恢复 API，不能把数据库文件复制说明写成已交付功能。
 
 ## 当前实现状态
 
-已实现基础：
+### 已实现
 
-- Tauri 在 appDataDir 创建主数据库目录以及 attachments、invoices、backups、config 等目录，并创建 appLogDir。
-- Go 使用 SQLite 单物理连接，启用 foreign_keys、WAL 和 5 秒 busy_timeout。
-- SQL 迁移嵌入 Sidecar，按递增版本逐个事务执行。
-- schema_migrations 记录版本和迁移名，并拒绝未知版本或同版本不同文件名。
-- 应用正常退出时执行 WAL checkpoint 后关闭数据库。
-- 开发数据库位于仓库 .local/dev-data，与正式 appDataDir 隔离。
+- SQLite 使用单物理连接、`foreign_keys=ON`、WAL 和 5000 ms `busy_timeout`；正常退出执行 `wal_checkpoint(TRUNCATE)`。
+- 迁移 SQL 通过 Go `embed` 编入 Sidecar，按编号记录到 `schema_migrations`；未知版本/文件名不一致拒绝启动。
+- 需要重建表的迁移可用首行 `-- migration: foreign_keys=off`，迁移器在固定连接上事务外关闭外键、事务内执行 SQL 与 `foreign_key_check`，成功或失败均恢复外键。
+- schema v9 新增单例 `workspace_identity`：`database_id` 永久不可变，`artifact_store_id` 只能从空值绑定一次；两者把受控 Artifact root 与数据库一一对应。迁移还新增不可变 `artifact_deletion_tombstones`，在 file Artifact 软删或 Task 聚合硬删的同一事务保留删除授权事实；Submission/Artifact 迁移只对无歧义 manual 状态回填 inferred Submission 和 system 事件，不虚构 Artifact。
+- 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
+- Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
+- Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
+- 文件上传流式计算 MIME、size、SHA-256，先写 staging，再无覆盖提升到 objects；数据库只保存 `objects/<artifact-id>` 相对路径。marker、文件数据、对象提升、移动/删除与关键目录项做耐久同步。
+- 启动时清理普通 staging 残留、协调中断的已知 trash move，并用 tombstone 区分授权删除与未知候选。active trash 恢复前必须匹配数据库 size/SHA-256；错配移入 quarantine 并记录 mismatch。无引用且没有可验证删除授权的受控 UUID object/trash 候选同样只进 quarantine，不自动永久删除，也不递归跟随异常目录或链接。
+- Artifact 软删除和 Task 聚合硬删除使用 trash 做文件/数据库补偿：事务失败恢复，提交后清除临时 trash 文件；物理 object 已缺失时仍允许确认软删或聚合硬删，软删同时记录 missing 完整性事实。
+- 下载前重新验证 size 与 SHA-256；missing/mismatch 状态写回数据库并拒绝输出内容。
 
-尚未实现：
+### 未实现
 
-- 没有 SQLite Online Backup API 或 VACUUM INTO 快照服务。
-- 没有破坏性迁移前自动备份；当前 database.Open 会直接执行迁移。
-- 没有备份 manifest、SHA-256、integrity_check、foreign_key_check 或实际恢复验证。
-- 没有手动备份、恢复、JSON/CSV/SQLite 导入导出 API 和 UI。
-- 没有维护锁、长任务进度、取消、低磁盘检查或原子替换流程。
-- 没有统一 Artifact 目录及附件/产出归档协议；Tauri 当前也未创建 PRD 规划中的 artifacts 目录。
-- Tauri 虽传入 OPC_LOG_DIR，当前 Go Sidecar 仍只向 stderr 写日志，没有日志落盘、轮转或脱敏诊断包。
-- 没有备份失败或迁移失败的收件箱事件和恢复页面。
+- SQLite Online Backup API 或等价一致性快照；
+- 包含数据库与 Artifact objects 的原子备份包；
+- backup manifest、校验、临时恢复演练与原子替换；
+- 设置页中的手动备份/恢复、导入/导出进度和诊断；
+- 破坏性迁移前产品化自动备份；
+- 计划备份、保留策略、增量备份、加密和云目标。
 
-## 目标功能
+## 当前应用数据布局
 
-### 应用数据布局
+物理根由 Tauri/操作系统决定，文档和业务逻辑不得硬编码机器绝对路径：
 
-目标目录：
+```text
+appDataDir/
+  opc-workspace.db
+  attachments/                 # 预留；客户/项目附件尚未实现
+  artifacts/
+    .opc-artifact-store-v1     # format_version + database_id + store_id JSON marker
+    .opc-artifact-store.lock   # 进程级独占 lease 文件
+    .staging/                   # 上传暂存；启动清理普通孤儿文件
+    objects/                    # UUID 文件对象
+    .trash/                     # 删除事务补偿区；非用户回收站
+    .quarantine/                # 无引用候选隔离区；不自动永久删除
+  invoices/                    # 预留；PDF 业务尚未实现
+  backups/                     # 预留；备份功能尚未实现
+  config/                      # 预留；当前部分设置仍在前端 localStorage
 
-| 路径 | 内容 |
-|------|------|
-| appDataDir/opc-workspace.db | SQLite 主数据库 |
-| appDataDir/attachments/ | 用户导入的附件 |
-| appDataDir/artifacts/ | 人或本地 Agent 的 Task Artifact |
-| appDataDir/invoices/ | 本地生成的发票 PDF |
-| appDataDir/backups/ | 本机一致性快照与归档 |
-| appDataDir/config/ | 数据库启动前必需的非敏感配置和迁移标记 |
-| appLogDir/opc-workspace.log | 桌面平台拥有的脱敏轮转日志；默认不纳入业务备份，仅在用户确认的诊断包中引用 |
+appLogDir/
+  opc-workspace.log            # 日志落盘管线尚未完成
+```
 
-数据库和归档只保存受控目录下的相对路径；不得把任意绝对路径作为可直接读取的业务引用。
+开发环境等价使用：
 
-### v0.1 一致性备份
+```text
+.local/dev-data/
+  opc-workspace.db
+  artifacts/
+    .opc-artifact-store-v1
+    .opc-artifact-store.lock
+    .staging/
+    objects/
+    .trash/
+    .quarantine/
+```
 
-- 使用 SQLite Online Backup API 或 VACUUM INTO 创建一致性快照。
-- 支持用户手动创建和破坏性迁移前自动创建。
-- 在开始前检查目标空间和当前维护任务；同一时刻只允许一个备份或恢复作业。
-- 每份备份生成 manifest，至少包含格式版本、创建时间、app/API/schema 版本、数据库文件、附件与 Artifact 清单、大小和 SHA-256。
-- 创建后执行 integrity_check、foreign_key_check 和临时打开验证。
-- 只有全部验证通过才把临时文件原子改名为可见备份。
-- 备份列表展示创建原因、版本、大小、验证状态和可恢复性。
+`attachments/` 与 `artifacts/` 不是同一协议：当前只有 Task Artifact 已经受 Sidecar 管理；客户/项目附件仍待单独设计。`.trash/` 是提交前后短暂补偿目录，不是可由用户浏览或恢复的长期回收站；`.quarantine/` 保留无法安全自动归属的受控候选，当前没有用户级查看或清理入口。
 
-### v0.1 基础导出
+## Artifact 一致性契约
 
-- 导出带 schema_version 和 export_format_version 的完整 JSON 数据包。
-- “完整”表示覆盖导出版本已经交付的全部业务与非敏感配置事实，包括 Task、Project、Client、Client Activity/Attachment、Actor、Assignment、Inbox Item、Reminder、Task Artifact 元数据、Focus Session、Financial/Invoice（若已交付）、Workflow Event 和 `app_settings`；会话令牌、Agent 单次令牌及操作系统安全存储凭据明确排除并写入 manifest。
-- 支持导出 SQLite 一致性快照。
-- 用户选择包含附件和 Artifact 时，生成数据库、文件和 manifest 的统一归档。
-- 外部 URL 只作为引用保存，不在导出时自动下载。
-- 导出过程不得在日志记录客户正文、发票内容或任务产出正文。
+### Root 声明
 
-### v0.1 验证与原子恢复
+1. Artifact root 不能为空、不能等于数据库文件、不能是文件系统卷根。
+2. schema v9 的不可变 `workspace_identity.database_id` 是数据库身份；`artifact_store_id` 初始为空且只能绑定一次。未绑定数据库首次声明空 root 时写入 `.opc-artifact-store-v1`，其规范 JSON 包含 `format_version`、数据库 ID 与新 `store_id`，随后把同一 store ID 写回数据库。
+3. 后续启动必须同时匹配 marker 格式、版本、数据库 ID 和已绑定 store ID；已绑定数据库不能改用另一空 root，已有 root 也不能由另一数据库接管。
+4. root、objects、staging、trash 必须是实际目录，不能穿越 symlink/reparse point。
+5. 协调或读写前通过 `.opc-artifact-store.lock` 获取非阻塞进程级独占锁，并持有到 router 关闭；第二个 Sidecar 不能共用同一 root。
 
-- 恢复开始前自动创建当前状态快照。
-- 先读取 manifest，校验格式、版本、平台无关性、文件清单、SHA-256 和可用磁盘。
-- 在独立临时目录和临时数据库中完成解包、完整性检查、外键检查和必要迁移。
-- 验证附件与 Artifact 路径、大小和校验值，拒绝路径穿越和符号链接逃逸。
-- 进入短暂维护模式，停止新写入并等待进行中的事务完成。
-- 原子替换数据库和受控文件集合；替换失败回滚到当前状态快照。
-- 重启 Sidecar，完成 health、schema 与抽样读取验证后才报告成功。
-- 恢复失败保持原数据可用，提供 request ID、阶段和脱敏日志。
+### 上传
 
-### v0.1 基础导入
+1. API 只接收 multipart 文件流，不接收任意本机路径。
+2. 严格 JSON body、multipart `manifest` 和单个 structured object 各最大 1 MiB；单文件最大 50 MiB 且必须非空；完整 multipart 请求最大 100 MiB。Sidecar HTTP read/write timeout 为 180 秒，Web 客户端上传与下载端到端超时为 120 秒。
+3. 写 `.staging/<artifact-uuid>.part` 时同步计算 SHA-256、size 和内容探测 MIME。
+4. 使用 no-replace hard-link 提升为 `objects/<artifact-id>`，不覆盖已有对象；暂存文件、目标目录项和后续移除按支持平台执行耐久同步后才报告成功。
+5. SQLite 事务报错时先查询 Artifact 事实，只有能证明 object 无引用才清理；查询失败或模糊 COMMIT 无法证明时保留 object 交给下次 reconcile，避免误删已经落库的文件。成功时只保留 objects 文件与相对路径元数据。
 
-- 仅接受 opc-workspace 自身导出的明确版本完整 JSON、SQLite 快照或归档格式。
-- v0.1 只支持“以完整快照恢复/替换”，不提供与当前数据库合并；预览展示覆盖范围、版本和校验结果，而不是伪造新增/更新冲突合并。
-- UUID、外键、状态机、唯一约束、Artifact 校验和与 manifest 在临时库/目录中验证。
-- 经验证的完整快照必须原样保留已验收、已付款、Agent succeeded 等历史事实及其审计，不能通过业务命令重放或降级这些状态。
-- 恢复操作追加独立的本机恢复记录，但不得改写快照内部的历史 Workflow Event。
+### 读取与完整性
 
-### 迁移安全
+- `relative_path` 固定为 `objects/<artifact-id>`（小写 UUID），API 从不返回该内部路径。
+- `integrity_status` 为 `unverified / verified / missing / mismatch`。
+- 文件创建时已计算完整性并标记 verified；每次下载仍重新比较实际 size 和 SHA-256。
+- 缺失返回 410 并标记 missing；大小/哈希不符返回 409 并标记 mismatch；任何情况都不输出部分或可疑内容。
+- 成功下载强制 attachment、`nosniff`、`no-store` 和 SHA-256 ETag。
 
-- 已发布的迁移只增不改，新迁移使用递增版本。
-- 破坏性迁移前自动创建并验证备份；失败则不开始迁移。
-- 迁移在事务中执行，完成后检查 schema、外键和关键索引。
-- 迁移失败时 Sidecar 进入可诊断恢复状态，桌面显示恢复页面。
-- 应用、Sidecar、API 和 schema 建立明确兼容矩阵；数据库版本过新时拒绝写入。
+### 软删除与聚合硬删除
 
-### v0.3 高级能力
+- 单 Artifact 删除要求确认、Task `If-Match` 和原因；pending-review 批次禁止删除。
+- text/link/structured 只写软删除元数据；详情仍可看元数据，但正文固定为 null。
+- file object 软删在同一事务写 immutable tombstone（size/SHA、`deletion_scope = artifact`）并移到 `.trash/<artifact-id>-<uuid>.trash`；数据库失败则恢复，成功提交后物理清除。object 已缺失时仍完成软删除，并写 `integrity_status = missing` 与检查时间。
+- Task DELETE 在同一事务为每个 active file 写 `deletion_scope = task` tombstone，再移动仍存在的 objects；缺失 object 不阻断聚合删除。随后事务级联删除 Task/Submission/Artifact；失败逆序恢复，提交后清除。tombstone 不引用被删聚合且不可修改/删除，供后续启动恢复判定授权删除。
+- 已软删文件在单 Artifact 删除成功时已无 object；Task 后续硬删除不重复寻找该文件。
 
-- 每日首次满足条件时运行计划备份，并在错过计划后进行启动补偿。
-- 用户通过系统文件对话框选择独立外部备份目录。
-- 可配置保留策略，默认保留最近 30 份；删除前检查备份状态和路径范围。
-- 支持任务、客户、财务等 CSV 导出与字段映射导入。
-- 导入前提供映射、规范化和冲突预览。
-- 周期性执行可恢复性抽检，并把失败作为本地系统维护事件进入收件箱。
+### 启动协调
 
-## 关键用户流程
+- `.staging/`：只删除普通文件；意外目录或链接留给人工诊断。
+- `.trash/`：仍需存在的 active Artifact 先用数据库 size/SHA-256 校验 trash；匹配时才恢复或清理确定的重复项，错配项进入 `.quarantine/` 并标记 mismatch。已无 Artifact 时，只有与 immutable tombstone 校验一致的授权删除候选可清理，其余候选进入 quarantine。
+- `objects/`：只检查文件名可解析为小写 UUID 的普通文件；没有 active file Artifact 引用时移入 `.quarantine/`。非 UUID 文件、目录或链接不递归清理。
+- `.quarantine/`：保存无法安全归属的受控候选；启动协调不会自动永久删除，后续诊断/清理能力必须另设显式确认。
 
-### 手动创建备份
+这套协调降低中断后的悬挂文件风险，但不是备份、版本历史或用户级恢复功能。
 
-1. 用户从设置进入“数据与备份”，点击创建备份。
-2. 应用显示数据范围、目标目录、预计空间和当前版本。
-3. Sidecar 获取维护作业锁，创建临时一致性快照。
-4. 系统生成 manifest 和 SHA-256，执行数据库与文件完整性验证。
-5. 验证通过后原子发布备份，并记录成功结果。
-6. 验证失败则删除或隔离临时产物，保留主数据并显示可定位错误。
+## SQLite 迁移契约
 
-### 破坏性迁移前备份
+当前 schema v9：
 
-1. Sidecar 检测到待执行的破坏性迁移。
-2. 在应用新版本写入任何新 schema 前创建迁移前快照。
-3. 快照验证失败时停止启动并进入恢复界面。
-4. 快照通过后执行事务迁移和迁移后检查。
-5. 迁移失败保留原数据库与备份，并允许打开日志或从备份恢复。
+- 001：核心业务表；
+- 002：删除旧固定 demo seed，不删除用户数据；
+- 003–005：Project 生命周期、幂等快照和聚合版本；
+- 006：Task facts、标签/父子关系和版本保护；
+- 007：Actor、Assignment、Workflow Event 与历史责任回填；
+- 008：Task 六状态、review policy、生命周期字段、command_seq 和事件不可变保护；
+- 009：带不可变 database ID/一次性 store 绑定的 workspace identity、Submission、Artifact、不可变 deletion tombstone、current submission、事件关联及 inferred manual 历史回填。
 
-### 从备份恢复
+新增 schema 只能追加递增文件，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
-1. 用户选择本地备份或归档文件。
-2. 应用只读解析 manifest，展示来源版本、时间、内容和风险。
-3. 用户确认后，系统先备份当前状态。
-4. 在临时目录完成校验、迁移和可打开性测试。
-5. 进入维护模式并原子替换。
-6. Sidecar 重启且 health、schema、外键和抽样读取通过后，界面报告恢复成功。
-7. 任一步骤失败都回到原数据，并保留可诊断信息。
+## 未来 v0.1 备份/恢复目标
 
-### 导出完整数据
+### 一致性备份
 
-1. 用户选择 JSON、SQLite 快照或含附件的完整归档。
-2. 系统通过原生文件对话框选择目标文件，不接受任意前端路径字符串。
-3. Sidecar 生成临时导出并校验。
-4. Tauri 将已验证文件写入用户选择的位置。
-5. 应用展示文件位置、大小、校验值和格式版本。
+备份必须同时包含：
 
-## 数据/API/状态与事件
+- SQLite 一致性快照，而不是仅复制可能仍有 WAL 的主文件；
+- 所有 active file Artifact objects；
+- manifest 与每个文件的 size/SHA-256；
+- app/API/schema/export format 版本；
+- 创建时间、平台与可选说明。
 
-### 备份 manifest
+备份进行时需要定义写入冻结或快照边界，避免数据库引用与 Artifact objects 跨时点不一致。`attachments/`、`invoices/` 在业务实现后也必须进入同一清单。
 
-建议 v0.1 固定以下最小字段：
+### 验证与恢复
 
-| 字段 | 含义 |
-|------|------|
-| format_version | 归档协议版本 |
-| backup_id / created_at | 稳定 ID 和 UTC 时间 |
-| reason | manual / pre_migration / pre_restore |
-| app_version / api_version / schema_version | 兼容性判断 |
-| files | 归档内相对路径、大小、类型和 SHA-256 |
-| checks | integrity_check、foreign_key_check、open_test 结果 |
-| source_platform | 诊断信息；不得阻止平台无关数据导入 |
+目标流程：
 
-### 作业状态
+1. 在临时目录展开备份，验证 manifest、文件 size/hash，并校验 Artifact marker 的 format/database/store ID 与恢复数据库的 `workspace_identity` 一致。
+2. 打开临时数据库，运行 `quick_check`/`foreign_key_check` 与 schema 兼容检查。
+3. 校验每个 active file Artifact 都有对应 object，且没有路径越界。
+4. 停止业务写入，备份当前正式数据以便回滚。
+5. 使用同卷临时路径原子替换数据库和受控文件根；任一步失败恢复原数据。
+6. 重启 Sidecar 并完成 health/schema/Artifact reconciliation；成功后再清理旧副本。
 
-备份作业：
+恢复绝不能直接覆盖正在打开的 SQLite 文件或部分覆盖 `objects/`。
 
-- queued → snapshotting → verifying → succeeded
-- queued / snapshotting / verifying → failed 或 cancelled
+### 导出/导入
 
-恢复作业：
+基础导出目标是版本化 JSON 业务包和可选 Artifact 文件，不包含会话令牌、绝对路径或未来 Agent secret。导入必须预览冲突、支持取消、使用新 UUID 或显式映射，并在一个可回滚作业中完成。当前没有冻结 API 或 UI。
 
-- inspecting → validating → ready_to_apply → applying → restarting → succeeded
-- 任一非终态 → failed；进入 applying 后不允许普通取消
+### 计划备份（v0.3）
 
-数据库维护锁和作业状态必须由 Sidecar 或专用恢复控制面统一管理，前端轮询或订阅展示，不自行推断。进入 applying/restarting 后，桌面平台阻止普通退出；恢复协调器写入本地 journal，使操作系统强制终止后的下次启动可以完成或回滚原子替换。
+后续再评审定时计划、保留数量、磁盘空间阈值、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
 
-### API 与桌面命令
+## 目标状态与 API（未实现）
 
-PRD v2.0 尚未冻结备份端点。实现前建议确定以下职责：
+建议作业状态：`queued / running / verifying / succeeded / failed / cancelled`。建议命令/API 在实现前另写 ADR，至少覆盖：创建备份、列出备份、验证、恢复、导出、导入预览/执行、取消和删除。PRD 出现这些名称不代表当前路由存在。
 
-| 能力 | 建议接口职责 |
-|------|--------------|
-| 备份列表/创建/验证 | Sidecar 业务 API，使用 WebView 会话鉴权和作业 ID |
-| 归档检查 | 只读检查接口，返回 manifest 与兼容性，不立刻应用 |
-| 恢复确认 | 独立危险命令，携带检查结果 ID、二次确认和幂等键 |
-| 导出/导入 | Sidecar 负责数据与校验，Tauri 文件对话框负责用户授权路径 |
-| 迁移失败恢复 | Tauri command 或恢复模式 Sidecar；不得暴露未鉴权文件访问 |
-
-所有写操作返回 request_id。恢复、导入和迁移使用独占维护锁；状态变化写入数据库维护事件，并通过桌面统一日志管线记录脱敏运行摘要。
-
-### 事件
-
-本地维护事件包括 backup_started、backup_verified、backup_failed、restore_started、restore_succeeded、restore_failed、migration_backup_created、migration_failed 和 data_exported。
-
-失败事件可用稳定 source_event_key 幂等生成 system_maintenance Inbox Item。Workflow Event 不记录归档密码、绝对敏感路径、客户正文或文件内容。
+未来事件应最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
 
 ## 与其他模块协作
 
-- [设置](settings.md)：提供手动备份、导出、恢复、目录和诊断 UI。
-- [桌面平台](desktop-platform.md)：提供 appDataDir、文件对话框、维护恢复页、Sidecar 重启、签名离线更新和日志目录。
-- [任务](tasks.md)、[项目](projects.md)、[客户](clients.md)、[收件箱](inbox.md)：作为统一事务事实被导出和恢复，不由数据模块重写其业务状态。
-- [Actor](actors.md) 与 [本地 Agent](local-agents.md)：备份 Actor、Assignment、Run、Artifact 和审计；恢复后重新校验本地执行文件和权限。
-- [专注](focus.md)：Session 与 tasks.actual_minutes 必须保持一致，恢复验证覆盖重复累计。
-- [财务与发票](finance-invoices.md)：v0.4 后归档发票 PDF 与财务事实，付款状态不能通过普通合并导入绕过确认。
-- [收件箱](inbox.md)：备份、恢复和迁移失败可生成去重的系统维护待办。
+- [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
+- [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
+- [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、停写协调和重启；Sidecar 负责 SQLite 与 Artifact 一致性。
+- [设置](settings.md)：未来展示备份作业、路径选择和错误；当前没有真实入口。
+- [客户](clients.md) / [财务与发票](finance-invoices.md)：文件业务实现后扩展备份清单。
 
-## 分阶段实施
+## 验收状态
 
-### v0.1-A：备份内核
+### 已实现
 
-- 定义 manifest、归档布局、作业状态和错误码。
-- 实现 Online Backup API 或 VACUUM INTO、SHA-256 和临时发布。
-- 增加 WAL 活跃、低磁盘、数据库损坏和并发写入测试。
+- [x] 开发/正式数据库和 Artifact root 隔离。
+- [x] schema v9 嵌入迁移、回滚、外键恢复和测试。
+- [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
+- [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
+- [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
+- [x] Artifact 软删除和 Task 硬删除的文件/数据库补偿。
 
-### v0.1-B：迁移前保护
+### 未实现
 
-- 将 database.Open 拆为兼容检查、备份、迁移和验证阶段。
-- 标记破坏性迁移并强制创建已验证快照。
-- 建立迁移失败恢复状态和桌面恢复入口。
-
-### v0.1-C：手动导出与恢复
-
-- 实现完整 JSON、SQLite 快照和含受控文件的归档。
-- 实现只读检查、恢复前快照、临时库迁移和原子替换。
-- 接入设置页进度、确认、错误、重试和诊断。
-
-### v0.1-D：文件与诊断归档一致性
-
-- 增加 artifacts 目录、受控相对路径和 SHA-256 校验。
-- 消费桌面平台提供的脱敏日志索引，生成用户确认的诊断包；本模块不实现第二套日志落盘或轮转。
-- 让系统维护失败幂等进入收件箱。
-
-### v0.3：计划与高级导入
-
-- 增加计划、启动补偿、外部目录和保留策略。
-- 增加 CSV 字段映射、冲突预览和安全合并；合并导入不得直接构造已验收、已付款或 Agent succeeded 等高风险事实，必须转换为待确认数据或走受控业务命令并记录导入来源。
-- 增加周期性可恢复性抽检和历史执行记录。
-
-## 验收标准
-
-- WAL 有未 checkpoint 写入时创建的备份仍能通过 integrity_check 和 foreign_key_check。
-- 每份成功备份都有完整 manifest、文件清单和 SHA-256，且在独立临时库实际打开验证。
-- 破坏性迁移没有已验证备份时不能开始。
-- 恢复前必定创建当前状态快照；损坏、未知 schema、版本过新、校验失败或低磁盘均不覆盖当前数据。
-- 恢复只在临时库验证成功后进入原子替换；替换失败可以回到原数据。
-- 路径穿越、绝对路径、符号链接逃逸和清单外文件被拒绝。
-- 重复创建、恢复确认和导入请求不会生成重复资源或重复业务事实。
-- 数据库、附件、Artifact 和发票文件恢复后引用一致，没有静默缺失。
-- Focus Session 与任务工时、Inbox Item 与必需任务、Assignment 与 Actor 的一致性检查通过。
-- 整个基础备份恢复流程断网可用，不调用线上服务。
-- v0.1 不依赖计划备份或外部目录才能恢复；v0.3 高级能力不会重新定义基础格式。
-- 日志和 manifest 不包含会话令牌、能力令牌、归档密码或敏感正文。
-- 至少在每个支持平台的干净系统完成一次“备份 → 修改数据 → 恢复 → 核对”验收。
+- [ ] 创建一个同时包含数据库与 Artifact 的一致性备份包。
+- [ ] 在临时数据库和目录完整验证备份。
+- [ ] 原子恢复及失败回滚。
+- [ ] 破坏性迁移前自动备份。
+- [ ] 导入/导出、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
-- [PRD：数据持久化方案](../opc-workspace-PRD.md#7-数据持久化方案)
-- [PRD：备份策略](../opc-workspace-PRD.md#73-备份策略)
-- [PRD：数据安全](../opc-workspace-PRD.md#74-数据安全)
-- [PRD：SQLite 初始化与迁移](../opc-workspace-PRD.md#1044-t-04-sqlite-初始化迁移与开发数据隔离)
-- [当前数据库初始化](../../services/sidecar/internal/database/database.go)
-- [当前迁移执行器](../../services/sidecar/internal/database/migrate.go)
-- [当前初始 schema](../../services/sidecar/internal/database/migrations/001_initial_schema.sql)
-- [当前桌面数据目录创建](../../apps/desktop/src-tauri/src/sidecar.rs)
-- [当前 Sidecar 退出与 checkpoint](../../services/sidecar/cmd/server/main.go)
+- [PRD 数据持久化](../opc-workspace-PRD.md)
+- [SQLite 入口](../../services/sidecar/internal/database/database.go)
+- [迁移器](../../services/sidecar/internal/database/migrate.go)
+- [schema v9 迁移](../../services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql)
+- [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
+- [Task output API](../../services/sidecar/internal/api/task_outputs.go)
+- [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
+- [统一开发脚本](../../scripts/dev.mjs)
+- [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)

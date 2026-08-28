@@ -23,6 +23,38 @@ func TestParseAllowsDynamicPortAndDevDatabase(t *testing.T) {
 	if !filepath.IsAbs(cfg.DatabasePath) {
 		t.Fatalf("DatabasePath = %q, want absolute path", cfg.DatabasePath)
 	}
+	if cfg.ArtifactDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "artifacts") {
+		t.Fatalf("ArtifactDir = %q, want database sibling artifacts", cfg.ArtifactDir)
+	}
+}
+
+func TestParseAcceptsExplicitArtifactDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "controlled-artifacts")
+	cfg, err := Parse([]string{"--dev", "--artifacts", directory}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	want, _ := filepath.Abs(directory)
+	if cfg.ArtifactDir != want {
+		t.Fatalf("ArtifactDir = %q, want %q", cfg.ArtifactDir, want)
+	}
+}
+
+func TestParseReadsArtifactDirectoryEnvironment(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "artifacts-from-env")
+	cfg, err := Parse([]string{"--dev"}, func(key string) string {
+		if key == "OPC_ARTIFACT_DIR" {
+			return directory
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	want, _ := filepath.Abs(directory)
+	if cfg.ArtifactDir != want {
+		t.Fatalf("ArtifactDir = %q, want %q", cfg.ArtifactDir, want)
+	}
 }
 
 func TestParseRejectsWildcardOrigin(t *testing.T) {

@@ -9,12 +9,19 @@ import {
   useUpdateTask,
 } from "../api/hooks";
 import { useUiStore } from "../store/ui";
-import type { Task, TaskKind, TaskPriority, TaskStatus } from "../types/models";
+import type {
+  Task,
+  TaskKind,
+  TaskPriority,
+  TaskReviewPolicy,
+  TaskStatus,
+} from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskEventsSection } from "./TaskEventsSection";
 import { TaskLifecycleSection } from "./TaskLifecycleSection";
+import { TaskOutputsSection } from "./TaskOutputsSection";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -91,6 +98,7 @@ export function TaskDetailModal() {
   const [projectId, setProjectId] = useState("");
   const [parentTaskId, setParentTaskId] = useState("");
   const [completionCriteria, setCompletionCriteria] = useState("");
+  const [reviewPolicy, setReviewPolicy] = useState<TaskReviewPolicy>("none");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [draftVersion, setDraftVersion] = useState(1);
   const [versionConflict, setVersionConflict] = useState(false);
@@ -102,11 +110,17 @@ export function TaskDetailModal() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [assignmentBusy, setAssignmentBusy] = useState(false);
   const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [outputBusy, setOutputBusy] = useState(false);
+  const [submissionHistoryState, setSubmissionHistoryState] = useState<{
+    loading: boolean;
+    error: boolean;
+    total: number | null;
+  }>({ loading: true, error: false, total: null });
   const task = query.data;
   const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
   const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
   const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
-  const busy = taskWriteBusy || assignmentBusy || workflowBusy;
+  const busy = taskWriteBusy || assignmentBusy || workflowBusy || outputBusy;
   const skipNextHydrate = useRef(false);
   const hydratedTaskId = useRef<string | null>(null);
 
@@ -123,6 +137,7 @@ export function TaskDetailModal() {
     setProjectId(value.projectId ?? "");
     setParentTaskId(value.parentTaskId ?? "");
     setCompletionCriteria(value.completionCriteria);
+    setReviewPolicy(value.reviewPolicy);
     setTagIds(value.tags.map((tag) => tag.id));
     setDraftVersion(value.version);
     hydratedTaskId.current = value.id;
@@ -144,6 +159,7 @@ export function TaskDetailModal() {
       projectId !== (task.projectId ?? "") ||
       parentTaskId !== (task.parentTaskId ?? "") ||
       completionCriteria !== task.completionCriteria ||
+      reviewPolicy !== task.reviewPolicy ||
       tagIds.join("\u0000") !== task.tags.map((tag) => tag.id).join("\u0000")),
   );
 
@@ -155,6 +171,8 @@ export function TaskDetailModal() {
     hydratedTaskId.current = null;
     setAssignmentBusy(false);
     setWorkflowBusy(false);
+    setOutputBusy(false);
+    setSubmissionHistoryState({ loading: true, error: false, total: null });
   }, [taskId]);
 
   useEffect(() => {
@@ -204,7 +222,14 @@ export function TaskDetailModal() {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!taskId || assignmentBusy || workflowBusy || versionConflict) return;
+    if (
+      !taskId ||
+      assignmentBusy ||
+      workflowBusy ||
+      outputBusy ||
+      versionConflict
+    )
+      return;
 
     const cleanTitle = title.trim();
     if (cleanTitle.length < 2) {
@@ -238,6 +263,7 @@ export function TaskDetailModal() {
           projectId: projectId || null,
           parentTaskId: parentTaskId || null,
           completionCriteria,
+          reviewPolicy,
           tagIds,
           plannedDate: plannedDate || null,
           dueDate: normalizedDueDate,
@@ -258,7 +284,14 @@ export function TaskDetailModal() {
   };
 
   const confirmDelete = () => {
-    if (!taskId || assignmentBusy || workflowBusy || versionConflict) return;
+    if (
+      !taskId ||
+      assignmentBusy ||
+      workflowBusy ||
+      outputBusy ||
+      versionConflict
+    )
+      return;
     deleteMutation.mutate(
       { id: taskId, expectedVersion: draftVersion },
       {
@@ -432,6 +465,7 @@ export function TaskDetailModal() {
             disabled={
               taskWriteBusy ||
               assignmentBusy ||
+              outputBusy ||
               confirmingDelete ||
               versionConflict
             }
@@ -450,10 +484,31 @@ export function TaskDetailModal() {
             disabled={
               taskWriteBusy ||
               workflowBusy ||
+              outputBusy ||
               confirmingDelete ||
               versionConflict
             }
             onBusyChange={setAssignmentBusy}
+            onTaskUpdated={(updatedTask) => {
+              setDraftVersion((current) =>
+                Math.max(current, updatedTask.version),
+              );
+            }}
+            task={task}
+          />
+
+          <TaskOutputsSection
+            disabled={
+              taskWriteBusy ||
+              assignmentBusy ||
+              workflowBusy ||
+              confirmingDelete ||
+              versionConflict
+            }
+            hasUnsavedFacts={taskDraftDirty}
+            onBusyChange={setOutputBusy}
+            onHistoryStateChange={setSubmissionHistoryState}
+            onRefreshTask={refreshTask}
             onTaskUpdated={(updatedTask) => {
               setDraftVersion((current) =>
                 Math.max(current, updatedTask.version),
@@ -481,6 +536,41 @@ export function TaskDetailModal() {
               rows={3}
               value={completionCriteria}
             />
+          </label>
+
+          <label className="form-field">
+            <span>验收策略</span>
+            <select
+              aria-label="验收策略"
+              disabled={
+                busy ||
+                task.status !== "todo" ||
+                task.currentSubmissionId !== null ||
+                submissionHistoryState.loading ||
+                submissionHistoryState.error ||
+                submissionHistoryState.total !== 0
+              }
+              onChange={(event) =>
+                setReviewPolicy(event.target.value as TaskReviewPolicy)
+              }
+              value={reviewPolicy}
+            >
+              <option value="none">无需验收 · 可直接完成</option>
+              <option value="manual">人工验收 · 提交产出后完成</option>
+            </select>
+            <small>
+              {submissionHistoryState.loading
+                ? "正在确认是否已有提交历史…"
+                : submissionHistoryState.error
+                  ? "提交历史暂不可用，验收策略已锁定。"
+                  : task.status !== "todo" ||
+                      task.currentSubmissionId !== null ||
+                      submissionHistoryState.total !== 0
+                    ? "只有待办且从未提交产出的任务可以修改验收策略。"
+                    : reviewPolicy === "manual"
+                      ? "需先设置负责人和所有者审核人，再提交产出。"
+                      : "适合无需单独检查产出的快速任务。"}
+            </small>
           </label>
 
           <label className="form-field">

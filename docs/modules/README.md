@@ -2,20 +2,20 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.0](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.1](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
 - [今日工作台](today.md)
-- [任务管理](tasks.md)
+- [任务管理](tasks.md)（事实层、D1 生命周期与 D2 manual Submission/Artifact 已交付；Inbox/Agent 仍待开发）
 - [项目管理](projects.md)
 - [客户管理](clients.md)
 - [收件箱工作编排](inbox.md)
-- [Actor 与任务分派](actors.md)
+- [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
 - [专注与工时](focus.md)
 - [设置](settings.md)
 - [命令面板与搜索](command-search.md)
-- [数据、备份与恢复](data-management.md)
+- [数据、受控文件、备份与恢复](data-management.md)（Artifact store 已交付；产品化备份/恢复仍待开发）
 - [桌面平台与发布](desktop-platform.md)
 
 ## v0.2 本地编排
@@ -47,5 +47,6 @@
 - 当前状态只能根据实际代码、测试和运行证据更新。
 - 新增字段必须通过递增迁移，不能回写已经发布的迁移。
 - 跨模块写操作必须说明事务、幂等、冲突和失败恢复。
+- 受控文件能力必须同时说明数据库身份绑定 marker、进程锁、staging/objects/trash/quarantine、相对路径、大小/哈希、耐久同步、软删与聚合硬删；不能把目录预留写成备份已完成。
 - person 只作本地责任记录；实际 Agent 执行在 v0.2，且必须经过本地 Adapter 和权限边界。
 - 页面骨架、静态原型、样式或无行为按钮不能标记为模块完成。

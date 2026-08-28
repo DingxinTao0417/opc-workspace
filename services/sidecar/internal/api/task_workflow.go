@@ -69,6 +69,8 @@ type taskWorkflowEventOutput struct {
 	Action       string                  `json:"action"`
 	Actor        *assignmentActorSummary `json:"actor"`
 	AssignmentID *string                 `json:"assignment_id"`
+	SubmissionID *string                 `json:"submission_id"`
+	ArtifactID   *string                 `json:"artifact_id"`
 	RequestID    *string                 `json:"request_id"`
 	CommandSeq   *int                    `json:"command_seq"`
 	Previous     map[string]any          `json:"previous"`
@@ -82,6 +84,8 @@ type taskWorkflowEventRow struct {
 	Action         string  `gorm:"column:action"`
 	ActorID        *string `gorm:"column:actor_id"`
 	AssignmentID   *string `gorm:"column:assignment_id"`
+	SubmissionID   *string `gorm:"column:submission_id"`
+	ArtifactID     *string `gorm:"column:artifact_id"`
 	RequestID      *string `gorm:"column:request_id"`
 	CommandSeq     *int    `gorm:"column:command_seq"`
 	PreviousJSON   *string `gorm:"column:previous_json"`
@@ -185,6 +189,14 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 		}
 		requestID := requestIDFromContext(c)
 		commandSequence := 1
+		if command == taskLifecycleCancel && taskHasPendingReview(current) {
+			commandSequence, err = withdrawCurrentSubmissionForCancellation(
+				tx, current, requestID, now, reason, commandSequence,
+			)
+			if err != nil {
+				return err
+			}
+		}
 		if closeReason != "" {
 			commandSequence, err = closeActiveAssignmentsForTerminalTask(
 				tx, taskIDValue, requestID, now, closeReason, commandSequence,
@@ -359,6 +371,7 @@ func taskLifecycleUpdates(task models.Task, command, reason, now string) (map[st
 		updates["blocked_from_status"] = nil
 		updates["submitted_at"] = nil
 		updates["reviewed_at"] = nil
+		updates["current_submission_id"] = nil
 	default:
 		return nil, "", errors.New("unsupported task lifecycle command")
 	}
@@ -374,15 +387,16 @@ func reasonForTaskEvent(command, reason string) string {
 
 func taskLifecycleSnapshot(task models.Task, reason string) map[string]any {
 	snapshot := map[string]any{
-		"status":              task.Status,
-		"review_policy":       task.ReviewPolicy,
-		"blocked_reason":      task.BlockedReason,
-		"blocked_at":          task.BlockedAt,
-		"blocked_from_status": task.BlockedFromStatus,
-		"completed_at":        task.CompletedAt,
-		"submitted_at":        task.SubmittedAt,
-		"reviewed_at":         task.ReviewedAt,
-		"version":             task.Version,
+		"status":                task.Status,
+		"review_policy":         task.ReviewPolicy,
+		"blocked_reason":        task.BlockedReason,
+		"blocked_at":            task.BlockedAt,
+		"blocked_from_status":   task.BlockedFromStatus,
+		"completed_at":          task.CompletedAt,
+		"submitted_at":          task.SubmittedAt,
+		"reviewed_at":           task.ReviewedAt,
+		"current_submission_id": task.CurrentSubmissionID,
+		"version":               task.Version,
 	}
 	if reason != "" {
 		snapshot["reason"] = reason
@@ -573,6 +587,8 @@ func taskWorkflowEventRowsQuery(db *gorm.DB) *gorm.DB {
 			event.action,
 			event.actor_id,
 			event.assignment_id,
+			event.submission_id,
+			event.artifact_id,
 			event.request_id,
 			event.command_seq,
 			event.previous_json,
@@ -617,6 +633,7 @@ func taskWorkflowEventOutputFromRow(row taskWorkflowEventRow) (taskWorkflowEvent
 	reason := taskWorkflowEventReason(current)
 	return taskWorkflowEventOutput{
 		ID: row.ID, Action: row.Action, Actor: actor, AssignmentID: row.AssignmentID,
+		SubmissionID: row.SubmissionID, ArtifactID: row.ArtifactID,
 		RequestID: row.RequestID, CommandSeq: row.CommandSeq,
 		Previous: previous, Current: current, Reason: reason,
 		CreatedAt: normalizeTimestamp(row.CreatedAt),
