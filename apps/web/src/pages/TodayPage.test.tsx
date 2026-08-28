@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { TodayPage } from "./TodayPage";
@@ -31,6 +31,7 @@ describe("TodayPage Inbox overview", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it("shows derived Inbox counts with risk deep links", () => {
@@ -159,5 +160,45 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.getByText("本周任务")).toBeVisible();
     expect(screen.getByRole("heading", { name: "未排期" })).toBeVisible();
     expect(screen.getByText("未排期任务")).toBeVisible();
+  });
+
+  it("switches the queried date and can return to today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    mocks.taskGroups.mockReturnValue({
+      data: { overdue: [], today: [], thisWeek: [], unscheduled: [] },
+      isError: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-28");
+    fireEvent.click(screen.getByRole("button", { name: "前一天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+    expect(screen.getByRole("button", { name: "回到今天" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "回到今天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-28");
+    expect(
+      screen.queryByRole("button", { name: "回到今天" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -1005,6 +1005,36 @@ kbd {
   white-space: nowrap;
 }
 
+.date-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.date-switcher > button {
+  display: inline-grid;
+  min-width: 25px;
+  height: 25px;
+  padding: 0 6px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-muted);
+}
+
+.date-switcher > button:hover,
+.date-switcher > button:focus-visible {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.date-switcher > .date-today-button {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .streak-pill {
   border-color: rgba(76, 183, 130, 0.2);
   background: rgba(76, 183, 130, 0.08);

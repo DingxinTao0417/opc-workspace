@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   ClipboardCheck,
   GitBranch,
@@ -11,6 +12,7 @@ import {
   Plus,
   Target,
 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   useInboxStatsQuery,
@@ -36,10 +38,24 @@ function formatToday(date: Date): string {
   }).format(date);
 }
 
+function dateFromKey(dateKey: string): Date {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function shiftLocalDateKey(dateKey: string, days: number): string {
+  const date = dateFromKey(dateKey);
+  date.setDate(date.getDate() + days);
+  return localDateKey(date);
+}
+
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
-  const now = new Date();
-  const dateKey = localDateKey(now);
+  const today = new Date();
+  const todayKey = localDateKey(today);
+  const [dateKey, setDateKey] = useState(todayKey);
+  const selectedDate = dateFromKey(dateKey);
+  const isToday = dateKey === todayKey;
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
   const statsQuery = useTodayStatsQuery(dateKey);
   const inboxStatsQuery = useInboxStatsQuery();
@@ -106,10 +122,38 @@ export function TodayPage() {
       <header className="today-header">
         <div className="today-heading-group">
           <h1 className="page-title">今日</h1>
-          <span className="date-pill">
-            <CalendarDays size={13} />
-            {formatToday(now)}
-          </span>
+          <div aria-label="日期切换" className="date-switcher">
+            <button
+              aria-label="前一天"
+              onClick={() =>
+                setDateKey((value) => shiftLocalDateKey(value, -1))
+              }
+              type="button"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <span className="date-pill">
+              <CalendarDays size={13} />
+              {isToday ? "今天 · " : null}
+              {formatToday(selectedDate)}
+            </span>
+            <button
+              aria-label="后一天"
+              onClick={() => setDateKey((value) => shiftLocalDateKey(value, 1))}
+              type="button"
+            >
+              <ChevronRight size={13} />
+            </button>
+            {!isToday ? (
+              <button
+                className="date-today-button"
+                onClick={() => setDateKey(todayKey)}
+                type="button"
+              >
+                回到今天
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="page-actions">
           <button
@@ -221,8 +265,10 @@ export function TodayPage() {
       <section className="task-section">
         <div className="section-heading compact-heading">
           <div>
-            <span className="section-kicker">接下来</span>
-            <h2>今天</h2>
+            <span className="section-kicker">
+              {isToday ? "接下来" : "日期计划"}
+            </span>
+            <h2>{isToday ? "今天" : "所选日期"}</h2>
           </div>
           <span className="section-count">{groups.today.length}</span>
         </div>
@@ -240,8 +286,8 @@ export function TodayPage() {
                 新建第一项任务
               </button>
             }
-            message="今天没有已安排的活动任务；可新建任务，或在任务页设置计划日期。"
-            title="今天已经安排妥当"
+            message={`${isToday ? "今天" : "所选日期"}没有已安排的活动任务；可新建任务，或在任务页设置计划日期。`}
+            title={isToday ? "今天已经安排妥当" : "所选日期暂无任务"}
           />
         ) : (
           <TaskList compact live={live} tasks={groups.today} />
