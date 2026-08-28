@@ -42,7 +42,7 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "version": "0.1.0",
   "app_version": "0.1.0",
   "api_version": "v1",
-  "schema_version": 18
+  "schema_version": 20
 }
 ```
 
@@ -60,6 +60,7 @@ The Sidecar exposes:
 - Task event history with actor summaries, request IDs, immutable snapshots, `command_seq`, and nullable Assignment/Submission/Artifact correlation IDs;
 - Client fact CRUD with stable filtering/sorting, snapshot idempotency, aggregate `ETag`, Project association propagation, constrained hard deletion, and derived latest activity time;
 - Client Activity note/meeting creation, stable pagination, optimistic editing, reasoned soft deletion, immutable deleted history, and parent Client version propagation;
+- Client contact relationship query/link/unlink with aggregate concurrency, idempotent snapshots, atomic person creation, one active contact per Client, and immutable unlink history;
 - Inbox Item create/query/detail, read/snooze/resolve/dismiss/reopen commands and immutable Inbox workflow history;
 - Inbox Item–Task active/history relationships, server-derived progress, required-flag updates, reasoned soft unlinking, and active-relation protection for Task hard deletion;
 - one-time local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, periodic due scanning, and exactly-once Reminder-to-Inbox projection;
@@ -95,6 +96,9 @@ POST   /api/v1/clients/:id/attachments
 GET    /api/v1/client-attachments/:id
 GET    /api/v1/client-attachments/:id/content
 DELETE /api/v1/client-attachments/:id?confirm=true
+GET    /api/v1/clients/:id/actor-links
+POST   /api/v1/clients/:id/actor-links
+DELETE /api/v1/client-actor-links/:id?confirm=true
 POST   /api/v1/clients
 GET    /api/v1/clients/:id
 PATCH  /api/v1/clients/:id
@@ -113,7 +117,7 @@ PATCH  /api/v1/reminders/:id
 DELETE /api/v1/reminders/:id
 ```
 
-Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; Client Attachment upload uses Client `If-Match`, while attachment deletion uses its own `ETag`. Stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events or file writes, and reject key reuse with different input.
+Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; Client Attachment upload/deletion and Client contact link/unlink use the containing Client `If-Match`. Stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events or file writes, and reject key reuse with different input.
 
 ### Settings contract
 
@@ -230,7 +234,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v18. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 adds indexes and guards for required-Task reconciliation. Migration 016 adds an initially empty `app_settings` table and its guards. Migration 017 adds constrained, versioned Task saved views. Migration 018 adds versioned Client activities, soft-delete audit constraints, timeline indexes, and Client aggregate propagation without rewriting v17 facts or seeding demo data. Future changes must start at `019_*`; never edit a shipped migration.
+The current schema is v20. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 adds indexes and guards for required-Task reconciliation. Migration 016 adds an initially empty `app_settings` table and its guards. Migration 017 adds constrained, versioned Task saved views. Migration 018 adds versioned Client activities. Migration 019 adds controlled Client Attachments. Migration 020 adds explicit Client–person contact relationships, immutable unlink history, active-person guards, and Client aggregate propagation without rewriting v19 facts or seeding demo data. Future changes must start at `021_*`; never edit a shipped migration.
 
 Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
 
@@ -243,4 +247,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v5.3 / schema v19 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, Client Activity and Client Attachment migrations/constraints/idempotency/pagination/optimistic deletion/integrity, verified SQLite+controlled-file backup creation/list/replay/re-verification/tamper rejection, isolated restore drills, automatic rollback packages, restart-applied atomic restore, confirmed package deletion and deterministic allowlisted business JSON export, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. The Tauri shell now exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Client external-source projection, follow-ups, finance, data import, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v5.4 / schema v20 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, constrained Task saved-view storage and versioned CRUD, Client Activity/Attachment/Actor Link migrations, constraints, idempotency, pagination, optimistic mutation and history protection, verified SQLite+controlled-file backup creation/list/replay/re-verification/tamper rejection, isolated restore drills, automatic rollback packages, restart-applied atomic restore, confirmed package deletion and deterministic allowlisted business JSON export, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, server-side Task filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. The Tauri shell exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Client external-source projection, follow-ups, finance, data import, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

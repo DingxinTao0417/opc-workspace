@@ -27,6 +27,7 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "clients", OrderBy: "id"},
 	{Name: "client_activities", OrderBy: "client_id, occurred_at, id"},
 	{Name: "client_attachments", OrderBy: "client_id, created_at, id"},
+	{Name: "client_actor_links", OrderBy: "client_id, linked_at, id"},
 	{Name: "projects", OrderBy: "id"},
 	{Name: "tasks", OrderBy: "id"},
 	{Name: "tags", OrderBy: "id"},

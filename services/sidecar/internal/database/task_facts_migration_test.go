@@ -45,8 +45,8 @@ func TestTaskFactsMigrationUpgradesRealV5DatabaseWithoutLosingFacts(t *testing.T
 		t.Fatalf("upgrade v5 database with Open(): %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 19 {
-		t.Fatalf("SchemaVersion = %d, want 19", store.SchemaVersion)
+	if store.SchemaVersion != 20 {
+		t.Fatalf("SchemaVersion = %d, want 20", store.SchemaVersion)
 	}
 
 	var task struct {

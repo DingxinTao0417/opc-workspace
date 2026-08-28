@@ -34,6 +34,22 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	`).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := store.DB.Exec(`
+		INSERT INTO actors(id, type, display_name, status, is_builtin, notes, metadata_json, version, created_at, updated_at)
+		VALUES (
+			'018f0000-0000-7000-8000-000000001704', 'person', 'Exported Contact', 'active', 0,
+			'', '{}', 1, '2026-08-28T08:01:00Z', '2026-08-28T08:01:00Z'
+		);
+		INSERT INTO client_actor_links(id, client_id, actor_id, role, linked_by_actor_id, linked_at)
+		VALUES (
+			'018f0000-0000-7000-8000-000000001705',
+			'018f0000-0000-7000-8000-000000001701',
+			'018f0000-0000-7000-8000-000000001704', 'contact',
+			'00000000-0000-5000-8000-000000000001', '2026-08-28T08:02:00Z'
+		)
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
 	task, _ := setupManualReviewTask(t, router)
 	uploaded := performMultipartRequest(
 		router,
@@ -103,6 +119,9 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if attachments := tables["client_attachments"]; len(attachments.Rows) != 1 {
 		t.Fatalf("Client attachment metadata was not exported: %#v", attachments)
+	}
+	if links := tables["client_actor_links"]; len(links.Rows) != 1 {
+		t.Fatalf("Client actor links were not exported: %#v", links)
 	}
 	for _, excluded := range businessExportExcludedTables {
 		if _, leaked := tables[excluded]; leaked {

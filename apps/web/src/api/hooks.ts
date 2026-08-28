@@ -16,6 +16,7 @@ import {
   createClient,
   createClientActivity,
   createClientAttachment,
+  createClientActorLink,
   createFocusSession,
   createReminder,
   createPersonActor,
@@ -27,6 +28,7 @@ import {
   deleteClient,
   deleteClientActivity,
   deleteClientAttachment,
+  deleteClientActorLink,
   deleteBackup,
   deleteProject,
   deleteTag,
@@ -51,6 +53,7 @@ import {
   getClient,
   getClientActivities,
   getClientAttachments,
+  getClientActorLinks,
   getClients,
   getActiveFocusSession,
   getHealth,
@@ -114,9 +117,11 @@ import type {
   ClientInput,
   ClientActivityListParams,
   ClientAttachmentListParams,
+  ClientActorLinkListParams,
   ClientListParams,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
+  CreateClientActorLinkInput,
   CreateFocusSessionInput,
   CreateReminderInput,
   CreatePersonActorInput,
@@ -124,6 +129,7 @@ import type {
   DeleteTaskArtifactInput,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
+  DeleteClientActorLinkInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusSessionSnapshot,
@@ -291,6 +297,17 @@ export function useAssignmentActorOptionsQuery(enabled = true) {
   return useQuery({
     queryKey: [...actorQueryKey, "assignment-options"],
     queryFn: () => getAllActors({ status: "active" }),
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useClientActorOptionsQuery(enabled = true) {
+  return useQuery({
+    queryKey: [...actorQueryKey, "client-contact-options"],
+    queryFn: () => getAllActors({ type: "person", status: "active" }),
     enabled,
     retry: 2,
     retryDelay: 500,
@@ -632,6 +649,94 @@ export function useDownloadClientAttachment() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       downloadClientAttachment(id, name),
+  });
+}
+
+export const clientActorLinkQueryKey = (clientId: string) =>
+  [...clientDetailQueryKey(clientId), "actor-links"] as const;
+
+export function useClientActorLinksQuery(
+  clientId: string | null,
+  input: ClientActorLinkListParams = {},
+) {
+  return useQuery({
+    queryKey: [
+      ...clientActorLinkQueryKey(clientId ?? "missing"),
+      "list",
+      input,
+    ],
+    queryFn: () => getClientActorLinks(clientId!, input),
+    enabled: Boolean(clientId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useCreateClientActorLink() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      clientId,
+      input,
+    }: {
+      clientId: string;
+      input: CreateClientActorLinkInput;
+    }) => {
+      const fingerprint = JSON.stringify({ clientId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createClientActorLink(clientId, input, attempt.current.key);
+    },
+    onSuccess: async (link) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: clientActorLinkQueryKey(link.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteClientActorLink() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      id,
+      clientId,
+      input,
+    }: {
+      id: string;
+      clientId: string;
+      input: DeleteClientActorLinkInput;
+    }) => {
+      const fingerprint = JSON.stringify({ id, clientId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return deleteClientActorLink(id, input, attempt.current.key);
+    },
+    onSuccess: async (link) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: clientActorLinkQueryKey(link.clientId),
+      });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
+    },
   });
 }
 

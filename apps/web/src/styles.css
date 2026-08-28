@@ -3029,6 +3029,202 @@ kbd {
   font-size: 9px;
 }
 
+.client-actor-links-section {
+  margin-top: 12px;
+}
+
+.client-actor-current,
+.client-actor-link-form,
+.client-actor-history {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.client-actor-current {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.75fr);
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+}
+
+.client-actor-profile {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.client-actor-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.client-actor-profile > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.client-actor-profile strong,
+.client-actor-profile small {
+  display: block;
+}
+
+.client-actor-profile strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.client-actor-profile small {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.client-actor-unlink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.client-actor-unlink label,
+.client-actor-link-form label,
+.client-actor-new-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.client-actor-unlink input,
+.client-actor-link-form input,
+.client-actor-link-form select {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.client-actor-unlink input:focus,
+.client-actor-link-form input:focus,
+.client-actor-link-form select:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.client-actor-link-form {
+  display: grid;
+  gap: 11px;
+  padding: 12px;
+}
+
+.client-actor-link-form > .button {
+  justify-self: start;
+}
+
+.client-actor-mode {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--panel-raised);
+}
+
+.client-actor-mode button {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.client-actor-mode button.active {
+  background: var(--panel-hover);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.client-actor-new-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.client-actor-history {
+  display: grid;
+  gap: 0;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.client-actor-history article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.8fr);
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.client-actor-history article:last-child {
+  border-bottom: 0;
+}
+
+.client-actor-history strong,
+.client-actor-history small {
+  display: block;
+}
+
+.client-actor-history strong {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.client-actor-history small,
+.client-actor-history p,
+.client-actor-history-empty {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.client-actor-history small {
+  margin-top: 3px;
+}
+
+.client-actor-history p {
+  margin: 0;
+  text-align: right;
+}
+
+.client-actor-history-empty {
+  margin: 0;
+  padding: 14px;
+}
+
 .client-future-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -8042,6 +8238,22 @@ kbd {
   .client-attachment-delete-confirm {
     grid-column: 1 / -1;
     grid-template-columns: 1fr;
+  }
+
+  .client-actor-current,
+  .client-actor-history article,
+  .client-actor-new-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .client-actor-unlink {
+    grid-template-columns: 1fr;
+  }
+
+  .client-actor-unlink .button,
+  .client-actor-history p {
+    justify-self: start;
+    text-align: left;
   }
 
   .clients-toolbar {

@@ -318,6 +318,9 @@ func (a *API) updateActor(c *gin.Context) {
 			if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_ASSIGNMENTS") {
 				return actorHasActiveAssignmentsError()
 			}
+			if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_CLIENT_LINKS") {
+				return actorHasActiveClientLinksError()
+			}
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
@@ -714,6 +717,14 @@ func actorHasActiveAssignmentsError() error {
 		http.StatusConflict,
 		"ACTOR_HAS_ACTIVE_ASSIGNMENTS",
 		"Reassign or end this actor's active assignments before deactivating it",
+	)
+}
+
+func actorHasActiveClientLinksError() error {
+	return newProjectRequestError(
+		http.StatusConflict,
+		"ACTOR_HAS_ACTIVE_CLIENT_LINKS",
+		"Unlink this actor from every active client contact before deactivating it",
 	)
 }
 

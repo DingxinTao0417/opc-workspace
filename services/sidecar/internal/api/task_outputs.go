@@ -1596,7 +1596,7 @@ func replayTaskOutputCommand(tx *gorm.DB, key, endpoint, requestHash string, res
 		return false, 0, newProjectRequestError(http.StatusConflict, "IDEMPOTENCY_REPLAY_UNAVAILABLE", "This legacy Idempotency-Key cannot be replayed safely; use a new key")
 	}
 	if *existing.RequestHash != requestHash {
-		return false, 0, newProjectRequestError(http.StatusConflict, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different Task output request")
+		return false, 0, newProjectRequestError(http.StatusConflict, "IDEMPOTENCY_CONFLICT", "Idempotency-Key was already used with a different request")
 	}
 	if err := json.Unmarshal([]byte(*existing.ResponseBody), response); err != nil {
 		return false, 0, err

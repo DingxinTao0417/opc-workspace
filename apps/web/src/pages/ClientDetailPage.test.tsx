@@ -108,6 +108,32 @@ vi.mock("../api/hooks", () => ({
   useCreateClientAttachment: () => state.activityMutation,
   useDeleteClientAttachment: () => state.activityMutation,
   useDownloadClientAttachment: () => state.activityMutation,
+  useClientActorLinksQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0, clientVersion: 3 },
+    },
+    isError: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useClientActorOptionsQuery: () => ({
+    data: [],
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useCreateClientActorLink: () => ({
+    error: null,
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
+  useDeleteClientActorLink: () => ({
+    error: null,
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 function renderDetail() {
@@ -140,6 +166,8 @@ describe("ClientDetailPage", () => {
     expect(screen.getByRole("button", { name: "记录活动" })).toBeEnabled();
     expect(screen.getByText(/不推测邮件、浏览或回复行为/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "添加附件" })).toBeEnabled();
+    expect(screen.getByRole("heading", { name: "本地联系人" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(screen.getByText(/回访计划属于后续业务版本/)).toBeTruthy();
     expect(state.projectQueryInput).toEqual(
       expect.objectContaining({

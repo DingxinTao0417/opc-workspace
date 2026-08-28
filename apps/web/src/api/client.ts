@@ -22,6 +22,9 @@ import type {
   ClientAttachmentDownload,
   ClientAttachmentListParams,
   ClientAttachmentListResult,
+  ClientActorLink,
+  ClientActorLinkListParams,
+  ClientActorLinkListResult,
   ClientActivityListParams,
   ClientActivityListResult,
   ClientInput,
@@ -30,6 +33,7 @@ import type {
   ClientStatus,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
+  CreateClientActorLinkInput,
   CreateFocusSessionInput,
   CreateBackupInput,
   CreateReminderInput,
@@ -75,6 +79,7 @@ import type {
   DeleteClientResult,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
+  DeleteClientActorLinkInput,
   Project,
   ProjectInput,
   ProjectListParams,
@@ -1016,6 +1021,94 @@ export function normalizeClientAttachment(value: unknown): ClientAttachment {
     clientVersion: positiveInteger(
       fieldValue(value, "client_version", "clientVersion"),
       "客户附件对应客户版本",
+    ),
+  };
+}
+
+export function normalizeClientActorLink(value: unknown): ClientActorLink {
+  if (!isRecord(value)) return invalidResponse("客户责任关联响应格式无效");
+  const id = stringField(value, "id");
+  const clientId = stringField(value, "client_id", "clientId");
+  const linkedAt = stringField(value, "linked_at", "linkedAt");
+  const rawActor = fieldValue(value, "actor");
+  const rawLinkedBy = fieldValue(value, "linked_by", "linkedBy");
+  const rawUnlinkedBy = fieldValue(value, "unlinked_by", "unlinkedBy");
+  if (
+    !id ||
+    !clientId ||
+    !linkedAt ||
+    value.role !== "contact" ||
+    !isRecord(rawActor) ||
+    !isRecord(rawLinkedBy) ||
+    (rawUnlinkedBy !== null && !isRecord(rawUnlinkedBy))
+  ) {
+    return invalidResponse("客户责任关联响应格式无效");
+  }
+  const actorId = stringField(rawActor, "id");
+  const actorDisplayName = stringField(rawActor, "display_name", "displayName");
+  const linkedById = stringField(rawLinkedBy, "id");
+  const linkedByDisplayName = stringField(
+    rawLinkedBy,
+    "display_name",
+    "displayName",
+  );
+  if (!actorId || !actorDisplayName || !linkedById || !linkedByDisplayName) {
+    return invalidResponse("客户责任关联人员响应格式无效");
+  }
+  const unlinkedAt = clientOptionalString(
+    fieldValue(value, "unlinked_at", "unlinkedAt"),
+    "客户责任解除时间",
+  );
+  const unlinkReason = clientOptionalString(
+    fieldValue(value, "unlink_reason", "unlinkReason"),
+    "客户责任解除原因",
+  );
+  let unlinkedBy: ClientActorLink["unlinkedBy"] = null;
+  if (isRecord(rawUnlinkedBy)) {
+    const unlinkedById = stringField(rawUnlinkedBy, "id");
+    const unlinkedByDisplayName = stringField(
+      rawUnlinkedBy,
+      "display_name",
+      "displayName",
+    );
+    if (!unlinkedById || !unlinkedByDisplayName) {
+      return invalidResponse("客户责任解除人员响应格式无效");
+    }
+    unlinkedBy = {
+      id: unlinkedById,
+      type: asActorType(rawUnlinkedBy.type),
+      displayName: unlinkedByDisplayName,
+    };
+  }
+  if (
+    (unlinkedAt === null) !==
+    (unlinkedBy === null && unlinkReason === null)
+  ) {
+    return invalidResponse("客户责任关联历史状态不一致");
+  }
+  return {
+    id,
+    clientId,
+    role: "contact",
+    actor: {
+      id: actorId,
+      type: asActorType(rawActor.type),
+      displayName: actorDisplayName,
+      status: asActorStatus(rawActor.status),
+      version: positiveInteger(rawActor.version, "客户关联人员版本"),
+    },
+    linkedBy: {
+      id: linkedById,
+      type: asActorType(rawLinkedBy.type),
+      displayName: linkedByDisplayName,
+    },
+    linkedAt,
+    unlinkedAt,
+    unlinkedBy,
+    unlinkReason,
+    clientVersion: positiveInteger(
+      fieldValue(value, "client_version", "clientVersion"),
+      "客户责任关联对应客户版本",
     ),
   };
 }
@@ -4651,6 +4744,100 @@ export async function downloadClientAttachment(
     "application/octet-stream",
     ARTIFACT_TRANSFER_TIMEOUT_MS,
   );
+}
+
+export async function getClientActorLinks(
+  clientId: string,
+  input: ClientActorLinkListParams = {},
+): Promise<ClientActorLinkListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.includeUnlinked) params.set("include_unlinked", "true");
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/actor-links?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("客户责任关联列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeClientActorLink);
+  if (items.some((link) => link.clientId !== clientId)) {
+    return invalidResponse("客户责任关联列表与请求不一致");
+  }
+  return {
+    items,
+    meta: {
+      page: positiveInteger(payload.meta.page, "客户责任关联页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "客户责任关联每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "客户责任关联总数"),
+      clientVersion: positiveInteger(
+        fieldValue(payload.meta, "client_version", "clientVersion"),
+        "客户责任关联对应客户版本",
+      ),
+    },
+  };
+}
+
+export async function createClientActorLink(
+  clientId: string,
+  input: CreateClientActorLinkInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientActorLink> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/actor-links`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        role: "contact",
+        ...("actorId" in input
+          ? { actor_id: input.actorId }
+          : {
+              create_person: {
+                display_name: input.createPerson.displayName,
+                notes: input.createPerson.notes,
+              },
+            }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const link = normalizeClientActorLink(body);
+  if (link.clientId !== clientId) {
+    return invalidResponse("客户责任关联创建响应与请求不一致");
+  }
+  return link;
+}
+
+export async function deleteClientActorLink(
+  id: string,
+  input: DeleteClientActorLinkInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientActorLink> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-actor-links/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientActorLink(body);
 }
 
 export async function getInboxItems(

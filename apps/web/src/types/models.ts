@@ -925,6 +925,55 @@ export interface ClientAttachmentDownload {
   mimeType: string;
 }
 
+export interface ClientActorLinkActor {
+  id: string;
+  type: ActorType;
+  displayName: string;
+  status: ActorStatus;
+  version: number;
+}
+
+export interface ClientActorLink {
+  id: string;
+  clientId: string;
+  role: "contact";
+  actor: ClientActorLinkActor;
+  linkedBy: ClientActivityActor;
+  linkedAt: string;
+  unlinkedAt: string | null;
+  unlinkedBy: ClientActivityActor | null;
+  unlinkReason: string | null;
+  clientVersion: number;
+}
+
+export interface ClientActorLinkListParams {
+  page?: number;
+  pageSize?: number;
+  includeUnlinked?: boolean;
+}
+
+export interface ClientActorLinkListResult {
+  items: ClientActorLink[];
+  meta: PageMeta & { clientVersion: number };
+}
+
+export type CreateClientActorLinkInput =
+  | {
+      actorId: string;
+      createPerson?: never;
+      expectedVersion: number;
+    }
+  | {
+      actorId?: never;
+      createPerson: { displayName: string; notes: string };
+      expectedVersion: number;
+    };
+
+export interface DeleteClientActorLinkInput {
+  reason: string;
+  expectedVersion: number;
+}
+
 export type InboxItemKind = "manual" | "reminder";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
