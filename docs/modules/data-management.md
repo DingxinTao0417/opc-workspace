@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 与 Client Attachment 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 

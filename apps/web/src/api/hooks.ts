@@ -56,6 +56,8 @@ import {
   getClientActorLinks,
   getClients,
   getActiveFocusSession,
+  getFocusReport,
+  getFocusSessions,
   getHealth,
   getAppSettings,
   getInboxItem,
@@ -132,6 +134,8 @@ import type {
   DeleteClientActorLinkInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
+  FocusReportParams,
+  FocusSessionListParams,
   FocusSessionSnapshot,
   ForceResolveInboxItemInput,
   CreateInboxItemInput,
@@ -1605,6 +1609,8 @@ async function invalidateFocusDependents(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
     queryClient.invalidateQueries({ queryKey: projectQueryKey }),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
+    queryClient.invalidateQueries({ queryKey: ["stats", "focus"] }),
+    queryClient.invalidateQueries({ queryKey: ["focus-sessions", "history"] }),
   ]);
 }
 
@@ -1632,6 +1638,27 @@ export function useActiveFocusSessionQuery() {
     retry: 2,
     retryDelay: 500,
     staleTime: 5_000,
+  });
+}
+
+export function useFocusSessionHistoryQuery(input: FocusSessionListParams) {
+  return useQuery({
+    queryKey: ["focus-sessions", "history", input],
+    queryFn: () => getFocusSessions(input),
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useFocusReportQuery(input: FocusReportParams) {
+  return useQuery({
+    queryKey: ["stats", "focus", input],
+    queryFn: () => getFocusReport(input),
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
   });
 }
 

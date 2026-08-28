@@ -511,6 +511,48 @@ export interface FocusSessionSnapshot {
   receivedAtMs: number;
 }
 
+export type FocusSessionHistoryStatus =
+  "terminal" | "completed" | "cancelled" | "interrupted";
+
+export interface FocusSessionListParams {
+  page?: number;
+  pageSize?: number;
+  status?: FocusSessionHistoryStatus;
+  taskId?: string;
+}
+
+export interface FocusSessionListResult {
+  items: FocusSession[];
+  meta: PageMeta;
+}
+
+export interface FocusReportDay {
+  date: string;
+  sessions: number;
+  seconds: number;
+  minutes: number;
+}
+
+export interface FocusReport {
+  dateFrom: string;
+  dateTo: string;
+  timezone: string;
+  totals: {
+    sessions: number;
+    seconds: number;
+    minutes: number;
+  };
+  days: FocusReportDay[];
+  currentStreakDays: number;
+  longestStreakDays: number;
+}
+
+export interface FocusReportParams {
+  dateFrom: string;
+  dateTo: string;
+  timezone: string;
+}
+
 export interface CreateFocusSessionInput {
   taskId: string | null;
   plannedSeconds: number;

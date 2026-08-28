@@ -46,7 +46,11 @@ import type {
   DeleteTaskSavedViewResult,
   EndTaskAssignmentInput,
   FocusRecoveryAction,
+  FocusReport,
+  FocusReportParams,
   FocusSession,
+  FocusSessionListParams,
+  FocusSessionListResult,
   FocusSessionSnapshot,
   ForceResolveInboxItemInput,
   HealthResponse,
@@ -1843,6 +1847,72 @@ export function normalizeFocusSessionSnapshot(
         : normalizeFocusSession(rawSession),
     serverNow: rawServerNow,
     receivedAtMs: Date.now(),
+  };
+}
+
+export function normalizeFocusSessionListResult(
+  payload: unknown,
+): FocusSessionListResult {
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("专注历史响应格式无效");
+  }
+  return {
+    items: payload.data.map(normalizeFocusSession),
+    meta: {
+      page: positiveInteger(payload.meta.page, "专注历史页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "专注历史每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "专注历史总数"),
+    },
+  };
+}
+
+export function normalizeFocusReport(payload: unknown): FocusReport {
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body) || !isRecord(body.totals) || !Array.isArray(body.days)) {
+    return invalidResponse("专注周期统计响应格式无效");
+  }
+  const dateFrom = stringField(body, "date_from", "dateFrom");
+  const dateTo = stringField(body, "date_to", "dateTo");
+  const timezone = stringField(body, "timezone");
+  if (!dateFrom || !dateTo || !timezone) {
+    return invalidResponse("专注周期统计响应格式无效");
+  }
+  return {
+    dateFrom,
+    dateTo,
+    timezone,
+    totals: {
+      sessions: nonNegativeInteger(body.totals.sessions, "专注总块数"),
+      seconds: nonNegativeInteger(body.totals.seconds, "专注总秒数"),
+      minutes: nonNegativeInteger(body.totals.minutes, "专注总分钟数"),
+    },
+    days: body.days.map((item) => {
+      if (!isRecord(item)) return invalidResponse("专注每日统计响应格式无效");
+      const date = stringField(item, "date");
+      if (!date) return invalidResponse("专注每日统计响应格式无效");
+      return {
+        date,
+        sessions: nonNegativeInteger(item.sessions, "每日专注块数"),
+        seconds: nonNegativeInteger(item.seconds, "每日专注秒数"),
+        minutes: nonNegativeInteger(item.minutes, "每日专注分钟数"),
+      };
+    }),
+    currentStreakDays: nonNegativeInteger(
+      fieldValue(body, "current_streak_days", "currentStreakDays"),
+      "当前连续专注天数",
+    ),
+    longestStreakDays: nonNegativeInteger(
+      fieldValue(body, "longest_streak_days", "longestStreakDays"),
+      "最长连续专注天数",
+    ),
   };
 }
 
@@ -5227,6 +5297,31 @@ export async function getInboxItemEvents(
 export async function getActiveFocusSession(): Promise<FocusSessionSnapshot> {
   const payload = await apiRequest<unknown>("/api/v1/focus-sessions/active");
   return normalizeFocusSessionSnapshot(payload);
+}
+
+export async function getFocusSessions(
+  input: FocusSessionListParams = {},
+): Promise<FocusSessionListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+    status: input.status ?? "terminal",
+  });
+  if (input.taskId) params.set("task_id", input.taskId);
+  const payload = await apiRequest<unknown>(`/api/v1/focus-sessions?${params}`);
+  return normalizeFocusSessionListResult(payload);
+}
+
+export async function getFocusReport(
+  input: FocusReportParams,
+): Promise<FocusReport> {
+  const params = new URLSearchParams({
+    date_from: input.dateFrom,
+    date_to: input.dateTo,
+    timezone: input.timezone,
+  });
+  const payload = await apiRequest<unknown>(`/api/v1/stats/focus?${params}`);
+  return normalizeFocusReport(payload);
 }
 
 export async function createFocusSession(

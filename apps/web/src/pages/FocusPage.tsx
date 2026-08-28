@@ -1,6 +1,11 @@
 import {
   Ban,
+  BarChart3,
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
+  History,
   Pause,
   Play,
   RotateCcw,
@@ -15,6 +20,8 @@ import {
   useActiveFocusSessionQuery,
   useCancelFocusSession,
   useCreateFocusSession,
+  useFocusReportQuery,
+  useFocusSessionHistoryQuery,
   usePauseFocusSession,
   useResumeFocusSession,
   useStopFocusSession,
@@ -37,6 +44,28 @@ function localDateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function recentDateRange(now = new Date()) {
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  return { dateFrom: localDateKey(start), dateTo: localDateKey(end) };
+}
+
+function focusHistoryStatus(status: string): string {
+  if (status === "completed") return "已完成";
+  if (status === "cancelled") return "已取消";
+  return "意外中断";
+}
+
+function focusHistoryTime(value: string): string {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function focusError(...errors: unknown[]): string | null {
@@ -62,6 +91,15 @@ export function FocusPage() {
   const stopFocus = useStopFocusSession();
   const cancelFocus = useCancelFocusSession();
   const todayStats = useTodayStatsQuery(localDateKey(new Date()));
+  const [historyPage, setHistoryPage] = useState(1);
+  const reportRange = useMemo(() => recentDateRange(), []);
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const focusReport = useFocusReportQuery({ ...reportRange, timezone });
+  const focusHistory = useFocusSessionHistoryQuery({
+    page: historyPage,
+    pageSize: 6,
+    status: "terminal",
+  });
   const cyclePhase = useFocusCycleStore((state) => state.phase);
   const cycleTaskId = useFocusCycleStore((state) => state.taskId);
   const completedCycles = useFocusCycleStore((state) => state.completedCycles);
@@ -430,6 +468,164 @@ export function FocusPage() {
               onRetry={() => void todayStats.refetch()}
             />
           ) : null}
+
+          <section className="focus-insights" aria-label="专注回顾">
+            <div className="focus-panel focus-report-panel">
+              <div className="focus-panel-heading">
+                <div>
+                  <span className="eyebrow">最近 7 天</span>
+                  <h2>专注趋势</h2>
+                </div>
+                <BarChart3 size={18} />
+              </div>
+              {focusReport.isPending ? (
+                <LoadingState label="正在统计本地专注记录…" />
+              ) : focusReport.isError ? (
+                <ErrorState
+                  compact
+                  message="七日专注统计暂时不可用。"
+                  onRetry={() => void focusReport.refetch()}
+                />
+              ) : focusReport.data ? (
+                <>
+                  <div className="focus-report-metrics">
+                    <div>
+                      <span>专注块</span>
+                      <strong>{focusReport.data.totals.sessions}</strong>
+                    </div>
+                    <div>
+                      <span>已确认</span>
+                      <strong>{focusReport.data.totals.minutes} 分钟</strong>
+                    </div>
+                    <div>
+                      <span>连续专注</span>
+                      <strong>{focusReport.data.currentStreakDays} 天</strong>
+                    </div>
+                    <div>
+                      <span>本期最长</span>
+                      <strong>{focusReport.data.longestStreakDays} 天</strong>
+                    </div>
+                  </div>
+                  {focusReport.data.totals.seconds === 0 ? (
+                    <div className="focus-empty-inline">
+                      <CalendarDays size={18} />
+                      <span>最近七天还没有已完成的专注记录。</span>
+                    </div>
+                  ) : (
+                    <div className="focus-bars" aria-label="每日专注分钟数">
+                      {focusReport.data.days.map((day) => {
+                        const maxMinutes = Math.max(
+                          ...focusReport.data.days.map((item) => item.minutes),
+                          1,
+                        );
+                        return (
+                          <div className="focus-bar-column" key={day.date}>
+                            <span>{day.minutes || ""}</span>
+                            <div>
+                              <i
+                                style={{
+                                  height: `${Math.max((day.minutes / maxMinutes) * 100, day.minutes ? 8 : 2)}%`,
+                                }}
+                              />
+                            </div>
+                            <small>
+                              {new Date(
+                                `${day.date}T12:00:00`,
+                              ).toLocaleDateString("zh-CN", {
+                                weekday: "short",
+                              })}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+
+            <div className="focus-panel focus-history-panel">
+              <div className="focus-panel-heading">
+                <div>
+                  <span className="eyebrow">本地记录</span>
+                  <h2>最近专注</h2>
+                </div>
+                <History size={18} />
+              </div>
+              {focusHistory.isPending ? (
+                <LoadingState label="正在读取专注历史…" />
+              ) : focusHistory.isError ? (
+                <ErrorState
+                  compact
+                  message="专注历史暂时不可用。"
+                  onRetry={() => void focusHistory.refetch()}
+                />
+              ) : focusHistory.data?.items.length ? (
+                <>
+                  <div className="focus-history-list">
+                    {focusHistory.data.items.map((item) => (
+                      <article key={item.id}>
+                        <span
+                          className="focus-history-status"
+                          data-status={item.status}
+                        >
+                          {focusHistoryStatus(item.status)}
+                        </span>
+                        <div>
+                          <strong>{item.taskTitle ?? "未绑定任务"}</strong>
+                          <span>
+                            {focusHistoryTime(item.endedAt ?? item.updatedAt)}
+                          </span>
+                        </div>
+                        <b>{formatFocusTime(item.accumulatedSeconds)}</b>
+                      </article>
+                    ))}
+                  </div>
+                  {focusHistory.data.meta.total >
+                  focusHistory.data.meta.pageSize ? (
+                    <div className="focus-history-pagination">
+                      <button
+                        aria-label="上一页专注历史"
+                        className="icon-button"
+                        disabled={historyPage === 1}
+                        onClick={() => setHistoryPage((page) => page - 1)}
+                        type="button"
+                      >
+                        <ChevronLeft size={15} />
+                      </button>
+                      <span>
+                        {historyPage} /{" "}
+                        {Math.ceil(
+                          focusHistory.data.meta.total /
+                            focusHistory.data.meta.pageSize,
+                        )}
+                      </span>
+                      <button
+                        aria-label="下一页专注历史"
+                        className="icon-button"
+                        disabled={
+                          historyPage >=
+                          Math.ceil(
+                            focusHistory.data.meta.total /
+                              focusHistory.data.meta.pageSize,
+                          )
+                        }
+                        onClick={() => setHistoryPage((page) => page + 1)}
+                        type="button"
+                      >
+                        <ChevronRight size={15} />
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="focus-empty-inline">
+                  <History size={18} />
+                  <span>完成一次专注后，记录会出现在这里。</span>
+                </div>
+              )}
+            </div>
+          </section>
         </>
       )}
 

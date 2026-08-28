@@ -4,6 +4,8 @@ import {
   cancelFocusSession,
   createFocusSession,
   getActiveFocusSession,
+  getFocusReport,
+  getFocusSessions,
   getTodayStats,
   normalizeFocusSessionSnapshot,
   pauseFocusSession,
@@ -169,5 +171,72 @@ describe("focus API contract", () => {
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
     expect(url.searchParams.get("timezone")).toBe("America/Los_Angeles");
     expect(stats.focus).toEqual({ sessions: 1, seconds: 1500, minutes: 25 });
+  });
+
+  it("reads terminal history with stable pagination fields", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [
+          focusSession({
+            status: "completed",
+            ended_at: "2026-08-28T10:25:00Z",
+            last_resumed_at: null,
+            end_reason: "completed",
+          }),
+        ],
+        meta: { page: 2, page_size: 6, total: 8 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getFocusSessions({
+      page: 2,
+      pageSize: 6,
+      status: "completed",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.pathname).toBe("/api/v1/focus-sessions");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "6",
+      status: "completed",
+    });
+    expect(result.meta).toEqual({ page: 2, pageSize: 6, total: 8 });
+    expect(result.items[0]).toMatchObject({
+      status: "completed",
+      taskTitle: "整理交付清单",
+    });
+  });
+
+  it("reads a timezone-explicit focus report", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: {
+          date_from: "2026-08-22",
+          date_to: "2026-08-28",
+          timezone: "America/Los_Angeles",
+          totals: { sessions: 2, seconds: 3000, minutes: 50 },
+          days: [
+            { date: "2026-08-28", sessions: 1, seconds: 1500, minutes: 25 },
+          ],
+          current_streak_days: 1,
+          longest_streak_days: 2,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const report = await getFocusReport({
+      dateFrom: "2026-08-22",
+      dateTo: "2026-08-28",
+      timezone: "America/Los_Angeles",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.searchParams.get("timezone")).toBe("America/Los_Angeles");
+    expect(report).toMatchObject({
+      totals: { sessions: 2, seconds: 3000, minutes: 50 },
+      currentStreakDays: 1,
+      longestStreakDays: 2,
+    });
   });
 });

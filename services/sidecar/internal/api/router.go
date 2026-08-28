@@ -246,6 +246,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/clients/:id/actor-links", service.listClientActorLinks)
 		v1.POST("/clients/:id/actor-links", service.createClientActorLink)
 		v1.DELETE("/client-actor-links/:id", service.deleteClientActorLink)
+		v1.GET("/focus-sessions", service.listFocusSessions)
 		v1.GET("/focus-sessions/active", service.getActiveFocusSession)
 		v1.POST("/focus-sessions", service.createFocusSession)
 		v1.POST("/focus-sessions/:id/pause", service.pauseFocusSession)
@@ -277,6 +278,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.PATCH("/reminders/:id", service.updateReminder)
 		v1.DELETE("/reminders/:id", service.cancelReminder)
 		v1.GET("/stats/today", service.todayStats)
+		v1.GET("/stats/focus", service.focusPeriodStats)
 		v1.GET("/stats/inbox", service.inboxStats)
 	}
 	result := &Router{Engine: router, artifactStore: artifacts}

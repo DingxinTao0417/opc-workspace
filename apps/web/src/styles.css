@@ -3668,6 +3668,201 @@ kbd {
   font-weight: 600;
 }
 
+.focus-insights {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.focus-panel {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+}
+
+.focus-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  color: var(--accent-light);
+}
+
+.focus-panel-heading .eyebrow {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.focus-panel-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.focus-report-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.focus-report-metrics > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.focus-report-metrics span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-report-metrics strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-bars {
+  display: grid;
+  height: 126px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.focus-bar-column {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 14px minmax(0, 1fr) 14px;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 8px;
+  text-align: center;
+}
+
+.focus-bar-column > div {
+  display: flex;
+  min-height: 0;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--chart-grid);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 24%,
+    var(--chart-grid) 25%,
+    transparent 26%
+  );
+}
+
+.focus-bar-column i {
+  display: block;
+  width: min(18px, 70%);
+  min-height: 2px;
+  border-radius: 3px 3px 1px 1px;
+  background: linear-gradient(180deg, var(--accent-light), var(--accent-deep));
+}
+
+.focus-bar-column small {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-empty-inline {
+  display: flex;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.focus-history-list {
+  display: grid;
+  gap: 1px;
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--border-subtle);
+}
+
+.focus-history-list article {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  background: var(--panel-2);
+}
+
+.focus-history-list article > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.focus-history-list article strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-history-list article span,
+.focus-history-list article b {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.focus-history-status {
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-bg);
+  color: var(--accent-text) !important;
+}
+
+.focus-history-status[data-status="cancelled"],
+.focus-history-status[data-status="interrupted"] {
+  background: rgba(229, 72, 77, 0.1);
+  color: var(--danger-text) !important;
+}
+
+.focus-history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
 .focus-recovery-summary {
   display: flex;
   align-items: flex-start;
@@ -8063,6 +8258,10 @@ kbd {
 }
 
 @media (max-width: 860px) {
+  .focus-insights {
+    grid-template-columns: 1fr;
+  }
+
   .today-inbox-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -8192,6 +8391,10 @@ kbd {
 
   .focus-stage {
     padding: 24px 16px;
+  }
+
+  .focus-report-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .focus-controls {

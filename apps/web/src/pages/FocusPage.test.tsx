@@ -1,6 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FocusSessionSnapshot } from "../types/models";
+import type {
+  FocusReport,
+  FocusSessionListResult,
+  FocusSessionSnapshot,
+} from "../types/models";
 import { useFocusCycleStore } from "../store/focus";
 import {
   DEFAULT_FOCUS_SETTINGS,
@@ -21,6 +25,34 @@ const mocks = vi.hoisted(() => ({
   },
   taskQuery: {
     data: [] as Array<{ id: string; title: string; status: string }>,
+    isPending: false,
+    isError: false,
+    refetch: vi.fn(),
+  },
+  historyQuery: {
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0 },
+    } as FocusSessionListResult,
+    isPending: false,
+    isError: false,
+    refetch: vi.fn(),
+  },
+  reportQuery: {
+    data: {
+      dateFrom: "2026-08-22",
+      dateTo: "2026-08-28",
+      timezone: "UTC",
+      totals: { sessions: 0, seconds: 0, minutes: 0 },
+      days: Array.from({ length: 7 }, (_, index) => ({
+        date: `2026-08-${String(22 + index).padStart(2, "0")}`,
+        sessions: 0,
+        seconds: 0,
+        minutes: 0,
+      })),
+      currentStreakDays: 0,
+      longestStreakDays: 0,
+    } as FocusReport,
     isPending: false,
     isError: false,
     refetch: vi.fn(),
@@ -47,6 +79,8 @@ vi.mock("../api/hooks", () => ({
   useTodayStatsQuery: () => ({
     data: { focus: { sessions: 1, minutes: 25 } },
   }),
+  useFocusSessionHistoryQuery: () => mocks.historyQuery,
+  useFocusReportQuery: () => mocks.reportQuery,
 }));
 
 beforeEach(() => {
@@ -126,5 +160,41 @@ describe("FocusPage", () => {
 
     expect(screen.getByText("休息阶段 · 不计入工时")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始休息" })).toBeEnabled();
+  });
+
+  it("renders weekly facts and terminal session history", () => {
+    mocks.reportQuery.data = {
+      ...mocks.reportQuery.data,
+      totals: { sessions: 3, seconds: 4500, minutes: 75 },
+      currentStreakDays: 2,
+      longestStreakDays: 4,
+    };
+    mocks.historyQuery.data = {
+      items: [
+        {
+          id: "focus-1",
+          taskId: null,
+          taskTitle: "整理交付",
+          status: "completed" as const,
+          plannedSeconds: 3000,
+          accumulatedSeconds: 1500,
+          startedAt: "2026-08-28T10:00:00Z",
+          endedAt: "2026-08-28T10:25:00Z",
+          lastResumedAt: null,
+          lastHeartbeatAt: null,
+          endReason: "completed" as const,
+          version: 2,
+          createdAt: "2026-08-28T10:00:00Z",
+          updatedAt: "2026-08-28T10:25:00Z",
+        },
+      ],
+      meta: { page: 1, pageSize: 6, total: 1 },
+    };
+    render(<FocusPage />);
+
+    expect(screen.getByText("75 分钟")).toBeInTheDocument();
+    expect(screen.getByText("整理交付")).toBeInTheDocument();
+    expect(screen.getByText("25:00")).toBeInTheDocument();
+    expect(screen.getByText("4 天")).toBeInTheDocument();
   });
 });

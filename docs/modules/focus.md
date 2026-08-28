@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v20（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v15 不改 Focus 契约，schema v16 仅新增下一轮 Focus 默认参数的非敏感设置事实，schema v17–v20 的保存视图、客户活动/附件/person 关联均不改 Focus。Focus Core 的 v0.1-A（事实与迁移）、v0.1-B（Session API 与事务）和 v0.1-C（前端接入与恢复）已经交付；历史列表、日/周报告、连续专注天数和原生桌面反馈仍属于 v0.1-D，尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v20（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v20 不改 Focus 表契约。Focus Core v0.1-A/B/C 与 v0.1-D1（历史和七日报告）已经交付；任务详情记录、高级分析和原生桌面反馈属于 D2，尚未交付。
 
 ## 定位与边界
 
@@ -32,9 +32,16 @@
 - 设置入口可直接打开“专注”模块；Modal 草稿/预览与 committed 设置分离。预览可改变未开始界面的展示，但创建 Session、自动下一轮和提示音只读取 committed 设置；修改、保存或取消均不改写活动 Session。
 - `/stats/today` 已按 IANA 时区的当地日边界对 completed Session 的 interval 做 overlap 聚合，支持跨午夜和 DST；返回 distinct Session 数、精确秒数和向下取整的展示分钟。
 
-### 尚未实现：v0.1-D 与后续增强
+### 已实现：v0.1-D1 历史与七日报告
 
-- Session 历史列表、任务详情专注记录、日/周报告和连续专注天数。
+- `GET /api/v1/focus-sessions` 默认只列终态 Session，支持 completed/cancelled/interrupted、可选 Task 筛选和稳定分页；active 仍由单独快照端点负责。
+- `GET /api/v1/stats/focus` 接受显式 IANA 时区和 1–93 个本地自然日；未传日期时默认最近七天。它只聚合 completed Session 的已关闭 interval，并按每日本地边界 overlap 切分，兼容跨午夜和 DST。
+- 报告返回区间 distinct Session、精确秒数、向下取整分钟、逐日事实、截至 `date_to` 的当前连续天数，以及区间内最长连续天数；零事实日保留在序列中。
+- FocusPage 展示最近七日指标/柱形趋势、终态历史分页，以及独立的加载、错误、重试和空状态。Session 结束后自动失效 Today、周期报告与历史缓存。
+
+### 尚未实现：v0.1-D2 与后续增强
+
+- Task 详情内的专注记录和自定义日期/月度报告。
 - 项目/标签时间分布、热力图和最佳专注时段。
 - 原生本地通知、托盘控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。
 - 长休息策略、白噪音和网站屏蔽。
@@ -208,9 +215,15 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - RightOverview 已接真实 Session；专注设置入口定向和草稿不破坏活动 Session 已修复。
 - 本地番茄循环继续提供休息、轮次、自动开始和提示音。
 
-### v0.1-D：历史、报告与桌面反馈（未完成）
+### v0.1-D1：历史与七日报告（已完成）
 
-- Session 历史、任务详情记录、日/周报告和连续天数。
+- 终态 Session 历史、状态/Task 筛选、稳定分页。
+- 显式 IANA 时区的七日趋势、总块数/时长、当前和区间最长 Streak。
+- completed-only、跨午夜、DST、空数据和错误状态自动测试。
+
+### v0.1-D2：任务明细、高级报告与桌面反馈（未完成）
+
+- 任务详情记录、自定义月报、高级分布与热力图。
 - 原生通知、托盘、应用通知暂停与系统勿扰引导。
 - 真实桌面环境的后台挂起、休眠、异常退出与三平台矩阵；当前已有可控时钟、跨午夜、DST、并发和恢复自动测试，不能替代桌面验收。
 
@@ -238,6 +251,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [PRD：T-12 专注设置与全局计时](../opc-workspace-PRD.md#10412-t-12-专注设置与全局计时)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [Focus Session API](../../services/sidecar/internal/api/focus_sessions.go)
+- [Focus 历史与周期统计 API](../../services/sidecar/internal/api/focus_history.go)
 - [今日统计 API](../../services/sidecar/internal/api/stats.go)
 - [前端 Focus 时钟与循环](../../apps/web/src/store/focus.ts)
 - [全局 ticker](../../apps/web/src/components/FocusTicker.tsx)
