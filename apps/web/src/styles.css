@@ -2368,6 +2368,83 @@ kbd {
   font-size: 10px;
 }
 
+.project-artifact-heading-actions,
+.project-history-toggle,
+.project-artifact-row,
+.project-artifact-copy > div {
+  display: flex;
+  align-items: center;
+}
+
+.project-artifact-heading-actions {
+  gap: 12px;
+}
+
+.project-history-toggle {
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.project-artifact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.project-artifact-row {
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.project-artifact-row.is-deleted {
+  opacity: 0.68;
+}
+
+.project-artifact-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.project-artifact-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-artifact-copy > div {
+  gap: 7px;
+  min-width: 0;
+}
+
+.project-artifact-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-artifact-copy span,
+.project-artifact-copy em {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.project-artifact-copy p,
+.project-artifact-copy small {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .project-action-row {
   display: flex;
   flex-wrap: wrap;

@@ -315,6 +315,27 @@ export interface TaskArtifactListResult {
   meta: TaskAggregateListMeta;
 }
 
+export interface ProjectArtifactItem {
+  artifact: TaskArtifactSummary;
+  task: {
+    id: string;
+    title: string;
+    status: TaskStatus;
+  };
+  submissionSequence: number;
+}
+
+export interface ProjectArtifactListParams {
+  page?: number;
+  pageSize?: number;
+  includeDeleted?: boolean;
+}
+
+export interface ProjectArtifactListResult {
+  items: ProjectArtifactItem[];
+  meta: PageMeta & { projectVersion: number };
+}
+
 interface NewArtifactBase {
   clientRef: string;
   name: string;

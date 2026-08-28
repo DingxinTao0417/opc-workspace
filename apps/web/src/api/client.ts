@@ -91,6 +91,9 @@ import type {
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
   Project,
+  ProjectArtifactItem,
+  ProjectArtifactListParams,
+  ProjectArtifactListResult,
   ProjectNote,
   ProjectNoteListParams,
   ProjectNoteListResult,
@@ -3512,6 +3515,73 @@ export async function getTaskArtifacts(
     return invalidResponse("任务产出列表响应与请求不一致");
   }
   return result;
+}
+
+export function normalizeProjectArtifactItem(
+  value: unknown,
+): ProjectArtifactItem {
+  if (!isRecord(value) || !isRecord(value.task)) {
+    return invalidResponse("项目产出响应格式无效");
+  }
+  const artifact = normalizeTaskArtifactSummary(value.artifact);
+  const taskId = stringField(value.task, "id");
+  const title = stringField(value.task, "title");
+  const status = asTaskStatus(value.task.status);
+  const submissionSequence = positiveInteger(
+    fieldValue(value, "submission_sequence", "submissionSequence"),
+    "项目产出提交序号",
+  );
+  if (!taskId || !title || taskId !== artifact.taskId) {
+    return invalidResponse("项目产出任务上下文不一致");
+  }
+  return {
+    artifact,
+    task: { id: taskId, title, status },
+    submissionSequence,
+  };
+}
+
+export async function getProjectArtifacts(
+  projectId: string,
+  input: ProjectArtifactListParams = {},
+): Promise<ProjectArtifactListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.includeDeleted !== undefined) {
+    params.set("include_deleted", String(input.includeDeleted));
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/artifacts?${params}`,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("项目产出列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeProjectArtifactItem);
+  const meta = isRecord(payload.meta) ? payload.meta : {};
+  if (
+    items.some((item) => item.artifact.taskId !== item.task.id) ||
+    (!input.includeDeleted &&
+      items.some((item) => item.artifact.deletedAt !== null))
+  ) {
+    return invalidResponse("项目产出列表响应与请求不一致");
+  }
+  return {
+    items,
+    meta: {
+      page: positiveInteger(meta.page, "项目产出页码"),
+      pageSize: positiveInteger(
+        fieldValue(meta, "page_size", "pageSize"),
+        "项目产出每页数量",
+      ),
+      total: nonNegativeInteger(meta.total, "项目产出总数"),
+      projectVersion: positiveInteger(
+        fieldValue(meta, "project_version", "projectVersion"),
+        "项目版本",
+      ),
+    },
+  };
 }
 
 export async function getTaskArtifact(id: string): Promise<TaskArtifact> {

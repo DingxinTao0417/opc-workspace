@@ -227,6 +227,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/projects", service.createProject)
 		v1.GET("/projects/:id", service.getProject)
 		v1.GET("/projects/:id/events", service.listProjectWorkflowEvents)
+		v1.GET("/projects/:id/artifacts", service.listProjectArtifacts)
 		v1.GET("/projects/:id/notes", service.listProjectNotes)
 		v1.POST("/projects/:id/notes", service.createProjectNote)
 		v1.PATCH("/projects/:id", service.updateProject)

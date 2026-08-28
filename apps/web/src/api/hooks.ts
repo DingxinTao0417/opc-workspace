@@ -81,6 +81,7 @@ import {
   getTasks,
   getTodayStats,
   getProject,
+  getProjectArtifacts,
   getProjectEvents,
   getProjectNotes,
   getProjects,
@@ -156,6 +157,7 @@ import type {
   CancelReminderInput,
   NewTaskInput,
   ProjectInput,
+  ProjectArtifactListParams,
   ProjectEventListParams,
   ProjectNoteListParams,
   ProjectListParams,
@@ -2809,6 +2811,8 @@ export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
 export const projectEventQueryKey = (id: string) =>
   [...projectDetailQueryKey(id), "events"] as const;
+export const projectArtifactQueryKey = (id: string) =>
+  [...projectDetailQueryKey(id), "artifacts"] as const;
 export const projectNoteQueryKey = (id: string) =>
   [...projectDetailQueryKey(id), "notes"] as const;
 
@@ -2879,6 +2883,23 @@ export function useProjectNotesQuery(
   return useQuery({
     queryKey: [...projectNoteQueryKey(projectId ?? "missing"), "list", input],
     queryFn: () => getProjectNotes(projectId!, input),
+    enabled: Boolean(projectId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useProjectArtifactsQuery(
+  projectId: string | null,
+  input: ProjectArtifactListParams = {},
+) {
+  return useQuery({
+    queryKey: [
+      ...projectArtifactQueryKey(projectId ?? "missing"),
+      "list",
+      input,
+    ],
+    queryFn: () => getProjectArtifacts(projectId!, input),
     enabled: Boolean(projectId),
     placeholderData: keepPreviousData,
     retry: 1,

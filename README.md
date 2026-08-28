@@ -24,7 +24,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 客户责任关联纵切：客户详情可选择已有 active person，或原子新建 person 后显式关联；每个客户只允许一个 active contact，解除必须填写原因并保留不可变历史，关联变化传播 Client 聚合版本
 - 手动一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将 Task Artifact、Client Attachment 的全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；桌面模式可一键等待受管 Sidecar 真实退出后重启应用，浏览器开发模式明确要求手动重启服务。下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用。删除把精确 UUID 包原子移入隐藏态后清理并同步，损坏包可删，不安全文件系统项会拒绝
 - 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task Artifact 与 Client Attachment 元数据但不嵌入文件正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
-- React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
+- React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块，具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护
 - Focus Core A+B+C+D1+D2a：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、七日趋势与 Streak、Task 详情按需专注记录，以及共享前端循环/恢复 UI
@@ -33,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、项目可编辑笔记/追加式活动时间线、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B/C 核心命令面板/统一本地搜索/详情直达、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、项目产出/附件、非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、命令最近使用、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v5.9](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
+受控任务生命周期 D1、T-18D D2、T-07A–D 任务计划/筛选/保存视图、项目可编辑笔记/Task Artifact 产出聚合/追加式活动时间线、客户基础资料/Project 关联/人工活动时间线/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、T-06A–H Today 日期与执行纵切、T-13A/B/C 核心命令面板/统一本地搜索/详情直达、设置前后端闭环、T-04B 备份恢复/业务 JSON，以及 T-11A1/A2/A3/B/C/F Inbox/Reminder/Task 编排已经交付。受控头像文件、Focus D2b/高级分析、客户外部来源/回访/财务、项目附件、非 Reminder 来源投影、重复提醒、迁移前自动备份、恢复进度/诊断、命令最近使用、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现。[PRD v6.0](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v5.9）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v6.0）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -234,6 +234,7 @@ GET    /api/v1/projects
 POST   /api/v1/projects
 GET    /api/v1/projects/:id
 GET    /api/v1/projects/:id/events
+GET    /api/v1/projects/:id/artifacts
 PATCH  /api/v1/projects/:id
 POST   /api/v1/projects/:id/transitions
 DELETE /api/v1/projects/:id?confirm=true
@@ -314,4 +315,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v5.9](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 基础纵切/可编辑人工笔记/追加式活动时间线、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板统一本地搜索与核心详情直达、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、项目产出/附件、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。
+[PRD v6.0](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 基础纵切/可编辑人工笔记/Task Artifact 产出聚合/追加式活动时间线、Client 人工活动/受控附件/person 显式关联、Focus Core A+B+C+D1+D2a、Today 日期/拖拽/快捷执行、命令面板统一本地搜索与核心详情直达、设置闭环、手工一致性备份恢复/业务 JSON、手工 Inbox/Task 编排和一次性 Reminder；明确未交付受控头像文件、Focus D2b/高级分析、任务/项目看板、项目附件、内容日历业务、客户外部活动来源/回访、收入/支出/发票业务、非 Reminder 来源投影、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复进度/诊断、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。

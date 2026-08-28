@@ -76,6 +76,17 @@ vi.mock("../api/hooks", () => ({
     isSuccess: true,
     refetch: vi.fn(),
   }),
+  useProjectArtifactsQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0, projectVersion: 2 },
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
   useCreateProjectNote: () => ({
     error: null,
     isPending: false,

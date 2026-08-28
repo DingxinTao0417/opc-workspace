@@ -4,7 +4,7 @@
 >
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v21。schema v21 新增独立、版本化且可追溯软删除的 `project_notes`，不把人工笔记混入不可变 Workflow Event。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑项目笔记和追加式项目活动时间线已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目产出/附件的来源投影、批量拆分和自动分诊尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑项目笔记、所属 Task Artifact 产出聚合和追加式项目活动时间线已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目附件、产出来源投影、批量拆分和自动分诊尚未交付。
 
 ## 定位与边界
 
@@ -18,7 +18,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、可编辑人工笔记、追加式审计时间线、列表和详情纵切。
+当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、可编辑人工笔记、所属 Task Artifact 产出聚合、追加式审计时间线、列表和详情纵切。
 
 ### 已实现
 
@@ -40,13 +40,15 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目创建、资料编辑、`start/pause/resume/complete/reopen/archive/restore` 和永久删除会在同一数据库事务追加 `project_*` Workflow Event，记录内置 owner、请求 ID、时间及前后项目快照；事件写入失败时整个项目命令回滚，创建幂等重放不会重复追加事件。
 - `GET /api/v1/projects/:id/events` 按 `created_at / command_seq / id` 稳定倒序分页，返回当前 Project `ETag` 和 `meta.project_version`。项目详情默认读取首批记录，展示状态变化或资料变更字段，并提供独立加载、空、错误重试和“加载更早”状态。
 - 项目详情支持人工笔记的幂等创建、稳定分页、版本化编辑、带原因软删除及删除历史查看；记录人固定为本地 owner。每次创建、编辑或软删除都由数据库 trigger 原子递增 Project 聚合版本，归档项目只读。
+- `GET /api/v1/projects/:id/artifacts` 在同一只读事务中校验 Project、分页聚合其所属 Task 的既有 Artifact，并返回 Task 标题/当前状态、Submission 序号和 Project 聚合版本；默认隐藏已删除产出，可显式查看删除历史。它不复制 Artifact 正文、文件、删除或验收事实。
+- 项目详情提供独立的产出加载、空、错误/重试、分页与删除历史状态；每项展示类型、跟进标记、来源 Task/批次并可打开共享任务详情，实际正文查看、文件下载、删除和验收仍由 Task 领域完成。
 
 ### 已知缺口
 
 - 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选、任务树或内嵌 Assignment/Submission 控件；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子、并发版本、Assignment 与 manual Submission/Artifact 验收已在共享任务详情交付。
 - 项目工时对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目级 Session 历史和高级分析仍未实现。
-- 没有项目产出、项目附件或发票明细；当前只返回发票计数，用于解释硬删除影响。人工项目笔记已经独立交付，系统写命令仍保存在不可变活动时间线，两类事实不互相替代。
-- schema v9 已有 Task 活动时间线与 `task_artifacts`；Project 现在已有事件生产器和读取时间线，但仍没有项目级 Artifact/附件聚合入口或 Inbox Item 来源投影。
+- 没有独立项目附件或发票明细；当前只返回发票计数，用于解释硬删除影响。项目产出只读聚合既有 Task Artifact，人工项目笔记已经独立交付，系统写命令仍保存在不可变活动时间线，三类事实不互相替代。
+- schema v9 已有 Task 活动时间线与 `task_artifacts`；Project 现在已有事件生产器、读取时间线和 Task Artifact 聚合入口，但仍没有项目附件或 Inbox Item 来源投影。
 - 没有项目里程碑、真实收入/成本聚合或开票操作。
 
 ## 当前用户流程
@@ -85,6 +87,13 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 3. 编辑和删除都使用笔记自己的 `ETag` / `If-Match` 版本。删除必须 `confirm=true` 并填写原因；正文随后不再返回，但删除时间、执行人和原因保留。
 4. 项目归档后笔记只读；永久删除 Project 会级联删除其笔记，UI 在确认前明确提示这一不可恢复边界。
 
+### 查看项目产出
+
+1. 项目详情按 Artifact 创建时间和 ID 稳定倒序读取所属任务的产出；默认每页 6 项，服务端最大每页 100 项。
+2. 列表只显示安全摘要、来源 Task、当前 Task 状态和 Submission 序号，不在 Project 创建第二份正文、文件或验收状态。
+3. owner 可切换删除历史；已删除项只展示墓碑摘要和原因。点击“打开任务”进入共享任务详情完成正文查看、文件下载、删除和验收。
+4. 归档项目仍可读取历史产出；Task 的后续合法变化会通过既有聚合 trigger 使 Project 版本失效，列表响应返回同事务读取的 `ETag` 和 `project_version`。
+
 ## 数据、API 与状态机
 
 ### 当前数据
@@ -103,6 +112,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 | POST   | `/api/v1/projects`                       | 创建 `planning` 项目；可选 `Idempotency-Key` 保存规范化请求 SHA-256 与首次响应快照，同请求可稳定重放并拒绝不同请求复用                                                                                            |
 | GET    | `/api/v1/projects/:id`                   | 返回项目资料、派生任务汇总、发票数、允许操作和 `ETag`                                                                                                                                                             |
 | GET    | `/api/v1/projects/:id/events`            | 项目活动时间线；`page` 默认 1，`page_size` 默认 20/最大 100，稳定倒序；返回 owner、request、前后快照、Project `ETag` 与 `meta.project_version`                                                                    |
+| GET    | `/api/v1/projects/:id/artifacts`         | 所属 Task Artifact 只读聚合；`page` 默认 1、`page_size` 默认 20/最大 100，按创建时间/ID 稳定倒序；`include_deleted=true` 可看删除历史；返回来源 Task/Submission 与 Project 版本，不返回 Artifact 正文             |
 | GET    | `/api/v1/projects/:id/notes`             | 项目笔记稳定倒序分页；`include_deleted=true` 可查看删除历史；返回 Project `ETag` 与 `meta.project_version`                                                                                                        |
 | POST   | `/api/v1/projects/:id/notes`             | 幂等创建人工笔记；归档项目返回 `409 PROJECT_ARCHIVED`                                                                                                                                                             |
 | GET    | `/api/v1/project-notes/:id`              | 读取单条笔记及其版本、记录人和当前 Project 聚合版本                                                                                                                                                               |
@@ -148,7 +158,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 项目详情增强
 
-- 追加式项目写命令活动时间线和可编辑人工笔记均已交付；任务产出聚合与项目附件仍待开发。
+- 追加式项目写命令活动时间线、可编辑人工笔记和所属 Task Artifact 产出聚合均已交付；独立项目附件仍待开发。
 - Focus Core 已把 completed Session 的新增完整分钟幂等累计到 Task；项目继续从 `actual_minutes` 派生工时，不新增第二份 Focus 汇总事实。项目级 Session 历史和高级分析仍待实现。
 - 发票模块交付后显示关联发票；财务模块交付后显示真实收入/成本。
 
@@ -156,7 +166,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 | 模块      | 当前与后续协作方式                                                                                                                                                                            |
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 任务      | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本、派生进度/工时，以及共享任务详情中的 D2 产出与验收；项目详情内的任务树和项目级产出聚合仍待接入。                            |
+| 任务      | 当前已支持项目选择、项目名展示、项目任务列表、Task 标签/父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；项目详情内的任务树仍待接入。              |
 | 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取、人工活动时间线、受控附件和 person 显式关联；外部活动来源仍待实现。 |
 | 收件箱    | 项目产出、阻塞、交付和后续工单的目标承接者；Project 自身审计事件已交付，但尚未投影为 Inbox 来源。                                                                                             |
 | Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                |
@@ -174,7 +184,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
-7. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收，以及 Inbox 手工关联已有 Task 已交付；项目级产出聚合、项目附件、Inbox 来源投影、批量拆分和来源事件去重仍待实现。
+7. **产出与 Inbox 协作（部分实现）**：Task Artifact、Task Workflow Event、人工分派、验收、项目级只读产出聚合，以及 Inbox 手工关联已有 Task 已交付；项目附件、Inbox 来源投影、批量拆分和来源事件去重仍待实现。
 8. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径
@@ -191,13 +201,15 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 项目创建、资料修改、状态流转和删除各追加一次不可变事件；事件失败回滚项目写入，创建幂等重放不重复事件。
 - 笔记创建可幂等重放且不重复写入；编辑与删除使用笔记版本，软删除隐藏正文并保留原因；归档项目拒绝笔记写入。
 - 笔记新增、编辑和删除分别只递增一次 Project 聚合版本；旧 Project 并发视图因此失效。
+- 项目产出只返回所属 Task Artifact，稳定分页、默认排除删除项、显式历史可见，且不泄漏正文；来源 Task/Submission 与 Project 聚合版本保持一致。
+- 项目详情产出区能区分加载、空、错误与删除历史，并通过精确 Task ID 打开共享任务详情，不在 Project 复制查看、下载或验收写命令。
 - 时间线分页稳定，返回真实 owner、请求 ID、前后快照和 Project 版本；前端的加载、空、错误重试与“加载更早”不影响项目其他区域。
 
 ### 完整模块仍待验收
 
 - Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；外部活动来源、回访与财务不属于已交付客户纵切。
 - 超过 100 条项目任务与项目选项已避免截断；项目详情内的可见分页/筛选/任务树、大数据量性能和项目级 Focus 历史/分析仍待验收。Focus → Task → Project 的整数分钟传播已有自动化覆盖。
-- 项目时间线和 Workflow Event 的事务、幂等重放与失败回滚已有自动化覆盖；产出、附件及 Inbox Item 来源投影的事务、去重和失败恢复仍待验收。
+- 项目时间线和 Workflow Event 的事务、幂等重放与失败回滚已有自动化覆盖；产出聚合的项目范围、分页、删除历史和 Task 直达已有自动化覆盖；项目附件及 Inbox Item 来源投影的事务、去重和失败恢复仍待验收。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
 ## 相关代码/PRD 链接
@@ -209,8 +221,10 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [ProjectDetailPage.tsx](../../apps/web/src/pages/ProjectDetailPage.tsx)
 - [ProjectEventsSection.tsx](../../apps/web/src/components/ProjectEventsSection.tsx)
 - [ProjectNotesSection.tsx](../../apps/web/src/components/ProjectNotesSection.tsx)
+- [ProjectArtifactsSection.tsx](../../apps/web/src/components/ProjectArtifactsSection.tsx)
 - [projects.go](../../services/sidecar/internal/api/projects.go)
 - [project_notes.go](../../services/sidecar/internal/api/project_notes.go)
+- [project_artifacts.go](../../services/sidecar/internal/api/project_artifacts.go)
 - [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [项目 API](../../services/sidecar/internal/api/projects.go)
