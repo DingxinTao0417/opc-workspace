@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：1.5
-> 日期：2026-08-27
-> 依据：[PRD v2.2](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v10
+> 文档版本：1.6
+> 日期：2026-08-28
+> 依据：[PRD v2.3](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v11
 
 ## 1. 目的
 
@@ -49,9 +49,9 @@
 ### 3.1 当前实现
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
-- React 已具备三栏框架、今日/任务/专注基础能力、项目卡片与详情、客户表格/基础详情、设置和命令面板；任务页已接服务端分页/搜索/筛选、根任务树、标签管理、批量安全操作和计划组手动排序，Project 表单与列表已接客户选择/筛选。
-- Go 已提供健康检查、任务事实/标签、批量/排序、项目 CRUD/生命周期、Client 基础资料 CRUD、Actor/Assignment、六状态 Task 命令、Submission/Artifact、manual review、Task 时间线和今日统计 API。
-- SQLite schema v10 已有 tasks、projects、clients、invoices、focus_sessions、`actors`、`task_assignments`、`workflow_events`、`workspace_identity`、`task_submissions`、`task_artifacts` 和 `artifact_deletion_tombstones`。v3–v8 依次增加 Project 生命周期、幂等快照、聚合版本、Task 事实、责任主体/分派/事件与六状态生命周期；v9 增加数据库/store 身份、Submission/Artifact、不可变删除恢复事实、Task 当前提交引用、事件关联和 inferred 历史回填；v10 为 Client 增加聚合版本、查询索引和 Project 关联变化触发器。
+- React 已具备三栏框架、今日/任务/项目/客户能力，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量和计划组排序，Project 已接 Client 选择/筛选。
+- Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session 状态命令和 Today 统计 API；Focus 命令以服务端绝对时间、`If-Match`、幂等快照和事务为事实。
+- SQLite schema v11 在既有 Task/Project/Client/Actor/Submission/Artifact 事实之上，以 `011_focus_sessions.sql` 重建 `focus_sessions` 并新增 `focus_session_intervals`、`task_focus_totals`；数据库保证单一开放 Session/interval，并保留 v10 历史 Session 而不二次增加 Task 工时。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -66,11 +66,12 @@
 - `review_policy = manual` 已在 Task 新建和受限编辑中开放；策略只可在 todo 且没有任何 Submission 历史时改变。manual Task 具备活动 assignee 与 owner reviewer 后，可提交摘要以及 text/link/structured/file Artifact，进入 waiting_review，由 owner 接受或要求返工。
 - schema v9 和 UI 已交付 Submission/Artifact 历史、受控文件 store、安全下载、完整性状态、确认软删除、Task 聚合硬删除补偿，以及提交/审核/撤回/删除时间线。不可变 Artifact deletion tombstone 与删除事实同事务写入并在 Task 聚合删除后保留，供启动恢复判定授权删除。producer 来自活动 assignee，submitter/recorder/reviewer/withdrawer/deleter 为内置 owner。
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<artifact-id>`，下载前复验 size 和 SHA-256。
-- 当前仍未实现 Client 活动/附件/Actor 显式关联/回访/财务聚合、项目附件/Inbox 集成、Inbox/Reminder 编排、Agent Runtime、Focus Session 持久化和产品化备份/恢复，因此完整工作编排仍是部分完成。
+- Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；设置 committed/draft/preview 不改活动 Session。
+- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件/Inbox、Inbox/Reminder、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：在已交付的项目纵切、客户基础事实、任务事实层、Actor/Assignment、六状态生命周期和 D2 manual Submission/Artifact 基础上，继续完成客户活动/附件、项目附件与收件箱人工编排、专注持久化、基础备份恢复和桌面可靠性。
+- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2 与 Focus Core 基础上，继续完成客户/项目增强、收件箱人工编排、基础备份恢复、桌面可靠性；Focus D 独立延后。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
@@ -176,13 +177,13 @@ Reminder 是调度事实；Inbox Item 是到期后的处理事实。两者不复
   → 创建 Focus Session(active)
   → pause/resume 使用绝对时间结算
   → 异常重启时 active 先进入 recovery_pending，由用户决定是否计入不确定间隔
-  → stop 在同一幂等事务累计 Task.actual_minutes
+  → stop 在同一幂等事务结算 interval/Session/精确秒数 ledger，每次递增 Task version，仅把新增完整分钟加入 Task.actual_minutes
   → 今日、项目和统计模块读取聚合结果
 ```
 
 Task 是否完成仍由任务模块决定，专注结束不能自动完成任务。
 
-当前项目详情已经读取任务 `actual_minutes` 的合计，但 Focus Session 尚未持久化，也不会自动更新该字段；上述停止事务仍是后续目标契约。
+上述链路已实现。Task Focus 余秒跨 Session 保存在 `task_focus_totals`；只有 `actual_minutes` 实际变化时，既有 trigger 才递增 Project 聚合版本。cancel/interrupted 不入账，专注结束也不自动完成 Task。
 
 ### 6.5 本地 Agent 执行（v0.2）
 
@@ -245,7 +246,7 @@ Task 已分派给健康 agent Actor
 - 同 key/endpoint 不同请求摘要返回 `409 IDEMPOTENCY_CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
-当前 Task、Tag、Project、Client 与 person Actor 创建已实现该原则的基础版本：schema v4 保存规范化请求 SHA-256、首次资源响应快照与原始 `201` 状态，因此资源后续编辑或删除不影响同请求重放；不同请求复用 key 会冲突，旧记录缺少快照时拒绝不安全重放。Task 创建摘要已包含 `review_policy` 并兼容可安全判断的旧快照。Actor 创建、Assignment 创建/改派/结束、六个 Task 生命周期命令，以及 D2 submit-output/review/Artifact delete 都保存请求摘要与首次响应；同请求重放不重复写责任、状态、Submission、Artifact 或 Event。Client 创建同样以清洗后的规范请求保存首次 `201` 快照。当前幂等 key 仍未加入调用 Actor 作用域；Inbox 与其他事件投影的完整幂等契约仍待后续编排纵切实现。
+当前 Task、Tag、Project、Client 与 person Actor 创建已实现该原则的基础版本。Actor/Assignment、Task 生命周期、D2 命令以及 Focus create/stop/cancel 都保存请求摘要与首次响应；Focus 在版本检查前安全重放同键同请求，匹配终态的重复 stop/cancel 也不重复结算、记账或写事件。当前幂等 key 仍未加入调用 Actor 作用域；Inbox 与其他事件投影的完整幂等契约仍待后续编排纵切实现。
 
 schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command_seq`：自动结束 Assignment 的事件从 1 递增，Task 主事件最后写入并取得最高序号。schema v9 再增加 nullable `submission_id / artifact_id`，并校验二者与 Task 聚合、彼此批次一致。Task 时间线按创建时间、命令序号和事件 ID 倒序读取；历史迁移事件允许序号为空。Workflow Event 不提供修改/删除 API，数据库 trigger 也拒绝更新和删除，唯一例外是 Task 聚合硬删除时由外键把已删除的 Assignment/Submission/Artifact 关联 ID 置空，其他快照保持不变。
 
@@ -276,17 +277,18 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | Artifact 文件/数据库提交中断    | Task + 受控文件 store     | 提交报错后先查询数据库，仅删除可证明无引用的 object；模糊 COMMIT 保留给 reconcile。恢复 active trash 前校验 size/SHA，错配隔离并记 mismatch；tombstone 让已授权删除与未知候选可区分，意外目录/链接不递归处理                                                                                                  |
 | 数据库与 Artifact root 不匹配   | 数据管理 + 受控文件 store | marker 的 `database_id / store_id` 分别匹配 workspace 的不可变数据库 ID 与一次性绑定 store ID；错库、换 root、未知 marker 格式或版本在 ready 前拒绝启动                                                                                                                                                       |
 | 第二 Sidecar 共用 Artifact root | 桌面平台 + 受控文件 store | 进程级非阻塞独占锁使后启动进程在 ready 前失败，禁止双进程协调同一文件根                                                                                                                                                                                                                                       |
+| Focus 进程中断                  | Focus + Sidecar           | 启动把遗留 active 原子改为 recovery_pending；全局不可关闭弹窗要求用户计入间隔继续、排除至最后 heartbeat 后继续，或中断。heartbeat 和活动查询不会递增业务 version                                                                                                                                              |
 
 ## 11. 实施依赖顺序
 
-已落地的基础纵切包括 Task 事实 CRUD、关系/标签、批量/排序、六状态生命周期、Assignment、Task 时间线、manual Submission/Artifact 验收和受控文件，Project CRUD/生命周期/任务聚合，Client 基础资料 CRUD/Project 客户关联，以及 Actor 管理与责任审计。后续依赖顺序为：
+已落地的基础纵切包括 Task D1/D2、Project/Client、Actor/Assignment 以及 Focus Core A+B+C。后续依赖顺序为：
 
 ```text
 已交付：Task D1 + D2 / Workflow Event / manual Submission / Artifact store
   → 已交付：Client 基础 CRUD / Project 客户选择与筛选
   → Client/Project 活动、附件与事件
   → Inbox Item / Reminder / 拆分 / 人工分派与验收
-  → Today 正确日期聚合 / Focus 持久化
+  → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计；Today 完整任务日期编排继续
   → 备份恢复 / 桌面日志与故障恢复
   → v0.2 本地 Agent / 预设自动化 / Task 看板
   → v0.3 路线图 / 内容日历 / 高级数据管理

@@ -10,7 +10,9 @@ import { useRef } from "react";
 import {
   ApiError,
   batchUpdateTasks,
+  cancelFocusSession,
   createClient,
+  createFocusSession,
   createPersonActor,
   createTag,
   createTask,
@@ -33,6 +35,7 @@ import {
   getActors,
   getClient,
   getClients,
+  getActiveFocusSession,
   getHealth,
   getTags,
   getTask,
@@ -46,11 +49,15 @@ import {
   getTodayStats,
   getProject,
   getProjects,
+  pauseFocusSession,
+  recoverFocusSession,
   resetRuntimeConnection,
   reorderTasks,
   reassignTaskAssignment,
+  resumeFocusSession,
   reviewTaskSubmission,
   submitTaskOutput,
+  stopFocusSession,
   updateClient,
   updateTag,
   updateTask,
@@ -63,10 +70,13 @@ import type {
   BatchUpdateTasksInput,
   ClientInput,
   ClientListParams,
+  CreateFocusSessionInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
   EndTaskAssignmentInput,
+  FocusSessionCommandInput,
+  FocusSessionSnapshot,
   NewTaskInput,
   ProjectInput,
   ProjectListParams,
@@ -84,6 +94,7 @@ import type {
   SubmitTaskOutputInput,
   ReviewTaskSubmissionInput,
   ReassignTaskAssignmentInput,
+  RecoverFocusSessionInput,
   UpdateActorInput,
   UpdateClientInput,
   UpdateTagInput,
@@ -566,10 +577,177 @@ export function useTaskOptionsQuery(enabled = true) {
   });
 }
 
-export function useTodayStatsQuery(date: string) {
+export const focusSessionQueryKey = ["focus-sessions", "active"] as const;
+
+const openFocusStatuses = new Set(["active", "paused", "recovery_pending"]);
+
+function activeFocusSnapshot(
+  snapshot: FocusSessionSnapshot,
+): FocusSessionSnapshot {
+  if (snapshot.session && !openFocusStatuses.has(snapshot.session.status)) {
+    return { ...snapshot, session: null };
+  }
+  return snapshot;
+}
+
+function cacheFocusSnapshot(
+  queryClient: QueryClient,
+  snapshot: FocusSessionSnapshot,
+) {
+  queryClient.setQueryData(focusSessionQueryKey, activeFocusSnapshot(snapshot));
+}
+
+async function invalidateFocusDependents(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: focusSessionQueryKey }),
+    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
+  ]);
+}
+
+function focusErrorNeedsRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 404 || error.status === 409)
+  );
+}
+
+function focusCommandCanRetry(failureCount: number, error: unknown): boolean {
+  return (
+    failureCount < 2 &&
+    error instanceof ApiError &&
+    (error.code === "NETWORK_ERROR" || error.code === "TIMEOUT")
+  );
+}
+
+export function useActiveFocusSessionQuery() {
   return useQuery({
-    queryKey: ["stats", "today", date],
-    queryFn: () => getTodayStats(date),
+    queryKey: focusSessionQueryKey,
+    queryFn: getActiveFocusSession,
+    refetchInterval: (query) =>
+      query.state.data?.session?.status === "active" ? 15_000 : false,
+    refetchOnWindowFocus: true,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 5_000,
+  });
+}
+
+export function useCreateFocusSession() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateFocusSessionInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createFocusSession(input, attempt.current.key);
+    },
+    onSuccess: async (snapshot) => {
+      attempt.current = null;
+      cacheFocusSnapshot(queryClient, snapshot);
+      await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+    },
+    onError: async (error) => {
+      if (focusErrorNeedsRefresh(error)) {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+      }
+    },
+  });
+}
+
+function useSimpleFocusCommand(
+  command: (
+    id: string,
+    expectedVersion: number,
+  ) => Promise<FocusSessionSnapshot>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, expectedVersion }: FocusSessionCommandInput) =>
+      command(id, expectedVersion),
+    onSuccess: (snapshot) => cacheFocusSnapshot(queryClient, snapshot),
+    onError: async (error) => {
+      if (focusErrorNeedsRefresh(error)) {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+      }
+    },
+  });
+}
+
+export function usePauseFocusSession() {
+  return useSimpleFocusCommand(pauseFocusSession);
+}
+
+export function useResumeFocusSession() {
+  return useSimpleFocusCommand(resumeFocusSession);
+}
+
+export function useRecoverFocusSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, expectedVersion }: RecoverFocusSessionInput) =>
+      recoverFocusSession(id, action, expectedVersion),
+    onSuccess: async (snapshot) => {
+      cacheFocusSnapshot(queryClient, snapshot);
+      if (snapshot.session?.status === "interrupted") {
+        await invalidateFocusDependents(queryClient);
+      }
+    },
+    onError: async (error) => {
+      if (focusErrorNeedsRefresh(error)) {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+      }
+    },
+  });
+}
+
+function useIdempotentFocusEndCommand(
+  command: (
+    id: string,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ) => Promise<FocusSessionSnapshot>,
+) {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({ id, expectedVersion }: FocusSessionCommandInput) => {
+      const fingerprint = `${id}:${expectedVersion}`;
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return command(id, expectedVersion, attempt.current.key);
+    },
+    onSuccess: async (snapshot) => {
+      attempt.current = null;
+      cacheFocusSnapshot(queryClient, snapshot);
+      await invalidateFocusDependents(queryClient);
+    },
+    onError: async (error) => {
+      if (focusErrorNeedsRefresh(error)) {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+      }
+    },
+    retry: focusCommandCanRetry,
+    retryDelay: 500,
+  });
+}
+
+export function useStopFocusSession() {
+  return useIdempotentFocusEndCommand(stopFocusSession);
+}
+
+export function useCancelFocusSession() {
+  return useIdempotentFocusEndCommand(cancelFocusSession);
+}
+
+export function useTodayStatsQuery(date: string) {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  return useQuery({
+    queryKey: ["stats", "today", date, timezone],
+    queryFn: () => getTodayStats(date, timezone),
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,

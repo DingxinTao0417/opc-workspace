@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v10 延续 schema v7 的 Actor 数据和 schema v9 的 Task Submission/Artifact（v10 不改变设置存储），“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
+> 文档状态：部分实现；当前 schema v11。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/诊断和桌面设置入口仍是后续范围。
 
 ## 定位与边界
 
@@ -27,18 +27,20 @@
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 关于：硬编码应用版本、数据存储、桌面架构和云同步状态。
 - Zustand persist 对输入进行边界清洗，历史存储键为 opc-focus-settings。
+- 当前设置状态明确分为三层：persist 后的 store 值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存提交 preview，取消丢弃 preview。
+- Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
+- 活动 Session 的 `planned_seconds` 是服务端事实。修改、保存或取消 Focus draft/preview 都不会重置、缩短或改写当前 Session；保存后的 break、cycle、自动开始与提示音配置最早在当前工作段结束后的本地转场生效。
 
 当前限制：
 
 - 除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage；浏览器开发环境与桌面应用互不共享。
 - 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
 - 没有 GET / PATCH /settings API，也没有 app_settings 表。
-- 从专注页或命令面板打开“专注设置”仍固定显示通用模块。
-- 专注设置草稿实时同步会重置当前计时；取消不能恢复已消耗进度。
+- 命令面板中的“专注设置”仍只打开通用设置；只有 Focus 页齿轮已直达 focus 模块。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
 - 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、诊断或 Agent 设置页。
 - “关于”没有读取真实 app、commit、API、schema 和 Sidecar 健康信息。
-- 通用 Modal 仅支持 Escape 和背景关闭，缺少完整焦点圈闭与关闭后的焦点恢复。
+- 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
 
@@ -98,13 +100,14 @@
 
 ### 编辑并保存设置
 
-1. 用户从任意入口打开指定设置模块，系统读取已提交的服务端设置。
-2. 前端建立独立草稿，记录打开前焦点和当前路由。
-3. 用户修改可预览项；预览只影响可逆表现层。
-4. 用户保存，前端按模块发送 PATCH 并携带 expected_version。
-5. Sidecar 清洗字段、事务写入并返回规范化设置。
-6. 前端以服务端响应更新缓存；保存失败则保留草稿并提示重试。
-7. 关闭后焦点回到触发元素。
+当前实现流程：
+
+1. 用户打开设置弹窗；前端从 localStorage-backed store 的 committed 值建立独立 draft 和 preview。
+2. 用户修改可预览项；preview 只影响可逆界面，Focus Session 始终继续以服务端快照计时。
+3. 用户保存，清洗后的 preview 成为新的 committed 值并持久化；Focus 新设置不追写当前 Session。
+4. 用户取消或关闭，preview 被丢弃，committed 与活动 Session 保持不变。
+
+目标 SQLite 流程仍是规划：读取已提交的服务端设置，按模块 `PATCH` 并携带版本，成功后以服务端规范化响应更新 committed，失败保留 draft。
 
 ### 取消预览
 
@@ -166,9 +169,9 @@
 
 ### 前端状态
 
-- committed：最近一次服务端确认的设置。
+- committed：当前已保存的设置；现阶段除 Actor 外来自 localStorage-backed store，未来迁移后才代表最近一次服务端确认值。
 - draft：当前弹窗内尚未保存的编辑值。
-- preview：仅用于主题和布局等可逆展示，不写入业务事实。
+- preview：仅用于主题、布局和下一轮 Focus 参数等可逆展示，不写入活动 Focus Session 或其他业务事实。
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
@@ -201,13 +204,13 @@
 ### v0.1-C：设置页面补齐
 
 - “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和诊断模块待实现。
-- 支持入口指定 activeModule。
+- **部分完成**：UI store 和 Focus 页入口已支持指定 activeModule；命令面板直达 focus 仍待接入。
 - 展示真实健康和版本信息，移除硬编码“关于”事实。
-- 完成焦点圈闭、Escape、关闭后焦点恢复和保存错误状态。
+- 补真实浏览器/窄屏的键盘与焦点验收，并实现持久化设置保存错误状态。
 
 ### v0.1-D：运行态解耦
 
-- 专注设置只影响下一轮，取消草稿不损失进度。
+- **已完成（Focus Core）**：committed/draft/preview 分离；专注设置的 draft/preview 不改变活动 Session，取消不损失进度，新 committed 值只影响后续创建或工作段后的本地转场。
 - 默认首页预览不破坏当前导航。
 - 数据恢复、Sidecar 重启等长操作使用各自任务状态，不阻塞普通设置保存。
 
@@ -225,8 +228,8 @@
 - 保存返回服务端规范化值；并发旧版本更新返回 409。
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
-- 各入口可直接打开指定设置模块。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v10 延续。
+- Focus 页齿轮可直接打开 focus 模块；命令面板仍待达到同一行为。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v11 延续。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。

@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v10。项目管理基础纵切、任务事实层、Actor/Assignment、六状态生命周期、Task 时间线、T-18D D2 的 manual Submission/Artifact 提交验收和受控文件，以及 Client 基础资料 CRUD/基础详情/Project 客户关联已接通；客户活动/附件/Actor 显式关联、收件箱/提醒编排、本地 Agent、备份恢复、回访/财务及项目附件/事件集成仍是规划，不代表完整工作流已经交付。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v11。项目/任务/Actor、D2 Submission/Artifact、Client 基础事实与 Focus Core A+B+C 已接通；Focus D（历史、周报、Streak、高级分析和原生桌面反馈）、客户活动/附件、收件箱/提醒、本地 Agent、备份恢复、回访/财务及项目附件/事件仍是规划，不代表完整工作流已经交付。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v2.2）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v2.3）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -24,7 +24,7 @@
 | 客户管理       | 部分完成（基础资料、基础详情与 Project 客户关联已交付）                   | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)   |
 | 收件箱工作编排 | 页面骨架                                                                  | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)       |
 | Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现） | v0.1                      | [actors.md](modules/actors.md)     |
-| 专注与工时     | 部分完成                                                                  | v0.1                      | [focus.md](modules/focus.md)       |
+| 专注与工时     | Core A+B+C 已完成；D 延后                                                 | v0.1                      | [focus.md](modules/focus.md)       |
 
 ## 平台与共享能力
 
@@ -87,3 +87,4 @@
 | Task Artifact   | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计     |
 | Reminder        | 本地调度事实；到期后幂等生成 Inbox Item                                                 |
 | Workflow Event  | 创建、拆分、分派、执行、验收和返工的追加式审计时间线                                    |
+| Focus Session   | 服务端持久化的一次工作段；interval 保存实际计入区间，前端 ticker 只派生显示             |

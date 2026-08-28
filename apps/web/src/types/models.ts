@@ -390,8 +390,61 @@ export interface TodayStats {
   };
   focus: {
     sessions: number;
+    seconds: number;
     minutes: number;
   };
+}
+
+export type FocusSessionStatus =
+  | "planned"
+  | "active"
+  | "paused"
+  | "recovery_pending"
+  | "completed"
+  | "cancelled"
+  | "interrupted";
+
+export type FocusSessionEndReason =
+  "user_stop" | "completed" | "cancelled" | "crash_recovery";
+
+export type FocusRecoveryAction =
+  "include_gap_resume" | "exclude_gap_resume" | "interrupt";
+
+export interface FocusSession {
+  id: string;
+  taskId: string | null;
+  taskTitle: string | null;
+  status: FocusSessionStatus;
+  plannedSeconds: number;
+  accumulatedSeconds: number;
+  startedAt: string;
+  endedAt: string | null;
+  lastResumedAt: string | null;
+  lastHeartbeatAt: string | null;
+  endReason: FocusSessionEndReason | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FocusSessionSnapshot {
+  session: FocusSession | null;
+  serverNow: string;
+  receivedAtMs: number;
+}
+
+export interface CreateFocusSessionInput {
+  taskId: string | null;
+  plannedSeconds: number;
+}
+
+export interface FocusSessionCommandInput {
+  id: string;
+  expectedVersion: number;
+}
+
+export interface RecoverFocusSessionInput extends FocusSessionCommandInput {
+  action: FocusRecoveryAction;
 }
 
 export interface NewTaskInput {

@@ -1,5 +1,14 @@
-import { useEffect, useMemo } from "react";
-import { useFocusStore, type FocusConfig } from "../store/focus";
+import { useEffect, useRef } from "react";
+import {
+  useActiveFocusSessionQuery,
+  useCreateFocusSession,
+  useStopFocusSession,
+} from "../api/hooks";
+import {
+  useBreakClock,
+  useFocusClock,
+  useFocusCycleStore,
+} from "../store/focus";
 import { useSettingsStore } from "../store/settings";
 
 function playPhaseCompleteSound() {
@@ -12,10 +21,7 @@ function playPhaseCompleteSound() {
         }
       ).webkitAudioContext;
 
-    if (!AudioContextConstructor) {
-      return;
-    }
-
+    if (!AudioContextConstructor) return;
     const context = new AudioContextConstructor();
     const oscillator = context.createOscillator();
     const gain = context.createGain();
@@ -36,69 +42,119 @@ function playPhaseCompleteSound() {
 }
 
 export function FocusTicker() {
-  const focusMinutes = useSettingsStore(
-    (state) => state.preview?.focus.focusMinutes ?? state.focusMinutes,
-  );
-  const breakMinutes = useSettingsStore(
-    (state) => state.preview?.focus.breakMinutes ?? state.breakMinutes,
-  );
-  const cycles = useSettingsStore(
-    (state) => state.preview?.focus.cycles ?? state.cycles,
-  );
-  const autoStartBreak = useSettingsStore(
-    (state) => state.preview?.focus.autoStartBreak ?? state.autoStartBreak,
-  );
-  const autoStartFocus = useSettingsStore(
-    (state) => state.preview?.focus.autoStartFocus ?? state.autoStartFocus,
-  );
-  const soundEnabled = useSettingsStore(
-    (state) => state.preview?.focus.soundEnabled ?? state.soundEnabled,
-  );
-  const running = useFocusStore((state) => state.running);
-  const setDurationsOrSync = useFocusStore((state) => state.setDurationsOrSync);
-  const tick = useFocusStore((state) => state.tick);
-
-  const config = useMemo<FocusConfig>(
-    () => ({
-      focusMinutes,
-      breakMinutes,
-      cycles,
-      autoStartBreak,
-      autoStartFocus,
-      soundEnabled,
-    }),
-    [
-      autoStartBreak,
-      autoStartFocus,
-      breakMinutes,
-      cycles,
-      focusMinutes,
-      soundEnabled,
-    ],
-  );
+  const focusQuery = useActiveFocusSessionQuery();
+  const createFocus = useCreateFocusSession();
+  const stopFocus = useStopFocusSession();
+  const clock = useFocusClock(focusQuery.data);
+  const breakClock = useBreakClock();
+  const focusMinutes = useSettingsStore((state) => state.focusMinutes);
+  const breakMinutes = useSettingsStore((state) => state.breakMinutes);
+  const cycles = useSettingsStore((state) => state.cycles);
+  const autoStartBreak = useSettingsStore((state) => state.autoStartBreak);
+  const autoStartFocus = useSettingsStore((state) => state.autoStartFocus);
+  const soundEnabled = useSettingsStore((state) => state.soundEnabled);
+  const cyclePhase = useFocusCycleStore((state) => state.phase);
+  const cycleTaskId = useFocusCycleStore((state) => state.taskId);
+  const cycleTaskTitle = useFocusCycleStore((state) => state.taskTitle);
+  const completedCycles = useFocusCycleStore((state) => state.completedCycles);
+  const targetCycles = useFocusCycleStore((state) => state.targetCycles);
+  const beginWork = useFocusCycleStore((state) => state.beginWork);
+  const completeWork = useFocusCycleStore((state) => state.completeWork);
+  const finishBreak = useFocusCycleStore((state) => state.finishBreak);
+  const autoStopAttempt = useRef<string | null>(null);
+  const breakCompletionAttempt = useRef<number | null>(null);
+  const session = focusQuery.data?.session;
 
   useEffect(() => {
-    setDurationsOrSync(config);
-  }, [config, setDurationsOrSync]);
+    if (
+      session?.status === "active" &&
+      (cyclePhase === "idle" || cyclePhase === "ready")
+    ) {
+      beginWork(session.taskId, cycles, session.taskTitle);
+    }
+  }, [beginWork, cyclePhase, cycles, session]);
 
   useEffect(() => {
-    if (!running) {
+    if (!session || session.status !== "active" || clock.remainingSeconds > 0) {
+      autoStopAttempt.current = null;
       return;
     }
 
-    const interval = window.setInterval(() => {
-      const state = useFocusStore.getState();
-      const phaseWillEnd = state.running && state.remainingSeconds <= 1;
+    const attempt = `${session.id}:${session.version}`;
+    if (autoStopAttempt.current === attempt) return;
+    autoStopAttempt.current = attempt;
 
-      state.tick();
+    void stopFocus
+      .mutateAsync({ id: session.id, expectedVersion: session.version })
+      .then(() => {
+        completeWork(
+          session.taskId,
+          {
+            focusMinutes,
+            breakMinutes,
+            cycles,
+            autoStartBreak,
+            autoStartFocus,
+            soundEnabled,
+          },
+          session.taskTitle,
+        );
+        if (soundEnabled) playPhaseCompleteSound();
+      })
+      .catch(() => {
+        if (autoStopAttempt.current === attempt) {
+          autoStopAttempt.current = null;
+        }
+      });
+  }, [
+    clock.remainingSeconds,
+    autoStartBreak,
+    autoStartFocus,
+    breakMinutes,
+    completeWork,
+    cycles,
+    focusMinutes,
+    session,
+    soundEnabled,
+    stopFocus.mutateAsync,
+  ]);
 
-      if (phaseWillEnd && state.soundEnabled) {
-        playPhaseCompleteSound();
-      }
-    }, 1_000);
+  useEffect(() => {
+    if (
+      cyclePhase !== "break" ||
+      breakClock.remainingSeconds > 0 ||
+      breakCompletionAttempt.current === completedCycles
+    ) {
+      if (cyclePhase !== "break") breakCompletionAttempt.current = null;
+      return;
+    }
 
-    return () => window.clearInterval(interval);
-  }, [running, tick]);
+    breakCompletionAttempt.current = completedCycles;
+    finishBreak();
+    if (soundEnabled) playPhaseCompleteSound();
+
+    if (!autoStartFocus || completedCycles >= targetCycles) return;
+    void createFocus
+      .mutateAsync({
+        taskId: cycleTaskId,
+        plannedSeconds: focusMinutes * 60,
+      })
+      .then(() => beginWork(cycleTaskId, targetCycles, cycleTaskTitle))
+      .catch(() => undefined);
+  }, [
+    autoStartFocus,
+    beginWork,
+    breakClock.remainingSeconds,
+    completedCycles,
+    createFocus.mutateAsync,
+    cyclePhase,
+    cycleTaskId,
+    cycleTaskTitle,
+    finishBreak,
+    focusMinutes,
+    soundEnabled,
+    targetCycles,
+  ]);
 
   return null;
 }

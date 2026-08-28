@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -16,14 +18,16 @@ import (
 const Version = "v1"
 
 type Options struct {
-	AppVersion     string
-	Commit         string
-	SchemaVersion  int
-	SessionToken   string
-	DevMode        bool
-	AllowedOrigins []string
-	Logger         *log.Logger
-	ArtifactDir    string
+	AppVersion             string
+	Commit                 string
+	SchemaVersion          int
+	SessionToken           string
+	DevMode                bool
+	AllowedOrigins         []string
+	Logger                 *log.Logger
+	ArtifactDir            string
+	Now                    func() time.Time
+	FocusHeartbeatInterval time.Duration
 }
 
 type API struct {
@@ -34,9 +38,11 @@ type API struct {
 
 type Router struct {
 	*gin.Engine
-	artifactStore *artifactStore
-	closeOnce     sync.Once
-	closeErr      error
+	artifactStore        *artifactStore
+	focusHeartbeatCancel context.CancelFunc
+	focusHeartbeatDone   chan struct{}
+	closeOnce            sync.Once
+	closeErr             error
 }
 
 func (r *Router) Close() error {
@@ -44,6 +50,10 @@ func (r *Router) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		if r.focusHeartbeatCancel != nil {
+			r.focusHeartbeatCancel()
+			<-r.focusHeartbeatDone
+		}
 		if r.artifactStore != nil {
 			r.closeErr = r.artifactStore.close()
 		}
@@ -57,6 +67,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.Logger == nil {
 		options.Logger = log.New(os.Stderr, "sidecar ", log.Ldate|log.Ltime|log.LUTC)
+	}
+	if options.Now == nil {
+		options.Now = time.Now
+	}
+	if options.FocusHeartbeatInterval == 0 {
+		options.FocusHeartbeatInterval = 15 * time.Second
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -112,6 +128,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			return nil, err
 		}
 	}
+	if err := recoverFocusSessionsOnStartup(db, options.Now().UTC().Truncate(time.Second)); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover active Focus Sessions: %w", err)
+	}
 	service := &API{db: db, options: options, artifactStore: artifacts}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
@@ -161,9 +183,37 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/clients/:id", service.getClient)
 		v1.PATCH("/clients/:id", service.updateClient)
 		v1.DELETE("/clients/:id", service.deleteClient)
+		v1.GET("/focus-sessions/active", service.getActiveFocusSession)
+		v1.POST("/focus-sessions", service.createFocusSession)
+		v1.POST("/focus-sessions/:id/pause", service.pauseFocusSession)
+		v1.POST("/focus-sessions/:id/resume", service.resumeFocusSession)
+		v1.POST("/focus-sessions/:id/recover", service.recoverFocusSession)
+		v1.POST("/focus-sessions/:id/stop", service.stopFocusSession)
+		v1.POST("/focus-sessions/:id/cancel", service.cancelFocusSession)
 		v1.GET("/stats/today", service.todayStats)
 	}
-	return &Router{Engine: router, artifactStore: artifacts}, nil
+	result := &Router{Engine: router, artifactStore: artifacts}
+	if options.FocusHeartbeatInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result.focusHeartbeatCancel = cancel
+		result.focusHeartbeatDone = make(chan struct{})
+		go func() {
+			defer close(result.focusHeartbeatDone)
+			ticker := time.NewTicker(options.FocusHeartbeatInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := service.refreshActiveFocusHeartbeat(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+						options.Logger.Printf("Focus Session heartbeat failed: %v", err)
+					}
+				}
+			}
+		}()
+	}
+	return result, nil
 }
 
 func (a *API) health(c *gin.Context) {

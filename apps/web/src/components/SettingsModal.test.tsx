@@ -48,7 +48,7 @@ describe("SettingsModal", () => {
       theme: DEFAULT_THEME,
       preview: null,
     });
-    useUiStore.setState({ settingsOpen: true });
+    useUiStore.setState({ settingsOpen: true, settingsModule: "general" });
     applyTheme(DEFAULT_THEME);
   });
 
@@ -232,6 +232,17 @@ describe("SettingsModal", () => {
 
     expect(screen.getByText("v0.1.0")).toBeTruthy();
     expect(screen.getByText("本地 SQLite")).toBeTruthy();
+  });
+
+  it("opens directly on a requested settings module", () => {
+    useUiStore.setState({ settingsOpen: true, settingsModule: "focus" });
+    renderSettings();
+
+    expect(screen.getByRole("heading", { name: "专注" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "专注" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   it("opens local actor management without implying an online account", async () => {

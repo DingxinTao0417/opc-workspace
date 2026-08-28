@@ -2623,6 +2623,7 @@ kbd {
 }
 
 .focus-stage-ring {
+  position: relative;
   display: grid;
   width: 188px;
   height: 188px;
@@ -2632,6 +2633,10 @@ kbd {
     var(--accent-light) var(--focus-progress),
     var(--track) 0
   );
+}
+
+.focus-stage-ring[data-running="true"] {
+  box-shadow: 0 0 34px rgba(94, 106, 210, 0.18);
 }
 
 .focus-stage-ring::before {
@@ -2683,6 +2688,8 @@ kbd {
 .focus-controls {
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 22px;
 }
@@ -2690,6 +2697,182 @@ kbd {
 .focus-primary {
   min-width: 132px;
   min-height: 42px;
+}
+
+.focus-start-form {
+  display: grid;
+  width: min(460px, 100%);
+  gap: 7px;
+  margin-top: 18px;
+  text-align: left;
+}
+
+.focus-start-form label {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.focus-start-form select {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: none;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.focus-start-form select:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.focus-start-form > span,
+.focus-recovery-inline,
+.focus-recovery-footer-note {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.focus-action-error {
+  margin: 14px 0 0;
+}
+
+.focus-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.focus-summary-grid article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 5px 9px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  color: var(--accent-light);
+}
+
+.focus-summary-grid article > span {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.focus-summary-grid article > strong {
+  grid-column: 2;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.focus-recovery-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid rgba(222, 160, 70, 0.24);
+  border-radius: var(--radius-lg);
+  background: rgba(222, 160, 70, 0.08);
+}
+
+.focus-recovery-warning {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--orange);
+}
+
+.focus-recovery-summary strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.focus-recovery-summary p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.focus-recovery-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.focus-recovery-option {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-raised);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.focus-recovery-option:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  background: var(--panel-hover);
+}
+
+.focus-recovery-option.is-danger:hover:not(:disabled) {
+  border-color: rgba(229, 72, 77, 0.4);
+}
+
+.focus-recovery-option > span:first-child {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.focus-recovery-option.is-danger > span:first-child {
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--danger-text);
+}
+
+.focus-recovery-option > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.focus-recovery-option strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.focus-recovery-option small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.focus-recovery-footer-note {
+  margin-right: auto;
 }
 
 .focus-note {
@@ -5466,8 +5649,22 @@ kbd {
   }
 
   .project-grid,
-  .invoice-summary {
+  .invoice-summary,
+  .focus-summary-grid {
     grid-template-columns: 1fr;
+  }
+
+  .focus-stage {
+    padding: 24px 16px;
+  }
+
+  .focus-controls {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .focus-controls .button {
+    width: 100%;
   }
 
   .project-detail-stats {

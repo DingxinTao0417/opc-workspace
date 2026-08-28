@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -12,7 +12,7 @@
 - [客户管理](clients.md)（基础资料 CRUD、基础详情与 Project 关联已交付；活动/附件/Actor 关联/回访/财务仍待开发）
 - [收件箱工作编排](inbox.md)
 - [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
-- [专注与工时](focus.md)
+- [专注与工时](focus.md)（Core A 事实迁移、B API/事务、C 前端接入已交付；历史/报告/原生桌面反馈 D 延后）
 - [设置](settings.md)
 - [命令面板与搜索](command-search.md)
 - [数据、受控文件、备份与恢复](data-management.md)（Artifact store 已交付；产品化备份/恢复仍待开发）

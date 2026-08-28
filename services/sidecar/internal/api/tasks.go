@@ -755,7 +755,20 @@ func (a *API) deleteTask(c *gin.Context) {
 		if task.Version != expectedVersion {
 			return taskVersionConflict()
 		}
-		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		var openFocusSessions int64
+		if err := tx.Model(&models.FocusSession{}).
+			Where("task_id = ? AND status IN ?", id, []string{"active", "paused", "recovery_pending"}).
+			Count(&openFocusSessions).Error; err != nil {
+			return err
+		}
+		if openFocusSessions > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"TASK_HAS_OPEN_FOCUS_SESSION",
+				"Stop, cancel, or recover the open Focus Session before deleting this task",
+			)
+		}
+		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
 		var err error
 		movedArtifactFiles, err = a.trashTaskArtifactFiles(tx, id, deletedAt)
 		if err != nil {

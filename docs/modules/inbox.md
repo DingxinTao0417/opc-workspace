@@ -39,7 +39,7 @@
 ### 已知缺口
 
 - “全部标为已读”没有行为，且没有收件箱列表、详情、筛选或真实计数。
-- 当前 SQLite schema v10 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、Submission/Artifact 和可查询的 Workflow Event 时间线，并新增 Client 基础事实；仍没有 `inbox_items`、`inbox_item_tasks` 或 `reminders` 表，也没有收件箱拆分/分派消费、Client 活动事件或 Artifact follow-up 事件投影链路。
+- 当前 SQLite schema v11 保留 schema v7–v10 已交付的 Actor/Assignment、Task 六状态命令、Submission/Artifact、Workflow Event 和 Client 基础事实，并新增 Focus Core；仍没有 `inbox_items`、`inbox_item_tasks` 或 `reminders` 表，也没有收件箱拆分/分派消费、Client 活动事件或 Artifact follow-up 事件投影链路。
 - 没有任何 Inbox/Reminder/Artifact API、Query 或 Mutation；Assignment API 已由任务/Actor 纵切提供，但当前收件箱页面没有调用。
 - 没有来源事件、稳定去重键、调度器、拆分事务、派生进度、解决/忽略/重开或审计。
 - 没有 Agent Adapter、Agent Run、能力令牌、取消/重试或崩溃恢复；这些也不属于 v0.1。
@@ -115,7 +115,7 @@
 - `inbox_item_tasks`：Task 关联、created/linked、必需标记、建立/取消关联历史。
 - `reminders`：来源、触发时间、`scheduled / fired / cancelled`、事件键和生成的 Inbox Item。
 - 依赖任务/Actor 基础：`actors`、`task_assignments`、`task_artifacts`、`workflow_events`。
-- 所有新结构必须从当前 schema v10 之后追加 `011_...` 或更高版本迁移，不能修改任何已发布迁移。
+- 所有新结构必须从当前 schema v11 之后追加 `012_...` 或更高版本迁移，不能修改任何已发布迁移。
 
 ### 主状态
 

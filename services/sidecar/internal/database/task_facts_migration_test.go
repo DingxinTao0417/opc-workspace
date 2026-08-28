@@ -45,8 +45,8 @@ func TestTaskFactsMigrationUpgradesRealV5DatabaseWithoutLosingFacts(t *testing.T
 		t.Fatalf("upgrade v5 database with Open(): %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 10 {
-		t.Fatalf("SchemaVersion = %d, want 10", store.SchemaVersion)
+	if store.SchemaVersion != 11 {
+		t.Fatalf("SchemaVersion = %d, want 11", store.SchemaVersion)
 	}
 
 	var task struct {
@@ -111,16 +111,29 @@ func TestTaskFactsMigrationUpgradesRealV5DatabaseWithoutLosingFacts(t *testing.T
 	}
 
 	var focusTaskID sql.NullString
-	var durationMinutes, completed int64
+	var focusStatus string
+	var plannedSeconds, accumulatedSeconds, creditedMinutes, focusVersion int64
 	if err := store.SQL.QueryRow(`
-		SELECT task_id, duration_minutes, completed
+		SELECT task_id, status, planned_seconds, accumulated_seconds, credited_minutes, version
 		FROM focus_sessions
 		WHERE id = ?
-	`, v5FocusSessionID).Scan(&focusTaskID, &durationMinutes, &completed); err != nil {
+	`, v5FocusSessionID).Scan(
+		&focusTaskID, &focusStatus, &plannedSeconds, &accumulatedSeconds, &creditedMinutes, &focusVersion,
+	); err != nil {
 		t.Fatalf("read upgraded focus session: %v", err)
 	}
-	if !focusTaskID.Valid || focusTaskID.String != v5ChildTaskID || durationMinutes != 15 || completed != 1 {
-		t.Fatalf("upgraded focus session = (%#v, %d, %d)", focusTaskID, durationMinutes, completed)
+	if !focusTaskID.Valid || focusTaskID.String != v5ChildTaskID || focusStatus != "completed" ||
+		plannedSeconds != 900 || accumulatedSeconds != 900 || creditedMinutes != 15 || focusVersion != 1 {
+		t.Fatalf(
+			"upgraded focus session = (%#v, %q, %d, %d, %d, %d)",
+			focusTaskID, focusStatus, plannedSeconds, accumulatedSeconds, creditedMinutes, focusVersion,
+		)
+	}
+	if got := readInt64(t, store.SQL, "SELECT duration_seconds FROM focus_session_intervals WHERE session_id = ?", v5FocusSessionID); got != 900 {
+		t.Fatalf("upgraded focus interval seconds = %d, want 900", got)
+	}
+	if got := readInt64(t, store.SQL, "SELECT exact_seconds FROM task_focus_totals WHERE task_id = ?", v5ChildTaskID); got != 900 {
+		t.Fatalf("upgraded Task Focus total seconds = %d, want 900", got)
 	}
 
 	var requestHash, responseBody string

@@ -9,7 +9,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单
-- SQLite schema v10、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v8 依次增加项目生命周期、幂等快照、聚合版本、Task 事实、Actor/Assignment/Event 与六状态生命周期，v9 增加带不可变数据库 ID/一次性 store 绑定的 workspace identity、Submission、Artifact、当前提交引用和事件关联保护，v10 增加 Client 聚合版本、查询索引和 Project 关联版本触发器
+- SQLite schema v11、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v10 依次增加项目、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实，v11 重建 Focus Session 并增加 interval 与 Task 精确秒数账本
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、原子批量操作、计划日期组手动排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式命令
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
@@ -19,11 +19,12 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看 Submission/Artifact 历史
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
-- React 三栏应用框架、今日/任务/项目/客户/专注基础页面；收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
+- React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口，以及加载、错误、重试和空状态
-- 全局专注/休息计时状态机，以及可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置
+- Focus Core A+B+C：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today 统计，以及共享前端循环/恢复 UI
+- 可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；committed/draft/preview 已隔离，预览或取消不会改写活动 Session
 
-受控任务生命周期 D1、T-18D D2（manual policy、Submission、Artifact、提交、验收、返工和受控文件），以及客户基础资料 CRUD/基础详情/Project 客户关联已经交付。客户活动与附件、Actor 显式关联、项目事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.2](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录，不会收到任务或获得访问权限。Artifact 的 `produced_by` 来自提交瞬间的活动 assignee，`recorded_by`、Submission 的 `submitted_by` 以及审核/撤回/删除操作人均为内置 owner，表达“负责人产出、我代录/验收”，不代表远程协作。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页、项目页和客户页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
+受控任务生命周期 D1、T-18D D2、客户基础资料/Project 客户关联，以及 Focus Core A+B+C 已经交付。Focus D 的 Session 历史、周报、Streak、高级分析、原生通知、托盘和 DND 引导仍延后；客户活动与附件、Actor 显式关联、项目事件/Inbox 集成、备份/恢复、全局系统快捷键、签名离线更新和三平台安装包也仍属于后续实现；在线 Updater 不在当前阶段。[PRD v2.3](docs/opc-workspace-PRD.md) 记录了这条边界。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库归入更后续版本。开发数据库默认从空业务数据开始；完成的绑定 Focus Session 会通过精确秒数账本把新增完整分钟写入 Task `actual_minutes`，Project 沿既有 Task 聚合读取结果。
 
 ## 目录结构
 
@@ -45,7 +46,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v2.2）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v2.3）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -210,7 +211,14 @@ POST   /api/v1/clients
 GET    /api/v1/clients/:id
 PATCH  /api/v1/clients/:id
 DELETE /api/v1/clients/:id?confirm=true
-GET    /api/v1/stats/today?date=YYYY-MM-DD
+GET    /api/v1/focus-sessions/active
+POST   /api/v1/focus-sessions
+POST   /api/v1/focus-sessions/:id/pause
+POST   /api/v1/focus-sessions/:id/resume
+POST   /api/v1/focus-sessions/:id/recover
+POST   /api/v1/focus-sessions/:id/stop
+POST   /api/v1/focus-sessions/:id/cancel
+GET    /api/v1/stats/today?date=YYYY-MM-DD&timezone=<IANA>
 ```
 
 Actor 详情、创建和更新返回 `ETag`；更新必须携带 `If-Match`。Actor 新建只接受 `person`，可选 `Idempotency-Key` 会保存规范化请求与首次 `201` 快照；owner 只允许修改展示名称，system 不可编辑，存在活动 Assignment 的 person 不能停用。当前没有 Actor 删除路由。Assignment 查询返回当前 assignee/reviewer、分页结束历史和 Task `ETag`；创建、改派和结束必须携带 Task `If-Match`，成功递增 Task 版本，并可用 `Idempotency-Key` 重放首次响应快照而不重复写事件。v0.1 assignee 仅允许 active owner/person，reviewer 仅允许 active owner。
@@ -225,9 +233,11 @@ Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` �
 
 Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
 
+Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时和 Today 统计；Today 以 IANA 本地日边界与已关闭 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。
+
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v10；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6 为任务增加类型、父任务、完成标准与版本，schema v7 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填历史 owner 分派，schema v8 安全重建六状态 Task 并增加生命周期字段和事件保护。schema v9 新增单例 `workspace_identity`、`task_submissions`、四种互斥 payload 的 `task_artifacts`、不可变 `artifact_deletion_tombstones`、Task `current_submission_id` 以及 Workflow Event 的 `submission_id / artifact_id`；不可变 `database_id` 与首次声明后不可更换的 `artifact_store_id` 将数据库和 Artifact marker 双向绑定。schema v10 为 `clients` 增加 `version` 与查询索引，将历史空白可选值归一为 `NULL`，并用触发器在 Project 关联变化时递增受影响 Client 的聚合版本。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v11；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6–v10 依次交付 Task、Actor/Assignment/Event、Submission/Artifact 和 Client 事实；`011_focus_sessions.sql` 重建 Focus Session，移除旧分钟/布尔双写字段，新增 interval 与 Task 精确秒数 ledger，并兼容映射历史 Session 而不二次增加 Task 工时。需要临时关闭外键的迁移由迁移器锁定单连接，在事务提交前执行 `foreign_key_check`，成功或失败都恢复外键；一致性失败会整体回滚。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -237,4 +247,4 @@ Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `
 
 ## 产品边界
 
-[PRD v2.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座明确不实现任务/项目看板、内容日历业务功能、客户回访、收入/支出/发票业务、自动化规则引擎、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。本地 Actor 身份、person 管理、Assignment、六状态生命周期、Task 时间线、manual Submission/Artifact 验收，以及 Client 基础资料 CRUD/Project 客户关联已经交付；客户活动/附件/Actor 显式关联、新版收件箱、提醒编排、Agent Runtime、备份/恢复和其他业务模块仍未交付。对应页面骨架、数据表或 API 规划不代表完整工作流已经可用。
+[PRD v2.3](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Client/Project 基础纵切和 Focus Core A+B+C；明确未交付 Focus D、任务/项目看板、内容日历业务、客户活动/附件/回访、收入/支出/发票业务、新版收件箱、提醒编排、Agent Runtime、备份/恢复、自动化规则、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。对应页面骨架、数据表或 API 规划不代表完整工作流已经可用。

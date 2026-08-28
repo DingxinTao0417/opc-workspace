@@ -35,16 +35,13 @@ import {
   type ProfileSettings,
   useSettingsStore,
 } from "../store/settings";
-import { useUiStore } from "../store/ui";
+import { useUiStore, type SettingsModule } from "../store/ui";
 import { ActorSettings } from "./ActorSettings";
 import { Modal } from "./Modal";
 
 interface SettingsModalProps {
   onSettingsSaved?: (next: FocusSettings, previous: FocusSettings) => void;
 }
-
-type SettingsModule =
-  "profile" | "general" | "appearance" | "focus" | "actors" | "about";
 
 const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "个人资料", icon: UserRound },
@@ -177,6 +174,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const open = useUiStore((state) => state.settingsOpen);
+  const requestedModule = useUiStore((state) => state.settingsModule);
   const setOpen = useUiStore((state) => state.setSettingsOpen);
   const beginPreview = useSettingsStore((state) => state.beginPreview);
   const setPreview = useSettingsStore((state) => state.setPreview);
@@ -201,7 +199,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
     const currentTheme = getAppearanceTheme();
     initialLocation.current = `${location.pathname}${location.search}${location.hash}`;
-    setActiveModule("general");
+    setActiveModule(requestedModule);
     setFocusDraft(getFocusSettings());
     setGeneralDraft(getGeneralSettings());
     setProfileDraft(getProfileSettings());
@@ -210,7 +208,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     beginPreview();
 
     return cancelPreview;
-  }, [beginPreview, cancelPreview, open]);
+  }, [beginPreview, cancelPreview, open, requestedModule]);
 
   const previewSettings = (
     focus: FocusSettings,

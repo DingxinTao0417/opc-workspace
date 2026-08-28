@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
+import { FocusRecoveryModal } from "./components/FocusRecoveryModal";
 import { NewTaskModal } from "./components/NewTaskModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { TaskDetailModal } from "./components/TaskDetailModal";
@@ -56,6 +57,7 @@ export default function App() {
       <GlobalShortcuts />
       <ThemeController />
       <FocusTicker />
+      <FocusRecoveryModal />
       <Routes>
         <Route element={<AppShell />}>
           <Route element={<Navigate replace to={`/${defaultRoute}`} />} index />

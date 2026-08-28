@@ -11,12 +11,16 @@ import type {
   ClientListParams,
   ClientListResult,
   ClientStatus,
+  CreateFocusSessionInput,
   CreatePersonActorInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
   DeleteTaskArtifactResult,
   DeleteTagResult,
   EndTaskAssignmentInput,
+  FocusRecoveryAction,
+  FocusSession,
+  FocusSessionSnapshot,
   HealthResponse,
   NewTaskInput,
   DeleteProjectResult,
@@ -1377,6 +1381,108 @@ function normalizeReassignTaskAssignmentResult(
   return { ...result, previousAssignment };
 }
 
+function asFocusSessionStatus(value: unknown): FocusSession["status"] {
+  if (
+    value === "planned" ||
+    value === "active" ||
+    value === "paused" ||
+    value === "recovery_pending" ||
+    value === "completed" ||
+    value === "cancelled" ||
+    value === "interrupted"
+  ) {
+    return value;
+  }
+  return invalidResponse("专注会话状态响应无效");
+}
+
+function asFocusSessionEndReason(value: unknown): FocusSession["endReason"] {
+  if (value === undefined || value === null || value === "") return null;
+  if (
+    value === "user_stop" ||
+    value === "completed" ||
+    value === "cancelled" ||
+    value === "crash_recovery"
+  ) {
+    return value;
+  }
+  return invalidResponse("专注会话结束原因响应无效");
+}
+
+export function normalizeFocusSession(value: unknown): FocusSession {
+  if (!isRecord(value)) return invalidResponse("专注会话响应格式无效");
+  const id = stringField(value, "id");
+  const startedAt = stringField(value, "started_at", "startedAt");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  if (!id || !startedAt || !createdAt || !updatedAt) {
+    return invalidResponse("专注会话响应格式无效");
+  }
+
+  return {
+    id,
+    taskId: nullableString(fieldValue(value, "task_id", "taskId")),
+    taskTitle: nullableString(fieldValue(value, "task_title", "taskTitle")),
+    status: asFocusSessionStatus(value.status),
+    plannedSeconds: positiveInteger(
+      fieldValue(value, "planned_seconds", "plannedSeconds"),
+      "专注计划秒数",
+    ),
+    accumulatedSeconds: nonNegativeInteger(
+      fieldValue(value, "accumulated_seconds", "accumulatedSeconds"),
+      "专注累计秒数",
+    ),
+    startedAt,
+    endedAt: nullableString(fieldValue(value, "ended_at", "endedAt")),
+    lastResumedAt: nullableString(
+      fieldValue(value, "last_resumed_at", "lastResumedAt"),
+    ),
+    lastHeartbeatAt: nullableString(
+      fieldValue(value, "last_heartbeat_at", "lastHeartbeatAt"),
+    ),
+    endReason: asFocusSessionEndReason(
+      fieldValue(value, "end_reason", "endReason"),
+    ),
+    version: positiveInteger(value.version, "专注会话版本"),
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function normalizeFocusSessionSnapshot(
+  payload: unknown,
+): FocusSessionSnapshot {
+  const root = isRecord(payload) ? payload : null;
+  const data = root && "data" in root ? root.data : payload;
+  const envelope = isRecord(data) ? data : null;
+  const wrapped = Boolean(
+    envelope && ("session" in envelope || !("id" in envelope)),
+  );
+  const rawSession = wrapped ? envelope?.session : data;
+  const rawServerNow =
+    fieldValue(envelope ?? {}, "server_now", "serverNow") ??
+    fieldValue(root ?? {}, "server_now", "serverNow");
+  if (typeof rawServerNow !== "string" || rawServerNow.length === 0) {
+    return invalidResponse("专注会话缺少服务端时间基准");
+  }
+  if (
+    rawSession !== null &&
+    rawSession !== undefined &&
+    !isRecord(rawSession)
+  ) {
+    return invalidResponse("专注会话响应格式无效");
+  }
+
+  return {
+    session:
+      rawSession === null || rawSession === undefined
+        ? null
+        : normalizeFocusSession(rawSession),
+    serverNow: rawServerNow,
+    receivedAtMs: Date.now(),
+  };
+}
+
 export async function getHealth(): Promise<HealthResponse> {
   return apiRequest<HealthResponse>("/health");
 }
@@ -2627,10 +2733,114 @@ export async function deleteClient(
   };
 }
 
-export async function getTodayStats(date: string): Promise<TodayStats> {
+export async function getActiveFocusSession(): Promise<FocusSessionSnapshot> {
+  const payload = await apiRequest<unknown>("/api/v1/focus-sessions/active");
+  return normalizeFocusSessionSnapshot(payload);
+}
+
+export async function createFocusSession(
+  input: CreateFocusSessionInput,
+  idempotencyKey: string,
+): Promise<FocusSessionSnapshot> {
+  const payload = await apiRequest<unknown>("/api/v1/focus-sessions", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      task_id: input.taskId,
+      planned_seconds: input.plannedSeconds,
+    }),
+  });
+  return normalizeFocusSessionSnapshot(payload);
+}
+
+async function executeFocusSessionCommand(
+  id: string,
+  command: "pause" | "resume" | "stop" | "cancel",
+  expectedVersion: number,
+  idempotencyKey?: string,
+): Promise<FocusSessionSnapshot> {
+  const headers = {
+    ...expectedVersionHeader(expectedVersion),
+    ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+  };
   const payload = await apiRequest<unknown>(
-    `/api/v1/stats/today?date=${encodeURIComponent(date)}`,
+    `/api/v1/focus-sessions/${encodeURIComponent(id)}/${command}`,
+    {
+      method: "POST",
+      headers,
+      body: "{}",
+    },
   );
+  return normalizeFocusSessionSnapshot(payload);
+}
+
+export function pauseFocusSession(
+  id: string,
+  expectedVersion: number,
+): Promise<FocusSessionSnapshot> {
+  return executeFocusSessionCommand(id, "pause", expectedVersion);
+}
+
+export function resumeFocusSession(
+  id: string,
+  expectedVersion: number,
+): Promise<FocusSessionSnapshot> {
+  return executeFocusSessionCommand(id, "resume", expectedVersion);
+}
+
+export function stopFocusSession(
+  id: string,
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<FocusSessionSnapshot> {
+  return executeFocusSessionCommand(
+    id,
+    "stop",
+    expectedVersion,
+    idempotencyKey,
+  );
+}
+
+export function cancelFocusSession(
+  id: string,
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<FocusSessionSnapshot> {
+  return executeFocusSessionCommand(
+    id,
+    "cancel",
+    expectedVersion,
+    idempotencyKey,
+  );
+}
+
+export async function recoverFocusSession(
+  id: string,
+  action: FocusRecoveryAction,
+  expectedVersion: number,
+): Promise<FocusSessionSnapshot> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/focus-sessions/${encodeURIComponent(id)}/recover`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(expectedVersion),
+      body: JSON.stringify({ action }),
+    },
+  );
+  return normalizeFocusSessionSnapshot(payload);
+}
+
+export async function getTodayStats(
+  date: string,
+  timezone?: string | number,
+): Promise<TodayStats> {
+  const params = new URLSearchParams({ date });
+  if (typeof timezone === "string" && timezone.trim()) {
+    params.set("timezone", timezone.trim());
+  } else if (typeof timezone === "number") {
+    params.set("timezone_offset_minutes", String(timezone));
+  }
+  const payload = await apiRequest<unknown>(`/api/v1/stats/today?${params}`);
   const data =
     isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
   if (!isRecord(data) || !isRecord(data.tasks) || !isRecord(data.focus)) {
@@ -2654,6 +2864,7 @@ export async function getTodayStats(date: string): Promise<TodayStats> {
     },
     focus: {
       sessions: numeric(data.focus.sessions),
+      seconds: numeric(data.focus.seconds),
       minutes: numeric(data.focus.minutes),
     },
   };

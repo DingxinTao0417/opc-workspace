@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v10（2026-08-27）；Task D2 的结构仍由 schema v9 引入，v10 不改写 Task 契约。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v11（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v10 不改写 Task 表，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线，以及 T-18D D2 manual Submission/Artifact 提交验收均已交付。Inbox/Reminder 消费、本地 Agent Run、专注工时回写和任务看板属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收，以及 Focus Core 工时回写均已交付。Inbox/Reminder 消费、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -34,6 +34,8 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - 输出冲突会刷新最新 Task，但保留摘要、文本、链接、结构化 JSON 和原浏览器 `File` 对象；用户查看最新事实后必须再次明确提交。取消未保存设置/草稿不会静默写服务端。
 - 成功写入会立即失效 Task、Submission、Artifact、Assignment、Event、Project 和 Today 相关 Query，避免等待缓存自然过期。
 - Task 时间线已覆盖策略变化、提交、接受、返工、等待验收时撤回、Artifact 删除及 v9 迁移回填文案。
+- 绑定 Task 的 Focus Session 只有 stop→completed 才把精确秒数写入 `task_focus_totals`，再把新增完整分钟追加到 `actual_minutes`；余秒跨 Session 保留，cancel/interrupted 不入账，也不改变 Task 生命周期。
+- Task 存在 active/paused/recovery_pending Focus Session 时，硬删除返回 `409 TASK_HAS_OPEN_FOCUS_SESSION`；Session 进入终态后可删除 Task，历史 Session 的 `task_id` 自动置空。
 
 ## 数据模型与约束
 
@@ -221,7 +223,7 @@ reason 最长 1,000 字符。只有 manual + waiting_review + current pending Su
 
 `DELETE /api/v1/artifacts/:id?confirm=true` 要求 Task `If-Match`、可选稳定幂等键和 `{ "reason": "1–1000 字符" }`。pending-review 批次禁止删除。非文件只写软删除元数据；file 删除在同一事务写不可变 tombstone，存在的文件先移入 `.trash/`，事务失败恢复，成功提交后清除 trash 文件。若物理文件已经缺失，确认软删除仍成功，并将完整性记录为 `missing` 及检查时间。列表可用 `include_deleted=true` 审计，详情隐藏已删 payload，文件下载返回 410。
 
-Task DELETE 是聚合硬删除：同一事务先为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，失败恢复已移动文件，提交后物理清理；tombstone 继续保留供启动恢复。它不是单 Artifact 删除的替代入口。
+Task DELETE 是聚合硬删除：服务端先确认没有关联的 active/paused/recovery_pending Focus Session，否则返回 `TASK_HAS_OPEN_FOCUS_SESSION` 且不移动文件。通过检查后，同一事务为每个 active file 写 `deletion_scope = task` tombstone，并把仍存在的文件放入 trash；缺失 object 不阻断删除。随后级联删除 Task、Submission、Artifact、Assignment 等成员，终态 Focus Session 按外键 `SET NULL` 保留；失败恢复已移动文件，提交后物理清理。它不是单 Artifact 删除的替代入口。
 
 ## 受控文件目录
 
@@ -274,7 +276,7 @@ schema v9 的 `009_task_submissions_artifacts.sql`：
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 
-仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、专注工时持久化、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Client 基础资料和 Project 客户关联已经交付。
+仍属后续：Inbox/Reminder 编排、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 
 ## 相关代码/PRD 链接
 

@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v10（2026-08-27）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v11（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离和 Task Artifact 受控文件目录已经实现；产品化备份、恢复、导入、导出、计划备份和跨版本恢复仍未实现。存在目录骨架不等于已有备份能力。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v2.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -26,6 +26,7 @@
 - 需要重建表的迁移可用首行 `-- migration: foreign_keys=off`，迁移器在固定连接上事务外关闭外键、事务内执行 SQL 与 `foreign_key_check`，成功或失败均恢复外键。
 - schema v9 新增单例 `workspace_identity`：`database_id` 永久不可变，`artifact_store_id` 只能从空值绑定一次；两者把受控 Artifact root 与数据库一一对应。迁移还新增不可变 `artifact_deletion_tombstones`，在 file Artifact 软删或 Task 聚合硬删的同一事务保留删除授权事实；Submission/Artifact 迁移只对无歧义 manual 状态回填 inferred Submission 和 system 事件，不虚构 Artifact。
 - schema v10 为 Client 增加聚合 `version`、名称/状态/更新时间查询索引和 Project 关联变化触发器，并把历史空白可选资料归一为 `NULL`；迁移不改写 schema v9 的 Artifact store 契约。
+- schema v11 重建 `focus_sessions`，新增有效工作区间账本 `focus_session_intervals` 和精确秒数余量账本 `task_focus_totals`；旧 Focus 记录按终态映射并补 interval，不二次增加 Task 工时，并用只适用于迁入终态的 `legacy_imported` 标记无损保留旧 schema 中超过 120 分钟的合法记录。
 - 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
@@ -127,7 +128,7 @@ appLogDir/
 
 ## SQLite 迁移契约
 
-当前 schema v10：
+当前 schema v11：
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -136,9 +137,10 @@ appLogDir/
 - 007：Actor、Assignment、Workflow Event 与历史责任回填；
 - 008：Task 六状态、review policy、生命周期字段、command_seq 和事件不可变保护；
 - 009：带不可变 database ID/一次性 store 绑定的 workspace identity、Submission、Artifact、不可变 deletion tombstone、current submission、事件关联及 inferred manual 历史回填；
-- 010：Client 聚合版本、查询索引、空白可选值归一，以及 Project 客户关联变化的版本传播 trigger。
+- 010：Client 聚合版本、查询索引、空白可选值归一，以及 Project 客户关联变化的版本传播 trigger；
+- 011：Focus Session 状态/版本重建、有效 interval、Task 精确秒数余量账本、单一开放 Session/interval 约束和 v10 历史兼容迁移。
 
-新增 schema 只能追加递增文件，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `012_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## 未来 v0.1 备份/恢复目标
 
@@ -194,7 +196,7 @@ appLogDir/
 ### 已实现
 
 - [x] 开发/正式数据库和 Artifact root 隔离。
-- [x] schema v10 嵌入迁移、回滚、外键恢复和测试。
+- [x] schema v11 嵌入迁移、回滚、外键恢复和测试。
 - [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
@@ -215,6 +217,7 @@ appLogDir/
 - [迁移器](../../services/sidecar/internal/database/migrate.go)
 - [schema v9 迁移](../../services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql)
 - [schema v10 Client 迁移](../../services/sidecar/internal/database/migrations/010_client_facts.sql)
+- [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)

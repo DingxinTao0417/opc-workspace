@@ -9,6 +9,7 @@ export function Modal({
   children,
   footer,
   width = "520px",
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -16,6 +17,7 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   width?: string;
+  dismissible?: boolean;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
@@ -40,7 +42,7 @@ export function Modal({
       '[tabindex]:not([tabindex="-1"])',
     ].join(",");
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && dismissible) {
         onCloseRef.current();
         return;
       }
@@ -77,7 +79,7 @@ export function Modal({
       document.removeEventListener("keydown", onKeyDown);
       if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [open]);
+  }, [dismissible, open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -92,12 +94,16 @@ export function Modal({
 
   return createPortal(
     <div className="modal-root">
-      <button
-        aria-label="关闭弹窗"
-        className="modal-backdrop"
-        onClick={onClose}
-        type="button"
-      />
+      {dismissible ? (
+        <button
+          aria-label="关闭弹窗"
+          className="modal-backdrop"
+          onClick={onClose}
+          type="button"
+        />
+      ) : (
+        <div className="modal-backdrop" />
+      )}
       <section
         aria-labelledby={titleId}
         aria-modal="true"
@@ -109,14 +115,16 @@ export function Modal({
       >
         <header className="modal-header">
           <h2 id={titleId}>{title}</h2>
-          <button
-            aria-label="关闭"
-            className="icon-button"
-            onClick={onClose}
-            type="button"
-          >
-            <X size={16} />
-          </button>
+          {dismissible ? (
+            <button
+              aria-label="关闭"
+              className="icon-button"
+              onClick={onClose}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+          ) : null}
         </header>
         <div className="modal-body">{children}</div>
         {footer ? <footer className="modal-footer">{footer}</footer> : null}
