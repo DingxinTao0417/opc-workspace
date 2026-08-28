@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  createPersonActor,
   createTag,
   deleteTag,
   deleteTask,
+  getActors,
   getAllProjects,
   getAllTasks,
   getTags,
   getTaskPage,
+  normalizeActor,
   normalizeTag,
   normalizeProject,
   normalizeTask,
@@ -15,6 +18,7 @@ import {
   updateTag,
   updateTask,
   updateTaskStatus,
+  updateActor,
 } from "./client";
 
 afterEach(() => {
@@ -64,6 +68,101 @@ function jsonResponse(body: unknown, status = 200) {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+const actorPayload = {
+  id: "00000000-0000-5000-8000-000000000003",
+  type: "person",
+  display_name: "陈设计",
+  status: "active",
+  is_builtin: false,
+  notes: "负责视觉",
+  metadata: { role: "design" },
+  version: 2,
+  created_at: "2026-08-27T00:00:00Z",
+  updated_at: "2026-08-27T00:01:00Z",
+};
+
+describe("actor requests", () => {
+  it("strictly normalizes actors and lists them with supported filters", async () => {
+    expect(normalizeActor(actorPayload)).toMatchObject({
+      displayName: "陈设计",
+      type: "person",
+      status: "active",
+      isBuiltin: false,
+      metadata: { role: "design" },
+      version: 2,
+    });
+    expect(() => normalizeActor({ ...actorPayload, metadata: [] })).toThrow(
+      ApiError,
+    );
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [actorPayload],
+        meta: { page: 2, page_size: 20, total: 21 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getActors({
+      page: 2,
+      pageSize: 20,
+      type: "person",
+      status: "inactive",
+      sort: "display_name",
+    });
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "20",
+      type: "person",
+      status: "inactive",
+      sort: "display_name",
+    });
+    expect(result.meta).toEqual({ page: 2, pageSize: 20, total: 21 });
+  });
+
+  it("creates only person actors and version-locks updates", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: actorPayload }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createPersonActor(
+      {
+        displayName: "陈设计",
+        notes: "负责视觉",
+        metadata: { role: "design" },
+      },
+      "actor-key",
+    );
+    await updateActor(actorPayload.id, {
+      displayName: "陈设计师",
+      status: "inactive",
+      expectedVersion: 2,
+    });
+
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("Idempotency-Key"),
+    ).toBe("actor-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      type: "person",
+      display_name: "陈设计",
+      metadata: { role: "design" },
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get("If-Match"),
+    ).toBe('"2"');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      display_name: "陈设计师",
+      status: "inactive",
+    });
+  });
+});
 
 describe("normalizeTask", () => {
   it("maps the versioned API snake_case fields", () => {

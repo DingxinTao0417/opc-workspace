@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：1.0
+> 文档版本：1.1
 > 日期：2026-08-27
-> 依据：[PRD v1.7](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v6
+> 依据：[PRD v1.8](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v7
 
 ## 1. 目的
 
@@ -50,18 +50,20 @@
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/专注基础能力、项目卡片与详情、设置和命令面板；任务页已接服务端分页/搜索/筛选、根任务树、标签管理、批量安全操作和计划组手动排序。
-- Go 已提供健康检查、任务事实与标签 API、任务批量/排序 API、项目 CRUD/生命周期 API 和今日统计。
-- SQLite schema v6 已有 tasks、projects、clients、invoices、focus_sessions 等基础表；v3 为 Project 增加生命周期版本，v4 增加安全幂等快照，v5 用触发器在任务/发票关联与聚合字段、客户名称或删除变化时原子递增 `projects.version`，v6 增加 Task 类型、父子关系、完成标准、Task/Tag 版本及关系索引/循环保护 trigger。
+- Go 已提供健康检查、任务事实与标签 API、任务批量/排序 API、项目 CRUD/生命周期 API、Actor 查询/创建/更新 API 和今日统计。
+- SQLite schema v7 已有 tasks、projects、clients、invoices、focus_sessions，以及 `actors`、`task_assignments`、`workflow_events` 等基础表；v3 为 Project 增加生命周期版本，v4 增加安全幂等快照，v5 用触发器在任务/发票关联与聚合字段、客户名称或删除变化时原子递增 `projects.version`，v6 增加 Task 类型、父子关系、完成标准、Task/Tag 版本及关系索引/循环保护 trigger，v7 增加责任主体、分派历史和工作流事件基础。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
 - 任务可关联项目；任务读取返回 `project_name`，项目读取从关联任务派生进度及 `actual_minutes` 合计。
 - 归档项目不再接受新任务关联；schema v5 让任务、发票和客户聚合事实变化同步失效 Project `ETag`，避免基于旧汇总完成、归档或硬删除。
-- 当前仍未实现 Client CRUD、项目产出/附件/Workflow Event/Inbox 集成、Actor/Assignment 和 Focus Session 持久化，因此项目模块仍是部分完成。
+- schema v7 以固定 UUID 初始化唯一 owner 与 system，按历史任务完成状态幂等回填 owner Assignment 和 `migration_assignment_backfill` 事件；数据库保护内置主体、活动分派与引用历史。
+- 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。
+- 当前仍未实现 Client CRUD、项目产出/附件/Inbox 集成、Assignment 操作 API/UI、受控任务状态与 Artifact、通用 Workflow Event 时间线和 Focus Session 持久化，因此完整人工编排与项目模块仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：在已交付的项目纵切和任务事实层上，继续完成 Actor/受控任务状态与人工分派、客户、项目产出与收件箱人工编排、专注持久化、基础备份恢复和桌面可靠性。
+- v0.1：在已交付的项目纵切、任务事实层和 Actor 身份基础上，继续完成 Assignment 操作、受控任务状态与人工分派、客户、项目产出与收件箱人工编排、专注持久化、基础备份恢复和桌面可靠性。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
@@ -93,10 +95,10 @@
 | [项目](modules/projects.md) | Client、Task | 当前已实现资料、受控生命周期、归档恢复和任务聚合 | 交付 Artifact、附件、时间线和 Inbox 事件仍待实现 |
 | [客户](modules/clients.md) | Project、Invoice、Activity | 客户资料和本地业务关系 | 回访、发票和 Inbox 来源 |
 | [收件箱](modules/inbox.md) | 项目产出、Reminder、Task/Agent/系统事件 | 受理、拆分、关联、跟进和解决 | Task 与 Assignment；今日待处理统计 |
-| [Actor](modules/actors.md) | 设置中的本地配置 | owner/person/agent/system 责任身份 | Assignment、审核人和审计主体 |
+| [Actor](modules/actors.md) | 设置中的本地 person 管理 | 已实现 owner/person/system 责任身份与启停；agent 仅保留类型边界 | Assignment、审核人和审计主体；分派操作仍待接入 |
 | [本地 Agent](modules/local-agents.md) | agent Assignment、Task 上下文、能力授权 | 单次受控执行 | Agent Run、Task Artifact、待验收或失败事件 |
 | [专注](modules/focus.md) | 当前 Task | 活动 Session 和有效工时 | Task actual_minutes、今日/统计数据 |
-| [设置](modules/settings.md) | owner 配置 | 非敏感版本化配置和本地偏好 | 布局、主题、Actor、备份和桌面行为 |
+| [设置](modules/settings.md) | 当前 localStorage 偏好与 Actor API | 本地偏好界面及已实现的 person 管理；版本化 app_settings 仍待实现 | 布局、主题、Actor、备份和桌面行为 |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/Inbox 索引 | 统一查找与快捷操作入口 | 跳转详情或触发受控命令 |
 | [数据管理](modules/data-management.md) | 全部本地事实与文件 | 备份、校验、恢复、导入导出和诊断归档 | 恢复后的完整应用状态和诊断包 |
 | [桌面平台](modules/desktop-platform.md) | Web 与 Sidecar 生命周期 | 原生窗口、进程、权限、运行日志和发布 | 可运行、可诊断的本地应用环境 |
@@ -221,7 +223,7 @@ Task 已分派给健康 agent Actor
 - 同 key 不同请求摘要返回 `409 CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
-当前 Task、Tag 与 Project 创建已实现该原则的基础版本：schema v4 保存规范化请求 SHA-256、首次资源响应快照与原始 `201` 状态，因此资源后续编辑或删除不影响同请求重放；不同请求复用 key 会冲突，旧记录缺少快照时拒绝不安全重放。Task 创建的 v2 摘要覆盖类型、父级、完成标准和稳定排序后的标签，同时兼容安全的旧 v1 快照；schema v5 把 Project 聚合依赖纳入版本冲突检测，schema v6 再为 Task/Tag 事实、父子聚合和标签嵌入提供版本失效。Actor 作用域和 Workflow Event 去重仍属于后续编排实现。
+当前 Task、Tag、Project 与 person Actor 创建已实现该原则的基础版本：schema v4 保存规范化请求 SHA-256、首次资源响应快照与原始 `201` 状态，因此资源后续编辑或删除不影响同请求重放；不同请求复用 key 会冲突，旧记录缺少快照时拒绝不安全重放。Task 创建的 v2 摘要覆盖类型、父级、完成标准和稳定排序后的标签，同时兼容安全的旧 v1 快照；schema v5 把 Project 聚合依赖纳入版本冲突检测，schema v6 再为 Task/Tag 事实、父子聚合和标签嵌入提供版本失效。Actor 创建同样保存规范化请求摘要与首次 `201` 快照，并保证重放不重复写 `actor_created` 事件；Assignment、Inbox 与通用事件投影的幂等契约仍待后续编排纵切实现。
 
 ## 9. 本地安全与权限边界
 
@@ -242,15 +244,15 @@ Task 已分派给健康 agent Actor
 | 备份失败 | 数据管理 | 通过桌面日志管线记录 request ID，并产生 system_maintenance Inbox Item |
 | 恢复进入 applying | 数据管理 + 桌面平台 | 获取维护锁、阻止普通退出；强制终止后依据 journal 完成或回滚 |
 | 来源资源删除 | 来源模块 + Inbox | open/tracking 时默认限制；允许删除后保留快照并显示来源不存在 |
-| 并发旧写入 | Sidecar 领域服务 | Task/Tag 当前事实、父子/标签嵌入、Project 资料/状态或其任务/发票/客户聚合变化都会使旧 `If-Match` 或 `expected_version` 返回 409；前端刷新并提示用户重新确认 |
+| 并发旧写入 | Sidecar 领域服务 | Task/Tag 当前事实、父子/标签嵌入、Project 资料/状态或其任务/发票/客户聚合变化，以及 Actor 资料/启停变化，都会使旧 `If-Match` 或 `expected_version` 返回 409；前端刷新并提示用户重新确认 |
 | Artifact 文件缺失 | Task/Agent + 数据管理 | 保留元数据和审计，标记损坏，不把 Task 静默视为完成 |
 
 ## 11. 实施依赖顺序
 
-已落地的基础纵切是 Task 三态 CRUD、项目/父子/标签/完成标准、分页筛选、批量安全操作、计划组排序和乐观锁，以及 Project CRUD、乐观锁、受控状态、归档恢复和任务聚合。后续依赖顺序为：
+已落地的基础纵切是 Task 三态 CRUD、项目/父子/标签/完成标准、分页筛选、批量安全操作、计划组排序和乐观锁，Project CRUD、乐观锁、受控状态、归档恢复和任务聚合，以及 Actor 身份、历史 Assignment 回填和 Actor 审计事件。后续依赖顺序为：
 
 ```text
-Actor / Assignment / 受控 Task 状态 / review_policy / Artifact / Workflow Event
+Assignment API/UI / 受控 Task 状态 / review_policy / Artifact / 通用 Workflow Event 时间线
   → Client CRUD / Project 客户选择、产出、附件与事件
   → Inbox Item / Reminder / 拆分 / 人工分派与验收
   → Today 正确日期聚合 / Focus 持久化

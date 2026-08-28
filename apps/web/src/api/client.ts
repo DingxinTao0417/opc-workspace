@@ -1,6 +1,10 @@
 import type {
+  Actor,
+  ActorListParams,
+  ActorListResult,
   BatchUpdateTasksInput,
   BatchUpdateTasksResult,
+  CreatePersonActorInput,
   DeleteTagResult,
   HealthResponse,
   NewTaskInput,
@@ -24,6 +28,7 @@ import type {
   TaskPriority,
   TaskStatus,
   TodayStats,
+  UpdateActorInput,
   UpdateTagInput,
   UpdateTaskInput,
   UpdateProjectInput,
@@ -312,6 +317,58 @@ function asProjectStatus(value: unknown): ProjectStatus {
   return "planning";
 }
 
+function asActorType(value: unknown): Actor["type"] {
+  if (
+    value === "owner" ||
+    value === "person" ||
+    value === "system" ||
+    value === "agent"
+  ) {
+    return value;
+  }
+  return invalidResponse("责任主体类型响应无效");
+}
+
+function asActorStatus(value: unknown): Actor["status"] {
+  if (value === "active" || value === "inactive") return value;
+  return invalidResponse("责任主体状态响应无效");
+}
+
+export function normalizeActor(value: unknown): Actor {
+  if (!isRecord(value)) return invalidResponse("责任主体响应格式无效");
+  const id = stringField(value, "id");
+  const displayName = stringField(value, "display_name", "displayName");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  const isBuiltin = fieldValue(value, "is_builtin", "isBuiltin");
+  const metadata = value.metadata;
+  if (
+    !id ||
+    !displayName ||
+    !createdAt ||
+    !updatedAt ||
+    typeof isBuiltin !== "boolean" ||
+    !isRecord(metadata)
+  ) {
+    return invalidResponse("责任主体响应格式无效");
+  }
+  if (typeof value.notes !== "string") {
+    return invalidResponse("责任主体备注响应无效");
+  }
+  return {
+    id,
+    type: asActorType(value.type),
+    displayName,
+    status: asActorStatus(value.status),
+    isBuiltin,
+    notes: value.notes,
+    metadata,
+    version: positiveInteger(value.version, "责任主体版本"),
+    createdAt,
+    updatedAt,
+  };
+}
+
 function asArchivedProjectStatus(
   value: unknown,
 ): Project["archivedFromStatus"] {
@@ -488,6 +545,86 @@ export function normalizeTask(value: unknown): Task {
 
 export async function getHealth(): Promise<HealthResponse> {
   return apiRequest<HealthResponse>("/health");
+}
+
+export async function getActors(
+  input: ActorListParams = {},
+): Promise<ActorListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.type) params.set("type", input.type);
+  if (input.status) params.set("status", input.status);
+  if (input.sort?.trim()) params.set("sort", input.sort.trim());
+  const payload = await apiRequest<unknown>(`/api/v1/actors?${params}`);
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("责任主体列表响应格式无效");
+  }
+  const items = payload.data.map(normalizeActor);
+  const meta = isRecord(payload.meta) ? payload.meta : {};
+  return {
+    items,
+    meta: {
+      page: positiveInteger(meta.page, "责任主体页码", input.page ?? 1),
+      pageSize: positiveInteger(
+        meta.page_size ?? meta.pageSize,
+        "责任主体分页大小",
+        input.pageSize ?? 50,
+      ),
+      total: nonNegativeInteger(meta.total, "责任主体总数", items.length),
+    },
+  };
+}
+
+export async function getActor(id: string): Promise<Actor> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/actors/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeActor(body);
+}
+
+export async function createPersonActor(
+  input: CreatePersonActorInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<Actor> {
+  const payload = await apiRequest<unknown>("/api/v1/actors", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      type: "person",
+      display_name: input.displayName,
+      notes: input.notes ?? "",
+      metadata: input.metadata ?? {},
+      status: input.status ?? "active",
+    }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeActor(body);
+}
+
+export async function updateActor(
+  id: string,
+  input: UpdateActorInput,
+): Promise<Actor> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/actors/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.displayName === undefined
+          ? {}
+          : { display_name: input.displayName }),
+        ...(input.notes === undefined ? {} : { notes: input.notes }),
+        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeActor(body);
 }
 
 export async function getTaskPage(

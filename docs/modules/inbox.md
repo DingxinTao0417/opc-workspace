@@ -39,7 +39,7 @@
 ### 已知缺口
 
 - “全部标为已读”没有行为，且没有收件箱列表、详情、筛选或真实计数。
-- 没有 `actors`、`inbox_items`、`inbox_item_tasks`、`task_assignments`、`task_artifacts`、`workflow_events` 或 `reminders` 表。
+- SQLite schema v7 已有 `actors`、`task_assignments` 和 `workflow_events` 基础及历史 owner Assignment 回填；仍没有 `inbox_items`、`inbox_item_tasks`、`task_artifacts` 或 `reminders` 表，也没有 Assignment 操作与收件箱事件链路。
 - 没有任何 Inbox/Reminder/Assignment/Artifact API、Query 或 Mutation。
 - 没有来源事件、稳定去重键、调度器、拆分事务、派生进度、解决/忽略/重开或审计。
 - 没有 Agent Adapter、Agent Run、能力令牌、取消/重试或崩溃恢复；这些也不属于 v0.1。

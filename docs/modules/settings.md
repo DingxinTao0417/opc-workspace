@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；v0.1 目标是把非敏感设置迁入版本化 SQLite，并补齐 Actor、数据、诊断和桌面设置入口。
+> 文档状态：部分实现；schema v7 的“人员与责任”设置模块已接真实 Actor API，其他现有偏好仍保存在 localStorage。v0.1 目标继续是把非敏感设置迁入版本化 SQLite，并补齐数据、诊断和桌面设置入口。
 
 ## 定位与边界
 
@@ -24,18 +24,19 @@
 - 通用：默认首页、右侧概览开关和减少动效。
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
+- 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 关于：硬编码应用版本、数据存储、桌面架构和云同步状态。
 - Zustand persist 对输入进行边界清洗，历史存储键为 opc-focus-settings。
 
 当前限制：
 
-- 所有设置只保存在当前浏览器或 WebView 的 localStorage；浏览器开发环境与桌面应用互不共享。
+- 除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage；浏览器开发环境与桌面应用互不共享。
 - 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
 - 没有 GET / PATCH /settings API，也没有 app_settings 表。
 - 从专注页或命令面板打开“专注设置”仍固定显示通用模块。
 - 专注设置草稿实时同步会重置当前计时；取消不能恢复已消耗进度。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 没有 Actor、通知、数据/备份、快捷键、诊断或 Agent 设置页。
+- 已有 Actor 设置页，但没有任务负责人选择器、分派历史、通知、数据/备份、快捷键、诊断或 Agent 设置页。
 - “关于”没有读取真实 app、commit、API、schema 和 Sidecar 健康信息。
 - 通用 Modal 仅支持 Escape 和背景关闭，缺少完整焦点圈闭与关闭后的焦点恢复。
 
@@ -64,9 +65,10 @@
 
 ### Actor 与本地 Agent
 
-- v0.1 管理 person：名称、备注、启用和停用；owner 与 system 只读且不可删除。
+- v0.1 Actor 管理已接 SQLite/API：person 可编辑名称、备注、非敏感 metadata、启用和停用；owner 只允许编辑展示名称，system 只读，当前没有 Actor 删除路由。
 - 明确提示 person 只记录本地责任，不发送任务、不创建账号、不授予访问权限。
 - 客户联系人只有用户显式创建或关联后才成为 person Actor。
+- person 存在活动 Assignment 时，API 与数据库共同拒绝停用并提示先改派；Assignment 操作入口仍待 T-18C。
 - v0.2 增加 Adapter 与 agent Actor 管理、能力摘要、健康检查、启停和隔离边界。
 - 未注册或不健康的本地执行器不能创建可分派 Agent。
 
@@ -122,10 +124,11 @@
 
 ### 管理 person Actor
 
-1. owner 打开 Actor 设置，查看内置 owner/system 与 person 列表。
-2. 新建 person 并明确确认其只是本地责任记录。
-3. person 可用于任务分派；停用后不能用于新分派。
-4. 已有历史引用保留，不能硬删除。
+1. owner 打开“人员与责任”，页面从 Sidecar 读取内置 owner/system 与 person 列表，并提供加载、错误重试和空状态。
+2. 新建 person，填写名称、备注和可选 JSON object；界面明确说明这只是本机责任记录。
+3. 编辑请求携带当前 `If-Match`；版本冲突时列表刷新并提示载入最新内容。
+4. person 没有活动 Assignment 时可停用或重新启用；存在活动 Assignment 时返回冲突并保持原状态。
+5. 当前没有硬删除入口，也没有任务分派入口；person 真正用于新分派随 T-18C 接入。
 
 ### 数据恢复
 
@@ -153,10 +156,10 @@
 
 | 方法与路径 | 用途 |
 |------------|------|
-| GET /api/v1/settings | 返回全部可见非敏感设置、schema 和版本 |
-| PATCH /api/v1/settings | 按模块更新，返回服务端规范化结果 |
-| GET / POST /api/v1/actors | 查询 Actor 或创建 person |
-| GET / PATCH /api/v1/actors/:id | 更新 person；owner 只允许修改展示资料；内置类型和 system 不可改，停用遵循 Actor 约束 |
+| GET /api/v1/settings | **规划**：返回全部可见非敏感设置、schema 和版本 |
+| PATCH /api/v1/settings | **规划**：按模块更新，返回服务端规范化结果 |
+| GET / POST /api/v1/actors | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag` |
+| GET / PATCH /api/v1/actors/:id | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
 | GET /health | 提供真实 app、commit、API 和 schema 版本 |
 
 备份、桌面能力与 Agent Adapter 通过各自模块 API 或 Tauri command 提供；设置页不建立第二份状态。
@@ -169,7 +172,7 @@
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
-关键事件可包括 settings_migrated、settings_updated、actor_created、actor_deactivated、backup_started 和 desktop_capability_changed。敏感值不能进入 Workflow Event。
+当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；失败写入和幂等重放不重复写事件。`settings_migrated`、`settings_updated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何 Workflow Event。
 
 ## 与其他模块协作
 
@@ -197,7 +200,7 @@
 
 ### v0.1-C：设置页面补齐
 
-- 增加 Actor、通知、数据/备份、快捷键和诊断模块。
+- “人员与责任”的 Actor 管理范围已完成；Assignment 入口及通知、数据/备份、快捷键和诊断模块待实现。
 - 支持入口指定 activeModule。
 - 展示真实健康和版本信息，移除硬编码“关于”事实。
 - 完成焦点圈闭、Escape、关闭后焦点恢复和保存错误状态。
@@ -223,7 +226,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - 各入口可直接打开指定设置模块。
-- person UI 明确说明不会发送或同步；停用不破坏历史分派。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础保留在 schema v7。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
@@ -232,10 +235,12 @@
 ## 相关代码/PRD链接
 
 - [PRD：专注设置模态框](../opc-workspace-PRD.md#专注设置模态框)
-- [PRD：app_settings 规划](../opc-workspace-PRD.md#本地工作编排规划表尚未实现)
+- [PRD：app_settings 规划](../opc-workspace-PRD.md#本地工作编排数据表部分实现)
 - [PRD：各模块具体实施计划](../opc-workspace-PRD.md#107-各模块具体实施计划)
 - [当前设置 store](../../apps/web/src/store/settings.ts)
 - [当前设置弹窗](../../apps/web/src/components/SettingsModal.tsx)
 - [当前设置测试](../../apps/web/src/components/SettingsModal.test.tsx)
+- [当前 Actor 设置](../../apps/web/src/components/ActorSettings.tsx)
+- [当前 Actor 设置测试](../../apps/web/src/components/ActorSettings.test.tsx)
 - [当前通用 Modal](../../apps/web/src/components/Modal.tsx)
 - [当前健康 API](../../services/sidecar/internal/api/router.go)

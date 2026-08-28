@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27
 >
-> 版本边界：任务事实层已在 SQLite schema v6 和 API v1 中交付；扩展状态、Actor 分派、产出和验收仍为 v0.1 后续纵切，Agent 执行为 v0.2 规划。
+> 版本边界：任务事实层已在 SQLite schema v6 和 API v1 中交付；当前 schema v7 已增加 Actor/Assignment/Event 数据基础、历史 owner 回填和 Actor 管理，但 Assignment 操作/UI、扩展状态、产出和验收仍为 v0.1 后续纵切，Agent 执行为 v0.2 规划。
 
 ## 定位与边界
 
@@ -41,7 +41,7 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 ### 已知缺口
 
 - 状态仍只有三态。列表按钮主要完成或恢复任务；`blocked / waiting_review / cancelled`、显式生命周期命令、返工原因和审计均未实现。
-- `completion_criteria` 已保存和编辑，但 `review_policy`、Assignment、Artifact、Workflow Event 与真正的验收流程尚未实现，因此完成标准目前只是事实字段，不会自动判定完成。
+- `completion_criteria` 已保存和编辑；schema v7 虽已有 Assignment/Event 数据基础与历史回填，但 `review_policy`、Assignment 操作、Artifact、任务事件生产/查询与真正的验收流程尚未实现，因此完成标准目前只是事实字段，不会自动判定完成。
 - 父任务只展示子任务统计，不会因子任务完成而自动推进；“所有子任务取消不自动完成”等规则要等扩展状态和受控生命周期上线后实现。
 - 批量 API 只允许移动项目、改计划日期、加/删标签，不批量改状态或删除，避免在受控生命周期上线前形成绕过入口。
 - 任务页实现了按钮式计划组排序，今日页尚未消费该纵切，仍没有真实日期分组、跨日期改期或拖拽回滚。

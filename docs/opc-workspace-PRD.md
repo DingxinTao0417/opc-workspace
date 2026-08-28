@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v1.7
+> **一人公司操作系统** · PRD v1.8
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-27
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v6
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v7
 
-> **v1.7 更新说明**：完成 SQLite schema v6 任务事实层：任务类型、父子关系、完成标准、Task/Tag 版本与循环保护；接通标签管理、任务页服务端分页/搜索/筛选/稳定排序、层级展示、`ETag`/`If-Match` 冲突处理、事务化批量安全操作和计划日期组手动排序。任务状态仍保持三态，Actor、Assignment、验收策略、Artifact、Workflow Event 和 Inbox 编排继续作为后续纵切，不把任务事实层误标为完整工作流。
+> **v1.8 更新说明**：完成 T-18A/T-18B，将当前基线推进到 SQLite schema v7：新增 Actor、Assignment 历史和 Workflow Event 基础，稳定初始化 owner/system 并幂等回填历史任务；接通 Actor API 与设置页 person 管理。Assignment 操作 API/UI、受控任务状态、Artifact、Agent 和 Inbox 编排仍是后续纵切，不把基础表与 Actor 管理误标为完整工作流。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -287,7 +287,7 @@ pnpm dev
 
 **历史原型（已移除）**：`tasks-linear.html`
 
-> **当前状态**：部分完成。schema v6 已实现任务类型、父子关系、完成标准、标签和版本；任务页已接服务端分页/搜索/筛选/稳定排序、层级展示、批量安全操作和计划日期组按钮排序，详情支持冲突草稿处理。状态仍只有 `todo / in_progress / done`；Actor 分派、扩展状态、产出验收、今日页排序接入和拖拽仍未实现。
+> **当前状态**：部分完成。schema v7 延续已实现的任务类型、父子关系、完成标准、标签和版本，并新增 Actor/Assignment/Event 基础与历史 owner 分派回填；任务页已接服务端分页/搜索/筛选/稳定排序、层级展示、批量安全操作和计划日期组按钮排序，详情支持冲突草稿处理。Actor 身份可在设置中管理，但任务状态仍只有 `todo / in_progress / done`，Assignment 操作、扩展状态、产出验收、今日页排序接入和拖拽仍未实现。
 
 目标提供全量任务视图；v0.1 先完成列表视图，任务看板归入 v0.2。
 
@@ -388,7 +388,7 @@ pnpm dev
 
 **历史原型（已移除）**：`projects-linear.html`
 
-> **当前状态**：部分完成。当前 schema v6 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合；Client CRUD、客户选择、项目产出/附件/事件和 Inbox 集成仍未实现。
+> **当前状态**：部分完成。当前 schema v7 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合；Client CRUD、客户选择、项目产出/附件/事件和 Inbox 集成仍未实现。
 
 项目采用卡片式网格布局，是任务的上层组织单位。
 
@@ -587,6 +587,8 @@ planning --start--> in_progress --pause--> paused --resume--> in_progress
 
 #### 本地 Actor 模型
 
+> **当前实现**：T-18A/T-18B 已交付 schema v7 Actor 身份基础、历史 Assignment 回填、Actor API 和设置页“人员与责任”。任务负责人选择、创建/改派/结束 Assignment、受控验收状态和 Artifact 仍未交付；agent Actor 仅保留数据类型边界，v0.1 API 不允许创建或编辑 agent。
+
 | Actor 类型 | 定义 | 目标能力 |
 |------------|------|--------------|
 | `owner` | 当前设备上的应用所有者，固定一个 | 创建、拆分、分派、改派、验收、返工、解决和重新打开工作 |
@@ -594,7 +596,7 @@ planning --start--> in_progress --pause--> paused --resume--> in_progress
 | `agent` | 由 Sidecar 管理且通过健康检查的本地执行器 | 在授权能力和本地资源范围内运行并提交产出，不能自行验收 |
 | `system` | 内置调度与规则主体 | 生成去重事件、派生进度、记录本地故障；不能替代用户完成高风险验收 |
 
-版本边界：v0.1 先交付 owner/person/system 的人工受理、分派和验收闭环；agent Actor、Adapter 和实际 Run 归入 v0.2。界面必须明确提示：分派给 `person` 仅记录责任归属，不会向对方发送任务或授予访问权限。客户联系人不自动成为 Actor，只有用户显式创建或关联后才能作为负责人。没有已注册并健康的本地执行器时，`agent` 选项必须禁用并说明原因，不能用占位 Actor 暗示 Agent 已可执行。
+版本边界：v0.1 的 owner/person/system 身份管理已经交付，人工分派和验收闭环继续开发；agent Actor、Adapter 和实际 Run 归入 v0.2。界面必须明确提示：`person` 仅记录本机责任归属，不会向对方发送任务、创建账号或授予访问权限。客户联系人不自动成为 Actor，只有用户显式创建或关联后才能作为负责人。没有已注册并健康的本地执行器时，`agent` 选项必须禁用并说明原因，不能用占位 Actor 暗示 Agent 已可执行。
 
 #### 规划事件来源
 
@@ -876,7 +878,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；v1.7 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v1.8 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1058,7 +1060,7 @@ Invoice → Client / Project
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | updated_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 
-**focus_sessions** - 专注记录表（当前 schema v6 仍保留旧字段与规划扩展）
+**focus_sessions** - 专注记录表（当前 schema v7 仍保留旧字段与规划扩展）
 
 | 字段 | 类型 | 约束 |
 |------|------|------|
@@ -1066,8 +1068,8 @@ Invoice → Client / Project
 | task_id | TEXT | FOREIGN KEY |
 | started_at | TEXT | NOT NULL，RFC 3339 UTC |
 | ended_at | TEXT | RFC 3339 UTC |
-| duration_minutes | INTEGER | 当前 schema v6 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
-| completed | INTEGER | 当前 schema v6 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
+| duration_minutes | INTEGER | 当前 schema v7 仍保留的字段；规划迁移后删除，以 accumulated_seconds 为唯一事实 |
+| completed | INTEGER | 当前 schema v7 仍保留的字段；规划迁移后删除，以 status 为唯一事实 |
 | created_at | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP |
 | status | TEXT | planned / active / paused / recovery_pending / completed / cancelled / interrupted；规划字段 |
 | planned_seconds | INTEGER | 本次计划时长；规划字段 |
@@ -1079,27 +1081,27 @@ Invoice → Client / Project
 
 规划迁移通过重建 `focus_sessions` 删除旧 `duration_minutes/completed`，不能让新旧字段并行可写。历史 `completed = 1` 迁为 status=completed；其他历史记录根据 ended_at 映射为 cancelled 或 interrupted；`accumulated_seconds = duration_minutes * 60`。同一迁移版本必须同步更新今日统计查询。迁移后同一数据库同时最多一个未结束 Session。新 Sidecar 发现属于旧进程的 active Session 时先原子转为 recovery_pending；用户再选择计入中断间隔恢复、只计到 last_heartbeat_at 后恢复，或结束为 interrupted。显示剩余时间时使用服务端绝对时间计算，前端 tick 不作为事实；pause/stop/cancel 在事务中结算当前区间，stop 与任务 `actual_minutes` 累计使用同一幂等事务。
 
-#### 本地工作编排规划表（尚未实现）
+#### 本地工作编排数据表（部分实现）
 
-schema v6 `006_task_facts.sql` 已交付 Task 类型、父子关系、完成标准、Task/Tag 版本、索引与父子循环/聚合失效 trigger。以下 Actor、Assignment、产出、事件和扩展状态结构必须从 `007_...` 起继续追加递增迁移，不得回写任何已发布迁移。Task 状态 CHECK 扩展时需要在事务内重建相关表，并验证 schema v6 数据、外键、trigger 和索引。
+schema v7 `007_actor_assignments.sql` 已在 schema v6 Task 事实层上新增 `actors`、`task_assignments` 和 `workflow_events`，并完成稳定内置主体与历史任务分派回填。`agent_adapters`、Inbox、Reminder、Artifact、Agent Run、`app_settings` 和 Task 扩展状态仍是规划；后续只能继续追加递增迁移，不得回写任何已发布迁移。Task 状态 CHECK 扩展时需要在事务内重建相关表，并验证 schema v7 数据、外键、trigger 和索引。
 
-**actors** - 本地责任主体
+**actors** - 本地责任主体（schema v7 已实现）
 
 | 字段 | 类型 | 约束 / 说明 |
 |------|------|-------------|
-| id | TEXT | PRIMARY KEY (UUID) |
+| id | TEXT | PRIMARY KEY (UUID)；owner/system 使用下述固定 UUID |
 | type | TEXT | owner / person / agent / system |
-| display_name | TEXT | NOT NULL |
-| status | TEXT | active / inactive |
-| is_builtin | INTEGER | owner/system 为 1 |
-| adapter_id | TEXT | agent 对应的 `agent_adapters.id`；其他类型为空 |
-| capabilities_json | TEXT | 本地能力白名单，不包含凭据 |
-| metadata_json | TEXT | 联系备注或非敏感配置 |
-| created_at / updated_at | TEXT | RFC 3339 UTC |
+| display_name | TEXT | trim 后 1–100 字符，NOT NULL |
+| status | TEXT | active / inactive；owner/system 固定 active |
+| is_builtin | INTEGER | owner/system 为 1，person/agent 为 0 |
+| notes | TEXT | 最多 2000 字符，默认空字符串 |
+| metadata_json | TEXT | 必须是 JSON object，默认 `{}`；API 另做大小、深度、key 数和敏感 key 限制 |
+| version | INTEGER | 乐观并发版本，默认 1 |
+| created_at / updated_at | TEXT | 非空 UTC 时间戳 |
 
-约束：仅允许一个 owner；owner/system 不可删除；已经被历史记录引用的 Actor 只能停用。
+约束：仅允许一个 owner 和一个 system；内置 Actor 不可删除。owner 只允许修改 `display_name`，system 完全不可编辑；活动 Assignment 存在时 Actor 不得停用。person 当前可修改展示名、备注、metadata 和 active/inactive，API 不提供 Actor 删除路由。agent 的 Adapter 和能力字段不在 `actors` 表内，随 v0.2 的 `agent_adapters` 单独建模。
 
-首次 Actor 迁移必须使用稳定的内置 UUID 幂等创建一个 owner 和一个 system。owner 初始名称使用本地默认值“我”，其 `actors.display_name` 是责任人名称的唯一事实源；旧 localStorage 的 displayName/avatarDataUrl 只迁移为 `app_settings.workspace` 品牌资料，不得改写 owner 名称。由于现有任务全部来自单用户版本，迁移为每条历史 Task 回填 owner Assignment：未完成任务保留活动分派；已完成任务以 `completed_at`（缺失时用 `updated_at`）结束分派。每条回填写 `migration_assignment_backfill` Workflow Event，并标明这是迁移推定，不宣称有更细的历史执行证据。重复运行迁移不得生成第二份内置 Actor、Assignment 或事件。
+schema v7 使用稳定 UUID `00000000-0000-5000-8000-000000000001` 幂等创建 owner“我”，使用 `00000000-0000-5000-8000-000000000002` 幂等创建 system“系统”。`actors.display_name` 是责任人名称的唯一事实源；旧 localStorage 的 displayName/avatarDataUrl 未来只迁移为 `app_settings.workspace` 品牌资料，不得改写 owner 名称，当前 `app_settings` 尚未实现。由于 schema v6 及更早任务全部来自单用户版本，迁移为每条历史 Task 回填 owner Assignment：未完成任务保留活动分派；已完成任务以 `completed_at`（缺失时用 `updated_at`）结束分派。每条回填写 `migration_assignment_backfill` Workflow Event，并标明这是迁移推定，不宣称有更细的历史执行证据。回填 ID 由已有 Task ID 确定性派生，不依赖应用运行时随机值；重复执行不得生成第二份内置 Actor、Assignment 或事件。
 
 **agent_adapters** - 本地 Agent 执行器注册（v0.2）
 
@@ -1158,18 +1160,18 @@ Adapter 注册信息以该表为事实源；敏感凭据不进入 manifest。每
 
 进度和自动解决只统计 `unlinked_at IS NULL` 的活动关联；对 `(inbox_item_id, task_id)` 建立仅覆盖活动行的唯一索引。重新关联同一 Task 时创建新行，不复用或覆盖旧记录，以保留完整关联历史。
 
-**task_assignments** - 任务分派历史
+**task_assignments** - 任务分派历史（schema v7 已实现数据基础，操作 API/UI 待开发）
 
 | 字段 | 类型 | 约束 / 说明 |
 |------|------|-------------|
 | id | TEXT | PRIMARY KEY (UUID) |
-| task_id / actor_id | TEXT | 任务与负责人 |
+| task_id / actor_id | TEXT | 任务与负责人；Task 删除级联清理，Actor 删除受限 |
 | role | TEXT | assignee / reviewer |
-| assigned_by_actor_id | TEXT | 执行分派的 Actor |
-| assigned_at / unassigned_at | TEXT | 生效与结束时间 |
-| reason | TEXT | 改派原因 |
+| assigned_by_actor_id | TEXT | 执行分派的 Actor；外键删除受限 |
+| assigned_at / unassigned_at | TEXT | 非空生效时间与可选结束时间；`unassigned_at IS NULL` 表示活动 |
+| reason | TEXT | 最多 1000 字符，默认空字符串 |
 
-Assignment 不设置自己的工作完成状态；同一任务、同一 role 同时只允许一个 `unassigned_at IS NULL` 的活动记录。
+Assignment 不设置自己的工作完成状态；同一任务、同一 role 同时只允许一个 `unassigned_at IS NULL` 的活动记录。新建/恢复活动 Assignment 时负责人和分派人必须 active；v0.1 reviewer 必须是 owner。已结束记录的身份字段、结束时间和原因不可覆盖，保留 Task 存续期间的责任历史。目前只有迁移回填，尚无查询、创建、改派或结束 API。当前 Task DELETE 是永久删除整个 Task 聚合，因此 `task_id ON DELETE CASCADE` 会一并删除其 Assignment；相关 Workflow Event 保留，但 `assignment_id` 按 `ON DELETE SET NULL` 清空，文档不承诺 Assignment 跨 Task 硬删除保留。
 
 **agent_runs** - 本地 Agent 单次执行
 
@@ -1193,9 +1195,9 @@ Assignment 不设置自己的工作完成状态；同一任务、同一 role 同
 
 字段至少包括 `id`、`task_id`、`agent_run_id`、`storage_kind`、`name`、`content_text`、`reference_url`、`relative_path`、`mime_type`、`size_bytes`、`sha256`、`requires_followup`、`produced_by_actor_id`、`recorded_by_actor_id`、`deleted_at`、`created_at`。person 的线下结果由 owner 录入时，前者记录 person、后者记录 owner；本地 Agent 产出必须关联 Agent Run。只有项目交付类产出或 owner 显式标记 `requires_followup = 1` 才能新建后续收件箱项。文件只能写入应用控制的产出目录，数据库只保存相对路径和校验值；外部 URL 只作为不可自动抓取的引用，`file:` 等本地路径必须先导入受控目录。
 
-**workflow_events** - 追加式工作流审计
+**workflow_events** - 追加式工作流审计（schema v7 已实现基础）
 
-字段至少包括 `id`、`aggregate_type`、`aggregate_id`、`action`、`actor_id`、`assignment_id`、`agent_run_id`、`request_id`、`previous_json`、`current_json`、`created_at`。普通业务 API 不提供修改或删除历史事件的入口。
+当前字段包括 `id`、`aggregate_type`、`aggregate_id`、`action`、可选 `actor_id`、`assignment_id`、`agent_run_id`、`request_id`、`previous_json`、`current_json` 和 `created_at`。Actor 创建、更新、停用与历史 Assignment 回填已经写入该表；普通业务 API 不提供修改或删除历史事件的入口。Assignment/Artifact/Inbox/Agent 等通用时间线生产与查询仍待各纵切接入，不能把现有表等同于完整审计系统。
 
 **reminders** - 本地提醒调度
 
@@ -1203,9 +1205,9 @@ Assignment 不设置自己的工作完成状态；同一任务、同一 role 同
 
 **idempotency_keys 增量字段** - 幂等重放契约
 
-schema v4 已在现有表上增加 `request_hash`、`response_status` 和 `response_body`；当前 Task 与 Project 创建均用其保存规范化请求摘要、首次资源响应和原始 `201` 状态，实现资源编辑/删除后的同请求安全重放与异体冲突检测。后续编排迁移再增加 `created_by_actor_id` 和 `expires_at`，把 key 的作用域扩展到 Actor、HTTP 方法和规范化路径；过期清理不得破坏仍需审计的 Workflow Event。完整契约中的 `response_body` 只保存有大小上限且已脱敏的资源响应，不缓存文件、Task Artifact 正文或 Agent 输入输出；除 Task/Project 创建外，其他规划写命令尚未获得这一保证。
+schema v4 已在现有表上增加 `request_hash`、`response_status` 和 `response_body`；当前 Task、Project 与 person Actor 创建均用其保存规范化请求摘要、首次资源响应和原始 `201` 状态，实现同请求安全重放与异体冲突检测。Actor 以 `POST /api/v1/actors` endpoint 作用域保存 key，并保证重放不重复写 `actor_created` 事件。后续编排迁移再评审 `created_by_actor_id` 和 `expires_at`，把 key 的作用域扩展到调用 Actor、HTTP 方法和规范化路径；过期清理不得破坏仍需审计的 Workflow Event。完整契约中的 `response_body` 只保存有大小上限且已脱敏的资源响应，不缓存文件、Task Artifact 正文或 Agent 输入输出；除 Task/Project/Actor 创建外，其他规划写命令尚未获得这一保证。
 
-**app_settings** - 版本化非敏感用户设置
+**app_settings** - 版本化非敏感用户设置（规划，尚未实现）
 
 字段至少包括 `key`、`value_json`、`version`、`updated_by_actor_id`、`updated_at`。`workspace` key 保存工作区品牌名称和头像引用，不作为 owner 身份；owner 名称只存在于 actors。服务端按设置模块清洗 schema；敏感凭据、Sidecar 会话令牌和 Agent 单次能力令牌不得进入该表。
 
@@ -1318,7 +1320,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。v1.7 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v1.8 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1364,13 +1366,13 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 模块 | MVP 目标功能 | 当前状态（2026-08-27） |
 |------|--------------|--------------------------|
 | 今日工作台 | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板 | **部分完成**：布局、真实任务/今日统计、共享任务详情和基础概览已接通；按日期筛选、拖拽排序、收入与客户动态待实现 |
-| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：schema v6 任务事实、父子/标签/完成标准、快照式幂等新建、`ETag`/`If-Match` CRUD、服务端分页搜索筛选、层级列表、批量安全操作和计划组按钮排序已实现；扩展状态、Actor 分派、产出验收、拖拽和 Focus 工时待实现 |
+| 任务管理 | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键 | **部分完成**：schema v6 任务事实及其 schema v7 兼容回归、父子/标签/完成标准、快照式幂等新建、`ETag`/`If-Match` CRUD、服务端分页搜索筛选、层级列表、批量安全操作和计划组按钮排序已实现；Actor 身份和历史 owner Assignment 已存在，但任务分派操作、扩展状态、产出验收、拖拽和 Focus 工时待实现 |
 | 项目管理 | 项目卡片、状态流转、项目进度、项目详情（任务列表） | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务派生进度/工时已实现；客户选择、产出/附件/事件/Inbox 集成待实现 |
 | 客户管理 | 客户列表表格、客户详情、基本 CRUD | **页面骨架**：可导航空状态已实现，CRUD 与详情未开始 |
-| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决 | **页面骨架**：空状态已实现；Actor、Inbox Item、Assignment、拆分、提醒和审计均未开始 |
+| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决 | **部分基础完成**：收件箱仍是空状态页面骨架；schema v7 Actor/Assignment/Event 基础、历史回填、Actor API 与设置页 person 管理已交付，Inbox Item/Reminder、Assignment 操作、拆分、验收与通用事件时间线未开始 |
 | 专注模式 | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导 | **部分完成**：全局计时、专注/休息循环、设置、自动衔接、重置和提示音已实现；会话入库、任务工时、连续天数和通知控制待实现 |
 | 全局功能 | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查 | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现 |
-| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发数据隔离、WAL、外键、迁移入口和 schema v6 已实现；一致性备份、恢复和基础导入导出待实现；每日计划和高级导入归 v0.3 |
+| 数据持久化 | Tauri `appDataDir`、SQLite 迁移、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发数据隔离、WAL、外键、迁移入口和 schema v7 已实现；一致性备份、恢复和基础导入导出待实现；每日计划和高级导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 - 看板视图（任务看板、项目看板）
@@ -1423,7 +1425,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-27。当前版本是可运行、可扩展的 v0.1 基座，不代表第 9.1 节的完整 MVP 或 v1.6 新增的 Actor/收件箱规划已经交付。
+> 状态截止：2026-08-27。当前版本是可运行、可扩展的 v0.1 基座；T-18A/T-18B 已交付，但这不代表第 9.1 节的完整 MVP、Assignment/受控验收或收件箱人工编排已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1441,9 +1443,9 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 前端 | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力及集中式 `styles.css` |
 | 桌面 | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件 |
 | Sidecar | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0` |
-| API / Schema | API v1；SQLite schema v6 |
+| API / Schema | API v1；SQLite schema v7 |
 | 数据默认值 | 开发数据库默认空白，不自动注入 demo 业务数据 |
-| 明确边界 | 当前代码不使用 Docker；已实现 Task 事实层但未实现受控验收、Actor、工作编排、Agent 执行、AI 助手、知识库、客户回访或收入/支出/发票业务；v0.1 规划中的 person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
+| 明确边界 | 当前代码不使用 Docker；已实现 Task 事实层和 Actor 身份管理，但未实现 Assignment 操作、受控验收、Artifact、完整工作编排、Agent 执行、AI 助手、知识库、客户回访或收入/支出/发票业务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
 ### 10.2 单项任务统一开发流程
 
@@ -1504,7 +1506,7 @@ pnpm dev
 
 | 状态类型 | 当前实现方式 | 示例 |
 |----------|--------------|------|
-| 服务端事实 | TanStack Query | 健康检查、任务、项目、今日统计 |
+| 服务端事实 | TanStack Query | 健康检查、任务、项目、Actor、今日统计 |
 | 短期 UI 状态 | Zustand | 命令面板、新建任务、设置弹窗开关 |
 | 本地配置 | Zustand persist + `localStorage` | 个人资料、默认首页、右栏、主题、减少动效和专注参数；规划迁移到版本化本地配置 |
 | 运行态 | Zustand 内存状态机 | 当前专注阶段、剩余秒数、已完成循环 |
@@ -1513,7 +1515,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v6，新增结构只能追加如 `007_add_xxx.sql` 的递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v7，新增结构只能追加如 `008_add_xxx.sql` 的递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1521,7 +1523,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；`002_remove_default_demo_seed.sql` 只清理旧版本固定 UUID 的 demo 记录，不删除用户创建的数据；`003_project_lifecycle.sql` 增加项目 `version`、`archived_from_status` 及状态/截止日期索引；`004_idempotency_snapshots.sql` 为幂等记录增加 `request_hash`、`response_body` 和 `response_status`；`005_project_aggregate_versions.sql` 用 trigger 在任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除变化时原子递增受影响项目版本；`006_task_facts.sql` 增加任务类型、父级、完成标准、Task/Tag 版本和查询索引，并以递归 trigger 防循环及传播父子聚合版本，把当前数据库推进到 schema v6。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；`002_remove_default_demo_seed.sql` 只清理旧版本固定 UUID 的 demo 记录，不删除用户创建的数据；`003_project_lifecycle.sql` 增加项目 `version`、`archived_from_status` 及状态/截止日期索引；`004_idempotency_snapshots.sql` 为幂等记录增加 `request_hash`、`response_body` 和 `response_status`；`005_project_aggregate_versions.sql` 用 trigger 在任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除变化时原子递增受影响项目版本；`006_task_facts.sql` 增加任务类型、父级、完成标准、Task/Tag 版本和查询索引，并以递归 trigger 防循环及传播父子聚合版本；`007_actor_assignments.sql` 新增 Actor、Assignment 和 Workflow Event 基础，以固定 UUID 初始化 owner/system，确定性回填历史任务的 owner Assignment 与迁移事件，并增加内置记录、活动分派、历史不可变、外键、唯一性和停用保护。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -1530,21 +1532,21 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 | T-01 工程目录与统一脚本 | 已完成 | pnpm workspace、统一启动、Sidecar 构建脚本、开发数据隔离 |
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成 | 窗口、单实例、动态端口、令牌、ready/health、退出清理 |
 | T-03 Go 健康检查与 API 基础 | 已完成 | 版本化路由、安全中间件、统一错误和健康检查 |
-| T-04 SQLite 初始化与迁移 | 已完成 | schema v6、PRAGMA、嵌入式迁移、demo 清理、项目生命周期/幂等快照/聚合版本及 Task 事实层 trigger |
+| T-04 SQLite 初始化与迁移 | 已完成 | schema v7、PRAGMA、嵌入式迁移、demo 清理、项目生命周期/幂等快照/聚合版本、Task 事实层及 Actor/Assignment/Event 迁移与 trigger |
 | T-05 前端 AppShell 与原型复刻 | 已完成 | Linear 深色三栏框架、导航、响应式和公共组件 |
 | T-06 今日工作台 | 部分完成 | 真实任务/统计、共享任务详情、右侧专注概览和反馈状态 |
-| T-07 任务管理纵向闭环 | 部分完成 | schema v6 任务事实、标签、父子/完成标准、版本/ETag、服务端分页筛选、层级列表、批量安全操作和计划组排序已交付；受控生命周期/验收待实现 |
+| T-07 任务管理纵向闭环 | 部分完成 | schema v6 任务事实、标签、父子/完成标准、版本/ETag、服务端分页筛选、层级列表、批量安全操作和计划组排序已交付并兼容 schema v7；Assignment 操作、受控生命周期/验收待实现 |
 | T-08 项目管理 | 部分完成 | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情和任务聚合 |
 | T-09 客户管理 | 页面骨架 | 路由、标题、新建入口外观和空状态 |
 | T-10 收入、支出与发票 | 页面骨架 | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4 |
-| T-11 收件箱与工作编排中心 | 页面骨架 | 当前仅有路由、全部已读入口外观和空状态；新版对象、事件和任务编排均未实现 |
+| T-11 收件箱与工作编排中心 | 页面骨架 | 当前仅有路由、全部已读入口外观和空状态；可复用 schema v7 Actor/Assignment/Event 基础，但 Inbox/Reminder、分派操作和任务编排均未实现 |
 | T-12 专注设置与全局计时 | 部分完成 | 设置持久化、专注/休息循环、提示音、跨路由计时；未绑定任务或写入工时 |
 | T-13 命令面板与基础反馈 | 部分完成 | WebView 快捷键、页面/任务搜索、加载/错误/空状态 |
 | T-14 测试、构建与桌面验收 | 部分完成 | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制 |
 | T-15 AI 助手 | 未开始 | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码 |
 | T-16 本地知识库 | 未开始 | 已登记导入、FTS 检索、引用与删除要求，尚无数据结构或页面 |
 | T-17 客户回访 | 未开始 | 已登记回访计划、到期提醒、结果记录和后续开发顺序，属于 v0.4 |
-| T-18 本地 Actor 与任务分派 | 未开始 | owner/person/agent/system、Assignment、停用与分派历史规划，尚无迁移或代码 |
+| T-18 本地 Actor 与任务分派 | 部分完成 | T-18A schema v7 Actor/Assignment/Event 基础与历史回填、T-18B Actor API 和设置页 person 管理已交付；T-18C Assignment API/UI 与 T-18D 受控状态/Artifact 待开发 |
 | T-19 本地 Agent 执行 | 未开始 | Adapter、Run、产出、取消/重试、验收/返工和崩溃恢复规划，属于 v0.2 |
 
 #### 10.4.1 T-01 工程目录与统一脚本
@@ -1575,9 +1577,9 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 - **需求映射**：6、7、9.1。
 - **用户流程**：首次启动自动创建数据库并迁移；后续启动只执行尚未应用的版本；开发和正式数据互不影响。
-- **实现方法**：GORM 使用纯 Go SQLite 驱动，连接池固定为一个物理连接；打开后启用外键、WAL 和 5 秒 busy timeout。SQL 迁移嵌入二进制并逐个事务执行。schema v1 建立核心表，schema v2 精确删除旧 demo 固定 ID，schema v3 增加 Project 生命周期版本，schema v4 增加幂等请求摘要与首次响应快照，schema v5 增加覆盖 Project 聚合依赖的版本 trigger，schema v6 增加 Task 类型/父子/完成标准、Task/Tag 版本、查询索引和父子循环/聚合失效 trigger。开发数据库位于 `.local/dev-data/`，生产数据库位于 Tauri `appDataDir`。
-- **关键路径**：`internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/006_task_facts.sql`。
-- **验证/剩余**：迁移测试覆盖真实 v5→v6 数据保留、默认值、外键、索引、循环拒绝、父子变更和父任务删除后的子任务解绑/版本失效；破坏性迁移前备份、一致性快照、恢复、导入导出和校验仍未实现。最终全量验证结果以 10.5 节本次更新为准。
+- **实现方法**：GORM 使用纯 Go SQLite 驱动，连接池固定为一个物理连接；打开后启用外键、WAL 和 5 秒 busy timeout。SQL 迁移嵌入二进制并逐个事务执行。schema v1 建立核心表，schema v2 精确删除旧 demo 固定 ID，schema v3 增加 Project 生命周期版本，schema v4 增加幂等请求摘要与首次响应快照，schema v5 增加覆盖 Project 聚合依赖的版本 trigger，schema v6 增加 Task 类型/父子/完成标准、Task/Tag 版本、查询索引和父子循环/聚合失效 trigger，schema v7 增加 Actor/Assignment/Event 基础、稳定内置 UUID、历史任务确定性回填及数据库保护 trigger。开发数据库位于 `.local/dev-data/`，生产数据库位于 Tauri `appDataDir`。
+- **关键路径**：`services/sidecar/internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/007_actor_assignments.sql`。
+- **验证/剩余**：迁移测试覆盖真实 v5→v6 与 v6→v7 数据保留，默认值、外键、索引、父子循环，稳定 owner/system，已完成/未完成任务 Assignment 回填，迁移重放幂等，以及内置 Actor、活动分派和历史保护约束；破坏性迁移前备份、一致性快照、恢复、导入导出和校验仍未实现。最终全量验证结果以 10.5 节本次更新为准。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -1601,7 +1603,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 - **用户流程**：用户按服务端条件搜索/筛选/分页任务；无筛选时展开根任务树，有筛选时查看父任务面包屑。新建与详情可维护类型、项目、父任务、标签、完成标准和日期；可选择多条任务原子改项目/计划日期/标签，也可在一个精确计划日期组内上移、下移或恢复默认顺序。详情保存或删除发生版本冲突时保留草稿并重新获取最新版。
 - **实现方法**：schema v6 增加 `kind`、`parent_task_id`、`completion_criteria`、Task/Tag `version`、任务事实索引和父子循环/聚合失效 trigger。Go 列表接口支持分页、标题/描述搜索、状态/优先级/类型/项目/计划及截止范围/多标签 AND/父级或根任务筛选和稳定白名单排序，并在同一只读事务读取总数、任务、标签。任务创建使用覆盖新增事实的 v2 规范化摘要并兼容安全的 v1 快照；读写返回 `ETag`，非状态 PATCH、三态状态与删除要求 `If-Match`；项目名称变化或硬删除也会递增嵌入该项目名的 Task 版本。Tag API 提供分页、搜索、幂等创建、版本化编辑和确认删除。批量 API 先校验 1–100 项全部版本再原子执行安全动作；排序 API 要求完整计划组及版本集合。前端 `client.ts`/Query hooks 接入分页、标签、批量与排序，`TasksPage` 提供筛选、层级、批量条和排序入口，详情弹窗提供冲突草稿处理。
 - **关键路径**：`services/sidecar/internal/api/tasks.go`、`apps/web/src/api/client.ts`、`apps/web/src/api/hooks.ts`、`apps/web/src/pages/TasksPage.tsx`、`apps/web/src/components/NewTaskModal.tsx`、`apps/web/src/components/TaskList.tsx`、`apps/web/src/components/TaskDetailModal.tsx`。
-- **验证/剩余**：Go 用例覆盖 schema v6、标签、父子循环/删除、101 条稳定分页、筛选/排序、批量原子性、计划组排序、创建快照兼容和版本冲突；前端定向测试覆盖 client/hooks、详情冲突和任务列表/页面交互。状态仍为三态，Actor/Assignment、`review_policy`、Artifact、Workflow Event、扩展状态、拖拽和 Focus 自动工时尚未实现；今日页尚未接入任务事实层的日期与排序能力。
+- **验证/剩余**：Go 用例覆盖 schema v6 任务事实并在 schema v7 上回归标签、父子循环/删除、101 条稳定分页、筛选/排序、批量原子性、计划组排序、创建快照兼容和版本冲突；前端定向测试覆盖 client/hooks、详情冲突和任务列表/页面交互。Actor 身份、历史 owner Assignment 和 Actor 事件已实现，但 Assignment 操作、`review_policy`、Artifact、任务通用 Workflow Event、扩展状态、拖拽和 Focus 自动工时尚未实现；今日页尚未接入任务事实层的日期与排序能力。
 
 #### 10.4.8 T-08 项目管理
 
@@ -1632,7 +1634,7 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 #### 10.4.11 T-11 收件箱与工作编排中心
 
 - **需求映射**：5.6。
-- **当前状态**：页面骨架；尚无 Actor、Inbox Item、Assignment、提醒、审计或 Agent Run 表/API，“全部标为已读”按钮暂无业务行为。
+- **当前状态**：页面骨架；schema v7 已提供 Actor/Assignment/Workflow Event 数据基础和 Actor 管理 API，但尚无 Inbox Item、提醒或 Agent Run 表/API，也没有 Assignment 操作和收件箱事件查询；“全部标为已读”按钮暂无业务行为。
 - **对象边界**：Inbox Item 管来源、分诊、已读、稍后和解决策略；Task 是唯一可执行工单；Assignment 管责任历史；Agent Run 管单次本地执行；Task Artifact 管产出；Workflow Event 管审计。
 - **分阶段纵切**：
   1. **T-11A 收件箱数据契约**：在 T-18 的 Actor/Task/Assignment/审计基础上新增 Inbox Item、关联表和 Reminder 迁移；T-11 不重复拥有 Actor 或 Task 状态迁移。
@@ -1647,9 +1649,9 @@ API 单次请求超时 8 秒；健康检查每 15 秒刷新；任务和今日统
 
 - **需求映射**：5.7。
 - **用户流程**：用户可从今日页、专注页或命令面板打开设置，调整时长、循环、自动开始和提示音；保存后各页面共享同一计时器。
-- **实现方法**：`store/settings.ts` 使用 Zustand persist 保存个人资料、通用、外观和专注设置并清洗越界值；`SettingsModal` 支持草稿预览、取消、恢复默认和保存。`store/focus.ts` 实现专注/休息状态机、循环计数、自动衔接、暂停、重置和完成状态；全局 `FocusTicker` 每秒推进状态，因此普通路由切换不会中断。阶段结束时使用短 WebAudio 振荡器提示，并安全处理不可用或被系统阻止的情况。
-- **关键路径**：`apps/web/src/store/settings.ts`、`apps/web/src/store/focus.ts`、`apps/web/src/components/SettingsModal.tsx`、`apps/web/src/components/FocusTicker.tsx`、`apps/web/src/pages/FocusPage.tsx`。
-- **当前限制**：设置只保存在当前浏览器/WebView 的 `localStorage`；运行态刷新后重置。专注页和命令面板的“专注设置”当前仍固定打开通用模块；专注参数实时预览会重置计时且取消不能恢复进度。计时尚未绑定具体任务、写入 `focus_sessions` 或累计 `actual_minutes`；跳过、连续天数、系统勿扰和原生通知未实现。
+- **实现方法**：`store/settings.ts` 使用 Zustand persist 保存个人资料、通用、外观和专注设置并清洗越界值；`SettingsModal` 支持草稿预览、取消、恢复默认和保存。独立的 `ActorSettings` 通过 TanStack Query 和真实 Actor API 管理 owner/person/system，不把责任身份写回 localStorage。`store/focus.ts` 实现专注/休息状态机、循环计数、自动衔接、暂停、重置和完成状态；全局 `FocusTicker` 每秒推进状态，因此普通路由切换不会中断。阶段结束时使用短 WebAudio 振荡器提示，并安全处理不可用或被系统阻止的情况。
+- **关键路径**：`apps/web/src/store/settings.ts`、`apps/web/src/store/focus.ts`、`apps/web/src/components/SettingsModal.tsx`、`apps/web/src/components/ActorSettings.tsx`、`apps/web/src/components/FocusTicker.tsx`、`apps/web/src/pages/FocusPage.tsx`。
+- **当前限制**：除 Actor 外的设置仍只保存在当前浏览器/WebView 的 `localStorage`，`app_settings` 表与 API 尚未实现；专注运行态刷新后重置。专注页和命令面板的“专注设置”当前仍固定打开通用模块；专注参数实时预览会重置计时且取消不能恢复进度。计时尚未绑定具体任务、写入 `focus_sessions` 或累计 `actual_minutes`；跳过、连续天数、系统勿扰和原生通知未实现。
 
 #### 10.4.13 T-13 命令面板、快捷键与反馈状态
 
@@ -1684,7 +1686,7 @@ pnpm build:desktop
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；v1.7 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v1.8 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -1723,11 +1725,14 @@ pnpm build:desktop
 #### 10.4.18 T-18 本地 Actor 与任务分派
 
 - **需求映射**：5.2、5.6、6、9.1。
-- **当前状态**：未开始；schema v6 已有父子任务、完成标准和 Task 版本，但当前仓库没有 Actor、Assignment、验收策略、扩展验收状态或分派历史。
-- **用户流程**：owner 在设置中维护 person；在任务详情或收件箱拆分面板中把任务分派给 owner/person；person 只记录线下责任，进度和结果由 owner 回填。
-- **实现方法**：在 schema v6 已有父任务、完成条件和乐观并发版本上新增 `actors`、`task_assignments`、`task_artifacts`、`workflow_events`，继续扩展 tasks 的验收策略与状态；同一任务同一 role 只允许一个活动 Assignment，改派通过同一事务结束旧记录并新增记录完成。T-18 是这些基础对象和迁移的唯一归属，T-11 只消费它们。
-- **前端范围**：Actor 设置页、负责人选择器、当前负责人、改派历史、任务提交产出、接受/返工/阻塞/取消操作和时间线。
-- **验收要求**：仅一个 owner；owner/system 初始化与历史任务 owner Assignment 回填可重复执行且不重复；内置 Actor 不可删除；person 停用保留历史；person UI 不暗示已发送任务；并发改派拒绝旧写入；状态流转和审计在同一事务中完成。
+- **当前状态**：部分完成。T-18A 和 T-18B 已交付；T-18C Assignment 操作与 T-18D 受控状态/Artifact 待开发。任务仍保持三态，当前没有负责人选择器、改派时间线、验收策略、扩展验收状态或产出模型。
+- **T-18A（已完成）**：schema v7 新增 `actors`、`task_assignments` 和 `workflow_events`；使用固定 UUID 初始化唯一 owner/system，以 Task ID 确定性回填历史 owner assignee 和 `migration_assignment_backfill` 事件。未完成任务保持活动分派，已完成任务以 `completed_at`、缺失时 `updated_at` 结束；迁移重放不重复。数据库约束内置记录、活动 Actor/分派人、owner reviewer、同 Task/role 唯一活动记录、结束历史不可覆盖、外键与停用保护。Artifact 未在此迁移提前建表，避免脱离 T-18D 的受控存储、校验和验收事务单独落地。
+- **T-18B（已完成）**：实现 `GET/POST /api/v1/actors` 与 `GET/PATCH /api/v1/actors/:id`。列表支持分页、type/status 筛选和白名单稳定排序；v0.1 只允许创建 person。创建可携带 `Idempotency-Key`，保存规范化 SHA-256 与首次 `201` 快照，重放返回相同资源且不重复写事件；不同请求体复用 key 返回冲突。详情、创建和更新返回 `ETag`，PATCH 强制 `If-Match`：缺失为 `428 VERSION_REQUIRED`，格式错误为 `400 INVALID_VERSION`，旧版本为 `409 VERSION_CONFLICT`。owner 只可修改展示名，system 与 agent 不可编辑，person 可编辑展示名、备注、非敏感 metadata 和 active/inactive；存在活动 Assignment 时返回 `409 ACTOR_HAS_ACTIVE_ASSIGNMENTS`，失败不递增版本也不写事件。成功创建、更新和停用与 `actor_created / actor_updated / actor_deactivated` 事件同事务提交。
+- **设置页（已完成 T-18B 范围）**：“人员与责任”读取真实 API，展示内置主体和本地人员；支持新建/编辑/停用/重新启用 person、编辑 owner 展示名、错误重试、空状态、字段校验和版本冲突草稿。界面明确说明 person 只是本机记录，不发送、同步或创建线上账号；metadata 只接受 JSON object，并提示不得填写密码、令牌、API key 等敏感信息。该模块的写入独立保存，不代表其他设置已迁入 `app_settings`；本轮没有浏览器视觉验收证据。
+- **T-18C（待开发）**：在任务详情接入负责人选择、当前 Assignment、创建/改派/结束命令和历史时间线；改派必须在一个事务中结束旧记录、创建新记录并写事件，并处理并发版本冲突。
+- **T-18D（待开发）**：扩展 Task 受控状态和 `review_policy`，新增 `task_artifacts` 及受控文件存储，提供提交产出、owner 接受/返工和通用时间线；Agent/Adapter/Run 仍属于 T-19。
+- **关键路径**：`services/sidecar/internal/database/migrations/007_actor_assignments.sql`、`internal/models/actor.go`、`internal/api/actors.go`、`apps/web/src/components/ActorSettings.tsx`、`apps/web/src/api/client.ts`、`apps/web/src/api/hooks.ts`。
+- **验证/剩余**：数据库测试覆盖真实 v6→v7 保留、迁移重放、已完成/未完成回填、固定内置 UUID、约束与外键；Go API 测试覆盖查询/稳定排序、创建/幂等、输入校验、字段权限、乐观锁、活动分派停用保护和事件原子性；前端定向测试覆盖加载错误重试、内置边界、person 创建/编辑/停用和 metadata 草稿校验。Assignment API/UI、受控状态、Artifact/Agent 和浏览器视觉验收仍未完成。
 
 #### 10.4.19 T-19 本地 Agent 执行
 
@@ -1744,25 +1749,26 @@ pnpm build:desktop
 | 检查 | 最近已知结果 | 说明 |
 |------|--------------|------|
 | 任务事实层定向验证 | 通过 | schema v6 真实 v5→v6 迁移、Task/Tag 创建快照、父子循环/删除、标签版本传播、101 条稳定分页、多条件筛选、批量原子性、计划组排序和版本冲突均有 Go 定向测试；前端 client/hooks、详情冲突和任务列表交互有定向回归 |
-| `pnpm format:check` | 通过 | 根配置、README、脚本、Web 与 Desktop package 范围均符合 Prettier 规则；Markdown 文档另通过 `git diff --check` 与本地链接检查 |
-| `pnpm typecheck` | 通过 | `pnpm build` 已执行 TypeScript 编译并通过，覆盖 Task/Tag 类型、分页、批量/排序 Query/Mutation 和任务详情 |
-| 前端测试 | 通过 | `pnpm test` 共 14 个测试文件、65 个测试全部通过，覆盖 client/hooks、TaskList、TaskDetail 冲突和 TasksPage 交互 |
+| Actor / schema v7 定向验证 | 通过 | 数据库测试覆盖真实 v6→v7 数据保留、迁移重放幂等、已完成/未完成 Assignment 回填、固定 owner/system、约束和外键；Actor API 测试覆盖分页/筛选/稳定排序、创建快照幂等、字段校验、权限、`ETag`/`If-Match`、活动分派停用保护和事务化事件 |
+| 格式与文档差异 | 部分通过 | 根 `pnpm format:check`、`git diff --check`、相对链接和绝对机器路径检查通过；11 份既有 Markdown 不在根格式脚本范围内，直接 Prettier 全文件检查仍报告存量格式差异，本轮未做会扩大 diff 的整篇机械重排 |
+| `pnpm typecheck` | 通过 | TypeScript 编译通过，覆盖新增 Actor model、client、Query/Mutation 和设置组件 |
+| 前端测试 | 通过 | `pnpm --filter @opc/web test` 共 15 个测试文件、73 个测试全部通过；其中 Actor 设置定向测试覆盖错误重试、内置边界、person 创建/编辑/停用、版本传递和 metadata 草稿校验 |
 | Go 测试与静态检查 | 通过 | `go test -count=1 ./...`、`go test -count=10 ./internal/api ./internal/database` 和 `go vet ./...` 均通过 |
-| Web 生产构建 | 通过 | 在 `apps/web` 执行 `pnpm build`，TypeScript 编译与 Vite 生产构建通过，包含任务页层级、筛选、标签、批量和排序交互 |
+| Web 生产构建 | 通过 | `pnpm build:web` 的 TypeScript 编译与 Vite 生产构建通过，包含 Actor 设置与既有任务/项目交互 |
 | `pnpm build:sidecar` | 通过 | 已生成当前 Windows Rust target triple 对应的 Go Sidecar 二进制；产物位于忽略目录，不纳入提交 |
 | Rust 格式 | 通过 | `cargo fmt -- --check` 通过；Rust 共 6 个 ready/状态单元测试，未覆盖真实 Sidecar 生命周期 |
 | `cargo check` / Rust tests | 环境受限 | Rust 工具链可用，但本机缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK），依赖构建阶段即被阻断 |
-| 本地迁移 / API 冒烟 | 通过 | 真实开发库已从 schema v5 迁移到 v6；标签、父子聚合、筛选、批量和排序本地 API 往返通过，QA 数据已清理且原有 1 条任务保留 |
-| 浏览器渲染 / 窄屏视觉 | 本次未验收 | 本会话浏览器控制接口不可用，未取得任务层级、标签、筛选、批量、排序和窄屏布局的真实截图证据 |
+| 本地迁移 / API 冒烟 | 通过 | 真实开发库现为 schema v7；`/health` 返回 app/API/schema 版本，Actor 列表返回固定 owner/system。本轮只做只读冒烟，没有创建或修改 QA 业务数据 |
+| 浏览器渲染 / 窄屏视觉 | 本次未验收 | 本轮没有执行 Actor 设置页或其他页面的真实浏览器视觉、键盘、焦点与窄屏核对；自动化组件测试不作为视觉证据 |
 | 桌面安装包与三平台验收 | 未执行 | 当前 Windows Sidecar target binary 已构建；Tauri 链接、安装包、签名环境和干净系统矩阵仍未完成 |
 
 根 `pnpm check` 当前只执行 TypeScript、Go 测试、Web 构建和 `cargo check`，没有覆盖前端测试、Rust 单元测试或格式检查；在修正聚合脚本前不得把单次 `pnpm check` 视为完整质量门禁。
 
 ### 10.6 已知限制与下一步顺序
 
-1. **任务事实层已交付，继续受控生命周期**：schema v6 的类型、父子、完成标准、标签、Task/Tag 版本、任务页分页筛选、批量安全操作和计划组手动排序已完成；下一步交付 `review_policy`、扩展状态、Actor/Assignment、Artifact、Workflow Event 和显式状态命令。今日页仍需真正按 `planned_date` 查询并接入排序；当前任务页只有上移/下移，不是拖拽。
+1. **Actor 身份基础已交付，继续 Assignment 与受控生命周期**：schema v6 的任务事实层以及 schema v7 的 Actor/Assignment/Event 基础、历史 owner 回填、Actor API 和设置页 person 管理已完成；下一步交付 Assignment 查询/创建/改派/结束、任务负责人 UI、`review_policy`、扩展状态、Artifact、通用时间线和显式状态命令。今日页仍需真正按 `planned_date` 查询并接入排序；当前任务页只有上移/下移，不是拖拽。
 2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务聚合已交付；继续验证大数据量串行分页、真实浏览器/窄屏/焦点，并保留客户、产出/附件/事件/Inbox 为明确缺口。
-3. **建立本地 Actor 与 Assignment**：先交付 owner/person 的本地责任记录、改派历史和人工验收；没有本地执行器时 agent 不可选。
+3. **完成 Assignment 与人工验收**：复用已交付的 owner/person 身份和历史表，补负责人选择、改派历史、受控提交/验收及并发保护；没有本地执行器时 agent 不可选。
 4. **交付基础客户并补项目客户协作**：实现 Client CRUD、搜索、删除约束和项目客户选择/筛选；客户回访不混入这一阶段。
 5. **交付收件箱人工闭环**：实现 Inbox Item、手动提醒、已读/稍后、任务拆分/关联、分派、验收/返工、审计与自动解决，再接项目产出、任务临期/阻塞和系统故障事件源。
 6. **接通专注持久化**：新增 Focus Session API，将开始/暂停/停止写入 SQLite，以绝对时间校正，并在成功事务中累计任务 `actual_minutes`。
@@ -1780,13 +1786,13 @@ pnpm build:desktop
 | 顺序 | 模块 | 后端与数据 | 前端与用户流程 | 完成验收 |
 |------|------|------------|----------------|----------|
 | 1 | 任务基础事实 | schema v6、非状态 PATCH、项目/父子/标签/完成标准、Task/Tag 版本、服务端分页筛选、原子批量安全操作和计划组排序已交付，保持三态兼容 | 详情冲突草稿、标签管理、根任务树/面包屑、筛选分页、批量条和计划组上移/下移已交付；今日页接入与拖拽后置 | 当前纵切覆盖 CRUD、循环防护、稳定分页、标签限制、整批回滚、完整计划组和并发冲突；“全部子任务取消不推进”随扩展状态验收 |
-| 2 | Actor、分派与任务验收 | T-18 交付 actors、task_assignments、Task 扩展状态/完成条件/验收策略、task_artifacts、workflow_events 和受控状态命令 | Actor 管理、负责人/改派、阻塞/取消、提交产出、人工验收/返工和时间线 | person 不发送/同步；唯一活动分派；受控状态不能被 PATCH 绕过；停用保留历史；并发旧写入冲突 |
+| 2 | Actor、分派与任务验收 | T-18A 的 actors/task_assignments/workflow_events 基础与回填、T-18B Actor API 已交付；T-18C 补 Assignment 操作，T-18D 补 Task 扩展状态/验收策略、task_artifacts 和受控状态命令 | Actor 设置管理已交付；负责人/改派、阻塞/取消、提交产出、人工验收/返工和通用时间线待实现 | Actor 管理已覆盖本地语义、内置保护、停用保护和并发冲突；剩余验收唯一活动分派命令、受控状态不可绕过及产出历史 |
 | 3 | 项目 | CRUD、schema v4 快照式创建幂等、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除和任务派生进度/工时已交付；Client CRUD 后补客户选择，T-11 后启用产出/Inbox 事件 | 卡片、分页/搜索/状态筛选、新建/编辑、详情任务列表/工时和归档恢复已交付；任务树、产出、附件和时间线待实现 | 当前纵切继续验收聚合并发、幂等快照、分页拉全性能、归档/删除；T-11 后再验收项目产出→拆分→分派→验收和事件去重 |
 | 4 | 客户 | Client CRUD/搜索/状态、删除约束、项目数聚合；发票上线后再聚合收入 | 表格、新建/编辑、详情资料/项目/活动/附件；不伪造邮件打开或下载行为 | 可选字段校验、分页筛选、受约束删除和关联可解释；回访保持 v0.4 |
 | 5 | 收件箱人工编排 | T-11 交付 inbox_items、inbox_item_tasks、reminders、拆分/分派事务、source_event_key 去重和派生解决策略 | 列表/详情、Reminder、已读/稍后、拆分/关联任务、分派/改派、验收/返工、解决/忽略/重开 | 纯离线；零必需任务不自动解决；拆分失败全回滚；进度由任务派生；来源删除可解释；关联取消可审计 |
 | 6 | 今日 | 按本地日期、逾期和本周范围查询；排序事务；按 IANA 时区计算 UTC 边界；增加收件箱派生计数 | 日期切换、真实分组、拖拽/回滚、恢复默认排序、编辑/删除/专注快捷操作；未上线的财务卡标后续 | 超过 100 项、午夜/夏令时、排序刷新、列表与统计一致；真实浏览器验证拖拽、键盘和窄屏 |
 | 7 | 专注 | 活动 Session、开始/暂停/继续/停止/取消、绝对时间、异常恢复；停止与累计 actual_minutes 同事务且幂等 | 任务选择、恢复/结束上次会话、历史与日/周统计；ticker 只负责显示 | 后台挂起、系统休眠、跨午夜、重复 stop、崩溃恢复和工时只累计一次 |
-| 8 | 设置与命令面板 | 版本化 app_settings、旧 localStorage 一次性迁移、头像文件引用、统一 search API、真实 health/version | 增加 Actor、通知、数据/备份、快捷键、诊断设置；v0.2 增加 Agent；入口可指定目标模块；搜索详情直达；Modal 焦点管理 | 旧设置不丢且不覆盖新值；取消专注草稿不损失进度；搜索目标可定位；键盘、焦点恢复和服务不可用完整覆盖 |
+| 8 | 设置与命令面板 | Actor API 已接入；版本化 app_settings、旧 localStorage 一次性迁移、头像文件引用、统一 search API 和真实 health/version 展示待实现 | “人员与责任”已支持 owner/person 管理；通知、数据/备份、快捷键、诊断、目标模块直达和搜索详情待实现，v0.2 再增加 Agent | Actor 组件测试已覆盖主要反馈状态；仍需验证旧设置迁移不覆盖新值、取消专注草稿、搜索定位、键盘、焦点恢复和服务不可用 |
 | 9 | 数据安全 | v0.1 一致性快照、manifest/SHA-256、迁移前备份、临时库验证、原子恢复和基础导入导出；v0.3 增加计划/映射 | 手动备份/恢复、进度、确认、失败诊断；v0.3 增加外部目录和高级导入 | WAL 活跃、低磁盘、损坏/未知 schema/校验失败均不覆盖当前数据；备份实际恢复验证 |
 | 10 | 桌面与发布 | Sidecar 自动/手动恢复、孤儿治理、日志、版本兼容；托盘/通知/全局快捷键/文件对话框/自启/签名离线更新；三平台 CI | 全局服务状态、恢复页、托盘语义、权限引导、离线安装/更新反馈 | 崩溃/超时/退出无残留；签名、公证、干净机、性能和数据保留逐平台验证后才宣称支持 |
 | 11 | 本地 Agent（v0.2） | Adapter ADR、专用鉴权、短时令牌、跨平台沙箱/网络边界、Agent Run、取消/重试/中断恢复 | 只显示健康且隔离已验证的 Agent；启动、运行、输出、失败、重试、待验收和返工 | 无任意 Shell/数据库/目录；禁网无法验证时执行保持禁用；成功进入 waiting_review；产出校验和历史完整 |
@@ -1801,7 +1807,8 @@ pnpm build:desktop
 ```text
 已交付：Task 三态基础与项目关联 + Project 基础纵切
   → Task 完整事实层
-  → Actor / Assignment
+  → Actor 身份 + Assignment/Event 数据基础
+  → Assignment 操作 + 受控任务状态/Artifact
   → Client CRUD + Project 客户/产出/附件/事件增强
   → Inbox Item / 拆分 / 人工分派与验收
   → 今日与专注持久化
@@ -1830,7 +1837,7 @@ pnpm build:desktop
 | 发票列表 | `invoices-linear.html` |
 | 收件箱 | `inbox-linear.html` |
 | 收件箱详情/拆分/分派 | 尚无新版原型；以 5.6 对象边界和工作流为准 |
-| Actor 管理 | 尚无原型；规划放入设置模块 |
+| Actor 管理 | 无历史 HTML 原型；当前已实现于设置模块“人员与责任”，视觉验收以 React 组件和实际渲染为准 |
 | 路线图 | `roadmap-linear.html` |
 | 内容日历 | `content-calendar-linear.html` |
 | 新建任务弹窗 | `modal-new-task-linear.html` |
@@ -1877,8 +1884,10 @@ pnpm build:desktop
 | POST | /api/v1/tasks/:id/complete | 完成无需验收的人工任务 | v0.1 规划中 |
 | POST | /api/v1/tasks/:id/cancel | 带原因取消 | v0.1 规划中 |
 | POST | /api/v1/tasks/:id/reopen | 重新打开已完成/取消任务 | v0.1 规划中 |
-| GET / POST | /api/v1/actors | 查询 Actor；v0.1 只允许新建 person，v0.2 才允许基于健康 Adapter 创建 agent | 分阶段规划中 |
-| GET / PATCH | /api/v1/actors/:id | 查看、更新或停用 Actor | v0.1 规划中 |
+| GET | /api/v1/actors | 分页查询 Actor | 已实现；默认 50/最大 100，支持 type/status 筛选与 type/display_name/status/created_at/updated_at 白名单稳定排序；默认 owner→person→system→agent |
+| POST | /api/v1/actors | 新建 person | 已实现；服务端固定非内置、version=1，接受 display_name/notes/metadata 和可选 active/inactive；可携带 `Idempotency-Key`，返回首次 `201` 快照、`ETag` 和重放标记；不允许创建 owner/system/agent |
+| GET | /api/v1/actors/:id | 查看 Actor | 已实现；返回 metadata JSON object、版本和 `ETag` |
+| PATCH | /api/v1/actors/:id | 更新或停用 Actor | 已实现；强制 `If-Match`；owner 仅展示名，system/agent 不可编辑，person 可编辑展示名/备注/metadata/状态；活动 Assignment 存在时拒绝停用 |
 | GET / POST | /api/v1/agent-adapters | 查询、注册本地 Adapter | v0.2 规划中 |
 | POST | /api/v1/agent-adapters/:id/check | 本地健康与能力检查 | v0.2 规划中 |
 | GET / POST | /api/v1/inbox-items | 分页查询、创建立即生效的手动工作项；定时提醒使用 reminders API | v0.1 规划中 |
@@ -1955,6 +1964,7 @@ pnpm build:desktop
 - 创建、拆分、分派、运行、验收、返工、解决和忽略均支持 `Idempotency-Key`；幂等记录必须包含请求摘要和可重放响应，同一 key 携带不同请求体返回 `409 CONFLICT`
 - 状态变化携带 `expected_version` 或 `If-Match`；并发版本不一致时拒绝旧写入并返回 `409 CONFLICT`
 - 本地调度事件以 `source_event_key` 建立唯一约束；幂等重放不得重复写 Workflow Event
+- Actor 详情、创建和更新返回 `ETag`；Actor PATCH 缺少 `If-Match` 返回 428，格式错误返回 400，旧版本返回 409。person 创建幂等重放不得重复写 `actor_created`；停用被活动 Assignment 拒绝时不得递增版本或写事件
 - Agent 不使用 WebView 会话令牌；Sidecar 为单次 Run 发放短时、能力受限且不可复用的本地令牌
 - Agent Runtime 使用独立路由组和鉴权中间件，或直接使用受控进程管道；具体传输、Origin 处理、撤销和泄漏防护必须由 v0.2 ADR 确定
 - 外部 URL 产出只作为不可自动抓取的引用；任意本地文件必须先复制到受控 Artifact 目录，读取和删除都经过 Sidecar 鉴权与 Workflow Event
@@ -1995,3 +2005,4 @@ pnpm build:desktop
 | v1.5 | 2026-08-26 | 将 AI 助手与知识库拆为独立工作包；新增客户回访与收入/支出需求；把客户回访、收入/支出和发票业务归入 v0.4 后续业务版，进一步收紧 v0.1 范围 |
 | v1.6 | 2026-08-27 | 将收件箱升级为本地工作受理与编排中心；接受单机 Actor 模型和无线上服务边界；增加任务拆分、Assignment、本地 Agent Run、产出、验收/返工、提醒、审计的数据/API 规划，并补齐各模块实施顺序、验收标准和当前文档基线；PRD 移入 `docs/`，新增整体功能架构与模块文档，历史 HTML 原型从仓库移除 |
 | v1.7 | 2026-08-27 | 将当前基线推进到 SQLite schema v6；交付任务类型、父子关系、完成标准、Task/Tag 版本、标签管理、服务端分页筛选、层级列表、事务化批量安全操作、计划组按钮排序与 `ETag`/`If-Match` 冲突处理；保留扩展生命周期、Actor/验收、今日页拖拽和专注工时为后续纵切 |
+| v1.8 | 2026-08-27 | 将当前基线推进到 SQLite schema v7；交付 T-18A Actor/Assignment/Event 数据基础、固定 owner/system、历史任务幂等分派回填和约束保护，以及 T-18B Actor API、创建幂等、`ETag`/`If-Match`、审计事件与设置页 person 管理；Assignment API/UI、受控状态、Artifact/Agent、Inbox 编排和 app_settings 保留为后续纵切 |

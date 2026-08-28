@@ -22,7 +22,7 @@
 
 当前状态为未开始：
 
-- 数据库没有 actors、agent_adapters、task_assignments、agent_runs、task_artifacts 或 workflow_events 表。
+- SQLite schema v7 已有 `actors`、`task_assignments` 和 `workflow_events` 基础及历史 owner Assignment 回填；但没有 `agent_adapters`、`agent_runs`、`task_artifacts`，也没有可执行 agent Actor 的注册与运行链路。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、负责人选项、Run 详情、输出预览或验收入口。

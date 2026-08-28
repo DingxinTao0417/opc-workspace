@@ -9,15 +9,16 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单
-- SQLite schema v6、WAL、外键、busy timeout 和嵌入式版本化迁移；v3 增加项目生命周期字段，v4 增加幂等快照，v5 让项目聚合变化原子递增版本，v6 增加任务类型、父子关系、完成标准及 Task/Tag 版本
+- SQLite schema v7、WAL、外键、busy timeout 和嵌入式版本化迁移；v3 增加项目生命周期字段，v4 增加幂等快照，v5 让项目聚合变化原子递增版本，v6 增加任务类型、父子关系、完成标准及 Task/Tag 版本，v7 增加本地 Actor、Assignment 基础和 Workflow Event 审计
 - 任务完整事实纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/三态状态/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/筛选/稳定排序、原子批量操作和计划日期组手动排序
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
+- Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - React 三栏应用框架、今日/任务/项目/专注基础页面；客户、收入、发票、收件箱目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口，以及加载、错误、重试和空状态
 - 全局专注/休息计时状态机，以及可持久化的个人资料、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置
 
-受控任务生命周期（阻塞/待验收/取消）、Actor/Assignment、基础客户 CRUD、项目客户选择、项目产出/附件/事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v1.7](docs/opc-workspace-PRD.md) 已规划本地 Actor、收件箱工作受理/拆分/分派/验收和本地 Agent 执行生命周期，但当前代码尚未实现这些对象或 API；第一阶段不引入多人登录、云同步、远程通知或线上 Agent。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页和项目页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
+受控任务生命周期（阻塞/待验收/取消）、Assignment 分派/改派 API 与任务 UI、基础客户 CRUD、项目客户选择、Artifact、项目事件/Inbox 集成、专注会话持久化、备份/恢复、系统托盘、全局系统快捷键、签名离线更新和三平台安装包仍属于后续实现；在线 Updater 不在当前阶段。[PRD v1.8](docs/opc-workspace-PRD.md) 已把 Actor 身份与 person 管理标为已交付，把分派、验收、收件箱编排和本地 Agent 生命周期继续列为后续纵切。第一阶段不引入多人登录、云同步、远程通知或线上 Agent；`person` 仅作本机责任记录，不会收到任务或获得访问权限。客户回访、收入/支出、发票 CRUD/PDF、AI 助手和本地知识库已明确归入更后续版本。开发数据库默认从空业务数据开始；任务页和项目页在 Sidecar 可用时读取真实 SQLite 数据。项目工时目前只聚合任务表已有的 `actual_minutes`，专注计时尚未写入该字段。
 
 ## 目录结构
 
@@ -39,7 +40,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v1.7）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v1.8）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -151,6 +152,10 @@ appLogDir/
 
 ```text
 GET    /health
+GET    /api/v1/actors
+POST   /api/v1/actors
+GET    /api/v1/actors/:id
+PATCH  /api/v1/actors/:id
 GET    /api/v1/tasks
 POST   /api/v1/tasks
 PATCH  /api/v1/tasks/batch
@@ -172,11 +177,11 @@ DELETE /api/v1/projects/:id?confirm=true
 GET    /api/v1/stats/today?date=YYYY-MM-DD
 ```
 
-任务资料、三态状态、删除及标签编辑/删除必须携带 `If-Match` 版本；批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。
+Actor 详情、创建和更新返回 `ETag`；更新必须携带 `If-Match`。Actor 新建只接受 `person`，可选 `Idempotency-Key` 会保存规范化请求与首次 `201` 快照；owner 只允许修改展示名称，system 不可编辑，存在活动 Assignment 的 person 不能停用。当前没有 Actor 删除路由，也没有 Assignment API。任务资料、三态状态、删除及标签编辑/删除同样必须携带 `If-Match` 版本；批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v6；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6 为任务增加类型、父任务、完成标准与版本，为标签增加版本，并建立父子循环保护、聚合版本失效及排序/标签索引。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v7；启动时按文件版本顺序执行，并记录到 `schema_migrations`。schema v6 为任务增加类型、父任务、完成标准与版本，为标签增加版本，并建立父子循环保护、聚合版本失效及排序/标签索引。schema v7 新增 `actors`、`task_assignments` 和 `workflow_events`，以固定 UUID 幂等创建 owner/system，并为历史任务回填可审计的 owner 分派；未完成任务保留活动分派，已完成任务使用 `completed_at`、缺失时回退 `updated_at` 作为结束时间。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -186,4 +191,4 @@ GET    /api/v1/stats/today?date=YYYY-MM-DD
 
 ## 产品边界
 
-[PRD v1.7](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座明确不实现任务/项目看板、内容日历业务功能、客户回访、收入/支出/发票业务、自动化规则引擎、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。本地 Actor 与新版收件箱已进入规划，但仍未交付；对应导航、数据库规划或 API 预览不代表功能已经实现。
+[PRD v1.8](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座明确不实现任务/项目看板、内容日历业务功能、客户回访、收入/支出/发票业务、自动化规则引擎、白噪音、网站屏蔽、SQLCipher、多币种、移动端、云同步、AI 助手或知识库。本地 Actor 身份、person 管理与审计基础已经交付；Assignment 操作、受控验收、新版收件箱和 Agent 仍未交付。对应数据库基础或 API 规划不代表完整工作流已经可用。

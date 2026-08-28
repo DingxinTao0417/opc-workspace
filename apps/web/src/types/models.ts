@@ -5,6 +5,49 @@ export type ProjectStatus =
   "planning" | "in_progress" | "paused" | "completed" | "archived";
 export type ProjectTransitionAction =
   "start" | "pause" | "resume" | "complete" | "reopen" | "archive" | "restore";
+export type ActorType = "owner" | "person" | "system" | "agent";
+export type ActorStatus = "active" | "inactive";
+
+export interface Actor {
+  id: string;
+  type: ActorType;
+  displayName: string;
+  status: ActorStatus;
+  isBuiltin: boolean;
+  notes: string;
+  metadata: Record<string, unknown>;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActorListParams {
+  page?: number;
+  pageSize?: number;
+  type?: ActorType;
+  status?: ActorStatus;
+  sort?: string;
+}
+
+export interface ActorListResult {
+  items: Actor[];
+  meta: PageMeta;
+}
+
+export interface CreatePersonActorInput {
+  displayName: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+  status?: ActorStatus;
+}
+
+export interface UpdateActorInput {
+  displayName?: string;
+  notes?: string;
+  metadata?: Record<string, unknown>;
+  status?: ActorStatus;
+  expectedVersion: number;
+}
 
 export interface Tag {
   id: string;

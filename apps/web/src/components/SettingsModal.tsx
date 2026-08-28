@@ -11,6 +11,7 @@ import {
   Sun,
   Trash2,
   UserRound,
+  UsersRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -35,19 +36,22 @@ import {
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore } from "../store/ui";
+import { ActorSettings } from "./ActorSettings";
 import { Modal } from "./Modal";
 
 interface SettingsModalProps {
   onSettingsSaved?: (next: FocusSettings, previous: FocusSettings) => void;
 }
 
-type SettingsModule = "profile" | "general" | "appearance" | "focus" | "about";
+type SettingsModule =
+  "profile" | "general" | "appearance" | "focus" | "actors" | "about";
 
 const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "个人资料", icon: UserRound },
   { id: "general", label: "通用", icon: Settings2 },
   { id: "appearance", label: "外观", icon: Palette },
   { id: "focus", label: "专注", icon: Focus },
+  { id: "actors", label: "人员与责任", icon: UsersRound },
   { id: "about", label: "关于", icon: Info },
 ];
 
@@ -552,6 +556,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       );
     }
 
+    if (activeModule === "actors") {
+      return <ActorSettings />;
+    }
+
     return (
       <>
         <header className="settings-content-header">
@@ -586,30 +594,45 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   return (
     <Modal
       footer={
-        <>
-          <button
-            className="button button-quiet settings-reset"
-            onClick={restoreDefaults}
-            type="button"
-          >
-            <RotateCcw size={14} />
-            恢复默认
-          </button>
-          <button
-            className="button button-secondary"
-            onClick={close}
-            type="button"
-          >
-            取消
-          </button>
-          <button
-            className="button button-primary"
-            onClick={save}
-            type="button"
-          >
-            保存
-          </button>
-        </>
+        activeModule === "actors" ? (
+          <>
+            <span className="settings-actor-footer-note">
+              人员资料通过模块内按钮单独保存
+            </span>
+            <button
+              className="button button-secondary"
+              onClick={close}
+              type="button"
+            >
+              关闭
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="button button-quiet settings-reset"
+              onClick={restoreDefaults}
+              type="button"
+            >
+              <RotateCcw size={14} />
+              恢复默认
+            </button>
+            <button
+              className="button button-secondary"
+              onClick={close}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="button button-primary"
+              onClick={save}
+              type="button"
+            >
+              保存
+            </button>
+          </>
+        )
       }
       onClose={close}
       open={open}

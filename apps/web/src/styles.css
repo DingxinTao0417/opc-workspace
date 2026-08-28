@@ -2803,7 +2803,7 @@ kbd {
 
 .settings-field-error {
   margin-top: 8px;
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: 10px;
 }
 
@@ -2937,6 +2937,399 @@ kbd {
   font-weight: 500;
 }
 
+.settings-actor-footer-note {
+  margin-right: auto;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.settings-state {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-state-error {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--danger-text) 32%, var(--border));
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--danger-text) 8%, var(--panel));
+  color: var(--danger-text);
+}
+
+.settings-state-error > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-state-error strong,
+.settings-state-error span {
+  display: block;
+}
+
+.settings-state-error span {
+  margin-top: 4px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.actor-settings-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.actor-settings-notice > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.actor-settings-notice strong,
+.actor-settings-notice span {
+  display: block;
+}
+
+.actor-settings-notice strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.actor-settings-notice span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.actor-settings-section + .actor-settings-section {
+  margin-top: 22px;
+}
+
+.actor-settings-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 2px 9px;
+}
+
+.actor-settings-section-heading h4,
+.actor-settings-section-heading p {
+  margin: 0;
+}
+
+.actor-settings-section-heading h4 {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.actor-settings-section-heading p {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.actor-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.actor-settings-card,
+.actor-settings-create,
+.actor-settings-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.actor-settings-card[data-inactive="true"] {
+  opacity: 0.72;
+}
+
+.actor-settings-card-main {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+}
+
+.actor-settings-avatar {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  background: var(--accent-bg);
+  color: var(--accent-light);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.actor-settings-avatar[data-type="system"] {
+  border-color: var(--border);
+  background: var(--panel-2);
+  color: var(--text-muted);
+}
+
+.actor-settings-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.actor-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actor-settings-title > strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actor-settings-copy > p {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actor-settings-badges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.actor-settings-type,
+.actor-settings-status {
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.actor-settings-status[data-status="active"] {
+  border-color: color-mix(in srgb, var(--green) 35%, transparent);
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  color: var(--green-light);
+}
+
+.actor-settings-edit {
+  flex: 0 0 auto;
+}
+
+.actor-settings-editor,
+.actor-settings-create {
+  padding: 14px;
+}
+
+.actor-settings-editor {
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
+}
+
+.actor-settings-create {
+  margin-bottom: 8px;
+}
+
+.actor-settings-create-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+
+.actor-settings-create-heading strong,
+.actor-settings-create-heading span {
+  display: block;
+}
+
+.actor-settings-create-heading strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.actor-settings-create-heading span {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.actor-settings-create-heading > button {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.actor-settings-create-heading > button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.actor-settings-field {
+  display: flex;
+  margin-bottom: 11px;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.actor-settings-field input,
+.actor-settings-field textarea,
+.actor-settings-field select {
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.actor-settings-field input,
+.actor-settings-field select {
+  height: 34px;
+}
+
+.actor-settings-field textarea {
+  min-height: 68px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.actor-settings-field input:focus,
+.actor-settings-field textarea:focus,
+.actor-settings-field select:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.actor-settings-field small {
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.actor-settings-status-field {
+  max-width: 220px;
+}
+
+.actor-settings-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 9px 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger-text) 30%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger-text) 7%, transparent);
+  color: var(--danger-text);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.actor-settings-error > svg {
+  flex: 0 0 auto;
+}
+
+.actor-settings-error > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.actor-settings-error > button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-light);
+  cursor: pointer;
+  font: inherit;
+}
+
+.actor-settings-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.actor-settings-empty {
+  display: flex;
+  min-height: 132px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+  padding: 18px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.actor-settings-empty strong {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.actor-settings-empty span {
+  max-width: 300px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.is-spinning {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 600px) {
   .modal-panel:has(.settings-layout) {
     height: calc(100vh - 24px);
@@ -2989,6 +3382,30 @@ kbd {
 
   .settings-select {
     width: 124px;
+  }
+
+  .settings-actor-footer-note {
+    display: none;
+  }
+
+  .actor-settings-section-heading,
+  .actor-settings-card-main {
+    align-items: flex-start;
+  }
+
+  .actor-settings-section-heading {
+    flex-direction: column;
+  }
+
+  .actor-settings-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .actor-settings-edit {
+    padding-right: 7px;
+    padding-left: 7px;
   }
 }
 

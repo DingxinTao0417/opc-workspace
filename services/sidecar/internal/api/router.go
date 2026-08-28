@@ -57,6 +57,10 @@ func NewRouter(db *gorm.DB, options Options) (*gin.Engine, error) {
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
 	{
+		v1.GET("/actors", service.listActors)
+		v1.POST("/actors", service.createActor)
+		v1.GET("/actors/:id", service.getActor)
+		v1.PATCH("/actors/:id", service.updateActor)
 		v1.GET("/tasks", service.listTasks)
 		v1.POST("/tasks", service.createTask)
 		v1.PATCH("/tasks/batch", service.batchUpdateTasks)

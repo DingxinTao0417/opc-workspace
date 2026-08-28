@@ -9,6 +9,7 @@ import { useRef } from "react";
 import {
   ApiError,
   batchUpdateTasks,
+  createPersonActor,
   createTag,
   createTask,
   createProject,
@@ -18,6 +19,8 @@ import {
   getAllProjects,
   getAllTags,
   getAllTasks,
+  getActor,
+  getActors,
   getHealth,
   getTags,
   getTask,
@@ -32,10 +35,13 @@ import {
   updateTask,
   updateTaskStatus,
   transitionProject,
+  updateActor,
   updateProject,
 } from "./client";
 import type {
+  ActorListParams,
   BatchUpdateTasksInput,
+  CreatePersonActorInput,
   NewTaskInput,
   ProjectInput,
   ProjectListParams,
@@ -46,10 +52,72 @@ import type {
   Task,
   TaskListParams,
   TaskStatus,
+  UpdateActorInput,
   UpdateTagInput,
   UpdateProjectInput,
   UpdateTaskInput,
 } from "../types/models";
+
+export const actorQueryKey = ["actors"] as const;
+export const actorDetailQueryKey = (id: string) =>
+  [...actorQueryKey, "detail", id] as const;
+
+export function useActorsQuery(input: ActorListParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: [...actorQueryKey, "list", input],
+    queryFn: () => getActors(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useActorQuery(id: string | null) {
+  return useQuery({
+    queryKey: actorDetailQueryKey(id ?? "closed"),
+    queryFn: () => getActor(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+export function useCreatePersonActor() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreatePersonActorInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createPersonActor(input, attempt.current.key);
+    },
+    onSuccess: async (actor) => {
+      attempt.current = null;
+      queryClient.setQueryData(actorDetailQueryKey(actor.id), actor);
+      await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+    },
+  });
+}
+
+export function useUpdateActor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateActorInput }) =>
+      updateActor(id, input),
+    onSuccess: async (actor) => {
+      queryClient.setQueryData(actorDetailQueryKey(actor.id), actor);
+      await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+      }
+    },
+  });
+}
 
 export const taskQueryKey = ["tasks"] as const;
 

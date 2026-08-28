@@ -5,7 +5,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import {
   DEFAULT_FOCUS_SETTINGS,
@@ -24,12 +25,17 @@ function LocationProbe() {
 }
 
 function renderSettings() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={["/today"]}>
-      <ThemeController />
-      <LocationProbe />
-      <SettingsModal />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/today"]}>
+        <ThemeController />
+        <LocationProbe />
+        <SettingsModal />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -48,6 +54,7 @@ describe("SettingsModal", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     applyTheme(DEFAULT_THEME);
   });
 
@@ -225,5 +232,41 @@ describe("SettingsModal", () => {
 
     expect(screen.getByText("v0.1.0")).toBeTruthy();
     expect(screen.getByText("本地 SQLite")).toBeTruthy();
+  });
+
+  it("opens local actor management without implying an online account", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: "00000000-0000-5000-8000-000000000001",
+                  type: "owner",
+                  display_name: "我",
+                  status: "active",
+                  is_builtin: true,
+                  notes: "",
+                  metadata: {},
+                  version: 1,
+                  created_at: "2026-08-27T00:00:00Z",
+                  updated_at: "2026-08-27T00:00:00Z",
+                },
+              ],
+              meta: { page: 1, page_size: 100, total: 1 },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "人员与责任" }));
+
+    expect(await screen.findByText("这里只记录责任归属")).toBeTruthy();
+    expect(screen.getByText("人员资料通过模块内按钮单独保存")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
   });
 });

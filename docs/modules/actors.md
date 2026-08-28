@@ -1,8 +1,8 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：`HEAD 471f814`（2026-08-27）
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v7（2026-08-27）
 >
-> 版本边界：当前 Actor/Assignment 完全未实现。schema v6 已交付 Task 父子、完成标准和乐观并发版本，但不包含责任主体、验收策略或审计。v0.1 交付 owner/person/system 的人工责任记录；agent Actor、Adapter 和实际执行归入 v0.2。
+> 版本边界：T-18A 迁移与内置 Actor、T-18B Actor API 与设置页 person 管理已交付。Assignment 表和历史回填已经存在，但分派/改派 API、任务负责人 UI、受控验收状态与 Artifact 仍未交付；agent Actor、Adapter 和实际执行归入 v0.2。
 
 ## 定位与边界
 
@@ -25,22 +25,24 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 当前实现状态
 
-当前状态为**未开始**。
+当前状态为**部分完成**。
 
-- 数据库没有 `actors`、`task_assignments`、`agent_adapters`、`agent_runs` 或 `workflow_events`。
-- Task 已有 `completion_criteria` 和 `version`，非状态编辑、三态状态更新和删除已要求 `If-Match`；仍没有 assignee/reviewer、`review_policy`、扩展状态或分派历史。
-- 前端没有 Actor 设置页、负责人选择器、当前负责人、改派历史或停用功能。
-- API 已支持任务基础三态、父子任务和事实层并发冲突；没有分派、改派、提交产出或验收接口。
-- 当前所有任务隐含属于单用户，但数据库中没有可审计的 owner Assignment 历史。
-- 没有本地 Agent Runtime、安全能力令牌、受控执行或崩溃恢复。
+- SQLite schema v7 已新增 `actors`、`task_assignments` 和 `workflow_events`。固定 owner UUID 为 `00000000-0000-5000-8000-000000000001`，system UUID 为 `00000000-0000-5000-8000-000000000002`；迁移重复执行不会重复创建内置主体、回填分派或迁移事件。
+- 历史未完成 Task 已回填活动 owner assignee；历史已完成 Task 已回填结束的 owner Assignment，结束时间优先使用 `completed_at`，缺失时回退 `updated_at`。每条回填都有唯一 `migration_assignment_backfill` Workflow Event，并明确标记为迁移推定。
+- 数据库已约束唯一 owner/system、内置主体不可删除、owner 仅展示名称可改、system 不可编辑、负责人/分派人必须 active、v0.1 reviewer 必须是 owner、同一 Task/role 仅一个活动 Assignment，以及活动分派存在时禁止停用 Actor。
+- `GET/POST /api/v1/actors` 与 `GET/PATCH /api/v1/actors/:id` 已接通真实 SQLite。列表支持分页、type/status 筛选和白名单稳定排序；创建只允许 person；详情/创建/更新返回 `ETag`，更新要求 `If-Match`。
+- person 创建支持可选 `Idempotency-Key`：同一规范化请求重放首次 `201` 快照，不重复写 `actor_created` 事件；同 key 异体请求返回冲突。Actor 更新、停用同事务递增版本并写前后值和 request ID。
+- 设置页已有“人员与责任”模块，可查看 owner/system/person，新建和编辑 person、启用/停用 person、单独修改 owner 展示名称；包含加载、空、错误、重试、校验、版本冲突和本地责任语义提示。
+- 当前没有 Actor 删除路由；system 没有编辑入口。person 有活动 Assignment 时 API 与数据库双重拒绝停用，UI 提示先改派。
+- 尚无 Assignment 查询/创建/改派/结束 API，任务详情没有负责人选择器或历史时间线；Task 仍为三态，也没有 `review_policy`、`task_artifacts`、受控提交/验收或 Agent Runtime。
 
 ## 目标功能
 
-### v0.1 Actor 管理
+### 已实现：v0.1 Actor 管理
 
-- 首次迁移幂等创建一个稳定 UUID 的 owner 和一个 system。
-- 设置页可管理 person 的名称、备注、非敏感元数据和 active/inactive 状态。
-- owner/system 不可删除；历史引用存在时 person 只能停用，内置 Actor 的状态变更由服务端受限管理。
+- 首次迁移幂等创建一个固定 UUID 的 owner 和一个 system。
+- 设置页可管理 person 的名称、备注、非敏感元数据和 active/inactive 状态；owner 只允许修改展示名称，system 只读。
+- owner/system 不可删除；当前 API 不提供任何 Actor 删除路由。历史引用存在时 person 只能停用，内置 Actor 的字段由 API 与数据库 trigger 双重限制。
 - 客户联系人转为 person 必须显式确认，不默认复制全部客户资料。
 
 ### v0.1 Assignment
@@ -51,7 +53,7 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 - person 任务由 owner 代记开始、阻塞、产出与完成；UI 明确提示不会通知对方。
 - v0.1 reviewer 只能是 owner；system 仅用于明确的内部维护任务。
 
-### 历史任务迁移
+### 已实现：历史任务迁移
 
 - 未完成历史 Task 回填活动 owner assignee。
 - 已完成 Task 回填已结束 owner Assignment，结束时间优先使用 `completed_at`，缺失时使用 `updated_at`。
@@ -70,13 +72,12 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ### 创建 person 并分派任务
 
-1. owner 在设置中创建 person，填写名称与备注。
-2. 在任务详情或收件箱拆分面板选择该 person。
-3. UI 显示“仅本机记录负责人，不会发送任务或授予访问权限”。
-4. Sidecar 创建 Assignment 与 Workflow Event。
-5. person 线下完成后，owner 以 person 为 `produced_by_actor_id`、owner 为 `recorded_by_actor_id` 录入产出。
+1. **已实现**：owner 在设置“人员与责任”中创建 person，填写名称、备注和可选非敏感 JSON 元数据。
+2. **已实现**：UI 持续显示“仅本机记录负责人，不会发送任务或授予访问权限”的边界说明。
+3. **待 T-18C**：在任务详情或收件箱拆分面板选择该 person，并由 Sidecar 创建 Assignment 与 Workflow Event。
+4. **待 T-18D**：person 线下完成后，owner 以 person 为 `produced_by_actor_id`、owner 为 `recorded_by_actor_id` 录入产出。
 
-### 改派
+### 改派（待 T-18C）
 
 1. owner 选择新 Actor 并填写改派原因。
 2. 请求携带 Task 当前版本。
@@ -85,10 +86,10 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ### 停用 person
 
-1. owner 查看该 person 的活动任务和历史引用。
-2. 存在活动 Assignment 时先改派或明确处理；不得静默留下无效负责人。
-3. Actor 标记为 inactive，历史记录继续显示原名称和类型。
-4. 新分派选择器不再显示该 Actor，已有时间线不变化。
+1. owner 在设置页编辑 person 并选择停用。
+2. API 在事务中检查活动 Assignment，数据库 trigger 同时兜底；存在活动分派时返回 `409 ACTOR_HAS_ACTIVE_ASSIGNMENTS`，Actor 版本和事件均不变化。
+3. 没有活动分派时，Actor 标记为 inactive、版本递增并写 `actor_deactivated` 事件；可再次编辑为 active。
+4. Actor 记录及其既有 Assignment 引用继续保留，历史不会因停用而删除；Assignment 不保存名称快照，展示时读取 Actor 当前资料。新分派选择器排除 inactive Actor 的行为随 T-18C 接入。
 
 ### 启动本地 Agent（v0.2）
 
@@ -100,24 +101,26 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 数据/API/状态与事件
 
-### v0.1 规划数据
+### schema v7 已实现数据
 
-- `actors`：`id`、`type`、`display_name`、`status`、`is_builtin`、可选 `adapter_id`、能力/元数据 JSON 和时间戳。
-- `task_assignments`：Task/Actor、`assignee / reviewer`、分派人、生效/结束时间和原因。
-- `task_artifacts`：Task、可选 Agent Run、存储信息、校验和、实际产出者、录入者和 follow-up 标记。
-- `workflow_events`：聚合对象、动作、Actor、Assignment/Run、request ID、前后值和时间。
-- Task 已有完成条件和 `version`；本纵切继续增加验收策略、扩展状态及与 Assignment/Artifact/Event 同事务的版本递增规则。
+| 表 | 当前字段与约束 |
+|----|----------------|
+| `actors` | `id`、`type`、`display_name`、`status`、`is_builtin`、`notes`、对象型 `metadata_json`、`version`、`created_at`、`updated_at`；名称 1–100 字符、备注最多 2000 字符、版本从 1 开始 |
+| `task_assignments` | `id`、Task/Actor、`assignee / reviewer`、`assigned_by_actor_id`、`assigned_at / unassigned_at`、`reason`；`unassigned_at IS NULL` 表示活动，同 Task/role 仅一个活动记录；永久删除 Task 时按 `ON DELETE CASCADE` 一并删除其 Assignment，属于删除整个 Task 聚合 |
+| `workflow_events` | `id`、`aggregate_type / aggregate_id`、`action`、可选 Actor/Assignment/Agent Run/request ID、前后 JSON 和时间；迁移回填事件按 Task 唯一；Assignment 被 Task 级联删除时事件的 `assignment_id` 按 `ON DELETE SET NULL` 处理 |
 
-数据库约束至少包括：仅一个 owner；内置 Actor 不可删除；同一 Task/role 只有一个活动 Assignment；停用不级联删除历史。
+`actors.metadata_json` 必须是 JSON object；API 进一步限制规范化后最多 16 KiB、最多 6 层和 100 个 key，并拒绝可能承载密码、令牌、凭据、cookie、API key、private key 或 session ID 的 key。`agent_adapters`、`agent_runs`、`task_artifacts` 及 Task 扩展状态尚未建表；Artifact 的受控文件存储、校验和、软删除与验收事务归 T-18D/T-19，不能把缺表写成已实现。
 
-### v0.1 规划 API
+### 已实现 Actor API
 
-- `GET/POST /api/v1/actors`：查询 Actor；只允许创建 person。
-- `GET/PATCH /api/v1/actors/:id`：详情、更新和停用。
-- `GET/POST /api/v1/tasks/:id/assignments`：查询和首次分派。
-- `POST /api/v1/tasks/:id/reassign`：原子改派。
-- `POST /api/v1/assignments/:id/end`：结束活动分派。
-- Task 的 submit-output/review/events API 消费 Actor 与 Assignment 上下文。
+| 方法与路径 | 当前行为 |
+|------------|----------|
+| `GET /api/v1/actors` | 默认每页 50、最大 100；支持 `type`、`status` 和 `type/display_name/status/created_at/updated_at` 白名单排序，默认 owner → person → system → agent 且以名称/ID 稳定排序 |
+| `POST /api/v1/actors` | 只创建 person；接受名称、备注、非敏感 metadata 和可选 active/inactive，服务端固定非内置、version=1；可选 `Idempotency-Key`；返回 `201`、`ETag` 和首次资源快照，重放带 `Idempotency-Replayed: true` |
+| `GET /api/v1/actors/:id` | UUID 校验、详情和 `ETag`；不存在返回 `ACTOR_NOT_FOUND` |
+| `PATCH /api/v1/actors/:id` | 必须 `If-Match`；person 可改名称/备注/metadata/active/inactive，owner 只可改展示名称，system 与 v0.1 agent 不可编辑；更新与 Workflow Event 同事务 |
+
+Actor PATCH 缺少 `If-Match` 返回 `428 VERSION_REQUIRED`，格式错误返回 `400 INVALID_VERSION`，旧版本返回 `409 VERSION_CONFLICT`。Actor 没有 DELETE 路由。`GET/POST /api/v1/tasks/:id/assignments`、`POST /api/v1/tasks/:id/reassign`、`POST /api/v1/assignments/:id/end` 和 Task submit-output/review/events API 仍为规划。
 
 ### v0.2 规划数据与 API
 
@@ -148,8 +151,8 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 分阶段实施
 
-1. **T-18A 迁移与内置 Actor**：在 schema v6 Task 事实层上新增 actors/assignments/artifacts/events，幂等创建 owner/system，回填历史任务。
-2. **T-18B person 管理**：设置页 CRUD（删除改为受约束停用）、校验、筛选和语义提示。
+1. **T-18A 迁移与内置 Actor（已完成）**：schema v7 新增 actors、assignments、events，幂等创建 owner/system 并回填历史任务；Artifact 延后到受控工作流纵切。
+2. **T-18B person 管理（已完成）**：Actor API、设置页新建/编辑/停用、校验、筛选、乐观锁、幂等创建、审计、加载/空/错误/重试和本地责任语义提示。
 3. **T-18C Assignment**：任务负责人选择、初次分派、改派、结束、唯一活动约束和时间线。
 4. **T-18D 受控工作流**：扩展 Task 状态、完成条件、提交产出、owner 验收/返工和乐观并发。
 5. **T-11 消费**：收件箱拆分和分派复用 T-18 基础，不重复定义 Actor 或 Task 状态。
@@ -157,16 +160,16 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 验收标准
 
-- 数据库中始终只有一个 owner；owner/system 初始化和历史回填可重复执行且不重复。
-- owner/system 不可删除；person 停用保留所有 Assignment、Artifact 和 Event。
-- 同一 Task、同一 role 同时只有一个活动 Assignment；并发改派拒绝旧写入。
-- person UI 始终清楚说明不登录、不发送、不远程同步；联系人不自动转为 Actor。
-- person 线下产出能区分实际产出者与 owner 录入者。
-- 分派、改派、状态变化和审计在同一事务中完成，失败无部分记录。
+- **已验证**：数据库始终只有一个 owner/system；固定内置记录和历史回填可重复执行且不重复。
+- **已验证**：owner/system 不可删除；owner 只有展示名称可改，system 不可编辑；活动 Assignment 阻止 person 停用。
+- **已验证**：同一 Task、同一 role 同时只有一个活动 Assignment，负责人/分派人必须 active，reviewer 必须 owner；Assignment API 的并发改派仍待验证。
+- **已验证**：person UI 清楚说明不登录、不发送、不远程同步；联系人不会自动转为 Actor。
+- **已验证**：Actor 创建、编辑、停用的成功事件与前后值可审计；幂等重放和失败停用不重复写事件。
+- **待实现**：person 线下产出区分实际产出者与 owner 录入者；分派、改派、受控状态、Artifact 和验收事务。
 - v0.1 没有可执行 agent 占位；未注册健康 Adapter 时 agent 选项禁用并解释原因。
 - v0.2 Agent 不复用 WebView Token、不直连 SQLite、不拥有任意 Shell/路径；只有经平台验证后才宣称禁网。
 - Agent 成功不自动完成 Task；owner 验收、返工、Run 重试和崩溃恢复历史完整。
-- Actor/Assignment API 的加载、空、错误、重试、冲突和权限边界均有定向测试。
+- Actor API 与设置 UI 的加载、空、错误、重试、校验、幂等、冲突和权限边界已有定向测试；Assignment API/UI 仍待同等覆盖。
 
 ## 相关代码/PRD链接
 
@@ -174,7 +177,13 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 - [PRD：本地 Actor 与任务分派实施计划](../opc-workspace-PRD.md#10418-t-18-本地-actor-与任务分派)
 - [PRD：架构决策记录（含 ADR-002）](../opc-workspace-PRD.md#d-架构决策记录)
 - [整体功能架构](../functional-architecture.md)
+- [schema v7 Actor 迁移](../../services/sidecar/internal/database/migrations/007_actor_assignments.sql)
+- [Actor/Assignment/Event models](../../services/sidecar/internal/models/actor.go)
+- [Actor API](../../services/sidecar/internal/api/actors.go)
+- [Actor API 测试](../../services/sidecar/internal/api/actors_test.go)
+- [Actor 迁移测试](../../services/sidecar/internal/database/actor_migration_test.go)
+- [设置页 Actor 管理](../../apps/web/src/components/ActorSettings.tsx)
+- [设置页 Actor 测试](../../apps/web/src/components/ActorSettings.test.tsx)
 - [当前 Task model](../../services/sidecar/internal/models/task.go)
 - [当前任务 API](../../services/sidecar/internal/api/tasks.go)
 - [当前 API 路由](../../services/sidecar/internal/api/router.go)
-- [初始数据库迁移](../../services/sidecar/internal/database/migrations/001_initial_schema.sql)
