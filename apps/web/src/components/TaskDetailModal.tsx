@@ -13,6 +13,8 @@ import type { Task, TaskKind, TaskPriority, TaskStatus } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
+import { TaskEventsSection } from "./TaskEventsSection";
+import { TaskLifecycleSection } from "./TaskLifecycleSection";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -32,7 +34,10 @@ const taskKinds: { value: TaskKind; label: string }[] = [
 const statusLabels: Record<TaskStatus, string> = {
   todo: "待办",
   in_progress: "进行中",
+  blocked: "阻塞",
+  waiting_review: "待验收",
   done: "已完成",
+  cancelled: "已取消",
 };
 
 function toLocalDateTime(value: string | null): string {
@@ -89,14 +94,19 @@ export function TaskDetailModal() {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [draftVersion, setDraftVersion] = useState(1);
   const [versionConflict, setVersionConflict] = useState(false);
+  const [conflictLatestTask, setConflictLatestTask] = useState<Task | null>(
+    null,
+  );
+  const [conflictRefreshing, setConflictRefreshing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [assignmentBusy, setAssignmentBusy] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
   const task = query.data;
   const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
   const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
   const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
-  const busy = taskWriteBusy || assignmentBusy;
+  const busy = taskWriteBusy || assignmentBusy || workflowBusy;
   const skipNextHydrate = useRef(false);
   const hydratedTaskId = useRef<string | null>(null);
 
@@ -139,9 +149,12 @@ export function TaskDetailModal() {
 
   useEffect(() => {
     setVersionConflict(false);
+    setConflictLatestTask(null);
+    setConflictRefreshing(false);
     skipNextHydrate.current = false;
     hydratedTaskId.current = null;
     setAssignmentBusy(false);
+    setWorkflowBusy(false);
   }, [taskId]);
 
   useEffect(() => {
@@ -168,13 +181,30 @@ export function TaskDetailModal() {
     deleteMutation.reset();
     setConfirmingDelete(false);
     setVersionConflict(false);
+    setConflictLatestTask(null);
+    setConflictRefreshing(false);
     setValidationError(null);
     setTaskId(null);
   };
 
+  const refreshTask = async (): Promise<Task | null> => {
+    const result = await query.refetch();
+    return result.isSuccess && result.data ? result.data : null;
+  };
+
+  const refreshFactConflict = async (expectedVersion: number) => {
+    setConflictRefreshing(true);
+    setConflictLatestTask(null);
+    const latest = await refreshTask();
+    setConflictLatestTask(
+      latest && latest.version > expectedVersion ? latest : null,
+    );
+    setConflictRefreshing(false);
+  };
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!taskId || assignmentBusy) return;
+    if (!taskId || assignmentBusy || workflowBusy || versionConflict) return;
 
     const cleanTitle = title.trim();
     if (cleanTitle.length < 2) {
@@ -219,7 +249,7 @@ export function TaskDetailModal() {
         onError: (error) => {
           if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
             setVersionConflict(true);
-            void query.refetch();
+            void refreshFactConflict(draftVersion);
           }
         },
         onSuccess: close,
@@ -228,7 +258,7 @@ export function TaskDetailModal() {
   };
 
   const confirmDelete = () => {
-    if (!taskId || assignmentBusy) return;
+    if (!taskId || assignmentBusy || workflowBusy || versionConflict) return;
     deleteMutation.mutate(
       { id: taskId, expectedVersion: draftVersion },
       {
@@ -236,7 +266,7 @@ export function TaskDetailModal() {
           if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
             setVersionConflict(true);
             setConfirmingDelete(false);
-            void query.refetch();
+            void refreshFactConflict(draftVersion);
           }
         },
         onSuccess: close,
@@ -275,7 +305,7 @@ export function TaskDetailModal() {
             <>
               <button
                 className="button button-quiet task-detail-delete"
-                disabled={busy}
+                disabled={busy || versionConflict}
                 onClick={() => setConfirmingDelete(true)}
                 type="button"
               >
@@ -292,7 +322,7 @@ export function TaskDetailModal() {
               </button>
               <button
                 className="button button-primary"
-                disabled={title.trim().length < 2 || busy}
+                disabled={title.trim().length < 2 || busy || versionConflict}
                 form="task-detail-form"
                 type="submit"
               >
@@ -333,14 +363,30 @@ export function TaskDetailModal() {
               <div>
                 <strong>此任务已在其他窗口发生变化</strong>
                 <span>
-                  已读取最新版 v{task.version}，你的草稿仍保留。请决定如何继续。
+                  {conflictRefreshing
+                    ? "正在读取最新版，你的草稿仍保留。"
+                    : conflictLatestTask
+                      ? `已读取最新版 v${conflictLatestTask.version}，你的草稿仍保留。请决定如何继续。`
+                      : "尚未确认最新版，你的草稿仍保留；当前不会重试写入。"}
                 </span>
               </div>
+              {!conflictRefreshing && !conflictLatestTask ? (
+                <button
+                  className="button button-secondary"
+                  onClick={() => void refreshFactConflict(draftVersion)}
+                  type="button"
+                >
+                  重试读取
+                </button>
+              ) : null}
               <button
                 className="button button-secondary"
+                disabled={!conflictLatestTask || conflictRefreshing}
                 onClick={() => {
-                  hydrate(task);
+                  if (!conflictLatestTask) return;
+                  hydrate(conflictLatestTask);
                   setVersionConflict(false);
+                  setConflictLatestTask(null);
                   updateMutation.reset();
                   deleteMutation.reset();
                 }}
@@ -350,10 +396,13 @@ export function TaskDetailModal() {
               </button>
               <button
                 className="button button-primary"
+                disabled={!conflictLatestTask || conflictRefreshing}
                 onClick={() => {
+                  if (!conflictLatestTask) return;
                   skipNextHydrate.current = true;
-                  setDraftVersion(task.version);
+                  setDraftVersion(conflictLatestTask.version);
                   setVersionConflict(false);
+                  setConflictLatestTask(null);
                   updateMutation.reset();
                   deleteMutation.reset();
                 }}
@@ -379,8 +428,31 @@ export function TaskDetailModal() {
             ) : null}
           </div>
 
+          <TaskLifecycleSection
+            disabled={
+              taskWriteBusy ||
+              assignmentBusy ||
+              confirmingDelete ||
+              versionConflict
+            }
+            hasUnsavedFacts={taskDraftDirty}
+            onBusyChange={setWorkflowBusy}
+            onRefreshTask={refreshTask}
+            onTaskUpdated={(updatedTask) => {
+              setDraftVersion((current) =>
+                Math.max(current, updatedTask.version),
+              );
+            }}
+            task={task}
+          />
+
           <TaskAssignmentsSection
-            disabled={taskWriteBusy || confirmingDelete}
+            disabled={
+              taskWriteBusy ||
+              workflowBusy ||
+              confirmingDelete ||
+              versionConflict
+            }
             onBusyChange={setAssignmentBusy}
             onTaskUpdated={(updatedTask) => {
               setDraftVersion((current) =>
@@ -581,13 +653,15 @@ export function TaskDetailModal() {
             </div>
           </fieldset>
 
+          <TaskEventsSection taskId={task.id} />
+
           {errorMessage ? (
             <div className="form-error" role="alert">
               {errorMessage}
             </div>
           ) : null}
           <p className="form-note">
-            状态变更使用任务列表中的完成按钮；普通编辑不会绕过任务状态流转。
+            普通编辑不会改变任务状态；状态变化只能使用上方受控命令。
           </p>
         </form>
       ) : null}

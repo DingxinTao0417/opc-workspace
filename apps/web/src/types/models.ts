@@ -1,6 +1,10 @@
-export type TaskStatus = "todo" | "in_progress" | "done";
+export type TaskStatus =
+  "todo" | "in_progress" | "blocked" | "waiting_review" | "done" | "cancelled";
 export type TaskPriority = "P0" | "P1" | "P2" | "P3";
 export type TaskKind = "work" | "review" | "followup" | "reminder";
+export type TaskReviewPolicy = "none" | "manual";
+export type TaskLifecycleAction =
+  "start" | "block" | "unblock" | "complete" | "cancel" | "reopen";
 export type ProjectStatus =
   "planning" | "in_progress" | "paused" | "completed" | "archived";
 export type ProjectTransitionAction =
@@ -135,6 +139,13 @@ export interface Task {
   parentTaskId: string | null;
   parentTaskTitle?: string;
   completionCriteria: string;
+  reviewPolicy: TaskReviewPolicy;
+  blockedReason: string | null;
+  blockedAt: string | null;
+  blockedFromStatus: Extract<
+    TaskStatus,
+    "todo" | "in_progress" | "waiting_review"
+  > | null;
   dueDate: string | null;
   plannedDate: string | null;
   estimatedMinutes: number | null;
@@ -146,7 +157,52 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
   tags: Tag[];
+}
+
+export interface TaskWorkflowEvent {
+  id: string;
+  action: string;
+  actor: ActorSummary | null;
+  assignmentId: string | null;
+  requestId: string | null;
+  commandSeq: number | null;
+  previous: Record<string, unknown> | null;
+  current: Record<string, unknown> | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface TaskEventListParams {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface TaskEventListMeta extends PageMeta {
+  taskVersion: number;
+}
+
+export interface TaskEventListResult {
+  items: TaskWorkflowEvent[];
+  meta: TaskEventListMeta;
+}
+
+export type TaskLifecycleCommandInput =
+  | {
+      action: Exclude<TaskLifecycleAction, "block" | "cancel">;
+      expectedVersion: number;
+    }
+  | {
+      action: "block" | "cancel";
+      reason: string;
+      expectedVersion: number;
+    };
+
+export interface TaskLifecycleCommandResult {
+  task: Task;
+  event: TaskWorkflowEvent;
 }
 
 export interface HealthResponse {
@@ -185,7 +241,6 @@ export interface NewTaskInput {
   title: string;
   description?: string;
   kind?: TaskKind;
-  status: TaskStatus;
   priority: TaskPriority;
   projectId?: string | null;
   parentTaskId?: string | null;

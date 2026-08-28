@@ -100,7 +100,6 @@ export function NewTaskModal() {
         title: cleanTitle,
         description: description.trim(),
         kind,
-        status: "todo",
         priority,
         projectId: projectId || null,
         parentTaskId: parentTaskId || null,

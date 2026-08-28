@@ -1,4 +1,6 @@
 import {
+  ChevronDown,
+  ChevronRight,
   Columns3,
   List,
   Plus,
@@ -32,9 +34,12 @@ import type {
 } from "../types/models";
 
 const groups: { status: TaskStatus; label: string }[] = [
-  { status: "in_progress", label: "进行中" },
   { status: "todo", label: "待办" },
+  { status: "in_progress", label: "进行中" },
+  { status: "blocked", label: "阻塞" },
+  { status: "waiting_review", label: "待验收" },
   { status: "done", label: "已完成" },
+  { status: "cancelled", label: "已取消" },
 ];
 
 type BatchAction = BatchUpdateTasksInput["action"];
@@ -71,6 +76,9 @@ export function TasksPage() {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [plannedDate, setPlannedDate] = useState("");
   const [sort, setSort] = useState("");
+  const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TaskStatus>>(
+    () => new Set(["cancelled"]),
+  );
   const [page, setPage] = useState(1);
   const [selectedTasks, setSelectedTasks] = useState<Record<string, Task>>({});
   const [batchAction, setBatchAction] = useState<BatchAction>("set_project");
@@ -335,7 +343,10 @@ export function TasksPage() {
               <option value="">全部</option>
               <option value="in_progress">进行中</option>
               <option value="todo">待办</option>
+              <option value="blocked">阻塞</option>
+              <option value="waiting_review">待验收</option>
               <option value="done">已完成</option>
+              <option value="cancelled">已取消</option>
             </select>
           </label>
           <label>
@@ -631,45 +642,74 @@ export function TasksPage() {
               (task) => task.status === group.status,
             );
             if (!groupedTasks.length) return null;
+            const collapsed = collapsedStatuses.has(group.status);
             return (
               <section className="task-group" key={group.status}>
                 <div className="task-group-heading">
-                  <h2>{group.label}</h2>
+                  {group.status === "cancelled" ? (
+                    <button
+                      aria-expanded={!collapsed}
+                      className="task-group-toggle"
+                      onClick={() =>
+                        setCollapsedStatuses((current) => {
+                          const next = new Set(current);
+                          if (next.has(group.status)) next.delete(group.status);
+                          else next.add(group.status);
+                          return next;
+                        })
+                      }
+                      type="button"
+                    >
+                      {collapsed ? (
+                        <ChevronRight size={13} />
+                      ) : (
+                        <ChevronDown size={13} />
+                      )}
+                      <h2>{group.label}</h2>
+                    </button>
+                  ) : (
+                    <h2>{group.label}</h2>
+                  )}
                   <span title="当前页数量">本页 {groupedTasks.length}</span>
                 </div>
-                <TaskList
-                  allowReorder={allowReorder}
-                  hierarchical={hierarchical}
-                  live={writeReady}
-                  onMove={(task, direction) =>
-                    moveMutation.mutate({
-                      taskId: task.id,
-                      plannedDate: task.plannedDate,
-                      direction,
-                    })
-                  }
-                  onSelectionChange={(task, selected) =>
-                    setSelectedTasks((current) => {
-                      const next = { ...current };
-                      if (selected) {
-                        if (!next[task.id] && Object.keys(next).length >= 100) {
-                          return current;
-                        }
-                        next[task.id] = task;
-                      } else delete next[task.id];
-                      return next;
-                    })
-                  }
-                  reorderPendingId={
-                    moveMutation.isPending
-                      ? (moveMutation.variables?.taskId ?? null)
-                      : null
-                  }
-                  selectedIds={selectedIds}
-                  selectionLimitReached={selectedItems.length >= 100}
-                  showParent={!hierarchical}
-                  tasks={groupedTasks}
-                />
+                {!collapsed ? (
+                  <TaskList
+                    allowReorder={allowReorder}
+                    hierarchical={hierarchical}
+                    live={writeReady}
+                    onMove={(task, direction) =>
+                      moveMutation.mutate({
+                        taskId: task.id,
+                        plannedDate: task.plannedDate,
+                        direction,
+                      })
+                    }
+                    onSelectionChange={(task, selected) =>
+                      setSelectedTasks((current) => {
+                        const next = { ...current };
+                        if (selected) {
+                          if (
+                            !next[task.id] &&
+                            Object.keys(next).length >= 100
+                          ) {
+                            return current;
+                          }
+                          next[task.id] = task;
+                        } else delete next[task.id];
+                        return next;
+                      })
+                    }
+                    reorderPendingId={
+                      moveMutation.isPending
+                        ? (moveMutation.variables?.taskId ?? null)
+                        : null
+                    }
+                    selectedIds={selectedIds}
+                    selectionLimitReached={selectedItems.length >= 100}
+                    showParent={!hierarchical}
+                    tasks={groupedTasks}
+                  />
+                ) : null}
               </section>
             );
           })}

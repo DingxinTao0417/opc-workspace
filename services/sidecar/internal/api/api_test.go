@@ -124,9 +124,9 @@ func TestTaskCreateListStatusAndTodayStats(t *testing.T) {
 
 	status := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+created.Data.ID+"/status",
-		[]byte(`{"status":"done"}`),
+		http.MethodPost,
+		"/api/v1/tasks/"+created.Data.ID+"/complete",
+		[]byte(`{}`),
 		map[string]string{"If-Match": `"1"`},
 	)
 	if status.Code != http.StatusOK {

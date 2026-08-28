@@ -80,7 +80,8 @@ export function Sidebar() {
     (state) => state.setCommandPaletteOpen,
   );
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
-  const taskCount = tasksQuery.data?.length ?? 0;
+  const taskCount =
+    tasksQuery.data?.filter((task) => task.status !== "cancelled").length ?? 0;
   const completedCount =
     tasksQuery.data?.filter((task) => task.status === "done").length ?? 0;
   const completedPercent = taskCount

@@ -7,7 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import type { Task, TaskListParams } from "../types/models";
+import type { Task, TaskListParams, TaskStatus } from "../types/models";
 import { TasksPage } from "./TasksPage";
 
 const mocks = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   resetOrder: vi.fn(),
   taskQueries: [] as TaskListParams[],
   placeholder: false,
+  taskStatus: "todo" as TaskStatus,
 }));
 
 const task: Task = {
@@ -30,6 +31,10 @@ const task: Task = {
   projectName: "品牌官网改版",
   parentTaskId: null,
   completionCriteria: "清单经负责人确认",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
   dueDate: null,
   plannedDate: "2026-08-27",
   estimatedMinutes: 30,
@@ -41,6 +46,8 @@ const task: Task = {
   createdAt: "2026-08-27T08:00:00Z",
   updatedAt: "2026-08-27T08:00:00Z",
   completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
   tags: [],
 };
 
@@ -49,7 +56,7 @@ vi.mock("../api/hooks", () => ({
     mocks.taskQueries.push(input);
     return {
       data: {
-        items: [task],
+        items: [{ ...task, status: mocks.taskStatus }],
         meta: { page: input.page ?? 1, pageSize: 50, total: 101 },
       },
       error: null,
@@ -90,13 +97,6 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     mutate: mocks.resetOrder,
   }),
-  useUpdateTaskStatus: () => ({
-    error: null,
-    isError: false,
-    isPending: false,
-    mutate: vi.fn(),
-    variables: undefined,
-  }),
   useCreateTag: () => ({
     error: null,
     isPending: false,
@@ -129,6 +129,7 @@ describe("TasksPage", () => {
     mocks.resetBatch.mockClear();
     mocks.resetOrder.mockClear();
     mocks.placeholder = false;
+    mocks.taskStatus = "todo";
   });
 
   afterEach(cleanup);
@@ -232,5 +233,30 @@ describe("TasksPage", () => {
     expect(
       screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
     ).toBeDisabled();
+  });
+
+  it("offers all six status filters and collapses cancelled tasks by default", () => {
+    mocks.taskStatus = "cancelled";
+    render(<TasksPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    const filter = screen.getByLabelText("状态");
+    for (const value of [
+      "todo",
+      "in_progress",
+      "blocked",
+      "waiting_review",
+      "done",
+      "cancelled",
+    ]) {
+      expect(filter.querySelector(`option[value="${value}"]`)).not.toBeNull();
+    }
+    expect(
+      screen.queryByRole("button", { name: `查看任务：${task.title}` }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "已取消" }));
+    expect(
+      screen.getByRole("button", { name: `查看任务：${task.title}` }),
+    ).toBeVisible();
   });
 });

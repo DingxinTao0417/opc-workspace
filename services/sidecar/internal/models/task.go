@@ -6,6 +6,7 @@ type Task struct {
 	Description        string  `gorm:"column:description" json:"description"`
 	Kind               string  `gorm:"column:kind" json:"kind"`
 	Status             string  `gorm:"column:status" json:"status"`
+	ReviewPolicy       string  `gorm:"column:review_policy" json:"review_policy"`
 	Priority           string  `gorm:"column:priority" json:"priority"`
 	ProjectID          *string `gorm:"column:project_id" json:"project_id"`
 	ProjectName        *string `gorm:"column:project_name;->" json:"project_name,omitempty"`
@@ -24,6 +25,11 @@ type Task struct {
 	CreatedAt          string  `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt          string  `gorm:"column:updated_at" json:"updated_at"`
 	CompletedAt        *string `gorm:"column:completed_at" json:"completed_at"`
+	BlockedReason      *string `gorm:"column:blocked_reason" json:"blocked_reason"`
+	BlockedAt          *string `gorm:"column:blocked_at" json:"blocked_at"`
+	BlockedFromStatus  *string `gorm:"column:blocked_from_status" json:"blocked_from_status"`
+	SubmittedAt        *string `gorm:"column:submitted_at" json:"submitted_at"`
+	ReviewedAt         *string `gorm:"column:reviewed_at" json:"reviewed_at"`
 }
 
 func (Task) TableName() string { return "tasks" }

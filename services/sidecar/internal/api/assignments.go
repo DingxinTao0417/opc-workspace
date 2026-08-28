@@ -21,6 +21,7 @@ import (
 const (
 	migrationAssignmentReason = "schema_v7_migration_inferred_owner"
 	taskCompletedReason       = "Task completed"
+	taskCancelledReason       = "Task cancelled"
 )
 
 var validAssignmentRoles = map[string]struct{}{
@@ -319,6 +320,7 @@ func (a *API) createTaskAssignment(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTask(&response.Task)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
 }
@@ -452,6 +454,7 @@ func (a *API) reassignTask(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTask(&response.Task)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
 }
@@ -557,6 +560,7 @@ func (a *API) endAssignment(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTask(&response.Task)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
 }
@@ -709,8 +713,8 @@ func loadAssignmentTask(tx *gorm.DB, id string, expectedVersion int64, requireAs
 	if task.Version != expectedVersion {
 		return models.Task{}, taskVersionConflict()
 	}
-	if requireAssignable && task.Status == "done" {
-		return models.Task{}, newProjectRequestError(http.StatusConflict, "TASK_NOT_ASSIGNABLE", "Completed tasks cannot be assigned or reassigned")
+	if requireAssignable && (task.Status == "done" || task.Status == "cancelled") {
+		return models.Task{}, newProjectRequestError(http.StatusConflict, "TASK_NOT_ASSIGNABLE", "Terminal tasks cannot be assigned or reassigned")
 	}
 	return task, nil
 }
@@ -827,6 +831,23 @@ func recordAssignmentWorkflowEvent(
 	requestID string,
 	createdAt string,
 ) error {
+	return recordAssignmentWorkflowEventWithSequence(
+		tx, action, taskIDValue, assignmentIDValue, previous, current,
+		requestID, createdAt, nil,
+	)
+}
+
+func recordAssignmentWorkflowEventWithSequence(
+	tx *gorm.DB,
+	action string,
+	taskIDValue string,
+	assignmentIDValue string,
+	previous any,
+	current any,
+	requestID string,
+	createdAt string,
+	commandSeq *int,
+) error {
 	var previousJSON *string
 	if previous != nil {
 		encoded, err := json.Marshal(previous)
@@ -845,7 +866,7 @@ func recordAssignmentWorkflowEvent(
 	event := models.WorkflowEvent{
 		ID: uuid.NewString(), AggregateType: "task", AggregateID: taskIDValue,
 		Action: action, ActorID: &actorIDValue, AssignmentID: &assignmentIDValue,
-		RequestID: &requestID, PreviousJSON: previousJSON, CurrentJSON: &currentJSON,
+		RequestID: &requestID, CommandSeq: commandSeq, PreviousJSON: previousJSON, CurrentJSON: &currentJSON,
 		CreatedAt: createdAt,
 	}
 	if err := tx.Create(&event).Error; err != nil {
@@ -854,47 +875,54 @@ func recordAssignmentWorkflowEvent(
 	return nil
 }
 
-func closeActiveAssignmentsForCompletedTask(
+func closeActiveAssignmentsForTerminalTask(
 	tx *gorm.DB,
 	taskIDValue string,
 	requestID string,
 	closedAt string,
-) error {
+	reason string,
+	firstSequence int,
+) (int, error) {
 	var rows []assignmentRow
 	if err := assignmentRowsQuery(tx).
 		Where("assignment.task_id = ? AND assignment.unassigned_at IS NULL", taskIDValue).
 		Order("assignment.role ASC").
 		Find(&rows).Error; err != nil {
-		return err
+		return firstSequence, err
 	}
+	nextSequence := firstSequence
 	for _, row := range rows {
 		previous := assignmentResponseFromRow(row)
 		result := tx.Model(&models.TaskAssignment{}).
 			Where("id = ? AND unassigned_at IS NULL", row.ID).
-			Updates(map[string]any{"unassigned_at": closedAt, "reason": taskCompletedReason})
+			Updates(map[string]any{"unassigned_at": closedAt, "reason": reason})
 		if result.Error != nil {
-			return mapAssignmentConstraintError(result.Error)
+			return nextSequence, mapAssignmentConstraintError(result.Error)
 		}
 		if result.RowsAffected == 0 {
-			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "The assignment is no longer active")
+			return nextSequence, newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "The assignment is no longer active")
 		}
 		ended, err := loadAssignmentResponse(tx, row.ID)
 		if err != nil {
-			return err
+			return nextSequence, err
 		}
-		if err := recordAssignmentWorkflowEvent(
+		sequence := nextSequence
+		if err := recordAssignmentWorkflowEventWithSequence(
 			tx, "assignment_ended", taskIDValue, row.ID, previous, ended,
-			requestID, closedAt,
+			requestID, closedAt, &sequence,
 		); err != nil {
-			return err
+			return nextSequence, err
 		}
+		nextSequence++
 	}
-	return nil
+	return nextSequence, nil
 }
 
 func mapAssignmentConstraintError(err error) error {
 	message := err.Error()
 	switch {
+	case strings.Contains(message, "TASK_NOT_ASSIGNABLE"):
+		return newProjectRequestError(http.StatusConflict, "TASK_NOT_ASSIGNABLE", "Terminal tasks cannot be assigned or reassigned")
 	case strings.Contains(message, "ASSIGNMENT_ACTOR_NOT_ACTIVE"):
 		return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_ACTOR_NOT_ACTIVE", "The selected Actor is inactive")
 	case strings.Contains(message, "ASSIGNMENT_REVIEWER_MUST_BE_OWNER"):

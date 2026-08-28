@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -136,9 +135,9 @@ func TestTaskFactsTagsHierarchyAndConcurrency(t *testing.T) {
 
 	done := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+child.ID+"/status",
-		[]byte(`{"status":"done"}`),
+		http.MethodPost,
+		"/api/v1/tasks/"+child.ID+"/complete",
+		[]byte(`{}`),
 		map[string]string{"If-Match": `"1"`},
 	)
 	if done.Code != http.StatusOK {
@@ -244,13 +243,14 @@ func TestTaskIdempotencyCanonicalTagsAndLegacySnapshot(t *testing.T) {
 		t.Fatalf("legacy replay = %d headers=%v body=%s", legacyReplay.Code, legacyReplay.Header(), legacyReplay.Body.String())
 	}
 	var legacyEnvelope struct {
-		Data json.RawMessage `json:"data"`
+		Data models.Task `json:"data"`
 	}
 	if err := json.Unmarshal(legacyReplay.Body.Bytes(), &legacyEnvelope); err != nil {
 		t.Fatalf("decode legacy replay: %v", err)
 	}
-	if !bytes.Equal(bytes.TrimSpace(legacyEnvelope.Data), []byte(legacyBody)) {
-		t.Fatalf("legacy snapshot changed:\n got %s\nwant %s", legacyEnvelope.Data, legacyBody)
+	if legacyEnvelope.Data.ID != legacyKey.ResourceID || legacyEnvelope.Data.Title != "Legacy task" ||
+		legacyEnvelope.Data.ReviewPolicy != "none" || legacyEnvelope.Data.Kind != "work" || legacyEnvelope.Data.Tags == nil {
+		t.Fatalf("legacy snapshot was not normalized for the current Task contract: %#v", legacyEnvelope.Data)
 	}
 	legacyConflict := performRequest(
 		router,
@@ -303,7 +303,7 @@ func TestTaskListStablePaginationFiltersAndEscaping(t *testing.T) {
 				priority = "P0"
 			}
 			task := models.Task{
-				ID: id, Title: title, Description: "", Kind: "work", Status: "todo", Priority: priority,
+				ID: id, Title: title, Description: "", Kind: "work", Status: "todo", ReviewPolicy: "none", Priority: priority,
 				ParentTaskID: parentID, PlannedDate: plannedDate, ActualMinutes: 0, Version: 1,
 				CreatedAt: createdAt, UpdatedAt: createdAt,
 			}

@@ -22,7 +22,7 @@
 
 当前状态为未开始：
 
-- SQLite schema v7 已有 `actors`、`task_assignments` 和 `workflow_events` 基础、历史 owner Assignment 回填，以及 owner/person 人工 Assignment API/UI；但当前 API 明确拒绝 agent assignee，仓库也没有 `agent_adapters`、`agent_runs`、`task_artifacts` 或可执行 agent Actor 的注册与运行链路。
+- SQLite schema v8 已有 Actor/Assignment、Task 六状态命令和可查询的 Workflow Event 时间线；但当前 API 明确拒绝 agent assignee，仓库也没有 `agent_adapters`、`agent_runs`、`task_artifacts` 或可执行 agent Actor 的注册与运行链路。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。
@@ -160,7 +160,7 @@ Agent Run 状态为：
 
 ### 前置条件：v0.1 人工编排闭环
 
-- 完成 Task 扩展状态、完成条件、manual 验收和乐观锁。
+- 在已交付 Task 六状态/乐观锁之上完成 Artifact、manual 提交验收与返工。
 - 复用已完成的 Actor 与 Assignment；继续完成 Artifact、受控 Workflow Event 时间线与收件箱人工跟进。
 - 完成基础备份恢复、日志与 Sidecar 故障恢复。
 

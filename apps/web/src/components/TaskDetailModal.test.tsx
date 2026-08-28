@@ -22,6 +22,8 @@ const apiMocks = vi.hoisted(() => ({
   createTaskAssignment: vi.fn(),
   reassignTaskAssignment: vi.fn(),
   endTaskAssignment: vi.fn(),
+  executeTaskLifecycleCommand: vi.fn(),
+  getTaskEvents: vi.fn(),
   getAllProjects: vi.fn(),
   getAllTags: vi.fn(),
   getAllTasks: vi.fn(),
@@ -43,6 +45,10 @@ const task: Task = {
   projectId: null,
   parentTaskId: null,
   completionCriteria: "",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
   dueDate: "2026-08-29T10:00:00Z",
   plannedDate: "2026-08-28",
   estimatedMinutes: 45,
@@ -54,6 +60,8 @@ const task: Task = {
   createdAt: "2026-08-27T08:00:00Z",
   updatedAt: "2026-08-27T09:00:00Z",
   completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
   tags: [],
 };
 
@@ -99,6 +107,10 @@ describe("TaskDetailModal", () => {
     apiMocks.getAllProjects.mockResolvedValue([]);
     apiMocks.getAllTags.mockResolvedValue([]);
     apiMocks.getAllTasks.mockResolvedValue([]);
+    apiMocks.getTaskEvents.mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0, taskVersion: task.version },
+    });
     useUiStore.setState({ taskDetailId: task.id });
   });
 
@@ -138,6 +150,22 @@ describe("TaskDetailModal", () => {
       ),
     );
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
+  });
+
+  it("requires saving fact changes before a lifecycle command", async () => {
+    renderModal();
+
+    const title = await screen.findByLabelText("任务名称");
+    const startButton = screen.getByRole("button", { name: "开始执行" });
+
+    expect(startButton).toBeEnabled();
+    fireEvent.change(title, { target: { value: "尚未保存的任务名称" } });
+
+    expect(
+      screen.getByText("当前有未保存的任务信息；请先保存，再执行状态操作。"),
+    ).toBeVisible();
+    expect(startButton).toBeDisabled();
+    expect(apiMocks.executeTaskLifecycleCommand).not.toHaveBeenCalled();
   });
 
   it("requires an explicit confirmation before deleting", async () => {
@@ -293,5 +321,33 @@ describe("TaskDetailModal", () => {
         expectedVersion: latestTask.version,
       }),
     );
+  });
+
+  it("does not claim the latest version when the conflict refresh fails", async () => {
+    apiMocks.getTask
+      .mockResolvedValueOnce(task)
+      .mockRejectedValue(new Error("offline"));
+    apiMocks.updateTask.mockRejectedValueOnce(
+      new ApiError("任务已发生变化", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    renderModal();
+
+    const title = await screen.findByLabelText("任务名称");
+    fireEvent.change(title, { target: { value: "仍需保留的草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    expect(
+      await screen.findByText(
+        "尚未确认最新版，你的草稿仍保留；当前不会重试写入。",
+        {},
+        { timeout: 4_000 },
+      ),
+    ).toBeVisible();
+    expect(title).toHaveValue("仍需保留的草稿");
+    expect(screen.getByRole("button", { name: "载入最新" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保留草稿重试" })).toBeDisabled();
   });
 });

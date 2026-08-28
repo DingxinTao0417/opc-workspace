@@ -10,27 +10,33 @@ import type {
   TagInput,
   Task,
   TaskAssignment,
+  TaskWorkflowEvent,
 } from "../types/models";
+import { ApiError } from "./client";
 import {
+  projectQueryKey,
   taskAssignmentQueryKey,
   taskDetailQueryKey,
+  taskEventQueryKey,
   useCreateProject,
   useCreateTag,
   useCreateTaskAssignment,
   useTaskAssignmentsQuery,
+  useTaskEventsQuery,
+  useTaskLifecycleCommand,
   useTaskPageQuery,
   useTasksQuery,
-  useUpdateTaskStatus,
 } from "./hooks";
 
 const createProjectMock = vi.hoisted(() => vi.fn());
 const createTagMock = vi.hoisted(() => vi.fn());
 const createTaskAssignmentMock = vi.hoisted(() => vi.fn());
+const executeTaskLifecycleCommandMock = vi.hoisted(() => vi.fn());
 const getAllActorsMock = vi.hoisted(() => vi.fn());
 const getTaskAssignmentsMock = vi.hoisted(() => vi.fn());
+const getTaskEventsMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
-const updateTaskStatusMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
@@ -39,11 +45,12 @@ vi.mock("./client", async () => {
     createProject: createProjectMock,
     createTag: createTagMock,
     createTaskAssignment: createTaskAssignmentMock,
+    executeTaskLifecycleCommand: executeTaskLifecycleCommandMock,
     getAllActors: getAllActorsMock,
     getTaskAssignments: getTaskAssignmentsMock,
+    getTaskEvents: getTaskEventsMock,
     getTaskPage: getTaskPageMock,
     getTasks: getTasksMock,
-    updateTaskStatus: updateTaskStatusMock,
   };
 });
 
@@ -88,6 +95,10 @@ const task: Task = {
   projectId: null,
   parentTaskId: null,
   completionCriteria: "",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
   dueDate: null,
   plannedDate: "2026-08-27",
   estimatedMinutes: 0,
@@ -99,6 +110,8 @@ const task: Task = {
   createdAt: "2026-08-27T00:00:00Z",
   updatedAt: "2026-08-27T00:00:00Z",
   completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
   tags: [],
 };
 
@@ -128,6 +141,19 @@ const assignment: TaskAssignment = {
   reason: null,
   isActive: true,
   inferred: false,
+};
+
+const taskEvent: TaskWorkflowEvent = {
+  id: "event-1",
+  action: "task_completed",
+  actor: owner,
+  assignmentId: null,
+  requestId: "request-1",
+  commandSeq: 1,
+  previous: { status: "in_progress", version: 4 },
+  current: { status: "done", version: 5 },
+  reason: null,
+  createdAt: "2026-08-27T02:00:00Z",
 };
 
 const tagInput: TagInput = { name: "交付", color: "#6E7BF2" };
@@ -257,14 +283,35 @@ describe("task queries", () => {
     );
     expect(fetchedPageCount).toBe(2);
   });
+
+  it("loads task event pages under a separate task-scoped key", async () => {
+    getTaskEventsMock.mockImplementation(
+      async (_taskId: string, input: { page: number }) => ({
+        items: [{ ...taskEvent, id: `event-${input.page}` }],
+        meta: { page: input.page, pageSize: 1, total: 2, taskVersion: 5 },
+      }),
+    );
+    const { result } = renderHook(
+      () => useTaskEventsQuery(task.id, { pageSize: 1 }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    expect(getTaskEventsMock).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({ page: 2, pageSize: 1 }),
+    );
+  });
 });
 
-describe("versioned task mutations", () => {
-  it("uses the observed cached version for legacy status callers", async () => {
-    updateTaskStatusMock.mockResolvedValue({
-      ...task,
-      status: "done",
-      version: 5,
+describe("controlled task lifecycle mutations", () => {
+  it("requires the observed version and invalidates every affected view", async () => {
+    executeTaskLifecycleCommandMock.mockResolvedValue({
+      task: { ...task, status: "done", version: 5 },
+      event: taskEvent,
     });
     const queryClient = new QueryClient({
       defaultOptions: {
@@ -274,19 +321,91 @@ describe("versioned task mutations", () => {
     });
     queryClient.setQueryData(taskDetailQueryKey(task.id), task);
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useUpdateTaskStatus(), {
+    const { result } = renderHook(() => useTaskLifecycleCommand(), {
       wrapper: wrapperFor(queryClient),
     });
 
-    act(() => result.current.mutate({ id: task.id, status: "done" }));
+    act(() =>
+      result.current.mutate({
+        id: task.id,
+        input: { action: "complete", expectedVersion: task.version },
+      }),
+    );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(updateTaskStatusMock).toHaveBeenCalledWith(
+    expect(executeTaskLifecycleCommandMock).toHaveBeenCalledWith(
       task.id,
-      "done",
-      task.version,
+      { action: "complete", expectedVersion: task.version },
+      expect.any(String),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: taskAssignmentQueryKey(task.id),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskEventQueryKey(task.id),
+    });
+  });
+
+  it("reuses one idempotency key for the same failed command retry", async () => {
+    executeTaskLifecycleCommandMock
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce({
+        task: { ...task, status: "blocked", version: 5 },
+        event: { ...taskEvent, action: "task_blocked" },
+      });
+    const { result } = renderHook(() => useTaskLifecycleCommand(), {
+      wrapper: createWrapper(),
+    });
+    const variables = {
+      id: task.id,
+      input: {
+        action: "block" as const,
+        reason: "等待客户",
+        expectedVersion: task.version,
+      },
+    };
+
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(executeTaskLifecycleCommandMock.mock.calls[0][2]).toBeTruthy();
+    expect(executeTaskLifecycleCommandMock.mock.calls[1][2]).toBe(
+      executeTaskLifecycleCommandMock.mock.calls[0][2],
+    );
+  });
+
+  it("refreshes project and today aggregates after a version conflict", async () => {
+    executeTaskLifecycleCommandMock.mockRejectedValue(
+      new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useTaskLifecycleCommand(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: task.id,
+        input: { action: "complete", expectedVersion: task.version },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: projectQueryKey,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["stats", "today"],
     });
   });
 });

@@ -7,7 +7,6 @@ import { TaskList } from "./TaskList";
 const mocks = vi.hoisted(() => ({ childTotal: 1 }));
 
 vi.mock("../api/hooks", () => ({
-  useUpdateTaskStatus: () => ({ isPending: false, mutate: vi.fn() }),
   useTaskPageQuery: (input: { page?: number; parentTaskId?: string }) => ({
     data:
       input.parentTaskId === task.id
@@ -39,6 +38,10 @@ const task: Task = {
   projectId: null,
   parentTaskId: null,
   completionCriteria: "",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
   dueDate: null,
   plannedDate: null,
   estimatedMinutes: 30,
@@ -50,6 +53,8 @@ const task: Task = {
   createdAt: "2026-08-27T08:00:00Z",
   updatedAt: "2026-08-27T08:00:00Z",
   completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
   tags: [],
 };
 
@@ -85,6 +90,40 @@ describe("TaskList", () => {
     );
 
     expect(useUiStore.getState().taskDetailId).toBe(task.id);
+  });
+
+  it("uses the status control only to open details for every lifecycle state", () => {
+    const statuses = [
+      ["todo", "待办"],
+      ["in_progress", "进行中"],
+      ["blocked", "阻塞"],
+      ["waiting_review", "待验收"],
+      ["done", "已完成"],
+      ["cancelled", "已取消"],
+    ] as const;
+    render(
+      <TaskList
+        live
+        tasks={statuses.map(([status], index) => ({
+          ...task,
+          id: `task-${index + 10}`,
+          title: `状态任务 ${index + 1}`,
+          status,
+        }))}
+      />,
+    );
+
+    for (const [, label] of statuses) {
+      expect(
+        screen.getByRole("button", { name: new RegExp(`（${label}）$`) }),
+      ).toBeVisible();
+    }
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /查看任务状态：状态任务 6（已取消）/,
+      }),
+    );
+    expect(useUiStore.getState().taskDetailId).toBe("task-15");
   });
 
   it("loads and renders children only after expanding a parent", () => {

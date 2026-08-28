@@ -39,7 +39,7 @@
 ### 已知缺口
 
 - “全部标为已读”没有行为，且没有收件箱列表、详情、筛选或真实计数。
-- SQLite schema v7 已有 `actors`、`task_assignments` 和 `workflow_events` 基础、历史 owner Assignment 回填及共享 Assignment 操作；仍没有 `inbox_items`、`inbox_item_tasks`、`task_artifacts` 或 `reminders` 表，也没有收件箱拆分/分派消费和事件链路。
+- SQLite schema v8 已有 Actor/Assignment、Task 六状态命令和可查询的 Workflow Event 时间线；仍没有 `inbox_items`、`inbox_item_tasks`、`task_artifacts` 或 `reminders` 表，也没有收件箱拆分/分派消费和事件投影链路。
 - 没有任何 Inbox/Reminder/Artifact API、Query 或 Mutation；Assignment API 已由任务/Actor 纵切提供，但当前收件箱页面没有调用。
 - 没有来源事件、稳定去重键、调度器、拆分事务、派生进度、解决/忽略/重开或审计。
 - 没有 Agent Adapter、Agent Run、能力令牌、取消/重试或崩溃恢复；这些也不属于 v0.1。
@@ -132,7 +132,7 @@ resolved / dismissed → open 或 tracking
 - `GET/POST /api/v1/inbox-items`、`GET/PATCH /api/v1/inbox-items/:id`。
 - 单条/全部已读、snooze/unsnooze、split、关联/软取消关联、resolve、force-resolve、dismiss、reopen。
 - `GET/POST /api/v1/reminders` 与单条读取/改期/取消。
-- Task Assignment API 已由共享工作流基础提供；Artifact、review 和 Inbox/Task events API 仍待 T-18D/T-11。
+- Task Assignment、六个生命周期命令和 Task events API 已由共享工作流基础提供；Artifact、submit/review 和 Inbox events API 仍待 T-18D D2/T-11。
 
 ### 幂等与并发
 
@@ -163,7 +163,7 @@ resolved / dismissed → open 或 tracking
 
 ## 分阶段实施
 
-1. **前置：Actor/Task 工作流基础**：actors 与 Assignment 操作已完成；扩展状态、Artifact、通用 Workflow Event 查询和状态命令仍待 T-18D。
+1. **前置：Actor/Task 工作流基础**：actors、Assignment、六状态命令和 Task Workflow Event 查询已完成；Artifact 与 manual 提交验收仍待 T-18D D2。
 2. **T-11A 数据契约**：新增 Inbox Item、关联表、Reminder、索引、去重与乐观锁迁移。
 3. **T-11B 人工受理**：列表、详情、已读/全部已读、稍后、手动提醒、解决、忽略和重开。
 4. **T-11C 拆分与分派**：原子多任务拆分/关联、必需标记、owner/person 分派、派生进度和自动解决。

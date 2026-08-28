@@ -33,10 +33,17 @@ import type {
   TaskAssignmentListResult,
   TaskAssignmentMutationResult,
   TaskKind,
+  TaskEventListParams,
+  TaskEventListResult,
+  TaskLifecycleAction,
+  TaskLifecycleCommandInput,
+  TaskLifecycleCommandResult,
   TaskListParams,
   TaskListResult,
   TaskPriority,
+  TaskReviewPolicy,
   TaskStatus,
+  TaskWorkflowEvent,
   TodayStats,
   UpdateActorInput,
   UpdateTagInput,
@@ -233,10 +240,34 @@ function invalidResponse(message: string): never {
 }
 
 function asTaskStatus(value: unknown): TaskStatus {
-  if (value === "todo" || value === "in_progress" || value === "done") {
+  if (
+    value === "todo" ||
+    value === "in_progress" ||
+    value === "blocked" ||
+    value === "waiting_review" ||
+    value === "done" ||
+    value === "cancelled"
+  ) {
     return value;
   }
   return invalidResponse("任务状态响应无效");
+}
+
+function asTaskReviewPolicy(value: unknown): TaskReviewPolicy {
+  if (value === "none" || value === "manual") return value;
+  return invalidResponse("任务验收策略响应无效");
+}
+
+function asBlockedFromStatus(value: unknown): Task["blockedFromStatus"] {
+  if (value === null) return null;
+  if (
+    value === "todo" ||
+    value === "in_progress" ||
+    value === "waiting_review"
+  ) {
+    return value;
+  }
+  return invalidResponse("任务阻塞前状态响应无效");
 }
 
 function asTaskPriority(value: unknown): TaskPriority {
@@ -662,6 +693,16 @@ export function normalizeTask(value: unknown): Task {
     completionCriteria: String(
       fieldValue(value, "completion_criteria", "completionCriteria") ?? "",
     ),
+    reviewPolicy: asTaskReviewPolicy(
+      fieldValue(value, "review_policy", "reviewPolicy"),
+    ),
+    blockedReason: nullableString(
+      fieldValue(value, "blocked_reason", "blockedReason"),
+    ),
+    blockedAt: nullableString(fieldValue(value, "blocked_at", "blockedAt")),
+    blockedFromStatus: asBlockedFromStatus(
+      fieldValue(value, "blocked_from_status", "blockedFromStatus"),
+    ),
     dueDate: nullableString(fieldValue(value, "due_date", "dueDate")),
     plannedDate: nullableString(
       fieldValue(value, "planned_date", "plannedDate"),
@@ -692,8 +733,111 @@ export function normalizeTask(value: unknown): Task {
     completedAt: nullableString(
       fieldValue(value, "completed_at", "completedAt"),
     ),
+    submittedAt: nullableString(
+      fieldValue(value, "submitted_at", "submittedAt"),
+    ),
+    reviewedAt: nullableString(fieldValue(value, "reviewed_at", "reviewedAt")),
     tags: Array.isArray(rawTags) ? rawTags.map(normalizeTag) : [],
   };
+}
+
+function nullableEventString(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  if (typeof value === "string" && value.length > 0) return value;
+  return invalidResponse(`${field} 响应无效`);
+}
+
+function nullableEventSnapshot(
+  value: unknown,
+  field: string,
+): Record<string, unknown> | null {
+  if (value === null) return null;
+  if (isRecord(value)) return value;
+  return invalidResponse(`${field} 响应无效`);
+}
+
+export function normalizeTaskWorkflowEvent(value: unknown): TaskWorkflowEvent {
+  if (!isRecord(value)) return invalidResponse("任务事件响应格式无效");
+  const id = stringField(value, "id");
+  const action = stringField(value, "action");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  if (!id || !action || action.length > 100 || !createdAt) {
+    return invalidResponse("任务事件响应格式无效");
+  }
+  const rawActor = value.actor;
+  if (rawActor !== null && !isRecord(rawActor)) {
+    return invalidResponse("任务事件责任主体响应无效");
+  }
+  const rawCommandSeq = fieldValue(value, "command_seq", "commandSeq");
+  let commandSeq: number | null = null;
+  if (rawCommandSeq !== null) {
+    if (
+      typeof rawCommandSeq !== "number" ||
+      !Number.isInteger(rawCommandSeq) ||
+      rawCommandSeq < 1
+    ) {
+      return invalidResponse("任务事件命令序号响应无效");
+    }
+    commandSeq = rawCommandSeq;
+  }
+  const reason = nullableEventString(value.reason, "任务事件原因");
+  if (reason !== null && reason.length > 1_000) {
+    return invalidResponse("任务事件原因响应无效");
+  }
+  const requestId = nullableEventString(
+    fieldValue(value, "request_id", "requestId"),
+    "任务事件请求 ID",
+  );
+  if (requestId !== null && requestId.length > 128) {
+    return invalidResponse("任务事件请求 ID 响应无效");
+  }
+  return {
+    id,
+    action,
+    actor: rawActor === null ? null : normalizeActorSummary(rawActor),
+    assignmentId: nullableEventString(
+      fieldValue(value, "assignment_id", "assignmentId"),
+      "任务事件分派 ID",
+    ),
+    requestId,
+    commandSeq,
+    previous: nullableEventSnapshot(value.previous, "任务事件旧快照"),
+    current: nullableEventSnapshot(value.current, "任务事件新快照"),
+    reason,
+    createdAt,
+  };
+}
+
+export function normalizeTaskEventListResult(
+  value: unknown,
+): TaskEventListResult {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.meta)) {
+    return invalidResponse("任务事件列表响应格式无效");
+  }
+  const items = value.data.map(normalizeTaskWorkflowEvent);
+  const meta = value.meta;
+  const result: TaskEventListResult = {
+    items,
+    meta: {
+      page: positiveInteger(meta.page, "任务事件页码"),
+      pageSize: positiveInteger(
+        fieldValue(meta, "page_size", "pageSize"),
+        "任务事件分页大小",
+      ),
+      total: nonNegativeInteger(meta.total, "任务事件总数"),
+      taskVersion: positiveInteger(
+        fieldValue(meta, "task_version", "taskVersion"),
+        "任务事件任务版本",
+      ),
+    },
+  };
+  if (
+    result.items.length > result.meta.pageSize ||
+    result.meta.total < result.items.length
+  ) {
+    return invalidResponse("任务事件分页响应不一致");
+  }
+  return result;
 }
 
 function normalizeTaskAssignmentMutationResult(
@@ -913,6 +1057,20 @@ export async function getTask(id: string): Promise<Task> {
   return normalizeTask(body);
 }
 
+export async function getTaskEvents(
+  taskId: string,
+  input: TaskEventListParams = {},
+): Promise<TaskEventListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/events?${params}`,
+  );
+  return normalizeTaskEventListResult(payload);
+}
+
 export async function getTaskAssignments(
   taskId: string,
   input: TaskAssignmentListParams = {},
@@ -942,7 +1100,7 @@ export async function getTaskAssignments(
   return result;
 }
 
-function assignmentCommandHeaders(
+function versionedCommandHeaders(
   expectedVersion: number,
   idempotencyKey: string,
 ): Record<string, string> {
@@ -961,7 +1119,7 @@ export async function createTaskAssignment(
     `/api/v1/tasks/${encodeURIComponent(taskId)}/assignments`,
     {
       method: "POST",
-      headers: assignmentCommandHeaders(input.expectedVersion, idempotencyKey),
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
       body: JSON.stringify({ role: input.role, actor_id: input.actorId }),
     },
   );
@@ -986,7 +1144,7 @@ export async function reassignTaskAssignment(
     `/api/v1/tasks/${encodeURIComponent(taskId)}/reassign`,
     {
       method: "POST",
-      headers: assignmentCommandHeaders(input.expectedVersion, idempotencyKey),
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
       body: JSON.stringify({
         role: input.role,
         actor_id: input.actorId,
@@ -1014,7 +1172,7 @@ export async function endTaskAssignment(
     `/api/v1/assignments/${encodeURIComponent(assignmentId)}/end`,
     {
       method: "POST",
-      headers: assignmentCommandHeaders(input.expectedVersion, idempotencyKey),
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
       body: JSON.stringify({ reason: input.reason }),
     },
   );
@@ -1036,7 +1194,6 @@ export async function createTask(
       title: input.title,
       description: input.description ?? "",
       kind: input.kind ?? "work",
-      status: input.status,
       priority: input.priority,
       project_id: input.projectId ?? null,
       parent_task_id: input.parentTaskId ?? null,
@@ -1052,21 +1209,46 @@ export async function createTask(
   return normalizeTask(body);
 }
 
-export async function updateTaskStatus(
+const taskLifecycleEventActions: Record<TaskLifecycleAction, string> = {
+  start: "task_started",
+  block: "task_blocked",
+  unblock: "task_unblocked",
+  complete: "task_completed",
+  cancel: "task_cancelled",
+  reopen: "task_reopened",
+};
+
+export async function executeTaskLifecycleCommand(
   id: string,
-  status: TaskStatus,
-  expectedVersion: number,
-): Promise<Task> {
+  input: TaskLifecycleCommandInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<TaskLifecycleCommandResult> {
   const payload = await apiRequest<unknown>(
-    `/api/v1/tasks/${encodeURIComponent(id)}/status`,
+    `/api/v1/tasks/${encodeURIComponent(id)}/${input.action}`,
     {
-      method: "PATCH",
-      headers: expectedVersionHeader(expectedVersion),
-      body: JSON.stringify({ status }),
+      method: "POST",
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
+      body: JSON.stringify(
+        input.action === "block" || input.action === "cancel"
+          ? { reason: input.reason }
+          : {},
+      ),
     },
   );
-  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
-  return normalizeTask(body);
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("任务生命周期命令响应格式无效");
+  }
+  const task = normalizeTask(payload.data.task);
+  const event = normalizeTaskWorkflowEvent(payload.data.event);
+  if (
+    task.id !== id ||
+    event.action !== taskLifecycleEventActions[input.action] ||
+    (typeof event.current?.version === "number" &&
+      event.current.version !== task.version)
+  ) {
+    return invalidResponse("任务生命周期命令响应不一致");
+  }
+  return { task, event };
 }
 
 export async function updateTask(

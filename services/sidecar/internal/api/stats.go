@@ -41,12 +41,12 @@ func (a *API) todayStats(c *gin.Context) {
 	var tasks taskStats
 	err := a.db.WithContext(c.Request.Context()).Raw(`
 		SELECT
-			COALESCE(SUM(CASE WHEN planned_date = ? THEN 1 ELSE 0 END), 0) AS total,
+			COALESCE(SUM(CASE WHEN planned_date = ? AND status <> 'cancelled' THEN 1 ELSE 0 END), 0) AS total,
 			COALESCE(SUM(CASE WHEN planned_date = ? AND status = 'done' THEN 1 ELSE 0 END), 0) AS completed,
-			COALESCE(SUM(CASE WHEN planned_date = ? AND status <> 'done' THEN 1 ELSE 0 END), 0) AS remaining,
-			COALESCE(SUM(CASE WHEN status <> 'done' AND due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END), 0) AS overdue,
-			COALESCE(SUM(CASE WHEN status <> 'done' AND due_date >= ? AND due_date <= ? THEN 1 ELSE 0 END), 0) AS due_soon,
-			COALESCE(SUM(CASE WHEN planned_date = ? THEN COALESCE(estimated_minutes, 0) ELSE 0 END), 0) AS estimated_minutes,
+			COALESCE(SUM(CASE WHEN planned_date = ? AND status NOT IN ('done', 'cancelled') THEN 1 ELSE 0 END), 0) AS remaining,
+			COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled') AND due_date IS NOT NULL AND due_date < ? THEN 1 ELSE 0 END), 0) AS overdue,
+			COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled') AND due_date >= ? AND due_date <= ? THEN 1 ELSE 0 END), 0) AS due_soon,
+			COALESCE(SUM(CASE WHEN planned_date = ? AND status <> 'cancelled' THEN COALESCE(estimated_minutes, 0) ELSE 0 END), 0) AS estimated_minutes,
 			COALESCE(SUM(CASE WHEN planned_date = ? THEN actual_minutes ELSE 0 END), 0) AS actual_minutes
 		FROM tasks
 	`, date, date, date, nowTimestamp, nowTimestamp, dueSoonTimestamp, date, date).Scan(&tasks).Error

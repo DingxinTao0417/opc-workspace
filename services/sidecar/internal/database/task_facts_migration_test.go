@@ -45,8 +45,8 @@ func TestTaskFactsMigrationUpgradesRealV5DatabaseWithoutLosingFacts(t *testing.T
 		t.Fatalf("upgrade v5 database with Open(): %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 7 {
-		t.Fatalf("SchemaVersion = %d, want 7", store.SchemaVersion)
+	if store.SchemaVersion != 8 {
+		t.Fatalf("SchemaVersion = %d, want 8", store.SchemaVersion)
 	}
 
 	var task struct {
@@ -145,8 +145,15 @@ func TestTaskFactsMigrationUpgradesRealV5DatabaseWithoutLosingFacts(t *testing.T
 
 	t.Run("schema v5 project aggregate triggers still fire", func(t *testing.T) {
 		if _, err := store.SQL.Exec(`
+			UPDATE task_assignments
+			SET unassigned_at = '2026-08-27T12:00:00Z', reason = 'migration constraint test'
+			WHERE task_id = ? AND unassigned_at IS NULL
+		`, v5ChildTaskID); err != nil {
+			t.Fatalf("end upgraded task assignment: %v", err)
+		}
+		if _, err := store.SQL.Exec(`
 			UPDATE tasks
-			SET status = 'done', version = version + 1
+			SET status = 'done', completed_at = '2026-08-27T12:00:00Z', version = version + 1
 			WHERE id = ?
 		`, v5ChildTaskID); err != nil {
 			t.Fatalf("update upgraded task status: %v", err)
@@ -304,7 +311,7 @@ func TestTaskParentConstraintsAndVersionTriggers(t *testing.T) {
 
 	if _, err := store.SQL.Exec(`
 		UPDATE tasks
-		SET status = 'done', version = version + 1
+		SET status = 'done', completed_at = '2026-08-27T12:00:00Z', version = version + 1
 		WHERE id = ?
 	`, grandchildID); err != nil {
 		t.Fatalf("update grandchild status: %v", err)

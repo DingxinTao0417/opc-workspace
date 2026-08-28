@@ -3,10 +3,12 @@ import {
   ApiError,
   createPersonActor,
   createTag,
+  createTask,
   createTaskAssignment,
   deleteTag,
   deleteTask,
   endTaskAssignment,
+  executeTaskLifecycleCommand,
   getAllActors,
   getActors,
   getAllProjects,
@@ -14,10 +16,13 @@ import {
   getTags,
   getTaskPage,
   getTaskAssignments,
+  getTaskEvents,
   normalizeActor,
   normalizeActorSummary,
   normalizeTaskAssignment,
   normalizeTaskAssignmentListResult,
+  normalizeTaskEventListResult,
+  normalizeTaskWorkflowEvent,
   normalizeTag,
   normalizeProject,
   normalizeTask,
@@ -25,7 +30,6 @@ import {
   reassignTaskAssignment,
   updateTag,
   updateTask,
-  updateTaskStatus,
   updateActor,
 } from "./client";
 
@@ -46,6 +50,10 @@ function taskPayload(overrides: Record<string, unknown> = {}) {
     project_name: "客户门户",
     parent_task_id: null,
     completion_criteria: "文件齐全",
+    review_policy: "none",
+    blocked_reason: null,
+    blocked_at: null,
+    blocked_from_status: null,
     due_date: "2026-08-26T18:00:00Z",
     planned_date: "2026-08-26",
     estimated_minutes: 45,
@@ -66,6 +74,8 @@ function taskPayload(overrides: Record<string, unknown> = {}) {
     created_at: "2026-08-26T10:00:00Z",
     updated_at: "2026-08-26T10:10:00Z",
     completed_at: null,
+    submitted_at: null,
+    reviewed_at: null,
     ...overrides,
   };
 }
@@ -122,6 +132,22 @@ function assignmentPayload(overrides: Record<string, unknown> = {}) {
     reason: null,
     is_active: true,
     inferred: false,
+    ...overrides,
+  };
+}
+
+function eventPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "event-1",
+    action: "task_started",
+    actor: ownerSummaryPayload,
+    assignment_id: null,
+    request_id: "request-1",
+    command_seq: 1,
+    previous: { status: "todo", version: 7 },
+    current: { status: "in_progress", version: 8 },
+    reason: null,
+    created_at: "2026-08-27T11:00:00Z",
     ...overrides,
   };
 }
@@ -424,6 +450,10 @@ describe("normalizeTask", () => {
       projectName: "客户门户",
       parentTaskId: null,
       completionCriteria: "文件齐全",
+      reviewPolicy: "none",
+      blockedReason: null,
+      blockedAt: null,
+      blockedFromStatus: null,
       estimatedMinutes: 45,
       actualMinutes: 12,
       manualOrder: 1000,
@@ -447,10 +477,23 @@ describe("normalizeTask", () => {
     ).toMatchObject({ estimatedMinutes: 0, manualOrder: 0 });
   });
 
-  it("rejects unknown statuses instead of treating them as todo", () => {
-    expect(() => normalizeTask(taskPayload({ status: "blocked" }))).toThrow(
+  it("accepts all controlled statuses and rejects unknown values", () => {
+    for (const status of [
+      "todo",
+      "in_progress",
+      "blocked",
+      "waiting_review",
+      "done",
+      "cancelled",
+    ]) {
+      expect(normalizeTask(taskPayload({ status })).status).toBe(status);
+    }
+    expect(() => normalizeTask(taskPayload({ status: "archived" }))).toThrow(
       ApiError,
     );
+    expect(() =>
+      normalizeTask(taskPayload({ review_policy: "automatic" })),
+    ).toThrow(ApiError);
   });
 
   it("rejects invalid task payloads", () => {
@@ -629,8 +672,138 @@ describe("task list requests", () => {
   });
 });
 
+describe("controlled task lifecycle", () => {
+  it("creates tasks in the server-controlled initial state without a status field", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: taskPayload({ status: "todo", version: 1 }) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTask(
+      {
+        title: "新任务",
+        priority: "P2",
+        kind: "work",
+      },
+      "task-key",
+    );
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).not.toHaveProperty("status");
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("Idempotency-Key"),
+    ).toBe("task-key");
+  });
+
+  it("strictly normalizes task events and their page metadata", () => {
+    expect(normalizeTaskWorkflowEvent(eventPayload())).toMatchObject({
+      id: "event-1",
+      action: "task_started",
+      actor: { displayName: "我" },
+      commandSeq: 1,
+      previous: { status: "todo", version: 7 },
+      current: { status: "in_progress", version: 8 },
+      reason: null,
+    });
+    expect(
+      normalizeTaskEventListResult({
+        data: [eventPayload()],
+        meta: { page: 1, page_size: 20, total: 1, task_version: 8 },
+      }),
+    ).toMatchObject({
+      items: [expect.objectContaining({ action: "task_started" })],
+      meta: { page: 1, pageSize: 20, total: 1, taskVersion: 8 },
+    });
+    expect(() =>
+      normalizeTaskWorkflowEvent(eventPayload({ previous: "todo" })),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeTaskWorkflowEvent(eventPayload({ command_seq: 0 })),
+    ).toThrow(ApiError);
+  });
+
+  it("gets a paged task event timeline", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [eventPayload()],
+        meta: { page: 2, page_size: 10, total: 11, task_version: 8 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getTaskEvents("task-1", { page: 2, pageSize: 10 });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.pathname).toBe("/api/v1/tasks/task-1/events");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "10",
+    });
+  });
+
+  it("posts each explicit command with version, stable key, and exact body", async () => {
+    const targets = {
+      start: ["task_started", "in_progress"],
+      block: ["task_blocked", "blocked"],
+      unblock: ["task_unblocked", "todo"],
+      complete: ["task_completed", "done"],
+      cancel: ["task_cancelled", "cancelled"],
+      reopen: ["task_reopened", "todo"],
+    } as const;
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const action = new URL(String(input), "http://local").pathname
+          .split("/")
+          .at(-1) as keyof typeof targets;
+        const [eventAction, status] = targets[action];
+        return jsonResponse({
+          data: {
+            task: taskPayload({ status, version: 8 }),
+            event: eventPayload({
+              action: eventAction,
+              current: { status, version: 8 },
+            }),
+          },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const commands = [
+      { action: "start", expectedVersion: 7 },
+      { action: "block", reason: "等待客户", expectedVersion: 7 },
+      { action: "unblock", expectedVersion: 7 },
+      { action: "complete", expectedVersion: 7 },
+      { action: "cancel", reason: "范围取消", expectedVersion: 7 },
+      { action: "reopen", expectedVersion: 7 },
+    ] as const;
+    for (const input of commands) {
+      await executeTaskLifecycleCommand("task-1", input, `key-${input.action}`);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    commands.forEach((input, index) => {
+      const [url, init] = fetchMock.mock.calls[index];
+      expect(new URL(String(url), "http://local").pathname).toBe(
+        `/api/v1/tasks/task-1/${input.action}`,
+      );
+      expect(init?.method).toBe("POST");
+      expect(new Headers(init?.headers).get("If-Match")).toBe('"7"');
+      expect(new Headers(init?.headers).get("Idempotency-Key")).toBe(
+        `key-${input.action}`,
+      );
+      expect(JSON.parse(String(init?.body))).toEqual(
+        input.action === "block" || input.action === "cancel"
+          ? { reason: input.reason }
+          : {},
+      );
+    });
+  });
+});
+
 describe("versioned task writes", () => {
-  it("sends If-Match for task patch, status, and delete", async () => {
+  it("sends If-Match for task patch and delete", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, init?: RequestInit) =>
         init?.method === "DELETE"
@@ -653,18 +826,14 @@ describe("versioned task writes", () => {
       estimatedMinutes: 0,
       expectedVersion: 7,
     });
-    await updateTaskStatus("task-1", "done", 8);
     await deleteTask("task-1", 9);
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
       new Headers(fetchMock.mock.calls[0][1]?.headers).get("If-Match"),
     ).toBe('"7"');
     expect(
       new Headers(fetchMock.mock.calls[1][1]?.headers).get("If-Match"),
-    ).toBe('"8"');
-    expect(
-      new Headers(fetchMock.mock.calls[2][1]?.headers).get("If-Match"),
     ).toBe('"9"');
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       estimated_minutes: 0,

@@ -58,6 +58,7 @@ const actorTypeLabels: Record<ActorSummary["type"], string> = {
 
 const assignmentReasonLabels: Readonly<Record<string, string>> = {
   "Task completed": "任务完成后自动结束",
+  "Task cancelled": "任务取消后自动结束",
 };
 
 const errorMessages: Record<string, string> = {
@@ -120,7 +121,7 @@ interface AssignmentCardProps {
   assignment: TaskAssignment | null;
   disabled: boolean;
   role: AssignmentRole;
-  taskDone: boolean;
+  taskTerminal: boolean;
   onEdit: (
     action: AssignmentAction,
     role: AssignmentRole,
@@ -132,7 +133,7 @@ function AssignmentCard({
   assignment,
   disabled,
   role,
-  taskDone,
+  taskTerminal,
   onEdit,
 }: AssignmentCardProps) {
   const label = roleLabels[role];
@@ -145,15 +146,15 @@ function AssignmentCard({
         <UserRoundPlus aria-hidden="true" size={19} />
         <strong>{role === "assignee" ? "未分派负责人" : "未设置审核人"}</strong>
         <span>
-          {taskDone
-            ? "已完成任务不能新增分派"
+          {taskTerminal
+            ? "终态任务不能新增分派"
             : role === "assignee"
               ? "选择所有者或本地人员"
               : "v0.1 仅支持所有者审核"}
         </span>
         <button
           className="button button-secondary"
-          disabled={disabled || taskDone}
+          disabled={disabled || taskTerminal}
           onClick={() => onEdit("assign", role)}
           type="button"
         >
@@ -170,9 +171,9 @@ function AssignmentCard({
         <div className="task-assignment-card-actions">
           <button
             className="button button-quiet"
-            disabled={disabled || taskDone}
+            disabled={disabled || taskTerminal}
             onClick={() => onEdit("reassign", role, assignment)}
-            title={taskDone ? "已完成任务不能改派" : undefined}
+            title={taskTerminal ? "已完成或取消的任务不能改派" : undefined}
             type="button"
           >
             改派
@@ -387,8 +388,11 @@ export function TaskAssignmentsSection({
 
   const submitEditor = () => {
     if (!editor || disabled || commandBusy || versionConflict) return;
-    if (task.status === "done" && editor.action !== "end") {
-      setValidationError("已完成的任务不能首次分派或改派。");
+    if (
+      (task.status === "done" || task.status === "cancelled") &&
+      editor.action !== "end"
+    ) {
+      setValidationError("已完成或取消的任务不能首次分派或改派。");
       return;
     }
     const expectedVersion = editor.expectedVersion;
@@ -524,14 +528,18 @@ export function TaskAssignmentsSection({
               disabled={disabled || commandBusy}
               onEdit={openEditor}
               role="assignee"
-              taskDone={task.status === "done"}
+              taskTerminal={
+                task.status === "done" || task.status === "cancelled"
+              }
             />
             <AssignmentCard
               assignment={active.reviewer}
               disabled={disabled || commandBusy}
               onEdit={openEditor}
               role="reviewer"
-              taskDone={task.status === "done"}
+              taskTerminal={
+                task.status === "done" || task.status === "cancelled"
+              }
             />
           </div>
         </>

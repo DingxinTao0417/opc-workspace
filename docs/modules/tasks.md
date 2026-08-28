@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27
 >
-> 版本边界：任务事实层已在 SQLite schema v6 和 API v1 中交付；当前 schema v7 已增加 Actor/Assignment/Event 数据基础、历史 owner 回填和 Actor 管理，T-18C Assignment 操作/UI 也已交付。扩展状态、产出和验收仍为 v0.1 后续纵切，Agent 执行为 v0.2 规划。
+> 版本边界：任务事实层已在 SQLite schema v6 和 API v1 中交付，schema v7 增加 Actor/Assignment/Event，当前 schema v8 已交付 T-18D D1 的六状态、六个受控命令和 Task 活动时间线。`review_policy = manual` 的创建/编辑入口、Artifact、提交验收/返工仍属于 T-18D D2；Agent 执行为 v0.2 规划。
 
 ## 定位与边界
 
@@ -18,12 +18,12 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 ## 当前实现状态
 
-当前状态为**部分完成**。任务事实、层级、标签、分页筛选、批量安全操作、计划组排序和责任分派已经形成可运行纵切；受控生命周期、产出验收和专注工时仍未接入。
+当前状态为**部分完成**。任务事实、层级、标签、分页筛选、批量安全操作、计划组排序、责任分派、受控生命周期 D1 和活动时间线已经形成可运行纵切；Artifact、manual 提交验收和专注工时仍未接入。
 
 ### 已实现
 
-- SQLite schema v6 为 `tasks` 增加 `kind`、`parent_task_id`、`completion_criteria` 和 `version`，并为 `tags` 增加 `version`；旧任务默认 `kind = work`、`completion_criteria = ''`、`version = 1`。
-- 任务类型支持 `work / review / followup / reminder`；状态暂时仍为 `todo / in_progress / done`。
+- SQLite schema v8 在保留 v7 全部任务事实、版本、关系、索引和触发器的前提下安全重建 `tasks`，将状态扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled`，并增加 `review_policy`、阻塞来源/原因/时间及提交/验收时间字段；旧任务保持原版本和关系，默认 `review_policy = none`。
+- schema v8 的重建迁移在固定物理连接上于事务外临时关闭外键，事务提交前执行 `PRAGMA foreign_key_check`，成功或失败都恢复外键；迁移失败整体回滚，不留下已登记但关系损坏的半成品。
 - 新建、详情和编辑已接入项目、父任务、完成标准、标签、计划日期、截止时间、预计时长等事实；读取返回 `project_name`、`parent_task_title`、标签和子任务完成数。
 - 父任务约束由 API 校验和数据库递归 trigger 双重保护，禁止自引用和循环。删除父任务时子任务按外键规则解除父级，不删除子任务；父级、子级标题/状态/关系变化会递增受影响任务版本，使嵌套列表缓存失效。
 - 标签提供分页/搜索/排序、幂等新建、编辑和确认删除 API；名称按大小写不敏感唯一，颜色为 `#RRGGBB`，单任务最多 20 个标签。标签重命名、改色或删除会递增所有受影响任务的版本。
@@ -31,9 +31,13 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 - 列表的计数、任务行、标签水合在同一只读事务中读取，避免返回相互矛盾的版本和标签快照。
 - 任务页使用服务端分页和防抖搜索；支持状态、优先级、类型、项目、标签和精确计划日期筛选。无筛选时分页展示根任务并按需展开子任务；筛选结果使用父任务面包屑，任务行展示标签和子任务进度。
 - `POST /tasks` 使用规范化 v2 请求摘要，覆盖类型、父任务、完成标准和排序后的标签 ID；保留对旧 v1 请求摘要的安全兼容。同 key 同请求在资源编辑或删除后仍重放首次 `201` 快照，异体复用返回 `409 IDEMPOTENCY_CONFLICT`。
-- `GET /tasks/:id` 与创建响应返回 `ETag`；任务非状态编辑、三态状态更新和删除都必须携带 `If-Match`。缺少版本返回 `428`，旧版本返回 `409 VERSION_CONFLICT`；详情弹窗保留草稿并允许载入最新版或基于最新版重试。
+- `GET /tasks/:id` 与创建响应返回 `ETag`；任务非状态编辑、删除和生命周期命令都必须携带 `If-Match`。缺少版本返回 `428`，旧版本返回 `409 VERSION_CONFLICT`；详情弹窗保留事实草稿和生命周期原因，允许载入最新版后再次明确提交。
 - 任务详情可查询当前 assignee/reviewer 与分页结束历史，并执行首次分派、改派和结束。Assignment 写入同样使用 Task `If-Match`，成功递增 Task 版本；冲突时保留选择和原因并要求用户刷新确认。
-- Task 转为 `done` 时在同一事务结束全部活动 Assignment 并逐条写 `assignment_ended`；重新打开不会恢复旧记录。显式结束 Assignment 不改变 Task 状态。
+- Task 状态只允许通过 `start / block / unblock / complete / cancel / reopen` 显式命令改变。新建固定为 `todo`，非 todo 创建返回 `422 LIFECYCLE_COMMAND_REQUIRED`；旧 `PATCH /tasks/:id/status` 固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED`。
+- `start` 要求活动 assignee；`block` 和 `cancel` 要求 1–1000 字符原因；`unblock` 只能恢复服务端保存的 `blocked_from_status`；`complete` 只允许 `review_policy = none` 的 `todo / in_progress`。每个命令只递增一次 Task 版本，并可用稳定 `Idempotency-Key` 重放首次响应而不重复写事件。
+- Task 转为 `done` 或 `cancelled` 时，在同一事务结束全部活动 Assignment 并逐条写 `assignment_ended`，Task 主事件最后写入；重新打开回到 `todo`，保留事件但不会恢复旧分派。显式结束 Assignment 不改变 Task 状态，终态 Task 不能新建或改派 Assignment。
+- `GET /tasks/:id/events` 返回 Task 聚合的生命周期、Assignment 和历史迁移事件，默认每页 50、最大 100，并返回 Task `ETag` 与 `meta.task_version`。同一命令内以 `command_seq` 稳定排序；历史 v7 事件允许序号为空。schema v8 trigger 拒绝修改或删除事件，仅允许外键在 Task 硬删除时把关联 Assignment ID 置空。
+- 任务详情的生命周期区会根据当前状态展示可用操作；事实表单有未保存修改时禁止状态命令，避免把旧草稿和新状态混合提交。活动时间线默认折叠并按需加载，覆盖加载、空、错误、重试和分页。
 - `PATCH /api/v1/tasks/batch` 在单事务内执行 1–100 条任务的移动项目、设置/清除计划日期、添加标签或移除标签。所有任务 ID 和 `expected_version` 先整体校验，任一任务不存在、版本过期、项目不可分配、标签不存在或超过 20 标签时全部回滚。
 - `PUT /api/v1/tasks/reorder` 对一个完整 `planned_date` 组（包括无计划日期组）原子写入手动顺序或恢复默认顺序。请求必须提交组内完整 ID/版本集合，组成员或版本变化时返回冲突；手动顺序以 1000 为间隔保存。
 - 任务页在选择一个精确计划日期、清除其他筛选并切换“手动顺序”后，可通过上移/下移持久调整该计划组，并可恢复默认排序。当前尚未实现拖拽。
@@ -42,21 +46,25 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 ### 已知缺口
 
-- 状态仍只有三态。列表按钮主要完成或恢复任务；`blocked / waiting_review / cancelled`、显式生命周期命令、返工原因和审计均未实现。
-- `completion_criteria` 已保存和编辑；Assignment 操作和责任事件已实现，但 `review_policy`、Artifact、受控状态事件和通用任务事件查询与真正的验收流程尚未实现，因此完成标准目前只是事实字段，不会自动判定完成。
-- 父任务只展示子任务统计，不会因子任务完成而自动推进；“所有子任务取消不自动完成”等规则要等扩展状态和受控生命周期上线后实现。
+- `review_policy`、`submitted_at` 和 `reviewed_at` 已进入 schema/model/响应，但 D1 不接受创建或编辑 manual 策略；当前新建与迁移任务都为 `none`。`submit-output / accept / request_changes`、Artifact 和产出 UI 留给 D2，因此 `waiting_review` 已可查询和展示，但当前公开 D1 命令不会把普通任务推进到该状态。
+- `completion_criteria` 已保存和编辑，但不会自动判定完成；manual 提交验收上线前，现有普通任务只能走 `review_policy = none` 的直接完成链路。
+- 父任务仍只展示子任务统计，不会因子任务完成/取消而自动推进；所有子任务取消不自动完成的目标规则尚未实现。
 - 批量 API 只允许移动项目、改计划日期、加/删标签，不批量改状态或删除，避免在受控生命周期上线前形成绕过入口。
 - 任务页实现了按钮式计划组排序，今日页尚未消费该纵切，仍没有真实日期分组、跨日期改期或拖拽回滚。
 - 项目/父任务选择器会串行拉取最多每页 100 条的全部选项，没有选择器内搜索；大数据量性能仍需专项验证。
 - 看板、任务依赖和绑定专注工时未实现；`actual_minutes` 字段与项目聚合已存在，但 Focus Session 尚不会自动累计。
-- Task/Tag 创建幂等仍没有 Actor 作用域、过期清理或 Workflow Event 去重；这些随本地工作编排实现。
+- Task/Tag 创建和 Task 生命周期幂等仍没有调用 Actor 作用域或过期清理；事件重放已保证不重复，完整作用域随本地工作编排实现。
 
 ## 当前数据与约束
 
 | 字段 | 当前契约 |
 |------|----------|
 | `kind` | `work / review / followup / reminder`，默认 `work` |
-| `status` | `todo / in_progress / done`；扩展状态待开发 |
+| `status` | `todo / in_progress / blocked / waiting_review / done / cancelled`；只由生命周期命令改变 |
+| `review_policy` | `none / manual`；schema/model 已实现，当前新建与编辑入口只产生/保留 `none`，manual 待 D2 开放 |
+| `blocked_reason / blocked_at / blocked_from_status` | 仅 `blocked` 状态非空；解除阻塞恢复服务端保存的 todo/in_progress/waiting_review 后清空 |
+| `completed_at` | 仅 `done` 非空；取消和重新打开时为空 |
+| `submitted_at / reviewed_at` | schema/model 已实现；D1 不提供写入命令，D2 提交验收使用 |
 | `parent_task_id` | 可空，自外键 `ON DELETE SET NULL`，禁止自引用与循环 |
 | `completion_criteria` | 最多 10000 字符，默认空字符串 |
 | `tag_ids` / `tags` | 写入使用最多 20 个 UUID；读取返回按名称稳定排序的完整标签 |
@@ -65,17 +73,24 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 | `due_date` | 可空 RFC 3339 时间戳，服务端规范化为 UTC |
 | `planned_date` | 可空 `YYYY-MM-DD` 纯日期 |
 
-`title` 为 2–200 字符；描述与完成标准分别最多 10000 字符；预计时长不得为负数。通用 PATCH 不接受 `status` 或生命周期时间。
+`title` 为 2–200 字符；描述与完成标准分别最多 10000 字符；预计时长不得为负数。通用 PATCH 不接受 `status`、`review_policy` 或生命周期时间。
 
 ## 当前 API
 
 | 方法 | 路径 | 当前行为 |
 |------|------|----------|
 | GET | `/api/v1/tasks` | 分页、搜索、筛选和稳定排序；可查询根任务或指定父任务 |
-| POST | `/api/v1/tasks` | 创建完整任务事实；可选 `Idempotency-Key`；返回 `ETag` |
+| POST | `/api/v1/tasks` | 创建完整任务事实，状态只能为 todo；非 todo 返回 `LIFECYCLE_COMMAND_REQUIRED`；可选 `Idempotency-Key`；返回 `ETag` |
 | GET | `/api/v1/tasks/:id` | 返回项目/父任务标题、标签、子任务统计和 `ETag` |
 | PATCH | `/api/v1/tasks/:id` | `If-Match` 保护的非生命周期编辑 |
-| PATCH | `/api/v1/tasks/:id/status` | `If-Match` 保护的三态兼容接口 |
+| PATCH | `/api/v1/tasks/:id/status` | 已废弃；固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED` |
+| POST | `/api/v1/tasks/:id/start` | `todo → in_progress`；要求活动 assignee、Task `If-Match`，可选幂等键 |
+| POST | `/api/v1/tasks/:id/block` | 从 todo/in_progress/waiting_review 进入 blocked；原因必填 |
+| POST | `/api/v1/tasks/:id/unblock` | 只恢复服务端保存的 blocked_from_status；客户端不可指定目标 |
+| POST | `/api/v1/tasks/:id/complete` | todo/in_progress → done；只允许 `review_policy = none` |
+| POST | `/api/v1/tasks/:id/cancel` | 从活动状态进入 cancelled；原因必填并结束活动 Assignment |
+| POST | `/api/v1/tasks/:id/reopen` | done/cancelled → todo；不恢复旧 Assignment |
+| GET | `/api/v1/tasks/:id/events` | Task 活动时间线；分页返回 actor/assignment/request/前后快照/原因/command_seq、Task `ETag` 和版本 |
 | GET | `/api/v1/tasks/:id/assignments` | 当前 assignee/reviewer、分页结束历史、Task 版本与 `ETag` |
 | POST | `/api/v1/tasks/:id/assignments` | Task `If-Match` 保护的首次分派；可选幂等键 |
 | POST | `/api/v1/tasks/:id/reassign` | 原子结束旧分派、创建新分派并写事件；要求原因、Task `If-Match` 和可选幂等键 |
@@ -90,12 +105,12 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 任务筛选参数包括 `page`、`page_size`、`q`、`status`、`priority`、`kind`、`project_id`、`planned_date`、`planned_from`、`planned_to`、`due_from`、`due_to`、重复 `tag_id`、`parent_task_id`、`root_only` 和 `sort`。排序字段为 `manual_order / priority / due_date / planned_date / created_at / updated_at / title / status / kind`，前缀 `-` 表示倒序。
 
-## 当前 Assignment 与后续生命周期/产出
+## 当前 Assignment、生命周期与后续产出
 
 - 当前每个任务可有 assignee 和 reviewer；同一 role 同时只能有一个活动 Assignment。
 - v0.1 已支持 active owner/person assignee 和 owner reviewer；person 仅是本地责任记录，由 owner 回填线下进度和产出。system/agent 当前不可作为 assignee。
-- T-18D 将状态扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled`，引入 `review_policy = none / manual`，并只允许通过 `start / block / unblock / complete / submit-output / accept / request_changes / cancel / reopen` 等显式命令改变生命周期。
-- T-18D 将支持文本、受控本地文件、链接引用和结构化摘要，并区分产出者与录入者；这些能力当前尚未实现。
+- T-18D D1 已扩展六状态，并交付 `start / block / unblock / complete / cancel / reopen`、并发/幂等保护、Assignment 终态联动和 Task 活动时间线。
+- T-18D D2 将开放 `review_policy = manual`，实现 `submit-output / accept / request_changes`，并支持文本、受控本地文件、链接引用和结构化摘要，区分产出者与录入者。
 - v0.2 才支持健康的本地 agent Actor；每次执行形成独立 Agent Run，成功后进入 `waiting_review`。
 
 ## 关键用户流程
@@ -108,6 +123,14 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 4. 用户可选择多条任务原子改项目、计划日期或标签；任一版本失效时整批不写入。
 5. 用户在精确计划日期组内调整顺序；服务端只接受该组完整且版本一致的集合。
 
+### 当前：执行、阻塞、取消与重新打开
+
+1. 用户先在责任区设置活动负责人，再在生命周期区点击“开始执行”；没有活动 assignee 时服务端拒绝。
+2. todo/in_progress/waiting_review 可填写原因后阻塞；解除阻塞不让客户端选择任意状态，只恢复服务端记录的阻塞前状态。
+3. `review_policy = none` 的 todo/in_progress 可直接完成；完成与取消都原子结束当前负责人和审核人，Task 版本只递增一次。
+4. done/cancelled 可重新打开到 todo；旧分派不会恢复，需要用户按当前事实重新分派。
+5. 任务详情按需展开活动时间线，查看状态、分派和迁移事件；版本冲突时保留操作草稿，刷新后由用户重新确认。
+
 ### 后续：提交产出并验收
 
 1. 人工负责人完成工作；person 的线下结果由 owner 代录。
@@ -119,7 +142,7 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 | 模块 | 协作方式 |
 |------|----------|
-| 今日 | 已可复用任务的计划日期、分页筛选和计划组排序 API；今日页尚待真正接入。 |
+| 今日 | 已复用六状态展示并从活跃列表排除 done/cancelled；统计总数/剩余/逾期/临期/预计排除 cancelled，actual_minutes 保留；真实日期分组和排序仍待接入。 |
 | 项目 | 当前已支持项目选择、`project_name` 和项目任务聚合；归档项目拒绝新关联，任务聚合变化会递增项目版本。 |
 | Actor | 当前由 Assignment 关联 Actor 与 Task；Task 状态保持唯一事实。 |
 | 收件箱 | 后续创建/关联 Task，并从必需任务派生进度；不复制 Task 状态。 |
@@ -133,10 +156,11 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 1. **任务基础事实（已交付）**：schema v6、类型、父子、完成标准、标签、版本/ETag、任务页服务端分页筛选、批量安全操作和计划组手动排序。
 2. **Actor 与 Assignment（已交付）**：Actor 管理、历史 owner 回填、Assignment API/UI、任务版本并发、幂等责任命令和责任事件。
-3. **受控状态（待交付）**：扩展状态、验收策略、Artifact、提交/验收/返工和通用 Workflow Event 时间线。
-4. **收件箱集成**：支持原子拆分/关联、必需标记和由任务派生的收件箱解决规则。
-5. **今日与专注集成**：今日页接入日期范围与排序 API；持久化 Focus Session 并累计工时。
-6. **v0.2 增强**：任务看板、本地 Agent Run、取消/重试和返工闭环；任务依赖另行排期。
+3. **T-18D D1 受控状态（已交付）**：schema v8、六状态、六命令、Task `If-Match`/幂等、终态 Assignment 联动、追加式事件与任务详情时间线。
+4. **T-18D D2 产出验收（待交付）**：开放 manual 策略，增加 Artifact、提交/接受/返工和受控文件能力。
+5. **收件箱集成**：支持原子拆分/关联、必需标记和由任务派生的收件箱解决规则。
+6. **今日与专注集成**：今日页接入日期范围与排序 API；持久化 Focus Session 并累计工时。
+7. **v0.2 增强**：任务看板、本地 Agent Run、取消/重试和返工闭环；任务依赖另行排期。
 
 ## 验收标准
 
@@ -156,12 +180,20 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 
 - 同一任务同一 role 只有一个活动 Assignment；并发旧版本的创建、改派或结束被拒绝。
 - person 分派明确说明不发送、不登录、不同步；inactive person 不进入候选，停用后既有历史仍可查。
-- 幂等重放不重复 Assignment 或责任事件；完成 Task 只递增一次 Task 版本并结束全部活动记录。
+- 幂等重放不重复 Assignment 或责任事件；完成或取消 Task 只递增一次 Task 版本并结束全部活动记录。
 - Assignment 没有独立 DELETE。Task 永久删除会级联删除 Assignment，保留 `assignment_id` 已置空且含 JSON 快照的 Workflow Event。
+
+### 当前受控生命周期与时间线
+
+- 新任务只能为 todo；通用 PATCH 和已废弃 status 端点不能绕过显式命令。
+- 状态转换矩阵、活动 assignee、阻塞/取消原因和 review policy 由服务端校验，数据库 trigger 同时限制非法转换、终态活动 Assignment 和终态重新分派。
+- 六个命令使用 Task `If-Match`；同 key 同请求可安全重放，同 key 异体请求返回冲突，失败不留下部分 Assignment 或事件。
+- Task 时间线能分页读取生命周期、责任和迁移事件；同请求内顺序可解释，事件普通更新/删除被数据库拒绝。
+- cancelled 不计入 Today 活跃任务与计划工作统计，但其历史 actual_minutes 不被抹除；Project 仍只把 done 计作完成。
 
 ### 后续工作流
 
-- manual、Agent 和高风险任务无法绕过“提交产出 → owner 验收”。
+- manual、Agent 和高风险任务无法绕过“提交产出 → owner 验收”；该能力需 D2 完成后验收。
 - 并发验收拒绝旧写入，且受控状态不能绕过提交产出与 owner 验收。
 - Artifact 文件只从应用受控目录读取，包含元数据和 SHA-256；软删除可审计。
 
@@ -171,7 +203,11 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 - [PRD：任务表与编排规划表](../opc-workspace-PRD.md#主要数据表)
 - [整体功能架构](../functional-architecture.md)
 - [schema v6 迁移](../../services/sidecar/internal/database/migrations/006_task_facts.sql)
+- [schema v8 生命周期迁移](../../services/sidecar/internal/database/migrations/008_task_workflow.sql)
 - [任务 API](../../services/sidecar/internal/api/tasks.go)
+- [任务生命周期与事件 API](../../services/sidecar/internal/api/task_workflow.go)
+- [任务生命周期 API 测试](../../services/sidecar/internal/api/task_workflow_test.go)
+- [schema v8 迁移测试](../../services/sidecar/internal/database/task_workflow_migration_test.go)
 - [Assignment API](../../services/sidecar/internal/api/assignments.go)
 - [Assignment API 测试](../../services/sidecar/internal/api/assignments_test.go)
 - [任务批量与排序 API](../../services/sidecar/internal/api/task_operations.go)
@@ -181,5 +217,7 @@ Task 是系统中唯一的**可执行工单**，回答“具体要完成什么�
 - [TaskList.tsx](../../apps/web/src/components/TaskList.tsx)
 - [TaskDetailModal.tsx](../../apps/web/src/components/TaskDetailModal.tsx)
 - [TaskAssignmentsSection.tsx](../../apps/web/src/components/TaskAssignmentsSection.tsx)
+- [TaskLifecycleSection.tsx](../../apps/web/src/components/TaskLifecycleSection.tsx)
+- [TaskEventsSection.tsx](../../apps/web/src/components/TaskEventsSection.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [前端 API client](../../apps/web/src/api/client.ts)

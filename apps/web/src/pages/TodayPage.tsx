@@ -29,7 +29,9 @@ function formatToday(date: Date): string {
 }
 
 function taskSplit(tasks: Task[]) {
-  const active = tasks.filter((task) => task.status !== "done");
+  const active = tasks.filter(
+    (task) => task.status !== "done" && task.status !== "cancelled",
+  );
   return {
     today: active.slice(0, 3),
     later: active.slice(3, 6),

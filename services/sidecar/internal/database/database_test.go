@@ -12,8 +12,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 7 {
-		t.Fatalf("SchemaVersion = %d, want 7", store.SchemaVersion)
+	if store.SchemaVersion != 8 {
+		t.Fatalf("SchemaVersion = %d, want 8", store.SchemaVersion)
 	}
 
 	checks := map[string]int{
@@ -91,7 +91,10 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	if lifecycle.Version != 2 {
 		t.Fatalf("project version after task insert = %d, want 2", lifecycle.Version)
 	}
-	if err := store.DB.Table("tasks").Where("id = ?", taskID).Update("status", "done").Error; err != nil {
+	if err := store.DB.Table("tasks").Where("id = ?", taskID).Updates(map[string]any{
+		"status":       "done",
+		"completed_at": "2026-08-27T12:00:00Z",
+	}).Error; err != nil {
 		t.Fatalf("update aggregate version task: %v", err)
 	}
 	if err := store.DB.Table("projects").Select("version").Where("id = ?", projectID).

@@ -1,8 +1,8 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v7（2026-08-27）
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v8（2026-08-27）
 >
-> 版本边界：T-18A 迁移与内置 Actor、T-18B Actor API 与设置页 person 管理、T-18C Assignment API 与任务详情责任 UI 已交付。受控验收状态、`review_policy` 与 Artifact 仍未交付；agent Actor、Adapter 和实际执行归入 v0.2。
+> 版本边界：T-18A 迁移与内置 Actor、T-18B Actor API 与设置页 person 管理、T-18C Assignment，以及 T-18D D1 的受控生命周期与 Task 时间线已交付。`review_policy = manual` 的开放、Artifact 和提交验收/返工属于 T-18D D2；agent Actor、Adapter 和实际执行归入 v0.2。
 
 ## 定位与边界
 
@@ -35,7 +35,9 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 - 设置页已有“人员与责任”模块，可查看 owner/system/person，新建和编辑 person、启用/停用 person、单独修改 owner 展示名称；包含加载、空、错误、重试、校验、版本冲突和本地责任语义提示。
 - 当前没有 Actor 删除路由；system 没有编辑入口。person 有活动 Assignment 时 API 与数据库双重拒绝停用，UI 提示先改派。
 - Assignment 查询、创建、改派和结束 API 已接真实 SQLite，任务详情可管理当前负责人/审核人并分页查看结束历史；创建、改派和结束都会递增 Task 版本并写责任事件。
-- Task 仍为三态，也没有 `review_policy`、`task_artifacts`、受控提交/验收、通用事件查询或 Agent Runtime。
+- schema v8 已扩展 Task 六状态，并交付 start/block/unblock/complete/cancel/reopen 命令。开始要求活动 assignee；complete/cancel 在同一事务结束全部活动 Assignment；reopen 不恢复旧分派；终态任务不能创建或改派 Assignment。
+- `GET /tasks/:id/events` 已提供生命周期、责任和迁移事件的分页时间线；`command_seq` 解释同一请求中多个事件的先后，数据库保护事件不可普通更新或删除。
+- `review_policy`、提交/验收时间字段已经建模，但 D1 不开放 manual 的创建/编辑入口；`task_artifacts`、受控提交/验收、返工和 Agent Runtime 仍未实现。
 
 ## 目标功能
 
@@ -51,9 +53,9 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 - 每条 Task 可有 `assignee` 和 `reviewer`；同一 Task、同一 role 同时仅一个活动 Assignment。
 - 分派记录负责人、分派人、开始/结束时间和改派原因。
 - 改派在一个事务中结束旧记录、创建新记录、递增 Task 版本并写 Workflow Event。
-- person 只表达本机责任归属；现阶段由 owner 代记 Task 三态变化，阻塞、产出与验收等受控操作待 T-18D。UI 明确提示不会通知对方。
+- person 只表达本机责任归属；现阶段由 owner 代记 Task 的开始、阻塞、完成、取消与重新打开。person 产出代录和验收仍待 T-18D D2；UI 明确提示不会通知对方。
 - v0.1 assignee 只允许 active owner/person，reviewer 只允许 active owner；当前 Assignment API 不接受 system 或 agent 作为 assignee。
-- Task 转为 `done` 时在同一事务结束全部活动 Assignment；重新打开 Task 不恢复旧分派。显式结束 Assignment 不改变 Task 状态。
+- Task 转为 `done` 或 `cancelled` 时在同一事务结束全部活动 Assignment并按顺序写责任与任务事件；重新打开 Task 不恢复旧分派。显式结束 Assignment 不改变 Task 状态。
 
 ### 已实现：历史任务迁移
 
@@ -77,7 +79,7 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 1. **已实现**：owner 在设置“人员与责任”中创建 person，填写名称、备注和可选非敏感 JSON 元数据。
 2. **已实现**：UI 持续显示“仅本机记录负责人，不会发送任务或授予访问权限”的边界说明。
 3. **已实现于任务详情**：选择 active owner/person 并由 Sidecar 创建 Assignment 与 Workflow Event；收件箱拆分面板仍待 T-11。
-4. **待 T-18D**：person 线下完成后，owner 以 person 为 `produced_by_actor_id`、owner 为 `recorded_by_actor_id` 录入产出。
+4. **待 T-18D D2**：person 线下完成后，owner 以 person 为 `produced_by_actor_id`、owner 为 `recorded_by_actor_id` 录入产出。
 
 ### 改派
 
@@ -103,17 +105,17 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 
 ## 数据/API/状态与事件
 
-### schema v7 已实现数据
+### schema v8 已实现数据
 
 | 表 | 当前字段与约束 |
 |----|----------------|
 | `actors` | `id`、`type`、`display_name`、`status`、`is_builtin`、`notes`、对象型 `metadata_json`、`version`、`created_at`、`updated_at`；名称 1–100 字符、备注最多 2000 字符、版本从 1 开始 |
 | `task_assignments` | `id`、Task/Actor、`assignee / reviewer`、`assigned_by_actor_id`、`assigned_at / unassigned_at`、`reason`；`unassigned_at IS NULL` 表示活动，同 Task/role 仅一个活动记录；永久删除 Task 时按 `ON DELETE CASCADE` 一并删除其 Assignment，属于删除整个 Task 聚合 |
-| `workflow_events` | `id`、`aggregate_type / aggregate_id`、`action`、可选 Actor/Assignment/Agent Run/request ID、前后 JSON 和时间；迁移回填事件按 Task 唯一；Assignment 被 Task 级联删除时事件的 `assignment_id` 按 `ON DELETE SET NULL` 处理 |
+| `workflow_events` | `id`、`aggregate_type / aggregate_id`、`action`、可选 Actor/Assignment/Agent Run/request ID、前后 JSON、正整数或空的 `command_seq` 和时间；迁移回填事件按 Task 唯一；Assignment 被 Task 级联删除时事件的 `assignment_id` 按 `ON DELETE SET NULL` 处理 |
 
-`actors.metadata_json` 必须是 JSON object；API 进一步限制规范化后最多 16 KiB、最多 6 层和 100 个 key，并拒绝可能承载密码、令牌、凭据、cookie、API key、private key 或 session ID 的 key。`agent_adapters`、`agent_runs`、`task_artifacts` 及 Task 扩展状态尚未建表；Artifact 的受控文件存储、校验和、软删除与验收事务归 T-18D/T-19，不能把缺表写成已实现。
+`actors.metadata_json` 必须是 JSON object；API 进一步限制规范化后最多 16 KiB、最多 6 层和 100 个 key，并拒绝可能承载密码、令牌、凭据、cookie、API key、private key 或 session ID 的 key。schema v8 已重建 Task 六状态及 `review_policy`/阻塞/提交/验收字段，并为 Workflow Event 增加命令顺序和不可变 trigger；`agent_adapters`、`agent_runs`、`task_artifacts` 仍未建表。Artifact 的受控文件存储、校验和、软删除与验收事务归 T-18D D2/T-19，不能把字段预留写成已实现。
 
-### 已实现 Actor 与 Assignment API
+### 已实现 Actor、Assignment 与 D1 生命周期 API
 
 | 方法与路径 | 当前行为 |
 |------------|----------|
@@ -125,10 +127,14 @@ Actor 是本机工作流中的责任主体，用统一模型表达应用所有�
 | `POST /api/v1/tasks/:id/assignments` | 首次创建 role 的活动分派；必须携带 Task `If-Match`，成功返回 `201`、新 Task `ETag`、Assignment 与 Task |
 | `POST /api/v1/tasks/:id/reassign` | 原子结束当前 role、创建新 Assignment 并写 `assignment_reassigned`；必须提供 1–1000 字符原因和 Task `If-Match` |
 | `POST /api/v1/assignments/:id/end` | 结束活动 Assignment 并写 `assignment_ended`；必须提供原因和所属 Task `If-Match`，不改变 Task 状态 |
+| `POST /api/v1/tasks/:id/start` | todo → in_progress；要求活动 assignee、Task `If-Match`，可选幂等键 |
+| `POST /api/v1/tasks/:id/block`、`unblock` | 带原因阻塞；解除时只恢复服务端保存的来源状态 |
+| `POST /api/v1/tasks/:id/complete`、`cancel`、`reopen` | 完成仅限 policy none；完成/取消结束活动 Assignment，重新打开不恢复；均使用 Task `If-Match` 和可选幂等键 |
+| `GET /api/v1/tasks/:id/events` | 默认每页 50、最大 100；返回 Task `ETag`/版本及按时间、command_seq、ID 倒序的状态/责任/迁移事件 |
 
 Actor PATCH 与 Assignment 命令缺少 `If-Match` 返回 `428 VERSION_REQUIRED`，格式错误返回 `400 INVALID_VERSION`，旧版本返回 `409 VERSION_CONFLICT`。Assignment 三个命令都支持可选 `Idempotency-Key`：服务端保存包含预期 Task 版本的规范化请求摘要、首次响应和状态码；安全重放返回原快照并带 `Idempotency-Replayed: true`，不重复写事件，异体复用返回 `409 IDEMPOTENCY_CONFLICT`。Actor 和 Assignment 都没有 DELETE 路由。Task submit-output/review/events API 仍为规划。
 
-Assignment 查询默认历史每页 50、最大 100；`role` 只过滤结束历史，当前两个 role 始终完整返回。任务详情按每页 20 条加载更早记录，区分迁移推定，并在 person 候选与当前卡片上解释本地责任语义。完成 Task 会以统一原因 `Task completed` 结束活动记录并逐条写事件，前端显示为“任务完成后自动结束”；重新打开不恢复旧分派。永久删除整个 Task 聚合时，Assignment 按外键级联删除，Workflow Event 保留且 `assignment_id` 置空，事件 JSON 快照继续用于解释历史。
+Assignment 查询默认历史每页 50、最大 100；`role` 只过滤结束历史，当前两个 role 始终完整返回。任务详情按每页 20 条加载更早记录，区分迁移推定，并在 person 候选与当前卡片上解释本地责任语义。完成/取消 Task 分别以内部原因 `Task completed` / `Task cancelled` 结束活动记录并逐条写事件，前端显示为“任务完成后自动结束”/“任务取消后自动结束”；重新打开不恢复旧分派。永久删除整个 Task 聚合时，Assignment 按外键级联删除，Workflow Event 保留且 `assignment_id` 置空，事件 JSON 快照继续用于解释历史。
 
 ### v0.2 规划数据与 API
 
@@ -141,7 +147,7 @@ Assignment 查询默认历史每页 50、最大 100；`role` 只过滤结束历�
 - Actor：`active / inactive`；停用是生命周期事实，不删除历史。
 - Assignment：以 `unassigned_at IS NULL` 表示活动，不另设“任务完成”状态。
 - Run：`queued → running → succeeded / failed / cancelled / interrupted`。
-- 当前 Workflow Event 已记录 actor 创建/更新/停用，以及 assignment 创建/改派/结束；产出录入、Run 生命周期和验收/返工事件随 T-18D/T-19 后续接入。
+- 当前 Workflow Event 已记录 actor 创建/更新/停用、assignment 创建/改派/结束，以及 Task 开始/阻塞/解除阻塞/完成/取消/重新打开。Task 详情可分页读取时间线；产出录入、Run 生命周期和验收/返工事件随 T-18D D2/T-19 后续接入。
 
 ## 与其他模块协作
 
@@ -162,22 +168,25 @@ Assignment 查询默认历史每页 50、最大 100；`role` 只过滤结束历�
 1. **T-18A 迁移与内置 Actor（已完成）**：schema v7 新增 actors、assignments、events，幂等创建 owner/system 并回填历史任务；Artifact 延后到受控工作流纵切。
 2. **T-18B person 管理（已完成）**：Actor API、设置页新建/编辑/停用、校验、筛选、乐观锁、幂等创建、审计、加载/空/错误/重试和本地责任语义提示。
 3. **T-18C Assignment（已完成）**：任务负责人/审核人选择、初次分派、改派、结束、唯一活动约束、分页历史、任务版本并发、幂等命令、责任事件和完成任务自动结束。
-4. **T-18D 受控工作流**：扩展 Task 状态、完成条件、提交产出、owner 验收/返工和乐观并发。
-5. **T-11 消费**：收件箱拆分和分派复用 T-18 基础，不重复定义 Actor 或 Task 状态。
-6. **T-19 v0.2 Agent**：Adapter ADR、注册/健康、能力令牌、Run、受控 Artifact、取消/重试和恢复。
+4. **T-18D D1 受控生命周期（已完成）**：schema v8、六状态、六命令、Task 并发/幂等、终态 Assignment 联动、事件顺序/不可变保护和任务详情时间线。
+5. **T-18D D2 产出验收（待完成）**：开放 manual 策略，增加 Artifact、submit-output、owner accept/request_changes 和受控文件能力。
+6. **T-11 消费**：收件箱拆分和分派复用 T-18 基础，不重复定义 Actor 或 Task 状态。
+7. **T-19 v0.2 Agent**：Adapter ADR、注册/健康、能力令牌、Run、受控 Artifact、取消/重试和恢复。
 
 ## 验收标准
 
 - **已验证**：数据库始终只有一个 owner/system；固定内置记录和历史回填可重复执行且不重复。
 - **已验证**：owner/system 不可删除；owner 只有展示名称可改，system 不可编辑；活动 Assignment 阻止 person 停用。
 - **已验证**：同一 Task、同一 role 同时只有一个活动 Assignment，负责人/分派人必须 active，reviewer 必须 owner；旧 Task 版本不能改派或结束，失败不产生部分写入。
+- **已验证**：开始任务要求活动 assignee；完成/取消在一个事务中结束全部活动角色、只递增一次 Task 版本并按命令顺序写事件；终态不能重新分派，reopen 不恢复旧责任。
+- **已验证**：六状态转换、原因校验、幂等重放、事件分页/顺序/不可变性和旧状态端点 410 均有定向测试；Today cancelled 统计语义有回归覆盖。
 - **已验证**：person UI 清楚说明不登录、不发送、不远程同步；联系人不会自动转为 Actor。
 - **已验证**：Actor 创建、编辑、停用的成功事件与前后值可审计；幂等重放和失败停用不重复写事件。
-- **待实现**：person 线下产出区分实际产出者与 owner 录入者；受控状态、Artifact 和验收事务。
+- **待实现**：person 线下产出区分实际产出者与 owner 录入者；Artifact 与 manual 提交验收事务。
 - v0.1 没有可执行 agent 占位；未注册健康 Adapter 时 agent 选项禁用并解释原因。
 - v0.2 Agent 不复用 WebView Token、不直连 SQLite、不拥有任意 Shell/路径；只有经平台验证后才宣称禁网。
 - Agent 成功不自动完成 Task；owner 验收、返工、Run 重试和崩溃恢复历史完整。
-- Actor 与 Assignment API，以及设置页和任务详情责任 UI，均已有加载、空、错误、重试、校验、幂等、冲突和权限边界的定向测试；前端全量 16 个测试文件、89 项测试通过，尚未宣称浏览器视觉验收完成。
+- Actor、Assignment、生命周期/事件 API，以及设置页和任务详情责任/生命周期/时间线 UI，均已有加载、空、错误、重试、校验、幂等、冲突和权限边界的定向测试；前端全量 18 个测试文件、111 项测试通过，尚未宣称浏览器视觉验收完成。
 
 ## 相关代码/PRD链接
 
@@ -186,16 +195,22 @@ Assignment 查询默认历史每页 50、最大 100；`role` 只过滤结束历�
 - [PRD：架构决策记录（含 ADR-002）](../opc-workspace-PRD.md#d-架构决策记录)
 - [整体功能架构](../functional-architecture.md)
 - [schema v7 Actor 迁移](../../services/sidecar/internal/database/migrations/007_actor_assignments.sql)
+- [schema v8 生命周期迁移](../../services/sidecar/internal/database/migrations/008_task_workflow.sql)
 - [Actor/Assignment/Event models](../../services/sidecar/internal/models/actor.go)
 - [Actor API](../../services/sidecar/internal/api/actors.go)
 - [Actor API 测试](../../services/sidecar/internal/api/actors_test.go)
 - [Assignment API](../../services/sidecar/internal/api/assignments.go)
 - [Assignment API 测试](../../services/sidecar/internal/api/assignments_test.go)
+- [任务生命周期与事件 API](../../services/sidecar/internal/api/task_workflow.go)
+- [任务生命周期与事件 API 测试](../../services/sidecar/internal/api/task_workflow_test.go)
 - [Actor 迁移测试](../../services/sidecar/internal/database/actor_migration_test.go)
+- [schema v8 迁移测试](../../services/sidecar/internal/database/task_workflow_migration_test.go)
 - [设置页 Actor 管理](../../apps/web/src/components/ActorSettings.tsx)
 - [设置页 Actor 测试](../../apps/web/src/components/ActorSettings.test.tsx)
 - [任务详情 Assignment UI](../../apps/web/src/components/TaskAssignmentsSection.tsx)
 - [任务详情 Assignment 测试](../../apps/web/src/components/TaskAssignmentsSection.test.tsx)
+- [任务详情生命周期 UI](../../apps/web/src/components/TaskLifecycleSection.tsx)
+- [任务详情时间线 UI](../../apps/web/src/components/TaskEventsSection.tsx)
 - [当前 Task model](../../services/sidecar/internal/models/task.go)
 - [当前任务 API](../../services/sidecar/internal/api/tasks.go)
 - [当前 API 路由](../../services/sidecar/internal/api/router.go)

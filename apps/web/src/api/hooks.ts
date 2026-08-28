@@ -19,6 +19,7 @@ import {
   deleteTag,
   deleteTask,
   endTaskAssignment,
+  executeTaskLifecycleCommand,
   getAllActors,
   getAllProjects,
   getAllTags,
@@ -29,6 +30,7 @@ import {
   getTags,
   getTask,
   getTaskAssignments,
+  getTaskEvents,
   getTaskPage,
   getTasks,
   getTodayStats,
@@ -39,7 +41,6 @@ import {
   reassignTaskAssignment,
   updateTag,
   updateTask,
-  updateTaskStatus,
   transitionProject,
   updateActor,
   updateProject,
@@ -59,8 +60,9 @@ import type {
   TagListParams,
   Task,
   TaskAssignmentListParams,
+  TaskEventListParams,
+  TaskLifecycleCommandInput,
   TaskListParams,
-  TaskStatus,
   ReassignTaskAssignmentInput,
   UpdateActorInput,
   UpdateTagInput,
@@ -195,6 +197,30 @@ export function useTaskQuery(id: string | null) {
 export const taskAssignmentQueryKey = (taskId: string) =>
   ["task-assignments", taskId] as const;
 
+export const taskEventQueryKey = (taskId: string) =>
+  ["task-events", taskId] as const;
+
+export function useTaskEventsQuery(
+  taskId: string | null,
+  input: Omit<TaskEventListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = { pageSize: input.pageSize ?? 20 };
+  return useInfiniteQuery({
+    queryKey: [...taskEventQueryKey(taskId ?? "closed"), "timeline", query],
+    queryFn: ({ pageParam }) =>
+      getTaskEvents(taskId!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(taskId) && enabled,
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
 export function useTaskAssignmentsQuery(
   taskId: string | null,
   input: Omit<TaskAssignmentListParams, "page"> = {},
@@ -236,6 +262,7 @@ async function invalidateTaskAssignments(
     queryClient.invalidateQueries({
       queryKey: taskAssignmentQueryKey(taskId),
     }),
+    queryClient.invalidateQueries({ queryKey: taskEventQueryKey(taskId) }),
   ]);
 }
 
@@ -426,37 +453,52 @@ function resolveTaskVersion(
   });
 }
 
-export function useUpdateTaskStatus() {
+export function useTaskLifecycleCommand() {
   const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
   return useMutation({
     mutationFn: ({
       id,
-      status,
-      expectedVersion,
+      input,
     }: {
       id: string;
-      status: TaskStatus;
-      expectedVersion?: number;
-    }) =>
-      updateTaskStatus(
-        id,
-        status,
-        resolveTaskVersion(queryClient, id, expectedVersion),
-      ),
-    onSuccess: async (task) => {
+      input: TaskLifecycleCommandInput;
+    }) => {
+      const fingerprint = JSON.stringify({ id, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return executeTaskLifecycleCommand(id, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({
-        queryKey: taskAssignmentQueryKey(task.id),
+        queryKey: taskAssignmentQueryKey(result.task.id),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: taskEventQueryKey(result.task.id),
       });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
     },
     onError: async (error, variables) => {
-      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+      if (
+        error instanceof ApiError &&
+        (error.status === 404 || error.status === 409)
+      ) {
         await queryClient.invalidateQueries({ queryKey: taskQueryKey });
         await queryClient.invalidateQueries({
           queryKey: taskAssignmentQueryKey(variables.id),
         });
+        await queryClient.invalidateQueries({
+          queryKey: taskEventQueryKey(variables.id),
+        });
+        if (error.status === 409) {
+          await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+          await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+        }
       }
     },
   });
@@ -500,6 +542,8 @@ export function useDeleteTask() {
     onSuccess: async (_, variables) => {
       const id = typeof variables === "string" ? variables : variables.id;
       queryClient.removeQueries({ queryKey: taskDetailQueryKey(id) });
+      queryClient.removeQueries({ queryKey: taskAssignmentQueryKey(id) });
+      queryClient.removeQueries({ queryKey: taskEventQueryKey(id) });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });

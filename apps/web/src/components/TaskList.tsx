@@ -1,16 +1,18 @@
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
+  Ban,
   Check,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleDotDashed,
   Clock3,
+  Eye,
 } from "lucide-react";
 import { useState } from "react";
-import { ApiError } from "../api/client";
-import { useTaskPageQuery, useUpdateTaskStatus } from "../api/hooks";
+import { useTaskPageQuery } from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
 
@@ -25,12 +27,20 @@ function formatMinutes(minutes: number | null): string {
 function statusIcon(status: TaskStatus) {
   if (status === "done") return <Check size={13} />;
   if (status === "in_progress") return <CircleDotDashed size={14} />;
+  if (status === "blocked") return <AlertTriangle size={13} />;
+  if (status === "waiting_review") return <Eye size={13} />;
+  if (status === "cancelled") return <Ban size={13} />;
   return <Circle size={14} />;
 }
 
-function nextStatus(status: TaskStatus): TaskStatus {
-  return status === "done" ? "todo" : "done";
-}
+const statusLabels: Record<TaskStatus, string> = {
+  todo: "待办",
+  in_progress: "进行中",
+  blocked: "阻塞",
+  waiting_review: "待验收",
+  done: "已完成",
+  cancelled: "已取消",
+};
 
 interface TaskListProps {
   tasks: Task[];
@@ -94,14 +104,7 @@ function TaskRow({
     },
     hierarchical && expanded && task.subtaskTotal > 0,
   );
-  const updateStatus = useUpdateTaskStatus();
   const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
-  const statusPending =
-    updateStatus.isPending && updateStatus.variables?.id === task.id;
-  const statusError =
-    updateStatus.isError && updateStatus.variables?.id === task.id
-      ? updateStatus.error
-      : null;
   const canExpand = hierarchical && task.subtaskTotal > 0;
   const isSelected = selectedIds?.has(task.id) ?? false;
   const childrenLive =
@@ -153,21 +156,10 @@ function TaskRow({
             )
           ) : null}
           <button
-            aria-label={
-              task.status === "done"
-                ? `恢复任务：${task.title}`
-                : `完成任务：${task.title}`
-            }
+            aria-label={`查看任务状态：${task.title}（${statusLabels[task.status]}）`}
             className={`task-check task-check-${task.status}`}
-            disabled={!live || statusPending}
-            onClick={() =>
-              updateStatus.mutate({
-                id: task.id,
-                status: nextStatus(task.status),
-                expectedVersion: task.version,
-              })
-            }
-            title={live ? "更新任务状态" : "本地服务不可用"}
+            onClick={() => setTaskDetailId(task.id)}
+            title={`${statusLabels[task.status]} · 打开详情执行状态操作`}
             type="button"
           >
             {statusIcon(task.status)}
@@ -245,14 +237,6 @@ function TaskRow({
               <ArrowDown size={12} />
             </button>
           </div>
-        ) : null}
-        {statusError ? (
-          <span className="task-row-error" role="alert">
-            {statusError instanceof ApiError &&
-            statusError.code === "VERSION_CONFLICT"
-              ? "任务已变化，列表正在刷新。"
-              : "状态更新失败，请重试。"}
-          </span>
         ) : null}
       </article>
       {canExpand && expanded ? (

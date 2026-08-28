@@ -72,7 +72,6 @@ vi.mock("../api/hooks", () => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   }),
-  useUpdateTaskStatus: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 
 describe("ProjectDetailPage", () => {

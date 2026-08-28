@@ -20,7 +20,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已实现
 
-- SQLite schema v7 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`，v6 增加 Task 事实与版本但不改变 Project 表，v7 增加 Actor/Assignment/Event 基础且仍不改变 Project 表；原有任务和发票外键继续使用 `ON DELETE SET NULL`。
+- SQLite schema v8 为当前基线：v3 增加 Project 生命周期版本，v4 为幂等记录增加请求摘要和响应快照，v5 用触发器在项目响应依赖的任务、发票和客户事实变化时递增 `projects.version`，v6 增加 Task 事实，v7 增加 Actor/Assignment/Event，v8 重建 Task 六状态并恢复 Project 聚合 trigger；v6–v8 均不改变 Project 表，原有任务和发票外键继续使用 `ON DELETE SET NULL`。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -29,7 +29,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 状态只能通过 `start / pause / resume / complete / reopen / archive / restore` 命令流转。完成仍有未完成任务的项目需要显式确认，且不会修改任何任务状态。
 - 归档会保存原状态，恢复时回到该状态；缺少历史归档来源的旧数据恢复到 `planning`。
 - 永久删除只允许已归档项目，同时要求 `confirm=true` 和最新版本；删除会解除任务、发票的项目外键并返回解除数量，不会删除这些记录。
-- 项目响应从关联任务实时派生总数、已完成数、进行中数、剩余数、完成百分比及 `actual_minutes` 合计，并返回客户名、发票数和当前允许操作。
+- 项目响应从关联任务实时派生总数、已完成数、进行中数、剩余数、完成百分比及 `actual_minutes` 合计，并返回客户名、发票数和当前允许操作。六状态上线后仍只有 `done` 计为已完成；cancelled 保留在总数和剩余口径中，项目语义未随 D1 改写。
 - 项目页使用真实 API 展示卡片、服务端搜索、状态筛选和每页 12 条分页，并覆盖加载、空、错误和重试状态。
 - 项目详情通过串行分页读取全部关联任务，支持资料编辑、从项目内新建并预选项目的任务、派生进度/工时、状态操作、归档恢复，以及带二次确认的永久删除；版本冲突会刷新详情事实。
 - 新建任务和任务详情已接项目选择器；任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
@@ -41,7 +41,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目详情内的任务列表和任务表单项目选项会按每页 100 条串行拉取全部结果，避免静默截断，但该项目详情区仍没有可见分页、状态筛选、任务树或内嵌 Assignment 控件；大数据量下的请求次数与响应性能仍待验证。Task 标签、父子、并发版本与任务详情 Assignment 已交付，受控任务验收仍未实现。
 - 项目工时只是对任务表当前 `actual_minutes` 求和；专注会话尚未持久化或自动累计工时。
 - 没有项目产出、附件、笔记、发票明细或活动时间线；当前只返回发票计数，用于解释硬删除影响。
-- schema v7 已有通用 `workflow_events` 表，但没有 `task_artifacts`、项目事件生产器或 Inbox Item 集成；项目状态变更目前仍没有追加式审计记录。
+- schema v8 已有通用 `workflow_events` 表和 Task 活动时间线，但没有 `task_artifacts`、项目事件生产器或 Inbox Item 集成；项目状态变更目前仍没有追加式审计记录。
 - 没有项目里程碑、真实收入/成本聚合或开票操作。
 
 ## 当前用户流程
@@ -71,7 +71,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v7 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护聚合版本，v6 Task 事实变化复用该机制，v7 不改变 Project 字段，也不另存可写进度。
+- 当前 schema v8 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护聚合版本，v8 在重建 Task 后恢复该机制，不改变 Project 字段，也不另存可写进度。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -143,7 +143,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v7 保留 schema v3–v6 的 Project 结构与聚合 trigger；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v8 保留 schema v3–v7 的 Project 结构与聚合 trigger；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；专注持久化和大数据量性能验证仍待实现。
 4. **客户协作（待实现）**：Client CRUD、项目客户选择及客户筛选。

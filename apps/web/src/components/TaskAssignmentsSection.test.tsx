@@ -35,6 +35,10 @@ const task: Task = {
   projectId: null,
   parentTaskId: null,
   completionCriteria: "",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
   dueDate: null,
   plannedDate: null,
   estimatedMinutes: 45,
@@ -46,6 +50,8 @@ const task: Task = {
   createdAt: "2026-08-27T08:00:00Z",
   updatedAt: "2026-08-27T09:00:00Z",
   completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
   tags: [],
 };
 
@@ -203,23 +209,20 @@ describe("TaskAssignmentsSection", () => {
     );
   });
 
-  it("translates the automatic completion reason in assignment history", async () => {
+  it.each([
+    ["Task completed", "任务完成后自动结束"],
+    ["Task cancelled", "任务取消后自动结束"],
+  ])("translates the internal assignment reason %s", async (reason, label) => {
     apiMocks.getTaskAssignments.mockResolvedValue(
       assignmentPage({
-        history: [
-          {
-            ...endedAssignment,
-            inferred: false,
-            reason: "Task completed",
-          },
-        ],
+        history: [{ ...endedAssignment, inferred: false, reason }],
       }),
     );
     renderSection();
 
     fireEvent.click(await screen.findByRole("button", { name: /历史 1/ }));
-    expect(screen.getByText("原因：任务完成后自动结束")).toBeInTheDocument();
-    expect(screen.queryByText(/Task completed/)).not.toBeInTheDocument();
+    expect(screen.getByText(`原因：${label}`)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(reason))).not.toBeInTheDocument();
   });
 
   it("offers only active owner/person candidates and explains person semantics", async () => {
@@ -382,23 +385,28 @@ describe("TaskAssignmentsSection", () => {
     );
   });
 
-  it("blocks assign/reassign on done tasks but still allows ending", async () => {
-    renderSection({ ...task, status: "done", version: 7 });
+  it.each(["done", "cancelled"] as const)(
+    "blocks assign/reassign on %s tasks but still allows ending",
+    async (status) => {
+      renderSection({ ...task, status, version: 7 });
 
-    expect(await screen.findByRole("button", { name: "改派" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "设置审核人" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "结束" }));
-    fireEvent.change(screen.getByLabelText("结束原因"), {
-      target: { value: "任务已经完成" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "确认结束" }));
+      expect(
+        await screen.findByRole("button", { name: "改派" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "设置审核人" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "结束" }));
+      fireEvent.change(screen.getByLabelText("结束原因"), {
+        target: { value: "任务已经结束" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "确认结束" }));
 
-    await waitFor(() =>
-      expect(apiMocks.endTaskAssignment).toHaveBeenCalledWith(
-        activeAssignment.id,
-        { reason: "任务已经完成", expectedVersion: 7 },
-        expect.any(String),
-      ),
-    );
-  });
+      await waitFor(() =>
+        expect(apiMocks.endTaskAssignment).toHaveBeenCalledWith(
+          activeAssignment.id,
+          { reason: "任务已经结束", expectedVersion: 7 },
+          expect.any(String),
+        ),
+      );
+    },
+  );
 });

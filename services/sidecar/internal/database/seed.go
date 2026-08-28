@@ -49,13 +49,13 @@ func SeedDevelopmentData(db *gorm.DB) error {
 		tasks := []models.Task{
 			{
 				ID: seedTaskOneID, Title: "完成首页交互评审",
-				Description: "确认关键状态和交互细节。", Kind: "work", Status: "in_progress", Priority: "P1",
+				Description: "确认关键状态和交互细节。", Kind: "work", Status: "in_progress", ReviewPolicy: "none", Priority: "P1",
 				ProjectID: stringPointer(seedProjectID), DueDate: &dueSoon, PlannedDate: &today,
 				EstimatedMinutes: &estimate50, ManualOrder: &order1, Version: 1, CreatedAt: timestamp, UpdatedAt: timestamp,
 			},
 			{
 				ID: seedTaskTwoID, Title: "整理客户跟进清单",
-				Description: "Development-only sample task.", Kind: "work", Status: "todo", Priority: "P2",
+				Description: "Development-only sample task.", Kind: "work", Status: "todo", ReviewPolicy: "none", Priority: "P2",
 				PlannedDate: &today, EstimatedMinutes: &estimate90, ManualOrder: &order2,
 				Version: 1, CreatedAt: timestamp, UpdatedAt: timestamp,
 			},

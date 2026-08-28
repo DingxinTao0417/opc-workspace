@@ -501,33 +501,32 @@ func TestAssignmentValidationPermissionsConflictsAndDoneRules(t *testing.T) {
 		t.Fatalf("end assignment twice = %d: %s", endAgain.Code, endAgain.Body.String())
 	}
 
-	doneTask := createTaskForTaskFacts(t, router, `{"title":"Already completed task","status":"done"}`)
+	doneTask := createTaskForTaskFacts(t, router, `{"title":"Already completed task"}`)
+	completed := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+doneTask.ID+"/complete",
+		[]byte(`{}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if completed.Code != http.StatusOK {
+		t.Fatalf("complete task before assignment rejection = %d: %s", completed.Code, completed.Body.String())
+	}
 	doneCreate := performRequest(
 		router,
 		http.MethodPost,
 		"/api/v1/tasks/"+doneTask.ID+"/assignments",
 		[]byte(fmt.Sprintf(`{"role":"assignee","actor_id":%q}`, person.ID)),
-		map[string]string{"If-Match": `"1"`},
+		map[string]string{"If-Match": `"2"`},
 	)
 	if doneCreate.Code != http.StatusConflict || assignmentError(t, doneCreate.Body.Bytes()).Code != "TASK_NOT_ASSIGNABLE" {
 		t.Fatalf("assign completed task = %d: %s", doneCreate.Code, doneCreate.Body.String())
 	}
-	doneAssignmentID := uuid.NewString()
 	if err := store.DB.Create(&models.TaskAssignment{
-		ID: doneAssignmentID, TaskID: doneTask.ID, ActorID: person.ID, Role: "assignee",
+		ID: uuid.NewString(), TaskID: doneTask.ID, ActorID: person.ID, Role: "assignee",
 		AssignedByActorID: models.BuiltinOwnerActorID, AssignedAt: now,
-	}).Error; err != nil {
-		t.Fatalf("seed active assignment on done task: %v", err)
-	}
-	doneEnd := performRequest(
-		router,
-		http.MethodPost,
-		"/api/v1/assignments/"+doneAssignmentID+"/end",
-		[]byte(`{"reason":"repair legacy active assignment"}`),
-		map[string]string{"If-Match": `"1"`},
-	)
-	if doneEnd.Code != http.StatusOK || decodeAssignmentMutation(t, doneEnd.Body.Bytes()).Task.Version != 2 {
-		t.Fatalf("end assignment on completed task = %d: %s", doneEnd.Code, doneEnd.Body.String())
+	}).Error; err == nil || !strings.Contains(err.Error(), "TASK_NOT_ASSIGNABLE") {
+		t.Fatalf("database allowed assignment on done task: %v", err)
 	}
 }
 
@@ -552,19 +551,19 @@ func TestCompletingTaskEndsActiveAssignmentsOnce(t *testing.T) {
 	requestID := uuid.NewString()
 	done := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+task.ID+"/status",
-		[]byte(`{"status":"done"}`),
-		map[string]string{"If-Match": `"3"`, "X-Request-ID": requestID},
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/complete",
+		[]byte(`{}`),
+		map[string]string{"If-Match": `"3"`, "Idempotency-Key": "complete-assigned-task", "X-Request-ID": requestID},
 	)
 	if done.Code != http.StatusOK || done.Header().Get("ETag") != `"4"` {
 		t.Fatalf("complete assigned task = %d headers=%v: %s", done.Code, done.Header(), done.Body.String())
 	}
 	var taskEnvelope struct {
-		Data models.Task `json:"data"`
+		Data taskLifecycleResponse `json:"data"`
 	}
-	if err := json.Unmarshal(done.Body.Bytes(), &taskEnvelope); err != nil || taskEnvelope.Data.Version != 4 || taskEnvelope.Data.Status != "done" {
-		t.Fatalf("completed task response = %#v err=%v", taskEnvelope.Data, err)
+	if err := json.Unmarshal(done.Body.Bytes(), &taskEnvelope); err != nil || taskEnvelope.Data.Task.Version != 4 || taskEnvelope.Data.Task.Status != "done" {
+		t.Fatalf("completed task response = %#v err=%v", taskEnvelope.Data.Task, err)
 	}
 
 	list := performRequest(router, http.MethodGet, "/api/v1/tasks/"+task.ID+"/assignments", nil, nil)
@@ -596,12 +595,12 @@ func TestCompletingTaskEndsActiveAssignmentsOnce(t *testing.T) {
 	}
 	doneAgain := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+task.ID+"/status",
-		[]byte(`{"status":"done"}`),
-		map[string]string{"If-Match": `"4"`},
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/complete",
+		[]byte(`{}`),
+		map[string]string{"If-Match": `"3"`, "Idempotency-Key": "complete-assigned-task"},
 	)
-	if doneAgain.Code != http.StatusOK || doneAgain.Header().Get("ETag") != `"4"` {
+	if doneAgain.Code != http.StatusOK || doneAgain.Header().Get("ETag") != `"4"` || doneAgain.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("repeat task completion = %d headers=%v: %s", doneAgain.Code, doneAgain.Header(), doneAgain.Body.String())
 	}
 	var repeatedEventCount int64
@@ -623,9 +622,9 @@ func TestCompletingTaskEndsActiveAssignmentsOnce(t *testing.T) {
 	}
 	reopened := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+task.ID+"/status",
-		[]byte(`{"status":"todo"}`),
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/reopen",
+		[]byte(`{}`),
 		map[string]string{"If-Match": `"4"`},
 	)
 	if reopened.Code != http.StatusOK || reopened.Header().Get("ETag") != `"5"` {

@@ -22,9 +22,12 @@ import (
 const createTaskEndpoint = "POST /api/v1/tasks"
 
 var (
-	validTaskStatuses = map[string]struct{}{"todo": {}, "in_progress": {}, "done": {}}
-	validPriorities   = map[string]struct{}{"P0": {}, "P1": {}, "P2": {}, "P3": {}}
-	validTaskKinds    = map[string]struct{}{"work": {}, "review": {}, "followup": {}, "reminder": {}}
+	errLifecycleCommandRequired = errors.New("tasks must be created in todo status; use a lifecycle command after creation")
+	validTaskStatuses           = map[string]struct{}{
+		"todo": {}, "in_progress": {}, "blocked": {}, "waiting_review": {}, "done": {}, "cancelled": {},
+	}
+	validPriorities = map[string]struct{}{"P0": {}, "P1": {}, "P2": {}, "P3": {}}
+	validTaskKinds  = map[string]struct{}{"work": {}, "review": {}, "followup": {}, "reminder": {}}
 )
 
 type createTaskRequest struct {
@@ -41,10 +44,6 @@ type createTaskRequest struct {
 	PlannedDate        *string  `json:"planned_date"`
 	EstimatedMinutes   *int     `json:"estimated_minutes"`
 	ManualOrder        *int     `json:"manual_order"`
-}
-
-type updateTaskStatusRequest struct {
-	Status string `json:"status"`
 }
 
 type nullableStringPatch struct {
@@ -325,6 +324,10 @@ func (a *API) createTask(c *gin.Context) {
 	}
 	task, err := taskFromCreateRequest(input)
 	if err != nil {
+		if errors.Is(err, errLifecycleCommandRequired) {
+			writeError(c, http.StatusUnprocessableEntity, "LIFECYCLE_COMMAND_REQUIRED", err.Error())
+			return
+		}
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
@@ -359,7 +362,6 @@ func (a *API) createTask(c *gin.Context) {
 	replayed := false
 	statusCode := http.StatusCreated
 	var response models.Task
-	var replayBody json.RawMessage
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if idempotencyKey != "" {
 			var existing models.IdempotencyKey
@@ -383,7 +385,6 @@ func (a *API) createTask(c *gin.Context) {
 				if err := json.Unmarshal([]byte(*existing.ResponseBody), &response); err != nil {
 					return fmt.Errorf("decode idempotent task response: %w", err)
 				}
-				replayBody = append(replayBody[:0], []byte(*existing.ResponseBody)...)
 				statusCode = *existing.ResponseStatus
 				replayed = true
 				return nil
@@ -443,15 +444,12 @@ func (a *API) createTask(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTask(&response)
 	version := response.Version
 	if version < 1 {
 		version = 1
 	}
 	setProjectETag(c, version)
-	if replayed {
-		c.JSON(statusCode, gin.H{"data": replayBody})
-		return
-	}
 	c.JSON(statusCode, gin.H{"data": response})
 }
 
@@ -682,77 +680,12 @@ func (a *API) updateTask(c *gin.Context) {
 }
 
 func (a *API) updateTaskStatus(c *gin.Context) {
-	id, ok := taskID(c)
-	if !ok {
-		return
-	}
-	expectedVersion, ok := projectIfMatch(c)
-	if !ok {
-		return
-	}
-	var input updateTaskStatusRequest
-	if err := decodeJSON(c, &input); err != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
-		return
-	}
-	if _, valid := validTaskStatuses[input.Status]; !valid {
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "status must be todo, in_progress, or done")
-		return
-	}
-	var task models.Task
-	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.Task
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-			}
-			return err
-		}
-		if current.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		if current.Status == input.Status {
-			loaded, err := loadTask(tx, id)
-			task = loaded
-			return err
-		}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		updates := map[string]any{"status": input.Status, "updated_at": now, "version": gorm.Expr("version + 1")}
-		if input.Status == "done" {
-			updates["completed_at"] = now
-		} else {
-			updates["completed_at"] = nil
-		}
-		result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		if input.Status == "done" {
-			if err := closeActiveAssignmentsForCompletedTask(
-				tx,
-				id,
-				requestIDFromContext(c),
-				now,
-			); err != nil {
-				return err
-			}
-		}
-		loaded, err := loadTask(tx, id)
-		task = loaded
-		return err
-	})
-	if err != nil {
-		if writeProjectRequestError(c, err) {
-			return
-		}
-		writeDatabaseError(c)
-		return
-	}
-	setProjectETag(c, task.Version)
-	c.JSON(http.StatusOK, gin.H{"data": task})
+	writeError(
+		c,
+		http.StatusGone,
+		"TASK_STATUS_ENDPOINT_DEPRECATED",
+		"Use an explicit task lifecycle command endpoint",
+	)
 }
 
 func (a *API) deleteTask(c *gin.Context) {
@@ -827,8 +760,8 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 	if input.Status != nil {
 		status = strings.TrimSpace(*input.Status)
 	}
-	if _, valid := validTaskStatuses[status]; !valid {
-		return models.Task{}, errors.New("status must be todo, in_progress, or done")
+	if status != "todo" {
+		return models.Task{}, errLifecycleCommandRequired
 	}
 	kind := "work"
 	if input.Kind != nil {
@@ -894,16 +827,13 @@ func taskFromCreateRequest(input createTaskRequest) (models.Task, error) {
 		completionCriteria = *input.CompletionCriteria
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var completedAt *string
-	if status == "done" {
-		completedAt = &now
-	}
 	return models.Task{
 		ID: uuid.NewString(), Title: title, Description: description, Kind: kind, Status: status, Priority: priority,
-		ProjectID: input.ProjectID, ParentTaskID: input.ParentTaskID, CompletionCriteria: completionCriteria,
+		ReviewPolicy: "none",
+		ProjectID:    input.ProjectID, ParentTaskID: input.ParentTaskID, CompletionCriteria: completionCriteria,
 		DueDate: input.DueDate, PlannedDate: input.PlannedDate,
 		EstimatedMinutes: input.EstimatedMinutes, ActualMinutes: 0, ManualOrder: input.ManualOrder,
-		Version: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: completedAt,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
@@ -1206,6 +1136,9 @@ func normalizeTask(task *models.Task) {
 	if task.Version < 1 {
 		task.Version = 1
 	}
+	if task.ReviewPolicy == "" {
+		task.ReviewPolicy = "none"
+	}
 	if task.Tags == nil {
 		task.Tags = make([]models.Tag, 0)
 	}
@@ -1218,6 +1151,16 @@ func normalizeTask(task *models.Task) {
 	if task.CompletedAt != nil {
 		normalized := normalizeTimestamp(*task.CompletedAt)
 		task.CompletedAt = &normalized
+	}
+	for _, field := range []**string{
+		&task.BlockedAt,
+		&task.SubmittedAt,
+		&task.ReviewedAt,
+	} {
+		if *field != nil {
+			normalized := normalizeTimestamp(**field)
+			*field = &normalized
+		}
 	}
 }
 

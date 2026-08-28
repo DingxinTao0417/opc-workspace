@@ -68,5 +68,6 @@ describe("NewTaskModal", () => {
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+    expect(createTask.mock.calls[0][0]).not.toHaveProperty("status");
   });
 });

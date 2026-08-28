@@ -201,9 +201,9 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 
 	taskDone := performRequest(
 		router,
-		http.MethodPatch,
-		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/status",
-		[]byte(`{"status":"done"}`),
+		http.MethodPost,
+		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/complete",
+		[]byte(`{}`),
 		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, taskEnvelope.Data.Version)},
 	)
 	if taskDone.Code != http.StatusOK {
