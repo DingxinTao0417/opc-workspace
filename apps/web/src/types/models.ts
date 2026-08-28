@@ -695,10 +695,17 @@ export type InboxItemKind = "manual" | "reminder";
 export type InboxItemPriority = TaskPriority;
 export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
 export type InboxItemView = "inbox" | "snoozed" | "archive";
-export type InboxResolutionPolicy = "manual";
-export type InboxResolutionMode = "manual" | "forced";
+export type InboxResolutionPolicy = "manual" | "all_required_tasks_done";
+export type InboxResolutionMode = "manual" | "forced" | "automatic";
 export type InboxItemAction =
-  "read" | "edit" | "snooze" | "unsnooze" | "resolve" | "dismiss" | "reopen";
+  | "read"
+  | "edit"
+  | "snooze"
+  | "unsnooze"
+  | "resolve"
+  | "force-resolve"
+  | "dismiss"
+  | "reopen";
 
 export interface InboxItem {
   id: string;
@@ -831,6 +838,51 @@ export interface UnlinkInboxItemTaskInput {
   taskId: string;
   reason: string;
   expectedVersion: number;
+}
+
+export interface InboxSplitTaskInput {
+  key: string;
+  parentKey: string | null;
+  title: string;
+  description: string;
+  kind: TaskKind;
+  priority: TaskPriority;
+  projectId: string | null;
+  completionCriteria: string;
+  tagIds: string[];
+  dueDate: string | null;
+  plannedDate: string | null;
+  estimatedMinutes: number | null;
+  reviewPolicy: TaskReviewPolicy;
+  isRequired: boolean;
+  assigneeActorId: string;
+}
+
+export interface SplitInboxItemInput {
+  inboxItemId: string;
+  expectedVersion: number;
+  resolutionPolicy: InboxResolutionPolicy;
+  tasks: InboxSplitTaskInput[];
+}
+
+export interface InboxSplitTaskResult {
+  key: string;
+  task: Task;
+  assignments: TaskAssignment[];
+  relation: InboxItemTaskRelation;
+}
+
+export interface SplitInboxItemResult {
+  inboxItem: InboxItem;
+  created: InboxSplitTaskResult[];
+  progress: InboxTaskProgress;
+}
+
+export interface ForceResolveInboxItemInput {
+  id: string;
+  expectedVersion: number;
+  reason: string;
+  confirm: true;
 }
 
 export interface CreateInboxItemInput {

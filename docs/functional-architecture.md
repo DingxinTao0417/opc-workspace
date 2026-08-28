@@ -2,8 +2,8 @@
 
 > 文档版本：1.8
 > 日期：2026-08-28
-> 依据：[PRD v2.6](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v14
+> 依据：[PRD v2.7](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v15
 
 ## 1. 目的
 
@@ -51,7 +51,7 @@
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、根任务树、标签、批量和计划组排序，Project 已接 Client 选择/筛选。
 - Go 已提供健康检查、Task/Project/Client/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照和事务维护事实。
-- SQLite 当前为 schema v14：schema v11 以 `011_focus_sessions.sql` 重建 `focus_sessions` 并新增 `focus_session_intervals`、`task_focus_totals`；schema v12 以 `012_inbox_items.sql` 加法迁移新增手工 Inbox Item；schema v13 以 `013_inbox_item_tasks.sql` 新增活动/历史 Task 关系与删除保护；schema v14 再以 `014_reminders.sql` 新增一次性 Reminder、稳定事件键、终态约束与 Inbox 投影引用保护，不改写 v13 既有事实，也不创建 demo 提醒。
+- SQLite 当前为 schema v15：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15 以 `015_inbox_task_orchestration.sql` 增加自动结清查询索引和数据库校验 trigger，不改写 v14 既有事实，也不创建 demo 数据。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -68,11 +68,11 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<artifact-id>`，下载前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Inbox Task 批量拆分/分派/自动解决、Sidebar/Today Inbox 计数、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
+- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Sidebar/Today Inbox 计数、Agent Runtime 和产品化备份/恢复，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core、手工 Inbox 受理/分诊、已有 Task 关系和一次性 Reminder 基础上，继续完成客户/项目增强、Inbox 批量拆分/分派/自动解决、非 Reminder 来源投影、基础备份恢复和桌面可靠性；Focus D、重复/原生通知独立延后。
+- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core、手工 Inbox 受理/分诊、Reminder 和 Inbox Task 编排基础上，继续完成客户/项目增强、非 Reminder 来源投影、基础备份恢复和桌面可靠性；Focus D、重复/原生通知独立延后。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
@@ -104,7 +104,7 @@
 | [任务](modules/tasks.md)                   | Project、Actor、未来 Inbox 来源                                         | 唯一工单、六态生命周期、完成条件、Submission/Artifact 与 manual 验收                                                                        | Project 进度、Task 事件、后续 Inbox 进度与 Focus 工时                                   |
 | [项目](modules/projects.md)                | Client、Task                                                            | 当前已实现资料、受控生命周期、归档恢复和任务聚合                                                                                            | 项目级产出聚合、附件、时间线和 Inbox 事件仍待实现；Task Artifact 已可从共享任务详情使用 |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity                                              | 当前已实现基础资料、状态、项目数聚合和 Project 关联；活动/附件/Actor 关联仍待实现                                                           | 回访、发票和 Inbox 来源仍属后续纵切                                                     |
-| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有 Task；项目/Agent/其他系统投影待开发 | 已交付手工受理/分诊、Reminder 到期投影、已有 Task 活动/历史关系、实时进度、required、软解除、状态联动和事件；批量拆分、分派与自动解决待开发 | 输出 Inbox/关系 Event 与 Task 只读派生进度；Assignment 和今日待处理统计待后续接通       |
+| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有/新建 Task；项目/Agent/其他系统投影待开发 | 已交付手工受理分诊、Reminder、Task 关系、原子拆分/分派、实时进度、自动结清/重开和强制例外 | 输出 Inbox/Task/Assignment Event 与实时派生进度；今日待处理统计待后续接通             |
 | [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                              | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                                                      | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                |
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                           | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                                 | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                   |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                 | 单次受控执行                                                                                                                                | Agent Run、Task Artifact、待验收或失败事件                                              |
@@ -245,7 +245,7 @@ Task 已分派给健康 agent Actor
 - cancelled、blocked、waiting_review 或失败中的必需 Task 会阻止自动解决。
 - 强制关闭是 owner 的危险操作，必须二次确认、填写原因并写入审计。
 - 父 Task 只有至少一个非取消子 Task 且全部完成时才允许自动推进；所有子任务取消不触发空集合完成。
-- 上述自动解决、统一 reconciliation、自动重新打开与 `force-resolve` 均属于 T-11C；T-11A2 只提供实时派生读模型，不据此改写 Inbox 终态。
+- schema v15/T-11C 已交付统一 reconciliation、自动解决、自动重新打开与 `force-resolve`；T-11A2 的实时派生读模型仍是唯一进度来源。
 
 ### 7.3 当前 Task 生命周期边界
 
@@ -334,11 +334,11 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 ## 12. 跨模块验收基线
 
-- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Client 基础资料/Project 客户关联、手工 Inbox 受理分诊/已有 Task 关系，以及一次性 Reminder 到期 Inbox 投影主链路可用；完整 v0.1 Inbox 批量拆分/分派/自动解决、非 Reminder 来源投影、Client 活动/附件、原生通知和备份闭环仍待交付。
+- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Client 基础资料/Project 客户关联、手工 Inbox 受理分诊、Reminder、已有 Task 关系和批量拆分/分派/自动结清主链路可用；非 Reminder 来源投影、Client 活动/附件、原生通知和备份闭环仍待交付。
 - 每个业务状态有且只有一个事实源。
 - 跨模块写操作具备事务、幂等和冲突检测。
 - 任何来源事件重扫和重启后不重复创建工作。
-- 已有 Task 关系写入失败不遗留部分关系、Inbox 状态或审计；未来任务拆分失败不得遗留部分 Task、关系、Assignment 或审计。
+- 已有 Task 关系与批量拆分写入失败均不遗留部分 Task、关系、Assignment、Inbox 状态或审计。
 - person 分派明确显示仅作本地责任记录。
 - manual 人工产出不能绕过 waiting_review 和 owner 验收；未来 Agent 必须复用同一 Submission/Artifact 领域命令。
 - Artifact 文件不能通过任意路径访问；缺失、篡改、软删与硬删后历史均可解释且不会泄露已删正文。

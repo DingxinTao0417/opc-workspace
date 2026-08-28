@@ -838,6 +838,9 @@ func (a *API) submitTaskOutput(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestIDFromContext(c), now); err != nil {
+			return err
+		}
 		response = submitOutputResponse{
 			Task: updated, Submission: submissionOutput, Artifacts: submissionOutput.Artifacts, Event: event,
 		}
@@ -1031,6 +1034,9 @@ func (a *API) reviewTaskOutput(c *gin.Context) {
 			requestID, now, commandSequence,
 		)
 		if err != nil {
+			return err
+		}
+		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
 			return err
 		}
 		response = reviewTaskOutputResponse{Task: updated, Submission: submissionOutput, Event: event}

@@ -22,6 +22,7 @@ import type {
   FocusRecoveryAction,
   FocusSession,
   FocusSessionSnapshot,
+  ForceResolveInboxItemInput,
   HealthResponse,
   InboxEventListParams,
   InboxEventListResult,
@@ -37,6 +38,7 @@ import type {
   InboxItemStatus,
   InboxTaskProgress,
   InboxTaskSummary,
+  InboxSplitTaskResult,
   InboxResolutionMode,
   InboxWorkflowEvent,
   CreateInboxItemInput,
@@ -61,6 +63,8 @@ import type {
   ReorderTasksResult,
   ReassignTaskAssignmentInput,
   ReassignTaskAssignmentResult,
+  SplitInboxItemInput,
+  SplitInboxItemResult,
   Tag,
   TagInput,
   TagListParams,
@@ -1532,7 +1536,9 @@ function asInboxItemKind(value: unknown): "manual" | "reminder" {
 
 function asInboxResolutionMode(value: unknown): InboxResolutionMode | null {
   if (value === undefined || value === null || value === "") return null;
-  if (value === "manual" || value === "forced") return value;
+  if (value === "manual" || value === "forced" || value === "automatic") {
+    return value;
+  }
   return invalidResponse("收件箱解决方式响应无效");
 }
 
@@ -1542,6 +1548,7 @@ const inboxActions = new Set<InboxItemAction>([
   "snooze",
   "unsnooze",
   "resolve",
+  "force-resolve",
   "dismiss",
   "reopen",
 ]);
@@ -1582,7 +1589,9 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       (sourceEntityType !== "reminder" ||
         !sourceEntityId ||
         !sourceEventKey)) ||
-    fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" ||
+    (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
+      fieldValue(value, "resolution_policy", "resolutionPolicy") !==
+        "all_required_tasks_done") ||
     (rawPayload !== undefined && !isRecord(rawPayload)) ||
     !Array.isArray(rawActions)
   ) {
@@ -1602,7 +1611,11 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     ),
     priority: asTaskPriority(value.priority),
     status: asInboxItemStatus(value.status),
-    resolutionPolicy: "manual",
+    resolutionPolicy: fieldValue(
+      value,
+      "resolution_policy",
+      "resolutionPolicy",
+    ) as InboxItem["resolutionPolicy"],
     dueAt: nullableString(fieldValue(value, "due_at", "dueAt")),
     readAt: nullableString(fieldValue(value, "read_at", "readAt")),
     triagedAt: nullableString(fieldValue(value, "triaged_at", "triagedAt")),
@@ -2109,6 +2122,61 @@ export function normalizeInboxItemTaskMutationResult(
     relation: normalizeInboxItemTaskRelation(body.relation),
     progress: normalizeInboxTaskProgress(body.progress),
   };
+}
+
+export function normalizeSplitInboxItemResult(
+  value: unknown,
+): SplitInboxItemResult {
+  const body = isRecord(value) && isRecord(value.data) ? value.data : value;
+  if (
+    !isRecord(body) ||
+    !Array.isArray(body.created) ||
+    body.created.length < 1 ||
+    body.created.length > 20
+  ) {
+    return invalidResponse("收件箱任务拆分响应格式无效");
+  }
+  const inboxItem = normalizeInboxItem(
+    fieldValue(body, "inbox_item", "inboxItem"),
+  );
+  const created: InboxSplitTaskResult[] = body.created.map((entry) => {
+    if (
+      !isRecord(entry) ||
+      typeof entry.key !== "string" ||
+      !entry.key ||
+      !Array.isArray(entry.assignments)
+    ) {
+      return invalidResponse("收件箱拆分任务响应格式无效");
+    }
+    const task = normalizeTask(entry.task);
+    const relation = normalizeInboxItemTaskRelation(entry.relation);
+    const assignments = entry.assignments.map(normalizeTaskAssignment);
+    if (
+      relation.inboxItemId !== inboxItem.id ||
+      relation.taskRefId !== task.id ||
+      relation.relationType !== "created" ||
+      !relation.isActive ||
+      assignments.length < 1 ||
+      assignments.some((assignment) => assignment.taskId !== task.id) ||
+      !assignments.some((assignment) => assignment.role === "assignee") ||
+      (task.reviewPolicy === "manual" &&
+        !assignments.some((assignment) => assignment.role === "reviewer"))
+    ) {
+      return invalidResponse("收件箱拆分任务响应不一致");
+    }
+    return { key: entry.key, task, assignments, relation };
+  });
+  const keys = new Set(created.map((entry) => entry.key));
+  const taskIds = new Set(created.map((entry) => entry.task.id));
+  const progress = normalizeInboxTaskProgress(body.progress);
+  if (
+    keys.size !== created.length ||
+    taskIds.size !== created.length ||
+    progress.activeTotal < created.length
+  ) {
+    return invalidResponse("收件箱任务拆分响应不一致");
+  }
+  return { inboxItem, created, progress };
 }
 
 export function normalizeInboxWorkflowEvent(
@@ -3634,6 +3702,72 @@ export async function unlinkInboxItemTask(
   );
   if (result.relation.isActive) {
     return invalidResponse("收件箱任务解除结果不一致");
+  }
+  return result;
+}
+
+export async function splitInboxItem(
+  input: SplitInboxItemInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<SplitInboxItemResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(input.inboxItemId)}/split`,
+    {
+      method: "POST",
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
+      body: JSON.stringify({
+        resolution_policy: input.resolutionPolicy,
+        tasks: input.tasks.map((task) => ({
+          key: task.key,
+          parent_key: task.parentKey,
+          title: task.title,
+          description: task.description,
+          kind: task.kind,
+          priority: task.priority,
+          project_id: task.projectId,
+          completion_criteria: task.completionCriteria,
+          tag_ids: task.tagIds,
+          due_date: task.dueDate,
+          planned_date: task.plannedDate,
+          estimated_minutes: task.estimatedMinutes,
+          review_policy: task.reviewPolicy,
+          is_required: task.isRequired,
+          assignee_actor_id: task.assigneeActorId,
+        })),
+      }),
+    },
+  );
+  const result = normalizeSplitInboxItemResult(payload);
+  if (
+    result.inboxItem.id !== input.inboxItemId ||
+    result.created.length !== input.tasks.length ||
+    result.created.some((entry, index) => entry.key !== input.tasks[index].key)
+  ) {
+    return invalidResponse("收件箱任务拆分结果与请求不一致");
+  }
+  return result;
+}
+
+export async function forceResolveInboxItem(
+  input: ForceResolveInboxItemInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<InboxItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/inbox-items/${encodeURIComponent(input.id)}/force-resolve`,
+    {
+      method: "POST",
+      headers: versionedCommandHeaders(input.expectedVersion, idempotencyKey),
+      body: JSON.stringify({ confirm: input.confirm, reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  const result = normalizeInboxItem(body);
+  if (
+    result.id !== input.id ||
+    result.status !== "resolved" ||
+    result.resolutionMode !== "forced"
+  ) {
+    return invalidResponse("收件箱强制解决响应不一致");
   }
   return result;
 }

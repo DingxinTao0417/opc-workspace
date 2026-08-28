@@ -139,6 +139,12 @@ vi.mock("../api/hooks", () => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   }),
+  useForceResolveInboxItem: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
 }));
 
 describe("InboxItemDetailModal", () => {

@@ -80,6 +80,8 @@ GET    /api/v1/inbox-items/:id/tasks?page=1&page_size=50
 POST   /api/v1/inbox-items/:id/tasks/:task_id
 PATCH  /api/v1/inbox-items/:id/tasks/:task_id
 DELETE /api/v1/inbox-items/:id/tasks/:task_id
+POST   /api/v1/inbox-items/:id/split
+POST   /api/v1/inbox-items/:id/force-resolve
 GET    /api/v1/reminders
 POST   /api/v1/reminders
 GET    /api/v1/reminders/:id
@@ -92,6 +94,8 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 ### Inbox Item–Task relationship contract
 
 `GET /api/v1/inbox-items/:id/tasks` returns `{ "data": { "active", "history" }, "meta": { "page", "page_size", "total", "inbox_item_version", "progress" } }` and the current Inbox Item `ETag`. `active` is the complete position-ordered active set and is capped at 100; `history` alone is paginated newest-unlinked-first, so `meta.total` is the history total. Every active relation joins the current Task summary at read time. Progress is therefore derived from current Task status without copying Task state or propagating Task version changes into the Inbox Item version.
+
+`POST /api/v1/inbox-items/:id/split` requires Inbox `If-Match` and optionally accepts `Idempotency-Key`. It atomically creates 1–20 ordered Tasks, batch-local parent links, tags, owner/person assignments, owner reviewers for manual-review Tasks, `created` Inbox relationships, and audit events. `POST /api/v1/inbox-items/:id/force-resolve` is restricted to `all_required_tasks_done` items and requires `{ "confirm": true, "reason": "..." }`; it records a forced terminal fact instead of pretending incomplete required Tasks are done.
 
 POST and PATCH use `{ "is_required": boolean }`; DELETE uses `{ "reason": string }`, trimmed to 1–1,000 characters. All three mutation routes require the Inbox Item `If-Match`, accept an optional `Idempotency-Key`, return the updated Inbox Item, relation, progress, and `ETag`, and append exactly one `task_linked`, `task_requirement_changed`, or `task_unlinked` event when the fact changes. The first active relation moves `open` to `tracking`; removing the last active relation moves `tracking` to `open`. Reopen derives `tracking` when any active relation remains and `open` otherwise. Linking never automatically resolves an Inbox Item, creates an Assignment, or creates a Task.
 
@@ -182,7 +186,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v14. Migration 009 adds the controlled Artifact and Submission aggregate described above; migration 010 adds Client aggregate versioning and Project-association propagation; migration 011 adds persistent Focus Session intervals and exact Task focus totals; migration 012 adds the independent manual Inbox Item and Inbox workflow events. Migration 013 adds `inbox_item_tasks` plus relationship-integrity and Task-delete interlock triggers. Migration 014 is additive: it adds one-time Reminder facts, stable source-event identity, terminal-state grouping, projection-reference consistency, immutable identity/terminal facts, and hard-delete protection. It does not rewrite v13 facts or seed demo Reminders. Future changes must start at `015_*`; never edit a shipped migration.
+The current schema is v15. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 is additive: it adds indexes used by required-Task reconciliation and database triggers that reject an automatic Inbox resolution unless at least one active required Task exists and all such Tasks are done. It does not rewrite v14 facts or seed demo data. Future changes must start at `016_*`; never edit a shipped migration.
 
 Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
 
@@ -195,4 +199,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v2.6 / schema v14 baseline, regression coverage includes historical migration preservation plus Inbox relationship and Reminder migrations, Reminder CRUD/validation/pagination, optimistic concurrency, idempotency replay/conflict, immutable terminal facts, exact-once Inbox projection, restart compensation, transaction rollback, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, split/Assignment/automatic-resolution orchestration, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v2.7 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, and Task hard-delete protection. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

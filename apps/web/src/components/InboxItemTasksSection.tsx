@@ -5,14 +5,17 @@ import {
   ChevronRight,
   History,
   Link2,
+  ListTree,
   LoaderCircle,
   Search,
+  ShieldAlert,
   Unlink2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
 import {
   useInboxItemTasksQuery,
+  useForceResolveInboxItem,
   useLinkInboxItemTask,
   useTaskPageQuery,
   useUnlinkInboxItemTask,
@@ -24,6 +27,7 @@ import type {
   InboxTaskProgress,
   TaskStatus,
 } from "../types/models";
+import { InboxTaskOrchestrationModal } from "./InboxTaskOrchestrationModal";
 
 const taskStatusLabels: Record<TaskStatus, string> = {
   todo: "待办",
@@ -214,6 +218,7 @@ export function InboxItemTasksSection({
   const linkMutation = useLinkInboxItemTask();
   const requirementMutation = useUpdateInboxItemTaskRequirement();
   const unlinkMutation = useUnlinkInboxItemTask();
+  const forceResolveMutation = useForceResolveInboxItem();
   const [editor, setEditor] = useState<EditorState>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -225,12 +230,16 @@ export function InboxItemTasksSection({
   const [localError, setLocalError] = useState<string | null>(null);
   const [conflictNotice, setConflictNotice] = useState<string | null>(null);
   const [conflictRefreshFailed, setConflictRefreshFailed] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [forceResolveOpen, setForceResolveOpen] = useState(false);
+  const [forceResolveReason, setForceResolveReason] = useState("");
   const linkButtonRef = useRef<HTMLButtonElement>(null);
   const terminal = item.status === "resolved" || item.status === "dismissed";
   const busy =
     linkMutation.isPending ||
     requirementMutation.isPending ||
-    unlinkMutation.isPending;
+    unlinkMutation.isPending ||
+    forceResolveMutation.isPending;
   const interactionDisabled = disabled || busy || terminal;
 
   useEffect(() => onBusyChange?.(busy), [busy, onBusyChange]);
@@ -464,7 +473,37 @@ export function InboxItemTasksSection({
     (requirementMutation.error
       ? errorMessage(requirementMutation.error)
       : null) ??
-    (unlinkMutation.error ? errorMessage(unlinkMutation.error) : null);
+    (unlinkMutation.error ? errorMessage(unlinkMutation.error) : null) ??
+    (forceResolveMutation.error
+      ? errorMessage(forceResolveMutation.error)
+      : null);
+
+  const submitForceResolve = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (interactionDisabled) return;
+    const reason = forceResolveReason.trim();
+    if (!reason) {
+      setLocalError("请填写强制解决原因。");
+      return;
+    }
+    setLocalError(null);
+    forceResolveMutation.mutate(
+      {
+        id: item.id,
+        expectedVersion: currentVersion,
+        reason,
+        confirm: true,
+      },
+      {
+        onError: handleMutationError,
+        onSuccess: async () => {
+          setForceResolveOpen(false);
+          setForceResolveReason("");
+          await onRefreshItem?.();
+        },
+      },
+    );
+  };
 
   return (
     <section
@@ -477,16 +516,27 @@ export function InboxItemTasksSection({
           <p>任务状态由任务模块维护，这里只展示关系与派生进度。</p>
         </div>
         {!terminal && editor?.type !== "link" ? (
-          <button
-            className="button button-secondary inbox-task-link-button"
-            disabled={disabled || busy}
-            onClick={openLinkEditor}
-            ref={linkButtonRef}
-            type="button"
-          >
-            <Link2 size={13} />
-            关联已有任务
-          </button>
+          <div className="inbox-task-heading-actions">
+            <button
+              className="button button-secondary inbox-task-link-button"
+              disabled={disabled || busy}
+              onClick={openLinkEditor}
+              ref={linkButtonRef}
+              type="button"
+            >
+              <Link2 size={13} />
+              关联已有任务
+            </button>
+            <button
+              className="button button-primary inbox-task-link-button"
+              disabled={disabled || busy}
+              onClick={() => setSplitOpen(true)}
+              type="button"
+            >
+              <ListTree size={13} />
+              拆分并分派
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -559,7 +609,7 @@ export function InboxItemTasksSection({
           <div className="inbox-task-editor-title">
             <strong>关联已有任务</strong>
             <p>
-              不会创建、拆分或重新分派任务；本阶段也不会自动解决收件箱条目。
+              仅建立与已有任务的关系；如需一次创建多项工作，请使用“拆分并分派”。
             </p>
           </div>
           <label className="form-field form-field-last">
@@ -809,6 +859,68 @@ export function InboxItemTasksSection({
         </div>
       ) : null}
 
+      {!terminal &&
+      item.resolutionPolicy === "all_required_tasks_done" &&
+      progress &&
+      !progress.allRequiredDone ? (
+        <div className="inbox-force-resolve-zone">
+          {!forceResolveOpen ? (
+            <button
+              className="form-inline-action danger"
+              disabled={disabled || busy}
+              onClick={() => {
+                setForceResolveReason("");
+                setForceResolveOpen(true);
+              }}
+              type="button"
+            >
+              <ShieldAlert size={13} />
+              例外：强制解决
+            </button>
+          ) : (
+            <form className="inbox-task-editor" onSubmit={submitForceResolve}>
+              <div className="inbox-task-editor-title">
+                <strong>强制解决此收件箱项</strong>
+                <p>未完成的必需任务会保留，操作原因将写入不可变事件记录。</p>
+              </div>
+              <label className="form-field form-field-last">
+                <span>例外原因</span>
+                <textarea
+                  autoFocus
+                  disabled={disabled || busy}
+                  maxLength={2_000}
+                  onChange={(event) =>
+                    setForceResolveReason(event.target.value)
+                  }
+                  placeholder="说明为什么无需等待必需任务完成…"
+                  rows={3}
+                  value={forceResolveReason}
+                />
+              </label>
+              <div className="inbox-detail-editor-actions">
+                <button
+                  className="button button-secondary"
+                  disabled={disabled || busy}
+                  onClick={() => setForceResolveOpen(false)}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="button button-danger"
+                  disabled={!forceResolveReason.trim() || disabled || busy}
+                  type="submit"
+                >
+                  {forceResolveMutation.isPending
+                    ? "正在解决…"
+                    : "确认强制解决"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      ) : null}
+
       {history.length > 0 || (latestMeta?.total ?? 0) > 0 ? (
         <details className="inbox-task-history">
           <summary>
@@ -842,6 +954,16 @@ export function InboxItemTasksSection({
             </button>
           ) : null}
         </details>
+      ) : null}
+
+      {splitOpen ? (
+        <InboxTaskOrchestrationModal
+          expectedVersion={currentVersion}
+          item={item}
+          onClose={() => setSplitOpen(false)}
+          onCreated={onRefreshItem}
+          open
+        />
       ) : null}
     </section>
   );

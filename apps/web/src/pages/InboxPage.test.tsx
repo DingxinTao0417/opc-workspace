@@ -150,6 +150,12 @@ vi.mock("../api/hooks", () => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   }),
+  useForceResolveInboxItem: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
   useMarkAllInboxItemsRead: () => hooks.markAll,
   useCreateInboxItem: () => hooks.create,
   useUpdateInboxItem: () => hooks.update,

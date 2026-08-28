@@ -237,6 +237,9 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 		if err != nil {
 			return err
 		}
+		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
+			return err
+		}
 		response = taskLifecycleResponse{Task: updated, Event: event}
 		return recordTaskLifecycleIdempotency(
 			tx,

@@ -519,6 +519,19 @@ func (a *API) executeInboxCommand(c *gin.Context, command string) {
 		if current.Version != expectedVersion {
 			return inboxVersionConflict()
 		}
+		if command == "resolve" && current.ResolutionPolicy == "all_required_tasks_done" {
+			progress, progressErr := loadInboxTaskProgress(tx, id)
+			if progressErr != nil {
+				return progressErr
+			}
+			if progress.RequiredTotal == 0 || !progress.AllRequiredDone {
+				return newProjectRequestError(
+					http.StatusConflict,
+					"INBOX_REQUIRED_TASKS_INCOMPLETE",
+					"All active required Tasks must be done before resolving this Inbox Item; use force-resolve for an exception",
+				)
+			}
+		}
 		reopenTracking := false
 		if command == "reopen" {
 			var activeRelations int64
@@ -1057,7 +1070,11 @@ func inboxAvailableActions(item models.InboxItem, now time.Time) []string {
 	} else {
 		actions = append(actions, "snooze")
 	}
-	return append(actions, "resolve", "dismiss")
+	actions = append(actions, "resolve", "dismiss")
+	if item.ResolutionPolicy == "all_required_tasks_done" {
+		actions = append(actions, "force-resolve")
+	}
+	return actions
 }
 
 func inboxItemEventState(item models.InboxItem, reason string) map[string]any {
@@ -1081,31 +1098,10 @@ func inboxItemEventState(item models.InboxItem, reason string) map[string]any {
 }
 
 func recordInboxWorkflowEvent(tx *gorm.DB, inboxItemIDValue, action string, previous, current map[string]any, requestID, createdAt string) error {
-	var previousText *string
-	if previous != nil {
-		encoded, err := json.Marshal(previous)
-		if err != nil {
-			return fmt.Errorf("encode previous Inbox Item state: %w", err)
-		}
-		value := string(encoded)
-		previousText = &value
-	}
-	encoded, err := json.Marshal(current)
-	if err != nil {
-		return fmt.Errorf("encode current Inbox Item state: %w", err)
-	}
-	currentText := string(encoded)
-	ownerID := models.BuiltinOwnerActorID
-	commandSequence := 1
-	event := models.WorkflowEvent{
-		ID: uuid.NewString(), AggregateType: "inbox_item", AggregateID: inboxItemIDValue,
-		Action: action, ActorID: &ownerID, RequestID: &requestID, CommandSeq: &commandSequence,
-		PreviousJSON: previousText, CurrentJSON: &currentText, CreatedAt: createdAt,
-	}
-	if err := tx.Create(&event).Error; err != nil {
-		return fmt.Errorf("record Inbox Item workflow event: %w", err)
-	}
-	return nil
+	return recordInboxWorkflowEventAs(
+		tx, inboxItemIDValue, action, models.BuiltinOwnerActorID,
+		previous, current, requestID, createdAt,
+	)
 }
 
 func inboxWorkflowEventRowsQuery(db *gorm.DB) *gorm.DB {

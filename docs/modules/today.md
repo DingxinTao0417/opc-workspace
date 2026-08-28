@@ -1,6 +1,6 @@
 # 今日工作台模块
 
-> 实现状态截止：2026-08-28；当前数据库 schema v14。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和实时进度，schema v14 新增一次性 Reminder 到期 Inbox 投影；Today 的 Inbox/Reminder 派生计数仍未接入。
+> 实现状态截止：2026-08-28；当前数据库 schema v15。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和实时进度，schema v14 新增一次性 Reminder 到期 Inbox 投影；Today 的 Inbox/Reminder 派生计数仍未接入。
 >
 > 版本边界：本文同时描述当前实现与目标规划；凡标注“规划”的内容均未在该基线交付。
 

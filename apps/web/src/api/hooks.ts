@@ -60,6 +60,7 @@ import {
   pauseFocusSession,
   createInboxItem,
   executeInboxItemCommand,
+  forceResolveInboxItem,
   markAllInboxItemsRead,
   linkInboxItemTask,
   recoverFocusSession,
@@ -69,6 +70,7 @@ import {
   resumeFocusSession,
   reviewTaskSubmission,
   submitTaskOutput,
+  splitInboxItem,
   stopFocusSession,
   updateClient,
   updateInboxItem,
@@ -94,6 +96,7 @@ import type {
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusSessionSnapshot,
+  ForceResolveInboxItemInput,
   CreateInboxItemInput,
   InboxEventListParams,
   InboxItemCommandInput,
@@ -108,6 +111,7 @@ import type {
   ProjectTransitionAction,
   ReminderListParams,
   ReorderTasksInput,
+  SplitInboxItemInput,
   TagInput,
   TagListParams,
   Task,
@@ -665,6 +669,50 @@ export function useUnlinkInboxItemTask() {
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
         await invalidateInboxFacts(queryClient, input.inboxItemId);
+      }
+    },
+  });
+}
+
+export function useSplitInboxItem() {
+  const queryClient = useQueryClient();
+  const attempt = useStableInboxTaskMutationKey<SplitInboxItemInput>();
+  return useMutation({
+    mutationFn: (input: SplitInboxItemInput) =>
+      splitInboxItem(input, attempt.keyFor(input)),
+    onSuccess: async (result) => {
+      attempt.reset();
+      queryClient.setQueryData(
+        inboxDetailQueryKey(result.inboxItem.id),
+        result.inboxItem,
+      );
+      await Promise.all([
+        invalidateInboxFacts(queryClient, result.inboxItem.id),
+        queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+      ]);
+    },
+    onError: async (error, input) => {
+      if (inboxFactsNeedRefresh(error)) {
+        await invalidateInboxFacts(queryClient, input.inboxItemId);
+      }
+    },
+  });
+}
+
+export function useForceResolveInboxItem() {
+  const queryClient = useQueryClient();
+  const attempt = useStableInboxTaskMutationKey<ForceResolveInboxItemInput>();
+  return useMutation({
+    mutationFn: (input: ForceResolveInboxItemInput) =>
+      forceResolveInboxItem(input, attempt.keyFor(input)),
+    onSuccess: async (item) => {
+      attempt.reset();
+      queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
+      await invalidateInboxFacts(queryClient, item.id);
+    },
+    onError: async (error, input) => {
+      if (inboxFactsNeedRefresh(error)) {
+        await invalidateInboxFacts(queryClient, input.id);
       }
     },
   });

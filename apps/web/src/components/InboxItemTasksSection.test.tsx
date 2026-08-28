@@ -148,6 +148,12 @@ const mocks = vi.hoisted(() => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   },
+  forceResolve: {
+    error: null as unknown,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  },
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -156,6 +162,7 @@ vi.mock("../api/hooks", () => ({
   useLinkInboxItemTask: () => mocks.link,
   useUpdateInboxItemTaskRequirement: () => mocks.requirement,
   useUnlinkInboxItemTask: () => mocks.unlink,
+  useForceResolveInboxItem: () => mocks.forceResolve,
 }));
 
 function relationPages(
@@ -214,6 +221,8 @@ describe("InboxItemTasksSection", () => {
     mocks.link.error = null;
     mocks.requirement.error = null;
     mocks.unlink.error = null;
+    mocks.forceResolve.error = null;
+    mocks.forceResolve.mutate.mockReset();
   });
 
   it("keeps cancelled tasks selectable and sends the Inbox version", () => {
@@ -222,7 +231,7 @@ describe("InboxItemTasksSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "关联已有任务" }));
     expect(
       screen.getByText(
-        "不会创建、拆分或重新分派任务；本阶段也不会自动解决收件箱条目。",
+        "仅建立与已有任务的关系；如需一次创建多项工作，请使用“拆分并分派”。",
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /整理发布清单/ }));
@@ -473,5 +482,61 @@ describe("InboxItemTasksSection", () => {
     expect(
       screen.getByText("该条目已结束，仅保留已有关系供查看。"),
     ).toBeInTheDocument();
+  });
+
+  it("requires an explicit reason before force resolving an automatic item", () => {
+    const automaticItem: InboxItem = {
+      ...item,
+      status: "tracking",
+      resolutionPolicy: "all_required_tasks_done",
+      availableActions: ["edit", "read", "snooze", "force-resolve", "dismiss"],
+    };
+    mocks.relations.mockReturnValue({
+      data: {
+        pages: [
+          {
+            ...relationPages(2, [taskRelation()]).pages[0],
+            meta: {
+              ...relationPages(2).pages[0].meta,
+              progress: {
+                ...progress,
+                activeTotal: 1,
+                requiredTotal: 1,
+                requiredRemaining: 1,
+                requiredCancelled: 1,
+                percent: 0,
+              },
+            },
+          },
+        ],
+      },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isError: false,
+      isFetchingNextPage: false,
+      isPending: false,
+      isPlaceholderData: false,
+      refetch: vi.fn(),
+    });
+
+    render(<InboxItemTasksSection item={automaticItem} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "例外：强制解决" }));
+    expect(screen.getByRole("button", { name: "确认强制解决" })).toBeDisabled();
+    fireEvent.change(
+      screen.getByPlaceholderText("说明为什么无需等待必需任务完成…"),
+      { target: { value: "客户已在线下取消" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "确认强制解决" }));
+
+    expect(mocks.forceResolve.mutate).toHaveBeenCalledWith(
+      {
+        id: item.id,
+        expectedVersion: 2,
+        reason: "客户已在线下取消",
+        confirm: true,
+      },
+      expect.any(Object),
+    );
   });
 });

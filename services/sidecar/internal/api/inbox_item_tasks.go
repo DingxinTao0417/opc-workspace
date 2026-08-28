@@ -385,6 +385,15 @@ func (a *API) createInboxTaskRelation(
 	); err != nil {
 		return err
 	}
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	if err != nil {
+		return err
+	}
+	response.Progress = progress
+	response.InboxItem, err = inboxItemOutputFromModel(updated, now)
+	if err != nil {
+		return err
+	}
 	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
 }
 
@@ -458,6 +467,15 @@ func (a *API) changeInboxTaskRequirement(
 		inboxTaskEventState(currentOutput, progress, "", updated.Status, updated.Version),
 		requestIDFromContext(c), nowText,
 	); err != nil {
+		return err
+	}
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	if err != nil {
+		return err
+	}
+	response.Progress = progress
+	response.InboxItem, err = inboxItemOutputFromModel(updated, now)
+	if err != nil {
 		return err
 	}
 	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
@@ -538,6 +556,15 @@ func (a *API) softUnlinkInboxTask(
 		inboxTaskEventState(currentOutput, progress, reason, updated.Status, updated.Version),
 		requestIDFromContext(c), nowText,
 	); err != nil {
+		return err
+	}
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	if err != nil {
+		return err
+	}
+	response.Progress = progress
+	response.InboxItem, err = inboxItemOutputFromModel(updated, now)
+	if err != nil {
 		return err
 	}
 	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
