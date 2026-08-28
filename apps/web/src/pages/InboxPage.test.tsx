@@ -365,4 +365,50 @@ describe("InboxPage", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("lists a backup-verify maintenance item with its safe title", () => {
+    const maintenanceItem: InboxItem = {
+      ...item,
+      kind: "event",
+      title: "本地备份校验需要处理",
+      summary:
+        "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: "backup:verify",
+      sourceEventKey:
+        "system:backup:verify:018f0000-0000-7000-8000-000000000819",
+      payloadJson: {
+        component: "backup",
+        operation: "verify",
+        failure_code: "backup_verify_failed",
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message:
+          "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+      },
+    };
+    hooks.items.mockReturnValue({
+      data: {
+        items: [maintenanceItem],
+        meta: {
+          page: 1,
+          pageSize: 30,
+          total: 1,
+          unreadTotal: 1,
+          snapshotAt: "2026-08-28T10:05:00.123456789Z",
+          serverNow: "2026-08-28T10:05:00.123456789Z",
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    renderInbox();
+
+    expect(
+      screen.getByRole("button", { name: "查看 本地备份校验需要处理" }),
+    ).toBeTruthy();
+  });
 });

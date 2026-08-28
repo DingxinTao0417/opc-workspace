@@ -267,6 +267,9 @@ func (a *API) verifyBackup(c *gin.Context) {
 			return
 		}
 		a.logBackupError("inspect", err)
+		if projectionErr := a.projectBackupVerifyFailure(requestIDFromContext(c)); projectionErr != nil {
+			a.logBackupError("record maintenance incident", projectionErr)
+		}
 		writeError(c, http.StatusInternalServerError, "BACKUP_VERIFY_FAILED", "The local backup could not be verified")
 		return
 	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -280,8 +283,11 @@ func (a *API) verifyBackup(c *gin.Context) {
 		return
 	}
 	manifest.VerifiedAt = a.options.Now().UTC().Format(time.RFC3339Nano)
-	if err := writeBackupManifestAtomic(packagePath, manifest); err != nil {
+	if err := persistVerifiedBackupManifest(packagePath, manifest); err != nil {
 		a.logBackupError("record verification", err)
+		if projectionErr := a.projectBackupVerifyFailure(requestIDFromContext(c)); projectionErr != nil {
+			a.logBackupError("record maintenance incident", projectionErr)
+		}
 		writeError(c, http.StatusInternalServerError, "BACKUP_VERIFY_FAILED", "The backup was valid but its verification time could not be recorded")
 		return
 	}
@@ -744,6 +750,8 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 func writeBackupManifest(packagePath string, manifest backupManifest) error {
 	return writeBackupManifestFile(filepath.Join(packagePath, backupManifestName), manifest)
 }
+
+var persistVerifiedBackupManifest = writeBackupManifestAtomic
 
 func writeBackupManifestAtomic(packagePath string, manifest backupManifest) error {
 	temporaryPath := filepath.Join(packagePath, ".manifest-"+uuid.NewString()+".tmp")

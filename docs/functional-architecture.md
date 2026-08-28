@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.17
+> 文档版本：2.18
 > 日期：2026-08-28
-> 依据：[PRD v6.7](opc-workspace-PRD.md)
+> 依据：[PRD v6.8](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v26
 
 ## 1. 目的
@@ -51,7 +51,7 @@
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 可编辑人工笔记、所属 Task Artifact 产出聚合与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立产出/笔记/审计反馈状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
-- SQLite 当前为 schema v26：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 为 follow-up Task Artifact、Task 阻塞、Task 临期和备份创建失败的系统维护增加 Inbox 来源身份、索引、不可变与删除/incident 协调 guards，不回填历史事实或创建 demo 数据。
+- SQLite 当前为 schema v26：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 为 follow-up Task Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护增加 Inbox 来源身份、索引、不可变与删除/incident 协调 guards，不回填历史事实或创建 demo 数据。
 - 手动一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、active Task file Artifact + Client Attachment、marker 和 manifest 在同卷 staging 中完整校验后原子发布。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前交换数据库和完整 objects，失败回滚、成功以 applied 提交点防止重复执行。设置页只发起/展示数据管理 API，不复制备份事实。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；`project_notes` 与其他业务历史进入导出，Task Artifact 与 Client Attachment 只保留数据库元数据和 active 文件摘要，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
@@ -73,7 +73,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；Task Artifact 与 Client Attachment 共享受控 object 协议并由 schema v19 阻止 ID 冲突，无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<uuid>`，下载前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 高级分析/原生反馈、Client 外部活动来源/回访/财务、其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建失败已投影到 Inbox；迁移失败、Sidecar 启动前失败和数据库不可写仍未投影。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 高级分析/原生反馈、Client 外部活动来源/回访/财务、其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败已投影到 Inbox；迁移失败、Sidecar 启动前失败和数据库不可写仍未投影。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 
@@ -110,7 +110,7 @@
 | [任务](modules/tasks.md)                   | Project、Actor、Inbox 关系与来源                                                           | 唯一工单、六态生命周期、完成条件、Submission/Artifact、manual 验收与阻塞来源投影                               | Project 进度、Task 事件、阻塞 Inbox Item、后续 Inbox 进度与 Focus 工时        |
 | [项目](modules/projects.md)                | Client、Task、受控文件 store                                                               | 已实现资料、生命周期、任务/Artifact 聚合、笔记、附件、活动时间线、follow-up/阻塞/Task 临期→Inbox               | 项目自身交付/验收节点来源待实现；产出操作仍直达共享任务详情                   |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                   | 当前已实现基础资料、状态、项目数/最近活动派生、Project 关联、人工时间线、Client Attachment 和显式 contact 关联 | 外部来源、回访、发票和 Inbox 来源仍属后续纵切                                 |
-| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期与备份创建失败 | 已交付受理分诊、来源上下文、Task 编排、自动结清/重开、来源删除协调、强制例外和运营计数/风险深链                | 输出 Event、实时进度及 Today/Sidebar 计数；其他系统故障来源待 T-11E           |
+| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期与备份创建/校验失败 | 已交付受理分诊、来源上下文、Task 编排、自动结清/重开、来源删除协调、强制例外和运营计数/风险深链                | 输出 Event、实时进度及 Today/Sidebar 计数；其他系统故障来源待 T-11E           |
 | [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                 | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                         | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续      |
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                              | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界    | Task 时间线、Submission/Artifact 责任；未来 Agent Run                         |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                    | 单次受控执行                                                                                                   | Agent Run、Task Artifact、待验收或失败事件                                    |
@@ -246,17 +246,22 @@ Task 已分派给健康 agent Actor
 
 若 Task 已被活动 Inbox Item 跟踪，Agent 输出只更新该工作项；只有未被收件箱跟踪的 Agent Task 才生成一条去重的验收项。
 
-### 6.8 备份创建失败的系统维护来源
+### 6.8 备份创建/校验失败的系统维护来源
 
 ```text
 POST /api/v1/backups 创建失败
   → 调用端仍收到 BACKUP_CREATE_FAILED；现有数据不变
-  → Sidecar 尽力投影 source_entity_type=system_maintenance、source_entity_id=backup:create
-  → 同一 open/tracking incident 复用；resolve/dismiss 后再失败开新条目
-  → owner 在 Inbox 查看固定安全说明并打开数据与备份
+  → Sidecar 尽力投影 source_entity_id=backup:create
+
+POST /api/v1/backups/:id/verify 操作失败
+  → 调用端仍收到 BACKUP_VERIFY_FAILED
+  → Sidecar 尽力投影 source_entity_id=backup:verify
+
+BACKUP_INVALID（损坏/篡改）
+  → 不投影 Inbox；设置页已展示包无效
 ```
 
-该链路已由 schema v26/T-11E 第四项交付。payload 只含 `component / operation / failure_code / occurred_at / message`，不保存 Go error、本机路径、备份 note、Token 或请求正文。投影失败只记内部日志，不改变备份错误响应。迁移失败、Sidecar 启动前失败、数据库不可写和完整诊断包仍未实现。
+该链路已由 schema v26/T-11E 第四、五项交付。payload 只含 `component / operation / failure_code / occurred_at / message`。投影失败只记内部日志，不改变备份错误响应。迁移失败、Sidecar 启动前失败、数据库不可写、恢复/演练失败和完整诊断包仍未实现。
 
 ## 7. 状态传播规则
 
@@ -292,7 +297,7 @@ POST /api/v1/backups 创建失败
 
 ### 8.1 事件来源
 
-- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建失败已交付；迁移/Sidecar 启动前/数据库不可写等其他系统故障待实现。
+- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败已交付；迁移/Sidecar 启动前/数据库不可写等其他系统故障待实现。
 - v0.2：Agent Runner 追加 Workflow Event，内置自动化投影器以统一 source_event_key 作为 Agent 失败/验收 Inbox Item 的唯一生产者；其他预设自动化也复用同一去重框架。
 - v0.3：路线图里程碑、内容审核与发布时间。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
@@ -306,7 +311,7 @@ POST /api/v1/backups 创建失败
 - 同 key/endpoint 不同请求摘要返回 `409 IDEMPOTENCY_CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
-当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；备份创建失败使用 `system:backup:create:<incident-id>`，且同一 `backup:create` 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；备份失败投影尽力执行且不改变 `BACKUP_CREATE_FAILED` 响应。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和归档后再失败按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
+当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；备份创建失败使用 `system:backup:create:<incident-id>`，备份校验失败使用 `system:backup:verify:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；备份失败投影尽力执行且不改变 `BACKUP_CREATE_FAILED` / `BACKUP_VERIFY_FAILED` 响应。`BACKUP_INVALID` 不投影。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和归档后再失败按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
 
 schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command_seq`：自动结束 Assignment 的事件从 1 递增，Task 主事件最后写入并取得最高序号。schema v9 再增加 nullable `submission_id / artifact_id`，并校验二者与 Task 聚合、彼此批次一致。Task 与 Project 时间线均按创建时间、命令序号和事件 ID 倒序读取；历史迁移事件允许序号为空，当前每个 Project 命令只产出一条序号 1 的事件。Workflow Event 不提供修改/删除 API，数据库 trigger 也拒绝更新和删除，唯一例外是 Task 聚合硬删除时由外键把已删除的 Assignment/Submission/Artifact 关联 ID 置空，其他快照保持不变。Project 删除没有事件外键级联，因此 `project_deleted` 及之前快照继续保留在业务导出中；资源 API 在 Project 不存在后返回 404。
 
@@ -329,7 +334,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | ------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Sidecar 启动失败                | 桌面平台                         | 展示全局恢复页；业务页面不得显示伪数据；shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止                                                                                                                                                                                                                                                                   |
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
-| 备份创建失败                    | 数据管理 + Inbox                 | 同步命令保留现有数据库/Artifact、清理未发布 staging，并返回带 request ID 的 `BACKUP_CREATE_FAILED`；随后尽力创建 `system_maintenance` Inbox Item，只记录固定安全字段。投影失败不改变备份错误。桌面诊断包、迁移失败、Sidecar 启动前失败和数据库不可写仍未实现 |
+| 备份创建/校验失败                | 数据管理 + Inbox                 | 创建失败保留现有数据并返回 `BACKUP_CREATE_FAILED`；校验操作失败返回 `BACKUP_VERIFY_FAILED`。随后分别尽力创建 `backup:create` / `backup:verify` Inbox Item，只记录固定安全字段。`BACKUP_INVALID` 不投影。投影失败不改变备份错误。桌面诊断包、迁移失败、Sidecar 启动前失败、数据库不可写和恢复/演练失败仍未实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。浏览器开发模式不接管外部 Sidecar，并提示手动重启。下一次 Sidecar 在数据库/Artifact lease 打开前交换同父目录资源，最终校验失败恢复 old 并隔离计划，成功将 pending 原子推进为 applied 后再清理；恢复进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立 |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                      |
@@ -351,7 +356,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → 已交付：手工 Inbox Item / 受理 / 分诊 / 归档事件
   → 已交付：已有 Task 活动/历史关系 / 实时进度 / 软解除 / 删除互锁
   → 已交付：一次性 Reminder / 启动补偿 / 到期 Inbox 投影
-  → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / 备份创建失败
+  → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / 备份创建失败 / 备份校验失败
   → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期改期、安全的开始/完成/开始专注快捷操作，以及编辑/版本化确认删除入口
   → 备份恢复 / 其他系统故障 / 桌面日志与故障恢复
   → v0.2 本地 Agent / 预设自动化 / Task 看板
@@ -365,7 +370,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 ## 12. 跨模块验收基线
 
-- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份创建失败来源投影、备份闭环和业务 JSON 导出均可用；其他系统故障、Client 外部活动来源和原生通知仍待交付。
+- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份创建失败/校验失败来源投影、备份闭环和业务 JSON 导出均可用；其他系统故障、Client 外部活动来源和原生通知仍待交付。
 - 每个业务状态有且只有一个事实源。
 - 跨模块写操作具备事务、幂等和冲突检测。
 - 任何来源事件重扫和重启后不重复创建工作。

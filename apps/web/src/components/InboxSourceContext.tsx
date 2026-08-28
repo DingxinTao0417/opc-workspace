@@ -44,8 +44,8 @@ interface TaskDueSourceSnapshot {
 
 interface SystemMaintenanceSourceSnapshot {
   component: "backup";
-  operation: "create";
-  failureCode: "backup_create_failed";
+  operation: "create" | "verify";
+  failureCode: "backup_create_failed" | "backup_verify_failed";
   occurredAt: string;
   message: string;
 }
@@ -170,10 +170,11 @@ function systemMaintenanceSnapshot(
   const failureCode = payload.failure_code;
   const occurredAt = stringValue(payload, "occurred_at");
   const message = stringValue(payload, "message");
+  if (component !== "backup") return null;
+  if (operation !== "create" && operation !== "verify") return null;
   if (
-    component !== "backup" ||
-    operation !== "create" ||
-    failureCode !== "backup_create_failed" ||
+    (operation === "create" && failureCode !== "backup_create_failed") ||
+    (operation === "verify" && failureCode !== "backup_verify_failed") ||
     !occurredAt ||
     !message
   ) {
@@ -182,7 +183,8 @@ function systemMaintenanceSnapshot(
   return {
     component,
     operation,
-    failureCode,
+    failureCode:
+      operation === "verify" ? "backup_verify_failed" : "backup_create_failed",
     occurredAt,
     message,
   };
@@ -214,7 +216,11 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </span>
           <div>
             <strong>系统维护</strong>
-            <small>本地备份创建失败</small>
+            <small>
+              {maintenanceSource.operation === "verify"
+                ? "本地备份校验失败"
+                : "本地备份创建失败"}
+            </small>
           </div>
         </div>
         <dl>
@@ -224,7 +230,9 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </div>
           <div>
             <dt>操作</dt>
-            <dd>创建</dd>
+            <dd>
+              {maintenanceSource.operation === "verify" ? "校验" : "创建"}
+            </dd>
           </div>
           <div>
             <dt>发生时间</dt>

@@ -236,13 +236,13 @@ func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T
 	if err := store.DB.Where(
 		"source_entity_type = ? AND source_entity_id = ?",
 		systemMaintenanceInboxSourceType,
-		systemMaintenanceSourceID(systemMaintenanceBackupComponent, systemMaintenanceCreateOperation),
+		systemMaintenanceSourceID(backupCreateMaintenanceIncident.component, backupCreateMaintenanceIncident.operation),
 	).First(&incident).Error; err != nil {
 		t.Fatalf("load maintenance incident: %v", err)
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 1)
-	if incident.Kind != "event" || incident.Priority != "P1" || incident.Title != systemMaintenanceBackupCreateTitle ||
-		incident.Summary != systemMaintenanceBackupCreateMessage || incident.SourceEventKey == nil ||
+	if incident.Kind != "event" || incident.Priority != "P1" || incident.Title != backupCreateMaintenanceIncident.title ||
+		incident.Summary != backupCreateMaintenanceIncident.message || incident.SourceEventKey == nil ||
 		!strings.HasPrefix(*incident.SourceEventKey, "system:backup:create:") ||
 		strings.Contains(incident.PayloadJSON, "do not persist this note") || strings.Contains(incident.PayloadJSON, backupDir) {
 		t.Fatalf("maintenance incident must be a safe, stable snapshot: %#v", incident)
@@ -252,7 +252,7 @@ func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T
 		t.Fatalf("decode maintenance payload: %v", err)
 	}
 	if payload["component"] != "backup" || payload["operation"] != "create" ||
-		payload["failure_code"] != systemMaintenanceBackupCreateCode || payload["message"] != systemMaintenanceBackupCreateMessage {
+		payload["failure_code"] != backupCreateMaintenanceIncident.failureCode || payload["message"] != backupCreateMaintenanceIncident.message {
 		t.Fatalf("maintenance payload = %#v", payload)
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_projected' AND actor_id = ?", 1, incident.ID, models.BuiltinSystemActorID)
@@ -281,7 +281,7 @@ func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T
 		*itemEnvelope.Data.SourceEntityID != "backup:create" ||
 		itemEnvelope.Data.DueAt != nil ||
 		itemEnvelope.Data.SourceDeletedAt != nil ||
-		itemEnvelope.Data.PayloadJSON["failure_code"] != systemMaintenanceBackupCreateCode ||
+		itemEnvelope.Data.PayloadJSON["failure_code"] != backupCreateMaintenanceIncident.failureCode ||
 		len(itemEnvelope.Data.PayloadJSON) != 5 {
 		t.Fatalf("maintenance incident API = %#v", itemEnvelope.Data)
 	}
@@ -314,8 +314,84 @@ func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 2)
 }
 
+func TestBackupVerifyFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T) {
+	router, store, _, _ := newBackupTestAPI(t)
+	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"do not persist verify note"}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create backup fixture = %d: %s", created.Code, created.Body.String())
+	}
+	summary := decodeBackupSummary(t, created.Body.Bytes())
+	originalPersist := persistVerifiedBackupManifest
+	persistVerifiedBackupManifest = func(packagePath string, manifest backupManifest) error {
+		if strings.Contains(packagePath, summary.ID) && manifest.ID == summary.ID {
+			return errors.New("simulated verification record failure at " + packagePath)
+		}
+		return originalPersist(packagePath, manifest)
+	}
+	t.Cleanup(func() { persistVerifiedBackupManifest = originalPersist })
+
+	first := performRequest(router, http.MethodPost, "/api/v1/backups/"+summary.ID+"/verify", []byte(`{}`), nil)
+	if first.Code != http.StatusInternalServerError || responseErrorCode(t, first.Body.Bytes()) != "BACKUP_VERIFY_FAILED" {
+		t.Fatalf("first failed verify = %d: %s", first.Code, first.Body.String())
+	}
+	second := performRequest(router, http.MethodPost, "/api/v1/backups/"+summary.ID+"/verify", []byte(`{}`), nil)
+	if second.Code != http.StatusInternalServerError || responseErrorCode(t, second.Body.Bytes()) != "BACKUP_VERIFY_FAILED" {
+		t.Fatalf("second failed verify = %d: %s", second.Code, second.Body.String())
+	}
+
+	sourceID := systemMaintenanceSourceID(backupVerifyMaintenanceIncident.component, backupVerifyMaintenanceIncident.operation)
+	var incident models.InboxItem
+	if err := store.DB.Where(
+		"source_entity_type = ? AND source_entity_id = ?",
+		systemMaintenanceInboxSourceType,
+		sourceID,
+	).First(&incident).Error; err != nil {
+		t.Fatalf("load verify incident: %v", err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance' AND source_entity_id = ?", 1, sourceID)
+	if incident.Kind != "event" || incident.Priority != "P1" || incident.Title != backupVerifyMaintenanceIncident.title ||
+		incident.Summary != backupVerifyMaintenanceIncident.message || incident.SourceEventKey == nil ||
+		!strings.HasPrefix(*incident.SourceEventKey, "system:backup:verify:") ||
+		strings.Contains(incident.PayloadJSON, "do not persist verify note") ||
+		strings.Contains(incident.PayloadJSON, "simulated verification") ||
+		strings.Contains(incident.PayloadJSON, summary.ID) {
+		t.Fatalf("verify incident must be a safe, stable snapshot: %#v", incident)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(incident.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode verify payload: %v", err)
+	}
+	if payload["component"] != "backup" || payload["operation"] != "verify" ||
+		payload["failure_code"] != backupVerifyMaintenanceIncident.failureCode ||
+		payload["message"] != backupVerifyMaintenanceIncident.message || len(payload) != 5 {
+		t.Fatalf("verify payload = %#v", payload)
+	}
+	for _, key := range []string{"error", "path", "note", "request_id", "token", "backup_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("verify payload leaked %s: %#v", key, payload)
+		}
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_projected' AND actor_id = ?", 1, incident.ID, models.BuiltinSystemActorID)
+
+	resolved := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+incident.ID+"/resolve",
+		[]byte(`{"reason":"Storage issue acknowledged"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("resolve verify incident = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	third := performRequest(router, http.MethodPost, "/api/v1/backups/"+summary.ID+"/verify", []byte(`{}`), nil)
+	if third.Code != http.StatusInternalServerError {
+		t.Fatalf("failed verify after resolution = %d: %s", third.Code, third.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance' AND source_entity_id = ?", 2, sourceID)
+}
+
 func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
-	router, _, _, backupDir := newBackupTestAPI(t)
+	router, store, _, backupDir := newBackupTestAPI(t)
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create empty backup = %d: %s", created.Code, created.Body.String())
@@ -330,6 +406,7 @@ func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
 	if verified.Code != http.StatusConflict || responseErrorCode(t, verified.Body.Bytes()) != "BACKUP_INVALID" {
 		t.Fatalf("verify unexpected file = %d: %s", verified.Code, verified.Body.String())
 	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 0)
 	if err := os.Remove(unexpected); err != nil {
 		t.Fatalf("remove unexpected fixture: %v", err)
 	}
@@ -346,6 +423,7 @@ func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
 	if verified.Code != http.StatusConflict || responseErrorCode(t, verified.Body.Bytes()) != "BACKUP_INVALID" {
 		t.Fatalf("verify tampered database = %d: %s", verified.Code, verified.Body.String())
 	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 0)
 }
 
 func TestBackupAPIValidatesConfigurationAndRequests(t *testing.T) {

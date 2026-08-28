@@ -214,4 +214,40 @@ describe("InboxSourceContext", () => {
       settingsModule: "data",
     });
   });
+
+  it("shows a safe backup-verify maintenance snapshot", () => {
+    const maintenanceItem: InboxItem = {
+      ...sourceItem,
+      title: "本地备份校验需要处理",
+      summary:
+        "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: "backup:verify",
+      sourceEventKey:
+        "system:backup:verify:018f0000-0000-7000-8000-000000000819",
+      dueAt: null,
+      payloadJson: {
+        component: "backup",
+        operation: "verify",
+        failure_code: "backup_verify_failed",
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message:
+          "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+      },
+    };
+    render(
+      <MemoryRouter>
+        <InboxSourceContext item={maintenanceItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("本地备份校验失败")).toBeTruthy();
+    expect(screen.getByText("校验")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/backup-id/i)).toBeNull();
+  });
 });

@@ -2328,7 +2328,11 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
-  const validSystemMaintenanceEvent =
+  const backupCreateMessage =
+    "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。";
+  const backupVerifyMessage =
+    "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。";
+  const validBackupCreateMaintenance =
     sourceEntityType === "system_maintenance" &&
     sourceEntityId === "backup:create" &&
     dueAt === null &&
@@ -2341,11 +2345,29 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     rawPayload.failure_code === "backup_create_failed" &&
     typeof rawPayload.occurred_at === "string" &&
     rawPayload.occurred_at.length > 0 &&
-    rawPayload.message ===
-      "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。" &&
+    rawPayload.message === backupCreateMessage &&
     typeof sourceEventKey === "string" &&
     sourceEventKey.startsWith("system:backup:create:") &&
     sourceEventKey.slice("system:backup:create:".length).length > 0;
+  const validBackupVerifyMaintenance =
+    sourceEntityType === "system_maintenance" &&
+    sourceEntityId === "backup:verify" &&
+    dueAt === null &&
+    sourceDeletedAt === null &&
+    (value.priority === "P0" || value.priority === "P1") &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.component === "backup" &&
+    rawPayload.operation === "verify" &&
+    rawPayload.failure_code === "backup_verify_failed" &&
+    typeof rawPayload.occurred_at === "string" &&
+    rawPayload.occurred_at.length > 0 &&
+    rawPayload.message === backupVerifyMessage &&
+    typeof sourceEventKey === "string" &&
+    sourceEventKey.startsWith("system:backup:verify:") &&
+    sourceEventKey.slice("system:backup:verify:".length).length > 0;
+  const validSystemMaintenanceEvent =
+    validBackupCreateMaintenance || validBackupVerifyMaintenance;
   if (
     !id ||
     !title ||
