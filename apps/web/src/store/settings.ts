@@ -18,7 +18,10 @@ const fallbackStorage: Storage = {
   },
 };
 
-function getSettingsStorage() {
+export const LEGACY_SETTINGS_STORAGE_KEY = "opc-focus-settings";
+export const LOCAL_SETTINGS_STORAGE_KEY = "opc-settings-local-v1";
+
+export function getSettingsStorage() {
   try {
     return window.localStorage ?? fallbackStorage;
   } catch {
@@ -65,6 +68,7 @@ interface SettingsState
   setGeneralSettings: (settings: Partial<GeneralSettings>) => void;
   setProfileSettings: (settings: Partial<ProfileSettings>) => void;
   setTheme: (theme: AppearanceTheme) => void;
+  replaceCommitted: (settings: SettingsPreview) => void;
   beginPreview: () => void;
   setPreview: (settings: SettingsPreview) => void;
   commitPreview: () => void;
@@ -239,6 +243,14 @@ export const useSettingsStore = create<SettingsState>()(
       setProfileSettings: (settings) =>
         set((state) => sanitizeProfileSettings(settings, state)),
       setTheme: (theme) => set({ theme: sanitizeAppearanceTheme(theme) }),
+      replaceCommitted: (settings) =>
+        set((state) => ({
+          ...sanitizeFocusSettings(settings.focus, state),
+          ...sanitizeGeneralSettings(settings.general, state),
+          ...sanitizeProfileSettings(settings.profile, state),
+          theme: sanitizeAppearanceTheme(settings.theme, state.theme),
+          preview: null,
+        })),
       beginPreview: () =>
         set((state) => ({
           preview: {
@@ -292,20 +304,9 @@ export const useSettingsStore = create<SettingsState>()(
         }),
     }),
     {
-      name: "opc-focus-settings",
+      name: LOCAL_SETTINGS_STORAGE_KEY,
       storage: createJSONStorage(getSettingsStorage),
       partialize: (state) => ({
-        focusMinutes: state.focusMinutes,
-        breakMinutes: state.breakMinutes,
-        cycles: state.cycles,
-        autoStartBreak: state.autoStartBreak,
-        autoStartFocus: state.autoStartFocus,
-        soundEnabled: state.soundEnabled,
-        theme: state.theme,
-        defaultRoute: state.defaultRoute,
-        showRightOverview: state.showRightOverview,
-        reduceMotion: state.reduceMotion,
-        displayName: state.displayName,
         avatarDataUrl: state.avatarDataUrl,
       }),
       merge: (persistedState, currentState) => {
@@ -315,15 +316,100 @@ export const useSettingsStore = create<SettingsState>()(
             : {};
         return {
           ...currentState,
-          ...sanitizeFocusSettings(persisted),
-          ...sanitizeGeneralSettings(persisted),
-          ...sanitizeProfileSettings(persisted),
-          theme: sanitizeAppearanceTheme(persisted.theme),
+          avatarDataUrl: sanitizeProfileSettings(
+            {
+              displayName: currentState.displayName,
+              avatarDataUrl: persisted.avatarDataUrl,
+            },
+            currentState,
+          ).avatarDataUrl,
         };
       },
     },
   ),
 );
+
+export interface LegacySettingsSnapshot extends SettingsPreview {
+  exists: boolean;
+}
+
+export interface LocalAvatarSnapshot {
+  exists: boolean;
+  avatarDataUrl: string | null;
+}
+
+export function readLocalAvatarSnapshot(
+  storage: Storage = getSettingsStorage(),
+): LocalAvatarSnapshot {
+  const fallback: LocalAvatarSnapshot = {
+    exists: false,
+    avatarDataUrl: null,
+  };
+  try {
+    const raw = storage.getItem(LOCAL_SETTINGS_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return fallback;
+    const envelope = parsed as Record<string, unknown>;
+    if (typeof envelope.state !== "object" || envelope.state === null) {
+      return fallback;
+    }
+    const state = envelope.state as Record<string, unknown>;
+    if (!("avatarDataUrl" in state)) return fallback;
+    return {
+      exists: true,
+      avatarDataUrl: sanitizeProfileSettings({
+        displayName: DEFAULT_PROFILE_SETTINGS.displayName,
+        avatarDataUrl: state.avatarDataUrl,
+      }).avatarDataUrl,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export function readLegacySettingsSnapshot(
+  storage: Storage = getSettingsStorage(),
+): LegacySettingsSnapshot {
+  const fallback: LegacySettingsSnapshot = {
+    exists: false,
+    focus: DEFAULT_FOCUS_SETTINGS,
+    general: DEFAULT_GENERAL_SETTINGS,
+    profile: DEFAULT_PROFILE_SETTINGS,
+    theme: DEFAULT_THEME,
+  };
+  try {
+    const raw = storage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return fallback;
+    const envelope = parsed as Record<string, unknown>;
+    const state =
+      typeof envelope.state === "object" && envelope.state !== null
+        ? envelope.state
+        : envelope;
+    return {
+      exists: true,
+      focus: sanitizeFocusSettings(state),
+      general: sanitizeGeneralSettings(state),
+      profile: sanitizeProfileSettings(state),
+      theme: sanitizeAppearanceTheme((state as Record<string, unknown>).theme),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export function clearLegacySettings(
+  storage: Storage = getSettingsStorage(),
+): void {
+  try {
+    storage.removeItem(LEGACY_SETTINGS_STORAGE_KEY);
+  } catch {
+    // Server facts are already durable; an inaccessible legacy cache must not
+    // block application startup or be reported as a failed migration.
+  }
+}
 
 export function getFocusSettings(): FocusSettings {
   return pickFocusSettings(useSettingsStore.getState());

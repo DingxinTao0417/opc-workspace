@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v16。v0.1-A 已交付版本化 `app_settings`、服务端 schema 清洗和 GET/PATCH API；Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实。前端偏好目前仍读取 localStorage，尚未切换到设置 API；兼容迁移、受控头像文件、数据/备份和完整桌面诊断入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v16。v0.1-A 已交付版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据/备份和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -20,14 +20,15 @@
 
 当前设置弹窗已实现：
 
-- 当前“个人资料”界面实际控制侧栏品牌名称与头像（字段为 displayName/avatarDataUrl），尚未与未来 owner Actor 身份分离；支持 PNG/JPG/WebP、2 MB 限制和本地预览。
+- “个人资料”控制侧栏工作区品牌名称与头像，不改写 owner Actor 身份；名称通过 `app_settings.workspace.display_name` 保存，头像暂以本地兼容 Data URL 保存，支持 PNG/JPG/WebP、2 MB 限制和预览。
 - 通用：默认首页、右侧概览开关和减少动效。
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
-- Zustand persist 对输入进行边界清洗，历史存储键为 opc-focus-settings。
-- 当前设置状态明确分为三层：persist 后的 store 值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存提交 preview，取消丢弃 preview。
+- 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取四个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
+- 当前设置状态明确分为三层：服务端确认值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存成功后才以服务端规范化响应替换 committed；取消丢弃 preview。
+- Zustand persist 新键 `opc-settings-local-v1` 只保留尚未受控文件化的头像 Data URL，不再持久化工作区名称、通用、外观或专注设置。
 - Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
 - 命令面板可分别直达个人资料、通用、外观、专注、人员与责任和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
 - 活动 Session 的 `planned_seconds` 是服务端事实。修改、保存或取消 Focus draft/preview 都不会重置、缩短或改写当前 Session；保存后的 break、cycle、自动开始与提示音配置最早在当前工作段结束后的本地转场生效。
@@ -42,9 +43,8 @@
 
 当前限制：
 
-- 前端尚未消费新设置 API；除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage，因此浏览器开发环境与桌面应用仍不共享偏好。
-- 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
-- 前端尚未实现首次兼容迁移、Query 缓存、服务端保存错误和版本冲突交互；schema v16/API 已可供下一纵切接入。
+- 四个非敏感设置模块已经以 SQLite 为统一事实源；头像仍以 Data URL 存入当前浏览器或 WebView 的 localStorage，尚未迁入受控文件目录，因此头像暂不跨前端运行容器共享。
+- 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
 - 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、完整诊断或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
@@ -109,12 +109,12 @@
 
 当前实现流程：
 
-1. 用户打开设置弹窗；前端从 localStorage-backed store 的 committed 值建立独立 draft 和 preview。
+1. 应用启动先从 `GET /api/v1/settings` 读取服务端 committed；用户打开设置弹窗时据此建立独立 draft 和 preview。
 2. 用户修改可预览项；preview 只影响可逆界面，Focus Session 始终继续以服务端快照计时。
-3. 用户保存，清洗后的 preview 成为新的 committed 值并持久化；Focus 新设置不追写当前 Session。
-4. 用户取消或关闭，preview 被丢弃，committed 与活动 Session 保持不变。
-
-目标前端 SQLite 流程仍待接入：读取已提交的服务端设置，按模块 `PATCH` 并携带版本，成功后以服务端规范化响应更新 committed，失败保留 draft。对应 Sidecar GET/PATCH、规范化和原子并发契约已交付。
+3. 用户保存时，前端只提交发生变化的模块，每项携带当前 `expected_version`；头像单独写入本地兼容存储。
+4. Sidecar 在一个事务中规范化并保存全部模块；成功后前端以返回快照更新 Query 和 committed，Focus 新设置不追写当前 Session。
+5. 网络、超时、校验或版本冲突失败时弹窗保留 draft 和预览并展示错误，不把未确认值写成 committed。
+6. 用户取消或关闭，preview 被丢弃，committed 与活动 Session 保持不变。
 
 ### 取消预览
 
@@ -125,12 +125,12 @@
 
 ### 首次从 localStorage 迁移
 
-1. 启动后读取 app_settings 和一次性迁移标记。
-2. 仅当服务端对应 key 不存在时读取旧 opc-focus-settings。
-3. 对个人资料、通用、外观和专注字段分别清洗后写入 SQLite。
-4. 头像 Data URL 转换到受控文件并保存引用；转换失败不删除旧值。
-5. 写入迁移完成标记；重复启动不覆盖较新的服务端设置。
-6. 验证成功后才清理或忽略旧 localStorage。
+1. 启动先读取 `app_settings`，再清洗历史键 `opc-focus-settings`；格式损坏的缓存不会被当作有效迁移源。
+2. 只为 `stored=false / version=0` 的模块生成更新；已经存在的服务端模块始终优先，不被旧缓存覆盖。
+3. workspace/general/appearance/focus 的缺失模块在同一个 PATCH 中原子回填；没有旧缓存时不为默认值创建无意义的设置行。
+4. 响应成功后使用服务端返回快照；若写请求发生冲突、网络中断或超时，则重新读取并且只有在全部目标模块已经存在时才接受为成功，否则保留旧键供下次重试。
+5. 服务端事实验证成功后才删除历史键。历史头像暂复制到新本地头像键；新键即使显式保存 `null` 也优先于残留旧头像，避免头像被复活。
+6. 受控头像文件导入仍待后续纵切；本轮不会把 Data URL 写入 `app_settings`。
 
 ### 管理 person Actor
 
@@ -177,7 +177,7 @@
 
 ### 前端状态
 
-- committed：当前前端已保存的设置；现阶段除 Actor 外仍来自 localStorage-backed store，下一纵切迁移后才代表最近一次服务端确认值。
+- committed：最近一次由启动读取或保存响应确认的服务端设置；仅头像是本地兼容值。
 - draft：当前弹窗内尚未保存的编辑值。
 - preview：仅用于主题、布局和下一轮 Focus 参数等可逆展示，不写入活动 Focus Session 或其他业务事实。
 - saving / error：保存中和可重试错误。
@@ -201,12 +201,12 @@
 
 - **后端已完成**：schema v16 `app_settings` 递增迁移、服务端 schema 清洗和 GET/PATCH API。
 - **后端已完成**：固定模块 key、完整值契约、默认值、原子批量保存、乐观锁、`SETTINGS_VERSION_CONFLICT` 和无敏感值审计。
-- **前端待完成**：将 Query 作为已提交事实源，Zustand 仅保存弹窗草稿和短期 UI 状态。
+- **前端已完成**：启动门禁、严格响应校验、Query 缓存、按变化模块保存、版本冲突刷新、保存错误保留 draft，以及服务端响应驱动 committed。
 
 ### v0.1-B：兼容迁移与头像
 
-- 一次性迁移 opc-focus-settings：旧 displayName/avatarDataUrl 只回填 `app_settings.workspace`，不得覆盖或改写 owner Actor 名称；其他字段按模块迁移且仅在服务端不存在时回填。
-- 将头像导入受控目录，补格式、大小、丢失和清理策略。
+- **部分完成**：一次性迁移 `opc-focus-settings`；旧 displayName 只回填缺失的 `app_settings.workspace`，不得覆盖或改写 owner Actor 名称，其他字段也只回填未存储模块。成功验证后删除旧键，模糊失败保留旧值重试。
+- **待完成**：将头像导入受控目录，补格式、大小、丢失和清理策略；当前只迁移到 `opc-settings-local-v1` 本地兼容值。
 - 验证浏览器开发环境与桌面 WebView 的升级路径。
 
 ### v0.1-C：设置页面补齐
@@ -214,7 +214,7 @@
 - “人员与责任”的 Actor 管理范围和任务详情 Assignment 入口已完成；通知、数据/备份、快捷键和完整诊断模块待实现。
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
 - **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
-- 补真实浏览器/窄屏的键盘与焦点验收，并实现持久化设置保存错误状态。
+- **已完成（组件层）**：持久化设置加载、保存中、保存失败和冲突提示；仍需真实浏览器/窄屏的键盘、焦点和视觉验收。
 
 ### v0.1-D：运行态解耦
 
@@ -230,8 +230,8 @@
 
 ## 验收标准
 
-- **后端已验证**：非敏感设置写入 SQLite 后可重新读取；前端接入完成前，浏览器与桌面环境仍存在 localStorage 偏好分离。
-- 旧 localStorage 只迁移一次，不覆盖已经存在的服务端值；迁移失败可重试且不丢旧值。
+- **已验证**：非敏感设置写入 SQLite 后可重新读取，前端启动与保存均消费严格校验的服务端快照。
+- **已验证（自动化）**：旧 localStorage 只回填服务端缺失模块，不覆盖已有值；原子迁移失败可重试且不丢旧值，显式清空的新头像不会被残留旧值恢复。
 - app_settings、日志和诊断信息中不包含会话令牌、Agent 能力令牌或持久敏感凭据。
 - **已验证（API）**：保存返回服务端规范化值；并发旧版本更新返回 409；批量中任一冲突会整批回滚。
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
@@ -251,6 +251,9 @@
 - [当前设置 store](../../apps/web/src/store/settings.ts)
 - [当前设置弹窗](../../apps/web/src/components/SettingsModal.tsx)
 - [当前设置测试](../../apps/web/src/components/SettingsModal.test.tsx)
+- [设置启动门禁](../../apps/web/src/components/SettingsBootstrap.tsx)
+- [设置兼容迁移](../../apps/web/src/settings/bootstrap.ts)
+- [设置 API 契约测试](../../apps/web/src/api/settings.test.ts)
 - [当前 Actor 设置](../../apps/web/src/components/ActorSettings.tsx)
 - [当前 Actor 设置测试](../../apps/web/src/components/ActorSettings.test.tsx)
 - [当前通用 Modal](../../apps/web/src/components/Modal.tsx)

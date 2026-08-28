@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v16。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder，以及 T-11C 批量拆分/分派/自动结清已交付；schema v16 不改 Inbox 契约；非 Reminder 来源投影和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.7](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

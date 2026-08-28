@@ -8,6 +8,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { normalizeAppSettingsResponse } from "../api/client";
+import { settingsQueryKey } from "../api/hooks";
 import {
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
@@ -32,13 +34,90 @@ const healthPayload = {
     commit: "abc123def456789-dirty",
   },
   api: { version: "v1" },
-  schema: { version: 15 },
+  schema: { version: 16 },
 };
+
+function settingsPayload(): any {
+  return {
+    data: {
+      schema_version: 1,
+      items: [
+        {
+          key: "workspace",
+          value: { display_name: "opc-workspace", avatar_ref: null },
+          schema_version: 1,
+          version: 1,
+          stored: true,
+          updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
+          updated_at: "2026-08-28T12:00:00Z",
+        },
+        {
+          key: "general",
+          value: {
+            default_route: "today",
+            show_right_overview: true,
+            reduce_motion: false,
+          },
+          schema_version: 1,
+          version: 1,
+          stored: true,
+          updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
+          updated_at: "2026-08-28T12:00:00Z",
+        },
+        {
+          key: "appearance",
+          value: { theme: "dark" },
+          schema_version: 1,
+          version: 1,
+          stored: true,
+          updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
+          updated_at: "2026-08-28T12:00:00Z",
+        },
+        {
+          key: "focus",
+          value: {
+            focus_minutes: 50,
+            break_minutes: 5,
+            cycles: 4,
+            auto_start_break: true,
+            auto_start_focus: false,
+            sound_enabled: true,
+          },
+          schema_version: 1,
+          version: 1,
+          stored: true,
+          updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
+          updated_at: "2026-08-28T12:00:00Z",
+        },
+      ],
+    },
+  };
+}
+
+function savedSettingsPayload(init?: RequestInit) {
+  const payload = settingsPayload();
+  if (!init?.body) return payload;
+  const input = JSON.parse(String(init.body)) as {
+    updates: { key: string; value: Record<string, unknown> }[];
+  };
+  for (const update of input.updates) {
+    const item = payload.data.items.find(
+      (candidate: { key: string }) => candidate.key === update.key,
+    )!;
+    item.value = update.value as never;
+    item.version += 1;
+  }
+  return payload;
+}
 
 function renderSettings() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  queryClient.setQueryData(
+    settingsQueryKey,
+    normalizeAppSettingsResponse(settingsPayload()),
+  );
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={["/today"]}>
@@ -54,11 +133,16 @@ describe("SettingsModal", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
+      vi.fn(async (url: string, init?: RequestInit) =>
         Promise.resolve(
-          new Response(JSON.stringify(healthPayload), {
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify(
+              url.includes("/api/v1/settings")
+                ? savedSettingsPayload(init)
+                : healthPayload,
+            ),
+            { headers: { "Content-Type": "application/json" } },
+          ),
         ),
       ),
     );
@@ -79,7 +163,7 @@ describe("SettingsModal", () => {
     applyTheme(DEFAULT_THEME);
   });
 
-  it("saves focus settings and closes", () => {
+  it("saves focus settings and closes", async () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole("button", { name: "专注" }));
@@ -96,12 +180,33 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState()).toMatchObject({
-      focusMinutes: 55,
-      autoStartFocus: true,
-      preview: null,
-    });
+    await waitFor(() =>
+      expect(useSettingsStore.getState()).toMatchObject({
+        focusMinutes: 55,
+        autoStartFocus: true,
+        preview: null,
+      }),
+    );
     expect(useUiStore.getState().settingsOpen).toBe(false);
+    const settingsCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(settingsCall?.[1]?.body))).toEqual({
+      updates: [
+        {
+          key: "focus",
+          expected_version: 1,
+          value: {
+            focus_minutes: 55,
+            break_minutes: 5,
+            cycles: 4,
+            auto_start_break: true,
+            auto_start_focus: true,
+            sound_enabled: true,
+          },
+        },
+      ],
+    });
   });
 
   it("discards draft changes when cancelled", () => {
@@ -117,7 +222,7 @@ describe("SettingsModal", () => {
     expect(useUiStore.getState().settingsOpen).toBe(false);
   });
 
-  it("saves the selected appearance theme", () => {
+  it("saves the selected appearance theme", async () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole("button", { name: "外观" }));
@@ -127,7 +232,9 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState().theme).toBe("light");
+    await waitFor(() =>
+      expect(useSettingsStore.getState().theme).toBe("light"),
+    );
     expect(document.documentElement.dataset.theme).toBe("light");
   });
 
@@ -144,7 +251,7 @@ describe("SettingsModal", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
-  it("saves general workspace preferences", () => {
+  it("saves general workspace preferences", async () => {
     renderSettings();
 
     fireEvent.change(screen.getByLabelText("默认首页"), {
@@ -170,15 +277,17 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState()).toMatchObject({
-      defaultRoute: "tasks",
-      showRightOverview: false,
-      reduceMotion: true,
-      preview: null,
-    });
+    await waitFor(() =>
+      expect(useSettingsStore.getState()).toMatchObject({
+        defaultRoute: "tasks",
+        showRightOverview: false,
+        reduceMotion: true,
+        preview: null,
+      }),
+    );
   });
 
-  it("previews and saves the profile name", () => {
+  it("previews and saves the profile name", async () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole("button", { name: "个人资料" }));
@@ -193,10 +302,12 @@ describe("SettingsModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
-    expect(useSettingsStore.getState()).toMatchObject({
-      displayName: "Dingxin Tao",
-      preview: null,
-    });
+    await waitFor(() =>
+      expect(useSettingsStore.getState()).toMatchObject({
+        displayName: "Dingxin Tao",
+        preview: null,
+      }),
+    );
   });
 
   it("previews a local avatar upload without saving it immediately", async () => {
@@ -221,6 +332,54 @@ describe("SettingsModal", () => {
 
     expect(useSettingsStore.getState().avatarDataUrl).toBeNull();
     expect(useSettingsStore.getState().preview).toBeNull();
+  });
+
+  it("keeps a local avatar compatibility value when explicitly saved", async () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "个人资料" }));
+    const avatar = new File([new Uint8Array([137, 80, 78, 71])], "avatar.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("上传头像"), {
+      target: { files: [avatar] },
+    });
+    await waitFor(() =>
+      expect(
+        useSettingsStore.getState().preview?.profile.avatarDataUrl,
+      ).toMatch(/^data:image\/png;base64,/),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(useSettingsStore.getState().avatarDataUrl).toMatch(
+        /^data:image\/png;base64,/,
+      ),
+    );
+    expect(
+      vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH"),
+    ).toBe(false);
+  });
+
+  it("keeps the preview and committed facts separate after a save failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("network down");
+      }),
+    );
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: "专注" }));
+    fireEvent.click(screen.getByRole("button", { name: "增加专注时长" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("设置未保存");
+    expect(useSettingsStore.getState()).toMatchObject({
+      focusMinutes: 50,
+      preview: { focus: { focusMinutes: 55 } },
+    });
+    expect(useUiStore.getState().settingsOpen).toBe(true);
   });
 
   it("restores the original route and preferences when preview is cancelled", () => {
@@ -258,7 +417,7 @@ describe("SettingsModal", () => {
       "abc123def456789-dirty",
     );
     expect(screen.getByText("v1")).toBeVisible();
-    expect(screen.getByText("v15")).toBeVisible();
+    expect(screen.getByText("v16")).toBeVisible();
     expect(screen.getByText("本地 SQLite · 可用")).toBeVisible();
     expect(screen.getByText("就绪")).toBeVisible();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();

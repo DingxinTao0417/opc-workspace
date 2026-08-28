@@ -19,6 +19,75 @@ export type ActorType = "owner" | "person" | "system" | "agent";
 export type ActorStatus = "active" | "inactive";
 export type AssignmentRole = "assignee" | "reviewer";
 
+export type AppSettingKey = "workspace" | "general" | "appearance" | "focus";
+
+export interface WorkspaceSettingValue {
+  displayName: string;
+  avatarRef: string | null;
+}
+
+export interface GeneralSettingValue {
+  defaultRoute: "today" | "tasks" | "projects" | "clients" | "focus";
+  showRightOverview: boolean;
+  reduceMotion: boolean;
+}
+
+export interface AppearanceSettingValue {
+  theme: "light" | "dark";
+}
+
+export interface FocusSettingValue {
+  focusMinutes: number;
+  breakMinutes: number;
+  cycles: number;
+  autoStartBreak: boolean;
+  autoStartFocus: boolean;
+  soundEnabled: boolean;
+}
+
+interface AppSettingItemBase {
+  schemaVersion: 1;
+  version: number;
+  stored: boolean;
+  updatedByActorId: string | null;
+  updatedAt: string | null;
+}
+
+export type AppSettingItem = AppSettingItemBase &
+  (
+    | { key: "workspace"; value: WorkspaceSettingValue }
+    | { key: "general"; value: GeneralSettingValue }
+    | { key: "appearance"; value: AppearanceSettingValue }
+    | { key: "focus"; value: FocusSettingValue }
+  );
+
+export interface AppSettingsResult {
+  schemaVersion: 1;
+  items: AppSettingItem[];
+}
+
+export type AppSettingUpdate =
+  | {
+      key: "workspace";
+      expectedVersion: number;
+      value: WorkspaceSettingValue;
+    }
+  | {
+      key: "general";
+      expectedVersion: number;
+      value: GeneralSettingValue;
+    }
+  | {
+      key: "appearance";
+      expectedVersion: number;
+      value: AppearanceSettingValue;
+    }
+  | {
+      key: "focus";
+      expectedVersion: number;
+      value: FocusSettingValue;
+    };
+
 export interface Actor {
   id: string;
   type: ActorType;

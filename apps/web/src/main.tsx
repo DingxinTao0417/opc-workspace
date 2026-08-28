@@ -3,6 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { SettingsBootstrap } from "./components/SettingsBootstrap";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -17,9 +18,11 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <SettingsBootstrap>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </SettingsBootstrap>
     </QueryClientProvider>
   </React.StrictMode>,
 );

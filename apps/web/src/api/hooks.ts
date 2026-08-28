@@ -40,6 +40,7 @@ import {
   getClients,
   getActiveFocusSession,
   getHealth,
+  getAppSettings,
   getInboxItem,
   getInboxItemEvents,
   getInboxItemTasks,
@@ -82,10 +83,12 @@ import {
   updateActor,
   updateProject,
   updateReminder,
+  updateAppSettings,
   unlinkInboxItemTask,
 } from "./client";
 import type {
   ActorListParams,
+  AppSettingUpdate,
   BatchUpdateTasksInput,
   ClientInput,
   ClientListParams,
@@ -136,6 +139,37 @@ import type {
   UpdateTaskInput,
   UnlinkInboxItemTaskInput,
 } from "../types/models";
+
+export const settingsQueryKey = ["settings"] as const;
+
+export function useAppSettingsQuery(enabled = true) {
+  return useQuery({
+    queryKey: settingsQueryKey,
+    queryFn: getAppSettings,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateAppSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (updates: AppSettingUpdate[]) => updateAppSettings(updates),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(settingsQueryKey, settings);
+    },
+    onError: async (error) => {
+      if (
+        error instanceof ApiError &&
+        error.code === "SETTINGS_VERSION_CONFLICT"
+      ) {
+        await queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+      }
+    },
+  });
+}
 
 export const actorQueryKey = ["actors"] as const;
 export const actorDetailQueryKey = (id: string) =>

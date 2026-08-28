@@ -20,8 +20,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ApiError } from "../api/client";
-import { useHealthQuery } from "../api/hooks";
+import { ApiError, getAppSetting } from "../api/client";
+import {
+  useAppSettingsQuery,
+  useHealthQuery,
+  useUpdateAppSettings,
+} from "../api/hooks";
+import { committedSettingsFromServer } from "../settings/bootstrap";
 import {
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
@@ -42,6 +47,7 @@ import {
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore, type SettingsModule } from "../store/ui";
+import type { AppSettingUpdate } from "../types/models";
 import { ActorSettings } from "./ActorSettings";
 import { Modal } from "./Modal";
 
@@ -81,6 +87,20 @@ function formatHealthError(error: unknown): string {
     return `${error.message}${error.requestId ? ` · 请求 ${error.requestId}` : ""}`;
   }
   return "无法连接本地服务，请确认 Sidecar 已启动后重试。";
+}
+
+function formatSettingsSaveError(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.code === "SETTINGS_VERSION_CONFLICT") {
+      return "设置已在另一个窗口改变，已请求最新版本。请确认当前预览后再次保存。";
+    }
+    return `${error.message}${error.requestId ? ` · 请求 ${error.requestId}` : ""}`;
+  }
+  return "设置保存失败，请保留当前草稿并重试。";
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function displayVersion(version: string): string {
@@ -202,7 +222,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const setOpen = useUiStore((state) => state.setSettingsOpen);
   const beginPreview = useSettingsStore((state) => state.beginPreview);
   const setPreview = useSettingsStore((state) => state.setPreview);
-  const commitPreview = useSettingsStore((state) => state.commitPreview);
+  const replaceCommitted = useSettingsStore((state) => state.replaceCommitted);
   const cancelPreview = useSettingsStore((state) => state.cancelPreview);
   const initialLocation = useRef("/today");
   const [activeModule, setActiveModule] = useState<SettingsModule>("general");
@@ -217,6 +237,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   );
   const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const settingsQuery = useAppSettingsQuery(open);
+  const settingsMutation = useUpdateAppSettings();
   const healthQuery = useHealthQuery(open && activeModule === "about");
 
   useEffect(() => {
@@ -230,6 +253,8 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setProfileDraft(getProfileSettings());
     setThemeDraft(currentTheme);
     setAvatarError(null);
+    setSaveError(null);
+    settingsMutation.reset();
     beginPreview();
 
     return cancelPreview;
@@ -297,6 +322,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   };
 
   const close = () => {
+    if (settingsMutation.isPending) return;
     cancelPreview();
     navigate(initialLocation.current);
     setOpen(false);
@@ -313,6 +339,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setProfileDraft(DEFAULT_PROFILE_SETTINGS);
     setThemeDraft(DEFAULT_THEME);
     setAvatarError(null);
+    setSaveError(null);
     previewSettings(
       DEFAULT_FOCUS_SETTINGS,
       DEFAULT_GENERAL_SETTINGS,
@@ -322,15 +349,66 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     navigate(`/${DEFAULT_GENERAL_SETTINGS.defaultRoute}`);
   };
 
-  const save = () => {
+  const save = async () => {
+    if (!settingsQuery.data || settingsMutation.isPending) return;
     const previousFocus = getFocusSettings();
     const nextFocus = sanitizeFocusSettings(focusDraft);
     const nextGeneral = sanitizeGeneralSettings(generalDraft);
     const nextProfile = sanitizeProfileSettings(profileDraft);
     previewSettings(nextFocus, nextGeneral, nextProfile, themeDraft);
-    commitPreview();
-    onSettingsSaved?.(nextFocus, previousFocus);
-    setOpen(false);
+    setSaveError(null);
+
+    const currentWorkspace = getAppSetting(settingsQuery.data, "workspace");
+    const currentGeneral = getAppSetting(settingsQuery.data, "general");
+    const currentAppearance = getAppSetting(settingsQuery.data, "appearance");
+    const currentFocus = getAppSetting(settingsQuery.data, "focus");
+    const updates: AppSettingUpdate[] = [];
+    const nextWorkspace = {
+      displayName: nextProfile.displayName,
+      avatarRef: currentWorkspace.value.avatarRef,
+    };
+    if (!sameValue(nextWorkspace, currentWorkspace.value)) {
+      updates.push({
+        key: "workspace",
+        expectedVersion: currentWorkspace.version,
+        value: nextWorkspace,
+      });
+    }
+    if (!sameValue(nextGeneral, currentGeneral.value)) {
+      updates.push({
+        key: "general",
+        expectedVersion: currentGeneral.version,
+        value: nextGeneral,
+      });
+    }
+    if (!sameValue({ theme: themeDraft }, currentAppearance.value)) {
+      updates.push({
+        key: "appearance",
+        expectedVersion: currentAppearance.version,
+        value: { theme: themeDraft },
+      });
+    }
+    if (!sameValue(nextFocus, currentFocus.value)) {
+      updates.push({
+        key: "focus",
+        expectedVersion: currentFocus.version,
+        value: nextFocus,
+      });
+    }
+
+    try {
+      const saved =
+        updates.length > 0
+          ? await settingsMutation.mutateAsync(updates)
+          : settingsQuery.data;
+      replaceCommitted(
+        committedSettingsFromServer(saved, nextProfile.avatarDataUrl),
+      );
+      onSettingsSaved?.(nextFocus, previousFocus);
+      setOpen(false);
+    } catch (error) {
+      setSaveError(formatSettingsSaveError(error));
+    }
   };
 
   const moduleContent = (() => {
@@ -408,7 +486,8 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </label>
           </div>
           <p className="settings-inline-note">
-            头像和名称仅保存在本机，修改后会立即在左上角预览。
+            名称保存到本机
+            SQLite；头像在受控文件导入完成前保留在当前本机兼容存储。修改后都会立即预览。
           </p>
         </>
       );
@@ -722,6 +801,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             ) : null}
             <button
               className="button button-secondary"
+              disabled={settingsMutation.isPending}
               onClick={close}
               type="button"
             >
@@ -732,6 +812,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           <>
             <button
               className="button button-quiet settings-reset"
+              disabled={settingsMutation.isPending}
               onClick={restoreDefaults}
               type="button"
             >
@@ -740,6 +821,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </button>
             <button
               className="button button-secondary"
+              disabled={settingsMutation.isPending}
               onClick={close}
               type="button"
             >
@@ -747,10 +829,22 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </button>
             <button
               className="button button-primary"
-              onClick={save}
+              disabled={
+                settingsMutation.isPending ||
+                settingsQuery.isFetching ||
+                !settingsQuery.data
+              }
+              onClick={() => void save()}
               type="button"
             >
-              保存
+              {settingsMutation.isPending ? (
+                <>
+                  <LoaderCircle className="animate-spin" size={14} />
+                  保存中…
+                </>
+              ) : (
+                "保存"
+              )}
             </button>
           </>
         )
@@ -760,7 +854,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       title="设置"
       width="760px"
     >
-      <div className="settings-layout">
+      <fieldset
+        aria-busy={settingsMutation.isPending}
+        className="settings-layout"
+        disabled={settingsMutation.isPending}
+      >
         <nav aria-label="设置模块" className="settings-module-nav">
           {modules.map(({ id, label, icon: Icon }) => (
             <button
@@ -781,8 +879,31 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           className="settings-module-content"
         >
           {moduleContent}
+          {activeModule !== "actors" &&
+          activeModule !== "about" &&
+          !settingsQuery.data &&
+          settingsQuery.isError ? (
+            <div className="settings-state-error" role="alert">
+              <AlertCircle size={16} />
+              <div>
+                <strong>无法读取已保存设置</strong>
+                <span>{formatSettingsSaveError(settingsQuery.error)}</span>
+              </div>
+            </div>
+          ) : null}
+          {activeModule !== "actors" &&
+          activeModule !== "about" &&
+          saveError ? (
+            <div className="settings-state-error" role="alert">
+              <AlertCircle size={16} />
+              <div>
+                <strong>设置未保存</strong>
+                <span>{saveError}</span>
+              </div>
+            </div>
+          ) : null}
         </section>
-      </div>
+      </fieldset>
     </Modal>
   );
 }
