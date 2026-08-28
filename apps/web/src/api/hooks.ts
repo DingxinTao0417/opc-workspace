@@ -1654,10 +1654,12 @@ export function useMoveTaskWithinPlan() {
       taskId,
       plannedDate,
       direction,
+      scope = "status",
     }: {
       taskId: string;
       plannedDate: string | null;
       direction: "up" | "down";
+      scope?: "status" | "active";
     }) => {
       const tasks = await getAllTasks({
         plannedDate: plannedDate ?? undefined,
@@ -1677,12 +1679,23 @@ export function useMoveTaskWithinPlan() {
           code: "TASK_REORDER_SET_CHANGED",
         });
       }
+      const current = scoped[currentIndex];
+      const isCandidate =
+        scope === "active"
+          ? (task: Task) =>
+              task.status !== "done" && task.status !== "cancelled"
+          : (task: Task) => task.status === current.status;
+      if (!isCandidate(current)) {
+        throw new ApiError("任务已不在当前活动计划组，请刷新后重试", {
+          code: "TASK_REORDER_SET_CHANGED",
+        });
+      }
       const step = direction === "up" ? -1 : 1;
       let targetIndex = currentIndex + step;
       while (
         targetIndex >= 0 &&
         targetIndex < scoped.length &&
-        scoped[targetIndex].status !== scoped[currentIndex].status
+        !isCandidate(scoped[targetIndex])
       ) {
         targetIndex += step;
       }

@@ -10,12 +10,16 @@ import {
   Inbox as InboxIcon,
   List,
   Plus,
+  RotateCcw,
   Target,
 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
+  useMoveTaskWithinPlan,
+  useResetTaskOrder,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
 } from "../api/hooks";
@@ -49,6 +53,12 @@ function shiftLocalDateKey(dateKey: string, days: number): string {
   return localDateKey(date);
 }
 
+function reorderErrorText(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof ApiError) return error.message;
+  return "无法保存任务顺序，请重试。";
+}
+
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const today = new Date();
@@ -59,7 +69,17 @@ export function TodayPage() {
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
   const statsQuery = useTodayStatsQuery(dateKey);
   const inboxStatsQuery = useInboxStatsQuery();
+  const moveMutation = useMoveTaskWithinPlan();
+  const resetOrderMutation = useResetTaskOrder();
   const live = taskGroupsQuery.isSuccess;
+  const reorderReady =
+    live &&
+    !taskGroupsQuery.isFetching &&
+    !moveMutation.isPending &&
+    !resetOrderMutation.isPending;
+  const reorderError =
+    reorderErrorText(moveMutation.error) ??
+    reorderErrorText(resetOrderMutation.error);
   const groups = taskGroupsQuery.data ?? {
     overdue: [],
     today: [],
@@ -116,6 +136,23 @@ export function TodayPage() {
       danger: true,
     },
   ];
+  const moveTask = (
+    taskId: string,
+    plannedDate: string | null,
+    direction: "up" | "down",
+  ) => {
+    resetOrderMutation.reset();
+    moveMutation.mutate({
+      taskId,
+      plannedDate,
+      direction,
+      scope: "active",
+    });
+  };
+  const resetPlanOrder = (plannedDate: string | null) => {
+    moveMutation.reset();
+    resetOrderMutation.mutate(plannedDate);
+  };
 
   return (
     <div className="page today-page">
@@ -249,6 +286,21 @@ export function TodayPage() {
         />
       ) : null}
 
+      {moveMutation.isPending ||
+      resetOrderMutation.isPending ||
+      reorderError ? (
+        <div className="task-order-banner today-order-status">
+          {moveMutation.isPending || resetOrderMutation.isPending ? (
+            <span role="status">正在保存任务顺序…</span>
+          ) : null}
+          {reorderError ? (
+            <span className="task-batch-error" role="alert">
+              {reorderError}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {groups.overdue.length > 0 ? (
         <section className="task-section">
           <div className="section-heading compact-heading">
@@ -270,7 +322,20 @@ export function TodayPage() {
             </span>
             <h2>{isToday ? "今天" : "所选日期"}</h2>
           </div>
-          <span className="section-count">{groups.today.length}</span>
+          <div className="today-task-heading-actions">
+            <span className="section-count">{groups.today.length}</span>
+            {groups.today.length > 0 ? (
+              <button
+                className="button button-quiet today-reset-order"
+                disabled={!reorderReady}
+                onClick={() => resetPlanOrder(dateKey)}
+                type="button"
+              >
+                <RotateCcw size={12} />
+                恢复默认顺序
+              </button>
+            ) : null}
+          </div>
         </div>
         {taskGroupsQuery.isPending ? (
           <SkeletonRows count={3} />
@@ -290,7 +355,18 @@ export function TodayPage() {
             title={isToday ? "今天已经安排妥当" : "所选日期暂无任务"}
           />
         ) : (
-          <TaskList compact live={live} tasks={groups.today} />
+          <TaskList
+            allowReorder
+            compact
+            live={reorderReady}
+            onMove={(task, direction) => moveTask(task.id, dateKey, direction)}
+            reorderPendingId={
+              moveMutation.isPending
+                ? (moveMutation.variables?.taskId ?? null)
+                : null
+            }
+            tasks={groups.today}
+          />
         )}
       </section>
 
@@ -318,9 +394,31 @@ export function TodayPage() {
               <span className="section-kicker">待安排</span>
               <h2>未排期</h2>
             </div>
-            <span className="section-count">{groups.unscheduled.length}</span>
+            <div className="today-task-heading-actions">
+              <span className="section-count">{groups.unscheduled.length}</span>
+              <button
+                className="button button-quiet today-reset-order"
+                disabled={!reorderReady}
+                onClick={() => resetPlanOrder(null)}
+                type="button"
+              >
+                <RotateCcw size={12} />
+                恢复默认顺序
+              </button>
+            </div>
           </div>
-          <TaskList compact live={live} tasks={groups.unscheduled} />
+          <TaskList
+            allowReorder
+            compact
+            live={reorderReady}
+            onMove={(task, direction) => moveTask(task.id, null, direction)}
+            reorderPendingId={
+              moveMutation.isPending
+                ? (moveMutation.variables?.taskId ?? null)
+                : null
+            }
+            tasks={groups.unscheduled}
+          />
         </section>
       ) : null}
     </div>

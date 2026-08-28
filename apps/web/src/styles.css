@@ -1633,6 +1633,22 @@ kbd {
   font-size: 10px;
 }
 
+.today-order-status {
+  margin-bottom: 12px;
+}
+
+.today-task-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-reset-order {
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
 .task-batch-bar select,
 .task-batch-bar input {
   height: 30px;

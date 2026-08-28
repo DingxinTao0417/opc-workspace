@@ -1,12 +1,25 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import { ApiError } from "../api/client";
 import { TodayPage } from "./TodayPage";
 
 const mocks = vi.hoisted(() => ({
   inbox: vi.fn(),
   stats: vi.fn(),
   taskGroups: vi.fn(),
+  moveTask: vi.fn(),
+  moveError: null as unknown,
+  movePending: false,
+  resetMove: vi.fn(),
+  resetOrder: vi.fn(),
+  resetResetOrder: vi.fn(),
   setNewTaskOpen: vi.fn(),
 }));
 
@@ -14,6 +27,19 @@ vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: mocks.inbox,
   useTodayStatsQuery: mocks.stats,
   useTodayTaskGroupsQuery: mocks.taskGroups,
+  useMoveTaskWithinPlan: () => ({
+    error: mocks.moveError,
+    isPending: mocks.movePending,
+    mutate: mocks.moveTask,
+    reset: mocks.resetMove,
+    variables: undefined,
+  }),
+  useResetTaskOrder: () => ({
+    error: null,
+    isPending: false,
+    mutate: mocks.resetOrder,
+    reset: mocks.resetResetOrder,
+  }),
   useTaskPageQuery: () => ({
     data: undefined,
     isFetching: false,
@@ -31,6 +57,8 @@ describe("TodayPage Inbox overview", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    mocks.moveError = null;
+    mocks.movePending = false;
     vi.useRealTimers();
   });
 
@@ -200,5 +228,143 @@ describe("TodayPage Inbox overview", () => {
     expect(
       screen.queryByRole("button", { name: "回到今天" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("persists active ordering for the exact selected date and unscheduled group", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    const makeTask = (
+      id: string,
+      title: string,
+      plannedDate: string | null,
+    ) => ({
+      id,
+      title,
+      description: "",
+      kind: "work",
+      status: "todo",
+      reviewPolicy: "none",
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate,
+      estimatedMinutes: null,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: 1,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    });
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [
+          makeTask("today-1", "今日第一项", "2026-08-28"),
+          makeTask("today-2", "今日第二项", "2026-08-28"),
+        ],
+        thisWeek: [],
+        unscheduled: [makeTask("unscheduled", "未排期任务", null)],
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "下移任务：今日第一项" }),
+    );
+    expect(mocks.moveTask).toHaveBeenCalledWith({
+      taskId: "today-1",
+      plannedDate: "2026-08-28",
+      direction: "down",
+      scope: "active",
+    });
+
+    const todaySection = screen
+      .getByRole("heading", { name: "今天" })
+      .closest("section");
+    const unscheduledSection = screen
+      .getByRole("heading", { name: "未排期" })
+      .closest("section");
+    expect(todaySection).not.toBeNull();
+    expect(unscheduledSection).not.toBeNull();
+    fireEvent.click(
+      within(todaySection!).getByRole("button", { name: "恢复默认顺序" }),
+    );
+    fireEvent.click(
+      within(unscheduledSection!).getByRole("button", {
+        name: "恢复默认顺序",
+      }),
+    );
+    expect(mocks.resetOrder).toHaveBeenNthCalledWith(1, "2026-08-28");
+    expect(mocks.resetOrder).toHaveBeenNthCalledWith(2, null);
+  });
+
+  it("keeps the current order visible and exposes a reorder failure", () => {
+    mocks.moveError = new ApiError("计划组已变化，请重新操作", {
+      code: "TASK_REORDER_SET_CHANGED",
+    });
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [],
+        thisWeek: [],
+        unscheduled: [],
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "计划组已变化，请重新操作",
+    );
   });
 });

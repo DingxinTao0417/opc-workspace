@@ -34,6 +34,7 @@ import {
   useTaskLifecycleCommand,
   useSubmitTaskOutput,
   useReviewTaskSubmission,
+  useMoveTaskWithinPlan,
   useDeleteTaskArtifact,
   useTaskPageQuery,
   useTodayTaskGroupsQuery,
@@ -56,6 +57,7 @@ const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllTasksMock = vi.hoisted(() => vi.fn());
+const reorderTasksMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
@@ -77,6 +79,7 @@ vi.mock("./client", async () => {
     getTaskPage: getTaskPageMock,
     getTasks: getTasksMock,
     getAllTasks: getAllTasksMock,
+    reorderTasks: reorderTasksMock,
   };
 });
 
@@ -344,6 +347,45 @@ describe("task queries", () => {
     expect(result.current.data?.today).toHaveLength(1);
     expect(result.current.data?.thisWeek).toHaveLength(1);
     expect(result.current.data?.unscheduled).toHaveLength(1);
+  });
+
+  it("moves across active statuses while preserving terminal task slots", async () => {
+    const done = { ...task, id: "done", status: "done" as const, version: 5 };
+    const blocked = {
+      ...task,
+      id: "blocked",
+      status: "blocked" as const,
+      version: 6,
+    };
+    getAllTasksMock.mockResolvedValue([task, done, blocked]);
+    reorderTasksMock.mockImplementation(async (input) => ({
+      plannedDate: input.plannedDate,
+      mode: input.mode,
+      changed: 2,
+      tasks: [],
+    }));
+    const { result } = renderHook(() => useMoveTaskWithinPlan(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        taskId: task.id,
+        plannedDate: task.plannedDate,
+        direction: "down",
+        scope: "active",
+      });
+    });
+
+    expect(reorderTasksMock).toHaveBeenCalledWith({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      items: [
+        { id: blocked.id, expectedVersion: blocked.version },
+        { id: done.id, expectedVersion: done.version },
+        { id: task.id, expectedVersion: task.version },
+      ],
+    });
   });
 
   it("loads assignment history pages under a task-scoped query key", async () => {
