@@ -730,6 +730,16 @@ func (a *API) updateTaskStatus(c *gin.Context) {
 		if result.RowsAffected == 0 {
 			return taskVersionConflict()
 		}
+		if input.Status == "done" {
+			if err := closeActiveAssignmentsForCompletedTask(
+				tx,
+				id,
+				requestIDFromContext(c),
+				now,
+			); err != nil {
+				return err
+			}
+		}
 		loaded, err := loadTask(tx, id)
 		task = loaded
 		return err
@@ -953,11 +963,12 @@ func legacyTaskCreateRequestHash(task models.Task) (string, error) {
 
 func taskID(c *gin.Context) (string, bool) {
 	id := strings.TrimSpace(c.Param("id"))
-	if _, err := uuid.Parse(id); err != nil {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_TASK_ID", "Task id must be a UUID")
 		return "", false
 	}
-	return id, true
+	return parsed.String(), true
 }
 
 func queryInt(c *gin.Context, key string, fallback, minimum, maximum int) (int, bool) {

@@ -3,18 +3,26 @@ import {
   ApiError,
   createPersonActor,
   createTag,
+  createTaskAssignment,
   deleteTag,
   deleteTask,
+  endTaskAssignment,
+  getAllActors,
   getActors,
   getAllProjects,
   getAllTasks,
   getTags,
   getTaskPage,
+  getTaskAssignments,
   normalizeActor,
+  normalizeActorSummary,
+  normalizeTaskAssignment,
+  normalizeTaskAssignmentListResult,
   normalizeTag,
   normalizeProject,
   normalizeTask,
   resetRuntimeConnection,
+  reassignTaskAssignment,
   updateTag,
   updateTask,
   updateTaskStatus,
@@ -81,6 +89,42 @@ const actorPayload = {
   created_at: "2026-08-27T00:00:00Z",
   updated_at: "2026-08-27T00:01:00Z",
 };
+
+const ownerSummaryPayload = {
+  id: "00000000-0000-5000-8000-000000000001",
+  type: "owner",
+  display_name: "我",
+  status: "active",
+  is_builtin: true,
+  version: 1,
+};
+
+const personSummaryPayload = {
+  id: actorPayload.id,
+  type: "person",
+  display_name: actorPayload.display_name,
+  status: "active",
+  is_builtin: false,
+  version: 2,
+};
+
+function assignmentPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "assignment-1",
+    task_id: "task-1",
+    role: "assignee",
+    actor_id: personSummaryPayload.id,
+    actor: personSummaryPayload,
+    assigned_by_actor_id: ownerSummaryPayload.id,
+    assigned_by_actor: ownerSummaryPayload,
+    assigned_at: "2026-08-27T09:00:00Z",
+    unassigned_at: null,
+    reason: null,
+    is_active: true,
+    inferred: false,
+    ...overrides,
+  };
+}
 
 describe("actor requests", () => {
   it("strictly normalizes actors and lists them with supported filters", async () => {
@@ -160,6 +204,209 @@ describe("actor requests", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       display_name: "陈设计师",
       status: "inactive",
+    });
+  });
+
+  it("loads every actor page without truncating assignment candidates", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://local.test");
+      const page = Number(url.searchParams.get("page"));
+      const data = Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+        ...actorPayload,
+        id: `actor-${page}-${index}`,
+        display_name: `人员 ${page}-${index}`,
+      }));
+      return jsonResponse({
+        data,
+        meta: { page, page_size: 100, total: 101 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAllActors({ status: "active" })).resolves.toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("page=2");
+  });
+});
+
+describe("task assignment responses", () => {
+  it("strictly normalizes actor snapshots, current roles, and ended history", () => {
+    expect(normalizeActorSummary(personSummaryPayload)).toMatchObject({
+      displayName: "陈设计",
+      type: "person",
+      status: "active",
+    });
+    expect(normalizeTaskAssignment(assignmentPayload())).toMatchObject({
+      taskId: "task-1",
+      actorId: personSummaryPayload.id,
+      assignedByActorId: ownerSummaryPayload.id,
+      isActive: true,
+      inferred: false,
+    });
+
+    const result = normalizeTaskAssignmentListResult({
+      data: {
+        active: {
+          assignee: assignmentPayload({ inferred: true }),
+          reviewer: null,
+        },
+        history: [
+          assignmentPayload({
+            id: "assignment-ended",
+            unassigned_at: "2026-08-27T10:00:00Z",
+            reason: "转交下一阶段",
+            is_active: false,
+          }),
+        ],
+      },
+      meta: { page: 1, page_size: 20, total: 1, task_version: 7 },
+    });
+    expect(result).toMatchObject({
+      active: { assignee: { inferred: true }, reviewer: null },
+      history: [{ reason: "转交下一阶段", isActive: false }],
+      meta: { page: 1, pageSize: 20, total: 1, taskVersion: 7 },
+    });
+  });
+
+  it("rejects unknown roles and inconsistent active/history flags", () => {
+    expect(() =>
+      normalizeTaskAssignment(assignmentPayload({ role: "observer" })),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeTaskAssignment(
+        assignmentPayload({
+          is_active: false,
+          unassigned_at: null,
+        }),
+      ),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeTaskAssignmentListResult({
+        data: {
+          active: { assignee: null, reviewer: null },
+          history: [assignmentPayload()],
+        },
+        meta: { page: 1, page_size: 20, total: 1, task_version: 7 },
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("serializes history paging and role filters", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: {
+          active: { assignee: assignmentPayload(), reviewer: null },
+          history: [],
+        },
+        meta: { page: 2, page_size: 25, total: 30, task_version: 7 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getTaskAssignments("task-1", {
+      page: 2,
+      pageSize: 25,
+      role: "assignee",
+      sort: " -assigned_at ",
+    });
+
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "25",
+      role: "assignee",
+      sort: "-assigned_at",
+    });
+  });
+
+  it("sends version and idempotency headers for assign, reassign, and end", async () => {
+    const active = assignmentPayload();
+    const ended = assignmentPayload({
+      unassigned_at: "2026-08-27T10:00:00Z",
+      reason: "工作阶段结束",
+      is_active: false,
+    });
+    const reassigned = assignmentPayload({
+      id: "assignment-2",
+      actor_id: ownerSummaryPayload.id,
+      actor: ownerSummaryPayload,
+    });
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/reassign")) {
+          return jsonResponse({
+            data: {
+              previous_assignment: ended,
+              assignment: reassigned,
+              task: taskPayload({ version: 8 }),
+            },
+          });
+        }
+        if (url.endsWith("/end")) {
+          return jsonResponse({
+            data: { assignment: ended, task: taskPayload({ version: 8 }) },
+          });
+        }
+        return jsonResponse({
+          data: { assignment: active, task: taskPayload({ version: 8 }) },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createTaskAssignment(
+      "task-1",
+      {
+        role: "assignee",
+        actorId: personSummaryPayload.id,
+        expectedVersion: 7,
+      },
+      "assign-key",
+    );
+    await reassignTaskAssignment(
+      "task-1",
+      {
+        role: "assignee",
+        actorId: ownerSummaryPayload.id,
+        reason: "转交所有者",
+        expectedVersion: 7,
+      },
+      "reassign-key",
+    );
+    await endTaskAssignment(
+      "assignment-1",
+      { reason: "工作阶段结束", expectedVersion: 7 },
+      "end-key",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("If-Match"),
+    ).toBe('"7"');
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("Idempotency-Key"),
+    ).toBe("assign-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      role: "assignee",
+      actor_id: personSummaryPayload.id,
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get("Idempotency-Key"),
+    ).toBe("reassign-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      role: "assignee",
+      actor_id: ownerSummaryPayload.id,
+      reason: "转交所有者",
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[2][1]?.headers).get("Idempotency-Key"),
+    ).toBe("end-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      reason: "工作阶段结束",
     });
   });
 });

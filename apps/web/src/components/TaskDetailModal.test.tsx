@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,6 +17,11 @@ const apiMocks = vi.hoisted(() => ({
   getTask: vi.fn(),
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
+  getTaskAssignments: vi.fn(),
+  getAllActors: vi.fn(),
+  createTaskAssignment: vi.fn(),
+  reassignTaskAssignment: vi.fn(),
+  endTaskAssignment: vi.fn(),
   getAllProjects: vi.fn(),
   getAllTags: vi.fn(),
   getAllTasks: vi.fn(),
@@ -71,6 +77,25 @@ describe("TaskDetailModal", () => {
       priority: "P1",
     });
     apiMocks.deleteTask.mockResolvedValue(undefined);
+    apiMocks.getTaskAssignments.mockResolvedValue({
+      active: { assignee: null, reviewer: null },
+      history: [],
+      meta: { page: 1, pageSize: 20, total: 0, taskVersion: task.version },
+    });
+    apiMocks.getAllActors.mockResolvedValue([
+      {
+        id: "actor-owner",
+        type: "owner",
+        displayName: "我",
+        status: "active",
+        isBuiltin: true,
+        notes: "",
+        metadata: {},
+        version: 1,
+        createdAt: "2026-08-27T00:00:00Z",
+        updatedAt: "2026-08-27T00:00:00Z",
+      },
+    ]);
     apiMocks.getAllProjects.mockResolvedValue([]);
     apiMocks.getAllTags.mockResolvedValue([]);
     apiMocks.getAllTasks.mockResolvedValue([]);
@@ -130,6 +155,99 @@ describe("TaskDetailModal", () => {
       expect(apiMocks.deleteTask).toHaveBeenCalledWith(task.id, task.version),
     );
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
+  });
+
+  it("keeps an unsaved task draft while an assignment write updates the task version", async () => {
+    const updatedTask = {
+      ...task,
+      version: task.version + 1,
+      updatedAt: "2026-08-27T09:30:00Z",
+    };
+    apiMocks.getTask.mockResolvedValueOnce(task).mockResolvedValue(updatedTask);
+    apiMocks.getTaskAssignments
+      .mockResolvedValueOnce({
+        active: { assignee: null, reviewer: null },
+        history: [],
+        meta: { page: 1, pageSize: 20, total: 0, taskVersion: task.version },
+      })
+      .mockResolvedValue({
+        active: { assignee: null, reviewer: null },
+        history: [],
+        meta: {
+          page: 1,
+          pageSize: 20,
+          total: 0,
+          taskVersion: updatedTask.version,
+        },
+      });
+    let finishAssignment!: (value: unknown) => void;
+    apiMocks.createTaskAssignment.mockReturnValue(
+      new Promise((resolve) => {
+        finishAssignment = resolve;
+      }),
+    );
+    renderModal();
+
+    const title = await screen.findByLabelText("任务名称");
+    fireEvent.change(title, { target: { value: "尚未保存的本地草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "分派负责人" }));
+    fireEvent.click(await screen.findByRole("option", { name: /我/ }));
+    fireEvent.click(screen.getByRole("button", { name: "确认分派" }));
+
+    await waitFor(() =>
+      expect(apiMocks.createTaskAssignment).toHaveBeenCalled(),
+    );
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "删除任务" })).toBeDisabled();
+
+    await act(async () => {
+      finishAssignment({
+        assignment: {
+          id: "assignment-1",
+          taskId: task.id,
+          role: "assignee",
+          actorId: "actor-owner",
+          actor: {
+            id: "actor-owner",
+            type: "owner",
+            displayName: "我",
+            status: "active",
+            isBuiltin: true,
+            version: 1,
+          },
+          assignedByActorId: "actor-owner",
+          assignedByActor: {
+            id: "actor-owner",
+            type: "owner",
+            displayName: "我",
+            status: "active",
+            isBuiltin: true,
+            version: 1,
+          },
+          assignedAt: "2026-08-27T09:30:00Z",
+          unassignedAt: null,
+          reason: null,
+          isActive: true,
+          inferred: false,
+        },
+        task: updatedTask,
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "保存修改" })).toBeEnabled(),
+    );
+    expect(title).toHaveValue("尚未保存的本地草稿");
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await waitFor(() =>
+      expect(apiMocks.updateTask).toHaveBeenCalledWith(
+        task.id,
+        expect.objectContaining({
+          title: "尚未保存的本地草稿",
+          expectedVersion: updatedTask.version,
+        }),
+      ),
+    );
   });
 
   it("keeps the draft and retries against the latest task version", async () => {

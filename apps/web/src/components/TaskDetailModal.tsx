@@ -12,6 +12,7 @@ import { useUiStore } from "../store/ui";
 import type { Task, TaskKind, TaskPriority, TaskStatus } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
+import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -90,11 +91,14 @@ export function TaskDetailModal() {
   const [versionConflict, setVersionConflict] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [assignmentBusy, setAssignmentBusy] = useState(false);
   const task = query.data;
   const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
   const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
-  const busy = updateMutation.isPending || deleteMutation.isPending;
+  const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
+  const busy = taskWriteBusy || assignmentBusy;
   const skipNextHydrate = useRef(false);
+  const hydratedTaskId = useRef<string | null>(null);
 
   const hydrate = (value: Task) => {
     setTitle(value.title);
@@ -111,13 +115,33 @@ export function TaskDetailModal() {
     setCompletionCriteria(value.completionCriteria);
     setTagIds(value.tags.map((tag) => tag.id));
     setDraftVersion(value.version);
+    hydratedTaskId.current = value.id;
     setConfirmingDelete(false);
     setValidationError(null);
   };
 
+  const taskDraftDirty = Boolean(
+    task &&
+    hydratedTaskId.current === task.id &&
+    (title !== task.title ||
+      description !== task.description ||
+      kind !== task.kind ||
+      priority !== task.priority ||
+      plannedDate !== (task.plannedDate ?? "") ||
+      dueDate !== toLocalDateTime(task.dueDate) ||
+      estimatedMinutes !==
+        (task.estimatedMinutes === null ? "" : String(task.estimatedMinutes)) ||
+      projectId !== (task.projectId ?? "") ||
+      parentTaskId !== (task.parentTaskId ?? "") ||
+      completionCriteria !== task.completionCriteria ||
+      tagIds.join("\u0000") !== task.tags.map((tag) => tag.id).join("\u0000")),
+  );
+
   useEffect(() => {
     setVersionConflict(false);
     skipNextHydrate.current = false;
+    hydratedTaskId.current = null;
+    setAssignmentBusy(false);
   }, [taskId]);
 
   useEffect(() => {
@@ -126,8 +150,9 @@ export function TaskDetailModal() {
       skipNextHydrate.current = false;
       return;
     }
+    if (taskDraftDirty) return;
     hydrate(task);
-  }, [task, versionConflict]);
+  }, [task, versionConflict, taskDraftDirty]);
 
   const errorMessage = useMemo(
     () =>
@@ -149,7 +174,7 @@ export function TaskDetailModal() {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!taskId) return;
+    if (!taskId || assignmentBusy) return;
 
     const cleanTitle = title.trim();
     if (cleanTitle.length < 2) {
@@ -203,7 +228,7 @@ export function TaskDetailModal() {
   };
 
   const confirmDelete = () => {
-    if (!taskId) return;
+    if (!taskId || assignmentBusy) return;
     deleteMutation.mutate(
       { id: taskId, expectedVersion: draftVersion },
       {
@@ -353,6 +378,17 @@ export function TaskDetailModal() {
               </span>
             ) : null}
           </div>
+
+          <TaskAssignmentsSection
+            disabled={taskWriteBusy || confirmingDelete}
+            onBusyChange={setAssignmentBusy}
+            onTaskUpdated={(updatedTask) => {
+              setDraftVersion((current) =>
+                Math.max(current, updatedTask.version),
+              );
+            }}
+            task={task}
+          />
 
           <label className="form-field">
             <span>任务名称</span>

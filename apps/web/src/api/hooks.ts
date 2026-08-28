@@ -1,5 +1,6 @@
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -12,10 +13,13 @@ import {
   createPersonActor,
   createTag,
   createTask,
+  createTaskAssignment,
   createProject,
   deleteProject,
   deleteTag,
   deleteTask,
+  endTaskAssignment,
+  getAllActors,
   getAllProjects,
   getAllTags,
   getAllTasks,
@@ -24,6 +28,7 @@ import {
   getHealth,
   getTags,
   getTask,
+  getTaskAssignments,
   getTaskPage,
   getTasks,
   getTodayStats,
@@ -31,6 +36,7 @@ import {
   getProjects,
   resetRuntimeConnection,
   reorderTasks,
+  reassignTaskAssignment,
   updateTag,
   updateTask,
   updateTaskStatus,
@@ -42,6 +48,8 @@ import type {
   ActorListParams,
   BatchUpdateTasksInput,
   CreatePersonActorInput,
+  CreateTaskAssignmentInput,
+  EndTaskAssignmentInput,
   NewTaskInput,
   ProjectInput,
   ProjectListParams,
@@ -50,8 +58,10 @@ import type {
   TagInput,
   TagListParams,
   Task,
+  TaskAssignmentListParams,
   TaskListParams,
   TaskStatus,
+  ReassignTaskAssignmentInput,
   UpdateActorInput,
   UpdateTagInput,
   UpdateProjectInput,
@@ -68,6 +78,17 @@ export function useActorsQuery(input: ActorListParams = {}, enabled = true) {
     queryFn: () => getActors(input),
     enabled,
     placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useAssignmentActorOptionsQuery(enabled = true) {
+  return useQuery({
+    queryKey: [...actorQueryKey, "assignment-options"],
+    queryFn: () => getAllActors({ status: "active" }),
+    enabled,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
@@ -168,6 +189,154 @@ export function useTaskQuery(id: string | null) {
     queryFn: () => getTask(id!),
     enabled: Boolean(id),
     retry: 1,
+  });
+}
+
+export const taskAssignmentQueryKey = (taskId: string) =>
+  ["task-assignments", taskId] as const;
+
+export function useTaskAssignmentsQuery(
+  taskId: string | null,
+  input: Omit<TaskAssignmentListParams, "page"> = {},
+  enabled = true,
+) {
+  const query = {
+    pageSize: input.pageSize ?? 20,
+    role: input.role,
+    sort: input.sort?.trim() || "-assigned_at",
+  };
+  return useInfiniteQuery({
+    queryKey: [...taskAssignmentQueryKey(taskId ?? "closed"), "history", query],
+    queryFn: ({ pageParam }) =>
+      getTaskAssignments(taskId!, { ...query, page: pageParam }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
+    enabled: Boolean(taskId) && enabled,
+    placeholderData: keepPreviousData,
+    retry: 1,
+    staleTime: 10_000,
+  });
+}
+
+function setTaskDetailIfNotOlder(queryClient: QueryClient, task: Task): void {
+  queryClient.setQueryData<Task>(taskDetailQueryKey(task.id), (current) =>
+    current && current.version > task.version ? current : task,
+  );
+}
+
+async function invalidateTaskAssignments(
+  queryClient: QueryClient,
+  taskId: string,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({
+      queryKey: taskAssignmentQueryKey(taskId),
+    }),
+  ]);
+}
+
+function assignmentErrorNeedsRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 404 ||
+      error.status === 409 ||
+      error.code === "ASSIGNMENT_ACTOR_NOT_ACTIVE")
+  );
+}
+
+export function useCreateTaskAssignment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      input,
+    }: {
+      taskId: string;
+      input: CreateTaskAssignmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({ taskId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createTaskAssignment(taskId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskAssignments(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (assignmentErrorNeedsRefresh(error)) {
+        await invalidateTaskAssignments(queryClient, variables.taskId);
+      }
+    },
+  });
+}
+
+export function useReassignTaskAssignment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      taskId,
+      input,
+    }: {
+      taskId: string;
+      input: ReassignTaskAssignmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({ taskId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return reassignTaskAssignment(taskId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskAssignments(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (assignmentErrorNeedsRefresh(error)) {
+        await invalidateTaskAssignments(queryClient, variables.taskId);
+      }
+    },
+  });
+}
+
+export function useEndTaskAssignment() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      taskId: _taskId,
+      assignmentId,
+      input,
+    }: {
+      taskId: string;
+      assignmentId: string;
+      input: EndTaskAssignmentInput;
+    }) => {
+      const fingerprint = JSON.stringify({ assignmentId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return endTaskAssignment(assignmentId, input, attempt.current.key);
+    },
+    onSuccess: async (result) => {
+      attempt.current = null;
+      setTaskDetailIfNotOlder(queryClient, result.task);
+      await invalidateTaskAssignments(queryClient, result.task.id);
+    },
+    onError: async (error, variables) => {
+      if (assignmentErrorNeedsRefresh(error)) {
+        await invalidateTaskAssignments(queryClient, variables.taskId);
+      }
+    },
   });
 }
 
@@ -274,14 +443,20 @@ export function useUpdateTaskStatus() {
         status,
         resolveTaskVersion(queryClient, id, expectedVersion),
       ),
-    onSuccess: async () => {
+    onSuccess: async (task) => {
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: taskAssignmentQueryKey(task.id),
+      });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+        await queryClient.invalidateQueries({
+          queryKey: taskAssignmentQueryKey(variables.id),
+        });
       }
     },
   });

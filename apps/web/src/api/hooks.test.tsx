@@ -3,16 +3,21 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  Actor,
   Project,
   ProjectInput,
   Tag,
   TagInput,
   Task,
+  TaskAssignment,
 } from "../types/models";
 import {
+  taskAssignmentQueryKey,
   taskDetailQueryKey,
   useCreateProject,
   useCreateTag,
+  useCreateTaskAssignment,
+  useTaskAssignmentsQuery,
   useTaskPageQuery,
   useTasksQuery,
   useUpdateTaskStatus,
@@ -20,6 +25,9 @@ import {
 
 const createProjectMock = vi.hoisted(() => vi.fn());
 const createTagMock = vi.hoisted(() => vi.fn());
+const createTaskAssignmentMock = vi.hoisted(() => vi.fn());
+const getAllActorsMock = vi.hoisted(() => vi.fn());
+const getTaskAssignmentsMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const updateTaskStatusMock = vi.hoisted(() => vi.fn());
@@ -30,6 +38,9 @@ vi.mock("./client", async () => {
     ...actual,
     createProject: createProjectMock,
     createTag: createTagMock,
+    createTaskAssignment: createTaskAssignmentMock,
+    getAllActors: getAllActorsMock,
+    getTaskAssignments: getTaskAssignmentsMock,
     getTaskPage: getTaskPageMock,
     getTasks: getTasksMock,
     updateTaskStatus: updateTaskStatusMock,
@@ -89,6 +100,34 @@ const task: Task = {
   updatedAt: "2026-08-27T00:00:00Z",
   completedAt: null,
   tags: [],
+};
+
+const owner: Actor = {
+  id: "actor-owner",
+  type: "owner",
+  displayName: "我",
+  status: "active",
+  isBuiltin: true,
+  notes: "",
+  metadata: {},
+  version: 1,
+  createdAt: "2026-08-27T00:00:00Z",
+  updatedAt: "2026-08-27T00:00:00Z",
+};
+
+const assignment: TaskAssignment = {
+  id: "assignment-1",
+  taskId: task.id,
+  role: "assignee",
+  actorId: owner.id,
+  actor: owner,
+  assignedByActorId: owner.id,
+  assignedByActor: owner,
+  assignedAt: "2026-08-27T01:00:00Z",
+  unassignedAt: null,
+  reason: null,
+  isActive: true,
+  inferred: false,
 };
 
 const tagInput: TagInput = { name: "交付", color: "#6E7BF2" };
@@ -173,6 +212,51 @@ describe("task queries", () => {
     expect(result.current.data).toEqual([task]);
     expect(Array.isArray(result.current.data)).toBe(true);
   });
+
+  it("loads assignment history pages under a task-scoped query key", async () => {
+    getTaskAssignmentsMock.mockImplementation(
+      async (_taskId: string, input: { page: number }) => ({
+        active: { assignee: assignment, reviewer: null },
+        history:
+          input.page === 1
+            ? [
+                {
+                  ...assignment,
+                  id: "history-1",
+                  isActive: false,
+                  unassignedAt: "2026-08-27T02:00:00Z",
+                  reason: "转交",
+                },
+              ]
+            : [
+                {
+                  ...assignment,
+                  id: "history-2",
+                  isActive: false,
+                  unassignedAt: "2026-08-27T01:30:00Z",
+                  reason: "结束",
+                },
+              ],
+        meta: { page: input.page, pageSize: 1, total: 2, taskVersion: 4 },
+      }),
+    );
+    const { result } = renderHook(
+      () => useTaskAssignmentsQuery(task.id, { pageSize: 1 }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    let fetchedPageCount = 0;
+    await act(async () => {
+      const next = await result.current.fetchNextPage();
+      fetchedPageCount = next.data?.pages.length ?? 0;
+    });
+    expect(getTaskAssignmentsMock).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({ page: 2, pageSize: 1 }),
+    );
+    expect(fetchedPageCount).toBe(2);
+  });
 });
 
 describe("versioned task mutations", () => {
@@ -189,6 +273,7 @@ describe("versioned task mutations", () => {
       },
     });
     queryClient.setQueryData(taskDetailQueryKey(task.id), task);
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useUpdateTaskStatus(), {
       wrapper: wrapperFor(queryClient),
     });
@@ -200,6 +285,78 @@ describe("versioned task mutations", () => {
       "done",
       task.version,
     );
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskAssignmentQueryKey(task.id),
+    });
+  });
+});
+
+describe("assignment mutations", () => {
+  it("reuses the same idempotency key when a failed assignment is retried", async () => {
+    createTaskAssignmentMock
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce({
+        assignment,
+        task: { ...task, version: task.version + 1 },
+      });
+    const { result } = renderHook(() => useCreateTaskAssignment(), {
+      wrapper: createWrapper(),
+    });
+    const variables = {
+      taskId: task.id,
+      input: {
+        role: "assignee" as const,
+        actorId: owner.id,
+        expectedVersion: task.version,
+      },
+    };
+
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(variables));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(createTaskAssignmentMock.mock.calls[0][2]).toBeTruthy();
+    expect(createTaskAssignmentMock.mock.calls[1][2]).toBe(
+      createTaskAssignmentMock.mock.calls[0][2],
+    );
+  });
+
+  it("does not replace a newer cached task with an idempotent replay snapshot", async () => {
+    createTaskAssignmentMock.mockResolvedValue({
+      assignment,
+      task: { ...task, version: 5 },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    queryClient.setQueryData(taskDetailQueryKey(task.id), {
+      ...task,
+      title: "更新后的缓存",
+      version: 7,
+    });
+    const { result } = renderHook(() => useCreateTaskAssignment(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        taskId: task.id,
+        input: {
+          role: "assignee",
+          actorId: owner.id,
+          expectedVersion: 4,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(
+      queryClient.getQueryData<Task>(taskDetailQueryKey(task.id)),
+    ).toMatchObject({ title: "更新后的缓存", version: 7 });
   });
 });
 

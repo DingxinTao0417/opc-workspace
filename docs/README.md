@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v7。项目管理基础纵切、任务事实层，以及 Actor 迁移/API/设置页 person 管理已经接通；Assignment 操作、受控任务验收、收件箱编排、本地 Agent、财务及项目 Artifact/附件/事件集成仍是规划，不代表完整工作流已经交付。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v7。项目管理基础纵切、任务事实层、Actor 迁移/API/设置页 person 管理，以及任务 Assignment API/UI 已经接通；受控任务验收、收件箱编排、本地 Agent、财务及项目 Artifact/附件/事件集成仍是规划，不代表完整工作流已经交付。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v1.8）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v1.9）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -23,7 +23,7 @@
 | 项目管理 | 部分完成 | v0.1 | [projects.md](modules/projects.md) |
 | 客户管理 | 页面骨架 | v0.1 | [clients.md](modules/clients.md) |
 | 收件箱工作编排 | 页面骨架 | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md) |
-| Actor 与分派 | 部分完成（Actor 管理已交付） | v0.1 | [actors.md](modules/actors.md) |
+| Actor 与分派 | 部分完成（Actor 管理与 Assignment 已交付） | v0.1 | [actors.md](modules/actors.md) |
 | 专注与工时 | 部分完成 | v0.1 | [focus.md](modules/focus.md) |
 
 ## 平台与共享能力
