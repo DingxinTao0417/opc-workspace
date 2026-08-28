@@ -105,6 +105,29 @@ describe("TaskList", () => {
     expect(useUiStore.getState().taskDetailId).toBeNull();
   });
 
+  it("exposes explicit edit and delete row actions", () => {
+    const onEditTask = vi.fn();
+    const onDeleteTask = vi.fn();
+    render(
+      <TaskList
+        live
+        onDeleteTask={onDeleteTask}
+        onEditTask={onEditTask}
+        tasks={[task]}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `编辑任务：${task.title}` }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: `删除任务：${task.title}` }),
+    );
+
+    expect(onEditTask).toHaveBeenCalledWith(task);
+    expect(onDeleteTask).toHaveBeenCalledWith(task);
+  });
+
   it("exposes only policy-safe lifecycle shortcuts plus focus", () => {
     const onStartTask = vi.fn();
     const onCompleteTask = vi.fn();

@@ -1496,6 +1496,34 @@ kbd {
   }
 }
 
+.task-order-actions button.task-quick-action-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+  color: var(--danger);
+}
+
+.task-delete-confirm-copy {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.task-delete-confirm-copy > svg {
+  color: var(--danger);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.task-delete-confirm-copy strong {
+  color: var(--text-strong);
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.task-delete-confirm-copy p {
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
 .task-plan-modal {
   display: grid;
   gap: 12px;

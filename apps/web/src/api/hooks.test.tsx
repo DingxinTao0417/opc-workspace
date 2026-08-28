@@ -17,6 +17,7 @@ import type {
 import { ApiError } from "./client";
 import {
   projectQueryKey,
+  taskQueryKey,
   taskAssignmentQueryKey,
   taskArtifactDetailQueryKey,
   taskArtifactQueryKey,
@@ -39,6 +40,7 @@ import {
   useReorderActiveTasksWithinPlan,
   useSetTaskPlannedDate,
   useDeleteTaskArtifact,
+  useDeleteTask,
   useTaskPageQuery,
   useTodayTaskGroupsQuery,
   useTasksQuery,
@@ -57,6 +59,7 @@ const getTaskSubmissionsMock = vi.hoisted(() => vi.fn());
 const submitTaskOutputMock = vi.hoisted(() => vi.fn());
 const reviewTaskSubmissionMock = vi.hoisted(() => vi.fn());
 const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
+const deleteTaskMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllTasksMock = vi.hoisted(() => vi.fn());
@@ -82,6 +85,7 @@ vi.mock("./client", async () => {
     submitTaskOutput: submitTaskOutputMock,
     reviewTaskSubmission: reviewTaskSubmissionMock,
     deleteTaskArtifact: deleteTaskArtifactMock,
+    deleteTask: deleteTaskMock,
     getTaskPage: getTaskPageMock,
     getTask: getTaskMock,
     getTasks: getTasksMock,
@@ -824,6 +828,41 @@ describe("task planned-date mutation", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(result.current.error).toBe(ambiguous);
+  });
+});
+
+describe("task deletion mutation", () => {
+  it("uses the visible version and refreshes task facts after a conflict", async () => {
+    deleteTaskMock.mockRejectedValue(
+      new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useDeleteTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({ id: task.id, expectedVersion: task.version }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(deleteTaskMock).toHaveBeenCalledWith(task.id, task.version);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: taskQueryKey });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: projectQueryKey,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["stats", "today"],
+    });
   });
 });
 

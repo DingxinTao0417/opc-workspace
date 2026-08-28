@@ -39,6 +39,11 @@ const mocks = vi.hoisted(() => ({
   createFocusError: null as unknown,
   createFocusPending: false,
   beginFocus: vi.fn(),
+  deleteTask: vi.fn(),
+  resetDeleteTask: vi.fn(),
+  deleteTaskError: null as unknown,
+  deleteTaskPending: false,
+  setTaskDetailId: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -97,6 +102,12 @@ vi.mock("../api/hooks", () => ({
     reset: mocks.resetLifecycleTask,
     variables: undefined,
   }),
+  useDeleteTask: () => ({
+    error: mocks.deleteTaskError,
+    isPending: mocks.deleteTaskPending,
+    mutate: mocks.deleteTask,
+    reset: mocks.resetDeleteTask,
+  }),
 }));
 
 vi.mock("../store/settings", () => ({
@@ -111,7 +122,10 @@ vi.mock("../store/focus", () => ({
 
 vi.mock("../store/ui", () => ({
   useUiStore: (selector: (state: unknown) => unknown) =>
-    selector({ setNewTaskOpen: mocks.setNewTaskOpen }),
+    selector({
+      setNewTaskOpen: mocks.setNewTaskOpen,
+      setTaskDetailId: mocks.setTaskDetailId,
+    }),
 }));
 
 describe("TodayPage Inbox overview", () => {
@@ -127,6 +141,8 @@ describe("TodayPage Inbox overview", () => {
     mocks.lifecyclePending = false;
     mocks.createFocusError = null;
     mocks.createFocusPending = false;
+    mocks.deleteTaskError = null;
+    mocks.deleteTaskPending = false;
     vi.useRealTimers();
   });
 
@@ -859,5 +875,129 @@ describe("TodayPage Inbox overview", () => {
       },
       expect.objectContaining({ onSettled: expect.any(Function) }),
     );
+  });
+
+  it("opens editing directly and requires confirmation before row deletion", () => {
+    const task = {
+      id: "today-row-actions",
+      title: "核对今日交付",
+      description: "",
+      kind: "work",
+      status: "todo",
+      reviewPolicy: "none",
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate: "2026-08-28",
+      estimatedMinutes: 30,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: 7,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    };
+    mocks.taskGroups.mockReturnValue({
+      data: { overdue: [], today: [task], thisWeek: [], unscheduled: [] },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    mocks.inbox.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑任务：核对今日交付" }),
+    );
+    expect(mocks.setTaskDetailId).toHaveBeenCalledWith(task.id);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除任务：核对今日交付" }),
+    );
+    expect(screen.getByRole("dialog", { name: "删除任务" })).toBeVisible();
+    expect(mocks.deleteTask).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+    expect(mocks.deleteTask).toHaveBeenCalledWith(
+      { id: task.id, expectedVersion: task.version },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("explains active Inbox relation protection during direct deletion", () => {
+    const task = {
+      id: "protected-task",
+      title: "仍有关联的任务",
+      description: "",
+      kind: "work",
+      status: "todo",
+      reviewPolicy: "none",
+      priority: "P2",
+      projectId: null,
+      projectName: null,
+      parentTaskId: null,
+      parentTaskTitle: null,
+      completionCriteria: "",
+      tags: [],
+      dueDate: null,
+      plannedDate: null,
+      estimatedMinutes: null,
+      actualMinutes: 0,
+      manualOrder: null,
+      version: 3,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      createdAt: "2026-08-28T00:00:00Z",
+      updatedAt: "2026-08-28T00:00:00Z",
+    };
+    mocks.deleteTaskError = new ApiError("Task has active relations", {
+      code: "TASK_HAS_ACTIVE_INBOX_RELATIONS",
+      status: 409,
+    });
+    mocks.taskGroups.mockReturnValue({
+      data: { overdue: [], today: [], thisWeek: [], unscheduled: [task] },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    mocks.stats.mockReturnValue({ data: undefined, isPending: false });
+    mocks.inbox.mockReturnValue({ data: undefined });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除任务：仍有关联的任务" }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("请先在收件箱解除关联");
   });
 });

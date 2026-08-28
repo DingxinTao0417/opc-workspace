@@ -12,8 +12,10 @@ import {
   Clock3,
   Eye,
   GripVertical,
+  Pencil,
   Play,
   Timer,
+  Trash2,
 } from "lucide-react";
 import { useState, type DragEvent } from "react";
 import { useTaskPageQuery } from "../api/hooks";
@@ -69,6 +71,8 @@ interface TaskListProps {
   onStartTask?: (task: Task) => void;
   onCompleteTask?: (task: Task) => void;
   onStartFocus?: (task: Task) => void;
+  onEditTask?: (task: Task) => void;
+  onDeleteTask?: (task: Task) => void;
   quickActionPendingId?: string | null;
   quickActionsDisabled?: boolean;
   focusActionDisabled?: boolean;
@@ -100,6 +104,8 @@ function TaskRow({
   onStartTask,
   onCompleteTask,
   onStartFocus,
+  onEditTask,
+  onDeleteTask,
   quickActionPendingId,
   quickActionsDisabled,
   focusActionDisabled,
@@ -161,7 +167,11 @@ function TaskRow({
     task.reviewPolicy === "none" &&
     Boolean(onCompleteTask);
   const hasQuickActions =
-    canQuickStart || canQuickComplete || Boolean(onStartFocus);
+    canQuickStart ||
+    canQuickComplete ||
+    Boolean(onStartFocus) ||
+    Boolean(onEditTask) ||
+    Boolean(onDeleteTask);
   const quickActionBusy = quickActionPendingId === task.id;
 
   return (
@@ -333,6 +343,30 @@ function TaskRow({
                 <CalendarClock size={12} />
               </button>
             ) : null}
+            {onEditTask ? (
+              <button
+                aria-label={`编辑任务：${task.title}`}
+                className="task-quick-action"
+                disabled={!live || quickActionsDisabled}
+                onClick={() => onEditTask(task)}
+                title="编辑任务"
+                type="button"
+              >
+                <Pencil size={12} />
+              </button>
+            ) : null}
+            {onDeleteTask ? (
+              <button
+                aria-label={`删除任务：${task.title}`}
+                className="task-quick-action task-quick-action-danger"
+                disabled={!live || quickActionsDisabled}
+                onClick={() => onDeleteTask(task)}
+                title="删除任务"
+                type="button"
+              >
+                <Trash2 size={12} />
+              </button>
+            ) : null}
             {allowReorder && onMove ? (
               <>
                 <button
@@ -386,6 +420,8 @@ function TaskRow({
               onPlanTask={onPlanTask}
               onStartFocus={onStartFocus}
               onStartTask={onStartTask}
+              onEditTask={onEditTask}
+              onDeleteTask={onDeleteTask}
               onSelectionChange={onSelectionChange}
               quickActionPendingId={quickActionPendingId}
               quickActionsDisabled={quickActionsDisabled}
@@ -452,6 +488,8 @@ export function TaskList({
   onStartTask,
   onCompleteTask,
   onStartFocus,
+  onEditTask,
+  onDeleteTask,
   quickActionPendingId = null,
   quickActionsDisabled = false,
   focusActionDisabled = false,
@@ -493,6 +531,8 @@ export function TaskList({
           onPlanTask={onPlanTask}
           onStartFocus={onStartFocus}
           onStartTask={onStartTask}
+          onEditTask={onEditTask}
+          onDeleteTask={onDeleteTask}
           onTaskDragEnd={endDrag}
           onTaskDragOver={(event, target) => {
             if (

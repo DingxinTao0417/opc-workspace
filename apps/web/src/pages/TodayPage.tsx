@@ -31,6 +31,7 @@ import { useFocusCycleStore } from "../store/focus";
 import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
+import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
 import { TaskList } from "../components/TaskList";
 import { TaskPlanModal } from "../components/TaskPlanModal";
 import type { Task } from "../types/models";
@@ -159,10 +160,12 @@ function previewTaskDropToGroup(
 
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
   const today = new Date();
   const todayKey = localDateKey(today);
   const [dateKey, setDateKey] = useState(todayKey);
   const [planningTask, setPlanningTask] = useState<Task | null>(null);
+  const [deletingTask, setDeletingTask] = useState<Task | null>(null);
   const selectedDate = dateFromKey(dateKey);
   const isToday = dateKey === todayKey;
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
@@ -365,6 +368,8 @@ export function TodayPage() {
   };
   const taskQuickActionProps = {
     focusActionDisabled,
+    onDeleteTask: setDeletingTask,
+    onEditTask: (task: Task) => setTaskDetailId(task.id),
     onCompleteTask: (task: Task) => runLifecycleAction(task, "complete"),
     onStartFocus: startFocus,
     onStartTask: (task: Task) => runLifecycleAction(task, "start"),
@@ -747,6 +752,10 @@ export function TodayPage() {
         open={Boolean(planningTask)}
         selectedDate={dateKey}
         task={planningTask}
+      />
+      <TaskDeleteConfirmModal
+        onClose={() => setDeletingTask(null)}
+        task={deletingTask}
       />
     </div>
   );

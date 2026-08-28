@@ -1636,6 +1636,9 @@ export function useDeleteTask() {
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
       await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
     },
+    onError: async (error) => {
+      if (isTaskFactsStale(error)) await invalidateTaskFacts(queryClient);
+    },
   });
 }
 
