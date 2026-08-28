@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v15。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立一次性 Reminder，均不改设置结构。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实；除 Actor 外的现有偏好仍保存在 localStorage。把非敏感设置迁入版本化 SQLite、数据/备份和完整桌面诊断入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v16。v0.1-A 已交付版本化 `app_settings`、服务端 schema 清洗和 GET/PATCH API；Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“关于”已接真实健康与版本事实。前端偏好目前仍读取 localStorage，尚未切换到设置 API；兼容迁移、受控头像文件、数据/备份和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -32,11 +32,19 @@
 - 命令面板可分别直达个人资料、通用、外观、专注、人员与责任和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
 - 活动 Session 的 `planned_seconds` 是服务端事实。修改、保存或取消 Focus draft/preview 都不会重置、缩短或改写当前 Session；保存后的 break、cycle、自动开始与提示音配置最早在当前工作段结束后的本地转场生效。
 
+当前 Sidecar 设置事实层已实现：
+
+- schema v16 新增空表 `app_settings`，迁移不写默认行、不改写既有业务事实，也不创建 demo 数据；GET 对缺失模块返回服务端默认值并显式标记 `stored=false / version=0`。
+- 固定模块 key 为 `workspace / general / appearance / focus`；每个值必须是完整 JSON object，服务端拒绝未知、缺失、null 非空字段、越界值和未受控头像引用。
+- `PATCH /api/v1/settings` 可一次原子保存 1–4 个不同模块；每项携带 `expected_version`，缺失行要求 0，旧版本返回 `409 SETTINGS_VERSION_CONFLICT`，任一项失败整批回滚。
+- 写入者固定为当前内置 owner；数据库 trigger 要求 active Actor、禁止改变 key 和硬删除设置行。
+- 每个成功模块写一条不可变 `settings_updated` Workflow Event；事件只记录 stored/version/schema 元数据，不写设置值、头像引用或敏感凭据。
+
 当前限制：
 
-- 除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage；浏览器开发环境与桌面应用互不共享。
+- 前端尚未消费新设置 API；除“人员与责任”使用 SQLite Actor API 外，现有偏好仍只保存在当前浏览器或 WebView 的 localStorage，因此浏览器开发环境与桌面应用仍不共享偏好。
 - 头像以 Data URL 存入 localStorage，尚未迁入受控文件目录。
-- 没有 GET / PATCH /settings API，也没有 app_settings 表。
+- 前端尚未实现首次兼容迁移、Query 缓存、服务端保存错误和版本冲突交互；schema v16/API 已可供下一纵切接入。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
 - 已有 Actor 设置页，任务详情也已接负责人/审核人选择与分派历史；仍没有通知、数据/备份、快捷键、完整诊断或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
@@ -106,7 +114,7 @@
 3. 用户保存，清洗后的 preview 成为新的 committed 值并持久化；Focus 新设置不追写当前 Session。
 4. 用户取消或关闭，preview 被丢弃，committed 与活动 Session 保持不变。
 
-目标 SQLite 流程仍是规划：读取已提交的服务端设置，按模块 `PATCH` 并携带版本，成功后以服务端规范化响应更新 committed，失败保留 draft。
+目标前端 SQLite 流程仍待接入：读取已提交的服务端设置，按模块 `PATCH` 并携带版本，成功后以服务端规范化响应更新 committed，失败保留 draft。对应 Sidecar GET/PATCH、规范化和原子并发契约已交付。
 
 ### 取消预览
 
@@ -148,18 +156,19 @@
 | ------------------- | ---------------------------------------------------------- |
 | key                 | 模块化稳定 key，例如 workspace、general、appearance、focus |
 | value_json          | 经服务端 schema 清洗的非敏感值                             |
+| schema_version      | 当前固定为 1；未知版本不能被旧 Sidecar 覆盖                |
 | version             | 乐观并发版本                                               |
 | updated_by_actor_id | 修改者；交互设置通常为 owner                               |
 | updated_at          | UTC 更新时间                                               |
 
-设置 schema 由 Sidecar 按模块版本化。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
+设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行：缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
 
 ### API
 
 | 方法与路径                     | 用途                                                                                                            |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| GET /api/v1/settings           | **规划**：返回全部可见非敏感设置、schema 和版本                                                                 |
-| PATCH /api/v1/settings         | **规划**：按模块更新，返回服务端规范化结果                                                                      |
+| GET /api/v1/settings           | **已实现**：按稳定顺序返回四个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                        |
+| PATCH /api/v1/settings         | **已实现**：原子更新 1–4 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
 | GET / POST /api/v1/actors      | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
 | GET / PATCH /api/v1/actors/:id | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
 | GET /health                    | 提供真实 app、commit、API 和 schema 版本                                                                        |
@@ -168,13 +177,13 @@
 
 ### 前端状态
 
-- committed：当前已保存的设置；现阶段除 Actor 外来自 localStorage-backed store，未来迁移后才代表最近一次服务端确认值。
+- committed：当前前端已保存的设置；现阶段除 Actor 外仍来自 localStorage-backed store，下一纵切迁移后才代表最近一次服务端确认值。
 - draft：当前弹窗内尚未保存的编辑值。
 - preview：仅用于主题、布局和下一轮 Focus 参数等可逆展示，不写入活动 Focus Session 或其他业务事实。
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
-当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；失败写入和幂等重放不重复写事件。`settings_migrated`、`settings_updated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何 Workflow Event。
+当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何 Workflow Event。
 
 ## 与其他模块协作
 
@@ -190,9 +199,9 @@
 
 ### v0.1-A：设置数据契约
 
-- 新增 app_settings 递增迁移、服务端 schema 清洗和 GET / PATCH API。
-- 定义模块 key、版本、默认值、乐观锁和错误码。
-- 将前端 Query 作为已提交事实源，Zustand 仅保存弹窗草稿和短期 UI 状态。
+- **后端已完成**：schema v16 `app_settings` 递增迁移、服务端 schema 清洗和 GET/PATCH API。
+- **后端已完成**：固定模块 key、完整值契约、默认值、原子批量保存、乐观锁、`SETTINGS_VERSION_CONFLICT` 和无敏感值审计。
+- **前端待完成**：将 Query 作为已提交事实源，Zustand 仅保存弹窗草稿和短期 UI 状态。
 
 ### v0.1-B：兼容迁移与头像
 
@@ -221,14 +230,14 @@
 
 ## 验收标准
 
-- 非敏感设置重启后从 SQLite 恢复，浏览器与桌面环境不再形成两套长期事实。
+- **后端已验证**：非敏感设置写入 SQLite 后可重新读取；前端接入完成前，浏览器与桌面环境仍存在 localStorage 偏好分离。
 - 旧 localStorage 只迁移一次，不覆盖已经存在的服务端值；迁移失败可重试且不丢旧值。
 - app_settings、日志和诊断信息中不包含会话令牌、Agent 能力令牌或持久敏感凭据。
-- 保存返回服务端规范化值；并发旧版本更新返回 409。
+- **已验证（API）**：保存返回服务端规范化值；并发旧版本更新返回 409；批量中任一冲突会整批回滚。
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v15 延续。schema v12 新增独立 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立 Reminder，均不改变 Assignment 约束。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment 保护，历史分派基础由 schema v7 建立并在当前 schema v16 延续。schema v12–v16 的 Inbox、Reminder、编排与设置迁移均不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
@@ -246,3 +255,6 @@
 - [当前 Actor 设置测试](../../apps/web/src/components/ActorSettings.test.tsx)
 - [当前通用 Modal](../../apps/web/src/components/Modal.tsx)
 - [当前健康 API](../../services/sidecar/internal/api/router.go)
+- [当前设置 API](../../services/sidecar/internal/api/settings.go)
+- [schema v16 设置迁移](../../services/sidecar/internal/database/migrations/016_app_settings.sql)
+- [设置 API 测试](../../services/sidecar/internal/api/settings_test.go)

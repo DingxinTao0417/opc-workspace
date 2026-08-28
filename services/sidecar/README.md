@@ -41,7 +41,7 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "version": "0.1.0",
   "app_version": "0.1.0",
   "api_version": "v1",
-  "schema_version": 15
+  "schema_version": 16
 }
 ```
 
@@ -51,6 +51,7 @@ Writing `shutdown` to stdin drains active requests and checkpoints the WAL befor
 
 The Sidecar exposes:
 
+- versioned non-sensitive workspace/general/appearance/focus settings with service defaults, strict full-object normalization, atomic optimistic updates, and value-free audit metadata;
 - health, Task/Tag/Project/Client CRUD and queries, Task batch/reorder, project lifecycle, and today statistics; Task lists support the derived `status=active` filter plus `planned_state=scheduled/unscheduled` for complete Today grouping;
 - Actor person management with Actor `ETag`, snapshot idempotency, and protected built-in owner/system records;
 - Task Assignment query/create/reassign/end, using the containing Task's `If-Match` version;
@@ -64,6 +65,8 @@ The Sidecar exposes:
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 
 ```text
+GET    /api/v1/settings
+PATCH  /api/v1/settings
 POST   /api/v1/tasks/:id/submit-output
 POST   /api/v1/tasks/:id/review
 GET    /api/v1/tasks/:id/submissions
@@ -91,6 +94,12 @@ DELETE /api/v1/reminders/:id
 ```
 
 Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events, and reject key reuse with different input.
+
+### Settings contract
+
+`GET /api/v1/settings` always returns the four keys `workspace`, `general`, `appearance`, and `focus` in that order. A missing database row is represented by the service default with `stored=false`, `version=0`, and null update metadata; reading defaults does not insert rows. Stored rows include their normalized value, schema version 1, optimistic version, owner actor, and UTC update time.
+
+`PATCH /api/v1/settings` accepts `{ "updates": [...] }` with 1–4 unique modules. Every update requires `key`, `expected_version`, and a complete `value` object. Creation requires expected version 0; subsequent writes require the exact current version. Unknown, missing, null non-nullable, or out-of-range fields are rejected. Workspace avatars are null or controlled `avatars/<uuid>.png|jpg|webp` references; Data URLs, tokens, API keys, and arbitrary paths are not accepted. All modules are saved in one transaction, so `409 SETTINGS_VERSION_CONFLICT` or any validation/database failure leaves every row unchanged. Each successful module appends one `settings_updated` Workflow Event containing only stored/version/schema metadata, never the setting value.
 
 ### Inbox Item–Task relationship contract
 
@@ -189,7 +198,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v15. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 is additive: it adds indexes used by required-Task reconciliation and database triggers that reject an automatic Inbox resolution unless at least one active required Task exists and all such Tasks are done. It does not rewrite v14 facts or seed demo data. Future changes must start at `016_*`; never edit a shipped migration.
+The current schema is v16. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 adds indexes and guards for required-Task reconciliation. Migration 016 adds an initially empty `app_settings` table, active-Actor write guards, immutable keys, and hard-delete protection. It does not rewrite v15 facts, store service defaults, or seed demo data. Future changes must start at `017_*`; never edit a shipped migration.
 
 Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
 
@@ -202,4 +211,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v3.5 / schema v15 baseline, regression coverage includes historical migration preservation, Inbox/Reminder migrations, Reminder projection, optimistic concurrency, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, active/scheduled Task list filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.
+At the PRD v3.6 / schema v16 baseline, regression coverage includes historical migration preservation, app_settings defaults/constraints/atomic optimistic writes/value-free audits, Inbox/Reminder migrations, Reminder projection, idempotency replay/conflict, atomic split rollback, parent-child Task creation, owner/person Assignment, manual reviewer creation, automatic resolve/reopen, forced-resolution audit, soft unlink history, Task hard-delete protection, active/scheduled Task list filters and complete-plan-set button/drag reordering used by Today, bounded Task search used by the command palette, and strict frontend health-contract validation. Settings frontend migration, Client activities/attachments, follow-ups, finance, productized backup/restore, non-Reminder Inbox source projection, native notifications, recurrence, Agent Runtime, and platform packaging remain separate future work.

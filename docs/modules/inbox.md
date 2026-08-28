@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v15。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder，以及 T-11C 批量拆分/分派/自动结清已交付；非 Reminder 来源投影和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v16。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder，以及 T-11C 批量拆分/分派/自动结清已交付；schema v16 不改 Inbox 契约；非 Reminder 来源投影和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -167,7 +167,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v15 延续）
+### `inbox_items`（schema v12，在当前 schema v16 延续）
 
 | 字段                                | 当前约束 / 说明                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------- |
@@ -180,11 +180,11 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 | `source_deleted_at`                 | 当前手工项为 null；来源删除协调尚未实现                                               |
 | `priority`                          | P0 / P1 / P2 / P3                                                                     |
 | `status`                            | open / tracking / resolved / dismissed                                                |
-| `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略          |
+| `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略         |
 | `due_at`                            | 可空 RFC 3339 UTC                                                                     |
 | `read_at / triaged_at`              | 相互独立的已读与分诊时间                                                              |
 | `snoozed_until`                     | 可空；未来值进入稍后视图，到期后按查询恢复                                            |
-| `resolved_* / resolution_*`         | resolved 终态事实；mode 为 manual/automatic/forced，自动模式使用 system Actor          |
+| `resolved_* / resolution_*`         | resolved 终态事实；mode 为 manual/automatic/forced，自动模式使用 system Actor         |
 | `dismissed_* / dismiss_reason`      | dismissed 终态的 owner、时间和原因                                                    |
 | `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                    |
 | `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                               |
@@ -193,19 +193,19 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 
 ### `inbox_item_tasks`（schema v13）
 
-| 字段                                 | 当前约束 / 说明                                                   |
-| ------------------------------------ | ----------------------------------------------------------------- |
-| `id`                                 | UUID 主键                                                         |
-| `inbox_item_id`                      | Inbox Item 外键                                                   |
-| `task_ref_id`                        | 不可变原 Task UUID；Task 删除后仍保留                             |
-| `task_id`                            | nullable 实时 Task 外键，`ON DELETE SET NULL`                     |
-| `task_title_snapshot`                | 建立关系时保存的标题；Task 删除后用于解释历史                     |
+| 字段                                 | 当前约束 / 说明                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| `id`                                 | UUID 主键                                                              |
+| `inbox_item_id`                      | Inbox Item 外键                                                        |
+| `task_ref_id`                        | 不可变原 Task UUID；Task 删除后仍保留                                  |
+| `task_id`                            | nullable 实时 Task 外键，`ON DELETE SET NULL`                          |
+| `task_title_snapshot`                | 建立关系时保存的标题；Task 删除后用于解释历史                          |
 | `relation_type`                      | linked / created；A2 关联已有 Task 使用 linked，T-11C 拆分使用 created |
-| `is_required`                        | 0/1；修改后立即参与自动策略 reconciliation                         |
-| `position`                           | 大于等于 1；单条关系按末尾追加，活动列表稳定排序                  |
-| `linked_by_actor_id / linked_at`     | 当前固定内置 owner 与 UTC 时间                                    |
-| `unlinked_by_actor_id / unlinked_at` | 软解除 Actor/时间；与原因成组出现                                 |
-| `unlink_reason`                      | trim 后 1–1,000 字符；历史行不可通过重新关联覆盖                  |
+| `is_required`                        | 0/1；修改后立即参与自动策略 reconciliation                             |
+| `position`                           | 大于等于 1；单条关系按末尾追加，活动列表稳定排序                       |
+| `linked_by_actor_id / linked_at`     | 当前固定内置 owner 与 UTC 时间                                         |
+| `unlinked_by_actor_id / unlinked_at` | 软解除 Actor/时间；与原因成组出现                                      |
+| `unlink_reason`                      | trim 后 1–1,000 字符；历史行不可通过重新关联覆盖                       |
 
 - 活动关系定义为 `unlinked_at IS NULL` 且 `task_id IS NOT NULL`；同 Inbox/Task 只允许一条活动关系，active 总数上限为 100。
 - history 按 `unlinked_at DESC, linked_at DESC, id DESC` 稳定分页；重新关联写新行。Task 硬删除只允许作用于已解除关系，随后 `task_id` 置空，快照字段不变。
@@ -215,7 +215,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 
 | 方法   | 路径                                     | 契约摘要                                                                                               |
 | ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| GET    | `/api/v1/inbox-items`                    | 三视图、搜索、优先级、risk、分页、稳定排序；返回全局待处理未读数与快照时间                              |
+| GET    | `/api/v1/inbox-items`                    | 三视图、搜索、优先级、risk、分页、稳定排序；返回全局待处理未读数与快照时间                             |
 | GET    | `/api/v1/stats/inbox`                    | 实时派生 pending/unread/tracking/blocked/waiting_review 与 server_now                                  |
 | POST   | `/api/v1/inbox-items`                    | 新建 manual 条目；可选 `Idempotency-Key`；返回 `201`、数据和 `ETag`                                    |
 | POST   | `/api/v1/inbox-items/read-all`           | 以 `through_created_at` 批量已读；可选幂等键；不受当前筛选缩小                                         |
@@ -232,8 +232,8 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | POST   | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{is_required}`；关联已有 Task，强制 Inbox `If-Match`，可选幂等键，第一条关系进入 tracking        |
 | PATCH  | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{is_required}`；修改活动关系 required，强制 Inbox `If-Match`，可选幂等键                         |
 | DELETE | `/api/v1/inbox-items/:id/tasks/:task_id` | body `{reason}`；带原因软解除，强制 Inbox `If-Match`，可选幂等键，最后关系回到 open                    |
-| POST   | `/api/v1/inbox-items/:id/split`          | 原子创建 1–20 个 Task、层级、Assignment、created 关系与审计；强制 Inbox `If-Match`，可选幂等键        |
-| POST   | `/api/v1/inbox-items/:id/force-resolve`  | body `{confirm:true,reason}`；仅自动策略的例外解决；强制 Inbox `If-Match`，可选幂等键                 |
+| POST   | `/api/v1/inbox-items/:id/split`          | 原子创建 1–20 个 Task、层级、Assignment、created 关系与审计；强制 Inbox `If-Match`，可选幂等键         |
+| POST   | `/api/v1/inbox-items/:id/force-resolve`  | body `{confirm:true,reason}`；仅自动策略的例外解决；强制 Inbox `If-Match`，可选幂等键                  |
 
 关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history。单条关系命令返回 `{inbox_item,relation,progress}`；split 返回 `{inbox_item,tasks,relations,assignments,progress}`。Reminder 使用独立路由和内部到期投影；当前仍没有非 Reminder 自动投影或 Inbox 删除路由。
 
@@ -256,16 +256,16 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 
 ## 与其他模块协作
 
-| 模块     | 当前协作事实                                                                        | 后续扩展                                                       |
-| -------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 任务     | 可关联已有 Task，或原子拆分并建立父子 Task/Assignment；任务写入触发 Inbox reconciliation | 来源投影、更多筛选与跨模块统计继续扩展                         |
-| 项目     | 当前没有项目来源投影                                                                | 显式 follow-up 产出和项目节点使用稳定事件键投影                |
-| 客户     | 当前没有客户活动或回访来源                                                          | v0.4 回访到期生成去重 Inbox Item                               |
-| 发票     | 当前没有财务来源                                                                    | v0.4 临期/逾期及开票节点生成本地待办                           |
-| Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开       | Agent Actor 仍延后                                             |
-| 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                              | 随 T-11E 来源投影自然纳入更多业务事件                           |
-| 系统维护 | 当前不投影备份、迁移或 Sidecar 故障                                                 | 对应故障链路完成后生成可追踪维护项                             |
-| Agent    | 未实现                                                                              | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件               |
+| 模块     | 当前协作事实                                                                             | 后续扩展                                         |
+| -------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 任务     | 可关联已有 Task，或原子拆分并建立父子 Task/Assignment；任务写入触发 Inbox reconciliation | 来源投影、更多筛选与跨模块统计继续扩展           |
+| 项目     | 当前没有项目来源投影                                                                     | 显式 follow-up 产出和项目节点使用稳定事件键投影  |
+| 客户     | 当前没有客户活动或回访来源                                                               | v0.4 回访到期生成去重 Inbox Item                 |
+| 发票     | 当前没有财务来源                                                                         | v0.4 临期/逾期及开票节点生成本地待办             |
+| Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开         | Agent Actor 仍延后                               |
+| 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                  | 随 T-11E 来源投影自然纳入更多业务事件            |
+| 系统维护 | 当前不投影备份、迁移或 Sidecar 故障                                                      | 对应故障链路完成后生成可追踪维护项               |
+| Agent    | 未实现                                                                                   | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件 |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
 

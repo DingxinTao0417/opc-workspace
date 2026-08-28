@@ -1,10 +1,10 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v15（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v16（2026-08-28）
 >
 > 版本边界：T-11A3 一次性本地 Reminder 已交付。重复提醒、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.5](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v3.6](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 
@@ -35,18 +35,18 @@ Reminder 是“一次性时间调度事实”，Inbox Item 是提醒到期后的
 
 schema v14 的 `014_reminders.sql` 新增 `reminders`：
 
-| 字段 | 说明 |
-| --- | --- |
-| `id` | UUID 主键 |
-| `source_entity_type / source_entity_id` | 当前公开创建固定为 `manual / null`；业务来源接入留待独立纵切 |
-| `title / summary / priority` | 标题 2–200 字符，摘要最多 10,000 字符，优先级 P0–P3 |
-| `trigger_at` | RFC 3339 UTC，一次性触发时间 |
-| `status` | `scheduled / fired / cancelled` |
-| `source_event_key` | 创建时生成稳定唯一键 `reminder:<id>:due` |
-| `created_by_actor_id` | 当前固定内置 owner |
-| `fired_at / inbox_item_id` | fired 时成组出现并引用唯一 Inbox Item |
-| `cancelled_by_actor_id / cancelled_at / cancel_reason` | cancelled 时成组出现，原因非空 |
-| `version / created_at / updated_at` | 乐观并发版本和 UTC 时间戳 |
+| 字段                                                   | 说明                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------------ |
+| `id`                                                   | UUID 主键                                                    |
+| `source_entity_type / source_entity_id`                | 当前公开创建固定为 `manual / null`；业务来源接入留待独立纵切 |
+| `title / summary / priority`                           | 标题 2–200 字符，摘要最多 10,000 字符，优先级 P0–P3          |
+| `trigger_at`                                           | RFC 3339 UTC，一次性触发时间                                 |
+| `status`                                               | `scheduled / fired / cancelled`                              |
+| `source_event_key`                                     | 创建时生成稳定唯一键 `reminder:<id>:due`                     |
+| `created_by_actor_id`                                  | 当前固定内置 owner                                           |
+| `fired_at / inbox_item_id`                             | fired 时成组出现并引用唯一 Inbox Item                        |
+| `cancelled_by_actor_id / cancelled_at / cancel_reason` | cancelled 时成组出现，原因非空                               |
+| `version / created_at / updated_at`                    | 乐观并发版本和 UTC 时间戳                                    |
 
 数据库约束和 trigger 共同保证：
 
@@ -56,17 +56,17 @@ schema v14 的 `014_reminders.sql` 新增 `reminders`：
 - fired/cancelled 为不可变终态，Reminder 不允许硬删除；
 - 创建者和取消者必须是有效 Actor，当前公开 API 只使用内置 owner，触发事件由内置 system 记录。
 
-迁移为纯加法，不创建 demo Reminder，也不改写 schema v13 的 Task、Inbox、Client、Project、Focus 或 Artifact 事实。其后的 schema v15 仅增加 Inbox 编排校验；后续迁移必须从 `016_*` 继续。
+迁移为纯加法，不创建 demo Reminder，也不改写 schema v13 的 Task、Inbox、Client、Project、Focus 或 Artifact 事实。其后的 schema v15 仅增加 Inbox 编排校验，schema v16 仅增加 app_settings；后续迁移必须从 `017_*` 继续。
 
 ## API 契约
 
-| 方法 | 路径 | 当前行为 |
-| --- | --- | --- |
-| GET | `/api/v1/reminders` | `page/page_size` 分页；支持 `q`、`status` 和白名单 `sort`；所有排序追加 `id ASC`，返回 `server_now` |
-| POST | `/api/v1/reminders` | 创建 future scheduled Reminder；支持 `Idempotency-Key`，保存规范化请求摘要和首次 201 快照 |
-| GET | `/api/v1/reminders/:id` | 返回完整事实、`available_actions` 和 ETag |
-| PATCH | `/api/v1/reminders/:id` | 仅 scheduled 可编辑；强制 `If-Match`，旧版本返回 409 |
-| DELETE | `/api/v1/reminders/:id` | 带 `{reason}` 的软取消；强制 `If-Match`，支持幂等快照；不提供硬删除 |
+| 方法   | 路径                    | 当前行为                                                                                            |
+| ------ | ----------------------- | --------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/reminders`     | `page/page_size` 分页；支持 `q`、`status` 和白名单 `sort`；所有排序追加 `id ASC`，返回 `server_now` |
+| POST   | `/api/v1/reminders`     | 创建 future scheduled Reminder；支持 `Idempotency-Key`，保存规范化请求摘要和首次 201 快照           |
+| GET    | `/api/v1/reminders/:id` | 返回完整事实、`available_actions` 和 ETag                                                           |
+| PATCH  | `/api/v1/reminders/:id` | 仅 scheduled 可编辑；强制 `If-Match`，旧版本返回 409                                                |
+| DELETE | `/api/v1/reminders/:id` | 带 `{reason}` 的软取消；强制 `If-Match`，支持幂等快照；不提供硬删除                                 |
 
 列表状态只接受 `scheduled / fired / cancelled`。排序字段只接受 `trigger_at / created_at / updated_at / priority / title` 及升降序。严格 JSON 会拒绝未知字段、重复 JSON、空请求和多余尾随内容。创建、编辑或重新安排的 `trigger_at` 必须晚于服务端当前时间。
 

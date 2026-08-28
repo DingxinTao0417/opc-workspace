@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-27（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v15。schema v12 新增独立手工 Inbox Item，schema v13 新增 Inbox–Task 关系和 Task 删除互锁，schema v14 新增独立一次性 Reminder；三者均不改 Project 表、聚合触发器或现有 Project API。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v16。schema v12–v16 的 Inbox、Reminder、编排与设置迁移均不改 Project 表、聚合触发器或现有 Project API。
 >
 > 版本边界：项目资料、基础生命周期、任务聚合和 Client 客户关联纵切已实现，模块仍为**部分完成**；Inbox 已可手工关联已有 Task，但项目产出/附件/事件的来源投影、批量拆分和自动分诊尚未交付。
 
@@ -73,7 +73,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v15 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12–v14 不改变这些 Project 事实。
+- 当前 schema v16 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`idempotency_keys` 另有 `request_hash`、`response_body` 和 `response_status`。v5 trigger 继续维护 Project 聚合版本，v8 在重建 Task 后恢复该机制；v10 补充 Project 关联变化对 Client 聚合版本的反向传播；v11 在 Focus 给 Task 新增完整分钟时沿用既有 `actual_minutes` 聚合触发器；v12–v16 不改变这些 Project 事实。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -145,7 +145,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v15 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12 的手工 Inbox Item、schema v13 的 Inbox–Task 关系和 schema v14 的独立 Reminder 均不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v16 保留 schema v3–v10 的 Project 结构与聚合 trigger，并接入 schema v11 Focus → Task 实际工时传播；schema v12–v16 的 Inbox、Reminder、编排与设置迁移均不改变 Project 结构。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选和双向聚合版本传播已接通；客户活动、附件、Actor 关联、回访和财务仍待实现。

@@ -154,6 +154,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
 	{
+		v1.GET("/settings", service.listSettings)
+		v1.PATCH("/settings", service.updateSettings)
 		v1.GET("/actors", service.listActors)
 		v1.POST("/actors", service.createActor)
 		v1.GET("/actors/:id", service.getActor)

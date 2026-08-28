@@ -49,8 +49,8 @@ func TestReminderMigrationUpgradesV13WithoutChangingExistingFacts(t *testing.T) 
 		t.Fatalf("upgrade v13 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 15 {
-		t.Fatalf("SchemaVersion = %d, want 15", store.SchemaVersion)
+	if store.SchemaVersion != 16 {
+		t.Fatalf("SchemaVersion = %d, want 16", store.SchemaVersion)
 	}
 	var preservedTask models.Task
 	if err := store.DB.First(&preservedTask, "id = ?", taskID).Error; err != nil {
