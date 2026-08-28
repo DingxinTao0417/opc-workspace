@@ -2088,6 +2088,83 @@ export function useReorderActiveTasksWithinPlan() {
   });
 }
 
+export function useReorderTaskWithinPlanStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      source,
+      target,
+      position,
+    }: {
+      source: Task;
+      target: Task;
+      position: "before" | "after";
+    }) => {
+      if (
+        source.id === target.id ||
+        source.plannedDate !== target.plannedDate ||
+        source.status !== target.status
+      ) {
+        throw new ApiError("只能在同一计划日期和状态组内拖拽任务", {
+          code: "TASK_REORDER_SCOPE_MISMATCH",
+        });
+      }
+      const scoped = await getPlanTasks(source.plannedDate);
+      if (scoped.length > 1_000) {
+        throw new ApiError("同一计划日期超过 1000 项，暂时无法拖拽排序", {
+          code: "TASK_REORDER_LIMIT",
+        });
+      }
+      const latestSource = scoped.find((task) => task.id === source.id);
+      const latestTarget = scoped.find((task) => task.id === target.id);
+      if (
+        !latestSource ||
+        !latestTarget ||
+        latestSource.version !== source.version ||
+        latestTarget.version !== target.version ||
+        latestSource.status !== source.status ||
+        latestTarget.status !== source.status
+      ) {
+        throw new ApiError("当前计划状态组已经变化，请刷新后重试", {
+          code: "TASK_REORDER_SET_CHANGED",
+        });
+      }
+      const statusOrder = scoped.filter(
+        (task) => task.status === source.status && task.id !== source.id,
+      );
+      const targetIndex = statusOrder.findIndex(
+        (task) => task.id === target.id,
+      );
+      if (targetIndex < 0) {
+        throw new ApiError("目标任务已不在当前状态组，请刷新后重试", {
+          code: "TASK_REORDER_SET_CHANGED",
+        });
+      }
+      statusOrder.splice(
+        targetIndex + (position === "after" ? 1 : 0),
+        0,
+        latestSource,
+      );
+      let statusIndex = 0;
+      const ordered = scoped.map((task) =>
+        task.status === source.status ? statusOrder[statusIndex++]! : task,
+      );
+      return reorderTasks({
+        plannedDate: source.plannedDate,
+        mode: "manual",
+        items: ordered.map((task) => ({
+          id: task.id,
+          expectedVersion: task.version,
+        })),
+      });
+    },
+    onSuccess: async () => invalidateTaskFacts(queryClient),
+    onError: async (error) => {
+      if (isTaskFactsStale(error)) await invalidateTaskFacts(queryClient);
+    },
+  });
+}
+
 export function useResetTaskOrder() {
   const queryClient = useQueryClient();
   return useMutation({

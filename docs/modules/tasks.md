@@ -4,7 +4,7 @@
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.1](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.2](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -23,7 +23,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、批量安全操作和计划组排序已接通真实 SQLite；任务页在单一精确日期的手动顺序视图中支持同状态拖拽。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -242,6 +242,9 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 
 ## 前端交互与并发
 
+- 任务页只有在选中一个精确计划日期、排序为 `manual_order` 且没有搜索、状态、优先级、类型、项目或标签筛选时启用排序；上移/下移与拖动手柄同时保留。
+- 拖拽限定在同一状态分组，不会通过视觉移动暗中改变 Task 生命周期。前端立即预览当前页相对位置，但 hook 按源/目标重新读取完整计划日期组，校验日期、状态和可见版本，再把同状态顺序织回完整组的原槽位并调用既有原子 reorder API。
+- 分页页面不把当前 50 行作为完整计划组提交；完整集合由 hook 自动分页读取，最多 1,000 项。集合/版本变化、网络错误或服务端拒绝时清除乐观预览并刷新 Task/Project/Today/Inbox，页面回到服务端事实。
 - 新建与详情编辑提供 review policy；详情只有在 todo 且无 current/历史 Submission 时开放修改。
 - 输出编辑器允许 summary 加最多 20 个条目；文件草稿保留浏览器 `File`，不会先复制或上传。
 - waiting_review 展示当前批次和完整 Artifact 摘要，接受与返工互斥；返工原因空白时前端阻止提交。
@@ -279,6 +282,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - 接受、返工、取消撤回、reopen、软删、Task 硬删、文件丢失/篡改和安全下载头；
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
+- 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
 
 仍属后续：Task/业务来源投影与自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Artifact 备份恢复、Focus Session 历史/周报/高级分析、Client 活动/附件/Actor 关联/回访/财务，以及 AI 助手与知识库；Inbox 批量拆分/Assignment/自动结清、一次性 Reminder、已有 Task 关系、Focus Core 工时持久化、Client 基础资料和 Project 客户关联已经交付。
 
@@ -293,6 +297,8 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - [Task API](../../services/sidecar/internal/api/tasks.go)
 - [Task output model](../../services/sidecar/internal/models/artifact.go)
 - [前端 Task output 组件](../../apps/web/src/components/TaskOutputsSection.tsx)
+- [任务列表页](../../apps/web/src/pages/TasksPage.tsx)
+- [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
 - [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)
 - [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)

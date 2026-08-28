@@ -13,9 +13,14 @@ import { TasksPage } from "./TasksPage";
 const mocks = vi.hoisted(() => ({
   batch: vi.fn(),
   move: vi.fn(),
+  resetMove: vi.fn(),
+  drag: vi.fn(),
+  resetDrag: vi.fn(),
   resetBatch: vi.fn(),
   resetOrder: vi.fn(),
+  resetResetOrder: vi.fn(),
   taskQueries: [] as TaskListParams[],
+  taskItems: null as Task[] | null,
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
 }));
@@ -57,7 +62,7 @@ vi.mock("../api/hooks", () => ({
     mocks.taskQueries.push(input);
     return {
       data: {
-        items: [{ ...task, status: mocks.taskStatus }],
+        items: mocks.taskItems ?? [{ ...task, status: mocks.taskStatus }],
         meta: { page: input.page ?? 1, pageSize: 50, total: 101 },
       },
       error: null,
@@ -91,12 +96,20 @@ vi.mock("../api/hooks", () => ({
     error: null,
     isPending: false,
     mutate: mocks.move,
+    reset: mocks.resetMove,
     variables: undefined,
+  }),
+  useReorderTaskWithinPlanStatus: () => ({
+    error: null,
+    isPending: false,
+    mutate: mocks.drag,
+    reset: mocks.resetDrag,
   }),
   useResetTaskOrder: () => ({
     error: null,
     isPending: false,
     mutate: mocks.resetOrder,
+    reset: mocks.resetResetOrder,
   }),
   useCreateTag: () => ({
     error: null,
@@ -127,10 +140,15 @@ describe("TasksPage", () => {
     mocks.taskQueries.length = 0;
     mocks.batch.mockClear();
     mocks.move.mockClear();
+    mocks.resetMove.mockClear();
+    mocks.drag.mockClear();
+    mocks.resetDrag.mockClear();
     mocks.resetBatch.mockClear();
     mocks.resetOrder.mockClear();
+    mocks.resetResetOrder.mockClear();
     mocks.placeholder = false;
     mocks.taskStatus = "todo";
+    mocks.taskItems = null;
   });
 
   afterEach(cleanup);
@@ -225,6 +243,61 @@ describe("TasksPage", () => {
       plannedDate: task.plannedDate,
       direction: "up",
     });
+  });
+
+  it("previews and persists pointer drag within an exact plan status group", () => {
+    const target = {
+      ...task,
+      id: "task-2",
+      title: "确认交付范围",
+      version: 8,
+    };
+    mocks.taskItems = [task, target];
+    render(<TasksPage />);
+    fireEvent.change(screen.getByLabelText("任务排序"), {
+      target: { value: "manual_order" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "筛选" }));
+    fireEvent.change(screen.getByLabelText("计划日期"), {
+      target: { value: "2026-08-27" },
+    });
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByTitle(`拖动排序：${task.title}`), {
+      dataTransfer,
+    });
+    const targetRow = screen
+      .getByRole("button", { name: `查看任务：${target.title}` })
+      .closest("article");
+    fireEvent.dragOver(targetRow!, { dataTransfer });
+    fireEvent.drop(targetRow!, { dataTransfer });
+
+    expect(mocks.drag).toHaveBeenCalledWith(
+      { source: task, target, position: "after" },
+      expect.objectContaining({ onSettled: expect.any(Function) }),
+    );
+    expect(
+      screen
+        .getAllByRole("button", {
+          name: /查看任务：(整理交付清单|确认交付范围)/,
+        })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["查看任务：确认交付范围", "查看任务：整理交付清单"]);
+
+    const callbacks = mocks.drag.mock.calls[0][1] as {
+      onSettled: () => void;
+    };
+    act(() => callbacks.onSettled());
+    expect(
+      screen
+        .getAllByRole("button", {
+          name: /查看任务：(整理交付清单|确认交付范围)/,
+        })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["查看任务：整理交付清单", "查看任务：确认交付范围"]);
   });
 
   it("blocks writes while a previous task page is shown as placeholder data", () => {

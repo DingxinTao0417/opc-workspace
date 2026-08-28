@@ -16,6 +16,7 @@ import {
   useBatchUpdateTasks,
   useMoveTaskWithinPlan,
   useProjectOptionsQuery,
+  useReorderTaskWithinPlanStatus,
   useResetTaskOrder,
   useTagOptionsQuery,
   useTaskPageQuery,
@@ -43,6 +44,31 @@ const groups: { status: TaskStatus; label: string }[] = [
 ];
 
 type BatchAction = BatchUpdateTasksInput["action"];
+
+function applyTaskOrder(tasks: Task[], orderedIds?: string[]): Task[] {
+  if (!orderedIds || orderedIds.length !== tasks.length) return tasks;
+  const byId = new Map(tasks.map((task) => [task.id, task]));
+  if (orderedIds.some((id) => !byId.has(id))) return tasks;
+  return orderedIds.map((id) => byId.get(id)!);
+}
+
+function previewTaskDrop(
+  tasks: Task[],
+  source: Task,
+  target: Task,
+): { orderedIds: string[]; position: "before" | "after" } | null {
+  if (source.status !== target.status) return null;
+  const ids = tasks.map((task) => task.id);
+  const sourceIndex = ids.indexOf(source.id);
+  const targetIndex = ids.indexOf(target.id);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)
+    return null;
+  const position = sourceIndex < targetIndex ? "after" : "before";
+  ids.splice(sourceIndex, 1);
+  const nextTargetIndex = ids.indexOf(target.id);
+  ids.splice(nextTargetIndex + (position === "after" ? 1 : 0), 0, source.id);
+  return { orderedIds: ids, position };
+}
 
 function apiErrorText(error: unknown): string | null {
   if (!error) return null;
@@ -85,6 +111,9 @@ export function TasksPage() {
   const [batchProjectId, setBatchProjectId] = useState("");
   const [batchPlannedDate, setBatchPlannedDate] = useState("");
   const [batchTagId, setBatchTagId] = useState("");
+  const [dragPreview, setDragPreview] = useState<
+    Partial<Record<TaskStatus, string[]>>
+  >({});
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -122,6 +151,7 @@ export function TasksPage() {
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
   const moveMutation = useMoveTaskWithinPlan();
+  const dragMutation = useReorderTaskWithinPlanStatus();
   const resetOrderMutation = useResetTaskOrder();
   const tasks = query.data?.items ?? [];
   const total = query.data?.meta.total ?? 0;
@@ -146,17 +176,39 @@ export function TasksPage() {
     Number(Boolean(plannedDate));
   const onlyPlanFilter =
     Boolean(plannedDate) &&
-    !(queryText || status || priority || kind || projectId || tagIds.length);
+    !(
+      searchInput.trim() ||
+      queryText ||
+      status ||
+      priority ||
+      kind ||
+      projectId ||
+      tagIds.length
+    );
   const allowReorder = sort === "manual_order" && onlyPlanFilter;
   const writeReady =
-    query.isSuccess && !query.isPlaceholderData && !query.isFetching;
+    query.isSuccess &&
+    !query.isPlaceholderData &&
+    !query.isFetching &&
+    !batchMutation.isPending &&
+    !moveMutation.isPending &&
+    !dragMutation.isPending &&
+    !resetOrderMutation.isPending;
   const batchError = apiErrorText(batchMutation.error);
   const reorderError =
-    apiErrorText(moveMutation.error) ?? apiErrorText(resetOrderMutation.error);
+    apiErrorText(dragMutation.error) ??
+    apiErrorText(moveMutation.error) ??
+    apiErrorText(resetOrderMutation.error);
+  const reorderPending =
+    dragMutation.isPending ||
+    moveMutation.isPending ||
+    resetOrderMutation.isPending;
 
   useEffect(() => {
     setSelectedTasks({});
+    setDragPreview({});
     batchMutation.reset();
+    dragMutation.reset();
   }, [
     page,
     queryText,
@@ -241,6 +293,33 @@ export function TasksPage() {
 
   const allPageSelected =
     tasks.length > 0 && tasks.every((task) => selectedIds.has(task.id));
+
+  const dropTask = (status: TaskStatus, source: Task, target: Task) => {
+    const groupedTasks = applyTaskOrder(
+      tasks.filter((task) => task.status === status),
+      dragPreview[status],
+    );
+    const preview = previewTaskDrop(groupedTasks, source, target);
+    if (!preview) return;
+    moveMutation.reset();
+    resetOrderMutation.reset();
+    dragMutation.reset();
+    setDragPreview((current) => ({
+      ...current,
+      [status]: preview.orderedIds,
+    }));
+    dragMutation.mutate(
+      { source, target, position: preview.position },
+      {
+        onSettled: () =>
+          setDragPreview((current) => {
+            const next = { ...current };
+            delete next[status];
+            return next;
+          }),
+      },
+    );
+  };
 
   return (
     <div className="page">
@@ -578,7 +657,12 @@ export function TasksPage() {
               <button
                 className="button button-quiet"
                 disabled={!writeReady || resetOrderMutation.isPending}
-                onClick={() => resetOrderMutation.mutate(plannedDate)}
+                onClick={() => {
+                  setDragPreview({});
+                  dragMutation.reset();
+                  moveMutation.reset();
+                  resetOrderMutation.mutate(plannedDate);
+                }}
                 type="button"
               >
                 <RotateCcw size={12} />
@@ -593,6 +677,7 @@ export function TasksPage() {
               {reorderError}
             </span>
           ) : null}
+          {reorderPending ? <span role="status">正在保存任务顺序…</span> : null}
         </div>
       ) : null}
 
@@ -638,8 +723,9 @@ export function TasksPage() {
       {tasks.length > 0 ? (
         <div className="task-groups">
           {groups.map((group) => {
-            const groupedTasks = tasks.filter(
-              (task) => task.status === group.status,
+            const groupedTasks = applyTaskOrder(
+              tasks.filter((task) => task.status === group.status),
+              dragPreview[group.status],
             );
             if (!groupedTasks.length) return null;
             const collapsed = collapsedStatuses.has(group.status);
@@ -674,15 +760,22 @@ export function TasksPage() {
                 </div>
                 {!collapsed ? (
                   <TaskList
+                    allowDrag={allowReorder}
                     allowReorder={allowReorder}
+                    dragPending={dragMutation.isPending}
                     hierarchical={hierarchical}
                     live={writeReady}
-                    onMove={(task, direction) =>
+                    onMove={(task, direction) => {
+                      setDragPreview({});
+                      dragMutation.reset();
                       moveMutation.mutate({
                         taskId: task.id,
                         plannedDate: task.plannedDate,
                         direction,
-                      })
+                      });
+                    }}
+                    onDropTask={(source, target) =>
+                      dropTask(group.status, source, target)
                     }
                     onSelectionChange={(task, selected) =>
                       setSelectedTasks((current) => {

@@ -38,6 +38,7 @@ import {
   useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
+  useReorderTaskWithinPlanStatus,
   useSetTaskPlannedDate,
   useDeleteTaskArtifact,
   useDeleteTask,
@@ -435,6 +436,80 @@ describe("task queries", () => {
         { id: task.id, expectedVersion: task.version },
       ],
     });
+  });
+
+  it("moves a task relative to another task without changing status slots", async () => {
+    const target = { ...task, id: "todo-target", version: 5 };
+    const tail = { ...task, id: "todo-tail", version: 6 };
+    const blocked = {
+      ...task,
+      id: "blocked",
+      status: "blocked" as const,
+      version: 7,
+    };
+    const done = {
+      ...task,
+      id: "done",
+      status: "done" as const,
+      version: 8,
+    };
+    getAllTasksMock.mockResolvedValue([task, blocked, target, done, tail]);
+    reorderTasksMock.mockResolvedValue({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      changed: 2,
+      tasks: [],
+    });
+    const { result } = renderHook(() => useReorderTaskWithinPlanStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        source: task,
+        target,
+        position: "after",
+      });
+    });
+
+    expect(reorderTasksMock).toHaveBeenCalledWith({
+      plannedDate: task.plannedDate,
+      mode: "manual",
+      items: [
+        { id: target.id, expectedVersion: target.version },
+        { id: blocked.id, expectedVersion: blocked.version },
+        { id: task.id, expectedVersion: task.version },
+        { id: done.id, expectedVersion: done.version },
+        { id: tail.id, expectedVersion: tail.version },
+      ],
+    });
+  });
+
+  it("rejects a status-group drag when a visible task version is stale", async () => {
+    const target = { ...task, id: "todo-target", version: 5 };
+    getAllTasksMock.mockResolvedValue([
+      { ...task, version: task.version + 1 },
+      target,
+    ]);
+    const { result } = renderHook(() => useReorderTaskWithinPlanStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.mutateAsync({
+          source: task,
+          target,
+          position: "after",
+        });
+      } catch (error) {
+        caught = error;
+      }
+    });
+
+    expect(caught).toMatchObject({ code: "TASK_REORDER_SET_CHANGED" });
+    expect(reorderTasksMock).not.toHaveBeenCalled();
   });
 
   it("rejects a drag snapshot when the active plan set changed", async () => {
