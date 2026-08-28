@@ -2758,8 +2758,13 @@ kbd {
   font-size: 9px;
 }
 
-.client-activities-section {
+.client-activities-section,
+.project-notes-section {
   margin-top: 12px;
+}
+
+.project-note-editor-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(190px, 0.6fr);
 }
 
 .client-activity-history-toggle {

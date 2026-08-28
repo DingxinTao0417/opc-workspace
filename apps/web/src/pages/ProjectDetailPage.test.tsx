@@ -65,6 +65,35 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     refetch: vi.fn(),
   }),
+  useProjectNotesQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0, projectVersion: 2 },
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useCreateProjectNote: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useUpdateProjectNote: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
+  useDeleteProjectNote: () => ({
+    error: null,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  }),
   useTasksQuery: () => ({
     data: [],
     isError: false,

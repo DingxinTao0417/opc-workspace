@@ -50,6 +50,22 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	`).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := store.DB.Exec(`
+		INSERT INTO projects(id, name, status, version, created_at, updated_at)
+		VALUES ('018f0000-0000-7000-8000-000000001706', 'Exported Project', 'in_progress', 1, '2026-08-28T08:00:00Z', '2026-08-28T08:00:00Z');
+		INSERT INTO project_notes(
+			id, project_id, title, body, occurred_at, created_by_actor_id,
+			version, created_at, updated_at
+		) VALUES (
+			'018f0000-0000-7000-8000-000000001707',
+			'018f0000-0000-7000-8000-000000001706',
+			'Exported project note', 'Local project note body',
+			'2026-08-28T08:03:00Z', '00000000-0000-5000-8000-000000000001',
+			1, '2026-08-28T08:03:00Z', '2026-08-28T08:03:00Z'
+		)
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
 	task, _ := setupManualReviewTask(t, router)
 	uploaded := performMultipartRequest(
 		router,
@@ -122,6 +138,9 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if links := tables["client_actor_links"]; len(links.Rows) != 1 {
 		t.Fatalf("Client actor links were not exported: %#v", links)
+	}
+	if notes := tables["project_notes"]; len(notes.Rows) != 1 {
+		t.Fatalf("Project notes were not exported: %#v", notes)
 	}
 	for _, excluded := range businessExportExcludedTables {
 		if _, leaked := tables[excluded]; leaked {

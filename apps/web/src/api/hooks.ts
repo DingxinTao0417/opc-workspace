@@ -20,6 +20,7 @@ import {
   createFocusSession,
   createReminder,
   createPersonActor,
+  createProjectNote,
   createTag,
   createTask,
   createTaskSavedView,
@@ -31,6 +32,7 @@ import {
   deleteClientActorLink,
   deleteBackup,
   deleteProject,
+  deleteProjectNote,
   deleteTag,
   deleteTask,
   deleteTaskSavedView,
@@ -80,6 +82,7 @@ import {
   getTodayStats,
   getProject,
   getProjectEvents,
+  getProjectNotes,
   getProjects,
   pauseFocusSession,
   createInboxItem,
@@ -107,6 +110,7 @@ import {
   transitionProject,
   updateActor,
   updateProject,
+  updateProjectNote,
   updateReminder,
   updateAppSettings,
   unlinkInboxItemTask,
@@ -129,11 +133,13 @@ import type {
   CreateFocusSessionInput,
   CreateReminderInput,
   CreatePersonActorInput,
+  CreateProjectNoteInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
+  DeleteProjectNoteInput,
   EndTaskAssignmentInput,
   FocusSessionCommandInput,
   FocusReportParams,
@@ -151,6 +157,7 @@ import type {
   NewTaskInput,
   ProjectInput,
   ProjectEventListParams,
+  ProjectNoteListParams,
   ProjectListParams,
   ProjectTransitionAction,
   ReminderListParams,
@@ -178,6 +185,7 @@ import type {
   UpdateInboxItemTaskRequirementInput,
   UpdateTagInput,
   UpdateProjectInput,
+  UpdateProjectNoteInput,
   UpdateReminderInput,
   UpdateTaskInput,
   UnlinkInboxItemTaskInput,
@@ -2801,6 +2809,8 @@ export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
 export const projectEventQueryKey = (id: string) =>
   [...projectDetailQueryKey(id), "events"] as const;
+export const projectNoteQueryKey = (id: string) =>
+  [...projectDetailQueryKey(id), "notes"] as const;
 
 export function useProjectsQuery(
   input: ProjectListParams = {},
@@ -2859,6 +2869,100 @@ export function useProjectEventsQuery(
     enabled: Boolean(projectId) && enabled,
     retry: 1,
     staleTime: 10_000,
+  });
+}
+
+export function useProjectNotesQuery(
+  projectId: string | null,
+  input: ProjectNoteListParams = {},
+) {
+  return useQuery({
+    queryKey: [...projectNoteQueryKey(projectId ?? "missing"), "list", input],
+    queryFn: () => getProjectNotes(projectId!, input),
+    enabled: Boolean(projectId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export function useCreateProjectNote() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      input,
+    }: {
+      projectId: string;
+      input: CreateProjectNoteInput;
+    }) => {
+      const fingerprint = JSON.stringify({ projectId, input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createProjectNote(projectId, input, attempt.current.key);
+    },
+    onSuccess: async (note) => {
+      attempt.current = null;
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "PROJECT_ARCHIVED") {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export function useUpdateProjectNote() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateProjectNoteInput;
+    }) => updateProjectNote(id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (
+        error instanceof ApiError &&
+        (error.code === "VERSION_CONFLICT" ||
+          error.code === "PROJECT_NOTE_DELETED" ||
+          error.code === "PROJECT_ARCHIVED")
+      ) {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
+  });
+}
+
+export function useDeleteProjectNote() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: DeleteProjectNoteInput;
+    }) => deleteProjectNote(id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+    },
+    onError: async (error) => {
+      if (
+        error instanceof ApiError &&
+        (error.code === "VERSION_CONFLICT" ||
+          error.code === "PROJECT_NOTE_DELETED" ||
+          error.code === "PROJECT_ARCHIVED")
+      ) {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      }
+    },
   });
 }
 

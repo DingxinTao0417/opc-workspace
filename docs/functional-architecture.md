@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.15
+> 文档版本：2.16
 > 日期：2026-08-28
-> 依据：[PRD v5.8](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v20
+> 依据：[PRD v5.9](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v21
 
 ## 1. 目的
 
@@ -49,11 +49,11 @@
 ### 3.1 当前实现
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
-- React 已具备三栏框架、今日/任务/项目/客户能力、Project 追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立时间线反馈状态。
-- Go 已提供健康检查、Task/Project/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
-- SQLite 当前为 schema v20：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15–v17 增加 Inbox 编排、版本化设置和保存视图；schema v18 新增本地 `client_activities`；schema v19 新增 `client_attachments`；schema v20 新增 `client_actor_links`、单 active contact、不可变解除历史和 Client 版本传播。v19→v20 不改写既有事实，也不创建 demo 数据。
+- React 已具备三栏框架、今日/任务/项目/客户能力、Project 可编辑人工笔记与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立笔记/审计反馈状态。
+- Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
+- SQLite 当前为 schema v21：schema v11–v14 依次交付 Focus、手工 Inbox Item、Inbox–Task 关系和一次性 Reminder；schema v15–v17 增加 Inbox 编排、版本化设置和保存视图；schema v18 新增本地 `client_activities`；schema v19 新增 `client_attachments`；schema v20 新增 `client_actor_links`；schema v21 新增 `project_notes`、不可变身份/删除历史和 Project 版本传播。v20→v21 不改写既有事实，也不创建 demo 数据。
 - 手动一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、active Task file Artifact + Client Attachment、marker 和 manifest 在同卷 staging 中完整校验后原子发布。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前交换数据库和完整 objects，失败回滚、成功以 applied 提交点防止重复执行。设置页只发起/展示数据管理 API，不复制备份事实。
-- 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Task Artifact 与 Client Attachment 只保留数据库元数据和 active 文件摘要，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
+- 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；`project_notes` 与其他业务历史进入导出，Task Artifact 与 Client Attachment 只保留数据库元数据和 active 文件摘要，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -67,6 +67,7 @@
 - Task 已扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态，并通过 `start / block / unblock / complete / cancel / reopen` 六个显式命令改变生命周期；新建只能进入 `todo`，旧通用状态端点返回 410。开始要求活动负责人，阻塞/取消要求原因，解除阻塞由服务端恢复来源状态，完成/取消会原子结束活动 Assignment，重新打开不会恢复旧分派。
 - 任务详情已提供按需加载的通用 Task Workflow Event 时间线；生命周期、Assignment 和迁移事件按时间与 `command_seq` 倒序展示，事件记录受数据库不可修改/删除保护。
 - Project 创建、资料编辑、生命周期转换与永久删除也复用通用不可变 Workflow Event；producer 与原项目写命令同事务，创建幂等重放跳过 producer，事件失败回滚命令。Project 时间线按时间、命令序号和事件 ID 倒序读取，返回当前 Project 版本，不成为项目状态的第二事实来源。
+- 人工 Project Note 是独立可编辑业务事实：创建、编辑和带原因软删除分别递增笔记版本及 Project 聚合版本；归档项目只读，删除历史不可再改写。它不写入或覆盖不可变 Workflow Event，Project 硬删除时随聚合级联删除。
 - `review_policy = manual` 已在 Task 新建和受限编辑中开放；策略只可在 todo 且没有任何 Submission 历史时改变。manual Task 具备活动 assignee 与 owner reviewer 后，可提交摘要以及 text/link/structured/file Artifact，进入 waiting_review，由 owner 接受或要求返工。
 - schema v9 和 UI 已交付 Submission/Artifact 历史、受控文件 store、安全下载、完整性状态、确认软删除、Task 聚合硬删除补偿，以及提交/审核/撤回/删除时间线。不可变 Artifact deletion tombstone 与删除事实同事务写入并在 Task 聚合删除后保留，供启动恢复判定授权删除。producer 来自活动 assignee，submitter/recorder/reviewer/withdrawer/deleter 为内置 owner。
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；Task Artifact 与 Client Attachment 共享受控 object 协议并由 schema v19 阻止 ID 冲突，无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<uuid>`，下载前复验 size 和 SHA-256。
@@ -88,6 +89,7 @@
 | --------------- | ---------------------------------------------------------------------- | ------------------------------------ |
 | Task            | 工作内容、生命周期、完成条件、验收策略、当前 Submission 指针、父子层级 | 收件箱已读/稍后、Agent 单次运行状态  |
 | Project         | 项目资料、客户关联、项目状态                                           | 手工维护的任务完成百分比             |
+| Project Note    | 项目人工上下文、记录时间、版本和软删除历史                             | Project 生命周期或系统命令审计       |
 | Client          | 客户资料、本地活动和受控附件元数据                                     | 重复存储项目数、已付款总额或文件正文 |
 | Inbox Item      | 事件来源、分诊、已读、稍后、解决策略                                   | Task 执行状态和负责人副本            |
 | Actor           | 本地责任主体身份和启停状态                                             | 某项任务的当前状态                   |
@@ -102,28 +104,28 @@
 
 ## 5. 功能模块协作总览
 
-| 模块                                       | 主要输入                                                                                   | 自己负责                                                                                                       | 主要输出 / 下游                                                                               |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| [今日](modules/today.md)                   | Task、Focus、Inbox 派生统计                                                                | 当日执行入口、聚合展示、完整计划组排序、同日/跨日期拖拽、版本化改期，以及受策略约束的生命周期/专注快捷操作     | 计划日期事实、源/目标组顺序结果、版本化开始/完成、绑定 Focus、打开收件箱                      |
-| [任务](modules/tasks.md)                   | Project、Actor、未来 Inbox 来源                                                            | 唯一工单、六态生命周期、完成条件、Submission/Artifact 与 manual 验收                                           | Project 进度、Task 事件、后续 Inbox 进度与 Focus 工时                                         |
-| [项目](modules/projects.md)                | Client、Task                                                                               | 当前已实现资料、受控生命周期、归档恢复、任务聚合和追加式写命令活动时间线                                       | 项目级产出聚合、附件、人工笔记和 Inbox 来源投影仍待实现；Task Artifact 已可从共享任务详情使用 |
-| [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                   | 当前已实现基础资料、状态、项目数/最近活动派生、Project 关联、人工时间线、Client Attachment 和显式 contact 关联 | 外部来源、回访、发票和 Inbox 来源仍属后续纵切                                                 |
-| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有/新建 Task；项目/Agent/其他系统投影待开发               | 已交付受理分诊、Reminder、Task 编排、自动结清/重开、强制例外和运营计数/风险深链                                | 输出 Event、实时进度及 Today/Sidebar 计数；更多来源待 T-11E                                   |
-| [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                 | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                         | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                      |
-| [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                              | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界    | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                         |
-| [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                    | 单次受控执行                                                                                                   | Agent Run、Task Artifact、待验收或失败事件                                                    |
-| [专注](modules/focus.md)                   | 当前 Task                                                                                  | 活动 Session 和有效工时                                                                                        | Task actual_minutes、今日/统计数据                                                            |
-| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health` 与数据维护 API | 本地偏好、person 管理、只读运行诊断、备份闭环和业务 JSON 下载；头像受控文件、导入与完整诊断待实现              | 布局、主题、Focus 默认值、Actor、运行版本、备份/导出和桌面行为                                |
-| [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                    | 参数化统一本地查找、确定性相关排序与快捷操作入口                                                               | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                          |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                          | 已实现 Task Artifact/Client Attachment 一致性、手动备份完整闭环和基础业务 JSON 导出；导入与含文件外部包仍规划  | 当前文件安全、已校验备份、恢复后的完整应用状态与业务 JSON；未来导入包与诊断包                 |
-| [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                    | 原生窗口、进程、权限、运行日志和发布                                                                           | 可运行、可诊断的本地应用环境                                                                  |
-| [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                | 财务与发票业务事实                                                                                             | 本地提醒、Inbox Item、客户聚合                                                                |
-| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                    | 本地回访计划与结果                                                                                             | Inbox 到期项、客户活动                                                                        |
-| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                      | 季度和里程碑规划                                                                                               | 临期/达成 Inbox 事件                                                                          |
-| [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                        | 内容计划和准备工作                                                                                             | 准备 Task、审核/发布时间 Inbox 事件                                                           |
-| [自动化](modules/automation.md)            | Workflow Event、本地时钟                                                                   | 预设规则和去重执行                                                                                             | 本地 Inbox Item、Task 或 Reminder                                                             |
-| [知识库](modules/knowledge-base.md)        | 本地文件                                                                                   | 导入、FTS 索引、来源定位和删除                                                                                 | 搜索结果、可选 AI 上下文                                                                      |
-| [AI 助手](modules/ai-assistant.md)         | 用户显式选择的本地上下文                                                                   | 本地问答、摘要和建议                                                                                           | 建议或待验收 Task Artifact                                                                    |
+| 模块                                       | 主要输入                                                                                   | 自己负责                                                                                                       | 主要输出 / 下游                                                                     |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [今日](modules/today.md)                   | Task、Focus、Inbox 派生统计                                                                | 当日执行入口、聚合展示、完整计划组排序、同日/跨日期拖拽、版本化改期，以及受策略约束的生命周期/专注快捷操作     | 计划日期事实、源/目标组顺序结果、版本化开始/完成、绑定 Focus、打开收件箱            |
+| [任务](modules/tasks.md)                   | Project、Actor、未来 Inbox 来源                                                            | 唯一工单、六态生命周期、完成条件、Submission/Artifact 与 manual 验收                                           | Project 进度、Task 事件、后续 Inbox 进度与 Focus 工时                               |
+| [项目](modules/projects.md)                | Client、Task                                                                               | 当前已实现资料、受控生命周期、归档恢复、任务聚合、可编辑人工笔记和追加式写命令活动时间线                       | 项目级产出聚合、附件和 Inbox 来源投影仍待实现；Task Artifact 已可从共享任务详情使用 |
+| [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                   | 当前已实现基础资料、状态、项目数/最近活动派生、Project 关联、人工时间线、Client Attachment 和显式 contact 关联 | 外部来源、回访、发票和 Inbox 来源仍属后续纵切                                       |
+| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期及已有/新建 Task；项目/Agent/其他系统投影待开发               | 已交付受理分诊、Reminder、Task 编排、自动结清/重开、强制例外和运营计数/风险深链                                | 输出 Event、实时进度及 Today/Sidebar 计数；更多来源待 T-11E                         |
+| [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                 | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                         | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续            |
+| [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                              | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界    | Task 时间线、Submission/Artifact 责任；未来 Agent Run                               |
+| [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                    | 单次受控执行                                                                                                   | Agent Run、Task Artifact、待验收或失败事件                                          |
+| [专注](modules/focus.md)                   | 当前 Task                                                                                  | 活动 Session 和有效工时                                                                                        | Task actual_minutes、今日/统计数据                                                  |
+| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health` 与数据维护 API | 本地偏好、person 管理、只读运行诊断、备份闭环和业务 JSON 下载；头像受控文件、导入与完整诊断待实现              | 布局、主题、Focus 默认值、Actor、运行版本、备份/导出和桌面行为                      |
+| [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                    | 参数化统一本地查找、确定性相关排序与快捷操作入口                                                               | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                          | 已实现 Task Artifact/Client Attachment 一致性、手动备份完整闭环和基础业务 JSON 导出；导入与含文件外部包仍规划  | 当前文件安全、已校验备份、恢复后的完整应用状态与业务 JSON；未来导入包与诊断包       |
+| [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                    | 原生窗口、进程、权限、运行日志和发布                                                                           | 可运行、可诊断的本地应用环境                                                        |
+| [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                | 财务与发票业务事实                                                                                             | 本地提醒、Inbox Item、客户聚合                                                      |
+| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                    | 本地回访计划与结果                                                                                             | Inbox 到期项、客户活动                                                              |
+| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                      | 季度和里程碑规划                                                                                               | 临期/达成 Inbox 事件                                                                |
+| [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                        | 内容计划和准备工作                                                                                             | 准备 Task、审核/发布时间 Inbox 事件                                                 |
+| [自动化](modules/automation.md)            | Workflow Event、本地时钟                                                                   | 预设规则和去重执行                                                                                             | 本地 Inbox Item、Task 或 Reminder                                                   |
+| [知识库](modules/knowledge-base.md)        | 本地文件                                                                                   | 导入、FTS 索引、来源定位和删除                                                                                 | 搜索结果、可选 AI 上下文                                                            |
+| [AI 助手](modules/ai-assistant.md)         | 用户显式选择的本地上下文                                                                   | 本地问答、摘要和建议                                                                                           | 建议或待验收 Task Artifact                                                          |
 
 ## 6. 跨模块主流程
 

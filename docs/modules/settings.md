@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v20。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17–v20 的保存视图、客户活动/附件/person 关联不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“数据与备份”已接一致性备份完整闭环与基础业务 JSON 下载，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据导入和完整桌面诊断入口仍是后续范围。
+> 文档状态：部分实现；当前 schema v21。v0.1-A 已交付由 schema v16 引入的版本化 `app_settings`、服务端 schema 清洗、GET/PATCH API、前端 Query 接入和旧设置按模块兼容迁移；schema v17–v21 的保存视图、客户活动/附件/person 关联和项目笔记不改变设置契约。Focus Core 已完成设置运行态解耦，“人员与责任”已接真实 Actor API，“数据与备份”已接一致性备份完整闭环与基础业务 JSON 下载，“关于”已接真实健康与版本事实。头像仍是仅保存在本地 WebView 的兼容 Data URL；受控头像文件、数据导入和完整桌面诊断入口仍是后续范围。
 
 ## 定位与边界
 
@@ -257,7 +257,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v20 延续。schema v12–v20 的 Inbox、Reminder、编排、设置、保存视图和客户扩展迁移不改变 Assignment 约束。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v21 延续。schema v12–v21 的 Inbox、Reminder、编排、设置、保存视图、客户扩展和项目笔记迁移不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除或业务 JSON 生成/下载后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、导出中/失败、挂起提示和 invalid 包均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。

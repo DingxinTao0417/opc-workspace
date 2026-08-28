@@ -824,6 +824,57 @@ export interface ProjectEventListResult {
   meta: ProjectEventListMeta;
 }
 
+export interface ProjectNoteActor {
+  id: string;
+  type: ActorType;
+  displayName: string;
+}
+
+export interface ProjectNote {
+  id: string;
+  projectId: string;
+  title: string;
+  body: string | null;
+  occurredAt: string;
+  createdBy: ProjectNoteActor;
+  version: number;
+  deletedAt: string | null;
+  deletedByActorId: string | null;
+  deleteReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+  projectVersion: number;
+}
+
+export interface ProjectNoteListParams {
+  page?: number;
+  pageSize?: number;
+  includeDeleted?: boolean;
+}
+
+export interface ProjectNoteListResult {
+  items: ProjectNote[];
+  meta: PageMeta & { projectVersion: number };
+}
+
+export interface CreateProjectNoteInput {
+  title: string;
+  body: string;
+  occurredAt: string;
+}
+
+export interface UpdateProjectNoteInput {
+  title?: string;
+  body?: string;
+  occurredAt?: string;
+  expectedVersion: number;
+}
+
+export interface DeleteProjectNoteInput {
+  reason: string;
+  expectedVersion: number;
+}
+
 export interface ProjectListParams {
   page?: number;
   pageSize?: number;

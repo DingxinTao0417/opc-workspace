@@ -20,6 +20,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
 import { ProjectEventsSection } from "../components/ProjectEventsSection";
+import { ProjectNotesSection } from "../components/ProjectNotesSection";
 import { TaskList } from "../components/TaskList";
 import { useUiStore } from "../store/ui";
 import type { ProjectStatus, ProjectTransitionAction } from "../types/models";
@@ -372,6 +373,11 @@ export function ProjectDetailPage() {
         ) : null}
       </section>
 
+      <ProjectNotesSection
+        archived={project.status === "archived"}
+        projectId={project.id}
+      />
+
       <ProjectEventsSection projectId={project.id} />
 
       {project.status === "archived" ? (
@@ -380,7 +386,9 @@ export function ProjectDetailPage() {
             <h2>永久删除</h2>
             <p>
               仅归档项目可永久删除；将解除 {project.taskSummary.total} 项任务和
-              {project.invoiceCount} 张发票的项目关联，业务记录本身不会被删除。
+              {project.invoiceCount}{" "}
+              张发票的项目关联；项目笔记将随项目永久删除，
+              任务和发票业务记录本身不会被删除。
             </p>
           </div>
           {confirmingDelete ? (

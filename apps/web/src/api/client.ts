@@ -42,6 +42,7 @@ import type {
   CreateBackupInput,
   CreateReminderInput,
   CreatePersonActorInput,
+  CreateProjectNoteInput,
   CreateTaskSavedViewInput,
   CreateTaskAssignmentInput,
   DeleteTaskArtifactInput,
@@ -84,11 +85,15 @@ import type {
   CancelReminderInput,
   NewTaskInput,
   DeleteProjectResult,
+  DeleteProjectNoteInput,
   DeleteClientResult,
   DeleteClientActivityInput,
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
   Project,
+  ProjectNote,
+  ProjectNoteListParams,
+  ProjectNoteListResult,
   ProjectInput,
   ProjectListParams,
   ProjectListResult,
@@ -154,6 +159,7 @@ import type {
   UpdateTaskSavedViewInput,
   UpdateTaskInput,
   UpdateProjectInput,
+  UpdateProjectNoteInput,
   UpdateReminderInput,
   UnlinkInboxItemTaskInput,
   WorkspaceSettingValue,
@@ -869,6 +875,115 @@ export function normalizeProjectEventListResult(
   };
   if (items.length > result.meta.pageSize || items.length > result.meta.total) {
     return invalidResponse("项目事件分页响应不一致");
+  }
+  return result;
+}
+
+export function normalizeProjectNote(value: unknown): ProjectNote {
+  if (!isRecord(value)) return invalidResponse("项目笔记响应格式无效");
+  const id = stringField(value, "id");
+  const projectId = stringField(value, "project_id", "projectId");
+  const title = stringField(value, "title");
+  const occurredAt = stringField(value, "occurred_at", "occurredAt");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  const rawCreatedBy = fieldValue(value, "created_by", "createdBy");
+  if (
+    !id ||
+    !projectId ||
+    !title ||
+    !occurredAt ||
+    !createdAt ||
+    !updatedAt ||
+    Number.isNaN(Date.parse(occurredAt)) ||
+    Number.isNaN(Date.parse(createdAt)) ||
+    Number.isNaN(Date.parse(updatedAt)) ||
+    !isRecord(rawCreatedBy)
+  ) {
+    return invalidResponse("项目笔记响应格式无效");
+  }
+  const createdById = stringField(rawCreatedBy, "id");
+  const createdByDisplayName = stringField(
+    rawCreatedBy,
+    "display_name",
+    "displayName",
+  );
+  if (!createdById || !createdByDisplayName) {
+    return invalidResponse("项目笔记记录人响应无效");
+  }
+  const body = clientOptionalString(value.body, "项目笔记正文");
+  const deletedAt = clientOptionalString(
+    fieldValue(value, "deleted_at", "deletedAt"),
+    "项目笔记删除时间",
+  );
+  const deletedByActorId = clientOptionalString(
+    fieldValue(value, "deleted_by_actor_id", "deletedByActorId"),
+    "项目笔记删除人",
+  );
+  const deleteReason = clientOptionalString(
+    fieldValue(value, "delete_reason", "deleteReason"),
+    "项目笔记删除原因",
+  );
+  if (
+    (deletedAt === null) !==
+      (deletedByActorId === null && deleteReason === null) ||
+    (deletedAt === null ? body === null : body !== null) ||
+    (deletedAt !== null && Number.isNaN(Date.parse(deletedAt)))
+  ) {
+    return invalidResponse("项目笔记状态响应不一致");
+  }
+  return {
+    id,
+    projectId,
+    title,
+    body,
+    occurredAt,
+    createdBy: {
+      id: createdById,
+      type: asActorType(rawCreatedBy.type),
+      displayName: createdByDisplayName,
+    },
+    version: positiveInteger(value.version, "项目笔记版本"),
+    deletedAt,
+    deletedByActorId,
+    deleteReason,
+    createdAt,
+    updatedAt,
+    projectVersion: positiveInteger(
+      fieldValue(value, "project_version", "projectVersion"),
+      "项目笔记对应项目版本",
+    ),
+  };
+}
+
+export function normalizeProjectNoteListResult(
+  value: unknown,
+): ProjectNoteListResult {
+  if (!isRecord(value) || !Array.isArray(value.data) || !isRecord(value.meta)) {
+    return invalidResponse("项目笔记列表响应格式无效");
+  }
+  const items = value.data.map(normalizeProjectNote);
+  const result: ProjectNoteListResult = {
+    items,
+    meta: {
+      page: positiveInteger(value.meta.page, "项目笔记页码"),
+      pageSize: positiveInteger(
+        fieldValue(value.meta, "page_size", "pageSize"),
+        "项目笔记每页数量",
+      ),
+      total: nonNegativeInteger(value.meta.total, "项目笔记总数"),
+      projectVersion: positiveInteger(
+        fieldValue(value.meta, "project_version", "projectVersion"),
+        "项目笔记对应项目版本",
+      ),
+    },
+  };
+  if (
+    items.length > result.meta.pageSize ||
+    items.length > result.meta.total ||
+    items.some((note) => note.projectVersion !== result.meta.projectVersion)
+  ) {
+    return invalidResponse("项目笔记分页响应不一致");
   }
   return result;
 }
@@ -4559,6 +4674,92 @@ export async function getProjectEvents(
     `/api/v1/projects/${encodeURIComponent(projectId)}/events?${params}`,
   );
   return normalizeProjectEventListResult(payload);
+}
+
+export async function getProjectNotes(
+  projectId: string,
+  input: ProjectNoteListParams = {},
+): Promise<ProjectNoteListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.includeDeleted) params.set("include_deleted", "true");
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/notes?${params}`,
+  );
+  const result = normalizeProjectNoteListResult(payload);
+  if (result.items.some((note) => note.projectId !== projectId)) {
+    return invalidResponse("项目笔记列表与请求项目不一致");
+  }
+  return result;
+}
+
+export async function getProjectNote(id: string): Promise<ProjectNote> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/project-notes/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeProjectNote(body);
+}
+
+export async function createProjectNote(
+  projectId: string,
+  input: CreateProjectNoteInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ProjectNote> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/notes`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({
+        title: input.title,
+        body: input.body,
+        occurred_at: input.occurredAt,
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeProjectNote(body);
+}
+
+export async function updateProjectNote(
+  id: string,
+  input: UpdateProjectNoteInput,
+): Promise<ProjectNote> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/project-notes/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.body === undefined ? {} : { body: input.body }),
+        ...(input.occurredAt === undefined
+          ? {}
+          : { occurred_at: input.occurredAt }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeProjectNote(body);
+}
+
+export async function deleteProjectNote(
+  id: string,
+  input: DeleteProjectNoteInput,
+): Promise<ProjectNote> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/project-notes/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeProjectNote(body);
 }
 
 export async function createProject(

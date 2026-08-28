@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v20（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v21（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 与 Client Attachment 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -32,6 +32,7 @@
 - schema v14 以加法迁移新增 `reminders`、稳定来源事件键、终态字段分组、触发投影引用一致性、身份/终态不可变与硬删除保护。v13→v14 不重建既有表、不改写业务事实，也不创建 demo Reminder。
 - schema v19 以加法迁移新增 `client_attachments` 与不可变 `client_attachment_deletion_tombstones`，复用同一受控 object root；双向 trigger 阻止与 Task Artifact object ID 冲突，并由附件新增/软删除传播 Client 聚合版本。v18→v19 不改写既有业务事实或创建 demo 数据。
 - schema v20 以加法迁移新增 `client_actor_links`、单 active contact、active person/owner 写入约束、不可变解除历史和 Client 版本传播。v19→v20 不把 `contact_name` 推断成 Actor，不改写既有事实或创建 demo 数据。
+- schema v21 以加法迁移新增 `project_notes`、稳定时间线索引、不可变身份/删除历史和 Project 聚合版本传播。v20→v21 不改写既有 Project 事实，也不创建笔记/demo 数据。
 - 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
@@ -49,7 +50,7 @@
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）与 objects 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
-- `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。白名单包含 `client_activities`、`client_attachments` 和 `client_actor_links` 的业务/历史元数据；表、列和行顺序稳定。Task/Client 文件元数据保留，正文不嵌入并以全部 active 受控文件数量/字节摘要声明。schema migrations、workspace identity、幂等响应、两类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
+- `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。白名单包含 `project_notes`、`client_activities`、`client_attachments` 和 `client_actor_links` 的业务/历史元数据；表、列和行顺序稳定。Task/Client 文件元数据保留，正文不嵌入并以全部 active 受控文件数量/字节摘要声明。schema migrations、workspace identity、幂等响应、两类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - 设置“数据与备份”提供业务 JSON 下载，以及备份说明、创建、加载/空/错误状态、摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后，桌面模式提供一键安全重启，浏览器开发模式明确提示手动停止并重启外部服务。长操作使用 180 秒客户端窗口。当前没有导入或含文件导出按钮，避免以无行为控件暗示能力。
 
 ### 仍未实现
@@ -150,14 +151,15 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 
 ## SQLite 迁移契约
 
-当前 schema v20：
+当前 schema v21：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
 - schema v17 以加法迁移新增版本化 `task_saved_views`；不改写 Task、设置或其他既有事实，也不创建默认视图/demo 数据。
 - schema v18 以加法迁移新增 `client_activities`、时间线索引、软删除与终态约束，以及 Client 聚合版本传播 trigger；不改写 Client/Task/设置等既有事实，也不创建活动/demo 数据。
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
-- schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。后续迁移从 `021_*` 继续。
+- schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
+- schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。后续迁移从 `022_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -177,7 +179,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `020_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `022_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
 
 ## v0.1 备份/恢复目标与当前进度
 
@@ -258,6 +260,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - [x] schema v18 嵌入迁移、v17→v18 业务事实保留、空活动表及来源/删除/终态/索引/外键/Client 版本传播约束已由迁移测试覆盖。
 - [x] schema v19 嵌入迁移、v18→v19 业务事实保留、空附件/墓碑表、活动同属/跨表 object ID/不可变/聚合删除/Client 版本传播约束已由迁移测试覆盖。
 - [x] schema v20 嵌入迁移、v19→v20 业务事实保留、空关系表、单 active contact、active person/owner、解除历史不可变、Client 版本传播和 Actor 停用保护已由迁移测试覆盖。
+- [x] schema v21 嵌入迁移、v20→v21 业务事实保留、空项目笔记表、身份/删除历史不可变、Project 版本传播与级联删除已由迁移测试覆盖。
 - [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
@@ -288,6 +291,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - [schema v10 Client 迁移](../../services/sidecar/internal/database/migrations/010_client_facts.sql)
 - [schema v19 Client Attachment 迁移](../../services/sidecar/internal/database/migrations/019_client_attachments.sql)
 - [schema v20 Client–Actor Link 迁移](../../services/sidecar/internal/database/migrations/020_client_actor_links.sql)
+- [schema v21 Project Note 迁移](../../services/sidecar/internal/database/migrations/021_project_notes.sql)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)
