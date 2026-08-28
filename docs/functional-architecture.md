@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.14
+> 文档版本：2.15
 > 日期：2026-08-28
-> 依据：[PRD v5.5](opc-workspace-PRD.md)
+> 依据：[PRD v5.6](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v20
 
 ## 1. 目的
@@ -69,13 +69,13 @@
 - `review_policy = manual` 已在 Task 新建和受限编辑中开放；策略只可在 todo 且没有任何 Submission 历史时改变。manual Task 具备活动 assignee 与 owner reviewer 后，可提交摘要以及 text/link/structured/file Artifact，进入 waiting_review，由 owner 接受或要求返工。
 - schema v9 和 UI 已交付 Submission/Artifact 历史、受控文件 store、安全下载、完整性状态、确认软删除、Task 聚合硬删除补偿，以及提交/审核/撤回/删除时间线。不可变 Artifact deletion tombstone 与删除事实同事务写入并在 Task 聚合删除后保留，供启动恢复判定授权删除。producer 来自活动 assignee，submitter/recorder/reviewer/withdrawer/deleter 为内置 owner。
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；Task Artifact 与 Client Attachment 共享受控 object 协议并由 schema v19 阻止 ID 冲突，无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<uuid>`，下载前复验 size 和 SHA-256。
-- Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）和 D1（历史与七日报告）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，七日趋势和 Streak 均由服务端事实派生；设置 committed/draft/preview 不改活动 Session。
+- Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与七日报告）和 D2a（Task 详情记录）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，七日趋势和 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus D2（任务详情记录、高级分析、原生通知/托盘/DND）、Client 外部活动来源/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。
+- 当前仍未实现 Focus D2b（高级分析、原生通知/托盘/DND）、Client 外部活动来源/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core+D1、手工 Inbox 受理/分诊、Reminder、Inbox Task 编排、基础备份闭环和业务 JSON 导出上，继续完成客户/项目增强、非 Reminder 来源投影、迁移前备份和桌面可靠性；Focus D2、重复/原生通知独立延后。
+- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core+D1+D2a、手工 Inbox 受理/分诊、Reminder、Inbox Task 编排、基础备份闭环和业务 JSON 导出上，继续完成客户/项目增强、非 Reminder 来源投影、迁移前备份和桌面可靠性；Focus D2b、重复/原生通知独立延后。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。

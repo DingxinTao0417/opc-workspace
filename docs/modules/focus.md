@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v20（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v20 不改 Focus 表契约。Focus Core v0.1-A/B/C 与 v0.1-D1（历史和七日报告）已经交付；任务详情记录、高级分析和原生桌面反馈属于 D2，尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v20（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v20 不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史和七日报告）与 D2a（Task 详情记录）已经交付；高级分析和原生桌面反馈属于 D2b，尚未交付。
 
 ## 定位与边界
 
@@ -39,9 +39,15 @@
 - 报告返回区间 distinct Session、精确秒数、向下取整分钟、逐日事实、截至 `date_to` 的当前连续天数，以及区间内最长连续天数；零事实日保留在序列中。
 - FocusPage 展示最近七日指标/柱形趋势、终态历史分页，以及独立的加载、错误、重试和空状态。Session 结束后自动失效 Today、周期报告与历史缓存。
 
-### 尚未实现：v0.1-D2 与后续增强
+### 已实现：v0.1-D2a Task 详情记录
 
-- Task 详情内的专注记录和自定义日期/月度报告。
+- Task 详情通过 D1 API 的 `task_id` 筛选按需读取终态 Session，默认不在 Modal 打开时抢占请求。
+- 每条记录展示 completed/cancelled/interrupted、实际累计时长和结束时间；分页切换不改 Task 草稿、版本或状态。
+- completed 表示已计入任务工时；cancelled/interrupted 只保留审计事实。读取失败仅影响本区块并提供重试。
+
+### 尚未实现：v0.1-D2b 与后续增强
+
+- 自定义日期/月度报告。
 - 项目/标签时间分布、热力图和最佳专注时段。
 - 原生本地通知、托盘控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。
 - 长休息策略、白噪音和网站屏蔽。
@@ -221,9 +227,14 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - 显式 IANA 时区的七日趋势、总块数/时长、当前和区间最长 Streak。
 - completed-only、跨午夜、DST、空数据和错误状态自动测试。
 
-### v0.1-D2：任务明细、高级报告与桌面反馈（未完成）
+### v0.1-D2a：Task 详情专注记录（已完成）
 
-- 任务详情记录、自定义月报、高级分布与热力图。
+- 按需读取、Task 筛选、状态/时长/结束时间、稳定分页。
+- 空状态、独立错误重试和 Task 草稿隔离测试。
+
+### v0.1-D2b：高级报告与桌面反馈（未完成）
+
+- 自定义月报、高级分布与热力图。
 - 原生通知、托盘、应用通知暂停与系统勿扰引导。
 - 真实桌面环境的后台挂起、休眠、异常退出与三平台矩阵；当前已有可控时钟、跨午夜、DST、并发和恢复自动测试，不能替代桌面验收。
 
@@ -256,5 +267,6 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [前端 Focus 时钟与循环](../../apps/web/src/store/focus.ts)
 - [全局 ticker](../../apps/web/src/components/FocusTicker.tsx)
 - [专注页面](../../apps/web/src/pages/FocusPage.tsx)
+- [Task 详情专注记录](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [恢复对话框](../../apps/web/src/components/FocusRecoveryModal.tsx)
 - [右侧概览](../../apps/web/src/components/RightOverview.tsx)

@@ -20,6 +20,7 @@ import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskEventsSection } from "./TaskEventsSection";
+import { TaskFocusHistorySection } from "./TaskFocusHistorySection";
 import { TaskLifecycleSection } from "./TaskLifecycleSection";
 import { TaskOutputsSection } from "./TaskOutputsSection";
 import { TaskTagPicker } from "./TaskTagPicker";
@@ -746,6 +747,7 @@ export function TaskDetailModal() {
             </div>
           </fieldset>
 
+          <TaskFocusHistorySection taskId={task.id} />
           <TaskEventsSection taskId={task.id} />
 
           {errorMessage ? (

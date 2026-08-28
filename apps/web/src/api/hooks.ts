@@ -1641,10 +1641,14 @@ export function useActiveFocusSessionQuery() {
   });
 }
 
-export function useFocusSessionHistoryQuery(input: FocusSessionListParams) {
+export function useFocusSessionHistoryQuery(
+  input: FocusSessionListParams,
+  enabled = true,
+) {
   return useQuery({
     queryKey: ["focus-sessions", "history", input],
     queryFn: () => getFocusSessions(input),
+    enabled,
     placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,

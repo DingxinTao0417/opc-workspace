@@ -5453,7 +5453,8 @@ kbd {
 }
 
 .task-lifecycle,
-.task-events {
+.task-events,
+.task-focus-history {
   margin-bottom: 16px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-subtle);
@@ -5461,6 +5462,7 @@ kbd {
 
 .task-lifecycle-heading,
 .task-events-heading,
+.task-focus-history-heading,
 .task-lifecycle-editor-heading {
   display: flex;
   align-items: flex-start;
@@ -5469,26 +5471,31 @@ kbd {
 }
 
 .task-lifecycle-heading,
-.task-events-heading {
+.task-events-heading,
+.task-focus-history-heading {
   margin: 0 2px 9px;
 }
 
 .task-lifecycle-heading h3,
 .task-lifecycle-heading p,
 .task-events-heading h3,
-.task-events-heading p {
+.task-events-heading p,
+.task-focus-history-heading h3,
+.task-focus-history-heading p {
   margin: 0;
 }
 
 .task-lifecycle-heading h3,
-.task-events-heading h3 {
+.task-events-heading h3,
+.task-focus-history-heading h3 {
   color: var(--text);
   font-size: 11px;
   font-weight: 600;
 }
 
 .task-lifecycle-heading p,
-.task-events-heading p {
+.task-events-heading p,
+.task-focus-history-heading p {
   margin-top: 2px;
   color: var(--text-dim);
   font-size: 9px;
@@ -5529,7 +5536,8 @@ kbd {
 .task-blocked-reason,
 .task-lifecycle-notice,
 .task-lifecycle-error,
-.task-events-error {
+.task-events-error,
+.task-focus-history-error {
   display: flex;
   align-items: flex-start;
   gap: 7px;
@@ -5556,12 +5564,14 @@ kbd {
 }
 
 .task-lifecycle-error,
-.task-events-error {
+.task-events-error,
+.task-focus-history-error {
   border-color: color-mix(in srgb, var(--danger-text) 28%, var(--border));
   color: var(--danger-text);
 }
 
-.task-events-error span {
+.task-events-error span,
+.task-focus-history-error span {
   min-width: 0;
   flex: 1;
 }
@@ -5615,11 +5625,17 @@ kbd {
   margin-top: 16px;
 }
 
-.task-events-heading {
+.task-focus-history {
+  margin-top: 16px;
+}
+
+.task-events-heading,
+.task-focus-history-heading {
   align-items: center;
 }
 
-.task-events-heading > .button {
+.task-events-heading > .button,
+.task-focus-history-heading > .button {
   height: 27px;
   padding: 0 6px;
   color: var(--text-muted);
@@ -5627,6 +5643,13 @@ kbd {
 }
 
 .task-events-panel {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.task-focus-history-panel {
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -5641,6 +5664,83 @@ kbd {
   gap: 6px;
   color: var(--text-dim);
   font-size: 9px;
+}
+
+.task-focus-history-state {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.task-focus-history-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-focus-history-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 0;
+}
+
+.task-focus-history-list li + li {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.task-focus-history-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--accent-light);
+}
+
+.task-focus-history-list li > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-focus-history-list strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.task-focus-history-list small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 8px;
+}
+
+.task-focus-history-list b {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.task-focus-history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-dim);
+  font-size: 8px;
 }
 
 .task-event-timeline {
@@ -8591,6 +8691,7 @@ kbd {
   .task-output-editor-heading,
   .task-artifact-card-heading,
   .task-events-heading,
+  .task-focus-history-heading,
   .task-lifecycle-editor-heading {
     align-items: stretch;
     flex-direction: column;
@@ -8624,7 +8725,8 @@ kbd {
   .task-lifecycle-editor-actions .button,
   .task-output-editor-actions .button,
   .task-review-actions .button,
-  .task-events-heading > .button {
+  .task-events-heading > .button,
+  .task-focus-history-heading > .button {
     width: 100%;
   }
 

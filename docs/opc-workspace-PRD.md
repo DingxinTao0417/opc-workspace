@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v5.5
+> **一人公司操作系统** · PRD v5.6
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v20
 
-> **v5.5 更新说明**：交付 Focus v0.1-D1 历史与周期报告纵切，不新增数据库迁移。新增稳定分页的终态 Session 历史 API，以及按显式 IANA 时区、自然日区间和已完成 interval overlap 派生的周期统计 API；Focus 页面接入最近七天趋势、总块数/分钟、当前与区间最长连续专注天数、历史分页及加载/错误/空状态。任务详情专注记录、高级分析、原生通知、托盘和系统勿扰仍属于后续 D2。
+> **v5.6 更新说明**：交付 Focus v0.1-D2a Task 详情专注记录。任务详情按需读取既有终态 Session API 的 `task_id` 筛选结果，展示 completed/cancelled/interrupted 状态、实际累计时长、结束时间和稳定分页，具备独立加载、错误重试和空状态；它不复制 Session、不改 Task 生命周期，也不把取消/中断计入工时。高级分析、原生通知、托盘和系统勿扰仍属于后续 D2b。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -286,7 +286,7 @@ pnpm dev
 - 任务行 hover/focus 时显示快速操作：当前已按状态提供开始、无需验收时完成和开始专注；编辑按钮直达共享详情，删除按钮打开独立确认弹窗并使用当前版本调用确认删除 API
 - 统计条的逾期及临期数字可点击，快速筛选对应任务
 - 日期 pill 点击可切换日期，查看过去/未来某天的任务安排
-- 连续专注天数与热力图属于 Focus D，当前未实现
+- 连续专注天数已由 Focus D1 交付；热力图仍属于后续高级分析
 
 ---
 
@@ -802,7 +802,7 @@ Actor 管理位于设置页。owner 和 system 为内置 Actor，不可删除；
 
 专注模式是核心差异化功能，提供无干扰的深度工作环境。
 
-> **当前状态**：Focus Core A+B+C 与 D1 已完成。schema v11、Session API、任务绑定、绝对时间快照、刷新/启动恢复、15 秒心跳、暂停/继续/停止/取消、精确工时记账、Today 当地日统计、终态历史、七日趋势和 Streak 已接通；任务详情专注记录、高级分析以及原生通知、托盘和勿扰集成未实现。
+> **当前状态**：Focus Core A+B+C、D1 与 D2a 已完成。schema v11、Session API、任务绑定、绝对时间快照、刷新/启动恢复、15 秒心跳、暂停/继续/停止/取消、精确工时记账、Today 当地日统计、终态历史、七日趋势、Streak 和 Task 详情记录已接通；高级分析以及原生通知、托盘和勿扰集成未实现。
 
 #### 番茄钟
 
@@ -817,14 +817,15 @@ Actor 管理位于设置页。owner 和 system 为内置 Actor，不可删除；
 - 可绑定任意非 cancelled Task，也可二次确认后无任务启动；只在 stop→completed 时累计绑定任务工时
 - Sidecar 每 15 秒刷新 active heartbeat；异常启动把遗留 active 变为 recovery_pending，用户必须选择计入间隔继续、排除间隔继续或按最后心跳中断
 - 当前任务高亮显示
-- 暂停应用内通知、原生通知、托盘状态和系统勿扰引导属于 Focus D2，当前未实现
+- 暂停应用内通知、原生通知、托盘状态和系统勿扰引导属于 Focus D2b，当前未实现
 - 白噪音和网站阻断属于后续候选，不在当前交付范围
 
 #### 专注统计
 
 - **已实现**：Today 按请求 IANA 时区的本地自然日统计完成 Session 数、精确秒数和向下取整的分钟数；按已关闭 interval 与日边界的实际 overlap 计算，跨午夜和 DST 不漂移，且只计 `completed`
 - **已实现 D1**：终态 Session 历史 UI/API；最近七个本地自然日的总块数、精确秒/分钟、每日趋势、当前连续天数和区间最长连续天数
-- **Focus D2 延后**：任务详情专注记录、月报与热力图、项目/标签分布、最佳专注时段、原生桌面反馈
+- **已实现 D2a**：Task 详情按需展示该任务的终态 Session、累计时长、结束时间和分页；取消/中断仅作审计展示
+- **Focus D2b 延后**：自定义月报与热力图、项目/标签分布、最佳专注时段、原生桌面反馈
 
 #### 专注设置模态框
 
@@ -936,7 +937,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v5.5 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v5.6 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1518,7 +1519,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v5.5 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v5.6 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1568,7 +1569,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 项目管理         | 项目卡片、状态流转、项目进度、项目详情（任务列表）                                         | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务派生进度/工时和客户选择/筛选已实现；产出/附件/事件/Inbox 集成待实现                                                                                                                                              |
 | 客户管理         | 客户列表表格、客户详情、基本 CRUD                                                          | **部分完成**：基础资料 CRUD、分页/搜索/状态筛选/排序、创建幂等、并发控制、基础详情、受约束删除、Project 关联、本地活动、受控附件和 person 显式关联已实现；外部来源投影、回访和财务待实现                                                                                                                                  |
 | 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决   | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；非 Reminder 来源投影待实现                                                                                                                                                                      |
-| 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                 | **Core A+B+C 与 D1 已完成，D2 延后**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总、终态历史、七日趋势与 Streak 已实现；任务详情记录、高级分析、原生通知/托盘/DND 待实现                                                                                                   |
+| 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                 | **Core A+B+C、D1、D2a 已完成，D2b 延后**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总、终态历史、七日趋势、Streak 与 Task 详情记录已实现；高级分析、原生通知/托盘/DND 待实现                                                                                              |
 | 全局功能         | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查                    | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现                                                                                                                                                                                                      |
 | 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控文件、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v20、重建迁移安全、设置/保存视图/客户活动/附件/person 关联事实、数据库身份强绑定和共享受控文件 store 已实现；手动 SQLite+受控文件备份完整闭环、桌面一键安全重启及基础业务 JSON 导出已交付；迁移前备份、恢复诊断、数据导入和含文件导出包仍待实现；每日计划和高级导入归 v0.3 |
 
@@ -1743,7 +1744,7 @@ pnpm dev
 | T-09 客户管理                        | 部分完成         | 基础资料 CRUD、列表/详情、创建幂等、乐观锁、删除约束、项目数聚合、Project 客户关联、本地活动、受控附件和 person 显式关联已交付；外部来源投影、回访/财务待实现                                                                                                                                         |
 | T-10 收入、支出与发票                | 页面骨架         | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                                                                                                                                               |
 | T-11 收件箱与工作编排中心            | 部分完成         | T-11A1/A2/A3/B/C/F 已交付受理分诊、Reminder、Task 关系与拆分编排、Today/Sidebar 运营计数；非 Reminder 来源投影待实现                                                                                                                                                                                  |
-| T-12 专注设置与全局计时              | Core+D1 完成     | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1：终态历史分页、七日本地日趋势及当前/最长 Streak 已交付；D2 的任务详情记录、高级分析、通知/托盘/DND 延后                                                                             |
+| T-12 专注设置与全局计时              | Core+D1+D2a 完成 | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1：终态历史分页、七日本地日趋势及当前/最长 Streak；D2a：Task 详情按需专注记录已交付；D2b 的高级分析、通知/托盘/DND 延后                                                               |
 | T-13 命令面板与基础反馈              | 部分完成         | WebView 快捷键、已交付页面命令、服务端 Task 搜索/详情打开、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护及加载/错误/重试/空状态                                                                                                                                                             |
 | T-14 设置持久化                      | 核心闭环完成     | schema v16、四模块严格 schema、原子 PATCH、乐观锁、Query committed、启动门禁、旧值迁移和数据备份/恢复/删除/业务 JSON 下载已交付；受控头像文件、数据导入待开发                                                                                                                                         |
 | T-20 测试、构建与桌面验收            | 部分完成         | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制                                                                                                                                                                                                                                       |
@@ -1866,12 +1867,12 @@ pnpm dev
 #### 10.4.12 T-12 专注设置与全局计时
 
 - **需求映射**：5.7。
-- **完成范围**：Core A 事实迁移、Core B API/状态机/事务、Core C 前端接入与恢复，以及 D1 终态历史/七日报告已完成；D2 任务详情记录、高级分析和系统集成延后。Today 与周期 completed-only 统计属于已交付闭环。
+- **完成范围**：Core A 事实迁移、Core B API/状态机/事务、Core C 前端接入与恢复、D1 终态历史/七日报告和 D2a Task 详情记录已完成；D2b 高级分析和系统集成延后。Today 与周期 completed-only 统计属于已交付闭环。
 - **用户流程**：用户在 Focus 页选择非 cancelled Task 或二次确认无绑定启动；可暂停、继续、停止完成或取消。刷新会重新查询服务端活动 Session；启动发现 recovery_pending 时全局不可关闭弹窗要求选择计入间隔继续、排除间隔继续或中断。Focus 页齿轮和命令面板“专注设置”均直达 focus 设置。
 - **实现方法**：schema v11 以 `focus_sessions`、`focus_session_intervals`、`task_focus_totals` 保存事实。API 快照统一返回 `session/server_now/elapsed_seconds/remaining_seconds` 并为 Session 返回 ETag；现有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`。Sidecar 启动把 active 转为 recovery_pending，每 15 秒刷新 heartbeat 且不递增 version。stop→completed 在一个事务内结算 interval、累计精确秒数、只把新增完整分钟写入 Task并每次递增 Task version；只有 `actual_minutes` 实际增加时既有 trigger 才递增 Project 聚合版本。cancel/interrupted 不入账。终态历史按 `ended_at DESC, id ASC` 分页；周期统计按显式 IANA 时区将 completed interval overlap 切到 1–93 个本地日，并派生 distinct Session、秒/分钟和 Streak。前端 TanStack Query 共享活动、历史与报告快照，本地 persist store 只保存 work/break/cycle 编排与绝对休息截止时间。
 - **设置隔离**：Query 确认的服务端快照是 committed，`SettingsModal` 表单是 draft，store `preview` 只控制可逆预览；Zustand persist 仅兼容保存头像。Session 创建和全局 ticker 读取 committed；draft/preview 的修改、保存或取消都不改变活动 Session 的服务端计划时长与进度。
-- **关键路径**：`services/sidecar/internal/database/migrations/011_focus_sessions.sql`、`internal/api/focus_sessions.go`、`internal/api/focus_history.go`、`internal/api/stats.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`store/settings.ts`、`store/focus.ts`、`components/FocusTicker.tsx`、`components/FocusRecoveryModal.tsx`、`pages/FocusPage.tsx`。
-- **验证/当前限制**：自动化测试覆盖迁移、状态机、绝对时间、心跳、恢复、并发创建/停止、幂等重放、事务回滚、跨 Session 余秒、Task/Project 版本、历史筛选/分页，以及 IANA/DST/跨午夜 completed-only 日与周期统计和 Streak。Focus 参数已从 SQLite committed 读取；任务详情专注记录、高级分析、原生通知、托盘和系统勿扰仍未实现，真实三平台后台/睡眠场景仍需桌面验收。
+- **关键路径**：`services/sidecar/internal/database/migrations/011_focus_sessions.sql`、`internal/api/focus_sessions.go`、`internal/api/focus_history.go`、`internal/api/stats.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`store/settings.ts`、`store/focus.ts`、`components/FocusTicker.tsx`、`components/FocusRecoveryModal.tsx`、`components/TaskFocusHistorySection.tsx`、`pages/FocusPage.tsx`。
+- **验证/当前限制**：自动化测试覆盖迁移、状态机、绝对时间、心跳、恢复、并发创建/停止、幂等重放、事务回滚、跨 Session 余秒、Task/Project 版本、历史筛选/分页、Task 详情按需读取/翻页/错误隔离，以及 IANA/DST/跨午夜 completed-only 日与周期统计和 Streak。Focus 参数已从 SQLite committed 读取；高级分析、原生通知、托盘和系统勿扰仍未实现，真实三平台后台/睡眠场景仍需桌面验收。
 
 #### 10.4.13 T-13 命令面板、快捷键与反馈状态
 
@@ -1895,7 +1896,7 @@ pnpm dev
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v5.5 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v5.6 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -2005,7 +2006,7 @@ pnpm build:desktop
 2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除、任务聚合和 Client 选择/筛选已交付；继续验证大数据量串行分页、真实浏览器/窄屏/焦点，并保留项目附件/事件/Inbox 为明确缺口。
 3. **收口客户基础事实并推进真实扩展**：schema v10、Client CRUD/搜索/删除约束、基础详情和 Project 客户关联，schema v18 人工活动时间线、schema v19 受控附件，以及 schema v20 person 显式关联已交付；继续做真实浏览器/大数据量验收，再按独立纵切实现外部来源投影。回访与财务仍属于 v0.4。
 4. **继续收件箱人工编排**：T-11A1/T-11B 的手工受理分诊与 T-11A2 的已有 Task 关系、实时进度、软解除、状态联动和删除互锁已交付；下一步可独立实现 Reminder，再做 T-11C 批量拆分/Assignment/统一 reconciliation 与自动解决，最后接项目产出、任务临期/阻塞和系统故障来源投影。
-5. **扩展 Focus D2**：Core A+B+C 与 D1 的持久化、恢复、精确工时、Today 统计、终态历史、七日趋势和 Streak 已交付；后续独立实现任务详情专注记录、高级分析和经平台验收的原生通知、托盘、DND 引导。
+5. **扩展 Focus D2b**：Core A+B+C、D1 与 D2a 的持久化、恢复、精确工时、Today 统计、终态历史、七日趋势、Streak 和 Task 详情记录已交付；后续独立实现高级分析和经平台验收的原生通知、托盘、DND 引导。
 6. **补数据安全链路**：手动一致性备份的创建、列表、完整校验、维护写锁、原子发布、隔离演练、恢复前回滚点、重启原子恢复、桌面一键安全重启、确认删除与基础业务 JSON 导出已经交付；下一步依次实现迁移前自动备份、诊断包内容选择、数据导入和含文件导出包。
 7. **补桌面可靠性与发布能力**：Sidecar 故障恢复、统一日志落盘/轮转、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页逐项最小授权实现。
 8. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、复用 D2 产出命令、取消/重试和审核返工。
@@ -2303,3 +2304,4 @@ pnpm build:desktop
 | v5.3     | 2026-08-28 | 将基线推进到 schema v19，交付 Client 受控附件纵切：metadata-first multipart 幂等上传、稳定分页、同客户活动关联、完整性校验下载、带原因软删除与只读历史；共享受控 store、启动协调、Client 硬删除、备份/恢复和业务 JSON 导出统一覆盖 Task Artifact 与 Client Attachment，客户详情接入真实附件交互；来源投影、Actor 关联与 v0.4 回访/财务继续独立实现 |
 | v5.4     | 2026-08-28 | 将基线推进到 schema v20，交付 Client–person 显式关联：已有 active person 与原子新建二选一、单 active contact、Client 乐观锁和幂等快照、带原因解除与不可变历史、Actor 停用保护、Client 删除边界和业务 JSON 导出；客户详情接入本地责任关联 UI，明确不创建账号/消息/权限；外部来源投影及 v0.4 回访/财务继续独立实现                                   |
 | v5.5     | 2026-08-28 | 交付 Focus v0.1-D1：终态 Session 稳定分页与可选状态/任务筛选、显式 IANA 时区 1–93 日本地日周期统计、completed interval overlap、每日与区间 distinct Session、当前/最长 Streak，以及 Focus 页面七日趋势、历史分页和完整反馈状态；schema 保持 v20，原生通知/托盘/DND 与高级分析独立延后                                                              |
+| v5.6     | 2026-08-28 | 交付 Focus v0.1-D2a：Task 详情按需读取 task-filtered 终态 Session，展示 completed/cancelled/interrupted、实际累计时长、结束时间、稳定分页及独立加载/错误/空状态；复用 D1 API 和事实，不新增表、不复制状态、不把取消/中断计入工时；高级分析和原生桌面反馈归 D2b                                                                                     |

@@ -4,7 +4,7 @@
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1 六状态生命周期与时间线、T-18D D2 manual Submission/Artifact 提交验收、Focus Core 工时回写、Inbox 对已有 Task 的关系、T-11C 批量拆分/分派/自动结清，以及一次性 Reminder 均已交付。Task 来源消费/自动建 Reminder、本地 Agent Run、Focus 历史分析和任务看板属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.5](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v5.6](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -35,6 +35,7 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - 成功写入会立即失效 Task、Submission、Artifact、Assignment、Event、Project 和 Today 相关 Query，避免等待缓存自然过期。
 - Task 时间线已覆盖策略变化、提交、接受、返工、等待验收时撤回、Artifact 删除及 v9 迁移回填文案。
 - 绑定 Task 的 Focus Session 只有 stop→completed 才把精确秒数写入 `task_focus_totals`，再把新增完整分钟追加到 `actual_minutes`；余秒跨 Session 保留，cancel/interrupted 不入账，也不改变 Task 生命周期。
+- Task 详情可按需分页读取该任务的终态 Focus Session；completed 显示为已计入工时，cancelled/interrupted 仅作审计展示，读取或翻页不会修改 Task 草稿、版本或生命周期。
 - Task 存在 active/paused/recovery_pending Focus Session 时，硬删除返回 `409 TASK_HAS_OPEN_FOCUS_SESSION`；Session 进入终态后可删除 Task，历史 Session 的 `task_id` 自动置空。
 - Task 存在任一活动 Inbox 关系时，硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，不会移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除。已解除历史关系的实时 `task_id` 随删除置空，但原 Task UUID/标题快照继续保留。
 
@@ -313,6 +314,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 - [schema v17 保存视图迁移](../../services/sidecar/internal/database/migrations/017_task_saved_views.sql)
 - [Task output model](../../services/sidecar/internal/models/artifact.go)
 - [前端 Task output 组件](../../apps/web/src/components/TaskOutputsSection.tsx)
+- [前端 Task 专注记录组件](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [任务列表页](../../apps/web/src/pages/TasksPage.tsx)
 - [任务保存视图控件](../../apps/web/src/components/TaskSavedViewsControl.tsx)
 - [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
