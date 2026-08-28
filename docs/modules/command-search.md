@@ -1,6 +1,6 @@
 # 命令面板与全局搜索模块
 
-> 文档状态：核心本地搜索已实现；最近使用、健康诊断和 OS 全局快捷键仍待后续纵切。
+> 文档状态：核心本地搜索、详情直达和本地最近使用已实现；健康诊断和 OS 全局快捷键仍待后续纵切。
 
 ## 定位与边界
 
@@ -29,12 +29,14 @@
 - 输入 200 ms 后调用统一 `GET /api/v1/search`，一次搜索真实 Task、Project、Client 和活动 Inbox Item；命令面板读取首 12 条并通过稳定详情路由打开精确资源。
 - 业务搜索具备加载、错误、重试和空结果反馈；页面与安全本地命令不依赖 Sidecar 搜索成功。
 - Task 使用 `/tasks/:taskId`、Project 使用 `/projects/:projectId`、Client 使用 `/clients/:clientId`、Inbox 使用 `/inbox/:inboxItemId`；Task 与 Inbox 路由刷新后会恢复同一详情弹窗，不存在资源由详情查询明确报错。
+- 空查询优先展示最近使用。浏览器/WebView 本地记录最多 8 条命令或资源身份，保留 90 天；记录只含命令 ID 或资源类型/ID，不保存搜索词、标题、摘要或业务正文。
+- 面板打开时重新读取最近资源的本地详情；已删除资源确认返回 404 后自动清理记录，服务暂时不可用时保留记录但不伪造资源内容。
 - 上下方向键、Enter、Escape、鼠标 hover 和空结果反馈；输入框使用 combobox/listbox 活动项关联。
 - 打开时聚焦搜索框并锁定背景滚动，Tab/Shift+Tab 圈闭在面板内，关闭后恢复原触发元素焦点；输入法组合期间忽略执行和 WebView 全局快捷键。
 
 当前限制：
 
-- 第一阶段使用参数化 LIKE 基线，不是模糊搜索，也没有关键词高亮或最近使用。
+- 第一阶段使用参数化 LIKE 基线，不是模糊搜索，也没有关键词高亮。
 - 命令面板只读取统一搜索第一页 12 条；结果更多时需要继续输入关键词，API 本身支持稳定分页和类型筛选。
 - 发票、财务和知识库不在当前搜索类型中，只有对应模块真实交付后才会注册。
 - AppShell 虽每 15 秒查询健康状态，但命令面板不展示服务不可用或恢复动作。
@@ -155,7 +157,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - desktop_shortcut_invoked：由 Tauri 发给 WebView。
 - sidecar_state_changed：使依赖服务的命令即时启用或禁用。
 
-最近使用可以作为非敏感 app_settings 子项或独立有上限的本地表；必须定义容量、清理和删除资源后的处理，不能无限增长。
+已实现的最近使用为浏览器/WebView 本地键 `opc-command-recents-v1`：只记录 8 条最近命令 ID 或资源类型/ID，90 天后清理；空查询时在固定命令前展示。资源标题在展示前按当前本地 API 重新读取，确认 404 则删除记录，避免把已删资源作为可执行结果；不保存搜索词、标题、摘要或正文。
 
 ## 与其他模块协作
 
@@ -182,11 +184,11 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - **已完成**：分页、类型筛选、参数化/转义查询、确定性相关性排序和输入/返回上限测试。
 - **已完成**：命令面板改用统一 API，不再以 Task 列表接口充当全局搜索。
 
-### v0.1-C：详情直达与健康反馈（详情路由已交付）
+### v0.1-C：详情直达、最近使用与健康反馈（部分完成）
 
 - **已完成**：为 Task、Project、Client 和 Inbox 建立稳定详情路由和不存在状态。
+- **已完成**：本地有上限的最近使用、空查询优先排序和已删除资源的 404 清理。
 - 接入 Sidecar health/version，提供搜索重试和诊断入口。
-- 记录有上限的最近使用，并处理资源删除与归档。
 
 ### 桌面与后续版本
 
@@ -209,6 +211,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - 参数化查询、输入长度、分页和性能边界有测试；特殊字符不会形成 SQL 注入。
 - OS 全局快捷键只有在平台实际注册成功后才显示为可用。
 - 搜索契约、空结果、错误、重试、键盘导航、焦点行为和稳定详情路由有自动化测试；真实浏览器/WebView 视觉与焦点仍需人工验收。
+- 最近使用的容量、去重、过期、非敏感存储和 404 删除清理有自动化测试。
 
 ## 相关代码/PRD链接
 
@@ -216,6 +219,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - [PRD：T-13 命令面板、快捷键与反馈状态](../opc-workspace-PRD.md#10413-t-13-命令面板快捷键与反馈状态)
 - [PRD：全局快捷键](../opc-workspace-PRD.md#85-全局快捷键)
 - [当前命令面板](../../apps/web/src/components/CommandPalette.tsx)
+- [最近使用本地存储](../../apps/web/src/store/commandRecents.ts)
 - [统一搜索 API](../../services/sidecar/internal/api/search.go)
 - [统一搜索 API 测试](../../services/sidecar/internal/api/search_test.go)
 - [当前 WebView 快捷键](../../apps/web/src/App.tsx)

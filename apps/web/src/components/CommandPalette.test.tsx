@@ -8,13 +8,34 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { ApiError } from "../api/client";
+import {
+  clearCommandRecentsForTests,
+  loadCommandRecents,
+  recordCommandRecent,
+} from "../store/commandRecents";
 import { useUiStore } from "../store/ui";
 import { CommandPalette } from "./CommandPalette";
 
 const mocks = vi.hoisted(() => ({
   searchQuery: vi.fn(),
   refetch: vi.fn(),
+  getTask: vi.fn(),
+  getProject: vi.fn(),
+  getClient: vi.fn(),
+  getInboxItem: vi.fn(),
 }));
+
+vi.mock("../api/client", async (importActual) => {
+  const actual = await importActual<typeof import("../api/client")>();
+  return {
+    ...actual,
+    getTask: mocks.getTask,
+    getProject: mocks.getProject,
+    getClient: mocks.getClient,
+    getInboxItem: mocks.getInboxItem,
+  };
+});
 
 vi.mock("../api/hooks", () => ({
   useSearchQuery: mocks.searchQuery,
@@ -42,6 +63,7 @@ describe("CommandPalette", () => {
     cleanup();
     vi.useRealTimers();
     vi.clearAllMocks();
+    clearCommandRecentsForTests();
     useUiStore.setState({
       commandPaletteOpen: false,
       settingsOpen: false,
@@ -108,6 +130,57 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("option", { name: /发票/ })).toBeNull();
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
+  });
+
+  it("shows and reruns bounded local recent commands before fixed commands", () => {
+    recordCommandRecent([], { kind: "command", commandId: "today" });
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+        <CurrentLocation />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("最近使用")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("option", { name: /今日/ })[0]);
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/today");
+  });
+
+  it("removes a stale recent resource after the local API confirms 404", async () => {
+    recordCommandRecent([], {
+      kind: "resource",
+      resourceType: "task",
+      resourceId: "deleted-task",
+    });
+    mocks.getTask.mockRejectedValue(
+      new ApiError("任务不存在", { status: 404, code: "TASK_NOT_FOUND" }),
+    );
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(mocks.getTask).toHaveBeenCalledWith("deleted-task"),
+    );
+    await waitFor(() => expect(loadCommandRecents()).toEqual([]));
   });
 
   it("opens the requested settings module directly", () => {

@@ -11,9 +11,22 @@ import {
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  ApiError,
+  getClient,
+  getInboxItem,
+  getProject,
+  getTask,
+} from "../api/client";
 import { useSearchQuery } from "../api/hooks";
+import {
+  loadCommandRecents,
+  recordCommandRecent,
+  removeCommandRecent,
+  type CommandRecent,
+} from "../store/commandRecents";
 import { useUiStore, type SettingsModule } from "../store/ui";
 import type { SearchResourceType } from "../types/models";
 
@@ -23,6 +36,15 @@ interface Command {
   hint: string;
   icon: LucideIcon;
   run: () => void;
+}
+
+interface RecentResourceCommand {
+  resourceType: SearchResourceType;
+  resourceId: string;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  route: string;
 }
 
 const focusableSelector = [
@@ -58,6 +80,58 @@ const searchResourcePresentation: Record<
   inbox_item: { label: "收件箱", icon: Inbox },
 };
 
+async function resolveRecentResource(
+  recent: Extract<CommandRecent, { kind: "resource" }>,
+): Promise<RecentResourceCommand> {
+  const presentation = searchResourcePresentation[recent.resourceType];
+  switch (recent.resourceType) {
+    case "task": {
+      const task = await getTask(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: task.title,
+        hint: `本地${presentation.label} · ${task.status}`,
+        icon: presentation.icon,
+        route: `/tasks/${task.id}`,
+      };
+    }
+    case "project": {
+      const project = await getProject(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: project.name,
+        hint: `本地${presentation.label} · ${project.status}`,
+        icon: presentation.icon,
+        route: `/projects/${project.id}`,
+      };
+    }
+    case "client": {
+      const client = await getClient(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: client.name,
+        hint: `本地${presentation.label} · ${client.status}`,
+        icon: presentation.icon,
+        route: `/clients/${client.id}`,
+      };
+    }
+    case "inbox_item": {
+      const item = await getInboxItem(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: item.title,
+        hint: `本地${presentation.label} · ${item.status}`,
+        icon: presentation.icon,
+        route: `/inbox/${item.id}`,
+      };
+    }
+  }
+}
+
 export function CommandPalette() {
   const open = useUiStore((state) => state.commandPaletteOpen);
   const setOpen = useUiStore((state) => state.setCommandPaletteOpen);
@@ -67,6 +141,12 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [recents, setRecents] = useState<CommandRecent[]>(() =>
+    loadCommandRecents(),
+  );
+  const [recentResources, setRecentResources] = useState<
+    RecentResourceCommand[]
+  >([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const normalizedQuery = query.trim();
@@ -75,7 +155,27 @@ export function CommandPalette() {
     open && searchQuery.length > 0,
   );
 
-  const closeAndNavigate = (to: string) => {
+  const recordRecentCommand = useCallback((commandId: string) => {
+    setRecents((current) =>
+      recordCommandRecent(current, { kind: "command", commandId }),
+    );
+  }, []);
+
+  const recordRecentResource = useCallback(
+    (resourceType: SearchResourceType, resourceId: string) => {
+      setRecents((current) =>
+        recordCommandRecent(current, {
+          kind: "resource",
+          resourceType,
+          resourceId,
+        }),
+      );
+    },
+    [],
+  );
+
+  const closeAndNavigate = (to: string, commandId?: string) => {
+    if (commandId) recordRecentCommand(commandId);
     setOpen(false);
     navigate(to);
   };
@@ -87,42 +187,42 @@ export function CommandPalette() {
         label: "今日",
         hint: "页面",
         icon: Sun,
-        run: () => closeAndNavigate("/today"),
+        run: () => closeAndNavigate("/today", "today"),
       },
       {
         id: "inbox",
         label: "收件箱",
         hint: "页面",
         icon: Inbox,
-        run: () => closeAndNavigate("/inbox"),
+        run: () => closeAndNavigate("/inbox", "inbox"),
       },
       {
         id: "tasks",
         label: "任务",
         hint: "页面",
         icon: CheckSquare2,
-        run: () => closeAndNavigate("/tasks"),
+        run: () => closeAndNavigate("/tasks", "tasks"),
       },
       {
         id: "projects",
         label: "项目",
         hint: "页面",
         icon: FolderKanban,
-        run: () => closeAndNavigate("/projects"),
+        run: () => closeAndNavigate("/projects", "projects"),
       },
       {
         id: "clients",
         label: "客户",
         hint: "页面",
         icon: Users,
-        run: () => closeAndNavigate("/clients"),
+        run: () => closeAndNavigate("/clients", "clients"),
       },
       {
         id: "focus",
         label: "专注",
         hint: "页面",
         icon: Focus,
-        run: () => closeAndNavigate("/focus"),
+        run: () => closeAndNavigate("/focus", "focus"),
       },
       {
         id: "new-task",
@@ -130,6 +230,7 @@ export function CommandPalette() {
         hint: "操作 · ⌘N",
         icon: Plus,
         run: () => {
+          recordRecentCommand("new-task");
           setOpen(false);
           setNewTaskOpen(true);
         },
@@ -140,13 +241,14 @@ export function CommandPalette() {
         hint: `设置 · ${label === "打开设置" ? "通用" : label.replace(/设置$/, "")}`,
         icon: Settings2,
         run: () => {
+          recordRecentCommand(id);
           setOpen(false);
           setSettingsOpen(true, module);
         },
       })),
     ];
     return pageCommands;
-  }, [navigate, setNewTaskOpen, setOpen, setSettingsOpen]);
+  }, [navigate, recordRecentCommand, setNewTaskOpen, setOpen, setSettingsOpen]);
 
   const resourceCommands = useMemo<Command[]>(() => {
     const resourceSource = resourcesQuery.data?.items ?? [];
@@ -156,11 +258,62 @@ export function CommandPalette() {
       hint: `本地${searchResourcePresentation[resource.resourceType].label} · ${resource.subtitle || resource.status}`,
       icon: searchResourcePresentation[resource.resourceType].icon,
       run: () => {
+        recordRecentResource(resource.resourceType, resource.resourceId);
         setOpen(false);
         navigate(resource.route);
       },
     }));
-  }, [navigate, resourcesQuery.data, setOpen]);
+  }, [navigate, recordRecentResource, resourcesQuery.data, setOpen]);
+
+  const recentResourceRecords = useMemo(
+    () =>
+      recents.filter(
+        (recent): recent is Extract<CommandRecent, { kind: "resource" }> =>
+          recent.kind === "resource",
+      ),
+    [recents],
+  );
+
+  useEffect(() => {
+    if (!open || recentResourceRecords.length === 0) {
+      if (!open) setRecentResources([]);
+      return;
+    }
+    let current = true;
+    void Promise.all(
+      recentResourceRecords.map(async (recent) => {
+        try {
+          return await resolveRecentResource(recent);
+        } catch (error) {
+          return error instanceof ApiError && error.status === 404
+            ? { stale: recent }
+            : null;
+        }
+      }),
+    ).then((resolved) => {
+      if (!current) return;
+      const stale = resolved.flatMap((entry) =>
+        entry && "stale" in entry ? [entry.stale] : [],
+      );
+      if (stale.length) {
+        setRecents((stored) =>
+          stale.reduce(
+            (currentRecents, recent) =>
+              removeCommandRecent(currentRecents, recent),
+            stored,
+          ),
+        );
+      }
+      setRecentResources(
+        resolved.filter((entry): entry is RecentResourceCommand =>
+          Boolean(entry && !("stale" in entry)),
+        ),
+      );
+    });
+    return () => {
+      current = false;
+    };
+  }, [open, recentResourceRecords]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -172,9 +325,80 @@ export function CommandPalette() {
     );
   }, [commands, query]);
 
+  const recentCommands = useMemo<Command[]>(() => {
+    const commandsByID = new Map(
+      commands.map((command) => [command.id, command]),
+    );
+    const resourcesByKey = new Map(
+      recentResources.map((resource) => [
+        `${resource.resourceType}:${resource.resourceId}`,
+        resource,
+      ]),
+    );
+    return recents.flatMap((recent) => {
+      if (recent.kind === "command") {
+        const command = commandsByID.get(recent.commandId);
+        return command
+          ? [
+              {
+                ...command,
+                id: `recent-command-${command.id}`,
+                hint: `最近使用 · ${command.hint}`,
+              },
+            ]
+          : [];
+      }
+      const resource = resourcesByKey.get(
+        `${recent.resourceType}:${recent.resourceId}`,
+      );
+      if (!resource) return [];
+      return [
+        {
+          id: `recent-resource-${resource.resourceType}-${resource.resourceId}`,
+          label: resource.label,
+          hint: `最近使用 · ${resource.hint}`,
+          icon: resource.icon,
+          run: () => {
+            recordRecentResource(resource.resourceType, resource.resourceId);
+            setOpen(false);
+            navigate(resource.route);
+          },
+        },
+      ];
+    });
+  }, [
+    commands,
+    navigate,
+    recentResources,
+    recents,
+    recordRecentResource,
+    setOpen,
+  ]);
+
+  const fixedCommandsWithoutRecents = useMemo(() => {
+    const recentCommandIDs = new Set(
+      recents.flatMap((recent) =>
+        recent.kind === "command" ? [recent.commandId] : [],
+      ),
+    );
+    return commands.filter((command) => !recentCommandIDs.has(command.id));
+  }, [commands, recents]);
+
   const results = useMemo(
-    () => (searchQuery ? [...filtered, ...resourceCommands] : filtered),
-    [filtered, resourceCommands, searchQuery],
+    () =>
+      searchQuery
+        ? [...filtered, ...resourceCommands]
+        : query.trim()
+          ? filtered
+          : [...recentCommands, ...fixedCommandsWithoutRecents],
+    [
+      filtered,
+      fixedCommandsWithoutRecents,
+      query,
+      recentCommands,
+      resourceCommands,
+      searchQuery,
+    ],
   );
 
   useEffect(() => {
@@ -304,6 +528,9 @@ export function CommandPalette() {
           <kbd>Esc</kbd>
         </div>
         <div className="command-list" id="command-results" role="listbox">
+          {!normalizedQuery && recentCommands.length ? (
+            <div className="command-section-label">最近使用</div>
+          ) : null}
           {results.length ? (
             results.map((command, index) => {
               const Icon = command.icon;

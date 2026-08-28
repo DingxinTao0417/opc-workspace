@@ -7230,6 +7230,15 @@ kbd {
   padding: 7px;
 }
 
+.command-section-label {
+  padding: 7px 8px 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .command-item {
   display: grid;
   width: 100%;

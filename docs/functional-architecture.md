@@ -2,7 +2,7 @@
 
 > 文档版本：2.16
 > 日期：2026-08-28
-> 依据：[PRD v6.5](opc-workspace-PRD.md)
+> 依据：[PRD v6.6](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v25
 
 ## 1. 目的
@@ -116,7 +116,7 @@
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                    | 单次受控执行                                                                                                   | Agent Run、Task Artifact、待验收或失败事件                                    |
 | [专注](modules/focus.md)                   | 当前 Task                                                                                  | 活动 Session 和有效工时                                                                                        | Task actual_minutes、今日/统计数据                                            |
 | [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health` 与数据维护 API | 本地偏好、person 管理、只读运行诊断、备份闭环和业务 JSON 下载；头像受控文件、导入与完整诊断待实现              | 布局、主题、Focus 默认值、Actor、运行版本、备份/导出和桌面行为                |
-| [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                    | 参数化统一本地查找、确定性相关排序与快捷操作入口                                                               | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                          |
+| [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                    | 参数化统一本地查找、确定性相关排序、非敏感有上限最近使用与快捷操作入口                                         | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                          |
 | [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                          | 已实现 Task Artifact/Client Attachment 一致性、手动备份完整闭环和基础业务 JSON 导出；导入与含文件外部包仍规划  | 当前文件安全、已校验备份、恢复后的完整应用状态与业务 JSON；未来导入包与诊断包 |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                    | 原生窗口、进程、权限、运行日志和发布                                                                           | 可运行、可诊断的本地应用环境                                                  |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                | 财务与发票业务事实                                                                                             | 本地提醒、Inbox Item、客户聚合                                                |
