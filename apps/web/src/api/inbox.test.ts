@@ -214,6 +214,49 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Task blocked source snapshots and event keys", () => {
+    const taskId = "018f0000-0000-7000-8000-000000000815";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "task",
+      source_entity_id: taskId,
+      source_event_key: `task:${taskId}:blocked:4`,
+      payload_json: {
+        task_id: taskId,
+        task_title: "等待客户确认",
+        blocked_reason: "尚未收到确认",
+        blocked_at: "2026-08-28T10:00:00Z",
+        blocked_from_status: "in_progress",
+        block_version: 4,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "task",
+      sourceEntityId: taskId,
+      payloadJson: {
+        task_title: "等待客户确认",
+        blocked_reason: "尚未收到确认",
+        block_version: 4,
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `task:${taskId}:blocked:3`,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          blocked_from_status: "blocked",
+        },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

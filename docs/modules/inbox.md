@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v23。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清和 T-11E follow-up Task Artifact 来源已交付；任务临期/阻塞、系统故障等其他来源和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v24。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact 与 Task 阻塞来源已交付；任务临期、系统故障等其他来源和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact 来源投影均已接真实 SQLite/API/UI。任务临期/阻塞、系统故障等其他自动来源和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact/Task 阻塞来源投影均已接真实 SQLite/API/UI。任务临期、系统故障等其他自动来源和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -94,11 +94,19 @@
 - 活动 `open/tracking` 来源项会分别以 `ARTIFACT_HAS_ACTIVE_INBOX_SOURCE` 或 `TASK_HAS_ACTIVE_INBOX_SOURCES` 阻止 Artifact/Task 删除。用户先解决或忽略来源项后，删除事务会递增 Inbox 版本、写 `source_deleted_at` 和 `source_deleted` 事件，再删除来源；失败整体回滚。
 - 来源删除后 Inbox Item 和 payload 快照继续保留，并明确显示“来源产出已删除”；重新打开仍可基于快照继续人工编排，但不会恢复来源 Artifact。
 
+### 已交付：T-11E 第二项——Task 阻塞来源
+
+- schema v24 通过 `024_task_blocked_inbox_projection.sql` 约束 `source_entity_type=task` 的阻塞来源身份、按来源 Task/version 查询的索引、不可变快照和 Task 删除协调；升级不回填此前已经处于 blocked 的 Task，也不创建 demo Inbox Item。
+- 每次受控 `block` 命令更新 Task、追加 `task_blocked` Event，并在同一事务以 `task:<task-id>:blocked:<block-version>` 创建一个 `kind=event` Inbox Item 和 system `source_projected` Event；命令幂等重放不重复创建，unblock 后再次 block 使用新版本生成新的独立阻塞事项。
+- payload 只快照 Task ID/标题、阻塞原因/时间/来源状态、本次 block version 及可选 Project ID/名称；不复制当前 Task 状态、Assignment 或正文。unblock 不自动解决或删除 Inbox Item，保留 owner 对本次阻塞事件的人工受理权。
+- 列表以警示图标区分 Task 阻塞；详情展示阻塞时间、原因、阻塞前状态、项目和精确 Task 入口。来源仍存在时可直达；Task 删除后隐藏失效链接并显示保留快照。
+- 任一 `open/tracking` Task 来源项使 Task DELETE 返回 `TASK_HAS_ACTIVE_INBOX_SOURCES`。全部来源项解决/忽略后，删除事务统一标记 `source_deleted_at`、递增 Inbox version、追加 `source_deleted` Event，再删除 Task；多个阻塞批次及 Artifact 来源任一步冲突都会整体回滚。
+
 ### 明确未交付
 
 - 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
-- Task 临期/阻塞、Project 节点、Client/Invoice 和系统故障等其他来源投影；
-- `source_entity_type=task_artifact` 以外来源的多态删除协调、Inbox Item 硬删除；
+- Task 临期、Project 节点、Client/Invoice 和系统故障等其他来源投影；
+- `source_entity_type=task_artifact/task` 以外来源的多态删除协调、Inbox Item 硬删除；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
 
@@ -176,29 +184,29 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v23 延续）
+### `inbox_items`（schema v12，在当前 schema v24 延续）
 
-| 字段                                | 当前约束 / 说明                                                                                                  |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `id`                                | UUID 主键                                                                                                        |
-| `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 使用 reminder、Artifact follow-up 使用 event |
-| `title / summary`                   | 标题 2–200；摘要最多 10,000                                                                                      |
-| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact                                                      |
-| `source_entity_id`                  | 当前手工项必须为 null                                                                                            |
-| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact 使用 `task-artifact:<id>:followup`                                  |
-| `source_deleted_at`                 | 手工/Reminder 为 null；Artifact 来源归档后删除时原子写入，且不可再次修改                                         |
-| `priority`                          | P0 / P1 / P2 / P3                                                                                                |
-| `status`                            | open / tracking / resolved / dismissed                                                                           |
-| `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略                                    |
-| `due_at`                            | 可空 RFC 3339 UTC                                                                                                |
-| `read_at / triaged_at`              | 相互独立的已读与分诊时间                                                                                         |
-| `snoozed_until`                     | 可空；未来值进入稍后视图，到期后按查询恢复                                                                       |
-| `resolved_* / resolution_*`         | resolved 终态事实；mode 为 manual/automatic/forced，自动模式使用 system Actor                                    |
-| `dismissed_* / dismiss_reason`      | dismissed 终态的 owner、时间和原因                                                                               |
-| `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                                               |
-| `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                                                          |
+| 字段                                | 当前约束 / 说明                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                | UUID 主键                                                                                                                    |
+| `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 使用 reminder、Artifact follow-up 与 Task 阻塞使用 event |
+| `title / summary`                   | 标题 2–200；摘要最多 10,000                                                                                                  |
+| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task                                                             |
+| `source_entity_id`                  | 当前手工项必须为 null                                                                                                        |
+| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact 使用 `task-artifact:<id>:followup`，Task 阻塞使用 `task:<id>:blocked:<version>` |
+| `source_deleted_at`                 | 手工/Reminder 为 null；Artifact/Task 来源归档后删除时原子写入，且不可再次修改                                                |
+| `priority`                          | P0 / P1 / P2 / P3                                                                                                            |
+| `status`                            | open / tracking / resolved / dismissed                                                                                       |
+| `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略                                                |
+| `due_at`                            | 可空 RFC 3339 UTC                                                                                                            |
+| `read_at / triaged_at`              | 相互独立的已读与分诊时间                                                                                                     |
+| `snoozed_until`                     | 可空；未来值进入稍后视图，到期后按查询恢复                                                                                   |
+| `resolved_* / resolution_*`         | resolved 终态事实；mode 为 manual/automatic/forced，自动模式使用 system Actor                                                |
+| `dismissed_* / dismiss_reason`      | dismissed 终态的 owner、时间和原因                                                                                           |
+| `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                                                           |
+| `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                                                                      |
 
-schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23 以附加索引和 trigger 冻结 Task Artifact 来源身份、来源删除顺序和 Artifact 删除协调，不重建表、不回填旧产出。其他 event 来源仍是受约束的未来空间。
+schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23–v24 以附加索引和 trigger 冻结 Task Artifact 与 Task 阻塞来源身份、来源删除顺序和来源删除协调，不重建表、不回填旧产出/阻塞事实。其他 event 来源仍是受约束的未来空间。
 
 ### `inbox_item_tasks`（schema v13）
 
@@ -287,7 +295,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派（已完成）**：原子多任务/父子拆分、owner/person Assignment、统一 reconciliation、自动解决/重开和 force-resolve。
 7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
-8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact 已完成；后续继续实现任务临期/阻塞和系统故障并逐项验证稳定事件键。
+8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact 与 Task 阻塞已完成；后续继续实现任务临期和系统故障并逐项验证稳定事件键。
 9. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
 10. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
 
@@ -312,9 +320,9 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [x] T-11C 批量拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
 - [x] 进度完全从活动必需 Task 派生，零必需任务不自动解决。
 - [x] 非 done Task 不误触发自动解决；自动完成后依赖失效会重开，手工/强制解决不会误重开。
-- [x] Reminder 跨扫描/重启、follow-up Artifact 跨提交重放均只生成一条 Inbox Item。
+- [x] Reminder 跨扫描/重启、follow-up Artifact 跨提交重放，以及同一次 Task block 幂等重放均只生成一条 Inbox Item；重复阻塞按 Task version 生成独立来源。
 - [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
-- [x] Task Artifact 多态来源删除会先限制活动项，归档后原子标记来源删除并保留快照；其他未来来源仍需逐项实现。
+- [x] Task Artifact/Task 阻塞多态来源删除会先限制活动项，归档后原子标记来源删除并保留快照；其他未来来源仍需逐项实现。
 - [x] Sidebar/Today 计数与 risk 深链已接真实统计；真实浏览器键盘/焦点、长列表和窄屏视觉仍需专项验收。
 - [ ] v0.2 Agent 成功只进入 `waiting_review`，只有 owner 可接受，重试保留全部 Run 与 Artifact。
 
@@ -327,6 +335,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [schema v14 Reminder 迁移](../../services/sidecar/internal/database/migrations/014_reminders.sql)
 - [schema v15 Inbox 编排迁移](../../services/sidecar/internal/database/migrations/015_inbox_task_orchestration.sql)
 - [schema v23 Task Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)
+- [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
 - [Reminder 模块文档](reminders.md)
 - [Inbox API](../../services/sidecar/internal/api/inbox_items.go)
 - [Inbox–Task 关系 API](../../services/sidecar/internal/api/inbox_item_tasks.go)

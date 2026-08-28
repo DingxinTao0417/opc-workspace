@@ -822,6 +822,14 @@ func (a *API) deleteTask(c *gin.Context) {
 			)
 		}
 		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
+		if err := coordinateTaskBlockedInboxSourceDeletion(
+			tx,
+			id,
+			requestIDFromContext(c),
+			deletedAt,
+		); err != nil {
+			return err
+		}
 		var sourceArtifactIDs []string
 		if err := tx.Model(&models.TaskArtifact{}).
 			Where("task_id = ?", id).

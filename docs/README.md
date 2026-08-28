@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v23。Project/Task/Actor、Client 本地事实、Focus、Today、设置、统一本地搜索、备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact 来源投影/删除协调已接通；受控头像文件、Focus D2b、客户外部来源、任务临期/阻塞和系统故障来源、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v24。Project/Task/Actor、Client 本地事实、Focus、Today、设置、统一本地搜索、备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact 与 Task 阻塞来源投影/删除协调已接通；受控头像文件、Focus D2b、客户外部来源、任务临期和系统故障来源、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v6.2）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v6.3）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。

@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v6.2
+> **一人公司操作系统** · PRD v6.3
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v23
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v24
 
-> **v6.2 更新说明**：交付 T-11E 第一项非 Reminder 来源投影。schema v23 为 `requires_followup` Task Artifact 建立受约束的稳定来源身份、来源索引和删除协调保护；产出提交与 Inbox Item/系统事件同事务完成，以 `task-artifact:<artifact-id>:followup` 跨重试去重。收件箱列表和详情展示真实任务、批次、产出与项目快照并可直达来源 Task；活动来源项存在时禁止删除 Artifact/Task，归档后删除会原子写入 `source_deleted_at` 和审计并保留可解释快照。任务临期/阻塞和系统故障来源仍待后续独立纵切。
+> **v6.3 更新说明**：交付 T-11E 第二项来源投影。schema v24 将每次受控 Task block 与 Inbox Item/系统事件同事务创建，以 `task:<task-id>:blocked:<block-version>` 区分阻塞批次并支持幂等重放；来源快照只保存任务、原因、时间、来源状态、版本和可选项目。列表/详情展示阻塞上下文并直达来源 Task；活动来源阻止 Task 删除，全部归档后删除事务统一写 `source_deleted_at`、保留快照与审计。任务临期和系统故障来源仍待后续独立纵切。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -401,7 +401,7 @@ pnpm dev
 
 **历史原型（已移除）**：`projects-linear.html`
 
-> **当前状态**：部分完成。当前 schema v23 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合。schema v21 新增独立、版本化 Project Note；schema v22 新增受控 Project Attachment。项目详情只读聚合所属 Task Artifact 和来源 Task/Submission 上下文，不复制产出或验收事实；schema v23 已把其中显式 `requires_followup` 的 Artifact 同事务投影到 Inbox。Client CRUD、客户选择/改绑/解除和客户筛选已接通。Focus 完成会更新绑定 Task 工时并沿既有聚合链刷新 Project。Project 写命令继续同事务追加不可变 Workflow Event；项目笔记和附件不混入命令审计。任务临期/阻塞、项目节点和系统故障来源投影仍未实现。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
+> **当前状态**：部分完成。当前 schema v24 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合。schema v21 新增独立、版本化 Project Note；schema v22 新增受控 Project Attachment。项目详情只读聚合所属 Task Artifact 和来源 Task/Submission 上下文，不复制产出或验收事实；schema v23 已把其中显式 `requires_followup` 的 Artifact 同事务投影到 Inbox，schema v24 进一步投影所属 Task 的阻塞事件。Client CRUD、客户选择/改绑/解除和客户筛选已接通。Focus 完成会更新绑定 Task 工时并沿既有聚合链刷新 Project。Project 写命令继续同事务追加不可变 Workflow Event；项目笔记和附件不混入命令审计。任务临期、项目节点和系统故障来源投影仍未实现。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
 
 项目采用卡片式网格布局，是任务的上层组织单位。
 
@@ -447,7 +447,7 @@ planning --start--> in_progress --pause--> paused --resume--> in_progress
 
 Project Attachment 列表使用 `GET /api/v1/projects/:id/attachments`，默认每页 20、最大 100，按 `created_at DESC, id ASC` 稳定分页，并可用 `include_deleted=true` 查看审计历史。`POST /api/v1/projects/:id/attachments` 强制 Project `If-Match`、首个 `metadata` JSON part 和唯一 `file` part；可选 `Idempotency-Key` 保存首次响应快照。详情与下载分别使用 `GET /api/v1/project-attachments/:id` 和 `/content`；下载复验 size/SHA-256。确认软删除使用 `DELETE /api/v1/project-attachments/:id?confirm=true`、Project `If-Match`、1–1,000 字符原因和可选幂等键。归档 Project 允许读取/下载但拒绝上传和删除；永久删除 Project 会通过 tombstone、trash 与事务补偿协调 active 附件，并在 UI 明确提示附件不可恢复。
 
-项目 Task 提交显式 `requires_followup` 产出后，schema v23 已按 Artifact ID 稳定去重并同事务创建收件箱项；未标记产出不创建。任务进入阻塞、项目达到交付/验收节点等其他规则仍需后续纵切，不从 Project 状态直接复制 Inbox 事实。
+项目 Task 提交显式 `requires_followup` 产出后，schema v23 已按 Artifact ID 稳定去重并同事务创建收件箱项；未标记产出不创建。schema v24 已按 block 后 Task version 为每次任务阻塞创建独立收件箱项。任务临期、项目达到交付/验收节点等其他规则仍需后续纵切，不从 Project 状态直接复制 Inbox 事实。
 
 ---
 
@@ -580,7 +580,7 @@ Project Attachment 列表使用 `GET /api/v1/projects/:id/attachments`，默认�
 
 **历史原型（已移除）**：`inbox-linear.html`。其中依赖在线客户行为、远程消息或外部服务的内容不属于第一阶段。
 
-> **当前状态**：部分完成。T-11A1/A2/A3/B/C 已交付受理分诊、Reminder、Task 关系、拆分分派和自动结清；T-11F 已交付实时运营计数、Sidebar/Today 展示及 Inbox 风险深链筛选；schema v23 已交付显式 follow-up Task Artifact 来源投影与删除协调。任务临期/阻塞、系统故障等其他来源、重复/原生通知和 Agent Run 仍是规划。
+> **当前状态**：部分完成。T-11A1/A2/A3/B/C 已交付受理分诊、Reminder、Task 关系、拆分分派和自动结清；T-11F 已交付实时运营计数、Sidebar/Today 展示及 Inbox 风险深链筛选；schema v23–v24 已交付显式 follow-up Task Artifact 与 Task 阻塞来源投影/删除协调。任务临期、系统故障等其他来源、重复/原生通知和 Agent Run 仍是规划。
 
 收件箱不是普通通知列表，而是统一承接本地业务事件、明确下一步工作、拆分任务、分派责任、跟踪执行和完成验收的**本地工作受理与编排中心**。
 
@@ -638,7 +638,7 @@ v0.1 人工编排阶段：
 - `reminder_due`：用户创建的一次性 Reminder 到期后生成收件箱项；Reminder 是调度事实，Inbox Item 是到期后的处理事实。
 - `task_output_submitted`：仅项目交付类任务或 owner 显式标记 `requires_followup` 的产出生成；普通子任务产出默认更新当前任务/收件箱，不递归创建新项。去重键必须包含 Artifact ID。
 - `task_due`：任务临期或逾期。
-- `task_blocked`：任务进入阻塞状态。
+- `task_blocked`：任务进入阻塞状态；schema v24 已实现，每次 block 按阻塞后的 Task version 形成独立事件，unblock 不自动替 owner 解决该事项。
 - `system_maintenance`：备份、迁移或 Sidecar 出现需要处理的异常。
 
 v0.2 本地 Agent 阶段：
@@ -844,7 +844,7 @@ v0.1 第一版可配置：
 | 自动开始专注 | 关闭    | 休息阶段结束后是否立即开始下一轮专注                          |
 | 结束后提示音 | 开启    | 阶段切换时播放短提示音；受系统音频和 WebView 自动播放策略限制 |
 
-当前前端在应用内容渲染前通过 `SettingsBootstrap` 严格读取由 schema v16 建立的 `GET /api/v1/settings`，workspace/general/appearance/focus 的服务端确认快照是 committed；当前 schema v23 不改变该契约。设置弹窗另持有 draft，store 的 `preview` 只用于可逆预览；保存只 PATCH 变化模块并携带 `expected_version`，成功后才以服务端规范化响应更新 committed，失败保留 draft/preview。Focus 页可预览下一轮时长，但创建请求和全局 ticker 只读 committed；修改、保存或取消设置都不改写活动 Session 的 `planned_seconds` 或已消耗进度。历史 `opc-focus-settings` 仅回填 `stored=false` 模块并在服务端事实验证后清理。Zustand persist 的新键 `opc-settings-local-v1` 只保留尚未受控文件化的头像 Data URL，其他非敏感偏好已统一进入 SQLite。
+当前前端在应用内容渲染前通过 `SettingsBootstrap` 严格读取由 schema v16 建立的 `GET /api/v1/settings`，workspace/general/appearance/focus 的服务端确认快照是 committed；当前 schema v24 不改变该契约。设置弹窗另持有 draft，store 的 `preview` 只用于可逆预览；保存只 PATCH 变化模块并携带 `expected_version`，成功后才以服务端规范化响应更新 committed，失败保留 draft/preview。Focus 页可预览下一轮时长，但创建请求和全局 ticker 只读 committed；修改、保存或取消设置都不改写活动 Session 的 `planned_seconds` 或已消耗进度。历史 `opc-focus-settings` 仅回填 `stored=false` 模块并在服务端事实验证后清理。Zustand persist 的新键 `opc-settings-local-v1` 只保留尚未受控文件化的头像 Data URL，其他非敏感偏好已统一进入 SQLite。
 
 长休息、暂停本应用通知、原生系统通知、托盘、系统专注/勿扰引导、白噪音和专注期间自动状态设置仍属于 Focus D 或更后续能力，不属于当前已交付范围。
 
@@ -939,7 +939,7 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（待开发）
 
-> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v6.2 当前阶段不接入线上模型服务。
+> **状态**：未开始；不属于 v0.1，目标版本和本地模型/运行时待单独评审。当前仓库没有模型 SDK、密钥、AI API、会话表或助手页面；PRD v6.3 当前阶段不接入线上模型服务。
 
 #### 目标能力
 
@@ -1221,7 +1221,7 @@ schema v11 通过重建 `focus_sessions` 删除旧 `duration_minutes/completed`�
 
 #### 本地工作编排数据表（Task/Actor/D2、手工 Inbox、已有 Task 关系与一次性 Reminder 已实现；Agent 仍规划）
 
-schema v7 `007_actor_assignments.sql` 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填稳定责任；schema v8 `008_task_workflow.sql` 重建 Task 六状态并增加 lifecycle/command_seq/事件保护；schema v9 `009_task_submissions_artifacts.sql` 新增 workspace identity、Submission/Artifact、不可变删除 tombstone、Task 当前提交和事件关联；schema v10 `010_client_facts.sql` 增加 Client 聚合版本、查询索引、空白可选值归一和 Project 关联版本传播；schema v11 `011_focus_sessions.sql` 交付 Focus Session/interval/精确 Task ledger；schema v12 `012_inbox_items.sql` 交付手工 Inbox Item；schema v13 `013_inbox_item_tasks.sql` 交付 Inbox–Task 活动/历史关系；schema v14 `014_reminders.sql` 交付一次性 Reminder 与投影保护；schema v15 `015_inbox_task_orchestration.sql` 增加自动结清查询索引和数据库校验 trigger；schema v16 `016_app_settings.sql` 新增版本化非敏感设置表；schema v17 `017_task_saved_views.sql` 新增版本化任务保存视图；schema v18 `018_client_activities.sql` 新增版本化客户活动；schema v19 `019_client_attachments.sql` 新增受控客户附件；schema v20 `020_client_actor_links.sql` 新增 Client–person contact 关联；schema v21 `021_project_notes.sql` 新增版本化 Project Note；schema v22 `022_project_attachments.sql` 新增受控 Project Attachment、完整性事实、不可变删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；schema v23 `023_task_artifact_inbox_projection.sql` 新增 follow-up Artifact 来源身份、索引、不可变与删除协调 guards。各版本不改写既有业务事实或创建 demo 数据。`agent_adapters` 和 Agent Run 仍是规划；后续只能从 `024_*` 追加迁移，不得回写已发布版本。
+schema v7 `007_actor_assignments.sql` 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填稳定责任；schema v8 `008_task_workflow.sql` 重建 Task 六状态并增加 lifecycle/command_seq/事件保护；schema v9 `009_task_submissions_artifacts.sql` 新增 workspace identity、Submission/Artifact、不可变删除 tombstone、Task 当前提交和事件关联；schema v10 `010_client_facts.sql` 增加 Client 聚合版本、查询索引、空白可选值归一和 Project 关联版本传播；schema v11 `011_focus_sessions.sql` 交付 Focus Session/interval/精确 Task ledger；schema v12 `012_inbox_items.sql` 交付手工 Inbox Item；schema v13 `013_inbox_item_tasks.sql` 交付 Inbox–Task 活动/历史关系；schema v14 `014_reminders.sql` 交付一次性 Reminder 与投影保护；schema v15 `015_inbox_task_orchestration.sql` 增加自动结清查询索引和数据库校验 trigger；schema v16 `016_app_settings.sql` 新增版本化非敏感设置表；schema v17 `017_task_saved_views.sql` 新增版本化任务保存视图；schema v18 `018_client_activities.sql` 新增版本化客户活动；schema v19 `019_client_attachments.sql` 新增受控客户附件；schema v20 `020_client_actor_links.sql` 新增 Client–person contact 关联；schema v21 `021_project_notes.sql` 新增版本化 Project Note；schema v22 `022_project_attachments.sql` 新增受控 Project Attachment、完整性事实、不可变删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；schema v23 `023_task_artifact_inbox_projection.sql` 新增 follow-up Artifact 来源保护；schema v24 `024_task_blocked_inbox_projection.sql` 新增 Task 阻塞事件来源身份、索引、不可变与删除协调 guards。各版本不改写既有业务事实或创建 demo 数据。`agent_adapters` 和 Agent Run 仍是规划；后续只能从 `025_*` 追加迁移，不得回写已发布版本。
 
 **client_activities** - 客户本地活动（schema v18 已实现）
 
@@ -1333,7 +1333,7 @@ Adapter 注册信息以该表为事实源；敏感凭据不进入 manifest。每
 | id                                    | TEXT    | PRIMARY KEY (UUID)                                                                 |
 | kind                                  | TEXT    | manual / event / reminder；当前创建 API 仅接受 manual                              |
 | title / summary                       | TEXT    | trim 后标题 2–200 字符；摘要最多 10,000 字符                                       |
-| source_entity_type / source_entity_id | TEXT    | 当前 API 固定 manual/null；其他来源归 T-11E                                        |
+| source_entity_type / source_entity_id | TEXT    | 公开创建 API 固定 manual/null；内部已使用 reminder/task_artifact/task              |
 | source_deleted_at                     | TEXT    | 来源被允许删除后的时间；保留最小快照并在 UI 标记来源不存在                         |
 | source_event_key                      | TEXT    | nullable；非空值由部分唯一索引去重；当前手工 API 禁止设置                          |
 | priority                              | TEXT    | P0 / P1 / P2 / P3                                                                  |
@@ -1351,7 +1351,7 @@ Adapter 注册信息以该表为事实源；敏感凭据不进入 manifest。每
 | version                               | INTEGER | 乐观并发版本                                                                       |
 | created_at / updated_at               | TEXT    | RFC 3339 UTC                                                                       |
 
-当前 T-11A1/B 中，手工项的 `source_entity_id / source_event_key / source_deleted_at` 均为空；有效编辑、snooze/unsnooze、resolve/dismiss 会在首次分诊时写 `triaged_at`，单纯 read 不写 triaged。resolve/dismiss 清除 snooze 但不隐式 read；reopen 保留 read/triaged 并清除终态字段。多态来源与删除协调属于 T-11E：后续 Inbox Item 处于 open/tracking 时默认阻止来源硬删除；允许删除后需保留最小快照、写 `source_deleted_at` 并追加 Workflow Event。
+当前手工项的 `source_entity_id / source_event_key / source_deleted_at` 均为空；有效编辑、snooze/unsnooze、resolve/dismiss 会在首次分诊时写 `triaged_at`，单纯 read 不写 triaged。resolve/dismiss 清除 snooze 但不隐式 read；reopen 保留 read/triaged 并清除终态字段。schema v23–v24 已为 Task Artifact 与 Task 阻塞实现多态来源和删除协调：Inbox Item 处于 open/tracking 时阻止来源删除；归档后删除保留最小快照、写 `source_deleted_at` 并追加 Workflow Event。其他来源继续逐项冻结契约。
 
 **inbox_item_tasks** - 收件箱项与任务关联（schema v13 / T-11A2 已实现）
 
@@ -1548,7 +1548,7 @@ appLogDir/
 6. 用户开始使用，核心功能从首次启动起即可离线运行
 ```
 
-首次启动不下载业务运行时或后端镜像。PRD v6.2 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
+首次启动不下载业务运行时或后端镜像。PRD v6.3 当前阶段不提供线上更新或第三方连接；安装、升级和核心使用均可在离线环境完成。
 
 ### 8.3 更新机制
 
@@ -1591,16 +1591,16 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 **包含功能**：
 
-| 模块             | MVP 目标功能                                                                               | 当前状态（2026-08-28）                                                                                                                                                                                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 今日工作台       | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板               | **部分完成**：日期导航、真实统计/四组任务、精确日期/未排期按钮式排序、四组共享同日/跨日期拖拽、空精确日期/未排期落点、任意日期/未排期安排、安全执行快捷操作、编辑/版本化确认删除入口、共享任务详情、真实 Focus 概览与 completed-only 汇总已接通；收入与客户动态待实现                                                                                     |
-| 任务管理         | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键  | **部分完成**：schema v6–v9 事实、责任、六状态、时间线与 manual Submission/Artifact 验收，快照幂等、`ETag`/`If-Match`、分页筛选、层级、批量/排序和受控文件均已实现；schema v11 Focus 工时已接入；Today 与任务页均已消费计划组拖拽排序，任务看板仍待实现                                                                                                    |
-| 项目管理         | 项目卡片、状态流转、项目进度、项目详情（任务列表）                                         | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务派生进度/工时、客户选择/筛选、可编辑人工笔记、受控附件、产出聚合、活动时间线和显式 follow-up 产出→Inbox 已实现；任务临期/阻塞及项目节点来源待实现                                                                                                |
-| 客户管理         | 客户列表表格、客户详情、基本 CRUD                                                          | **部分完成**：基础资料 CRUD、分页/搜索/状态筛选/排序、创建幂等、并发控制、基础详情、受约束删除、Project 关联、本地活动、受控附件和 person 显式关联已实现；外部来源投影、回访和财务待实现                                                                                                                                                                  |
-| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决   | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；schema v23 已交付 follow-up Artifact 来源投影与删除协调，其他来源待实现                                                                                                                                                         |
-| 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                 | **Core A+B+C、D1、D2a 已完成，D2b 延后**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总、终态历史、七日趋势、Streak 与 Task 详情记录已实现；高级分析、原生通知/托盘/DND 待实现                                                                                                                              |
-| 全局功能         | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查                    | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现                                                                                                                                                                                                                                      |
-| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控文件、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v23、重建迁移安全、设置/保存视图/客户活动/附件/person 关联/项目笔记/项目附件/Artifact 来源约束、数据库身份强绑定和共享受控文件 store 已实现；手动 SQLite+受控文件备份完整闭环、桌面一键安全重启及基础业务 JSON 导出已交付；迁移前备份、恢复诊断、数据导入和含文件导出包仍待实现；每日计划和高级导入归 v0.3 |
+| 模块             | MVP 目标功能                                                                               | 当前状态（2026-08-28）                                                                                                                                                                                                                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 今日工作台       | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板               | **部分完成**：日期导航、真实统计/四组任务、精确日期/未排期按钮式排序、四组共享同日/跨日期拖拽、空精确日期/未排期落点、任意日期/未排期安排、安全执行快捷操作、编辑/版本化确认删除入口、共享任务详情、真实 Focus 概览与 completed-only 汇总已接通；收入与客户动态待实现                                                                                             |
+| 任务管理         | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键  | **部分完成**：schema v6–v9 事实、责任、六状态、时间线与 manual Submission/Artifact 验收，快照幂等、`ETag`/`If-Match`、分页筛选、层级、批量/排序和受控文件均已实现；schema v11 Focus 工时已接入；Today 与任务页均已消费计划组拖拽排序，任务看板仍待实现                                                                                                            |
+| 项目管理         | 项目卡片、状态流转、项目进度、项目详情（任务列表）                                         | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务派生进度/工时、客户选择/筛选、可编辑人工笔记、受控附件、产出聚合、活动时间线、显式 follow-up 产出与 Task 阻塞→Inbox 已实现；任务临期及项目节点来源待实现                                                                                                 |
+| 客户管理         | 客户列表表格、客户详情、基本 CRUD                                                          | **部分完成**：基础资料 CRUD、分页/搜索/状态筛选/排序、创建幂等、并发控制、基础详情、受约束删除、Project 关联、本地活动、受控附件和 person 显式关联已实现；外部来源投影、回访和财务待实现                                                                                                                                                                          |
+| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决   | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；schema v23–v24 已交付 follow-up Artifact 与 Task 阻塞来源投影/删除协调，其他来源待实现                                                                                                                                                  |
+| 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                 | **Core A+B+C、D1、D2a 已完成，D2b 延后**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总、终态历史、七日趋势、Streak 与 Task 详情记录已实现；高级分析、原生通知/托盘/DND 待实现                                                                                                                                      |
+| 全局功能         | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查                    | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现                                                                                                                                                                                                                                              |
+| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控文件、手动/迁移前一致性备份、基础 JSON 导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v24、重建迁移安全、设置/保存视图/客户活动/附件/person 关联/项目笔记/项目附件/Artifact 与 Task 来源约束、数据库身份强绑定和共享受控文件 store 已实现；手动 SQLite+受控文件备份完整闭环、桌面一键安全重启及基础业务 JSON 导出已交付；迁移前备份、恢复诊断、数据导入和含文件导出包仍待实现；每日计划和高级导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 
@@ -1670,14 +1670,14 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 当前实现事实以仓库代码、测试和运行结果为准。PRD 中描述的目标接口、插件、迁移或页面，不因出现在文档中就视为已交付。文档和命令说明只使用仓库相对路径，不记录开发者机器的绝对工作目录或临时 HEAD。
 
-| 基线项       | 当前实现                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 前端         | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力及集中式 `styles.css`                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 桌面         | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Sidecar      | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| API / Schema | API v1；SQLite schema v23                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| 数据默认值   | 开发数据库默认空白，不自动注入 demo 业务数据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| 明确边界     | 当前代码不使用 Docker；已实现 Task 事实层、Actor/Assignment、D1 生命周期、Task 时间线、D2 manual Submission/Artifact/受控文件、Project 笔记/附件/产出聚合/活动时间线、Client 基础资料/Project 客户关联/人工活动/附件/person 关联、Focus Core A+B+C、手工 Inbox/Reminder/Task 编排、follow-up Artifact 来源投影及删除协调、基础备份闭环与业务 JSON 导出；未实现 Client 外部活动来源、Focus D2b、任务临期/阻塞及系统故障来源、重复/原生通知、Agent、导入/含文件导出、AI 助手、知识库、客户回访或收入/支出/发票业务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
+| 基线项       | 当前实现                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 前端         | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力及集中式 `styles.css`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 桌面         | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Sidecar      | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| API / Schema | API v1；SQLite schema v24                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 数据默认值   | 开发数据库默认空白，不自动注入 demo 业务数据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 明确边界     | 当前代码不使用 Docker；已实现 Task 事实层、Actor/Assignment、D1 生命周期、Task 时间线、D2 manual Submission/Artifact/受控文件、Project 笔记/附件/产出聚合/活动时间线、Client 基础资料/Project 客户关联/人工活动/附件/person 关联、Focus Core A+B+C、手工 Inbox/Reminder/Task 编排、follow-up Artifact 与 Task 阻塞来源投影/删除协调、基础备份闭环与业务 JSON 导出；未实现 Client 外部活动来源、Focus D2b、任务临期及系统故障来源、重复/原生通知、Agent、导入/含文件导出、AI 助手、知识库、客户回访或收入/支出/发票业务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
 ### 10.2 单项任务统一开发流程
 
@@ -1747,7 +1747,7 @@ pnpm dev
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v23，新增结构只能从 `024_*` 继续追加递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v24，新增结构只能从 `025_*` 继续追加递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1755,7 +1755,7 @@ pnpm dev
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–010 依次增加 Project、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实；011–014 依次交付 Focus Session、手工 Inbox、Inbox–Task 关系和一次性 Reminder；015 增加 Inbox 自动结清索引与数据库校验；016 增加空的版本化 `app_settings`；017 增加空的版本化 `task_saved_views`；018 增加客户活动；019 增加受控客户附件；020 增加 Client–person contact 关联；021 增加 Project Note；022 增加受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；023 增加 Task Artifact follow-up 来源身份、查询索引、不可变和删除协调保护。迁移文件首行可声明 `-- migration: foreign_keys=off`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–010 依次增加 Project、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实；011–014 依次交付 Focus Session、手工 Inbox、Inbox–Task 关系和一次性 Reminder；015 增加 Inbox 自动结清索引与数据库校验；016 增加空的版本化 `app_settings`；017 增加空的版本化 `task_saved_views`；018 增加客户活动；019 增加受控客户附件；020 增加 Client–person contact 关联；021 增加 Project Note；022 增加受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；023 增加 Task Artifact follow-up 来源保护；024 增加 Task 阻塞事件来源身份、查询索引、不可变和删除协调保护。迁移文件首行可声明 `-- migration: foreign_keys=off`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -1764,15 +1764,15 @@ pnpm dev
 | T-01 工程目录与统一脚本              | 已完成           | pnpm workspace、统一启动、Sidecar 构建脚本、开发数据隔离                                                                                                                                                                                                                                              |
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成         | 窗口、单实例、动态端口、令牌、ready/health、退出清理，以及恢复挂起后的受管 Sidecar 安全退出/应用重启                                                                                                                                                                                                  |
 | T-03 Go 健康检查与 API 基础          | 已完成           | 版本化路由、安全中间件、统一错误和健康检查                                                                                                                                                                                                                                                            |
-| T-04 SQLite 初始化与迁移             | 已完成           | schema v23、PRAGMA、嵌入迁移、demo 清理、Project/Project Note/Project Attachment/Task/Actor、六状态、workspace identity、Submission/Artifact、Client/Activity/Attachment/Actor Link、Focus、Inbox/Reminder、follow-up 来源 guards、app_settings 与 task_saved_views                                   |
+| T-04 SQLite 初始化与迁移             | 已完成           | schema v24、PRAGMA、嵌入迁移、demo 清理、Project/Project Note/Project Attachment/Task/Actor、六状态、workspace identity、Submission/Artifact、Client/Activity/Attachment/Actor Link、Focus、Inbox/Reminder、follow-up/Task 阻塞来源 guards、app_settings 与 task_saved_views                          |
 | T-04B 手动一致性备份                 | 基础安全闭环完成 | 专用 backup root、维护写锁、SQLite `VACUUM INTO`、全部 active 受控文件+marker+manifest、完整校验、同卷原子发布、创建幂等、列表/重新校验、隔离演练、自动回滚点、pending/applied 提交点、重启原子恢复、桌面安全重启、确认删除、白名单业务 JSON 导出及设置 UI 已交付；迁移前自动备份和恢复诊断待后续纵切 |
 | T-05 前端 AppShell 与原型复刻        | 已完成           | Linear 深色三栏框架、导航、响应式和公共组件                                                                                                                                                                                                                                                           |
 | T-06 今日工作台                      | 部分完成         | 日期切换/回到今天、真实日期分组与完整分页、真实任务/统计、共享任务详情、活动 Focus 概览、IANA 当地日 completed-only Focus 汇总和反馈状态                                                                                                                                                              |
 | T-07 任务管理纵向闭环                | 部分完成         | 任务事实、关系/标签、版本/ETag、稳定分页、批量/排序、Assignment、六状态/时间线、D2 manual Submission/Artifact/受控文件及 Focus 自动工时已交付；T-07A–D 已交付任务页计划组拖拽、日期/客户筛选和版本化保存视图；任务看板待 v0.2                                                                         |
-| T-08 项目管理                        | 部分完成         | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、任务聚合、客户选择/筛选、笔记、项目附件、Task Artifact 聚合、活动时间线和显式 follow-up 产出→Inbox；任务临期/阻塞与项目节点来源待实现                                                                                         |
+| T-08 项目管理                        | 部分完成         | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、任务聚合、客户选择/筛选、笔记、项目附件、Task Artifact 聚合、活动时间线、显式 follow-up 产出与 Task 阻塞→Inbox；任务临期与项目节点来源待实现                                                                                  |
 | T-09 客户管理                        | 部分完成         | 基础资料 CRUD、列表/详情、创建幂等、乐观锁、删除约束、项目数聚合、Project 客户关联、本地活动、受控附件和 person 显式关联已交付；外部来源投影、回访/财务待实现                                                                                                                                         |
 | T-10 收入、支出与发票                | 页面骨架         | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                                                                                                                                               |
-| T-11 收件箱与工作编排中心            | 部分完成         | T-11A1/A2/A3/B/C/F 已交付；T-11E 已交付 follow-up Artifact 投影、稳定去重、来源上下文和删除协调；任务临期/阻塞、系统故障与 Agent 待实现                                                                                                                                                               |
+| T-11 收件箱与工作编排中心            | 部分完成         | T-11A1/A2/A3/B/C/F 已交付；T-11E 已交付 follow-up Artifact 与 Task 阻塞投影、稳定去重、来源上下文和删除协调；任务临期、系统故障与 Agent 待实现                                                                                                                                                        |
 | T-12 专注设置与全局计时              | Core+D1+D2a 完成 | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1：终态历史分页、七日本地日趋势及当前/最长 Streak；D2a：Task 详情按需专注记录已交付；D2b 的高级分析、通知/托盘/DND 延后                                                               |
 | T-13 命令面板与基础反馈              | 核心搜索完成     | WebView 快捷键、已交付页面命令、Task/Project/Client/活动 Inbox 统一本地搜索、稳定详情路由、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护及加载/错误/重试/空状态；最近使用、健康诊断与 OS 全局快捷键待后续                                                                                   |
 | T-14 设置持久化                      | 核心闭环完成     | schema v16、四模块严格 schema、原子 PATCH、乐观锁、Query committed、启动门禁、旧值迁移和数据备份/恢复/删除/业务 JSON 下载已交付；受控头像文件、数据导入待开发                                                                                                                                         |
@@ -1811,7 +1811,7 @@ pnpm dev
 
 - **需求映射**：6、7、9.1。
 - **用户流程**：首次启动自动创建数据库并迁移；后续启动只执行尚未应用的版本；开发和正式数据互不影响。
-- **实现方法**：GORM 使用纯 Go SQLite 驱动和单物理连接，启用外键、WAL 与 5 秒 busy timeout。schema v1–v14 依次建立核心、Project、Task、Actor/Assignment/Event、Submission/Artifact、Client、Focus、Inbox、Inbox–Task 关系与 Reminder；schema v15–v17 增加 Inbox 编排、版本化设置和任务保存视图；schema v18 新增客户活动；schema v19 新增受控客户附件；schema v20 新增 Client–person contact；schema v21 新增 Project Note；schema v22 新增受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 版本传播；schema v23 新增 follow-up Task Artifact→Inbox 来源身份、索引、不可变快照与删除协调，均不改写既有模块事实或创建 demo 数据。不可变 `database_id`、一次性 `artifact_store_id` 与 marker 的 database/store ID 双向绑定，阻止错库接管或数据库静默换文件根。标有 foreign-keys-off 的迁移在同连接事务外关外键、事务内校验 `foreign_key_check`，再提交或整体回滚并恢复。开发数据库/受控文件位于 `.local/dev-data/`，生产数据位于 Tauri `appDataDir`。
+- **实现方法**：GORM 使用纯 Go SQLite 驱动和单物理连接，启用外键、WAL 与 5 秒 busy timeout。schema v1–v14 依次建立核心、Project、Task、Actor/Assignment/Event、Submission/Artifact、Client、Focus、Inbox、Inbox–Task 关系与 Reminder；schema v15–v17 增加 Inbox 编排、版本化设置和任务保存视图；schema v18 新增客户活动；schema v19 新增受控客户附件；schema v20 新增 Client–person contact；schema v21 新增 Project Note；schema v22 新增受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 版本传播；schema v23–v24 新增 follow-up Task Artifact 与 Task 阻塞→Inbox 来源身份、索引、不可变快照与删除协调，均不改写既有模块事实或创建 demo 数据。不可变 `database_id`、一次性 `artifact_store_id` 与 marker 的 database/store ID 双向绑定，阻止错库接管或数据库静默换文件根。标有 foreign-keys-off 的迁移在同连接事务外关外键、事务内校验 `foreign_key_check`，再提交或整体回滚并恢复。开发数据库/受控文件位于 `.local/dev-data/`，生产数据位于 Tauri `appDataDir`。
 - **关键路径**：`services/sidecar/internal/database/database.go`、`migrate.go`、`migrations/001_initial_schema.sql` 至 `migrations/022_project_attachments.sql`。
 - **验证/剩余**：迁移测试覆盖连续旧版本数据保留、Task/Project/Client 版本与关系、Submission/Artifact 约束、Client 空值/索引/trigger、Focus interval/ledger、保存视图、客户扩展、Project Note、v21→v22 Project Attachment 事实保留/约束/墓碑/版本传播，以及 v22→v23 不发明 Inbox 数据、来源约束和删除协调。手动一致性快照、隔离恢复演练、重启原子恢复和业务 JSON 导出见 T-04B；迁移前自动备份、数据导入和含文件导出包仍未实现。
 
@@ -1851,7 +1851,7 @@ pnpm dev
 #### 10.4.8 T-08 项目管理
 
 - **需求映射**：5.3。
-- **当前状态**：部分完成；项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑人工笔记、受控项目附件、只读 Task Artifact 产出聚合、追加式项目活动时间线和显式 follow-up 产出→Inbox 已接通；任务临期/阻塞与项目节点来源仍未完成。
+- **当前状态**：部分完成；项目资料、基础生命周期、任务聚合、Client 客户关联、可编辑人工笔记、受控项目附件、只读 Task Artifact 产出聚合、追加式项目活动时间线、显式 follow-up 产出和 Task 阻塞→Inbox 已接通；任务临期与项目节点来源仍未完成。
 - **用户流程**：用户可分页查看和搜索/按状态或客户筛选项目，新建或编辑非归档项目资料并选择、改绑或解除 Client，进入详情查看任务、派生进度/工时与项目活动时间线，从详情新建项目任务，执行受控状态命令，归档/恢复，并在已归档状态二次确认永久删除；归档项目必须恢复后才能编辑资料。时间线展示真实 owner、发生时间、状态前后值或资料变更字段，支持独立错误重试和加载更早。
 - **实现方法**：schema v3 增加 `projects.version`、`archived_from_status` 和查询索引，schema v4 为幂等键增加请求摘要与响应快照，schema v5 用 trigger 把任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除纳入项目版本，schema v7–v9 提供通用不可变 `workflow_events`，schema v10 让 Project 客户关联变化反向递增 Client 聚合版本；本纵切复用事件表而不新增迁移。Go Project API 提供 CRUD、分页/搜索/状态与客户筛选、经布尔校验的 `include_archived`、白名单排序、基于规范化请求 SHA-256 和首次响应快照的创建幂等、覆盖聚合响应的 `If-Match` 乐观锁、显式 transition、归档来源恢复和受约束硬删除；普通列表默认排除归档项，Client 详情用 `include_archived=true` 读取完整关联历史。创建、资料更新、七种 transition 和永久删除在原写事务中追加 `project_*` 事件，记录 owner/request/前后快照；创建安全重放跳过 producer，事件失败使写命令整体回滚。事件 GET 先验证 Project 存在，按时间/命令/ID 倒序分页，返回 Project `ETag`/版本；永久删除事件保留在业务导出但资源删除后 API 返回 404。查询通过子查询派生任务总数/完成数/进行中数/剩余数、完成百分比与 `actual_minutes` 合计，并返回客户名、发票数和只含生命周期转换的 `available_actions`。前端用 Query/Mutation 接通卡片、表单、客户选择器、详情和时间线；完成未结任务、归档和永久删除均有确认，版本冲突刷新详情，关联变化会失效相关 Project/Client/Event 缓存。
 - **关键路径**：`services/sidecar/internal/database/migrations/003_project_lifecycle.sql`、`migrations/004_idempotency_snapshots.sql`、`migrations/005_project_aggregate_versions.sql`、`migrations/007_actor_assignments.sql`、`migrations/008_task_workflow.sql`、`migrations/010_client_facts.sql`、`internal/models/project.go`、`internal/api/projects.go`、`internal/api/projects_test.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`pages/ProjectsPage.tsx`、`pages/ProjectDetailPage.tsx`、`components/ProjectEventsSection.tsx`、`components/ProjectFormModal.tsx`。
@@ -1878,7 +1878,7 @@ pnpm dev
 #### 10.4.11 T-11 收件箱与工作编排中心
 
 - **需求映射**：5.6。
-- **当前状态**：部分完成。schema v12–v15 已交付手工受理分诊、已有 Task 关系、一次性 Reminder 和 T-11C 拆分编排；T-11F 已交付实时运营计数、Today/Sidebar 展示和风险深链筛选；schema v23 已交付显式 follow-up Task Artifact 来源投影、稳定事件键、来源上下文与删除协调。任务临期/阻塞、系统故障等其他来源、重复/原生通知和 Agent Run 仍未实现。
+- **当前状态**：部分完成。schema v12–v15 已交付手工受理分诊、已有 Task 关系、一次性 Reminder 和 T-11C 拆分编排；T-11F 已交付实时运营计数、Today/Sidebar 展示和风险深链筛选；schema v23–v24 已交付显式 follow-up Task Artifact 与 Task 阻塞来源投影、稳定事件键、来源上下文与删除协调。任务临期、系统故障等其他来源、重复/原生通知和 Agent Run 仍未实现。
 - **对象边界**：Inbox Item 管来源、分诊、已读、稍后和解决策略；Task 是唯一可执行工单；Assignment 管责任历史；Agent Run 管单次本地执行；Task Artifact 管产出；Workflow Event 管审计。
 - **当前并发/批量契约**：创建、单条命令、read-all、关系命令、split 与 force-resolve 支持幂等快照；Inbox PATCH 和各写命令要求 `If-Match`，命令在版本检查前重放。单条关系命令只递增 Inbox version；split 在一个事务内创建 Task/Assignment/关系并递增 Inbox version。关系 GET 实时 JOIN Task，不新增 Task.version→Inbox.version trigger；Task 生命周期、产出验收和关系写入显式调用统一 reconciliation。read-all 用 `through_created_at` 同时限制 `created_at` 与 `updated_at`，截止后变化的条目保守跳过。
 - **分阶段纵切**：
@@ -1888,10 +1888,10 @@ pnpm dev
   4. **T-11A3 Reminder（已完成）**：schema v14 `reminders`、创建/分页查询/详情、scheduled 编辑与改期、带原因取消、ETag/幂等、启动补偿、15 秒扫描和稳定事件键到期 Inbox 投影。
   5. **T-11C 拆分与分派（已完成）**：schema v15、原子父子 Task/关系/Assignment/reviewer、统一 reconciliation、自动结清/重开与强制例外；单条已有 Task 关系仍由 A2 负责。
   6. **T-11F 运营计数（已完成）**：实时派生 pending/unread/tracking/blocked/waiting_review，接入 Sidebar、Today 与 Inbox 风险深链筛选。
-  7. **T-11E 事件源（部分完成）**：schema v23 已接显式 follow-up 的 Task Artifact；后续继续接任务临期/阻塞和系统故障。发票、客户回访和项目里程碑随对应业务模块启用。
+  7. **T-11E 事件源（部分完成）**：schema v23–v24 已接显式 follow-up Task Artifact 与 Task 阻塞；后续继续接任务临期和系统故障。发票、客户回访和项目里程碑随对应业务模块启用。
   8. **T-11D 本地 Agent（v0.2）**：接入已注册本地 Adapter、Agent Run、产出、取消/重试、人工验收、返工和中断恢复。
 - **关键路径**：`services/sidecar/internal/database/migrations/012_inbox_items.sql` 至 `015_inbox_task_orchestration.sql`、`services/sidecar/internal/api/inbox_items.go`、`inbox_item_tasks.go`、`inbox_orchestration.go`、`reminders.go`、`apps/web/src/pages/InboxPage.tsx`、`InboxItemDetailModal.tsx`、`InboxTaskOrchestrationModal.tsx` 和 `ReminderManagerModal.tsx`。
-- **验收要求**：当前纵切已覆盖纯离线手工受理、迁移保留、幂等/并发、事务回滚、全局未读、Task 关系/删除互锁、Reminder 和 follow-up Artifact 唯一投影、Artifact/Task 来源删除协调、批量拆分全回滚、owner/person 分派、自动结清/重开与强制例外审计。完整编排仍需逐项验证任务临期/阻塞和系统故障来源；Agent 成功不能跳过验收，返工必须保留 Run/产出。
+- **验收要求**：当前纵切已覆盖纯离线手工受理、迁移保留、幂等/并发、事务回滚、全局未读、Task 关系/删除互锁、Reminder、follow-up Artifact 和 Task 阻塞唯一投影、重复阻塞、Artifact/Task 来源删除协调、批量拆分全回滚、owner/person 分派、自动结清/重开与强制例外审计。完整编排仍需逐项验证任务临期和系统故障来源；Agent 成功不能跳过验收，返工必须保留 Run/产出。
 
 #### 10.4.12 T-12 专注设置与全局计时
 
@@ -1925,7 +1925,7 @@ pnpm dev
 - **需求映射**：5.10、9.1、9.2。
 - **当前状态**：未开始；没有模型依赖、本地 Adapter 配置、会话 API、前端路由或占位按钮。
 - **建议开发流程**：
-  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v6.2 当前阶段不评审远程 Provider。
+  1. 先完成本地运行时、资源预算、上下文权限和质量评测 ADR；PRD v6.3 当前阶段不评审远程 Provider。
   2. 对本地运行配置和敏感凭据使用应用配置边界或操作系统安全存储，验证其不进入普通 SQLite、`localStorage`、命令行和日志。
   3. 在 Go Sidecar 定义本地 Adapter 接口，统一普通/流式响应、取消、超时、资源限制和错误映射。
   4. 先实现无业务写权限的独立助手，再接入用户显式选择的任务、项目、客户或知识库上下文。
@@ -2032,9 +2032,9 @@ pnpm build:desktop
 ### 10.6 已知限制与下一步顺序
 
 1. **D1/D2 已交付，收口任务体验**：schema v8 生命周期与 schema v9 manual Submission/Artifact 已完成；Today 已按 `planned_date` 完整查询并接入按钮、同日/跨日期拖拽和安全快捷操作，任务页也已支持精确日期计划组内同状态拖拽。继续做真实浏览器键盘/焦点/窄屏验收、长历史性能和错误恢复；任务看板保持 v0.2。
-2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除、任务聚合、Client 选择/筛选、schema v21 项目笔记、schema v22 项目附件、只读 Task Artifact 聚合、活动时间线和 schema v23 显式 follow-up 产出→Inbox 已交付；继续验证大数据量、真实浏览器/窄屏/焦点，任务临期/阻塞和项目节点来源仍是缺口。
+2. **收口项目基础纵切**：CRUD、schema v4 幂等快照、schema v5 聚合版本、乐观锁、归档关联约束、状态流转、归档恢复、确认硬删除、任务聚合、Client 选择/筛选、schema v21 项目笔记、schema v22 项目附件、只读 Task Artifact 聚合、活动时间线，以及 schema v23–v24 显式 follow-up 产出/Task 阻塞→Inbox 已交付；继续验证大数据量、真实浏览器/窄屏/焦点，任务临期和项目节点来源仍是缺口。
 3. **收口客户基础事实并推进真实扩展**：schema v10、Client CRUD/搜索/删除约束、基础详情和 Project 客户关联，schema v18 人工活动时间线、schema v19 受控附件，以及 schema v20 person 显式关联已交付；继续做真实浏览器/大数据量验收，再按独立纵切实现外部来源投影。回访与财务仍属于 v0.4。
-4. **继续收件箱来源投影**：T-11A1/A2/A3/B/C/F 的手工受理分诊、已有 Task 关系、Reminder、批量拆分/Assignment、统一 reconciliation、自动解决和运营统计均已交付；下一步按独立纵切接项目产出、任务临期/阻塞和系统故障来源投影。
+4. **继续收件箱来源投影**：T-11A1/A2/A3/B/C/F 的手工受理分诊、已有 Task 关系、Reminder、批量拆分/Assignment、统一 reconciliation、自动解决和运营统计，以及 follow-up Artifact/Task 阻塞来源均已交付；下一步按独立纵切接任务临期和系统故障来源投影。
 5. **扩展 Focus D2b**：Core A+B+C、D1 与 D2a 的持久化、恢复、精确工时、Today 统计、终态历史、七日趋势、Streak 和 Task 详情记录已交付；后续独立实现高级分析和经平台验收的原生通知、托盘、DND 引导。
 6. **补数据安全链路**：手动一致性备份的创建、列表、完整校验、维护写锁、原子发布、隔离演练、恢复前回滚点、重启原子恢复、桌面一键安全重启、确认删除与基础业务 JSON 导出已经交付；下一步依次实现迁移前自动备份、诊断包内容选择、数据导入和含文件导出包。
 7. **补桌面可靠性与发布能力**：Sidecar 故障恢复、统一日志落盘/轮转、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页逐项最小授权实现。
@@ -2255,12 +2255,12 @@ pnpm build:desktop
 - 创建、关联、解除、拆分、分派、运行、验收、返工、解决和忽略等可重试命令按各阶段支持 `Idempotency-Key`；幂等记录必须包含请求摘要和可重放响应，同一 key 携带不同请求体返回 409。当前 Assignment、Task 生命周期、D2 submit/review/Artifact delete、Client Attachment upload/delete、Focus create/stop/cancel、手工 Inbox 创建/单条命令/read-all/Task 关系写入，以及 Reminder create/cancel 已实现；Client Attachment、Focus、Inbox 与 Reminder 命令在版本检查前重放同键同请求，不重复写文件、记账、改写事实或写事件
 - 状态变化携带 `expected_version` 或 `If-Match`；并发版本不一致时拒绝旧写入并返回 409。Focus Session 命令缺少 `If-Match` 返回 428，旧版本返回 409；heartbeat 不改变 version。匹配当前终态的 stop-on-completed/cancel-on-cancelled 可稳定返回，反向终态命令仍返回状态冲突
 - 输出严格 JSON body、multipart manifest 和单个 structured object 各限 1 MiB，单文件限 50 MiB、完整 multipart 限 100 MiB；Sidecar HTTP read/write timeout 为 180 秒，前端上传/下载采用 120 秒端到端超时
-- schema v12 已为非空 `source_event_key` 建立部分唯一约束，schema v14 的 Reminder 使用 `reminder:<id>:due`；schema v23 的 follow-up Artifact 使用 `task-artifact:<artifact-id>:followup` 并与 Task 提交同事务写入。两类来源跨重试不重复创建 Inbox Item/Workflow Event；后续来源仍必须使用稳定键
+- schema v12 已为非空 `source_event_key` 建立部分唯一约束，schema v14 的 Reminder 使用 `reminder:<id>:due`；schema v23 的 follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；schema v24 的 Task 阻塞使用 `task:<task-id>:blocked:<block-version>`。后两者分别与 Task 提交/block Event 同事务写入，三类来源跨重试不重复创建 Inbox Item/Workflow Event；后续来源仍必须使用稳定键
 - Actor 详情、创建和更新返回 `ETag`；Actor PATCH 缺少 `If-Match` 返回 428，格式错误返回 400，旧版本返回 409。person 创建幂等重放不得重复写 `actor_created`；停用被活动 Assignment 拒绝时不得递增版本或写事件
 - Agent 不使用 WebView 会话令牌；Sidecar 为单次 Run 发放短时、能力受限且不可复用的本地令牌
 - Agent Runtime 使用独立路由组和鉴权中间件，或直接使用受控进程管道；具体传输、Origin 处理、撤销和泄漏防护必须由 v0.2 ADR 确定
 - 外部 URL 产出只作为不可自动抓取的引用；任意本地业务文件必须先复制到共享受控文件目录。Task Artifact 的读取/删除经过 Sidecar 鉴权并写 Workflow Event；Client Attachment 的读取/删除经过相同鉴权与完整性/墓碑边界，并以 Client 聚合版本和附件审计事实追踪
-- schema v13 的**关联 Task**删除互锁仍独立存在；schema v23 另为 `source_entity_type=task_artifact` 实现多态来源删除协调：活动来源项阻止 Artifact/Task 删除，归档后删除写 `source_deleted_at`、保留最小快照并显示“来源产出已删除”。其他未来来源仍需逐项实现同类契约
+- schema v13 的**关联 Task**删除互锁仍独立存在；schema v23–v24 另为 `source_entity_type=task_artifact/task` 实现多态来源删除协调：活动来源项阻止 Artifact/Task 删除，归档后删除写 `source_deleted_at`、保留最小快照并显示来源已删除。其他未来来源仍需逐项实现同类契约
 
 ### D. 架构决策记录
 
@@ -2342,3 +2342,4 @@ pnpm build:desktop
 | v6.0     | 2026-08-28 | 交付 Project 产出聚合纵切：只读 API 在 Project 范围聚合既有 Task Artifact，稳定分页、删除历史、来源 Task/Submission 上下文和 Project 版本同一事务返回；项目详情新增真实产出区与任务详情直达，不复制正文、文件、验收或删除事实；项目附件与 Inbox 来源投影继续独立实现                                                                                              |
 | v6.1     | 2026-08-28 | 将基线推进到 schema v22，交付受控 Project Attachment：严格 multipart 幂等上传、稳定分页、鉴权完整性下载、带原因软删除、归档只读、Project 版本传播与不可变墓碑；父项目删除协调 trash/事务补偿，启动恢复、手动备份/恢复演练和业务 JSON 元数据导出覆盖第三类受控文件；项目详情接入预览、上传、下载、完整性、删除和历史状态，Inbox 来源投影继续独立实现               |
 | v6.2     | 2026-08-28 | 将基线推进到 schema v23，交付 T-11E 第一项来源投影：显式 `requires_followup` Task Artifact 与 Inbox Item/系统事件同事务创建，稳定 Artifact 事件键防重；前端展示来源 Task/批次/产出/项目快照并直达任务；活动来源阻止 Artifact/Task 删除，归档后删除原子标记 `source_deleted_at`、保留快照和追加式审计；任务临期/阻塞与系统故障来源继续独立实现                     |
+| v6.3     | 2026-08-28 | 将基线推进到 schema v24，交付 T-11E Task 阻塞来源：每次 block 与 Inbox Item/system Event 同事务提交，以 Task ID + block 后 version 稳定区分批次，幂等重放不重复；详情展示原因、时间、来源状态和项目并直达 Task；活动来源阻止 Task 删除，全部归档后删除原子标记来源删除并保留快照/审计；任务临期与系统故障继续独立实现                                             |

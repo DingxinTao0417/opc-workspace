@@ -75,5 +75,49 @@ describe("InboxSourceContext", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("来源产出已删除");
     expect(screen.getByText("准备项目交付")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
+  });
+
+  it("shows a Task blocked source and hides its dead link after deletion", () => {
+    const blockedItem: InboxItem = {
+      ...sourceItem,
+      title: "任务阻塞：等待客户确认",
+      sourceEntityType: "task",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000806",
+      sourceEventKey: "task:018f0000-0000-7000-8000-000000000806:blocked:4",
+      payloadJson: {
+        task_id: "018f0000-0000-7000-8000-000000000806",
+        task_title: "等待客户确认",
+        blocked_reason: "尚未收到确认",
+        blocked_at: "2026-08-28T10:00:00Z",
+        blocked_from_status: "in_progress",
+        block_version: 4,
+        project_name: "官网升级",
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={blockedItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("任务阻塞")).toBeTruthy();
+    expect(screen.getByText("等待客户确认")).toBeTruthy();
+    expect(screen.getByText("尚未收到确认")).toBeTruthy();
+    expect(screen.getByText("进行中")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源任务/ })).toHaveAttribute(
+      "href",
+      "/tasks/018f0000-0000-7000-8000-000000000806",
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{ ...blockedItem, sourceDeletedAt: "2026-08-28T11:00:00Z" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源任务已删除");
+    expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
   });
 });

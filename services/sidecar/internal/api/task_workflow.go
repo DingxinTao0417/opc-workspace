@@ -237,6 +237,11 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 		if err != nil {
 			return err
 		}
+		if command == taskLifecycleBlock {
+			if err := projectTaskBlockedInboxItem(tx, updated, requestID, now); err != nil {
+				return err
+			}
+		}
 		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
 			return err
 		}

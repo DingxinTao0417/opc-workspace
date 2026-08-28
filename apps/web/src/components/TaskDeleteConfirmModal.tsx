@@ -14,7 +14,7 @@ function deleteErrorText(error: unknown): string | null {
         : error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS"
           ? "该任务仍关联活动收件箱条目。请先在收件箱解除关联，再删除任务。"
           : error.code === "TASK_HAS_ACTIVE_INBOX_SOURCES"
-            ? "该任务仍有产出作为活动收件箱事项的来源。请先解决或忽略这些跟进项，再删除任务。"
+            ? "该任务或其产出仍是活动收件箱事项的来源。请先解决或忽略这些来源项，再删除任务。"
             : error.message;
     return error.requestId ? `${message} · 请求 ${error.requestId}` : message;
   }
@@ -82,7 +82,7 @@ export function TaskDeleteConfirmModal({
         <div>
           <strong>确定删除“{task?.title}”吗？</strong>
           <p>
-            删除后无法恢复；存在活动收件箱关系或产出来源跟进项时，系统会拒绝操作。
+            删除后无法恢复；存在活动收件箱关系或任务/产出来源项时，系统会拒绝操作。
           </p>
         </div>
       </div>

@@ -2286,6 +2286,32 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceEventKey = nullableString(
     fieldValue(value, "source_event_key", "sourceEventKey"),
   );
+  const validTaskArtifactEvent =
+    sourceEntityType === "task_artifact" &&
+    !!sourceEntityId &&
+    sourceEventKey === `task-artifact:${sourceEntityId}:followup` &&
+    isRecord(rawPayload) &&
+    rawPayload.artifact_id === sourceEntityId &&
+    typeof rawPayload.artifact_name === "string" &&
+    typeof rawPayload.task_id === "string" &&
+    typeof rawPayload.task_title === "string" &&
+    typeof rawPayload.submission_id === "string" &&
+    typeof rawPayload.submission_sequence === "number";
+  const validTaskBlockedEvent =
+    sourceEntityType === "task" &&
+    !!sourceEntityId &&
+    isRecord(rawPayload) &&
+    rawPayload.task_id === sourceEntityId &&
+    typeof rawPayload.task_title === "string" &&
+    typeof rawPayload.blocked_reason === "string" &&
+    typeof rawPayload.blocked_at === "string" &&
+    (rawPayload.blocked_from_status === "todo" ||
+      rawPayload.blocked_from_status === "in_progress" ||
+      rawPayload.blocked_from_status === "waiting_review") &&
+    Number.isInteger(rawPayload.block_version) &&
+    (rawPayload.block_version as number) >= 2 &&
+    sourceEventKey ===
+      `task:${sourceEntityId}:blocked:${String(rawPayload.block_version)}`;
   if (
     !id ||
     !title ||
@@ -2294,7 +2320,8 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     typeof rawSummary !== "string" ||
     (sourceEntityType !== "manual" &&
       sourceEntityType !== "reminder" &&
-      sourceEntityType !== "task_artifact") ||
+      sourceEntityType !== "task_artifact" &&
+      sourceEntityType !== "task") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
         sourceEntityId !== null ||
@@ -2303,17 +2330,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       (sourceEntityType !== "reminder" ||
         !sourceEntityId ||
         !sourceEventKey)) ||
-    (kind === "event" &&
-      (sourceEntityType !== "task_artifact" ||
-        !sourceEntityId ||
-        !sourceEventKey ||
-        !isRecord(rawPayload) ||
-        rawPayload.artifact_id !== sourceEntityId ||
-        typeof rawPayload.artifact_name !== "string" ||
-        typeof rawPayload.task_id !== "string" ||
-        typeof rawPayload.task_title !== "string" ||
-        typeof rawPayload.submission_id !== "string" ||
-        typeof rawPayload.submission_sequence !== "number")) ||
+    (kind === "event" && !validTaskArtifactEvent && !validTaskBlockedEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==
         "all_required_tasks_done") ||

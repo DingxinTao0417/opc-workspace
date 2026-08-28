@@ -129,6 +129,25 @@ func TestTaskLifecycleCommandsIdempotencyAndTimeline(t *testing.T) {
 		blocked.Event.Reason == nil || *blocked.Event.Reason != "External dependency" || blocked.Event.Current["reason"] != "External dependency" {
 		t.Fatalf("blocked response = %#v", blocked)
 	}
+	var blockedSources []models.InboxItem
+	if err := store.DB.Where("source_entity_type = ? AND source_entity_id = ?", taskBlockedInboxSourceType, task.ID).
+		Order("id ASC").Find(&blockedSources).Error; err != nil {
+		t.Fatalf("load projected blocked source: %v", err)
+	}
+	if len(blockedSources) != 1 || blockedSources[0].Kind != "event" || blockedSources[0].Status != "open" ||
+		blockedSources[0].SourceEventKey == nil || *blockedSources[0].SourceEventKey != taskBlockedEventKey(task.ID, 4) ||
+		blockedSources[0].Priority != "P2" || blockedSources[0].Summary != "阻塞原因：External dependency" {
+		t.Fatalf("projected blocked source = %#v", blockedSources)
+	}
+	var blockedPayload map[string]any
+	if err := json.Unmarshal([]byte(blockedSources[0].PayloadJSON), &blockedPayload); err != nil {
+		t.Fatalf("decode blocked source payload: %v", err)
+	}
+	if blockedPayload["task_id"] != task.ID || blockedPayload["task_title"] != task.Title ||
+		blockedPayload["blocked_reason"] != "External dependency" || blockedPayload["blocked_from_status"] != "in_progress" ||
+		blockedPayload["block_version"] != float64(4) {
+		t.Fatalf("blocked source payload = %#v", blockedPayload)
+	}
 	blockReplay := performRequest(
 		router,
 		http.MethodPost,
@@ -138,6 +157,14 @@ func TestTaskLifecycleCommandsIdempotencyAndTimeline(t *testing.T) {
 	)
 	if blockReplay.Code != http.StatusOK || blockReplay.Header().Get("Idempotency-Replayed") != "true" || blockReplay.Body.String() != blockedRecorder.Body.String() {
 		t.Fatalf("normalized reason replay = %d headers=%v: %s", blockReplay.Code, blockReplay.Header(), blockReplay.Body.String())
+	}
+	var blockedSourceCount int64
+	if err := store.DB.Model(&models.InboxItem{}).
+		Where("source_event_key = ?", taskBlockedEventKey(task.ID, 4)).Count(&blockedSourceCount).Error; err != nil {
+		t.Fatalf("count replayed blocked sources: %v", err)
+	}
+	if blockedSourceCount != 1 {
+		t.Fatalf("block replay projected %d Inbox sources, want 1", blockedSourceCount)
 	}
 
 	blockedComplete := performRequest(
@@ -284,6 +311,121 @@ func TestTaskLifecycleCommandsIdempotencyAndTimeline(t *testing.T) {
 	var taskVersion int64
 	if err := store.SQL.QueryRow("SELECT version FROM tasks WHERE id = ?", task.ID).Scan(&taskVersion); err != nil || taskVersion != 9 {
 		t.Fatalf("final task version = %d err=%v", taskVersion, err)
+	}
+}
+
+func TestTaskBlockedSourceProtectsDeleteAndKeepsSnapshot(t *testing.T) {
+	router, store := newActorTestAPI(t)
+	task := createTaskForTaskFacts(t, router, `{"title":"Blocked source task","priority":"P1"}`)
+
+	blockedRecorder := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/block",
+		[]byte(`{"reason":"Waiting for a local approval"}`),
+		map[string]string{"If-Match": `"1"`, "Idempotency-Key": "blocked-source-delete"},
+	)
+	if blockedRecorder.Code != http.StatusOK {
+		t.Fatalf("block source Task = %d: %s", blockedRecorder.Code, blockedRecorder.Body.String())
+	}
+	blocked := decodeTaskLifecycleResponse(t, blockedRecorder.Body.Bytes())
+	if blocked.Task.Status != "blocked" || blocked.Task.Version != 2 {
+		t.Fatalf("blocked source Task = %#v", blocked.Task)
+	}
+
+	var source models.InboxItem
+	if err := store.DB.Where("source_event_key = ?", taskBlockedEventKey(task.ID, 2)).Take(&source).Error; err != nil {
+		t.Fatalf("load blocked source Inbox Item: %v", err)
+	}
+	deleteBlocked := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/tasks/"+task.ID+"?confirm=true",
+		nil,
+		map[string]string{"If-Match": `"2"`},
+	)
+	if deleteBlocked.Code != http.StatusConflict || responseErrorCode(t, deleteBlocked.Body.Bytes()) != "TASK_HAS_ACTIVE_INBOX_SOURCES" {
+		t.Fatalf("delete active blocked source Task = %d: %s", deleteBlocked.Code, deleteBlocked.Body.String())
+	}
+
+	resolved := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+source.ID+"/resolve",
+		[]byte(`{"reason":"Approval obtained"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if resolved.Code != http.StatusOK || decodeInboxItemData(t, resolved.Body.Bytes()).Status != "resolved" {
+		t.Fatalf("resolve blocked source = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	unblocked := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/unblock",
+		[]byte(`{}`),
+		map[string]string{"If-Match": `"2"`},
+	)
+	if unblocked.Code != http.StatusOK || decodeTaskLifecycleResponse(t, unblocked.Body.Bytes()).Task.Version != 3 {
+		t.Fatalf("unblock source Task = %d: %s", unblocked.Code, unblocked.Body.String())
+	}
+	reblocked := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/block",
+		[]byte(`{"reason":"Approval expired"}`),
+		map[string]string{"If-Match": `"3"`},
+	)
+	if reblocked.Code != http.StatusOK || decodeTaskLifecycleResponse(t, reblocked.Body.Bytes()).Task.Version != 4 {
+		t.Fatalf("reblock source Task = %d: %s", reblocked.Code, reblocked.Body.String())
+	}
+	var sources []models.InboxItem
+	if err := store.DB.Where("source_entity_type = ? AND source_entity_id = ?", taskBlockedInboxSourceType, task.ID).
+		Order("source_event_key ASC").Find(&sources).Error; err != nil {
+		t.Fatalf("load repeated blocked sources: %v", err)
+	}
+	if len(sources) != 2 || sources[0].SourceEventKey == nil || sources[1].SourceEventKey == nil ||
+		*sources[0].SourceEventKey != taskBlockedEventKey(task.ID, 2) ||
+		*sources[1].SourceEventKey != taskBlockedEventKey(task.ID, 4) {
+		t.Fatalf("repeated blocked sources = %#v", sources)
+	}
+	resolveSecond := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+sources[1].ID+"/resolve",
+		[]byte(`{"reason":"Second block acknowledged"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if resolveSecond.Code != http.StatusOK {
+		t.Fatalf("resolve second blocked source = %d: %s", resolveSecond.Code, resolveSecond.Body.String())
+	}
+
+	deleted := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/tasks/"+task.ID+"?confirm=true",
+		nil,
+		map[string]string{"If-Match": `"4"`},
+	)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete coordinated blocked source Task = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var retained models.InboxItem
+	if err := store.DB.First(&retained, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load retained blocked source: %v", err)
+	}
+	if retained.SourceDeletedAt == nil || retained.Status != "resolved" || retained.Version != 3 ||
+		!strings.Contains(retained.PayloadJSON, `"task_title":"Blocked source task"`) ||
+		!strings.Contains(retained.PayloadJSON, `"blocked_reason":"Waiting for a local approval"`) {
+		t.Fatalf("retained blocked source = %#v", retained)
+	}
+	var sourceDeletedEvents int64
+	if err := store.DB.Model(&models.WorkflowEvent{}).
+		Where("aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_deleted'", source.ID).
+		Count(&sourceDeletedEvents).Error; err != nil {
+		t.Fatalf("count source_deleted events: %v", err)
+	}
+	if sourceDeletedEvents != 1 {
+		t.Fatalf("source_deleted events = %d, want 1", sourceDeletedEvents)
 	}
 }
 

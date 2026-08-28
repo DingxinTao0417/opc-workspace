@@ -13,6 +13,7 @@ import (
 )
 
 const taskArtifactInboxSourceType = "task_artifact"
+const taskBlockedInboxSourceType = "task"
 
 func taskArtifactFollowupEventKey(artifactID string) string {
 	return fmt.Sprintf("task-artifact:%s:followup", artifactID)
@@ -25,6 +26,69 @@ func taskArtifactFollowupTitle(name string) string {
 		value = value[:200]
 	}
 	return string(value)
+}
+
+func taskBlockedEventKey(taskID string, blockVersion int64) string {
+	return fmt.Sprintf("task:%s:blocked:%d", taskID, blockVersion)
+}
+
+func taskBlockedTitle(title string) string {
+	const prefix = "任务阻塞："
+	value := []rune(prefix + title)
+	if len(value) > 200 {
+		value = value[:200]
+	}
+	return string(value)
+}
+
+func projectTaskBlockedInboxItem(tx *gorm.DB, task models.Task, requestID, now string) error {
+	if task.Status != "blocked" || task.BlockedReason == nil || task.BlockedAt == nil || task.BlockedFromStatus == nil {
+		return errors.New("blocked Task projection requires complete blocked state")
+	}
+	key := taskBlockedEventKey(task.ID, task.Version)
+	var existing models.InboxItem
+	err := tx.First(&existing, "source_event_key = ?", key).Error
+	if err == nil {
+		if existing.Kind != "event" || existing.SourceEntityType != taskBlockedInboxSourceType ||
+			existing.SourceEntityID == nil || *existing.SourceEntityID != task.ID {
+			return errors.New("Task blocked source_event_key belongs to an incompatible Inbox Item")
+		}
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	payload := map[string]any{
+		"task_id": task.ID, "task_title": task.Title,
+		"blocked_reason": *task.BlockedReason, "blocked_at": *task.BlockedAt,
+		"blocked_from_status": *task.BlockedFromStatus, "block_version": task.Version,
+	}
+	if task.ProjectID != nil {
+		payload["project_id"] = *task.ProjectID
+	}
+	if task.ProjectName != nil {
+		payload["project_name"] = *task.ProjectName
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	sourceID := task.ID
+	item := models.InboxItem{
+		ID: uuid.NewString(), Kind: "event", Title: taskBlockedTitle(task.Title),
+		Summary: "阻塞原因：" + *task.BlockedReason, SourceEntityType: taskBlockedInboxSourceType,
+		SourceEntityID: &sourceID, SourceEventKey: &key, Priority: task.Priority,
+		Status: "open", ResolutionPolicy: "manual", PayloadJSON: string(payloadJSON),
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := tx.Create(&item).Error; err != nil {
+		return fmt.Errorf("create Task blocked Inbox Item: %w", err)
+	}
+	return recordInboxWorkflowEventAs(
+		tx, item.ID, "source_projected", models.BuiltinSystemActorID,
+		nil, inboxItemEventState(item, ""), requestID, now,
+	)
 }
 
 func projectTaskArtifactFollowups(
@@ -102,12 +166,43 @@ func coordinateTaskArtifactInboxSourceDeletion(
 	requestID string,
 	now string,
 ) error {
-	if len(artifactIDs) == 0 {
+	return coordinateInboxSourceDeletion(
+		tx, taskArtifactInboxSourceType, artifactIDs, conflictCode, conflictMessage, requestID, now,
+	)
+}
+
+func coordinateTaskBlockedInboxSourceDeletion(
+	tx *gorm.DB,
+	taskID string,
+	requestID string,
+	now string,
+) error {
+	return coordinateInboxSourceDeletion(
+		tx,
+		taskBlockedInboxSourceType,
+		[]string{taskID},
+		"TASK_HAS_ACTIVE_INBOX_SOURCES",
+		"Resolve or dismiss all Task source Inbox Items before deleting this Task",
+		requestID,
+		now,
+	)
+}
+
+func coordinateInboxSourceDeletion(
+	tx *gorm.DB,
+	sourceType string,
+	sourceIDs []string,
+	conflictCode string,
+	conflictMessage string,
+	requestID string,
+	now string,
+) error {
+	if len(sourceIDs) == 0 {
 		return nil
 	}
-	uniqueIDs := make([]string, 0, len(artifactIDs))
-	seen := make(map[string]struct{}, len(artifactIDs))
-	for _, id := range artifactIDs {
+	uniqueIDs := make([]string, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, id := range sourceIDs {
 		if _, ok := seen[id]; ok {
 			continue
 		}
@@ -119,7 +214,7 @@ func coordinateTaskArtifactInboxSourceDeletion(
 	var items []models.InboxItem
 	if err := tx.Where(
 		"source_entity_type = ? AND source_entity_id IN ? AND source_deleted_at IS NULL",
-		taskArtifactInboxSourceType,
+		sourceType,
 		uniqueIDs,
 	).Order("id ASC").Find(&items).Error; err != nil {
 		return err

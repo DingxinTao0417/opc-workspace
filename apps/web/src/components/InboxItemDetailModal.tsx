@@ -9,6 +9,7 @@ import {
   Inbox,
   RotateCcw,
   Save,
+  TriangleAlert,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -345,6 +346,8 @@ export function InboxItemDetailModal({
             <span aria-hidden="true" className="inbox-detail-icon">
               {item.kind === "reminder" ? (
                 <BellRing size={17} />
+              ) : item.sourceEntityType === "task" ? (
+                <TriangleAlert size={17} />
               ) : item.kind === "event" ? (
                 <FileCheck2 size={17} />
               ) : (

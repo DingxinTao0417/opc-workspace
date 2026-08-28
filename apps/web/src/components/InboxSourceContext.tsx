@@ -14,6 +14,17 @@ interface TaskArtifactSourceSnapshot {
   projectName: string | null;
 }
 
+interface TaskBlockedSourceSnapshot {
+  taskId: string;
+  taskTitle: string;
+  blockedReason: string;
+  blockedAt: string;
+  blockedFromStatus: "todo" | "in_progress" | "waiting_review";
+  blockVersion: number;
+  projectId: string | null;
+  projectName: string | null;
+}
+
 function stringValue(
   value: Record<string, unknown>,
   key: string,
@@ -59,6 +70,42 @@ function taskArtifactSnapshot(
   };
 }
 
+function taskBlockedSnapshot(
+  item: InboxItem,
+): TaskBlockedSourceSnapshot | null {
+  if (item.sourceEntityType !== "task") return null;
+  const payload = item.payloadJson;
+  const taskId = stringValue(payload, "task_id");
+  const taskTitle = stringValue(payload, "task_title");
+  const blockedReason = stringValue(payload, "blocked_reason");
+  const blockedAt = stringValue(payload, "blocked_at");
+  const blockedFromStatus = payload.blocked_from_status;
+  const blockVersion = payload.block_version;
+  if (
+    !taskId ||
+    !taskTitle ||
+    !blockedReason ||
+    !blockedAt ||
+    (blockedFromStatus !== "todo" &&
+      blockedFromStatus !== "in_progress" &&
+      blockedFromStatus !== "waiting_review") ||
+    !Number.isInteger(blockVersion) ||
+    (blockVersion as number) < 2
+  ) {
+    return null;
+  }
+  return {
+    taskId,
+    taskTitle,
+    blockedReason,
+    blockedAt,
+    blockedFromStatus,
+    blockVersion: blockVersion as number,
+    projectId: stringValue(payload, "project_id"),
+    projectName: stringValue(payload, "project_name"),
+  };
+}
+
 const storageKindLabels: Record<string, string> = {
   text: "文本",
   link: "链接",
@@ -67,6 +114,67 @@ const storageKindLabels: Record<string, string> = {
 };
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
+  const blockedSource = taskBlockedSnapshot(item);
+  if (blockedSource) {
+    const statusLabels = {
+      todo: "待办",
+      in_progress: "进行中",
+      waiting_review: "待验收",
+    } as const;
+    const blockedDate = new Date(blockedSource.blockedAt);
+    const blockedTime = Number.isNaN(blockedDate.getTime())
+      ? blockedSource.blockedAt
+      : blockedDate.toLocaleString("zh-CN", { hour12: false });
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <TriangleAlert size={15} />
+          </span>
+          <div>
+            <strong>任务阻塞</strong>
+            <small>{blockedTime}</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源任务已删除；以下快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>来源任务</dt>
+            <dd>{blockedSource.taskTitle}</dd>
+          </div>
+          <div>
+            <dt>阻塞原因</dt>
+            <dd>{blockedSource.blockedReason}</dd>
+          </div>
+          <div>
+            <dt>阻塞前状态</dt>
+            <dd>{statusLabels[blockedSource.blockedFromStatus]}</dd>
+          </div>
+          {blockedSource.projectName ? (
+            <div>
+              <dt>所属项目</dt>
+              <dd>{blockedSource.projectName}</dd>
+            </div>
+          ) : null}
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link
+            className="button button-secondary"
+            to={`/tasks/${blockedSource.taskId}`}
+          >
+            查看来源任务
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
+      </section>
+    );
+  }
+
   const source = taskArtifactSnapshot(item);
   if (!source) return null;
 
@@ -107,10 +215,15 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </div>
         ) : null}
       </dl>
-      <Link className="button button-secondary" to={`/tasks/${source.taskId}`}>
-        查看来源任务
-        <ExternalLink aria-hidden="true" size={13} />
-      </Link>
+      {item.sourceDeletedAt ? null : (
+        <Link
+          className="button button-secondary"
+          to={`/tasks/${source.taskId}`}
+        >
+          查看来源任务
+          <ExternalLink aria-hidden="true" size={13} />
+        </Link>
+      )}
     </section>
   );
 }

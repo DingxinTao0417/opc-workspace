@@ -7,6 +7,7 @@ import {
   FileCheck2,
   Plus,
   Search,
+  TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -128,6 +129,8 @@ function InboxRow({
           <Archive size={15} />
         ) : item.kind === "reminder" ? (
           <BellRing size={15} />
+        ) : item.sourceEntityType === "task" ? (
+          <TriangleAlert size={15} />
         ) : item.kind === "event" ? (
           <FileCheck2 size={15} />
         ) : (
