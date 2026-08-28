@@ -3950,7 +3950,12 @@ kbd {
   white-space: nowrap;
 }
 
-.settings-backup-restore-confirm,
+.settings-backup-delete {
+  color: var(--danger-text);
+  white-space: nowrap;
+}
+
+.settings-backup-confirm,
 .settings-backup-restore-ready {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -3962,17 +3967,17 @@ kbd {
   background: color-mix(in srgb, var(--danger-text) 6%, var(--panel));
 }
 
-.settings-backup-restore-confirm > svg {
+.settings-backup-confirm > svg {
   color: var(--danger-text);
 }
 
-.settings-backup-restore-confirm strong,
+.settings-backup-confirm strong,
 .settings-backup-restore-ready strong {
   color: var(--text);
   font-size: 11px;
 }
 
-.settings-backup-restore-confirm p,
+.settings-backup-confirm p,
 .settings-backup-restore-ready p {
   margin: 4px 0 0;
   color: var(--text-muted);
@@ -3980,7 +3985,7 @@ kbd {
   line-height: 1.55;
 }
 
-.settings-backup-restore-confirm small {
+.settings-backup-confirm small {
   display: block;
   margin-top: 5px;
   color: var(--text-dim);
@@ -3988,7 +3993,7 @@ kbd {
   font-size: 8px;
 }
 
-.settings-backup-restore-confirm-actions {
+.settings-backup-confirm-actions {
   display: flex;
   grid-column: 1 / -1;
   justify-content: flex-end;
@@ -4451,7 +4456,8 @@ kbd {
 
   .settings-backup-verify,
   .settings-backup-drill,
-  .settings-backup-restore {
+  .settings-backup-restore,
+  .settings-backup-delete {
     width: 100%;
     justify-self: stretch;
   }

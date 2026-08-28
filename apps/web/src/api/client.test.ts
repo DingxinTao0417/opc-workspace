@@ -8,6 +8,7 @@ import {
   createTaskSavedView,
   createTaskAssignment,
   deleteTaskArtifact,
+  deleteBackup,
   deleteTag,
   deleteTask,
   deleteTaskSavedView,
@@ -1455,6 +1456,12 @@ describe("verified local backups", () => {
             202,
           );
         }
+        if (
+          init?.method === "DELETE" &&
+          String(input).endsWith(`/backups/${backupPayload.id}?confirm=true`)
+        ) {
+          return new Response(null, { status: 204 });
+        }
         return jsonResponse(
           init?.method === "POST"
             ? { data: backupPayload }
@@ -1482,6 +1489,7 @@ describe("verified local backups", () => {
       requestedAt: "2026-08-28T12:06:00Z",
       restartRequired: true,
     });
+    await deleteBackup(backupPayload.id);
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("/api/v1/backups");
     expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
@@ -1506,6 +1514,10 @@ describe("verified local backups", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[4][1]?.body))).toEqual({
       confirm: true,
     });
+    expect(String(fetchMock.mock.calls[5][0])).toContain(
+      `/api/v1/backups/${backupPayload.id}?confirm=true`,
+    );
+    expect(fetchMock.mock.calls[5][1]?.method).toBe("DELETE");
   });
 });
 

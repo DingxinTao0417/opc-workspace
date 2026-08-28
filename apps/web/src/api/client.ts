@@ -3794,6 +3794,14 @@ export async function scheduleBackupRestore(
   return { backupId, rollbackBackupId, requestedAt, restartRequired };
 }
 
+export async function deleteBackup(id: string): Promise<void> {
+  await apiRequest<unknown>(
+    `/api/v1/backups/${encodeURIComponent(id)}?confirm=true`,
+    { method: "DELETE" },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+}
+
 export async function getTags(
   input: TagListParams = {},
 ): Promise<TagListResult> {

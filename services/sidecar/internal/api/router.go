@@ -180,6 +180,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.POST("/backups/:id/drill", service.drillBackupRestore)
 		v1.POST("/backups/:id/restore", service.scheduleBackupRestore)
+		v1.DELETE("/backups/:id", service.deleteBackup)
 		v1.GET("/settings", service.listSettings)
 		v1.PATCH("/settings", service.updateSettings)
 		v1.GET("/actors", service.listActors)

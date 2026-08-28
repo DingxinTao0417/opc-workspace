@@ -23,6 +23,7 @@ import {
   createTaskAssignment,
   createProject,
   deleteClient,
+  deleteBackup,
   deleteProject,
   deleteTag,
   deleteTask,
@@ -205,6 +206,16 @@ export function useScheduleBackupRestore() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => scheduleBackupRestore(id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
+    },
+  });
+}
+
+export function useDeleteBackup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteBackup(id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },

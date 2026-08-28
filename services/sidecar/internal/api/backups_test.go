@@ -405,3 +405,63 @@ func TestRollbackRestoreSwapRecoversPartiallyMovedSQLiteSidecars(t *testing.T) {
 		t.Fatalf("old WAL was not consumed: %v", err)
 	}
 }
+
+func TestBackupDeleteRequiresConfirmationAndRemovesValidOrInvalidPackages(t *testing.T) {
+	router, store, _, backupDir := newBackupTestAPI(t)
+	defer store.Close()
+	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"delete me"}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create delete fixture = %d: %s", created.Code, created.Body.String())
+	}
+	backup := decodeBackupSummary(t, created.Body.Bytes())
+	withoutConfirmation := performRequest(router, http.MethodDelete, "/api/v1/backups/"+backup.ID, nil, nil)
+	if withoutConfirmation.Code != http.StatusUnprocessableEntity || responseErrorCode(t, withoutConfirmation.Body.Bytes()) != "CONFIRMATION_REQUIRED" {
+		t.Fatalf("delete without confirmation = %d: %s", withoutConfirmation.Code, withoutConfirmation.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, backup.ID)); err != nil {
+		t.Fatalf("unconfirmed delete changed package: %v", err)
+	}
+	deleted := performRequest(router, http.MethodDelete, "/api/v1/backups/"+backup.ID+"?confirm=true", nil, nil)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete backup = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	if _, err := os.Lstat(filepath.Join(backupDir, backup.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted package remains: %v", err)
+	}
+	repeated := performRequest(router, http.MethodDelete, "/api/v1/backups/"+backup.ID+"?confirm=true", nil, nil)
+	if repeated.Code != http.StatusNotFound || responseErrorCode(t, repeated.Body.Bytes()) != "BACKUP_NOT_FOUND" {
+		t.Fatalf("repeat delete = %d: %s", repeated.Code, repeated.Body.String())
+	}
+
+	invalidID := uuid.NewString()
+	invalidPath := filepath.Join(backupDir, invalidID)
+	if err := os.Mkdir(invalidPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(invalidPath, "broken.txt"), []byte("broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	invalidDelete := performRequest(router, http.MethodDelete, "/api/v1/backups/"+invalidID+"?confirm=true", nil, nil)
+	if invalidDelete.Code != http.StatusNoContent {
+		t.Fatalf("delete invalid package = %d: %s", invalidDelete.Code, invalidDelete.Body.String())
+	}
+	if _, err := os.Lstat(invalidPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invalid package remains: %v", err)
+	}
+
+	resumableID := uuid.NewString()
+	resumablePath := filepath.Join(backupDir, deletingBackupPrefix+resumableID)
+	if err := os.Mkdir(resumablePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(resumablePath, "leftover.txt"), []byte("leftover"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resumedDelete := performRequest(router, http.MethodDelete, "/api/v1/backups/"+resumableID+"?confirm=true", nil, nil)
+	if resumedDelete.Code != http.StatusNoContent {
+		t.Fatalf("resume staged delete = %d: %s", resumedDelete.Code, resumedDelete.Body.String())
+	}
+	if _, err := os.Lstat(resumablePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged delete remains: %v", err)
+	}
+}

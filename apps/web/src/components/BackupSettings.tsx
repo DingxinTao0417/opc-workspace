@@ -6,6 +6,7 @@ import {
   RefreshCw,
   RotateCcw,
   ShieldCheck,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { useState } from "react";
@@ -13,6 +14,7 @@ import { ApiError } from "../api/client";
 import {
   useBackupsQuery,
   useCreateBackup,
+  useDeleteBackup,
   useDrillBackupRestore,
   useScheduleBackupRestore,
   useVerifyBackup,
@@ -70,6 +72,12 @@ function backupErrorText(error: unknown): string {
     if (error.code === "RESTORE_RESTART_REQUIRED") {
       return "恢复已经挂起，请关闭并重新打开应用后继续。";
     }
+    if (error.code === "BACKUP_DELETE_UNSAFE") {
+      return "备份目录包含不安全的文件系统项，已拒绝删除。";
+    }
+    if (error.code === "BACKUP_DELETE_FAILED") {
+      return "备份删除未完整结束，请对同一备份重试。";
+    }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
       : error.message;
@@ -83,6 +91,7 @@ function BackupCard({
   drillingId,
   verifyingId,
   onDrill,
+  onDelete,
   onRestore,
   onVerify,
 }: {
@@ -91,6 +100,7 @@ function BackupCard({
   drillingId: string | null;
   verifyingId: string | null;
   onDrill: (id: string) => void;
+  onDelete: (backup: BackupSummary) => void;
   onRestore: (backup: BackupSummary) => void;
   onVerify: (id: string) => void;
 }) {
@@ -161,6 +171,16 @@ function BackupCard({
           <Undo2 size={13} />
           恢复此备份
         </button>
+        <button
+          aria-label={`删除备份 ${backup.id.slice(0, 8)}`}
+          className="button button-quiet settings-backup-delete"
+          disabled={busy}
+          onClick={() => onDelete(backup)}
+          type="button"
+        >
+          <Trash2 size={13} />
+          删除备份
+        </button>
       </div>
     </article>
   );
@@ -172,11 +192,15 @@ export function BackupSettings() {
   const verifyMutation = useVerifyBackup();
   const drillMutation = useDrillBackupRestore();
   const restoreMutation = useScheduleBackupRestore();
+  const deleteMutation = useDeleteBackup();
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
   const [restoreCandidate, setRestoreCandidate] =
     useState<BackupSummary | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<BackupSummary | null>(
+    null,
+  );
   const [scheduledRestore, setScheduledRestore] = useState<{
     backupId: string;
     rollbackBackupId: string;
@@ -186,13 +210,15 @@ export function BackupSettings() {
     createMutation.isPending ||
     verifyMutation.isPending ||
     drillMutation.isPending ||
-    restoreMutation.isPending;
+    restoreMutation.isPending ||
+    deleteMutation.isPending;
   const locked = pending || scheduledRestore !== null;
   const mutationError =
     createMutation.error ??
     verifyMutation.error ??
     drillMutation.error ??
-    restoreMutation.error;
+    restoreMutation.error ??
+    deleteMutation.error;
 
   const create = () => {
     setSuccess(null);
@@ -200,6 +226,7 @@ export function BackupSettings() {
     verifyMutation.reset();
     drillMutation.reset();
     restoreMutation.reset();
+    deleteMutation.reset();
     createMutation.mutate(
       { note: note.trim() },
       {
@@ -220,6 +247,7 @@ export function BackupSettings() {
     verifyMutation.reset();
     drillMutation.reset();
     restoreMutation.reset();
+    deleteMutation.reset();
     verifyMutation.mutate(id, {
       onSuccess: (backup) =>
         setSuccess(`备份 ${backup.id.slice(0, 8)} 完整性校验通过。`),
@@ -234,6 +262,7 @@ export function BackupSettings() {
     verifyMutation.reset();
     drillMutation.reset();
     restoreMutation.reset();
+    deleteMutation.reset();
     drillMutation.mutate(id, {
       onSuccess: (result) =>
         setSuccess(
@@ -250,6 +279,7 @@ export function BackupSettings() {
     verifyMutation.reset();
     drillMutation.reset();
     restoreMutation.reset();
+    deleteMutation.reset();
     restoreMutation.mutate(restoreCandidate.id, {
       onSuccess: (result) => {
         setScheduledRestore({
@@ -257,6 +287,37 @@ export function BackupSettings() {
           rollbackBackupId: result.rollbackBackupId,
         });
         setRestoreCandidate(null);
+      },
+    });
+  };
+
+  const chooseRestore = (backup: BackupSummary) => {
+    setDeleteCandidate(null);
+    setRestoreCandidate(backup);
+    setSuccess(null);
+    deleteMutation.reset();
+  };
+
+  const chooseDelete = (backup: BackupSummary) => {
+    setRestoreCandidate(null);
+    setDeleteCandidate(backup);
+    setSuccess(null);
+    restoreMutation.reset();
+    deleteMutation.reset();
+  };
+
+  const deleteSelectedBackup = () => {
+    if (!deleteCandidate) return;
+    const id = deleteCandidate.id;
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    restoreMutation.reset();
+    deleteMutation.reset();
+    deleteMutation.mutate(id, {
+      onSuccess: () => {
+        setDeleteCandidate(null);
+        setSuccess(`备份 ${id.slice(0, 8)} 已永久删除。`);
       },
     });
   };
@@ -375,7 +436,8 @@ export function BackupSettings() {
               drillingId={drillingId}
               key={backup.id}
               onDrill={drill}
-              onRestore={setRestoreCandidate}
+              onDelete={chooseDelete}
+              onRestore={chooseRestore}
               onVerify={verify}
               verifyingId={verifyingId}
             />
@@ -384,10 +446,7 @@ export function BackupSettings() {
       )}
 
       {restoreCandidate ? (
-        <section
-          aria-label="确认恢复备份"
-          className="settings-backup-restore-confirm"
-        >
+        <section aria-label="确认恢复备份" className="settings-backup-confirm">
           <AlertCircle size={18} />
           <div>
             <strong>确认恢复到“{restoreCandidate.note || "手动备份"}”？</strong>
@@ -400,7 +459,7 @@ export function BackupSettings() {
               {restoreCandidate.id.slice(0, 8)}
             </small>
           </div>
-          <div className="settings-backup-restore-confirm-actions">
+          <div className="settings-backup-confirm-actions">
             <button
               className="button button-secondary"
               disabled={restoreMutation.isPending}
@@ -428,6 +487,45 @@ export function BackupSettings() {
         </section>
       ) : null}
 
+      {deleteCandidate ? (
+        <section aria-label="确认删除备份" className="settings-backup-confirm">
+          <AlertCircle size={18} />
+          <div>
+            <strong>永久删除“{deleteCandidate.note || "手动备份"}”？</strong>
+            <p>
+              删除后无法再从这个备份恢复，但不会改变当前数据库或受控文件。损坏的备份包也可以通过此流程安全移除。
+            </p>
+            <small>
+              目标：{formatLocalTime(deleteCandidate.createdAt)} · ID{" "}
+              {deleteCandidate.id.slice(0, 8)}
+            </small>
+          </div>
+          <div className="settings-backup-confirm-actions">
+            <button
+              className="button button-secondary"
+              disabled={deleteMutation.isPending}
+              onClick={() => setDeleteCandidate(null)}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="button button-danger"
+              disabled={deleteMutation.isPending}
+              onClick={deleteSelectedBackup}
+              type="button"
+            >
+              {deleteMutation.isPending ? (
+                <LoaderCircle className="animate-spin" size={13} />
+              ) : (
+                <Trash2 size={13} />
+              )}
+              {deleteMutation.isPending ? "正在永久删除…" : "确认永久删除"}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {scheduledRestore ? (
         <section
           aria-live="assertive"
@@ -447,8 +545,8 @@ export function BackupSettings() {
       ) : null}
 
       <p className="settings-inline-note">
-        当前已开放创建、查看、完整性校验、隔离演练和重启前安全恢复安排；删除与
-        JSON 导出会在后续独立流程完成后启用。
+        当前已开放创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；JSON
+        导出会在后续独立流程完成后启用。
       </p>
     </>
   );

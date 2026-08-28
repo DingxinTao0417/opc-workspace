@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   drill: vi.fn(),
   restore: vi.fn(),
+  deleteBackup: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
 }));
@@ -77,6 +78,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useDeleteBackup: () => ({
+    mutate: mocks.deleteBackup,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
@@ -85,6 +92,7 @@ describe("BackupSettings", () => {
     mocks.verify.mockClear();
     mocks.drill.mockClear();
     mocks.restore.mockClear();
+    mocks.deleteBackup.mockClear();
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
   });
@@ -130,6 +138,14 @@ describe("BackupSettings", () => {
     expect(screen.getByText(/确认恢复到“提交前检查点”/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "确认并安排恢复" }));
     expect(mocks.restore).toHaveBeenCalledWith(
+      backup.id,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /删除备份 018f0000/ }));
+    expect(screen.getByText(/永久删除“提交前检查点”/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+    expect(mocks.deleteBackup).toHaveBeenCalledWith(
       backup.id,
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );

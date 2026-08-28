@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v17（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练和重启前安全恢复已经实现；备份删除、导入、导出、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复和确认删除已经实现；导入、导出、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v4.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -46,11 +46,12 @@
 - `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker 与 objects 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证 active file Artifact。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）与 objects 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
-- 设置“数据与备份”提供说明、创建、加载/空/错误状态、备份摘要、显式重新校验、恢复演练和二次确认恢复；安排成功后明确要求关闭并重新打开应用。长操作使用 180 秒客户端窗口。当前没有自动重启、删除或导出按钮，避免以无行为控件暗示能力。
+- `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
+- 设置“数据与备份”提供说明、创建、加载/空/错误状态、备份摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后明确要求关闭并重新打开应用。长操作使用 180 秒客户端窗口。当前没有自动重启或导出按钮，避免以无行为控件暗示能力。
 
 ### 仍未实现
 
-- 备份删除、基础 JSON 导出、导入预览/执行；
+- 基础 JSON 导出、导入预览/执行；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 破坏性迁移前产品化自动备份；
 - 计划备份、保留策略、增量备份、加密和云目标。
@@ -215,8 +216,9 @@ appLogDir/
 | `POST /api/v1/backups/:id/verify`  | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact |
 | `POST /api/v1/backups/:id/drill`   | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                    |
 | `POST /api/v1/backups/:id/restore` | 严格确认后重验目标、创建当前状态回滚包并挂起计划；下一次 Sidecar 启动前原子替换并最终复验，失败恢复旧资源                 |
+| `DELETE /api/v1/backups/:id`       | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝           |
 
-删除、导出/导入尚无路由。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
+导出/导入尚无路由。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
 
 当前备份事实只存在于备份包的 manifest，不写 `workflow_events`，避免把机器维护动作伪装成 Task/Project 业务事件。未来若增加诊断事件，最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
 
@@ -225,7 +227,7 @@ appLogDir/
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位和 Sidecar 生命周期；当前用户手动关闭/重开触发恢复，自动重启入口待实现。Sidecar 负责停写、SQLite 与 Artifact 一致性。
-- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练和二次确认恢复；未来再接删除、路径选择和作业诊断。
+- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；未来再接导出、路径选择和作业诊断。
 - [客户](clients.md) / [财务与发票](finance-invoices.md)：文件业务实现后扩展备份清单。
 
 ## 验收状态
@@ -250,12 +252,13 @@ appLogDir/
 - [x] 恢复演练再次校验源包，在唯一临时数据根复制、打开/迁移数据库、声明 Artifact store、复验全部 active file Artifact 并清理临时数据；源备份和当前数据保持不变。
 - [x] 恢复安排再次演练目标并创建完整自动回滚包，发布后冻结业务写入；同目标请求可安全重放，不同 pending 目标被拒绝。
 - [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。
+- [x] 备份永久删除要求明确确认，支持有效/损坏 UUID 包，原子移入可续删隐藏态后清理和同步；拒绝 symlink/reparse、非普通文件及 pending 恢复期间删除。
 
 ### 仍未实现
 
 - [ ] 桌面层一键安全重启、启动恢复进度页和 applied 清理警告诊断。
 - [ ] 破坏性迁移前自动备份。
-- [ ] 备份删除、导入/导出、保留策略、计划备份和跨版本兼容矩阵。
+- [ ] 导入/导出、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
@@ -274,6 +277,7 @@ appLogDir/
 - [备份 API 测试](../../services/sidecar/internal/api/backups_test.go)
 - [隔离恢复演练](../../services/sidecar/internal/api/backup_drill.go)
 - [重启前安全恢复](../../services/sidecar/internal/api/backup_restore.go)
+- [确认删除](../../services/sidecar/internal/api/backup_delete.go)
 - [设置备份界面](../../apps/web/src/components/BackupSettings.tsx)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)

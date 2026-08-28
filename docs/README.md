@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v17。项目/任务/Actor、D2 Submission/Artifact、Task 保存视图、Client 基础事实、Focus Core A+B+C、Today T-06A–H 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及编辑/确认删除入口、设置前后端闭环与旧值迁移、手动一致性备份创建/列表/校验/隔离恢复演练/重启恢复、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D、客户活动/附件、非 Reminder 来源投影、重复/原生通知、本地 Agent、备份删除/导出、回访/财务及项目附件/事件仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v17。项目/任务/Actor、D2 Submission/Artifact、Task 保存视图、Client 基础事实、Focus Core A+B+C、Today T-06A–H 日期分组/导航/排序/跨组拖拽/行内改期、安全执行快捷操作及编辑/确认删除入口、设置前后端闭环与旧值迁移、手动一致性备份创建/列表/校验/隔离演练/重启恢复/确认删除、手工 Inbox 及 Reminder/Task 编排已接通；受控头像文件、Focus D、客户活动/附件、非 Reminder 来源投影、重复/原生通知、本地 Agent、备份导出、回访/财务及项目附件/事件仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v4.8）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v4.9）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -29,13 +29,13 @@
 
 ## 平台与共享能力
 
-| 模块                       | 当前状态                                                                                | 目标版本            | 文档                                               |
-| -------------------------- | --------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 未开始                                                                                  | v0.2                | [local-agents.md](modules/local-agents.md)         |
-| 设置                       | 部分完成                                                                                | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
-| 命令面板与搜索             | 部分完成                                                                                | v0.1                | [command-search.md](modules/command-search.md)     |
-| 数据、受控文件、备份与恢复 | 迁移、Artifact store、手动备份创建/列表/校验、隔离演练及重启恢复已交付；删除/导出待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
-| 桌面平台与发布             | 基座部分完成                                                                            | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
+| 模块                       | 当前状态                                                                                     | 目标版本            | 文档                                               |
+| -------------------------- | -------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
+| 本地 Agent Runtime         | 未开始                                                                                       | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 设置                       | 部分完成                                                                                     | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
+| 命令面板与搜索             | 部分完成                                                                                     | v0.1                | [command-search.md](modules/command-search.md)     |
+| 数据、受控文件、备份与恢复 | 迁移、Artifact store、手动备份创建/列表/校验、隔离演练、重启恢复及确认删除已交付；导出待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
+| 桌面平台与发布             | 基座部分完成                                                                                 | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
 
@@ -55,7 +55,7 @@
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
-- Task 文件 Artifact 只保存在 Sidecar 声明的受控目录并经鉴权 API 下载；受控根通过不可变数据库身份 marker、进程独占锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用已能创建、列出和完整校验内部 SQLite+Artifact 备份包，在隔离临时根演练，并通过自动回滚点在下一次 Sidecar 启动前恢复当前数据；仍不能删除或导出备份。
+- Task 文件 Artifact 只保存在 Sidecar 声明的受控目录并经鉴权 API 下载；受控根通过不可变数据库身份 marker、进程独占锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用已能创建、列出和完整校验内部 SQLite+Artifact 备份包，在隔离临时根演练，通过自动回滚点在下一次 Sidecar 启动前恢复当前数据，并经二次确认永久删除精确包；仍不能导出备份。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。

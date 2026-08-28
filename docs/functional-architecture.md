@@ -2,7 +2,7 @@
 
 > 文档版本：2.10
 > 日期：2026-08-28
-> 依据：[PRD v4.8](opc-workspace-PRD.md)
+> 依据：[PRD v4.9](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v17
 
 ## 1. 目的
@@ -70,11 +70,11 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<artifact-id>`，下载前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime 和备份删除/导出，因此完整工作编排仍是部分完成。
+- 当前仍未实现 Focus D（历史、周报、Streak、高级分析、原生通知/托盘/DND）、Client 活动/附件/回访/财务、项目附件与非 Reminder 来源投影、重复提醒、Agent Runtime 和备份导出，因此完整工作编排仍是部分完成。
 
 ### 3.2 目标扩展
 
-- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core、手工 Inbox 受理/分诊、Reminder、Inbox Task 编排和基础备份恢复上，继续完成客户/项目增强、非 Reminder 来源投影、备份删除/导出和桌面可靠性；Focus D、重复/原生通知独立延后。
+- v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core、手工 Inbox 受理/分诊、Reminder、Inbox Task 编排和基础备份恢复/删除上，继续完成客户/项目增强、非 Reminder 来源投影、备份导出和桌面可靠性；Focus D、重复/原生通知独立延后。
 - v0.2：本地 Agent Runtime、任务看板和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
@@ -113,7 +113,7 @@
 | [专注](modules/focus.md)                   | 当前 Task                                                                     | 活动 Session 和有效工时                                                                                     | Task actual_minutes、今日/统计数据                                                      |
 | [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API 与 `/health` | 本地偏好界面、版本化非敏感设置事实、person 管理和只读运行诊断；头像受控文件、备份与完整诊断待实现           | 布局、主题、Focus 默认值、Actor、运行版本、备份和桌面行为                               |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/Inbox 索引                                                | 统一查找与快捷操作入口                                                                                      | 跳转详情或触发受控命令                                                                  |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移、受控 Artifact 一致性、手动备份创建/列表/校验、隔离演练和重启恢复；删除、导入导出仍规划          | 当前文件安全、已校验备份、恢复后的完整应用状态；未来诊断包                              |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                             | 已实现迁移、受控 Artifact 一致性、手动备份创建/列表/校验、隔离演练、重启恢复和确认删除；导入导出仍规划      | 当前文件安全、已校验备份、恢复后的完整应用状态；未来导出包与诊断包                      |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                       | 原生窗口、进程、权限、运行日志和发布                                                                        | 可运行、可诊断的本地应用环境                                                            |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                   | 财务与发票业务事实                                                                                          | 本地提醒、Inbox Item、客户聚合                                                          |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                       | 本地回访计划与结果                                                                                          | Inbox 到期项、客户活动                                                                  |
