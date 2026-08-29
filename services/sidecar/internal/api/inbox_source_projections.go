@@ -14,6 +14,7 @@ import (
 
 const taskArtifactInboxSourceType = "task_artifact"
 const taskBlockedInboxSourceType = "task"
+const projectCompletionInboxSourceType = "project_completion"
 
 func taskArtifactFollowupEventKey(artifactID string) string {
 	return fmt.Sprintf("task-artifact:%s:followup", artifactID)
@@ -39,6 +40,68 @@ func taskBlockedTitle(title string) string {
 		value = value[:200]
 	}
 	return string(value)
+}
+
+func projectCompletionEventKey(projectID string, completionVersion int64) string {
+	return fmt.Sprintf("project:%s:completed:%d", projectID, completionVersion)
+}
+
+func projectCompletionTitle(name string) string {
+	const prefix = "项目完成待跟进："
+	value := []rune(prefix + name)
+	if len(value) > 200 {
+		value = value[:200]
+	}
+	return string(value)
+}
+
+func projectProjectCompletionInboxItem(
+	tx *gorm.DB,
+	project models.Project,
+	incompleteTaskCount int64,
+	requestID,
+	completedAt string,
+) error {
+	if project.Status != "completed" || project.Version < 2 || incompleteTaskCount < 0 {
+		return errors.New("Project completion projection requires a completed Project snapshot")
+	}
+	key := projectCompletionEventKey(project.ID, project.Version)
+	var existing models.InboxItem
+	err := tx.First(&existing, "source_event_key = ?", key).Error
+	if err == nil {
+		if existing.Kind != "event" || existing.SourceEntityType != projectCompletionInboxSourceType ||
+			existing.SourceEntityID == nil || *existing.SourceEntityID != project.ID {
+			return errors.New("Project completion source_event_key belongs to an incompatible Inbox Item")
+		}
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	payloadJSON, err := json.Marshal(map[string]any{
+		"project_id": project.ID, "project_name": project.Name,
+		"completed_at": completedAt, "completion_version": project.Version,
+		"incomplete_task_count": incompleteTaskCount,
+	})
+	if err != nil {
+		return err
+	}
+	sourceID := project.ID
+	item := models.InboxItem{
+		ID: uuid.NewString(), Kind: "event", Title: projectCompletionTitle(project.Name),
+		Summary:          "项目已标记完成，请确认交付收尾、归档或其他后续工作。",
+		SourceEntityType: projectCompletionInboxSourceType, SourceEntityID: &sourceID,
+		SourceEventKey: &key, Priority: "P1", Status: "open", ResolutionPolicy: "manual",
+		PayloadJSON: string(payloadJSON), Version: 1, CreatedAt: completedAt, UpdatedAt: completedAt,
+	}
+	if err := tx.Create(&item).Error; err != nil {
+		return fmt.Errorf("create Project completion Inbox Item: %w", err)
+	}
+	return recordInboxWorkflowEventAs(
+		tx, item.ID, "source_projected", models.BuiltinSystemActorID,
+		nil, inboxItemEventState(item, ""), requestID, completedAt,
+	)
 }
 
 func projectTaskBlockedInboxItem(tx *gorm.DB, task models.Task, requestID, now string) error {
@@ -200,6 +263,23 @@ func coordinateTaskDueInboxSourceDeletion(
 		[]string{taskID},
 		"TASK_HAS_ACTIVE_INBOX_SOURCES",
 		"Resolve or dismiss all Task source Inbox Items before deleting this Task",
+		requestID,
+		now,
+	)
+}
+
+func coordinateProjectCompletionInboxSourceDeletion(
+	tx *gorm.DB,
+	projectID,
+	requestID,
+	now string,
+) error {
+	return coordinateInboxSourceDeletion(
+		tx,
+		projectCompletionInboxSourceType,
+		[]string{projectID},
+		"PROJECT_HAS_ACTIVE_INBOX_SOURCES",
+		"Resolve or dismiss all Project source Inbox Items before deleting this Project",
 		requestID,
 		now,
 	)

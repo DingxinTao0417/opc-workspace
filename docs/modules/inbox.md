@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v27。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败的系统维护来源已交付；schema v27 不改变 Inbox 契约，其他系统故障来源和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v28。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
 
 导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败的系统维护来源投影均已接真实 SQLite/API/UI。其他系统故障来源和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败来源投影均已接真实 SQLite/API/UI。其他系统故障来源和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -141,11 +141,19 @@
 - journal 中的稳定 incident ID 同时进入 `source_event_key`。即使数据库提交成功而 journal 删除结果不确定，重放也先按 event key 查询，用户已经 resolve/dismiss 的同一失败不会被重新创建。新的启动失败在旧 journal 已消费后获得新 ID，遵循活动 incident 去重规则。
 - `OPC_LOG_DIR`/`--logs` 现在是独立受控诊断目录，默认使用数据库同级 `logs/`，不得与 Artifact/backup root 重叠。该能力不是完整日志落盘、轮转、诊断包或桌面恢复页；这些仍待开发。
 
+### 已交付：T-11E 第八项——Project 完成节点
+
+- schema v28 新增 `source_entity_type=project_completion`，不回填已经完成的历史 Project，也不创建 demo Inbox Item。只有用户通过 Project `complete` 命令产生的新完成事实会在原状态转换事务内投影；Project 命令、`project_completed` Workflow Event、Inbox Item 和 `source_projected` Event 共同成功或回滚。
+- 稳定键为 `project:<project_id>:completed:<completion_version>`。同一完成周期不能重复；Project reopen 后再次 complete 会以新的完成后 Project version 形成独立周期和新事项。
+- 不可变 payload 精确保存 `project_id / project_name / completed_at / completion_version / incomplete_task_count`。事项固定 P1、无截止时间、人工解决；未结任务数使用 complete 命令确认时的同事务快照，不随后续 Task 变化改写。
+- Inbox 详情展示“项目完成”、完成时间、项目名和完成时未结任务数，并直达 `/projects/:id`。这只要求用户确认交付收尾、归档或其他人工后续，不自动创建 Task，不伪造验收、开票、收入或客户消息。
+- 活动完成事项会阻止 Project 永久删除。全部来源事项先 resolve/dismiss 后，Project 删除事务写入 `source_deleted_at` 和 `source_deleted` Event，再删除 Project；历史 Inbox Item 保留快照并停止提供失效链接。
+
 ### 明确未交付
 
 - 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
-- Project 节点、Client/Invoice，以及运行期数据库不可写、磁盘空间和其他尚未接入的系统故障来源投影；
-- `source_entity_type=task_artifact/task/task_due` 以外来源的多态删除协调、Inbox Item 硬删除；
+- Project 完成以外的独立里程碑、Client/Invoice，以及运行期数据库不可写、磁盘空间和其他尚未接入的系统故障来源投影；
+- 已交付来源以外的多态删除协调、Inbox Item 硬删除；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
 
@@ -223,17 +231,17 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v27 延续）
+### `inbox_items`（schema v12，在当前 schema v28 延续）
 
 | 字段                                | 当前约束 / 说明                                                                                                             |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `id`                                | UUID 主键                                                                                                                   |
 | `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 使用 reminder，其余已交付业务来源使用 event             |
 | `title / summary`                   | 标题 2–200；摘要最多 10,000                                                                                                 |
-| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task/task_due/system_maintenance                                |
+| `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task/task_due/project_completion/system_maintenance             |
 | `source_entity_id`                  | 当前手工项必须为 null；系统维护项为 `backup:create/verify/drill/restore`、`database:startup/migration` 或 `sidecar:startup` |
-| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact、Task 阻塞、Task 临期和系统维护分别使用各自稳定键                              |
-| `source_deleted_at`                 | 手工/Reminder/系统维护为 null；Artifact/Task/Task due 来源归档后删除时原子写入，且不可再次修改                              |
+| `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact、Task 阻塞/临期、Project 完成和系统维护分别使用稳定键                          |
+| `source_deleted_at`                 | 手工/Reminder/系统维护为 null；Artifact/Task/Task due/Project 完成来源归档后删除时原子写入，且不可再次修改                  |
 | `priority`                          | P0 / P1 / P2 / P3                                                                                                           |
 | `status`                            | open / tracking / resolved / dismissed                                                                                      |
 | `resolution_policy`                 | manual/all_required_tasks_done；公开新建仍为 manual，T-11C 拆分可切换自动策略                                               |
@@ -245,7 +253,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 | `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                                                          |
 | `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                                                                     |
 
-schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23–v25 以附加索引和 trigger 冻结 Task Artifact、Task 阻塞与 Task 临期来源身份、来源删除顺序和删除协调；schema v26 增加系统维护来源身份、活动 incident 唯一索引、不可变快照和禁止来源删除标记。均不重建表、不回填旧事实。其他 event 来源仍是受约束的未来空间。
+schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23–v25 冻结 Task Artifact、Task 阻塞与 Task 临期来源；schema v26 增加系统维护来源；schema v28 增加 Project 完成周期来源、不可变快照和删除协调。均不重建表、不回填旧事实。其他 event 来源仍是受约束的未来空间。
 
 ### `inbox_item_tasks`（schema v13）
 
@@ -291,7 +299,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | POST   | `/api/v1/inbox-items/:id/split`          | 原子创建 1–20 个 Task、层级、Assignment、created 关系与审计；强制 Inbox `If-Match`，可选幂等键         |
 | POST   | `/api/v1/inbox-items/:id/force-resolve`  | body `{confirm:true,reason}`；仅自动策略的例外解决；强制 Inbox `If-Match`，可选幂等键                  |
 
-关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history。单条关系命令返回 `{inbox_item,relation,progress}`；split 返回 `{inbox_item,tasks,relations,assignments,progress}`。Reminder 使用独立路由和内部到期投影；Task Artifact follow-up 由既有 `submit-output` 内部投影；备份创建、校验、恢复演练与恢复安排失败分别由既有 backup 路由内部尽力投影，不增加公开来源创建路由。PATCH 不能给 `system_maintenance` 条目设置截止时间。当前仍没有 Inbox 删除路由。
+关系 GET 返回 `{data:{active,history},meta:{page,page_size,total,inbox_item_version,progress}}`；`page/page_size` 只作用于 history。单条关系命令返回 `{inbox_item,relation,progress}`；split 返回 `{inbox_item,tasks,relations,assignments,progress}`。Reminder 使用独立路由和内部到期投影；Task Artifact follow-up 由 `submit-output` 投影，Project 完成由 `POST /projects/:id/transitions` 的 complete 命令投影；备份失败由既有路由内部尽力投影。所有来源都没有公开创建路由。PATCH 不能给 `system_maintenance` 条目设置截止时间。当前仍没有 Inbox 删除路由。
 
 ### 幂等、并发与事务
 
@@ -315,7 +323,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | 模块     | 当前协作事实                                                                                     | 后续扩展                                         |
 | -------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | 任务     | 可关联/拆分 Task；写入触发 reconciliation；follow-up、阻塞与提前 24 小时临期来源已投影并协调删除 | 更多筛选与跨模块统计继续扩展                     |
-| 项目     | 所属 Task 的显式 follow-up 产出已携带 Project 快照投影                                           | 项目节点继续使用独立稳定事件键投影               |
+| 项目     | 所属 Task follow-up 与 Project 完成节点已投影；完成事项按 Project version 区分周期并协调删除     | 其他里程碑只随真实状态/事实扩展                  |
 | 客户     | 当前没有客户活动或回访来源                                                                       | v0.4 回访到期生成去重 Inbox Item                 |
 | 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办             |
 | Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                               |
@@ -334,7 +342,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派（已完成）**：原子多任务/父子拆分、owner/person Assignment、统一 reconciliation、自动解决/重开和 force-resolve。
 7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
-8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期，以及备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已完成；后续继续实现运行期数据库不可写等其他系统故障并逐项验证稳定事件键。
+8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已完成；后续继续实现运行期数据库不可写等其他系统故障并逐项验证稳定事件键。
 9. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
 10. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
 
@@ -377,6 +385,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
 - [schema v25 Task 临期来源迁移](../../services/sidecar/internal/database/migrations/025_task_due_inbox_projection.sql)
 - [schema v26 系统维护来源迁移](../../services/sidecar/internal/database/migrations/026_system_maintenance_inbox_projection.sql)
+- [schema v28 Project 完成来源迁移](../../services/sidecar/internal/database/migrations/028_project_completion_inbox_projection.sql)
 - [Reminder 模块文档](reminders.md)
 - [Inbox API](../../services/sidecar/internal/api/inbox_items.go)
 - [Inbox–Task 关系 API](../../services/sidecar/internal/api/inbox_item_tasks.go)
@@ -388,6 +397,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [Inbox API 测试](../../services/sidecar/internal/api/inbox_items_test.go)
 - [Inbox–Task 关系 API 测试](../../services/sidecar/internal/api/inbox_item_tasks_test.go)
 - [Inbox 迁移测试](../../services/sidecar/internal/database/inbox_migration_test.go)
+- [Project 完成来源迁移测试](../../services/sidecar/internal/database/project_completion_inbox_projection_migration_test.go)
 - [Inbox–Task 关系迁移测试](../../services/sidecar/internal/database/inbox_task_migration_test.go)
 - [Inbox 页面](../../apps/web/src/pages/InboxPage.tsx)
 - [Inbox 详情](../../apps/web/src/components/InboxItemDetailModal.tsx)

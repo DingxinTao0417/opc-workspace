@@ -300,6 +300,52 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Project completion source snapshots", () => {
+    const projectId = "018f0000-0000-7000-8000-000000000822";
+    const projected = inboxPayload({
+      kind: "event",
+      title: "项目完成待跟进：官网升级",
+      summary: "项目已标记完成，请确认交付收尾、归档或其他后续工作。",
+      source_entity_type: "project_completion",
+      source_entity_id: projectId,
+      source_event_key: `project:${projectId}:completed:5`,
+      source_deleted_at: null,
+      priority: "P1",
+      due_at: null,
+      payload_json: {
+        project_id: projectId,
+        project_name: "官网升级",
+        completed_at: "2026-08-28T12:00:00Z",
+        completion_version: 5,
+        incomplete_task_count: 1,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "project_completion",
+      sourceEntityId: projectId,
+      priority: "P1",
+      dueAt: null,
+      payloadJson: {
+        project_name: "官网升级",
+        completion_version: 5,
+        incomplete_task_count: 1,
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `project:${projectId}:completed:4`,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, unexpected: "value" },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly validates backup-create system maintenance snapshots", () => {
     const projected = inboxPayload({
       kind: "event",

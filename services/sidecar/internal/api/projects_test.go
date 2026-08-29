@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
 func newProjectTestAPI(t *testing.T) (*gin.Engine, *database.Store) {
@@ -826,6 +827,107 @@ func TestProjectTransitionsRequireValidStateVersionAndIncompleteConfirmation(t *
 	restoredFallback := transitionProjectForTest(t, router, legacyFallback.ID, 1, `{"action":"restore"}`)
 	if restoredFallback.Status != "planning" {
 		t.Fatalf("legacy restore status = %q, want planning", restoredFallback.Status)
+	}
+}
+
+func TestProjectCompletionProjectsInboxSourceAndCoordinatesDeletion(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	created := createProjectForTest(t, router, `{"name":"客户门户交付"}`, nil)
+	started := transitionProjectForTest(t, router, created.ID, created.Version, `{"action":"start"}`)
+	completed := transitionProjectForTest(t, router, created.ID, started.Version, `{"action":"complete"}`)
+
+	var first models.InboxItem
+	firstKey := projectCompletionEventKey(created.ID, completed.Version)
+	if err := store.DB.First(&first, "source_event_key = ?", firstKey).Error; err != nil {
+		t.Fatalf("load first Project completion source: %v", err)
+	}
+	if first.Kind != "event" || first.SourceEntityType != projectCompletionInboxSourceType ||
+		first.SourceEntityID == nil || *first.SourceEntityID != created.ID || first.Priority != "P1" ||
+		first.Status != "open" || first.ResolutionPolicy != "manual" {
+		t.Fatalf("first Project completion source = %#v", first)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(first.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode first Project completion payload: %v", err)
+	}
+	if len(payload) != 5 || payload["project_id"] != created.ID || payload["project_name"] != created.Name ||
+		payload["completion_version"] != float64(completed.Version) || payload["incomplete_task_count"] != float64(0) ||
+		payload["completed_at"] != first.CreatedAt {
+		t.Fatalf("first Project completion payload = %#v", payload)
+	}
+	var projectedEvents int64
+	if err := store.DB.Table("workflow_events").Where(
+		"aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_projected' AND actor_id = ?",
+		first.ID,
+		models.BuiltinSystemActorID,
+	).Count(&projectedEvents).Error; err != nil || projectedEvents != 1 {
+		t.Fatalf("first source_projected events = %d, err=%v", projectedEvents, err)
+	}
+	dueDateRejected := performRequest(
+		router,
+		http.MethodPatch,
+		"/api/v1/inbox-items/"+first.ID,
+		[]byte(`{"due_at":"2026-08-30T12:00:00Z"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if dueDateRejected.Code != http.StatusUnprocessableEntity || responseErrorCode(t, dueDateRejected.Body.Bytes()) != "VALIDATION_ERROR" {
+		t.Fatalf("Project completion due date edit = %d: %s", dueDateRejected.Code, dueDateRejected.Body.String())
+	}
+
+	reopened := transitionProjectForTest(t, router, created.ID, completed.Version, `{"action":"reopen"}`)
+	completedAgain := transitionProjectForTest(t, router, created.ID, reopened.Version, `{"action":"complete"}`)
+	var sources []models.InboxItem
+	if err := store.DB.Where(
+		"source_entity_type = ? AND source_entity_id = ?",
+		projectCompletionInboxSourceType,
+		created.ID,
+	).Order("created_at ASC, id ASC").Find(&sources).Error; err != nil {
+		t.Fatalf("load Project completion cycles: %v", err)
+	}
+	if len(sources) != 2 || sources[0].SourceEventKey == nil || *sources[0].SourceEventKey != firstKey ||
+		sources[1].SourceEventKey == nil || *sources[1].SourceEventKey != projectCompletionEventKey(created.ID, completedAgain.Version) {
+		t.Fatalf("Project completion cycles = %#v", sources)
+	}
+
+	archived := transitionProjectForTest(t, router, created.ID, completedAgain.Version, `{"action":"archive"}`)
+	blockedDelete := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/projects/"+created.ID+"?confirm=true",
+		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, archived.Version)},
+	)
+	if blockedDelete.Code != http.StatusConflict || responseErrorCode(t, blockedDelete.Body.Bytes()) != "PROJECT_HAS_ACTIVE_INBOX_SOURCES" {
+		t.Fatalf("delete with active Project sources = %d: %s", blockedDelete.Code, blockedDelete.Body.String())
+	}
+	for _, source := range sources {
+		resolved := performRequest(
+			router,
+			http.MethodPost,
+			"/api/v1/inbox-items/"+source.ID+"/resolve",
+			[]byte(`{"reason":"项目收尾已确认"}`),
+			map[string]string{"If-Match": `"1"`},
+		)
+		if resolved.Code != http.StatusOK {
+			t.Fatalf("resolve Project completion source = %d: %s", resolved.Code, resolved.Body.String())
+		}
+	}
+	deleted := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/projects/"+created.ID+"?confirm=true",
+		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, archived.Version)},
+	)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete after Project source coordination = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var coordinated int64
+	if err := store.DB.Table("inbox_items").Where(
+		"source_entity_type = 'project_completion' AND source_entity_id = ? AND source_deleted_at IS NOT NULL",
+		created.ID,
+	).Count(&coordinated).Error; err != nil || coordinated != 2 {
+		t.Fatalf("coordinated Project completion sources = %d, err=%v, want 2", coordinated, err)
 	}
 }
 

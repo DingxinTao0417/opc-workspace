@@ -422,11 +422,17 @@ func (a *API) updateInboxItem(c *gin.Context) {
 		}
 		next := current
 		patch.apply(&next)
-		if current.SourceEntityType == systemMaintenanceInboxSourceType && !equalStringPointers(current.DueAt, next.DueAt) {
+		if (current.SourceEntityType == systemMaintenanceInboxSourceType ||
+			current.SourceEntityType == projectCompletionInboxSourceType) &&
+			!equalStringPointers(current.DueAt, next.DueAt) {
+			message := "system maintenance Inbox Items cannot have a due date"
+			if current.SourceEntityType == projectCompletionInboxSourceType {
+				message = "Project completion Inbox Items cannot have a due date"
+			}
 			return newProjectRequestError(
 				http.StatusUnprocessableEntity,
 				"VALIDATION_ERROR",
-				"system maintenance Inbox Items cannot have a due date",
+				message,
 			)
 		}
 		if inboxItemEditableEqual(current, next) {

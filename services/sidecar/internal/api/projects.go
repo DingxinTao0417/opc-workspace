@@ -551,16 +551,16 @@ func (a *API) transitionProject(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if input.Action == "complete" && !input.ConfirmIncompleteTasks {
-			var remaining int64
-			if err := tx.Table("tasks").Where("project_id = ? AND status <> ?", id, "done").Count(&remaining).Error; err != nil {
+		var incompleteTaskCount int64
+		if input.Action == "complete" {
+			if err := tx.Table("tasks").Where("project_id = ? AND status <> ?", id, "done").Count(&incompleteTaskCount).Error; err != nil {
 				return err
 			}
-			if remaining > 0 {
+			if incompleteTaskCount > 0 && !input.ConfirmIncompleteTasks {
 				return newProjectRequestError(
 					http.StatusConflict,
 					"INCOMPLETE_TASKS_CONFIRMATION_REQUIRED",
-					fmt.Sprintf("Project has %d incomplete task(s); explicit confirmation is required", remaining),
+					fmt.Sprintf("Project has %d incomplete task(s); explicit confirmation is required", incompleteTaskCount),
 				)
 			}
 		}
@@ -600,6 +600,17 @@ func (a *API) transitionProject(c *gin.Context) {
 			updatedAt,
 		); err != nil {
 			return err
+		}
+		if input.Action == "complete" {
+			if err := projectProjectCompletionInboxItem(
+				tx,
+				row.Project,
+				incompleteTaskCount,
+				requestIDFromContext(c),
+				updatedAt,
+			); err != nil {
+				return err
+			}
 		}
 		response = projectResponseFromRow(row)
 		return nil
@@ -646,6 +657,14 @@ func (a *API) deleteProject(c *gin.Context) {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
 		}
 		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		if err := coordinateProjectCompletionInboxSourceDeletion(
+			tx,
+			id,
+			requestIDFromContext(c),
+			deletedAt,
+		); err != nil {
+			return err
+		}
 		var err error
 		movedAttachmentFiles, err = a.trashProjectAttachmentFiles(tx, id, deletedAt)
 		if err != nil {

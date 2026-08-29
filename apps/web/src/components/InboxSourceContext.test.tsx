@@ -171,6 +171,50 @@ describe("InboxSourceContext", () => {
     expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
   });
 
+  it("shows a Project completion snapshot and hides its link after deletion", () => {
+    const projectId = "018f0000-0000-7000-8000-000000000822";
+    const projectItem: InboxItem = {
+      ...sourceItem,
+      title: "项目完成待跟进：官网升级",
+      summary: "项目已标记完成，请确认交付收尾、归档或其他后续工作。",
+      sourceEntityType: "project_completion",
+      sourceEntityId: projectId,
+      sourceEventKey: `project:${projectId}:completed:5`,
+      dueAt: null,
+      payloadJson: {
+        project_id: projectId,
+        project_name: "官网升级",
+        completed_at: "2026-08-28T12:00:00Z",
+        completion_version: 5,
+        incomplete_task_count: 1,
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={projectItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("项目完成")).toBeTruthy();
+    expect(screen.getByText("官网升级")).toBeTruthy();
+    expect(screen.getByText("1 项")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源项目/ })).toHaveAttribute(
+      "href",
+      `/projects/${projectId}`,
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{ ...projectItem, sourceDeletedAt: "2026-08-29T12:00:00Z" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源项目已删除");
+    expect(screen.getByText("官网升级")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /查看来源项目/ })).toBeNull();
+  });
+
   it("shows a safe backup-create maintenance snapshot and opens data settings", () => {
     const maintenanceItem: InboxItem = {
       ...sourceItem,

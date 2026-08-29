@@ -2380,6 +2380,23 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
+  const validProjectCompletionEvent =
+    sourceEntityType === "project_completion" &&
+    !!sourceEntityId &&
+    dueAt === null &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.project_id === sourceEntityId &&
+    typeof rawPayload.project_name === "string" &&
+    rawPayload.project_name.trim().length > 0 &&
+    typeof rawPayload.completed_at === "string" &&
+    rawPayload.completed_at.length > 0 &&
+    Number.isInteger(rawPayload.completion_version) &&
+    (rawPayload.completion_version as number) >= 2 &&
+    Number.isInteger(rawPayload.incomplete_task_count) &&
+    (rawPayload.incomplete_task_count as number) >= 0 &&
+    sourceEventKey ===
+      `project:${sourceEntityId}:completed:${String(rawPayload.completion_version)}`;
   const maintenanceDefinition =
     typeof sourceEntityId === "string"
       ? systemMaintenanceDefinitions[
@@ -2416,6 +2433,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "task_artifact" &&
       sourceEntityType !== "task" &&
       sourceEntityType !== "task_due" &&
+      sourceEntityType !== "project_completion" &&
       sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
@@ -2429,6 +2447,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validTaskArtifactEvent &&
       !validTaskBlockedEvent &&
       !validTaskDueEvent &&
+      !validProjectCompletionEvent &&
       !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==

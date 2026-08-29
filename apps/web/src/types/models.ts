@@ -1206,6 +1206,7 @@ export interface InboxItem {
     | "task_artifact"
     | "task"
     | "task_due"
+    | "project_completion"
     | "system_maintenance";
   sourceEntityId: string | null;
   sourceEventKey: string | null;

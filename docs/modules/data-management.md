@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v27（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件与 Workspace Avatar，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v7.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v7.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -165,7 +165,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v27：
+当前 schema v28：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -174,7 +174,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加四类 Inbox 来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards。均不改写既有事实或创建附件/demo 数据。后续迁移从 `028_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调。均不改写既有事实或创建附件/demo 数据。后续迁移从 `029_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；

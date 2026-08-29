@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.18
+> 文档版本：2.19
 > 日期：2026-08-28
-> 依据：[PRD v7.2](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v27
+> 依据：[PRD v7.3](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
 
@@ -51,7 +51,7 @@
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 可编辑人工笔记、所属 Task Artifact 产出聚合与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立产出/笔记/审计反馈状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
-- SQLite 当前为 schema v27：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加四类 Inbox 来源 guards；schema v27 新增受控工作区头像、不可变删除墓碑、单 active、设置引用存在性和跨 Task/Client/Project/Avatar 文件 ID 唯一保护，不回填历史事实或创建 demo 数据。
+- SQLite 当前为 schema v28：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源、不可变快照与父项目删除协调，不回填历史事实或创建 demo 数据。
 - 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
@@ -66,14 +66,14 @@
 - 任务详情已接 Assignment API/UI：可查询当前 assignee/reviewer 与结束历史，完成首次分派、改派和结束；命令使用 Task `If-Match`/`version`、可选幂等快照和事务化 Workflow Event。完成 Task 会结束活动 Assignment，重新打开不会恢复旧记录。
 - Task 已扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态，并通过 `start / block / unblock / complete / cancel / reopen` 六个显式命令改变生命周期；新建只能进入 `todo`，旧通用状态端点返回 410。开始要求活动负责人，阻塞/取消要求原因，解除阻塞由服务端恢复来源状态，完成/取消会原子结束活动 Assignment，重新打开不会恢复旧分派。
 - 任务详情已提供按需加载的通用 Task Workflow Event 时间线；生命周期、Assignment 和迁移事件按时间与 `command_seq` 倒序展示，事件记录受数据库不可修改/删除保护。
-- Project 创建、资料编辑、生命周期转换与永久删除也复用通用不可变 Workflow Event；producer 与原项目写命令同事务，创建幂等重放跳过 producer，事件失败回滚命令。Project 时间线按时间、命令序号和事件 ID 倒序读取，返回当前 Project 版本，不成为项目状态的第二事实来源。
+- Project 创建、资料编辑、生命周期转换与永久删除也复用通用不可变 Workflow Event；producer 与原项目写命令同事务，创建幂等重放跳过 producer，事件失败回滚命令。`complete` 还在同一事务按 Project ID + 完成后 version 投影一个完成收尾 Inbox Item，保存项目名、完成时间与未结任务数快照；reopen 后再次完成形成新周期。Project 时间线按时间、命令序号和事件 ID 倒序读取，返回当前 Project 版本，不成为项目状态的第二事实来源。
 - 人工 Project Note 是独立可编辑业务事实：创建、编辑和带原因软删除分别递增笔记版本及 Project 聚合版本；归档项目只读，删除历史不可再改写。它不写入或覆盖不可变 Workflow Event，Project 硬删除时随聚合级联删除。
 - `review_policy = manual` 已在 Task 新建和受限编辑中开放；策略只可在 todo 且没有任何 Submission 历史时改变。manual Task 具备活动 assignee 与 owner reviewer 后，可提交摘要以及 text/link/structured/file Artifact，进入 waiting_review，由 owner 接受或要求返工。
 - schema v9 和 UI 已交付 Submission/Artifact 历史、受控文件 store、安全下载、完整性状态、确认软删除、Task 聚合硬删除补偿，以及提交/审核/撤回/删除时间线。不可变 Artifact deletion tombstone 与删除事实同事务写入并在 Task 聚合删除后保留，供启动恢复判定授权删除。producer 来自活动 assignee，submitter/recorder/reviewer/withdrawer/deleter 为内置 owner。
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 高级分析/原生反馈、Client 外部活动来源/回访/财务、运行期数据库不可写等其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已投影到 Inbox；完整日志/恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 高级分析/原生反馈、Client 外部活动来源/回访/财务、运行期数据库不可写等其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已投影到 Inbox；完整日志/恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 
@@ -108,7 +108,7 @@
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | [今日](modules/today.md)                   | Task、Focus、Inbox 派生统计                                                                       | 当日执行入口、聚合展示、完整计划组排序、同日/跨日期拖拽、版本化改期，以及受策略约束的生命周期/专注快捷操作                               | 计划日期事实、源/目标组顺序结果、版本化开始/完成、绑定 Focus、打开收件箱                            |
 | [任务](modules/tasks.md)                   | Project、Actor、Inbox 关系与来源                                                                  | 唯一工单、六态生命周期、完成条件、Submission/Artifact、manual 验收与阻塞来源投影                                                         | Project 进度、Task 事件、阻塞 Inbox Item、后续 Inbox 进度与 Focus 工时                              |
-| [项目](modules/projects.md)                | Client、Task、受控文件 store                                                                      | 已实现资料、生命周期、任务/Artifact 聚合、笔记、附件、活动时间线、follow-up/阻塞/Task 临期→Inbox                                         | 项目自身交付/验收节点来源待实现；产出操作仍直达共享任务详情                                         |
+| [项目](modules/projects.md)                | Client、Task、受控文件 store                                                                      | 已实现资料、生命周期、任务/Artifact 聚合、笔记、附件、活动时间线、follow-up/阻塞/Task 临期及完成节点→Inbox                               | 完成收尾事项进入 Inbox；产出操作仍直达共享任务详情，其他里程碑随真实节点实现                        |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                          | 当前已实现基础资料、状态、项目数/最近活动派生、Project 关联、人工时间线、Client Attachment 和显式 contact 关联                           | 外部来源、回访、发票和 Inbox 来源仍属后续纵切                                                       |
 | [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期、备份及启动故障 | 已交付受理分诊、来源上下文、Task 编排、自动结清/重开、来源删除协调、强制例外和运营计数/风险深链                                          | 输出 Event、实时进度及 Today/Sidebar 计数；运行期数据库等来源待 T-11E                               |
 | [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                        | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                                                   | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                            |
@@ -382,7 +382,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → 已交付：手工 Inbox Item / 受理 / 分诊 / 归档事件
   → 已交付：已有 Task 活动/历史关系 / 实时进度 / 软解除 / 删除互锁
   → 已交付：一次性 Reminder / 启动补偿 / 到期 Inbox 投影
-  → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / 备份创建 / 校验 / 恢复演练 / 恢复安排失败
+  → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / Project 完成 / 备份与启动故障来源
   → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期改期、安全的开始/完成/开始专注快捷操作，以及编辑/版本化确认删除入口
   → 已交付数据库启动/迁移与 Sidecar 启动失败补偿；继续运行期数据库故障 / 桌面完整日志与恢复
   → v0.2 本地 Agent / 预设自动化 / Task 看板

@@ -1,5 +1,6 @@
 import {
   CalendarClock,
+  CheckCircle2,
   DatabaseBackup,
   ExternalLink,
   FileCheck2,
@@ -40,6 +41,14 @@ interface TaskDueSourceSnapshot {
   dueState: "due_soon" | "overdue";
   projectId: string | null;
   projectName: string | null;
+}
+
+interface ProjectCompletionSourceSnapshot {
+  projectId: string;
+  projectName: string;
+  completedAt: string;
+  completionVersion: number;
+  incompleteTaskCount: number;
 }
 
 interface SystemMaintenanceSourceSnapshot {
@@ -168,6 +177,36 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
   };
 }
 
+function projectCompletionSnapshot(
+  item: InboxItem,
+): ProjectCompletionSourceSnapshot | null {
+  if (item.sourceEntityType !== "project_completion") return null;
+  const payload = item.payloadJson;
+  const projectId = stringValue(payload, "project_id");
+  const projectName = stringValue(payload, "project_name");
+  const completedAt = stringValue(payload, "completed_at");
+  const completionVersion = payload.completion_version;
+  const incompleteTaskCount = payload.incomplete_task_count;
+  if (
+    !projectId ||
+    !projectName ||
+    !completedAt ||
+    !Number.isInteger(completionVersion) ||
+    (completionVersion as number) < 2 ||
+    !Number.isInteger(incompleteTaskCount) ||
+    (incompleteTaskCount as number) < 0
+  ) {
+    return null;
+  }
+  return {
+    projectId,
+    projectName,
+    completedAt,
+    completionVersion: completionVersion as number,
+    incompleteTaskCount: incompleteTaskCount as number,
+  };
+}
+
 function systemMaintenanceSnapshot(
   item: InboxItem,
 ): SystemMaintenanceSourceSnapshot | null {
@@ -269,6 +308,52 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             打开数据与备份
           </button>
         ) : null}
+      </section>
+    );
+  }
+
+  const projectSource = projectCompletionSnapshot(item);
+  if (projectSource) {
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <CheckCircle2 size={15} />
+          </span>
+          <div>
+            <strong>项目完成</strong>
+            <small>{localTimestamp(projectSource.completedAt)}</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源项目已删除；以下完成快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>来源项目</dt>
+            <dd>{projectSource.projectName}</dd>
+          </div>
+          <div>
+            <dt>完成时间</dt>
+            <dd>{localTimestamp(projectSource.completedAt)}</dd>
+          </div>
+          <div>
+            <dt>完成时未结任务</dt>
+            <dd>{projectSource.incompleteTaskCount} 项</dd>
+          </div>
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link
+            className="button button-secondary"
+            to={`/projects/${projectSource.projectId}`}
+          >
+            查看来源项目
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
       </section>
     );
   }

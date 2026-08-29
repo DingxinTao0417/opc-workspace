@@ -1,6 +1,6 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v27（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v27 不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v28 不改写 Task 表。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder、本地 Agent Run、Focus 高级分析和任务看板属于后续纵切。
 
