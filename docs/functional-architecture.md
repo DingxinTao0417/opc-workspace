@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.20
+> 文档版本：2.21
 > 日期：2026-08-28
-> 依据：[PRD v8.7](opc-workspace-PRD.md)
+> 依据：[PRD v8.8](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
@@ -53,6 +53,7 @@
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - SQLite 当前为 schema v28：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源、不可变快照与父项目删除协调，不回填历史事实或创建 demo 数据。
 - 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
+- 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 含文件业务 ZIP 导出在维护写锁内完整生成后才响应：`manifest.json` 记录 source、业务 JSON 及全部 active 受控文件的安全相对路径、size/SHA-256，`files/` 携带正文；复制时任一文件漂移都会整体失败并清理 staging。该包排除 SQLite、identity、store marker 和运行维护事实。
 - 业务 JSON 与含文件 ZIP 导入均先 strict 预检同 schema/固定表列/标量行/终态 Focus 和空目标；ZIP 额外校验 manifest、文件全集、安全路径、size/SHA-256 与数据库元数据。正式应用前创建已校验回滚备份；JSON 在单事务中写入，ZIP 先无覆盖发布文件，再于 DB 提交前复验磁盘正文，失败补偿本次文件。非空目标和跨 schema 包继续拒绝。
@@ -364,7 +365,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
 | 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。`BACKUP_INVALID` 与可解释业务结果不投影；启动应用失败转入下一行的 journal 补偿                                                                                                                                         |
 | 数据库/Sidecar 启动失败         | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal，下一次健康启动在 ready 前补偿为 `database:startup` / `database:migration` / `sidecar:startup`。稳定 incident ID 防模糊清理重放；原错误、路径和敏感内容不进入 journal/Inbox。Sidecar 脱敏日志已轮转落盘；Tauri 壳日志、恢复页和运行期数据库不可写仍待实现                                                                                                               |
-| 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。浏览器开发模式不接管外部 Sidecar，并提示手动重启。下一次 Sidecar 在数据库/Artifact lease 打开前交换同父目录资源，最终校验失败恢复 old 并隔离计划，成功将 pending 原子推进为 applied 后再清理；恢复进度页仍待实现 |
+| 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。健康启动后只读诊断 API 汇总 pending、本次 applied、清理残留、失败隔离和 invalid 记录，设置页恢复门禁并脱敏展示；数据库打开前实时进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                              |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                      |
 | 并发旧写入                      | Sidecar 领域服务                 | Task/Tag 当前事实、父子/标签嵌入、Assignment、生命周期、Submission/Artifact、Project/Client 聚合和 Actor 变化都会使旧 `If-Match` 或 `expected_version` 返回 409；输出前端保留 summary、text、link、structured 与浏览器 File 草稿，Client 编辑前端保留资料草稿，刷新后要求用户再次明确提交，不用旧版本自动重试                                                                                    |

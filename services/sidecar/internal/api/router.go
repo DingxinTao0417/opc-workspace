@@ -31,6 +31,7 @@ type Options struct {
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration
 	ReminderScanInterval   time.Duration
+	StartupRestore         StartupRestoreResult
 }
 
 type API struct {
@@ -162,6 +163,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/imports/business-package/preview", service.previewBusinessPackageImport)
 		v1.POST("/imports/business-package", service.applyBusinessPackageImport)
 		v1.GET("/backups", service.listBackups)
+		v1.GET("/backups/restore-diagnostics", service.getRestoreDiagnostics)
 		v1.POST("/backups", service.createBackup)
 		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.POST("/backups/:id/drill", service.drillBackupRestore)

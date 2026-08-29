@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。非空目标冲突合并、计划备份、恢复诊断和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。数据库打开前恢复页、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.7](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -54,6 +54,7 @@
 - `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker、objects 与 avatars 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证全部 active 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects/avatars，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）、objects 与 avatars 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
+- GET /api/v1/backups/restore-diagnostics 在健康启动后只读汇总当前 pending、本次进程已应用恢复、applied 清理残留、failed 隔离和不规范记录。响应只含规范备份 ID、请求时间、状态与计数；本机路径、原始 cleanup warning 和底层错误不会进入 API。失败/无效记录不会被自动删除，applied 残留不会导致恢复重复执行。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
 - `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。`workspace_avatars` 元数据与其他业务/历史表进入导出，文件正文不嵌入；摘要统计全部 active Task/Client/Project/Avatar 受控文件。schema migrations、workspace identity、幂等响应、四类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - `GET /api/v1/exports/business-package` 在维护写锁内先完整生成临时 ZIP，再开始响应。根目录固定为 `manifest.json` 与 `business-data.json`，活动受控文件按 `files/objects/<uuid>` 或 `files/avatars/<uuid>.<ext>` 写入；manifest format v1 记录 source、业务 JSON 和每个文件的相对路径、size/SHA-256、文件数与未压缩字节总量。复制时重新读取并校验每个 regular file，任一缺失、size/hash 漂移或不安全路径都整体失败并清理临时包。ZIP 不包含 SQLite、workspace identity、store marker、会话令牌、机器绝对路径或运行维护表。
@@ -261,6 +262,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 | `POST /api/v1/imports/business-data` | 固定确认头后再次预检，导入前自动已校验备份，维护写锁内原子替换与完整性复验 |
 | `POST /api/v1/imports/business-package/preview` | strict 预检含文件 ZIP，返回 schema、表/总行数、文件数/字节数、`can_apply` 与空目标 blocker；不改变数据 |
 | `POST /api/v1/imports/business-package` | 独立固定确认头后再次预检，导入前自动已校验备份；受控文件无覆盖发布，DB 提交前复验正文，失败补偿本次文件 |
+| `GET /api/v1/backups/restore-diagnostics` | 只读汇总待重启、本次 applied、applied 清理残留、failed 隔离与 invalid 记录；只返回规范 ID/时间/状态/计数 |
 
 恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。JSON 与含文件 ZIP 导入当前都只支持空目标和同 schema。数据量增长后再把同步导入导出升级为可取消作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
 
@@ -313,7 +315,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 仍未实现
 
-- [ ] 启动恢复进度页和 applied 清理警告诊断。
+- [x] 健康启动后的 pending/applied/failed/invalid 恢复结果诊断、脱敏计数和设置页重启门禁恢复。
+- [ ] 数据库打开前的实时恢复进度页与桌面恢复界面。
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
@@ -345,6 +348,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [系统维护 Inbox 投影](../../services/sidecar/internal/api/system_maintenance_inbox.go)
 - [隔离恢复演练](../../services/sidecar/internal/api/backup_drill.go)
 - [重启前安全恢复](../../services/sidecar/internal/api/backup_restore.go)
+- [启动恢复结果诊断](../../services/sidecar/internal/api/backup_restore_diagnostics.go)
+- [启动恢复结果诊断测试](../../services/sidecar/internal/api/backup_restore_diagnostics_test.go)
 - [确认删除](../../services/sidecar/internal/api/backup_delete.go)
 - [业务 JSON 导出](../../services/sidecar/internal/api/business_export.go)
 - [含文件业务 ZIP 导出](../../services/sidecar/internal/api/business_package_export.go)

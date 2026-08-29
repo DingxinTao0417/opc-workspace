@@ -159,6 +159,7 @@ func run(args []string) int {
 		ArtifactDir:    cfg.ArtifactDir,
 		DatabasePath:   cfg.DatabasePath,
 		BackupDir:      cfg.BackupDir,
+		StartupRestore: restoreResult,
 	})
 	if err != nil {
 		logger.Printf("router initialization failed: %v", err)

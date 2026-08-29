@@ -26,6 +26,7 @@ import {
   useExportBusinessPackage,
   usePreviewBusinessDataImport,
   usePreviewBusinessPackageImport,
+  useRestoreDiagnosticsQuery,
   useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
@@ -257,6 +258,7 @@ function BackupCard({
 
 export function BackupSettings() {
   const backupsQuery = useBackupsQuery();
+  const restoreDiagnosticsQuery = useRestoreDiagnosticsQuery();
   const createMutation = useCreateBackup();
   const verifyMutation = useVerifyBackup();
   const drillMutation = useDrillBackupRestore();
@@ -298,7 +300,18 @@ export function BackupSettings() {
     importApplyMutation.isPending ||
     packageImportPreviewMutation.isPending ||
     packageImportApplyMutation.isPending;
-  const locked = pending || scheduledRestore !== null;
+  const restoreDiagnostics = restoreDiagnosticsQuery.data;
+  const diagnosticRestore =
+    restoreDiagnostics?.restartRequired &&
+    restoreDiagnostics.backupId &&
+    restoreDiagnostics.rollbackBackupId
+      ? {
+          backupId: restoreDiagnostics.backupId,
+          rollbackBackupId: restoreDiagnostics.rollbackBackupId,
+        }
+      : null;
+  const restoreReady = scheduledRestore ?? diagnosticRestore;
+  const locked = pending || restoreReady !== null;
   const mutationError =
     createMutation.error ??
     verifyMutation.error ??
@@ -581,6 +594,62 @@ export function BackupSettings() {
         <h3>数据与备份</h3>
         <p>创建 SQLite 与受控文件处于同一写入边界的本地备份。</p>
       </header>
+
+      <div className="settings-group settings-backup-export">
+        <div className="settings-backup-intro">
+          {restoreDiagnostics?.attentionRequired ||
+          restoreDiagnostics?.cleanupRequired ? (
+            <AlertCircle size={18} />
+          ) : restoreDiagnosticsQuery.isPending ? (
+            <LoaderCircle className="animate-spin" size={18} />
+          ) : (
+            <ShieldCheck size={18} />
+          )}
+          <div>
+            <strong>启动恢复诊断</strong>
+            {restoreDiagnosticsQuery.isPending ? (
+              <span>正在读取安全恢复状态…</span>
+            ) : restoreDiagnosticsQuery.isError ? (
+              <span>恢复诊断暂时不可用；不会据此推断恢复成功。</span>
+            ) : restoreDiagnostics?.status === "attention_required" ? (
+              <span>
+                发现 {restoreDiagnostics.failedAttemptCount} 次失败记录和{" "}
+                {restoreDiagnostics.invalidEntryCount}{" "}
+                个无效记录；当前数据未被自动清理，请结合运行诊断检查。
+              </span>
+            ) : restoreDiagnostics?.status === "cleanup_required" ? (
+              <span>
+                数据恢复已经完成，但有{" "}
+                {restoreDiagnostics.residualAppliedCount || 1}{" "}
+                项启动清理未完全结束；恢复不会重复执行。
+              </span>
+            ) : restoreDiagnostics?.status === "restored" ? (
+              <span>
+                本次启动已完成备份{" "}
+                {restoreDiagnostics.backupId?.slice(0, 8) ?? "未知"}{" "}
+                的恢复，并通过最终验证。
+              </span>
+            ) : restoreDiagnostics?.status === "restart_required" ? (
+              <span>恢复计划已安全挂起，重启前业务写入保持冻结。</span>
+            ) : (
+              <span>未发现待应用恢复、失败隔离或残留清理记录。</span>
+            )}
+          </div>
+        </div>
+        <button
+          className="button button-secondary settings-backup-export-button"
+          disabled={restoreDiagnosticsQuery.isFetching}
+          onClick={() => void restoreDiagnosticsQuery.refetch()}
+          type="button"
+        >
+          {restoreDiagnosticsQuery.isFetching ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <RefreshCw size={14} />
+          )}
+          {restoreDiagnosticsQuery.isFetching ? "检查中…" : "重新检查"}
+        </button>
+      </div>
 
       <div className="settings-group settings-backup-create">
         <div className="settings-backup-intro">
@@ -991,7 +1060,7 @@ export function BackupSettings() {
         </section>
       ) : null}
 
-      {scheduledRestore ? (
+      {restoreReady ? (
         <section
           aria-live="assertive"
           className="settings-backup-restore-ready"
@@ -1002,8 +1071,8 @@ export function BackupSettings() {
             <strong>恢复已安全挂起，需要重启应用</strong>
             <p>
               重启前业务写入已停止。启动时将应用备份{" "}
-              {scheduledRestore.backupId.slice(0, 8)}；当前状态的自动回滚点为{" "}
-              {scheduledRestore.rollbackBackupId.slice(0, 8)}。
+              {restoreReady.backupId.slice(0, 8)}；当前状态的自动回滚点为{" "}
+              {restoreReady.rollbackBackupId.slice(0, 8)}。
             </p>
           </div>
           <button

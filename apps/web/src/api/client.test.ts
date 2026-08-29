@@ -26,6 +26,7 @@ import {
   getAllProjects,
   getAllTasks,
   getBackups,
+  getRestoreDiagnostics,
   getTags,
   getTaskPage,
   getTaskSavedViews,
@@ -1671,6 +1672,41 @@ describe("verified local backups", () => {
         "X-Import-Confirmation",
       ),
     ).toBe("replace-empty-workspace-with-controlled-files");
+  });
+
+  it("strictly reads sanitized startup restore diagnostics", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify({
+            data: {
+              status: "cleanup_required",
+              restart_required: false,
+              applied_this_startup: true,
+              cleanup_required: true,
+              attention_required: false,
+              backup_id: "018f0000-0000-7000-8000-000000001798",
+              rollback_backup_id: "018f0000-0000-7000-8000-000000001799",
+              requested_at: "2026-08-28T12:00:00Z",
+              residual_applied_count: 1,
+              failed_attempt_count: 0,
+              invalid_entry_count: 0,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getRestoreDiagnostics()).resolves.toMatchObject({
+      status: "cleanup_required",
+      appliedThisStartup: true,
+      cleanupRequired: true,
+      residualAppliedCount: 1,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/backups/restore-diagnostics",
+    );
   });
 
   it("previews and explicitly confirms a business JSON import", async () => {

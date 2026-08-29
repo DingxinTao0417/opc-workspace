@@ -51,6 +51,7 @@ type StartupRestoreResult struct {
 	Applied          bool
 	BackupID         string
 	RollbackBackupID string
+	RequestedAt      string
 	CleanupWarning   string
 }
 
@@ -432,7 +433,7 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 	commitSyncErr := syncArtifactDirectory(absoluteBackup)
 	cleanupErr := cleanupSuccessfulRestore(paths, appliedPath, absoluteBackup)
 	warning := errors.Join(commitSyncErr, cleanupErr)
-	result := StartupRestoreResult{Applied: true, BackupID: plan.BackupID, RollbackBackupID: plan.RollbackBackupID}
+	result := StartupRestoreResult{Applied: true, BackupID: plan.BackupID, RollbackBackupID: plan.RollbackBackupID, RequestedAt: plan.RequestedAt}
 	if warning != nil {
 		result.CleanupWarning = warning.Error()
 	}

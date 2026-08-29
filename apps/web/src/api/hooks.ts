@@ -58,6 +58,7 @@ import {
   getAllTags,
   getAllTasks,
   getBackups,
+  getRestoreDiagnostics,
   getInboxStats,
   getActor,
   getActors,
@@ -223,6 +224,7 @@ export function useSearchQuery(input: SearchListParams, enabled = true) {
 }
 
 export const backupQueryKey = ["backups"] as const;
+export const restoreDiagnosticsQueryKey = ["restore-diagnostics"] as const;
 
 export function useBackupsQuery(enabled = true) {
   return useQuery({
@@ -232,6 +234,14 @@ export function useBackupsQuery(enabled = true) {
     retry: 1,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useRestoreDiagnosticsQuery(enabled = true) {
+  return useQuery({
+    queryKey: restoreDiagnosticsQueryKey,
+    queryFn: getRestoreDiagnostics,
+    enabled,
   });
 }
 
@@ -274,7 +284,10 @@ export function useScheduleBackupRestore() {
   return useMutation({
     mutationFn: (id: string) => scheduleBackupRestore(id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: backupQueryKey }),
+        queryClient.invalidateQueries({ queryKey: restoreDiagnosticsQueryKey }),
+      ]);
     },
   });
 }

@@ -43,6 +43,19 @@ const mocks = vi.hoisted(() => ({
   restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
+  restoreDiagnostics: {
+    status: "idle",
+    restartRequired: false,
+    appliedThisStartup: false,
+    cleanupRequired: false,
+    attentionRequired: false,
+    backupId: null as string | null,
+    rollbackBackupId: null as string | null,
+    requestedAt: null as string | null,
+    residualAppliedCount: 0,
+    failedAttemptCount: 0,
+    invalidEntryCount: 0,
+  },
 }));
 
 vi.mock("../api/desktop", () => ({
@@ -50,6 +63,14 @@ vi.mock("../api/desktop", () => ({
 }));
 
 vi.mock("../api/hooks", () => ({
+  useRestoreDiagnosticsQuery: () => ({
+    data: mocks.restoreDiagnostics,
+    isPending: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: mocks.refetch,
+  }),
   useBackupsQuery: () => ({
     data: [
       {
@@ -166,6 +187,19 @@ describe("BackupSettings", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    Object.assign(mocks.restoreDiagnostics, {
+      status: "idle",
+      restartRequired: false,
+      appliedThisStartup: false,
+      cleanupRequired: false,
+      attentionRequired: false,
+      backupId: null,
+      rollbackBackupId: null,
+      requestedAt: null,
+      residualAppliedCount: 0,
+      failedAttemptCount: 0,
+      invalidEntryCount: 0,
+    });
     mocks.create.mockClear();
     mocks.verify.mockClear();
     mocks.drill.mockClear();
@@ -362,5 +396,36 @@ describe("BackupSettings", () => {
       await screen.findByText("Sidecar 未确认安全退出，已取消应用重启"),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "立即安全重启" })).toBeEnabled();
+  });
+
+  it("shows sanitized startup restore attention without inventing a success", () => {
+    Object.assign(mocks.restoreDiagnostics, {
+      status: "attention_required",
+      cleanupRequired: true,
+      attentionRequired: true,
+      residualAppliedCount: 1,
+      failedAttemptCount: 2,
+      invalidEntryCount: 1,
+    });
+    render(<BackupSettings />);
+
+    expect(screen.getByText(/发现 2 次失败记录和 1 个无效记录/)).toBeVisible();
+    expect(screen.queryByText(/恢复已完成备份/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    expect(mocks.refetch).toHaveBeenCalled();
+  });
+
+  it("restores the restart gate from server diagnostics after reopening settings", () => {
+    Object.assign(mocks.restoreDiagnostics, {
+      status: "restart_required",
+      restartRequired: true,
+      backupId: backup.id,
+      rollbackBackupId: "018f0000-0000-7000-8000-000000001702",
+      requestedAt: "2026-08-28T12:05:00Z",
+    });
+    render(<BackupSettings />);
+
+    expect(screen.getByText(/恢复已安全挂起/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "立即备份" })).toBeDisabled();
   });
 });

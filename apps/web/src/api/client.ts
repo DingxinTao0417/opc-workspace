@@ -16,6 +16,7 @@ import type {
   BusinessPackageDownload,
   BusinessPackageImportPreview,
   BusinessPackageImportResult,
+  RestoreDiagnostics,
   BusinessImportPreview,
   BusinessImportResult,
   DiagnosticPackageDownload,
@@ -5296,6 +5297,119 @@ export async function applyBusinessPackageImport(
     return invalidResponse("含文件业务包导入响应格式无效");
   }
   return { importedRows, importedFiles, backupId };
+}
+
+export async function getRestoreDiagnostics(): Promise<RestoreDiagnostics> {
+  const payload = await apiRequest<unknown>(
+    "/api/v1/backups/restore-diagnostics",
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("恢复诊断响应格式无效");
+  const status = stringField(body, "status");
+  const restartRequired = fieldValue(
+    body,
+    "restart_required",
+    "restartRequired",
+  );
+  const appliedThisStartup = fieldValue(
+    body,
+    "applied_this_startup",
+    "appliedThisStartup",
+  );
+  const cleanupRequired = fieldValue(
+    body,
+    "cleanup_required",
+    "cleanupRequired",
+  );
+  const attentionRequired = fieldValue(
+    body,
+    "attention_required",
+    "attentionRequired",
+  );
+  const backupId = fieldValue(body, "backup_id", "backupId");
+  const rollbackBackupId = fieldValue(
+    body,
+    "rollback_backup_id",
+    "rollbackBackupId",
+  );
+  const requestedAt = fieldValue(body, "requested_at", "requestedAt");
+  const residualAppliedCount = numberField(
+    body,
+    "residual_applied_count",
+    "residualAppliedCount",
+  );
+  const failedAttemptCount = numberField(
+    body,
+    "failed_attempt_count",
+    "failedAttemptCount",
+  );
+  const invalidEntryCount = numberField(
+    body,
+    "invalid_entry_count",
+    "invalidEntryCount",
+  );
+  const statuses = new Set([
+    "idle",
+    "restart_required",
+    "restored",
+    "cleanup_required",
+    "attention_required",
+  ]);
+  const canonicalId = (value: unknown) =>
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      value,
+    );
+  if (
+    !status ||
+    !statuses.has(status) ||
+    typeof restartRequired !== "boolean" ||
+    typeof appliedThisStartup !== "boolean" ||
+    typeof cleanupRequired !== "boolean" ||
+    typeof attentionRequired !== "boolean" ||
+    (backupId !== null && !canonicalId(backupId)) ||
+    (rollbackBackupId !== null && !canonicalId(rollbackBackupId)) ||
+    (backupId === null) !== (rollbackBackupId === null) ||
+    (requestedAt !== null &&
+      (typeof requestedAt !== "string" ||
+        Number.isNaN(Date.parse(requestedAt)))) ||
+    residualAppliedCount === undefined ||
+    !Number.isInteger(residualAppliedCount) ||
+    residualAppliedCount < 0 ||
+    failedAttemptCount === undefined ||
+    !Number.isInteger(failedAttemptCount) ||
+    failedAttemptCount < 0 ||
+    invalidEntryCount === undefined ||
+    !Number.isInteger(invalidEntryCount) ||
+    invalidEntryCount < 0 ||
+    (status === "restart_required" && !restartRequired) ||
+    (status === "cleanup_required" && !cleanupRequired) ||
+    (status === "attention_required" && !attentionRequired) ||
+    (status === "restored" && !appliedThisStartup) ||
+    (status === "idle" &&
+      (restartRequired ||
+        appliedThisStartup ||
+        cleanupRequired ||
+        attentionRequired))
+  ) {
+    return invalidResponse("恢复诊断响应格式无效");
+  }
+  return {
+    status: status as RestoreDiagnostics["status"],
+    restartRequired,
+    appliedThisStartup,
+    cleanupRequired,
+    attentionRequired,
+    backupId: typeof backupId === "string" && backupId ? backupId : null,
+    rollbackBackupId:
+      typeof rollbackBackupId === "string" && rollbackBackupId
+        ? rollbackBackupId
+        : null,
+    requestedAt: typeof requestedAt === "string" ? requestedAt : null,
+    residualAppliedCount,
+    failedAttemptCount,
+    invalidEntryCount,
+  };
 }
 
 function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {

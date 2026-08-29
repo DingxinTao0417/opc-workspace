@@ -1639,6 +1639,25 @@ export interface BusinessPackageImportResult {
   backupId: string;
 }
 
+export interface RestoreDiagnostics {
+  status:
+    | "idle"
+    | "restart_required"
+    | "restored"
+    | "cleanup_required"
+    | "attention_required";
+  restartRequired: boolean;
+  appliedThisStartup: boolean;
+  cleanupRequired: boolean;
+  attentionRequired: boolean;
+  backupId: string | null;
+  rollbackBackupId: string | null;
+  requestedAt: string | null;
+  residualAppliedCount: number;
+  failedAttemptCount: number;
+  invalidEntryCount: number;
+}
+
 export interface BusinessImportPreview {
   formatVersion: 1;
   schemaVersion: number;
