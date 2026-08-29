@@ -2687,6 +2687,25 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
+  const validClientFollowupEvent =
+    sourceEntityType === "client_followup" &&
+    !!sourceEntityId &&
+    sourceDeletedAt === null &&
+    !!dueAt &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.client_followup_id === sourceEntityId &&
+    typeof rawPayload.client_id === "string" &&
+    rawPayload.client_id.trim().length > 0 &&
+    rawPayload.scheduled_at === dueAt &&
+    typeof rawPayload.timezone === "string" &&
+    rawPayload.timezone.trim().length > 0 &&
+    typeof rawPayload.channel === "string" &&
+    rawPayload.channel.trim().length > 0 &&
+    typeof sourceEventKey === "string" &&
+    new RegExp(`^followup:${sourceEntityId}:due:[1-9]\\d*$`).test(
+      sourceEventKey,
+    );
   const validProjectCompletionEvent =
     sourceEntityType === "project_completion" &&
     !!sourceEntityId &&
@@ -2740,6 +2759,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "task_artifact" &&
       sourceEntityType !== "task" &&
       sourceEntityType !== "task_due" &&
+      sourceEntityType !== "client_followup" &&
       sourceEntityType !== "project_completion" &&
       sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
@@ -2754,6 +2774,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validTaskArtifactEvent &&
       !validTaskBlockedEvent &&
       !validTaskDueEvent &&
+      !validClientFollowupEvent &&
       !validProjectCompletionEvent &&
       !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
@@ -7295,6 +7316,9 @@ export async function getInboxItems(
   if (input.q?.trim()) params.set("q", input.q.trim());
   if (input.priority) params.set("priority", input.priority);
   if (input.risk) params.set("risk", input.risk);
+  if (input.sourceEntityType) {
+    params.set("source_entity_type", input.sourceEntityType);
+  }
   const payload = await apiRequest<unknown>(`/api/v1/inbox-items?${params}`);
   return normalizeInboxItemListResult(payload);
 }

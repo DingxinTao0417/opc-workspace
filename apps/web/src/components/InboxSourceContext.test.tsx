@@ -171,6 +171,40 @@ describe("InboxSourceContext", () => {
     expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
   });
 
+  it("routes a due Client Follow-up to its client without inventing an external action", () => {
+    const clientId = "018f0000-0000-7000-8000-000000000808";
+    const followupId = "018f0000-0000-7000-8000-000000000809";
+    const followupItem: InboxItem = {
+      ...sourceItem,
+      title: "确认项目验收",
+      summary: "客户：星河工作室 · 渠道：微信",
+      sourceEntityType: "client_followup",
+      sourceEntityId: followupId,
+      sourceEventKey: `followup:${followupId}:due:2`,
+      dueAt: "2026-08-30T10:00:00Z",
+      payloadJson: {
+        client_followup_id: followupId,
+        client_id: clientId,
+        scheduled_at: "2026-08-30T10:00:00Z",
+        timezone: "Asia/Shanghai",
+        channel: "微信",
+      },
+    };
+    render(
+      <MemoryRouter>
+        <InboxSourceContext item={followupItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("客户回访到期")).toBeTruthy();
+    expect(screen.getByText("本地计划提醒")).toBeTruthy();
+    expect(screen.getByText("微信")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "查看客户回访" })).toHaveAttribute(
+      "href",
+      `/clients/${clientId}`,
+    );
+  });
+
   it("shows a Project completion snapshot and hides its link after deletion", () => {
     const projectId = "018f0000-0000-7000-8000-000000000822";
     const projectItem: InboxItem = {

@@ -686,6 +686,7 @@ function useInvalidateClientFollowups() {
         queryKey: clientDetailQueryKey(clientId),
       }),
       queryClient.invalidateQueries({ queryKey: clientQueryKey }),
+      queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
     ]);
   };
 }

@@ -1257,6 +1257,82 @@ kbd {
   color: var(--danger-text);
 }
 
+.today-followups-overview {
+  margin-top: 22px;
+}
+
+.today-followups-list {
+  display: grid;
+  gap: 8px;
+}
+
+.today-followup-card,
+.today-followups-more {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--panel);
+  text-decoration: none;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.today-followup-card {
+  min-height: 58px;
+  padding: 9px 13px;
+}
+
+.today-followup-card:hover,
+.today-followups-more:hover {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+}
+
+.today-followup-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.today-followup-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-followup-copy small,
+.today-followups-empty {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.today-followup-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-followups-empty {
+  margin: 0;
+  padding: 14px 13px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 10px;
+}
+
+.today-followups-more {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
 .task-section + .task-section {
   margin-top: 16px;
 }

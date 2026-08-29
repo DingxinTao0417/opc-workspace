@@ -43,6 +43,14 @@ interface TaskDueSourceSnapshot {
   projectName: string | null;
 }
 
+interface ClientFollowupSourceSnapshot {
+  clientFollowupId: string;
+  clientId: string;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+}
+
 interface ProjectCompletionSourceSnapshot {
   projectId: string;
   projectName: string;
@@ -184,6 +192,30 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
     projectId: stringValue(payload, "project_id"),
     projectName: stringValue(payload, "project_name"),
   };
+}
+
+function clientFollowupSnapshot(
+  item: InboxItem,
+): ClientFollowupSourceSnapshot | null {
+  if (item.sourceEntityType !== "client_followup") return null;
+  const payload = item.payloadJson;
+  const clientFollowupId = stringValue(payload, "client_followup_id");
+  const clientId = stringValue(payload, "client_id");
+  const scheduledAt = stringValue(payload, "scheduled_at");
+  const timezone = stringValue(payload, "timezone");
+  const channel = stringValue(payload, "channel");
+  if (
+    !clientFollowupId ||
+    !clientId ||
+    !scheduledAt ||
+    !timezone ||
+    !channel ||
+    clientFollowupId !== item.sourceEntityId ||
+    scheduledAt !== item.dueAt
+  ) {
+    return null;
+  }
+  return { clientFollowupId, clientId, scheduledAt, timezone, channel };
 }
 
 function projectCompletionSnapshot(
@@ -367,6 +399,44 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <ExternalLink aria-hidden="true" size={13} />
           </Link>
         )}
+      </section>
+    );
+  }
+
+  const followupSource = clientFollowupSnapshot(item);
+  if (followupSource) {
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <CalendarClock size={15} />
+          </span>
+          <div>
+            <strong>客户回访到期</strong>
+            <small>本地计划提醒</small>
+          </div>
+        </div>
+        <dl>
+          <div>
+            <dt>计划时间</dt>
+            <dd>{localTimestamp(followupSource.scheduledAt)}</dd>
+          </div>
+          <div>
+            <dt>时区</dt>
+            <dd>{followupSource.timezone}</dd>
+          </div>
+          <div>
+            <dt>渠道</dt>
+            <dd>{followupSource.channel}</dd>
+          </div>
+        </dl>
+        <Link
+          className="button button-secondary"
+          to={`/clients/${followupSource.clientId}`}
+        >
+          查看客户回访
+          <ExternalLink aria-hidden="true" size={13} />
+        </Link>
       </section>
     );
   }

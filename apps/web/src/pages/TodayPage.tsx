@@ -19,6 +19,7 @@ import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
+  useInboxItemsQuery,
   useActiveFocusSessionQuery,
   useCreateFocusSession,
   useMoveTaskAcrossPlans,
@@ -36,7 +37,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
 import { TaskList } from "../components/TaskList";
 import { TaskPlanModal } from "../components/TaskPlanModal";
-import type { Task } from "../types/models";
+import type { InboxItem, Task } from "../types/models";
 
 function localDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -51,6 +52,24 @@ function formatToday(date: Date): string {
     day: "numeric",
     weekday: "short",
   }).format(date);
+}
+
+function formatInboxDueAt(value: string | null): string {
+  if (!value) return "时间待确认";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间待确认";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function clientFollowupClientId(item: InboxItem): string | null {
+  if (item.sourceEntityType !== "client_followup") return null;
+  const clientId = item.payloadJson.client_id;
+  return typeof clientId === "string" && clientId.trim() ? clientId : null;
 }
 
 function dateFromKey(dateKey: string): Date {
@@ -189,6 +208,15 @@ export function TodayPage() {
     riskFilter !== null,
   );
   const inboxStatsQuery = useInboxStatsQuery();
+  const clientFollowupsQuery = useInboxItemsQuery(
+    {
+      view: "inbox",
+      sourceEntityType: "client_followup",
+      page: 1,
+      pageSize: 5,
+    },
+    isToday,
+  );
   const focusQuery = useActiveFocusSessionQuery();
   const lifecycleMutation = useTaskLifecycleCommand();
   const createFocusMutation = useCreateFocusSession();
@@ -336,6 +364,13 @@ export function TodayPage() {
       danger: true,
     },
   ];
+  const dueClientFollowups = (clientFollowupsQuery.data?.items ?? []).flatMap(
+    (item) => {
+      const clientId = clientFollowupClientId(item);
+      return clientId ? [{ item, clientId }] : [];
+    },
+  );
+  const clientFollowupTotal = clientFollowupsQuery.data?.meta.total ?? 0;
   const moveTask = (
     taskId: string,
     plannedDate: string | null,
@@ -578,6 +613,59 @@ export function TodayPage() {
           </div>
         )}
       </section>
+
+      {isToday ? (
+        <section aria-label="待办客户回访" className="today-followups-overview">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="section-kicker">关系维护</span>
+              <h2>待办客户回访</h2>
+            </div>
+            <span className="section-count">
+              {clientFollowupsQuery.isPending
+                ? "…"
+                : `${clientFollowupTotal} 项回访`}
+            </span>
+          </div>
+          {clientFollowupsQuery.isPending ? (
+            <SkeletonRows count={2} />
+          ) : clientFollowupsQuery.isError ? (
+            <ErrorState
+              compact
+              message="无法读取到期客户回访。"
+              onRetry={() => void clientFollowupsQuery.refetch()}
+            />
+          ) : dueClientFollowups.length === 0 ? (
+            <p className="today-followups-empty">目前没有到期的客户回访。</p>
+          ) : (
+            <div className="today-followups-list">
+              {dueClientFollowups.map(({ item, clientId }) => (
+                <Link
+                  aria-label={`查看客户回访：${item.title}`}
+                  className="today-followup-card"
+                  key={item.id}
+                  to={`/clients/${clientId}`}
+                >
+                  <span className="today-followup-copy">
+                    <strong>{item.title}</strong>
+                    <small>
+                      {formatInboxDueAt(item.dueAt)} · {item.summary}
+                    </small>
+                  </span>
+                  <ChevronRight aria-hidden="true" size={14} />
+                </Link>
+              ))}
+              {clientFollowupTotal > dueClientFollowups.length ? (
+                <Link className="today-followups-more" to="/inbox">
+                  其余 {clientFollowupTotal - dueClientFollowups.length}{" "}
+                  项在收件箱
+                  <ChevronRight aria-hidden="true" size={13} />
+                </Link>
+              ) : null}
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {riskFilter === null && taskGroupsQuery.isError ? (
         <ErrorState

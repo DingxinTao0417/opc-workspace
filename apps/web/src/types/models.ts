@@ -1377,6 +1377,7 @@ export interface InboxItem {
     | "task_artifact"
     | "task"
     | "task_due"
+    | "client_followup"
     | "project_completion"
     | "system_maintenance";
   sourceEntityId: string | null;
@@ -1408,6 +1409,7 @@ export interface InboxItemListParams {
   q?: string;
   priority?: InboxItemPriority;
   risk?: InboxItemRisk;
+  sourceEntityType?: InboxItem["sourceEntityType"];
   page?: number;
   pageSize?: number;
 }

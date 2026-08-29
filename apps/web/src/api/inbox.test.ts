@@ -300,6 +300,49 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Client Follow-up due source snapshots and event keys", () => {
+    const followupId = "018f0000-0000-7000-8000-000000000821";
+    const clientId = "018f0000-0000-7000-8000-000000000822";
+    const dueAt = "2026-08-30T10:00:00Z";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "client_followup",
+      source_entity_id: followupId,
+      source_event_key: `followup:${followupId}:due:2`,
+      due_at: dueAt,
+      payload_json: {
+        client_followup_id: followupId,
+        client_id: clientId,
+        scheduled_at: dueAt,
+        timezone: "Asia/Shanghai",
+        channel: "微信",
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "client_followup",
+      sourceEntityId: followupId,
+      dueAt,
+      payloadJson: {
+        client_id: clientId,
+        timezone: "Asia/Shanghai",
+        channel: "微信",
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, client_id: "" },
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `followup:${followupId}:due:0`,
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly validates Project completion source snapshots", () => {
     const projectId = "018f0000-0000-7000-8000-000000000822";
     const projected = inboxPayload({
@@ -573,6 +616,7 @@ describe("inbox API contract", () => {
       view: "snoozed",
       q: " 交付 ",
       priority: "P1",
+      sourceEntityType: "client_followup",
       page: 2,
       pageSize: 20,
     });
@@ -584,6 +628,7 @@ describe("inbox API contract", () => {
       page_size: "20",
       q: "交付",
       priority: "P1",
+      source_entity_type: "client_followup",
     });
     expect(result.meta).toEqual({
       page: 2,

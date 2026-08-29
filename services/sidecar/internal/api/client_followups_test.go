@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
 func decodeClientFollowupResponse(t *testing.T, body []byte) clientFollowupResponse {
@@ -70,6 +73,41 @@ func TestClientFollowupCreateListAndUpdate(t *testing.T) {
 	}
 }
 
+func TestClientFollowupUpdateArchivesStaleDueInboxSource(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Followup Source Client"}`, nil)
+	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-01T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"confirm milestone"}`), nil)
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("create followup = %d: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	created := decodeClientFollowupResponse(t, createdRecorder.Body.Bytes())
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	key := "followup:" + created.ID + ":due:1"
+	source := models.InboxItem{
+		ID: uuid.NewString(), Kind: "event", Title: created.Purpose,
+		Summary: "客户回访到期", SourceEntityType: clientFollowupInboxSourceType,
+		SourceEntityID: &created.ID, SourceEventKey: &key,
+		Priority: "P2", Status: "open", ResolutionPolicy: "manual",
+		DueAt: &created.ScheduledAt, PayloadJSON: `{}`,
+		Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.DB.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	updatedRecorder := performRequest(router, http.MethodPatch, "/api/v1/client-followups/"+created.ID, []byte(`{"purpose":"confirm revised milestone"}`), map[string]string{"If-Match": `"1"`})
+	if updatedRecorder.Code != http.StatusOK {
+		t.Fatalf("update followup = %d: %s", updatedRecorder.Code, updatedRecorder.Body.String())
+	}
+	var actual models.InboxItem
+	if err := store.DB.First(&actual, "id = ?", source.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if actual.Status != "resolved" || actual.ResolutionReason == nil || *actual.ResolutionReason != "客户回访计划已更新" || actual.Version != 2 {
+		t.Fatalf("stale due source = %#v", actual)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_resolved'", 1, source.ID)
+}
+
 func TestClientFollowupRejectsUnavailableAssigneeAndInvalidTimezone(t *testing.T) {
 	router, _ := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Guard Client"}`, nil)
@@ -97,8 +135,34 @@ func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 		}
 		return decodeClientFollowupResponse(t, recorder.Body.Bytes())
 	}
+	createOpenDueSource := func(followup clientFollowupResponse) models.InboxItem {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		key := "followup:" + followup.ID + ":due:" + "1"
+		item := models.InboxItem{
+			ID: uuid.NewString(), Kind: "event", Title: followup.Purpose,
+			Summary: "客户回访到期", SourceEntityType: clientFollowupInboxSourceType,
+			SourceEntityID: &followup.ID, SourceEventKey: &key,
+			Priority: "P2", Status: "open", ResolutionPolicy: "manual",
+			DueAt: &followup.ScheduledAt, PayloadJSON: `{}`,
+			Version: 1, CreatedAt: now, UpdatedAt: now,
+		}
+		if err := store.DB.Create(&item).Error; err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	assertSourceResolved := func(item models.InboxItem, reason string) {
+		var actual models.InboxItem
+		if err := store.DB.First(&actual, "id = ?", item.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if actual.Status != "resolved" || actual.ResolvedByActorID == nil || *actual.ResolvedByActorID != models.BuiltinOwnerActorID || actual.ResolutionReason == nil || *actual.ResolutionReason != reason || actual.ResolutionMode == nil || *actual.ResolutionMode != "manual" || actual.Version != 2 {
+			t.Fatalf("resolved client followup source = %#v", actual)
+		}
+	}
 
 	completed := create("completed")
+	completedSource := createOpenDueSource(completed)
 	completeRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+completed.ID+"/complete", []byte(`{"result":"confirmed","next_step":"send summary"}`), map[string]string{"If-Match": `"1"`})
 	if completeRecorder.Code != http.StatusOK || completeRecorder.Header().Get("ETag") != `"2"` {
 		t.Fatalf("complete followup = %d: %s", completeRecorder.Code, completeRecorder.Body.String())
@@ -107,18 +171,22 @@ func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	if completedResult.Status != "completed" || completedResult.Result == nil || *completedResult.Result != "confirmed" || completedResult.CompletedAt == nil || completedResult.NextStep == nil || *completedResult.NextStep != "send summary" {
 		t.Fatalf("completed followup = %#v", completedResult)
 	}
+	assertSourceResolved(completedSource, "客户回访已完成")
 	terminalEdit := performRequest(router, http.MethodPatch, "/api/v1/client-followups/"+completed.ID, []byte(`{"channel":"email"}`), map[string]string{"If-Match": `"2"`})
 	if terminalEdit.Code != http.StatusConflict || responseErrorCode(t, terminalEdit.Body.Bytes()) != "CLIENT_FOLLOWUP_FINAL" {
 		t.Fatalf("terminal followup edit = %d: %s", terminalEdit.Code, terminalEdit.Body.String())
 	}
 
 	skipped := create("skipped")
+	skippedSource := createOpenDueSource(skipped)
 	skipRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+skipped.ID+"/skip", []byte(`{"reason":"client asked to wait"}`), map[string]string{"If-Match": `"1"`})
 	if skipRecorder.Code != http.StatusOK || decodeClientFollowupResponse(t, skipRecorder.Body.Bytes()).Status != "skipped" {
 		t.Fatalf("skip followup = %d: %s", skipRecorder.Code, skipRecorder.Body.String())
 	}
+	assertSourceResolved(skippedSource, "客户回访已跳过")
 
 	rescheduled := create("reschedule")
+	rescheduledSource := createOpenDueSource(rescheduled)
 	rescheduleRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+rescheduled.ID+"/reschedule", []byte(`{"scheduled_at":"2026-09-03T10:00:00+08:00","timezone":"Asia/Shanghai","assigned_actor_id":"00000000-0000-5000-8000-000000000001","channel":"meeting","purpose":"next meeting","priority":"low","reason":"time changed"}`), map[string]string{"If-Match": `"1"`})
 	var rescheduleEnvelope struct {
 		Data struct {
@@ -129,8 +197,10 @@ func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	if rescheduleRecorder.Code != http.StatusOK || json.Unmarshal(rescheduleRecorder.Body.Bytes(), &rescheduleEnvelope) != nil || rescheduleEnvelope.Data.Previous.Status != "cancelled" || rescheduleEnvelope.Data.Next.Status != "planned" || rescheduleEnvelope.Data.Next.RescheduledFromID == nil || *rescheduleEnvelope.Data.Next.RescheduledFromID != rescheduled.ID || rescheduleEnvelope.Data.Next.ScheduledAt != "2026-09-03T02:00:00Z" {
 		t.Fatalf("reschedule followup = %d: %s", rescheduleRecorder.Code, rescheduleRecorder.Body.String())
 	}
+	assertSourceResolved(rescheduledSource, "客户回访已重新安排")
 
 	cancelled := create("cancelled")
+	cancelledSource := createOpenDueSource(cancelled)
 	withoutConfirm := performRequest(router, http.MethodDelete, "/api/v1/client-followups/"+cancelled.ID, []byte(`{"reason":"no longer needed"}`), map[string]string{"If-Match": `"1"`})
 	if withoutConfirm.Code != http.StatusUnprocessableEntity || responseErrorCode(t, withoutConfirm.Body.Bytes()) != "CONFIRMATION_REQUIRED" {
 		t.Fatalf("unconfirmed cancellation = %d: %s", withoutConfirm.Code, withoutConfirm.Body.String())
@@ -139,5 +209,7 @@ func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	if cancelRecorder.Code != http.StatusOK || decodeClientFollowupResponse(t, cancelRecorder.Body.Bytes()).Status != "cancelled" {
 		t.Fatalf("cancel followup = %d: %s", cancelRecorder.Code, cancelRecorder.Body.String())
 	}
+	assertSourceResolved(cancelledSource, "客户回访已取消")
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND action IN ('client_followup_completed', 'client_followup_skipped', 'client_followup_rescheduled', 'client_followup_reschedule_created', 'client_followup_cancelled')", 5)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND action = 'source_resolved'", 4)
 }

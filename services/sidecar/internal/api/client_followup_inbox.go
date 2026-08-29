@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const clientFollowupInboxSourceType = "client_followup"
+
 // projectDueClientFollowups projects each due planned followup exactly once. The
 // unique Inbox source key is intentionally based on followup id and version:
 // edits before the plan becomes due are reflected in the same plan, while a
@@ -51,7 +53,7 @@ func (a *API) projectClientFollowup(ctx context.Context, id, nowText string) err
 		var existing models.InboxItem
 		err := tx.First(&existing, "source_event_key = ?", key).Error
 		if err == nil {
-			if existing.Kind != "event" || existing.SourceEntityType != "client_followup" || existing.SourceEntityID == nil || *existing.SourceEntityID != followup.ID {
+			if existing.Kind != "event" || existing.SourceEntityType != clientFollowupInboxSourceType || existing.SourceEntityID == nil || *existing.SourceEntityID != followup.ID {
 				return errors.New("Client Followup source_event_key belongs to an incompatible Inbox Item")
 			}
 			return nil
@@ -69,7 +71,7 @@ func (a *API) projectClientFollowup(ctx context.Context, id, nowText string) err
 		}
 		summary := fmt.Sprintf("客户：%s · 渠道：%s", client.Name, followup.Channel)
 		priority := map[string]string{"high": "P1", "normal": "P2", "low": "P3"}[followup.Priority]
-		inbox := models.InboxItem{ID: uuid.NewString(), Kind: "event", Title: followup.Purpose, Summary: summary, SourceEntityType: "client_followup", SourceEntityID: &followup.ID, SourceEventKey: &key, Priority: priority, Status: "open", ResolutionPolicy: "manual", DueAt: &followup.ScheduledAt, PayloadJSON: string(payload), Version: 1, CreatedAt: nowText, UpdatedAt: nowText}
+		inbox := models.InboxItem{ID: uuid.NewString(), Kind: "event", Title: followup.Purpose, Summary: summary, SourceEntityType: clientFollowupInboxSourceType, SourceEntityID: &followup.ID, SourceEventKey: &key, Priority: priority, Status: "open", ResolutionPolicy: "manual", DueAt: &followup.ScheduledAt, PayloadJSON: string(payload), Version: 1, CreatedAt: nowText, UpdatedAt: nowText}
 		if err := tx.Create(&inbox).Error; err != nil {
 			return fmt.Errorf("create Client Followup Inbox Item: %w", err)
 		}
@@ -78,4 +80,62 @@ func (a *API) projectClientFollowup(ctx context.Context, id, nowText string) err
 		}
 		return recordClientFollowupWorkflowEvent(tx, followup.ID, "client_followup_due", nil, map[string]any{"inbox_item_id": inbox.ID, "scheduled_at": followup.ScheduledAt, "version": followup.Version}, "", nowText)
 	})
+}
+
+// resolveClientFollowupInboxSources archives active due projections when the
+// underlying local followup changes or becomes terminal. The Inbox event stays
+// auditable, but it must not remain a second actionable representation of a
+// plan that has already been handled or superseded.
+func resolveClientFollowupInboxSources(
+	tx *gorm.DB,
+	followupID,
+	reason,
+	requestID,
+	now string,
+) error {
+	var items []models.InboxItem
+	if err := tx.Where(
+		"source_entity_type = ? AND source_entity_id = ? AND status IN ('open', 'tracking')",
+		clientFollowupInboxSourceType,
+		followupID,
+	).Order("id ASC").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, current := range items {
+		next := current
+		ownerID := models.BuiltinOwnerActorID
+		mode := "manual"
+		next.Status = "resolved"
+		next.SnoozedUntil = nil
+		if next.TriagedAt == nil {
+			next.TriagedAt = &now
+		}
+		next.ResolvedByActorID = &ownerID
+		next.ResolvedAt = &now
+		next.ResolutionReason = &reason
+		next.ResolutionMode = &mode
+		next.Version++
+		next.UpdatedAt = now
+		result := tx.Model(&models.InboxItem{}).
+			Where("id = ? AND version = ? AND status IN ('open', 'tracking')", current.ID, current.Version).
+			Updates(inboxCommandUpdates(next))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return inboxVersionConflict()
+		}
+		if err := recordInboxWorkflowEvent(
+			tx,
+			current.ID,
+			"source_resolved",
+			inboxItemEventState(current, reason),
+			inboxItemEventState(next, reason),
+			requestID,
+			now,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }

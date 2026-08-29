@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v35。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v32 仅扩展 Reminder，schema v33 仅新增受限 Automation Rule/Run，schema v34 仅新增 Agent Adapter 诊断事实，schema v35 新增受约束的 Client Followup 计划事实。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付；v0.4 前置的回访 API、到期 Inbox 投影及客户详情本地管理也已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源、回访 Today/Inbox 反向入口和财务聚合尚未验收或交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v35。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v32 仅扩展 Reminder，schema v33 仅新增受限 Automation Rule/Run，schema v34 仅新增 Agent Adapter 诊断事实，schema v35 新增受约束的 Client Followup 计划事实。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付；v0.4 前置的回访 API、到期 Inbox 投影、客户详情本地管理、Today 待办和 Inbox→客户详情入口也已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源和财务聚合尚未验收或交付。
 
 ## 定位与边界
 
@@ -243,7 +243,7 @@ Client DELETE                     → link history cascade；person Actor 保留
 | 项目      | 已实现 Project 可选关联、改绑、解除和列表筛选；Client 详情显式包含归档项目，从 Project 派生完整数量与分页列表。 |
 | 任务      | 客户相关工作仍应通过 Project 或未来 Inbox 落为 Task；Client 本身不拥有执行状态。                                |
 | Actor     | 联系人不会自动成为 person；owner 可显式关联已有 active person 或原子新建并关联。active 关联会阻止 person 停用。 |
-| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，反向处理入口仍待。              |
+| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，来源上下文只深链回客户详情。    |
 | 发票/财务 | Invoice 强引用删除约束已生效；业务 API、发票详情和收入聚合仍属 v0.4。                                           |
 | 数据管理  | 客户附件复用受控 store；内部备份/演练/恢复包含 active objects，业务 JSON 仅导出元数据，不含文件正文。           |
 | 今日      | 尚未显示客户回访；已存在的客户活动只在客户列表/详情展示，不自动生成 Today 工作项。                              |
@@ -256,7 +256,7 @@ Client DELETE                     → link history cascade；person Actor 保留
 2. **v0.1 前端纵切（已实现基础范围）**：列表、新建/编辑、基础详情、关联项目，以及覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选的共享 ClientSelect 已交付。选择器具备每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留、inactive 可见可选、加载/空/错误重试/更多提示和 combobox 键盘语义；真实浏览器/窄屏/大数据量专项仍待验收。
 3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、Project complete/reopen 只读系统活动、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；邮件/日历/回访等其他来源仍待实现，不接线上行为。
 4. **v0.1 Actor 显式关联（已实现）**：已有 person / 原子新建二选一、单 active contact、聚合乐观锁、幂等重放、带原因解除、不可变历史和本地责任语义提示。
-5. **v0.4 回访前置纵切（部分完成）**：本地回访计划/终态、API、到期 Inbox 投影和客户详情管理已交付；Today、Inbox 反向处理、发票和财务聚合仍待。第一版仍不自动对外发送。
+5. **v0.4 回访前置纵切（部分完成）**：本地回访计划/终态、API、到期 Inbox 投影、客户详情管理、Today 待办和 Inbox→客户详情入口已交付；发票和财务聚合仍待。第一版仍不自动对外发送。
 
 ## 验证与验收边界
 

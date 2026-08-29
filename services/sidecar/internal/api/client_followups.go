@@ -354,6 +354,15 @@ func (a *API) updateClientFollowup(c *gin.Context) {
 			return err
 		}
 		response = clientFollowupResponseFromRow(row)
+		if err := resolveClientFollowupInboxSources(
+			tx,
+			id,
+			"客户回访计划已更新",
+			requestIDFromContext(c),
+			response.UpdatedAt,
+		); err != nil {
+			return err
+		}
 		return recordClientFollowupWorkflowEvent(tx, id, "client_followup_updated", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(response), requestIDFromContext(c), response.UpdatedAt)
 	})
 	if err != nil {
@@ -535,6 +544,15 @@ func (a *API) rescheduleClientFollowup(c *gin.Context) {
 			return err
 		}
 		oldResponse, nextResponse = clientFollowupResponseFromRow(oldRow), clientFollowupResponseFromRow(nextRow)
+		if err := resolveClientFollowupInboxSources(
+			tx,
+			id,
+			"客户回访已重新安排",
+			requestIDFromContext(c),
+			now,
+		); err != nil {
+			return err
+		}
 		if err := recordClientFollowupWorkflowEvent(tx, id, "client_followup_rescheduled", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(oldResponse), requestIDFromContext(c), now); err != nil {
 			return err
 		}
@@ -581,6 +599,15 @@ func (a *API) transitionClientFollowup(c *gin.Context, id string, expected int64
 			return err
 		}
 		response = clientFollowupResponseFromRow(row)
+		if err := resolveClientFollowupInboxSources(
+			tx,
+			id,
+			clientFollowupInboxResolutionReason(action),
+			requestIDFromContext(c),
+			response.UpdatedAt,
+		); err != nil {
+			return err
+		}
 		return recordClientFollowupWorkflowEvent(tx, id, action, clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(response), requestIDFromContext(c), response.UpdatedAt)
 	})
 	return response, err
@@ -591,6 +618,17 @@ func (a *API) writeClientFollowupTransitionError(c *gin.Context, err error) {
 		return
 	}
 	writeDatabaseError(c)
+}
+
+func clientFollowupInboxResolutionReason(action string) string {
+	switch action {
+	case "client_followup_completed":
+		return "客户回访已完成"
+	case "client_followup_skipped":
+		return "客户回访已跳过"
+	default:
+		return "客户回访已取消"
+	}
 }
 
 func (a *API) clientFollowupFromCreateRequest(input createClientFollowupRequest) (models.ClientFollowup, error) {

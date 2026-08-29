@@ -196,6 +196,11 @@ func (a *API) listInboxItems(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "risk filter is invalid")
 		return
 	}
+	sourceEntityType := strings.TrimSpace(c.Query("source_entity_type"))
+	if sourceEntityType != "" && sourceEntityType != clientFollowupInboxSourceType {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "source_entity_type filter is invalid")
+		return
+	}
 	search := strings.TrimSpace(c.Query("q"))
 	if utf8.RuneCountInString(search) > 200 {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "q cannot exceed 200 characters")
@@ -211,6 +216,9 @@ func (a *API) listInboxItems(c *gin.Context) {
 		base := inboxListQuery(tx.Model(&models.InboxItem{}), view, nowText)
 		if priority != "" {
 			base = base.Where("priority = ?", priority)
+		}
+		if sourceEntityType != "" {
+			base = base.Where("source_entity_type = ?", sourceEntityType)
 		}
 		switch risk {
 		case "tracking":

@@ -2,16 +2,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Client, ClientInput } from "../types/models";
+import type { Client, ClientFollowup, ClientInput } from "../types/models";
 import {
   clientQueryKey,
+  inboxQueryKey,
   projectQueryKey,
   useClientOptionsQuery,
+  useCompleteClientFollowup,
   useCreateClient,
   useUpdateClient,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
+  completeFollowup: vi.fn(),
   create: vi.fn(),
   list: vi.fn(),
   update: vi.fn(),
@@ -22,6 +25,7 @@ vi.mock("./client", async () => {
   return {
     ...actual,
     createClient: calls.create,
+    completeClientFollowup: calls.completeFollowup,
     getClients: calls.list,
     updateClient: calls.update,
   };
@@ -44,6 +48,34 @@ const client: Client = {
   latestActivityAt: null,
   createdAt: "2026-08-20T00:00:00Z",
   updatedAt: "2026-08-27T00:00:00Z",
+};
+
+const clientFollowup: ClientFollowup = {
+  id: "followup-1",
+  clientId: client.id,
+  clientName: client.name,
+  assignedActorId: "00000000-0000-5000-8000-000000000001",
+  assignedActorName: "应用所有者",
+  assignedActorType: "owner",
+  scheduledAt: "2026-08-29T09:00:00Z",
+  timezone: "UTC",
+  channel: "phone",
+  purpose: "确认项目验收",
+  notes: null,
+  status: "completed",
+  priority: "normal",
+  completedAt: "2026-08-29T10:00:00Z",
+  result: "已确认",
+  nextStep: null,
+  skippedAt: null,
+  skipReason: null,
+  cancelledAt: null,
+  cancelReason: null,
+  rescheduledFromId: null,
+  version: 2,
+  createdAt: "2026-08-28T10:00:00Z",
+  updatedAt: "2026-08-29T10:00:00Z",
+  clientVersion: 3,
 };
 
 function wrapperFor(queryClient: QueryClient) {
@@ -148,5 +180,29 @@ describe("client hooks", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+  });
+
+  it("refreshes Inbox projections after completing a client followup", async () => {
+    calls.completeFollowup.mockResolvedValue(clientFollowup);
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useCompleteClientFollowup(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: clientFollowup.id,
+        input: {
+          result: "已确认",
+          nextStep: null,
+          completedAt: null,
+          expectedVersion: 1,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
   });
 });

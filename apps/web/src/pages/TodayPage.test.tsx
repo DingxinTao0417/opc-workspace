@@ -7,13 +7,14 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { TodayPage } from "./TodayPage";
 
 const mocks = vi.hoisted(() => ({
   inbox: vi.fn(),
+  followups: vi.fn(),
   stats: vi.fn(),
   taskGroups: vi.fn(),
   riskTasks: vi.fn(),
@@ -50,6 +51,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: mocks.inbox,
+  useInboxItemsQuery: mocks.followups,
   useActiveFocusSessionQuery: () => ({
     data: { session: null },
     isFetching: false,
@@ -200,6 +202,12 @@ function mockTodayShell(overdue = 2, dueSoon = 3) {
     isPending: false,
     refetch: vi.fn(),
   });
+  mocks.followups.mockReturnValue({
+    data: { items: [], meta: { page: 1, pageSize: 5, total: 0 } },
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  });
 }
 
 function riskQueryResult(
@@ -218,6 +226,15 @@ function riskQueryResult(
 }
 
 describe("TodayPage Inbox overview", () => {
+  beforeEach(() => {
+    mocks.followups.mockReturnValue({
+      data: { items: [], meta: { page: 1, pageSize: 5, total: 0 } },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -298,6 +315,52 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.getByRole("link", { name: /有阻塞 1/ })).toHaveAttribute(
       "href",
       "/inbox?risk=blocked",
+    );
+  });
+
+  it("shows due Client Follow-ups from the filtered Inbox projection", () => {
+    mockTodayShell(0, 0);
+    mocks.followups.mockReturnValue({
+      data: {
+        items: [
+          {
+            id: "018f0000-0000-7000-8000-000000000901",
+            title: "确认项目验收",
+            summary: "客户：星河工作室 · 渠道：微信",
+            sourceEntityType: "client_followup",
+            dueAt: "2026-08-30T10:00:00Z",
+            payloadJson: {
+              client_id: "018f0000-0000-7000-8000-000000000902",
+            },
+          },
+        ],
+        meta: { page: 1, pageSize: 5, total: 6 },
+      },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("heading", { name: "待办客户回访" })).toBeVisible();
+    expect(screen.getByText("确认项目验收")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "查看客户回访：确认项目验收" }),
+    ).toHaveAttribute("href", "/clients/018f0000-0000-7000-8000-000000000902");
+    expect(screen.getByText("其余 5 项在收件箱")).toBeVisible();
+    expect(mocks.followups).toHaveBeenLastCalledWith(
+      {
+        view: "inbox",
+        sourceEntityType: "client_followup",
+        page: 1,
+        pageSize: 5,
+      },
+      true,
     );
   });
 
