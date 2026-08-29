@@ -15,8 +15,11 @@ import {
   createBackup,
   drillBackupRestore,
   cancelFocusSession,
+  checkAgentAdapter,
   disableAutomationRule,
+  disableAgentAdapter,
   enableAutomationRule,
+  enableAgentAdapter,
   createClient,
   createClientActivity,
   createClientAttachment,
@@ -75,6 +78,7 @@ import {
   getAppSettings,
   getAutomationRules,
   getAutomationRuns,
+  getAgentAdapters,
   commitAppSettingsWithAvatar,
   getInboxItem,
   getInboxItemEvents,
@@ -94,6 +98,7 @@ import {
   getTaskSavedViews,
   getTasks,
   getTodayStats,
+  registerAgentAdapter,
   getProject,
   getProjectArtifacts,
   getProjectAttachments,
@@ -1126,6 +1131,78 @@ export function useRetryAutomationRun() {
     onSuccess: async () => invalidateAutomationFacts(queryClient),
     onError: async () => {
       await queryClient.invalidateQueries({ queryKey: automationRunsQueryKey });
+    },
+  });
+}
+
+export const agentAdaptersQueryKey = ["agent-adapters"] as const;
+
+export function useAgentAdaptersQuery(enabled = true) {
+  return useQuery({
+    queryKey: agentAdaptersQueryKey,
+    queryFn: getAgentAdapters,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useRegisterAgentAdapter() {
+  const queryClient = useQueryClient();
+  const idempotencyKey = useRef<string | null>(null);
+  return useMutation({
+    mutationFn: () => {
+      idempotencyKey.current ??= crypto.randomUUID();
+      return registerAgentAdapter(
+        "builtin-local-text-v1",
+        idempotencyKey.current,
+      );
+    },
+    onSuccess: async () => {
+      idempotencyKey.current = null;
+      await queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey });
+    },
+  });
+}
+
+export function useCheckAgentAdapter() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => checkAgentAdapter(id, expectedVersion),
+    onSuccess: async (adapter) => {
+      await queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey });
+      return adapter;
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey });
+    },
+  });
+}
+
+export function useSetAgentAdapterEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      enabled,
+      expectedVersion,
+    }: {
+      id: string;
+      enabled: boolean;
+      expectedVersion: number;
+    }) =>
+      enabled
+        ? enableAgentAdapter(id, expectedVersion)
+        : disableAgentAdapter(id, expectedVersion),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey });
     },
   });
 }

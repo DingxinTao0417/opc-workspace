@@ -192,6 +192,9 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		if table.Name == "automation_rules" && tableHasInvalidAutomationRules(table) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Automation preset configuration is invalid"}
 		}
+		if table.Name == "agent_adapters" && tableHasInvalidAgentAdapters(table) {
+			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Agent Adapter manifest or diagnostic state is invalid"}
+		}
 		counts[table.Name] = len(table.Rows)
 		total += len(table.Rows)
 	}
@@ -234,7 +237,7 @@ func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData bu
 			"task_assignments", "task_artifacts", "workflow_events",
 			"client_activities", "client_attachments", "client_actor_links", "project_notes", "project_attachments",
 			"focus_sessions", "focus_session_intervals", "inbox_items", "inbox_item_tasks",
-			"reminders", "automation_rules", "automation_runs",
+			"reminders", "automation_rules", "automation_runs", "agent_adapters",
 			"workspace_avatars", "app_settings", "task_saved_views",
 		}
 		for _, name := range order {
@@ -580,6 +583,73 @@ func tableHasInvalidAutomationRules(table businessExportTable) bool {
 		}
 	}
 	return len(seen) != len(automationPresets)
+}
+
+func tableHasInvalidAgentAdapters(table businessExportTable) bool {
+	indexes := make(map[string]int, len(table.Columns))
+	for index, column := range table.Columns {
+		indexes[column] = index
+	}
+	required := []string{
+		"id", "adapter_key", "kind", "display_name", "executable_ref", "manifest_json", "protocol_version",
+		"status", "health_status", "health_error_code", "isolation_status", "execution_ready", "last_health_at", "version",
+	}
+	for _, column := range required {
+		if _, ok := indexes[column]; !ok {
+			return true
+		}
+	}
+	if len(table.Rows) > len(agentAdapterPresets) {
+		return true
+	}
+	seen := make(map[string]struct{}, len(table.Rows))
+	for _, row := range table.Rows {
+		key, keyOK := row[indexes["adapter_key"]].(string)
+		preset, exists := agentAdapterPresetByKey(key)
+		manifest, err := json.Marshal(preset.Manifest)
+		status, statusOK := row[indexes["status"]].(string)
+		health, healthOK := row[indexes["health_status"]].(string)
+		isolation, isolationOK := row[indexes["isolation_status"]].(string)
+		ready, readyOK := businessImportInt64(row[indexes["execution_ready"]])
+		version, versionOK := businessImportInt64(row[indexes["version"]])
+		id, idOK := row[indexes["id"]].(string)
+		kind, kindOK := row[indexes["kind"]].(string)
+		displayName, displayOK := row[indexes["display_name"]].(string)
+		executableRef, executableOK := row[indexes["executable_ref"]].(string)
+		manifestJSON, manifestOK := row[indexes["manifest_json"]].(string)
+		protocol, protocolOK := row[indexes["protocol_version"]].(string)
+		if !keyOK || !exists || err != nil || !statusOK || status != "disabled" || !healthOK ||
+			!isolationOK || isolation != "unverified" || !readyOK || ready != 0 || !versionOK || version != 1 ||
+			!idOK || id != preset.ID || !kindOK || kind != "builtin" || !displayOK || displayName != preset.DisplayName ||
+			!executableOK || executableRef != preset.ExecutableRef || !manifestOK || manifestJSON != string(manifest) ||
+			!protocolOK || protocol != agentAdapterProtocolVersion {
+			return true
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return true
+		}
+		seen[key] = struct{}{}
+		healthError := row[indexes["health_error_code"]]
+		lastHealth := row[indexes["last_health_at"]]
+		switch health {
+		case "unknown":
+			if healthError != nil || lastHealth != nil {
+				return true
+			}
+		case "blocked":
+			code, codeOK := healthError.(string)
+			timestamp, timestampOK := lastHealth.(string)
+			if !codeOK || code != agentAdapterIsolationBlockedCode || !timestampOK {
+				return true
+			}
+			if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+				return true
+			}
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func businessImportInt64(value any) (int64, bool) {

@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v33。schema v33 新增独立 Automation Rule/Run，不改变 `app_settings` 契约；设置左栏已接首个预设自动化纵切。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、备份/导入导出、诊断与启动恢复均已交付。非空目标/跨 schema 高级导入、数据库打开前恢复进度和 Agent 设置仍是后续范围。
+> 文档状态：部分实现；当前 schema v34。schema v34 新增独立 Agent Adapter 诊断事实，不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断与启动恢复均已交付。非空目标/跨 schema 高级导入、数据库打开前恢复进度和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -26,6 +26,7 @@
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 自动化：从真实 `/api/v1/automations` 读取五个稳定预设；支持依赖状态、优先级或当地时间/IANA 时区即时服务端预览、规则配置独立保存、启停、下一次运行、最近 Run、空/加载/错误和失败手动重试。发票/Agent 预设明确 unavailable；该模块使用独立规则版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
+- 本地 Agent：从真实 `/api/v1/agent-adapters` 读取代码所有清单；支持空状态幂等登记、能力/安全闸门、手动诊断、加载/错误重试和未就绪启用禁用。当前诊断固定为隔离未验证，不启动进程、不创建 agent Actor/Assignment/Run；该模块使用 Adapter 自身版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
 - 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手工创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留未提交输入，不伪造成功或自动重试。恢复需求同时覆盖当前回滚点和 pending 目标副本。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前通过容量准入并自动创建已校验回滚备份。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
@@ -33,7 +34,7 @@
 - 当前设置状态明确分为三层：服务端确认值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存成功后才以服务端规范化响应替换 committed；取消丢弃 preview。
 - Zustand persist 不再保存头像内容；运行态只持有由鉴权 content 响应创建的 Blob URL。历史 `opc-settings-local-v1` 仅作为一次性迁移源，服务端事实确认后清理。
 - Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
-- 命令面板可分别直达个人资料、通用、外观、专注、人员与责任、自动化、数据与备份、运行诊断和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
+- 命令面板可分别直达个人资料、通用、外观、专注、人员与责任、本地 Agent、自动化、数据与备份、运行诊断和关于模块；关闭设置后通用 Modal 恢复触发元素焦点。
 - 活动 Session 的 `planned_seconds` 是服务端事实。修改、保存或取消 Focus draft/preview 都不会重置、缩短或改写当前 Session；保存后的 break、cycle、自动开始与提示音配置最早在当前工作段结束后的本地转场生效。
 
 当前 Sidecar 设置事实层已实现：
@@ -53,7 +54,7 @@
 - 五个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor、自动化、低空间阈值、备份/导入导出和脱敏诊断；但仍没有通知、非空目标/跨 schema 冲突合并、快捷键、数据库打开前恢复进度或 Agent 设置页。自动化只有三个受限本地预设可用，不等于 Agent 设置或自由规则。
+- 已有 Actor、自动化、Agent Adapter 诊断、低空间阈值、备份/导入导出和脱敏诊断；但仍没有通知、非空目标/跨 schema 冲突合并、快捷键、数据库打开前恢复进度或可执行 Agent Runner。Adapter 设置只登记代码清单并显示 blocked，不等于 agent 身份、分派或执行能力。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
@@ -85,7 +86,7 @@
 - 明确提示 person 只记录本地责任，不发送任务、不创建账号、不授予访问权限。
 - 客户联系人只有用户显式创建或关联后才成为 person Actor。
 - person 存在活动 Assignment 时，API 与数据库共同拒绝停用并提示先改派；任务详情已提供 Assignment 创建、改派和结束入口。
-- v0.2 增加 Adapter 与 agent Actor 管理、能力摘要、健康检查、启停和隔离边界。
+- v0.2-A 已增加代码所有 Adapter 登记、能力摘要、健康诊断、启停边界和隔离未验证提示；agent Actor 管理和实际执行仍待 Runner 安全闸门通过后实现。
 - 未注册或不健康的本地执行器不能创建可分派 Agent。
 
 ### 通知、快捷键与启动
@@ -270,7 +271,7 @@
 
 ### v0.2 与 v0.3
 
-- v0.2 增加本地 Agent Adapter、健康和能力设置。
+- [x] v0.2-A 增加本地 Agent Adapter 登记、健康诊断和能力/闸门设置；Runner 与 agent Actor 分派继续延期。
 - v0.3 增加备份计划、外部目录、高级导入和快捷键自定义。
 - 任何远程 Provider、在线 Updater 或云同步设置都需要新的 ADR 与用户明确授权，不属于当前路线。
 
@@ -284,7 +285,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v33 延续。schema v12–v29 的其他迁移不改变 Assignment 约束；schema v30–v33 的扩展不改变 Actor、Assignment 或设置表契约。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v34 延续。schema v12–v29 的其他迁移不改变 Assignment 约束；schema v30–v34 的扩展不改变 Actor、Assignment 或设置表契约。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整导出/导入后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导入导出中/失败、预检阻断、挂起提示和 invalid 包均有明确状态。
@@ -311,6 +312,9 @@
 - [当前自动化设置](../../apps/web/src/components/AutomationSettings.tsx)
 - [当前自动化设置测试](../../apps/web/src/components/AutomationSettings.test.tsx)
 - [自动化模块契约](automation.md)
+- [当前本地 Agent 设置](../../apps/web/src/components/AgentAdapterSettings.tsx)
+- [当前本地 Agent 设置测试](../../apps/web/src/components/AgentAdapterSettings.test.tsx)
+- [本地 Agent 模块契约](local-agents.md)
 - [当前备份设置](../../apps/web/src/components/BackupSettings.tsx)
 - [当前备份设置测试](../../apps/web/src/components/BackupSettings.test.tsx)
 - [当前通用 Modal](../../apps/web/src/components/Modal.tsx)

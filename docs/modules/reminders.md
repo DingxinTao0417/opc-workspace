@@ -1,10 +1,10 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v33（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v33 的预设自动化可创建来源为 automation 的一次性 Reminder，但不改变 Reminder 表。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v33 的预设自动化可创建来源为 automation 的一次性 Reminder，schema v34 仅新增 Agent Adapter 诊断事实，均不改变 Reminder 表。
 >
 > 版本边界：T-11A3 一次性本地 Reminder 及每日/每周重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”已能按 IANA 时区创建本地一次性 Reminder。每月/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.24](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.25](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 
@@ -62,7 +62,7 @@ schema v14 的 `014_reminders.sql` 新增 `reminders`，schema v32 的 `032_recu
 - fired/cancelled 为不可变终态，Reminder 不允许硬删除；
 - 创建者和取消者必须是有效 Actor，当前公开 API 只使用内置 owner，触发事件由内置 system 记录。
 
-schema v32 为普通加法迁移：既有 Reminder 幂等回填 `series_id=id / recurrence_type=none / interval=1 / timezone=UTC / occurrence=1`，不创建 demo Reminder，也不改变其标题、状态、触发时间、Inbox 引用或历史事件。schema v33 新增 Automation Rule/Run 表，未启用规则不会创建 Reminder；后续迁移必须从 `034_*` 继续。
+schema v32 为普通加法迁移：既有 Reminder 幂等回填 `series_id=id / recurrence_type=none / interval=1 / timezone=UTC / occurrence=1`，不创建 demo Reminder，也不改变其标题、状态、触发时间、Inbox 引用或历史事件。schema v33 新增 Automation Rule/Run 表，未启用规则不会创建 Reminder；schema v34 新增空的 Agent Adapter 表且不触发 Reminder；后续迁移必须从 `035_*` 继续。
 
 ## API 契约
 

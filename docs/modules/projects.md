@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v33。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束；schema v32 只扩展 Reminder；schema v33 增加受限 Automation Rule/Run，并允许用户显式启用“项目完成后提醒检查开票”的纯本地 Inbox 动作。项目级 Focus 读取复用既有 Task/Session 关系。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v34。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束；schema v32 只扩展 Reminder；schema v33 增加受限 Automation Rule/Run，并允许用户显式启用“项目完成后提醒检查开票”的纯本地 Inbox 动作；schema v34 只新增 Agent Adapter 诊断事实，不改变 Project。项目级 Focus 读取复用既有 Task/Session 关系。
 >
 > 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内组合筛选及服务端分页、Client 客户关联、共享 Project 选择读模型、项目笔记/附件、所属 Task Artifact 聚合及 nullable follow-up/实时 required 进度、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up/阻塞/临期/完成节点来源，以及项目 Focus 分析与终态历史已实现，模块仍为**部分完成**；Assignment/Submission 写入继续复用共享 Task/Inbox 详情，财务和其他真实里程碑尚未交付。
 

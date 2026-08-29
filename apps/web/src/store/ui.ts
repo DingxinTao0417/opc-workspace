@@ -6,6 +6,7 @@ export type SettingsModule =
   | "appearance"
   | "focus"
   | "actors"
+  | "agent"
   | "automation"
   | "data"
   | "diagnostics"

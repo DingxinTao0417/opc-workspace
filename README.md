@@ -10,7 +10,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v31、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束
+- SQLite schema v34、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束，v32–v33 交付重复 Reminder 与受限预设自动化，v34 新增空的 Agent Adapter 诊断事实
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
@@ -40,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已完成安全 ADR，但 Adapter/Run 尚未实现，平台隔离未验证前执行保持关闭。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF 和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v33。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.24](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已交付代码所有 Adapter 登记与安全诊断，但 Runner/Run 尚未实现，平台隔离未验证前执行保持关闭。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF 和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v34。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.25](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.24）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.25）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -348,11 +348,13 @@ Reminder API 提供一次性及 daily/weekly 本地提醒的分页/搜索/状态
 
 Automation API 只暴露五个代码所有的稳定预设，不提供创建任意 trigger/action 的接口。规则配置、启停使用版本化 `If-Match`；preview 由服务端规范化参数并返回下一计划与权限。当前可用 Project 完成 Inbox、daily/weekly Reminder；发票 Task 和 Agent failure Inbox 固定 unavailable。Run 保留终态、attempt、快照、结果/安全错误码，失败最多三次并可手动重试。没有 Shell、SQL、HTTP、外发、AI/LLM 或 Agent Runtime。
 
+Agent Adapter API 只允许登记代码所有的 `builtin-local-text-v1`，提供列表、详情、手动诊断、启用拒绝和停用；写命令使用幂等键或 `If-Match`。设置“本地 Agent”展示协议、允许能力和三个安全闸门。当前诊断固定为 `PLATFORM_ISOLATION_UNVERIFIED`，`execution_ready=false`，不会接受可执行路径、启动子进程、创建 agent Actor/Assignment/Run 或执行任务。
+
 Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时、Today 和周期报告；Today/周期报告以 IANA 本地日边界与已关闭正时长 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。终态历史和周期报告均可选严格 canonical UUID `project_id`：空值、非法或非 canonical 返回 `400 INVALID_PROJECT_ID`，不存在返回 `404 PROJECT_NOT_FOUND`，归档项目仍可读。项目筛选按 Session 绑定 Task 的查询时当前 `project_id` 归类，Task 改绑会重分类旧 Session；无 Task、Task 已删除或当前无项目的记录不进入项目过滤结果。
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v33；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v31 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件及来源 guards；v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；v33 新增空的 Automation Rule/Run 表及稳定身份、事件/计划形状、去重、重试和不可变约束。迁移不创建 demo 数据或 Automation Run；五个默认禁用预设由 Sidecar 幂等登记。后续从 `034_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v34；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v31 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件及来源 guards；v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；v33 新增空的 Automation Rule/Run 表及稳定身份、事件/计划形状、去重、重试和不可变约束。迁移不创建 demo 数据或 Automation Run；五个默认禁用预设由 Sidecar 幂等登记。schema v34 新增空的代码所有 Agent Adapter 清单/诊断表且迁移不登记 Adapter；后续从 `035_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -362,4 +364,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.24](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全和桌面恢复基座；v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 只完成安全 ADR，尚无 Adapter/Run。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则。真实浏览器/WebView 休眠/时区切换、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。
+[PRD v9.25](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全和桌面恢复基座；v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则。真实浏览器/WebView 休眠/时区切换、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。

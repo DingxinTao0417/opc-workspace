@@ -23,6 +23,14 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	`).Error; err != nil {
 		t.Fatal(err)
 	}
+	registered := performRequest(sourceRouter, http.MethodPost, "/api/v1/agent-adapters", []byte(`{"preset_key":"builtin-local-text-v1"}`), nil)
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("register source Agent Adapter = %d: %s", registered.Code, registered.Body.String())
+	}
+	checked := performRequest(sourceRouter, http.MethodPost, "/api/v1/agent-adapters/018f0000-0000-5000-8000-000000003401/check", nil, map[string]string{"If-Match": `"1"`})
+	if checked.Code != http.StatusOK {
+		t.Fatalf("check source Agent Adapter = %d: %s", checked.Code, checked.Body.String())
+	}
 	exported := performRequest(sourceRouter, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
 	if exported.Code != http.StatusOK {
 		t.Fatalf("source export = %d: %s", exported.Code, exported.Body.String())
@@ -61,11 +69,19 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	if err := json.Unmarshal(applyResponse.Body.Bytes(), &resultEnvelope); err != nil || resultEnvelope.Data.BackupID == "" || resultEnvelope.Data.ImportedRows != previewEnvelope.Data.TotalRows {
 		t.Fatalf("import result = %#v err=%v", resultEnvelope.Data, err)
 	}
-	for table, want := range map[string]int64{"clients": 1, "projects": 1, "tasks": 1} {
+	for table, want := range map[string]int64{"clients": 1, "projects": 1, "tasks": 1, "agent_adapters": 1} {
 		var count int64
 		if err := targetStore.DB.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count = %d err=%v", table, count, err)
 		}
+	}
+	var importedAdapter struct {
+		HealthStatus   string `gorm:"column:health_status"`
+		ExecutionReady bool   `gorm:"column:execution_ready"`
+		Version        int64  `gorm:"column:version"`
+	}
+	if err := targetStore.DB.Table("agent_adapters").Take(&importedAdapter).Error; err != nil || importedAdapter.HealthStatus != "blocked" || importedAdapter.ExecutionReady || importedAdapter.Version != 1 {
+		t.Fatalf("imported Agent Adapter = %#v err=%v", importedAdapter, err)
 	}
 	var ownerName string
 	if err := targetStore.DB.Table("actors").Where("id = ?", "00000000-0000-5000-8000-000000000001").Pluck("display_name", &ownerName).Error; err != nil || ownerName != "Imported Owner" {
@@ -179,6 +195,26 @@ func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
 	var count int64
 	if err := store.DB.Table("clients").Where("name = ?", "Existing Client").Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("existing data changed count=%d err=%v", count, err)
+	}
+}
+
+func TestBusinessImportTreatsRegisteredAgentAdapterAsNonEmpty(t *testing.T) {
+	router, _, _, _ := newBackupTestAPI(t)
+	packageData := emptyBusinessExportFixture(t, router)
+	registered := performRequest(router, http.MethodPost, "/api/v1/agent-adapters", []byte(`{"preset_key":"builtin-local-text-v1"}`), nil)
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("register target Agent Adapter = %d: %s", registered.Code, registered.Body.String())
+	}
+	body, _ := json.Marshal(packageData)
+	preview := performRequest(router, http.MethodPost, "/api/v1/imports/business-data/preview", body, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview with registered Agent Adapter = %d: %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" {
+		t.Fatalf("Agent Adapter target preview = %#v err=%v", envelope.Data, err)
 	}
 }
 

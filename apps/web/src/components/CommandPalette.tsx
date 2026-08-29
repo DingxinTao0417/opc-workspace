@@ -80,6 +80,7 @@ const settingsCommands: {
   { id: "settings-appearance", label: "外观设置", module: "appearance" },
   { id: "settings-focus", label: "专注设置", module: "focus" },
   { id: "settings-actors", label: "人员与责任设置", module: "actors" },
+  { id: "settings-agent", label: "本地 Agent 设置", module: "agent" },
   { id: "settings-automation", label: "自动化设置", module: "automation" },
   { id: "settings-data", label: "数据与备份", module: "data" },
   { id: "settings-diagnostics", label: "运行诊断", module: "diagnostics" },

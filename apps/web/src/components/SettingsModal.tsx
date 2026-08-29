@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertCircle,
+  Bot,
   CheckCircle2,
   Copy,
   DatabaseBackup,
@@ -66,6 +67,7 @@ import {
 import { useUiStore, type SettingsModule } from "../store/ui";
 import type { AppSettingUpdate } from "../types/models";
 import { ActorSettings } from "./ActorSettings";
+import { AgentAdapterSettings } from "./AgentAdapterSettings";
 import { AutomationSettings } from "./AutomationSettings";
 import { BackupSettings } from "./BackupSettings";
 import { Modal } from "./Modal";
@@ -80,6 +82,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "appearance", label: "外观", icon: Palette },
   { id: "focus", label: "专注", icon: Focus },
   { id: "actors", label: "人员与责任", icon: UsersRound },
+  { id: "agent", label: "本地 Agent", icon: Bot },
   { id: "automation", label: "自动化", icon: Zap },
   { id: "data", label: "数据与备份", icon: DatabaseBackup },
   { id: "diagnostics", label: "运行诊断", icon: Activity },
@@ -911,6 +914,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
     if (activeModule === "actors") {
       return <ActorSettings />;
+    }
+
+    if (activeModule === "agent") {
+      return <AgentAdapterSettings />;
     }
 
     if (activeModule === "automation") {

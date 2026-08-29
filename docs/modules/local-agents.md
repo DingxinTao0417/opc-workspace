@@ -1,6 +1,6 @@
 # 本地 Agent 执行模块
 
-> 文档状态：T-19 v0.2-A 安全 ADR 已完成；目标版本为 v0.2。当前仓库尚未实现 Adapter、Run 或任何可执行 Agent。
+> 文档状态：T-19 v0.2-A Adapter 登记与安全诊断已完成；目标版本为 v0.2。当前仓库仍未实现 Runner、Run 或任何可执行 Agent。
 
 ## 定位与边界
 
@@ -20,14 +20,15 @@
 
 ## 当前实现状态
 
-当前状态为**前置 ADR 已完成、代码未开始**：
+当前状态为**v0.2-A 诊断纵切已完成、执行能力未开始**：
 
 - [ADR-003](../adr/003-local-agent-runtime-security.md) 已冻结首版 Runtime 边界：每个 Run 一个短生命周期子进程；Sidecar 匿名 stdin/stdout 管道是唯一能力通道；不开放 Runtime HTTP、不传 WebView Token、不接受任意命令/路径；资源只用业务 ID 和单次 staging；各平台进程沙箱与禁网未验证时 `execution_ready=false`，不得创建可分派 agent Actor 或启动 Run。
 
-- 当前 SQLite schema v33 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线，并包含 Focus、Inbox/Reminder、设置、客户/项目扩展与受限预设自动化；schema v10–v33 均没有新增 Agent 表、Adapter 或执行能力。当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
-- Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
-- API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
-- 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。
+- 当前 SQLite schema v34 新增空的 `agent_adapters`，保存代码所有清单、协议、启停、诊断、隔离和 `execution_ready`；迁移不创建 Adapter、agent Actor、Assignment 或 Run。身份字段不可变，未达到 healthy + verified 时数据库拒绝 enabled，诊断观察不递增用户版本。
+- Sidecar 已提供 Adapter 列表、幂等登记、详情、手动诊断、启用拒绝和停用 API。唯一预设为 `builtin-local-text-v1`；响应不暴露 `executable_ref`。当前诊断只验证代码清单并记录 `blocked / PLATFORM_ISOLATION_UNVERIFIED`，不会启动进程。
+- 设置新增独立“本地 Agent”模块和命令面板入口，覆盖加载、空、错误、登记、能力/安全闸门、诊断反馈与禁用启用入口；当前没有 agent 负责人选项、Run 详情、输出预览或 Agent 验收入口。
+- 业务 JSON/ZIP 导入导出包含 Adapter 行，并严格接受代码所有身份、disabled、version=1、`execution_ready=false` 以及 unknown 或固定 blocked 诊断状态；普通备份随 SQLite 自动包含该事实，恢复后仍必须重新诊断。
+- 当前 API 仍明确拒绝 agent assignee，仓库没有 `agent_runs`、Runner、超时、取消、重试、中断恢复、Agent 专用鉴权或单次能力协议实现。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Tauri 当前只管理 Go Sidecar，没有额外 Agent 子进程的生命周期与隔离策略。
 
 因此，界面在没有已注册且健康的本地 Adapter 时必须隐藏或禁用 agent 分派，不能用占位 Actor 暗示功能已经可用。
@@ -36,7 +37,7 @@
 
 ### Adapter 注册与健康
 
-- 注册内置执行器或由用户通过文件选择器明确授权的本地可执行文件。
+- 当前只登记代码内置清单；用户文件选择和外部可执行文件注册必须在独立威胁评审后再决定，不属于 v0.2-A。
 - 保存稳定 adapter_key、展示名称、版本、输入输出协议、声明能力和平台要求。
 - 支持启用、停用、手动健康检查和运行前强制复检。
 - Adapter 可先注册供诊断；只有健康、manifest 兼容且平台隔离条件满足时，才能创建可执行 agent Actor 和接受分派。
@@ -78,11 +79,11 @@
 
 ### 首次配置本地 Agent
 
-1. owner 在设置的“本地 Agent”页选择注册执行器。
-2. 应用读取并展示 manifest、平台要求和请求能力，用户明确确认。
-3. Sidecar 完成可执行文件、协议、版本和隔离能力检查。
-4. 检查通过后创建 Adapter 与 agent Actor；失败时保持不可分派并给出诊断。
-5. 后续每次启动和每次 Run 前仍重新验证，不把历史健康结果当作当前保证。
+1. owner 在设置的“本地 Agent”页登记代码所有的内置诊断适配器。
+2. 应用展示稳定 manifest、协议、请求能力和三个安全闸门；请求不携带文件路径或命令。
+3. owner 点击检查，Sidecar 以 `If-Match` 重新校验代码清单并保存脱敏诊断。
+4. 当前平台隔离尚未验证，结果固定为 blocked，Adapter 保持 disabled，不创建 agent Actor 或 Run。
+5. 未来只有平台隔离全部验证后，才进入创建 agent Actor、运行前复检和 Run 流程；历史健康结果不能替代当前保证。
 
 ### 从任务启动执行
 
@@ -108,7 +109,7 @@
 | 对象             | 关键事实                                                                                                                                                         |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | actors           | type=agent、状态、Adapter 引用和能力摘要；历史引用后只能停用                                                                                                     |
-| agent_adapters   | 稳定标识、执行器引用、manifest、启停状态、隔离配置和最近健康结果                                                                                                 |
+| agent_adapters   | **schema v34 已实现**：稳定代码所有标识、内部执行器引用、manifest、启停、隔离、就绪和最近脱敏诊断；当前不保存路径或凭据                                          |
 | task_assignments | Task 当前 assignee；启动 Run 时必须指向同一个 agent Actor                                                                                                        |
 | agent_runs       | 一次执行的任务、分派、Agent、输入快照、状态、尝试次数、输出摘要和错误                                                                                            |
 | task_artifacts   | 当前 D2 已有受控文本/文件/链接/结构化产出、相对路径、SHA-256 与 producer/recorder；未来 Run 来源通过新增显式关联或 Workflow Event 表达，不回写已发布的 schema v9 |
@@ -116,17 +117,20 @@
 
 敏感凭据和单次能力令牌不进入上述表。
 
-### 规划 API
+### 当前与规划 API
 
-| 方法与路径                              | 用途                        |
-| --------------------------------------- | --------------------------- |
-| GET / POST /api/v1/agent-adapters       | 查询或注册本地 Adapter      |
-| POST /api/v1/agent-adapters/:id/check   | 执行当前健康与能力检查      |
-| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或由 owner 启动 Run |
-| GET /api/v1/agent-runs/:id              | 查看 Run、输出和错误        |
-| POST /api/v1/agent-runs/:id/cancel      | 取消当前 Run                |
-| POST /api/v1/agent-runs/:id/retry       | 基于旧 Run 创建新尝试       |
-| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工    |
+| 方法与路径                              | 用途                                              |
+| --------------------------------------- | ------------------------------------------------- |
+| GET / POST /api/v1/agent-adapters       | **已实现**：查询或幂等登记代码内置 Adapter        |
+| GET /api/v1/agent-adapters/:id          | **已实现**：详情与数值 ETag，不返回内部执行器引用 |
+| POST /api/v1/agent-adapters/:id/check   | **已实现**：版本化诊断；当前固定返回隔离未验证    |
+| POST /api/v1/agent-adapters/:id/enable  | **已实现拒绝路径**：未就绪时返回 409，不改变事实  |
+| POST /api/v1/agent-adapters/:id/disable | **已实现**：版本化停用；当前 disabled 时稳定返回  |
+| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或由 owner 启动 Run                       |
+| GET /api/v1/agent-runs/:id              | 查看 Run、输出和错误                              |
+| POST /api/v1/agent-runs/:id/cancel      | 取消当前 Run                                      |
+| POST /api/v1/agent-runs/:id/retry       | 基于旧 Run 创建新尝试                             |
+| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工                          |
 
 Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议已由 [ADR-003](../adr/003-local-agent-runtime-security.md) 冻结为单次匿名管道方案；实现仍必须通过平台隔离、禁网、进程树清理和协议验收，不能仅凭 ADR 标记为可执行。
 
@@ -143,7 +147,7 @@ Agent Run 状态为：
 | cancelled   | owner 已取消               | owner 可按需创建新重试                    |
 | interrupted | 进程或应用异常中断         | owner 检查后决定是否重试                  |
 
-关键 Workflow Event 至少包括 adapter_registered、agent_assigned、agent_run_queued、agent_run_started、agent_run_succeeded、agent_run_failed、agent_run_cancelled、agent_run_interrupted、task_output_submitted、task_review_accepted 和 task_rework_requested。
+当前已写 `agent_adapter_registered / agent_adapter_health_checked`。未来关键 Workflow Event 还至少包括 agent_adapter_disabled、agent_assigned、agent_run_queued、agent_run_started、agent_run_succeeded、agent_run_failed、agent_run_cancelled、agent_run_interrupted、task_output_submitted、task_review_accepted 和 task_rework_requested。
 
 所有创建、取消、重试和验收写入都使用幂等键与 expected_version；版本冲突返回 409，不覆盖较新的分派或验收。
 
@@ -169,8 +173,9 @@ Agent Run 状态为：
 ### v0.2-A：安全与 Adapter 契约
 
 - [x] 编写 Adapter、专用传输、单次管道能力、路径授权、沙箱和网络阻断 ADR。
-- 完成 Adapter 表、manifest schema、注册/停用/健康检查 API。
-- 建立各平台能力矩阵；不能验证的隔离能力在 UI 中明确标注。
+- [x] 完成 schema v34 Adapter 表、代码所有 manifest、列表/幂等登记/详情/停用/健康诊断和未就绪启用拒绝 API。
+- [x] 设置增加本地 Agent 模块，不能验证的隔离能力明确标注并保持执行关闭。
+- [ ] 在 Windows、macOS、Linux 建立并验证实际沙箱/禁网/进程树能力矩阵；当前三个闸门均未验证。
 
 ### v0.2-B：Runner 与生命周期
 
@@ -212,6 +217,11 @@ Agent Run 状态为：
 - [PRD：T-19 本地 Agent 执行](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)
 - [PRD：API 约定](../opc-workspace-PRD.md#c-api-约定)
 - [当前 Sidecar 路由](../../services/sidecar/internal/api/router.go)
+- [schema v34 Agent Adapter 迁移](../../services/sidecar/internal/database/migrations/034_agent_adapters.sql)
+- [Agent Adapter API](../../services/sidecar/internal/api/agent_adapters.go)
+- [Agent Adapter API 测试](../../services/sidecar/internal/api/agent_adapters_test.go)
+- [本地 Agent 设置模块](../../apps/web/src/components/AgentAdapterSettings.tsx)
+- [本地 Agent 设置测试](../../apps/web/src/components/AgentAdapterSettings.test.tsx)
 - [当前 WebView 鉴权与 Origin 中间件](../../services/sidecar/internal/api/middleware.go)
 - [当前 Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
 - [ADR-003：本地 Agent Runtime 安全与传输边界](../adr/003-local-agent-runtime-security.md)
