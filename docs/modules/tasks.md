@@ -2,9 +2,9 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v29 不改写 Task 表。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板 v1，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder、本地 Agent Run 和看板跨列受控生命周期交互属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.8](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.9](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -23,7 +23,7 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。六状态看板 v1 复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；卡片不通过跨列拖拽暗中改变生命周期。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -264,7 +264,8 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 - 起点晚于终点时，对应日期控件显示无效状态和就地错误，主 Task Query 暂停，旧任务结果不继续展示；服务端仍二次校验格式和顺序，避免绕过 UI。
 - 任务页只有在选中一个精确计划日期、排序为 `manual_order` 且没有搜索、状态、优先级、类型、项目或标签筛选时启用排序；上移/下移与拖动手柄同时保留。
 - 拖拽限定在同一状态分组，不会通过视觉移动暗中改变 Task 生命周期。前端立即预览当前页相对位置，但 hook 按源/目标重新读取完整计划日期组，校验日期、状态和可见版本，再把同状态顺序织回完整组的原槽位并调用既有原子 reorder API。
-- 看板固定展示六个生命周期列，列计数明确是当前服务端分页结果；卡片可选择进入既有原子批量操作，点击正文进入共享任务详情。v1 不提供跨列拖拽，生命周期仍必须使用详情或批量命令完成其负责人、原因、验收策略和版本门禁。
+- 看板固定展示六个生命周期列，列计数明确是当前服务端分页结果；卡片可选择进入既有原子批量操作，点击正文进入共享任务详情。跨列拖拽按来源/目标解析为 `start / block / unblock / complete / cancel / reopen`，确认后携带卡片版本执行；阻塞/取消要求原因，blocked 只能解除回 `blocked_from_status`，manual 与 waiting_review 不得绕过详情中的人工验收。
+- 看板不做乐观状态写入；命令成功后由 Query 失效读取服务端事实，失败时卡片保持原列。版本冲突关闭旧确认、刷新列表并要求用户基于新版本重新拖动，不自动重试。
 - 分页页面不把当前 50 行作为完整计划组提交；完整集合由 hook 自动分页读取，最多 1,000 项。集合/版本变化、网络错误或服务端拒绝时清除乐观预览并刷新 Task/Project/Today/Inbox，页面回到服务端事实。
 - 新建与详情编辑提供 review policy；详情只有在 todo 且无 current/历史 Submission 时开放修改。
 - 输出编辑器允许 summary 加最多 20 个条目；文件草稿保留浏览器 `File`，不会先复制或上传。
@@ -310,7 +311,7 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - 前端 manual 前置条件、混合草稿、审核、冲突时 `File` 保留、下载错误与软删确认；
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 - 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
-- 任务页列表/看板切换、看板平铺查询、六列空状态、卡片详情直达及与现有批量选择共用事实。
+- 任务页列表/看板切换、看板平铺查询、六列空状态、卡片详情直达、跨列命令映射/原因/确认/版本及人工验收门禁，以及与现有批量选择共用事实。
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
 - 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
@@ -341,6 +342,7 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - [前端 Task 专注记录组件](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [任务列表页](../../apps/web/src/pages/TasksPage.tsx)
 - [任务看板](../../apps/web/src/components/TaskBoard.tsx)
+- [任务看板生命周期确认](../../apps/web/src/components/TaskBoardTransitionModal.tsx)
 - [任务保存视图控件](../../apps/web/src/components/TaskSavedViewsControl.tsx)
 - [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)

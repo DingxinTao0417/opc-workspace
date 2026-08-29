@@ -26,6 +26,11 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { TagManagerModal } from "../components/TagManagerModal";
 import { TaskBoard } from "../components/TaskBoard";
+import {
+  resolveBoardTransition,
+  TaskBoardTransitionModal,
+  type TaskBoardTransition,
+} from "../components/TaskBoardTransitionModal";
 import { TaskList } from "../components/TaskList";
 import { TaskSavedViewsControl } from "../components/TaskSavedViewsControl";
 import { useUiStore } from "../store/ui";
@@ -136,6 +141,11 @@ export function TasksPage() {
   const [dragPreview, setDragPreview] = useState<
     Partial<Record<TaskStatus, string[]>>
   >({});
+  const [boardTransition, setBoardTransition] =
+    useState<TaskBoardTransition | null>(null);
+  const [boardTransitionNotice, setBoardTransitionNotice] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -292,6 +302,8 @@ export function TasksPage() {
     setSelectedTasks({});
     setBatchConfirmationPending(false);
     setDragPreview({});
+    setBoardTransition(null);
+    setBoardTransitionNotice(null);
     batchMutation.reset();
     dragMutation.reset();
   }, [
@@ -994,25 +1006,45 @@ export function TasksPage() {
       ) : null}
 
       {filtersValid && tasks.length > 0 && view === "board" ? (
-        <TaskBoard
-          live={writeReady}
-          onSelectionChange={(task, selected) => {
-            setBatchConfirmationPending(false);
-            setSelectedTasks((current) => {
-              const next = { ...current };
-              if (selected) {
-                if (!next[task.id] && Object.keys(next).length >= 100) {
-                  return current;
-                }
-                next[task.id] = task;
-              } else delete next[task.id];
-              return next;
-            });
-          }}
-          selectedIds={selectedIds}
-          selectionLimitReached={selectedItems.length >= 100}
-          tasks={tasks}
-        />
+        <>
+          {boardTransitionNotice ? (
+            <div className="task-order-banner" role="status">
+              <span>{boardTransitionNotice}</span>
+            </div>
+          ) : null}
+          <TaskBoard
+            live={writeReady}
+            onSelectionChange={(task, selected) => {
+              setBatchConfirmationPending(false);
+              setSelectedTasks((current) => {
+                const next = { ...current };
+                if (selected) {
+                  if (!next[task.id] && Object.keys(next).length >= 100) {
+                    return current;
+                  }
+                  next[task.id] = task;
+                } else delete next[task.id];
+                return next;
+              });
+            }}
+            selectedIds={selectedIds}
+            selectionLimitReached={selectedItems.length >= 100}
+            tasks={tasks}
+            onStatusDrop={(task, targetStatus) => {
+              const transition = resolveBoardTransition(task, targetStatus);
+              if (!transition) {
+                setBoardTransitionNotice(
+                  task.status === "waiting_review" && targetStatus === "done"
+                    ? "待验收任务必须在详情中由人工执行接受或驳回，不能通过拖拽完成。"
+                    : "当前两列之间没有安全的生命周期命令，请打开任务详情操作。",
+                );
+                return;
+              }
+              setBoardTransitionNotice(null);
+              setBoardTransition(transition);
+            }}
+          />
+        </>
       ) : null}
 
       {filtersValid && tasks.length > 0 && view === "list" ? (
@@ -1133,6 +1165,17 @@ export function TasksPage() {
       <TagManagerModal
         onClose={() => setTagManagerOpen(false)}
         open={tagManagerOpen}
+      />
+      <TaskBoardTransitionModal
+        onClose={() => setBoardTransition(null)}
+        onConflict={() => {
+          setBoardTransitionNotice(
+            "任务已被其他操作更新，列表已刷新，请重新拖动。",
+          );
+          setBoardTransition(null);
+          void query.refetch();
+        }}
+        transition={boardTransition}
       />
     </div>
   );

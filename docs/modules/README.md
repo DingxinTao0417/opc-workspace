@@ -2,12 +2,12 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.8](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.9](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
 - [今日工作台](today.md)（T-06A–H 日期分组、导航、按钮排序、同日/跨日期拖拽、空精确日期/未排期落点、行内任意日期安排、安全执行快捷操作及编辑/确认删除入口已交付）
-- [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、六状态看板 v1、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；看板跨列生命周期交互与 Agent 待开发）
+- [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、六状态看板及受控跨列生命周期、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；Agent 待开发）
 - [项目管理](projects.md)（基础纵切、任务树/平铺及项目内搜索/状态筛选/服务端分页、Client、笔记、附件、Task Artifact 聚合、活动时间线、显式 follow-up 产出和 Project 完成节点→Inbox 已交付；高级分析待开发）
 - [客户管理](clients.md)（基础资料 CRUD、Project 关联、人工活动时间线、受控附件和 person 显式关联已交付；外部来源/回访/财务仍待开发）
 - [收件箱工作编排](inbox.md)（T-11A1/A2/A3/B/C/F 和 T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成、备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败及可配置低空间监测已交付；Agent 待开发）
@@ -24,7 +24,7 @@
 - [本地 Agent Runtime](local-agents.md)
 - [预设自动化](automation.md)
 
-任务看板 v1 已提前交付读取、筛选、分页、选择和详情入口；跨列受控生命周期交互仍属于任务模块的 v0.2 阶段，详见 [任务管理](tasks.md)。
+任务看板已交付读取、筛选、分页、选择、详情入口及跨列受控生命周期交互；人工验收仍必须在任务详情完成，详见 [任务管理](tasks.md)。
 
 ## v0.3 规划增强
 

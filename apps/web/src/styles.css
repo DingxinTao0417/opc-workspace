@@ -9685,6 +9685,14 @@ kbd {
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.task-board-column[data-drop-active="true"] {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
 }
 
 .task-board-column-header {
@@ -9768,11 +9776,34 @@ kbd {
   line-height: 0;
 }
 
+.task-board-drag-handle {
+  position: absolute;
+  z-index: 1;
+  top: 9px;
+  right: 8px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: grab;
+}
+
+.task-board-drag-handle:hover {
+  background: var(--panel-2);
+  color: var(--text-secondary);
+}
+
+.task-board-drag-handle:active {
+  cursor: grabbing;
+}
+
 .task-board-card-body {
   display: grid;
   width: 100%;
   gap: 9px;
-  padding: 10px 10px 10px 34px;
+  padding: 10px 34px 10px 34px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -9841,6 +9872,55 @@ kbd {
   color: var(--text-muted);
   font-size: 11px;
   text-align: center;
+}
+
+.task-board-transition-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+}
+
+.task-board-transition-copy > svg {
+  flex: 0 0 auto;
+  color: var(--orange);
+}
+
+.task-board-transition-copy strong,
+.task-board-transition-copy p,
+.task-board-transition-copy small {
+  display: block;
+}
+
+.task-board-transition-copy strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.task-board-transition-copy p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 7px 0 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.task-board-transition-copy small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.task-board-transition-reason {
+  margin-top: 14px;
+}
+
+.task-board-transition-reason > small {
+  align-self: flex-end;
 }
 
 @media (max-width: 900px) {

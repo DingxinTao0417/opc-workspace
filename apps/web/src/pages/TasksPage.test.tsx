@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   resetBatch: vi.fn(),
   resetOrder: vi.fn(),
   resetResetOrder: vi.fn(),
+  lifecycle: vi.fn(),
+  resetLifecycle: vi.fn(),
   taskQueries: [] as TaskListParams[],
   taskQueryEnabled: [] as boolean[],
   taskItems: null as Task[] | null,
@@ -165,6 +167,12 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.resetOrder,
     reset: mocks.resetResetOrder,
   }),
+  useTaskLifecycleCommand: () => ({
+    error: null,
+    isPending: false,
+    mutate: mocks.lifecycle,
+    reset: mocks.resetLifecycle,
+  }),
   useCreateTag: () => ({
     error: null,
     isPending: false,
@@ -210,6 +218,8 @@ describe("TasksPage", () => {
     mocks.resetBatch.mockClear();
     mocks.resetOrder.mockClear();
     mocks.resetResetOrder.mockClear();
+    mocks.lifecycle.mockClear();
+    mocks.resetLifecycle.mockClear();
     mocks.placeholder = false;
     mocks.taskStatus = "todo";
     mocks.taskItems = null;
@@ -286,6 +296,78 @@ describe("TasksPage", () => {
       screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
     );
     expect(screen.getByText("已选 1 项")).toBeVisible();
+  });
+
+  it("maps a cross-column drop to a confirmed versioned lifecycle command", () => {
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const transfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText(`移动任务：${task.title}`), {
+      dataTransfer: transfer,
+    });
+    const target = screen
+      .getByRole("heading", { name: "进行中" })
+      .closest("section");
+    expect(target).not.toBeNull();
+    fireEvent.dragEnter(target!, { dataTransfer: transfer });
+    fireEvent.drop(target!, { dataTransfer: transfer });
+
+    expect(
+      screen.getByRole("dialog", { name: "确认任务状态变更" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText("将执行“开始执行”命令；", { exact: false }),
+    ).toBeVisible();
+    expect(mocks.lifecycle).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认变更" }));
+    expect(mocks.lifecycle).toHaveBeenCalledWith(
+      {
+        id: task.id,
+        input: { action: "start", expectedVersion: task.version },
+      },
+      expect.objectContaining({
+        onError: expect.any(Function),
+        onSuccess: expect.any(Function),
+      }),
+    );
+  });
+
+  it("keeps manual review acceptance out of board dragging", () => {
+    mocks.taskItems = [
+      { ...task, status: "waiting_review", reviewPolicy: "manual" },
+    ];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const transfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText(`移动任务：${task.title}`), {
+      dataTransfer: transfer,
+    });
+    const target = screen
+      .getByRole("heading", { name: "已完成" })
+      .closest("section");
+    fireEvent.dragEnter(target!, { dataTransfer: transfer });
+    fireEvent.drop(target!, { dataTransfer: transfer });
+
+    expect(
+      screen.getByText(
+        "待验收任务必须在详情中由人工执行接受或驳回，不能通过拖拽完成。",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("dialog", { name: "确认任务状态变更" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.lifecycle).not.toHaveBeenCalled();
   });
 
   it("sends the selected task version with an atomic batch update", () => {

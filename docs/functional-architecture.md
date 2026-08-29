@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.31
+> 文档版本：2.32
 > 日期：2026-08-28
-> 依据：[PRD v9.8](opc-workspace-PRD.md)
+> 依据：[PRD v9.9](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
 ## 1. 目的
@@ -50,7 +50,7 @@
 
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 任务树/平铺及项目内任务服务端搜索/状态筛选/分页、可编辑人工笔记、所属 Task Artifact 产出聚合与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立产出/笔记/审计反馈状态。
-- 任务看板 v1 与列表消费同一个严格 Task 契约：切换看板后使用平铺服务端分页，固定显示六状态列，复用全部筛选、最多 100 项批量选择及共享详情入口；当前不提供跨列拖拽，生命周期变化继续经过现有详情/批量命令门禁。
+- 任务看板与列表消费同一个严格 Task 契约：切换看板后使用平铺服务端分页，固定显示六状态列，复用全部筛选、最多 100 项批量选择及共享详情入口；跨列拖拽只映射既有生命周期命令，经过确认、版本、负责人、原因及人工验收门禁，服务端成功前不改卡片状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - SQLite 当前为 schema v29：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`，不回填默认设置或创建 demo 数据。
 - 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
@@ -83,7 +83,7 @@
 ### 3.2 目标扩展
 
 - v0.1：在已交付的 Task/Project/Client、Actor/Assignment、D2、Focus Core+D1+D2a+D2b 日期范围回顾/项目/标签/小时分布与二维热力图、手工 Inbox 受理/分诊、Reminder、Inbox Task 编排、基础备份闭环和业务 JSON 导出上，继续完成客户/项目增强、非 Reminder 来源投影和桌面可靠性；Focus 原生反馈、重复/原生通知独立延后。
-- v0.2：本地 Agent Runtime、任务看板跨列受控生命周期交互和预设自动化。
+- v0.2：本地 Agent Runtime 和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
 - 待定：本地知识库与 AI 助手。

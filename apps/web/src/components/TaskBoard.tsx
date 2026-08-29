@@ -1,4 +1,5 @@
-import { CalendarDays, FolderKanban } from "lucide-react";
+import { CalendarDays, FolderKanban, GripVertical } from "lucide-react";
+import { useState } from "react";
 import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
 
@@ -17,6 +18,7 @@ interface TaskBoardProps {
   selectedIds: Set<string>;
   selectionLimitReached?: boolean;
   onSelectionChange: (task: Task, selected: boolean) => void;
+  onStatusDrop: (task: Task, status: TaskStatus) => void;
 }
 
 function dateLabel(value: string): string {
@@ -30,8 +32,12 @@ export function TaskBoard({
   selectedIds,
   selectionLimitReached = false,
   onSelectionChange,
+  onStatusDrop,
 }: TaskBoardProps) {
   const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
+  const draggedTask = tasks.find((task) => task.id === draggedTaskId) ?? null;
 
   return (
     <div aria-label="任务看板" className="task-board">
@@ -43,7 +49,28 @@ export function TaskBoard({
           <section
             aria-labelledby={`task-board-${column.status}`}
             className="task-board-column"
+            data-drop-active={dropStatus === column.status || undefined}
             key={column.status}
+            onDragEnter={(event) => {
+              if (!live || !draggedTask || draggedTask.status === column.status)
+                return;
+              event.preventDefault();
+              setDropStatus(column.status);
+            }}
+            onDragOver={(event) => {
+              if (!live || !draggedTask || draggedTask.status === column.status)
+                return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDropStatus(null);
+              setDraggedTaskId(null);
+              if (!live || !draggedTask || draggedTask.status === column.status)
+                return;
+              onStatusDrop(draggedTask, column.status);
+            }}
           >
             <header className="task-board-column-header">
               <span
@@ -59,6 +86,28 @@ export function TaskBoard({
                   const selected = selectedIds.has(task.id);
                   return (
                     <article className="task-board-card" key={task.id}>
+                      <span
+                        aria-label={`移动任务：${task.title}`}
+                        className="task-board-drag-handle"
+                        draggable={live}
+                        onDragEnd={() => {
+                          setDraggedTaskId(null);
+                          setDropStatus(null);
+                        }}
+                        onDragStart={(event) => {
+                          if (!live) {
+                            event.preventDefault();
+                            return;
+                          }
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", task.id);
+                          setDraggedTaskId(task.id);
+                        }}
+                        role="img"
+                        title={live ? "拖到其他列变更状态" : "数据刷新后可移动"}
+                      >
+                        <GripVertical aria-hidden="true" size={14} />
+                      </span>
                       <label className="task-board-select">
                         <input
                           aria-label={`选择任务：${task.title}`}
