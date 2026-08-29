@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
   deleteBackup: vi.fn(),
   exportData: vi.fn(),
+  previewImport: vi.fn(),
+  applyImport: vi.fn(),
   restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
@@ -105,6 +107,27 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  usePreviewBusinessDataImport: () => ({
+    mutate: mocks.previewImport,
+    reset: mocks.reset,
+    data: {
+      formatVersion: 1,
+      schemaVersion: 28,
+      exportedAt: "2026-08-28T12:00:00Z",
+      tableCounts: { tasks: 2 },
+      totalRows: 2,
+      canApply: true,
+      blocker: null,
+    },
+    isPending: false,
+    error: null,
+  }),
+  useApplyBusinessDataImport: () => ({
+    mutate: mocks.applyImport,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
@@ -117,6 +140,8 @@ describe("BackupSettings", () => {
     mocks.restore.mockClear();
     mocks.deleteBackup.mockClear();
     mocks.exportData.mockClear();
+    mocks.previewImport.mockClear();
+    mocks.applyImport.mockClear();
     mocks.restartApplication.mockReset();
     mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
@@ -179,6 +204,19 @@ describe("BackupSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
     expect(mocks.exportData).toHaveBeenCalledWith(
       undefined,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    const importFile = new File(["{}"], "workspace.json", {
+      type: "application/json",
+    });
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: { files: [importFile] },
+    });
+    expect(mocks.previewImport).toHaveBeenCalledWith(importFile);
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    expect(mocks.applyImport).toHaveBeenCalledWith(
+      importFile,
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 

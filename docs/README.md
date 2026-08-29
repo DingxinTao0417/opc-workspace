@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v28。Project/Task/Actor、Client 本地事实、Focus（含日期范围回顾、项目/标签/小时分布与二维热力图）、Today、设置与受控工作区头像、统一本地搜索、备份恢复/业务 JSON、Sidecar 脱敏轮转日志、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败的来源投影已接通；Focus 原生反馈、客户外部来源、Tauri 壳日志/打开日志入口与恢复页、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v28。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复、业务 JSON 导出与空工作区安全导入、Sidecar 日志、Inbox/Reminder/Task 编排及已登记来源投影已接通；Focus 原生反馈、客户外部来源、Tauri 壳日志/恢复页、重复/原生通知、本地 Agent、含文件/冲突合并导入、回访/财务仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v8.4）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v8.5）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -34,7 +34,7 @@
 | 本地 Agent Runtime         | 未开始                                                                                                     | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                                                   | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续           | v0.1                | [command-search.md](modules/command-search.md)     |
-| 数据、受控文件、备份与恢复 | 迁移、Artifact store、手动备份完整闭环、创建失败 Inbox 投影及基础业务 JSON 导出已交付；导入/含文件包待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
+| 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、失败 Inbox、业务 JSON 导出与空工作区安全导入已交付；含文件/冲突合并导入待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
 | 桌面平台与发布             | 基座部分完成                                                                                               | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
@@ -55,7 +55,7 @@
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
-- Task file Artifact、Client Attachment 与 Project Attachment 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过不可变数据库身份 marker、进程锁、耐久同步与 quarantine 防止错库、双写和未知文件误删。应用已能管理 SQLite+三类 active objects 的内部备份；含文件外部包和数据导入仍未实现。
+- Task file Artifact、Client Attachment 与 Project Attachment 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、进程锁、耐久同步与 quarantine 防止错库、双写和误删。应用已能管理 SQLite+active objects 内部备份及无文件业务 JSON 安全导入；含文件外部包仍未实现。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。

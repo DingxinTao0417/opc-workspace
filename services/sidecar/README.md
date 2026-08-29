@@ -71,6 +71,7 @@ The Sidecar exposes:
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands, terminal history pagination, and timezone-aware today/period aggregation with streaks;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 - synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active controlled Task Artifact or Client Attachment through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
+- versioned business JSON export plus strict import preview/application for an empty same-schema workspace without controlled files. Apply requires explicit confirmation, creates a verified rollback backup, replaces allowlisted business tables atomically, rebuilds derived Focus totals, restores triggers, and rechecks foreign keys/database integrity.
 
 ```text
 GET    /api/v1/settings

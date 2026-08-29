@@ -10,16 +10,19 @@ import {
   ShieldCheck,
   Trash2,
   Undo2,
+  Upload,
 } from "lucide-react";
 import { useState } from "react";
 import { ApiError } from "../api/client";
 import { requestApplicationRestart } from "../api/desktop";
 import {
   useBackupsQuery,
+  useApplyBusinessDataImport,
   useCreateBackup,
   useDeleteBackup,
   useDrillBackupRestore,
   useExportBusinessData,
+  usePreviewBusinessDataImport,
   useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
@@ -85,6 +88,37 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "DATA_EXPORT_FAILED") {
       return "无法生成一致的业务数据导出，请重试。";
+    }
+    if (error.code === "INVALID_IMPORT_JSON") {
+      return "所选文件不是有效的 opc-workspace 业务 JSON。";
+    }
+    if (error.code === "IMPORT_TOO_LARGE") {
+      return "导入文件不能超过 16 MiB。";
+    }
+    if (error.code === "IMPORT_VERSION_UNSUPPORTED") {
+      return "导入文件的格式、API 或 schema 版本与当前应用不兼容。";
+    }
+    if (error.code === "IMPORT_FILES_UNSUPPORTED") {
+      return "这个快照包含受控文件；当前 JSON 导入不能恢复文件正文。";
+    }
+    if (error.code === "IMPORT_ACTIVE_FOCUS_UNSUPPORTED") {
+      return "源工作区仍有活动专注，请先结束或取消后重新导出。";
+    }
+    if (
+      error.code === "IMPORT_MANIFEST_INVALID" ||
+      error.code === "IMPORT_SCHEMA_MISMATCH" ||
+      error.code === "IMPORT_ROW_INVALID"
+    ) {
+      return "导入文件结构不完整或已被修改，已拒绝应用。";
+    }
+    if (error.code === "IMPORT_TARGET_NOT_EMPTY") {
+      return "当前工作区已有业务数据，安全导入不会覆盖它。";
+    }
+    if (error.code === "IMPORT_BACKUP_FAILED") {
+      return "无法创建导入前回滚备份，现有数据没有改变。";
+    }
+    if (error.code === "IMPORT_APPLY_FAILED") {
+      return "导入数据未通过完整性校验，整批内容已回滚。";
     }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
@@ -202,6 +236,9 @@ export function BackupSettings() {
   const restoreMutation = useScheduleBackupRestore();
   const deleteMutation = useDeleteBackup();
   const exportMutation = useExportBusinessData();
+  const importPreviewMutation = usePreviewBusinessDataImport();
+  const importApplyMutation = useApplyBusinessDataImport();
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
@@ -224,7 +261,9 @@ export function BackupSettings() {
     drillMutation.isPending ||
     restoreMutation.isPending ||
     deleteMutation.isPending ||
-    exportMutation.isPending;
+    exportMutation.isPending ||
+    importPreviewMutation.isPending ||
+    importApplyMutation.isPending;
   const locked = pending || scheduledRestore !== null;
   const mutationError =
     createMutation.error ??
@@ -233,6 +272,8 @@ export function BackupSettings() {
     restoreMutation.error ??
     deleteMutation.error ??
     exportMutation.error ??
+    importPreviewMutation.error ??
+    importApplyMutation.error ??
     downloadError;
 
   const resetExportFeedback = () => {
@@ -379,6 +420,36 @@ export function BackupSettings() {
     });
   };
 
+  const chooseImportFile = (file: File | null) => {
+    setSuccess(null);
+    setDownloadError(null);
+    importApplyMutation.reset();
+    importPreviewMutation.reset();
+    setImportFile(file);
+    if (!file) return;
+    if (file.size > 16 * 1024 * 1024) {
+      setImportFile(null);
+      setDownloadError("导入文件不能超过 16 MiB。");
+      return;
+    }
+    importPreviewMutation.mutate(file);
+  };
+
+  const applyBusinessImport = () => {
+    if (!importFile || !importPreviewMutation.data?.canApply) return;
+    setSuccess(null);
+    importApplyMutation.reset();
+    importApplyMutation.mutate(importFile, {
+      onSuccess: (result) => {
+        setImportFile(null);
+        importPreviewMutation.reset();
+        setSuccess(
+          `已原子导入 ${result.importedRows} 行业务数据；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+        );
+      },
+    });
+  };
+
   const restartApplication = async () => {
     setRestartError(null);
     setRestarting(true);
@@ -472,6 +543,84 @@ export function BackupSettings() {
           )}
           {exportMutation.isPending ? "正在生成…" : "下载 JSON"}
         </button>
+      </div>
+
+      <div className="settings-group settings-backup-export">
+        <div className="settings-backup-intro">
+          <Upload size={18} />
+          <div>
+            <strong>导入业务数据 JSON</strong>
+            <span>
+              先预检官方导出文件；当前仅支持无受控文件的同 schema
+              数据，并且只能导入空工作区。
+            </span>
+          </div>
+        </div>
+        <label className="button button-secondary settings-backup-export-button">
+          {importPreviewMutation.isPending ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <Upload size={14} />
+          )}
+          {importPreviewMutation.isPending ? "正在预检…" : "选择 JSON"}
+          <input
+            accept="application/json,.json"
+            aria-label="选择业务数据 JSON"
+            disabled={locked}
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              chooseImportFile(file);
+            }}
+            type="file"
+          />
+        </label>
+        {importFile && importPreviewMutation.data ? (
+          <div className="settings-backup-confirm">
+            <FileJson size={18} />
+            <div>
+              <strong>{importFile.name}</strong>
+              <p>
+                schema v{importPreviewMutation.data.schemaVersion} · 共{" "}
+                {importPreviewMutation.data.totalRows} 行业务数据
+              </p>
+              {!importPreviewMutation.data.canApply ? (
+                <small>当前工作区已有业务数据，已禁止覆盖导入。</small>
+              ) : (
+                <small>
+                  应用前会自动创建并校验回滚备份；任一行失败则整批回滚。
+                </small>
+              )}
+            </div>
+            <div className="settings-backup-confirm-actions">
+              <button
+                className="button button-secondary"
+                disabled={importApplyMutation.isPending}
+                onClick={() => chooseImportFile(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="button button-danger"
+                disabled={
+                  !importPreviewMutation.data.canApply ||
+                  importApplyMutation.isPending
+                }
+                onClick={applyBusinessImport}
+                type="button"
+              >
+                {importApplyMutation.isPending ? (
+                  <LoaderCircle className="animate-spin" size={13} />
+                ) : (
+                  <Upload size={13} />
+                )}
+                {importApplyMutation.isPending ? "正在导入…" : "确认导入"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {success ? (
@@ -671,7 +820,7 @@ export function BackupSettings() {
 
       <p className="settings-inline-note">
         当前已开放版本化业务 JSON
-        导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；文件产出正文需通过一致性备份保留。
+        导出与空工作区安全导入，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；文件产出正文需通过一致性备份保留。
       </p>
     </>
   );

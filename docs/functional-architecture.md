@@ -2,7 +2,7 @@
 
 > 文档版本：2.19
 > 日期：2026-08-28
-> 依据：[PRD v8.4](opc-workspace-PRD.md)
+> 依据：[PRD v8.5](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
@@ -54,6 +54,7 @@
 - SQLite 当前为 schema v28：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源、不可变快照与父项目删除协调，不回填历史事实或创建 demo 数据。
 - 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
+- 业务 JSON 导入先 strict 预检同 schema/固定表列/标量行/无文件/终态 Focus 和空目标；正式应用前创建已校验回滚备份，在维护写锁与 trigger 持续生效的单事务中写入业务白名单、重建派生 Focus ledger 并复验外键/quick-check。非空目标和含文件包继续拒绝。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -74,7 +75,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、运行期数据库不可写等其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。Focus 项目/当前标签分布、DST 安全小时分布/最佳时段与周几×小时二维热力图已交付；显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已投影到 Inbox；Sidecar 脱敏轮转日志已交付，Tauri 壳日志、打开日志入口和恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、运行期数据库不可写等其他系统故障来源、重复提醒、Agent Runtime、含文件外部包和非空目标冲突导入，因此完整工作编排仍是部分完成。Focus 分析已交付；已登记来源投影到 Inbox；Sidecar 脱敏轮转日志已交付，Tauri 壳日志、打开日志入口和恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 
@@ -116,9 +117,9 @@
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                                                 | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                              | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                               |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                                       | 单次受控执行                                                                                                                             | Agent Run、Task Artifact、待验收或失败事件                                                          |
 | [专注](modules/focus.md)                   | 当前 Task                                                                                                     | 活动 Session 和有效工时                                                                                                                  | Task actual_minutes、今日/统计数据                                                                  |
-| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health`、Tauri Sidecar 状态与数据维护 API | 本地偏好、person 管理、脱敏运行诊断/诊断包、备份闭环和业务 JSON 下载；导入、打开日志入口与恢复页待实现                              | 布局、主题、Focus 默认值、Actor、运行版本、诊断、备份/导出和桌面行为                                |
+| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、Actor API、`/health`、Tauri 状态与数据维护 API | 本地偏好、person、诊断、备份闭环和业务 JSON 安全导入导出；高级导入、打开日志与恢复页待实现 | 布局、主题、Focus 默认值、Actor、版本、诊断、备份/导入导出和桌面行为 |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                                       | 参数化统一本地查找、确定性相关排序、非敏感有上限最近使用与快捷操作入口                                                                   | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                                |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                             | 已实现 Task Artifact/Client Attachment 一致性、手动备份完整闭环、创建失败的安全 Inbox 投影和基础业务 JSON 导出；导入与含文件外部包仍规划 | 当前文件安全、已校验备份、恢复后的完整应用状态、备份失败 Inbox Item 与业务 JSON；未来导入包与诊断包 |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件 | 已实现受控文件一致性、备份恢复、失败 Inbox、业务 JSON 导出与空工作区安全导入；含文件/冲突合并导入仍规划 | 当前文件安全、已校验备份、恢复状态、失败 Inbox 与业务 JSON |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                       | 原生窗口、进程、权限、运行日志和发布                                                                                                     | 可运行、可诊断的本地应用环境                                                                        |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                   | 财务与发票业务事实                                                                                                                       | 本地提醒、Inbox Item、客户聚合                                                                      |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划与结果                                                                                                                       | Inbox 到期项、客户活动                                                                              |

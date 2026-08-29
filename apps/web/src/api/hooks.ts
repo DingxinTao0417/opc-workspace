@@ -9,6 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import {
   ApiError,
+  applyBusinessDataImport,
   batchUpdateTasks,
   createBackup,
   drillBackupRestore,
@@ -45,6 +46,7 @@ import {
   downloadProjectAttachment,
   downloadBusinessDataExport,
   downloadDiagnosticPackage,
+  previewBusinessDataImport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -286,6 +288,20 @@ export function useDeleteBackup() {
 
 export function useExportBusinessData() {
   return useMutation({ mutationFn: downloadBusinessDataExport });
+}
+
+export function usePreviewBusinessDataImport() {
+  return useMutation({ mutationFn: previewBusinessDataImport });
+}
+
+export function useApplyBusinessDataImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: applyBusinessDataImport,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
 }
 
 export function useDownloadDiagnosticPackage() {

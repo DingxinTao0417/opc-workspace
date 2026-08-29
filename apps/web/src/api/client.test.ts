@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  applyBusinessDataImport,
   batchUpdateTasks,
   createBackup,
   createPersonActor,
@@ -33,6 +34,7 @@ import {
   getTaskSubmissions,
   downloadTaskArtifact,
   normalizeActor,
+  previewBusinessDataImport,
   normalizeActorSummary,
   normalizeBackupSummary,
   normalizeHealthResponse,
@@ -1552,6 +1554,62 @@ describe("verified local backups", () => {
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Accept")).toBe(
       "application/json",
     );
+  });
+
+  it("previews and explicitly confirms a business JSON import", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              format_version: 1,
+              schema_version: 28,
+              exported_at: "2026-08-28T12:00:00Z",
+              table_counts: { tasks: 2 },
+              total_rows: 2,
+              can_apply: true,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              imported_rows: 2,
+              backup_id: "018f0000-0000-7000-8000-000000001799",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["{}"], "workspace.json", {
+      type: "application/json",
+    });
+
+    const preview = await previewBusinessDataImport(file);
+    const result = await applyBusinessDataImport(file);
+
+    expect(preview).toMatchObject({
+      formatVersion: 1,
+      schemaVersion: 28,
+      totalRows: 2,
+      canApply: true,
+      blocker: null,
+    });
+    expect(result).toEqual({
+      importedRows: 2,
+      backupId: "018f0000-0000-7000-8000-000000001799",
+    });
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(file);
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get(
+        "X-Import-Confirmation",
+      ),
+    ).toBe("replace-empty-workspace");
   });
 
   it("downloads a versioned local diagnostic package with a safe filename", async () => {

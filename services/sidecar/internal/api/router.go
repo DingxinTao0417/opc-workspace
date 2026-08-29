@@ -156,6 +156,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	{
 		v1.GET("/diagnostics/package", service.downloadDiagnosticPackage)
 		v1.GET("/exports/business-data", service.exportBusinessData)
+		v1.POST("/imports/business-data/preview", service.previewBusinessImport)
+		v1.POST("/imports/business-data", service.applyBusinessImport)
 		v1.GET("/backups", service.listBackups)
 		v1.POST("/backups", service.createBackup)
 		v1.POST("/backups/:id/verify", service.verifyBackup)
