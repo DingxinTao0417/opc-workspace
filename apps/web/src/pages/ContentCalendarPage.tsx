@@ -8,7 +8,9 @@ import {
   Send,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
+  useContentItemQuery,
   useCreateContentItem,
   useProjectsQuery,
   useContentItemsInfiniteQuery,
@@ -558,18 +560,80 @@ function EditContentItemModal({
   );
 }
 
+function ContentItemDetailModal({
+  contentItemId,
+  onClose,
+}: {
+  contentItemId: string | null;
+  onClose: () => void;
+}) {
+  const query = useContentItemQuery(contentItemId);
+  if (query.data) {
+    return (
+      <EditContentItemModal
+        item={query.data}
+        key={`${query.data.id}:${query.data.version}`}
+        onClose={onClose}
+      />
+    );
+  }
+  return (
+    <Modal
+      footer={
+        <button
+          className="button button-secondary"
+          onClick={onClose}
+          type="button"
+        >
+          关闭
+        </button>
+      }
+      onClose={onClose}
+      open={Boolean(contentItemId)}
+      title="内容详情与排期"
+      width="640px"
+    >
+      {query.isPending ? <SkeletonRows count={4} /> : null}
+      {query.isError ? (
+        <ErrorState
+          message="无法读取内容详情，请确认本地服务已连接。"
+          onRetry={() => void query.refetch()}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
 export function ContentCalendarPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [month, setMonth] = useState(
     () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<ContentItem | null>(null);
+  const detailId = searchParams.get("item")?.trim() || null;
   const [status, setStatus] = useState<ContentItemStatus | "">("");
   const [moveError, setMoveError] = useState<string | null>(null);
   const [schedulePreviews, setSchedulePreviews] = useState<
     Record<string, string>
   >({});
   const schedule = useScheduleContentItem();
+  const openDetail = (id: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("item", id);
+      return next;
+    });
+  };
+  const closeDetail = () => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("item");
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const calendar = useMemo(() => calendarForMonth(month), [month]);
   const query = useContentItemsInfiniteQuery({
     pageSize: 100,
@@ -862,7 +926,7 @@ export function ContentCalendarPage() {
                           ),
                         );
                       }}
-                      onClick={() => setEditing(item)}
+                      onClick={() => openDetail(item.id)}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
                         event.dataTransfer.setData(
@@ -916,13 +980,7 @@ export function ContentCalendarPage() {
         onClose={() => setCreating(false)}
         open={creating}
       />
-      {editing ? (
-        <EditContentItemModal
-          item={editing}
-          key={`${editing.id}:${editing.version}`}
-          onClose={() => setEditing(null)}
-        />
-      ) : null}
+      <ContentItemDetailModal contentItemId={detailId} onClose={closeDetail} />
     </div>
   );
 }

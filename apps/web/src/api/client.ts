@@ -6791,6 +6791,19 @@ export async function getContentItems(
   );
 }
 
+export async function getContentItem(
+  id: string,
+  signal?: AbortSignal,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}`,
+    { signal },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
+}
+
 export async function createContentItem(
   input: CreateContentItemInput,
 ): Promise<ContentItem> {

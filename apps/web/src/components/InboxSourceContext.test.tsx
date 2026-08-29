@@ -278,7 +278,7 @@ describe("InboxSourceContext", () => {
     expect(screen.getByText("v3")).toBeTruthy();
     expect(screen.getByRole("link", { name: /查看内容日历/ })).toHaveAttribute(
       "href",
-      "/content-calendar",
+      `/content-calendar?item=${contentItemId}`,
     );
 
     rerender(

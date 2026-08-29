@@ -469,7 +469,10 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </div>
         </dl>
         {item.sourceDeletedAt ? null : (
-          <Link className="button button-secondary" to="/content-calendar">
+          <Link
+            className="button button-secondary"
+            to={`/content-calendar?item=${encodeURIComponent(contentSource.contentItemId)}`}
+          >
             查看内容日历
             <ExternalLink aria-hidden="true" size={13} />
           </Link>

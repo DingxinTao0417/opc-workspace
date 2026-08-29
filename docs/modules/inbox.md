@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v41。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly/weekdays/monthly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；schema v35 的到期 Client Followup 会创建本地来源并只深链客户详情；schema v40 的 monthly 仍为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v41。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly/weekdays/monthly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；schema v35 的到期 Client Followup 会创建本地来源并只深链客户详情；schema v38 的审核/发布内容来源会通过内容 ID 精确深链最新详情；schema v40 的 monthly 仍为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.70](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.76](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
 
 ## 定位与边界
 
@@ -93,6 +93,7 @@
 - 列表新增 `risk=tracking|blocked|waiting_review` 服务端筛选，blocked/waiting_review 使用活动必需关系和实时 Task 状态；全局 `unread_total` 继续不受 risk/search/priority 缩小。
 - Sidebar 显示待处理徽标，Today 显示待处理/跟进中/待验收/有阻塞并跳转风险深链；统计 Query 位于 Inbox Query 前缀下，写入后统一失效并每 15 秒刷新。
 - `client_followup` 是当前唯一允许以 `source_entity_type` 过滤的 Inbox 来源，供 Today 准确读取到期回访；前端严格验证 `followup:<id>:due:<version>` 与 `client_followup_id / client_id / scheduled_at / timezone / channel` 快照，来源上下文只能深链客户详情，不能在 Inbox 伪造回访完成。
+- `content_item` 来源严格校验内容 ID、事件类型、版本、计划时间和时区；来源存在时链接到 `/content-calendar?item=<content-item-id>` 并由内容日历单条 API 读取最新详情，不依赖当前月格。来源删除后只展示不可变排期快照并隐藏失效链接。
 
 ### 已交付：T-11E 第一项——Task Artifact follow-up 来源
 

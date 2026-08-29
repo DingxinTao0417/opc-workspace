@@ -5,13 +5,14 @@ import {
   render,
   screen,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentItem } from "../types/models";
 import { ContentCalendarPage } from "./ContentCalendarPage";
 
 const hooks = vi.hoisted(() => ({
   items: vi.fn(),
+  detail: vi.fn(),
   projects: vi.fn(),
   tasks: vi.fn(),
   update: vi.fn(),
@@ -23,6 +24,7 @@ const hooks = vi.hoisted(() => ({
 }));
 vi.mock("../api/hooks", () => ({
   useContentItemsInfiniteQuery: hooks.items,
+  useContentItemQuery: hooks.detail,
   useProjectsQuery: hooks.projects,
   useTasksQuery: hooks.tasks,
   useCreateContentItem: () => ({
@@ -80,6 +82,13 @@ const item: ContentItem = {
   requiredTaskDone: 1,
 };
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="location-probe">{`${location.pathname}${location.search}`}</output>
+  );
+}
+
 describe("ContentCalendarPage", () => {
   afterEach(cleanup);
   beforeEach(() => {
@@ -89,6 +98,12 @@ describe("ContentCalendarPage", () => {
     hooks.publish.mockReset();
     hooks.link.mockReset();
     hooks.unlink.mockReset();
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id ? item : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
     hooks.items.mockReturnValue({
       data: {
         pages: [{ items: [item], meta: { page: 1, pageSize: 100, total: 1 } }],
@@ -159,6 +174,61 @@ describe("ContentCalendarPage", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it("opens a URL-addressed item and removes only that query on close", () => {
+    hooks.items.mockReturnValue({
+      data: {
+        pages: [{ items: [], meta: { page: 1, pageSize: 100, total: 0 } }],
+      },
+      isError: false,
+      isFetchNextPageError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      isPending: false,
+      isSuccess: true,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?item=content-1&source=inbox"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    expect(hooks.detail).toHaveBeenCalledWith("content-1");
+    expect(
+      screen.getByRole("heading", { name: "内容详情与排期" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText("关闭").closest("button")!);
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?source=inbox",
+    );
+  });
+
+  it("keeps a URL-addressed detail failure retryable", () => {
+    const refetch = vi.fn();
+    hooks.detail.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isPending: false,
+      refetch,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?item=missing-item"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText("无法读取内容详情，请确认本地服务已连接。"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it("moves an editable item to a visible adjacent-month day with its current version", () => {

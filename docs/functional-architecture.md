@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.85
+> 文档版本：2.86
 > 日期：2026-08-29
-> 依据：[PRD v9.75](opc-workspace-PRD.md)
+> 依据：[PRD v9.76](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v41
 
-> 2.85 说明：Roadmap 详情由 `?milestone=<id>` 驱动；Today 与路线图卡片共享指定详情深链，关闭/编辑只清理该参数并保留其他查询上下文；schema/API 不变。
+> 2.86 说明：Content Calendar 详情由 `?item=<id>` 驱动；Inbox 内容来源与月格卡片共享指定详情深链，按单条 API 获取最新事实且不受当前月格范围限制；关闭只清理该参数并保留其他查询上下文。
 
 ## 1. 目的
 
@@ -137,7 +137,7 @@
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                             | 财务与发票业务事实                                                                                                                                                                        | 本地提醒、Inbox Item、客户聚合                                                                                                                                   |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                                 | 本地回访计划、终态结果、完成时原子安排下一次计划、客户详情管理、Today 待办和 Inbox→客户详情入口                                                                                           | Inbox 到期项；不自动创建客户活动或外部通信                                                                                                                       |
 | [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除、同季度安全排序、年度跨季度/跨年度移动和季度内精确日期调整                     | 里程碑到期/达成已投影本地 Inbox 事件；原生通知待后续                                                                                                             |
-| [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、拖拽/卡片键盘逐日改期即时预移与失败回滚、准备 Task 关系、本地发布确认；CC2–CC5-B 已交付                                                            | 准备 Task（读写已交付）；当前版本审核/发布时间到期事实投影到 Inbox（已交付）                                                                                     |
+| [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、拖拽/卡片键盘逐日改期即时预移与失败回滚、准备 Task 关系、本地发布确认；指定详情由 `?item=<id>` 和单条读取承载；CC2–CC5-B 已交付                    | 准备 Task（读写已交付）；审核/发布时间到期事实投影到 Inbox，Inbox 通过内容 ID 精确回到最新详情（已交付）                                                         |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                                    | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                     |
 | [知识库](modules/knowledge-base.md)        | 本地文件                                                                                                                | 导入、FTS 索引、来源定位和删除                                                                                                                                                            | 搜索结果、可选 AI 上下文                                                                                                                                         |
 | [AI 助手](modules/ai-assistant.md)         | 用户显式选择的本地上下文                                                                                                | 本地问答、摘要和建议                                                                                                                                                                      | 建议或待验收 Task Artifact                                                                                                                                       |

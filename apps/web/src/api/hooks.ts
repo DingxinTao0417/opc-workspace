@@ -111,6 +111,7 @@ import {
   getProjects,
   getRoadmapMilestones,
   getRoadmapMilestone,
+  getContentItem,
   createRoadmapMilestone,
   updateRoadmapMilestone,
   archiveRoadmapMilestone,
@@ -3403,6 +3404,8 @@ export const roadmapMilestoneQueryKey = ["roadmap", "milestones"] as const;
 export const roadmapMilestoneDetailQueryKey = (id: string) =>
   [...roadmapMilestoneQueryKey, "detail", id] as const;
 export const contentItemQueryKey = ["content-items"] as const;
+export const contentItemDetailQueryKey = (id: string) =>
+  [...contentItemQueryKey, "detail", id] as const;
 export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
 export const projectEventQueryKey = (id: string) =>
@@ -3470,6 +3473,17 @@ export function useContentItemsInfiniteQuery(
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useContentItemQuery(id: string | null) {
+  return useQuery({
+    queryKey: contentItemDetailQueryKey(id ?? "idle"),
+    queryFn: ({ signal }) => getContentItem(id!, signal),
+    enabled: Boolean(id),
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 5_000,
   });
 }
 

@@ -27,6 +27,7 @@ import {
   getAllTasks,
   getBackups,
   getHealth,
+  getContentItem,
   getRestoreDiagnostics,
   getTags,
   getTaskPage,
@@ -67,6 +68,46 @@ import {
   updateActor,
   verifyBackup,
 } from "./client";
+
+describe("content item detail request", () => {
+  it("loads and normalizes one URL-addressed content item", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: {
+          id: "content/item 1",
+          title: "版本更新说明",
+          platform: "Newsletter",
+          status: "scheduled",
+          scheduled_at: "2026-08-30T10:00:00Z",
+          scheduled_timezone: "Asia/Shanghai",
+          published_at: null,
+          project_id: null,
+          notes: null,
+          external_link: null,
+          manual_order: 1024,
+          archived_from_status: null,
+          version: 3,
+          created_at: "2026-08-29T00:00:00Z",
+          updated_at: "2026-08-29T01:00:00Z",
+          tasks: [],
+          required_task_total: 0,
+          required_task_done: 0,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getContentItem("content/item 1")).resolves.toMatchObject({
+      id: "content/item 1",
+      status: "scheduled",
+      scheduledTimezone: "Asia/Shanghai",
+      version: 3,
+    });
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0]), "http://local.test").pathname,
+    ).toBe("/api/v1/content-items/content%2Fitem%201");
+  });
+});
 
 describe("health response normalization", () => {
   it("accepts the complete local runtime contract", () => {
