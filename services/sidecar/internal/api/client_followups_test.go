@@ -125,6 +125,35 @@ func TestClientFollowupRejectsUnavailableAssigneeAndInvalidTimezone(t *testing.T
 	}
 }
 
+func TestClientFollowupListFiltersServiceDerivedOverduePlans(t *testing.T) {
+	now := time.Date(2026, time.August, 29, 12, 34, 56, 789123000, time.UTC)
+	router, _ := newTaskDueFilterAPI(t, now)
+	client := createClientForTest(t, router, `{"name":"Overdue Followup Client"}`, nil)
+	create := func(scheduledAt, purpose string) clientFollowupResponse {
+		recorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"`+scheduledAt+`","timezone":"UTC","channel":"phone","purpose":"`+purpose+`"}`), nil)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("create %s followup = %d: %s", purpose, recorder.Code, recorder.Body.String())
+		}
+		return decodeClientFollowupResponse(t, recorder.Body.Bytes())
+	}
+	expired := create(now.Add(-time.Nanosecond).Format(time.RFC3339Nano), "expired")
+	create(now.Format(time.RFC3339Nano), "at-now")
+	create(now.Add(time.Nanosecond).Format(time.RFC3339Nano), "future")
+
+	listed := performRequest(router, http.MethodGet, "/api/v1/clients/"+client.ID+"/followups?due_state=overdue&status=planned", nil, nil)
+	var envelope struct {
+		Data []clientFollowupResponse `json:"data"`
+		Meta pageMeta                 `json:"meta"`
+	}
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &envelope) != nil || envelope.Meta.Total != 1 || len(envelope.Data) != 1 || envelope.Data[0].ID != expired.ID {
+		t.Fatalf("overdue followup list = %d: %s", listed.Code, listed.Body.String())
+	}
+	invalid := performRequest(router, http.MethodGet, "/api/v1/clients/"+client.ID+"/followups?due_state=overdue&status=completed", nil, nil)
+	if invalid.Code != http.StatusBadRequest || responseErrorCode(t, invalid.Body.Bytes()) != "INVALID_FILTER" {
+		t.Fatalf("invalid overdue status combination = %d: %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestClientFollowupBlocksAssigneeDeactivationUntilPlanIsClosed(t *testing.T) {
 	router, _ := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Followup Responsibility Client"}`, nil)

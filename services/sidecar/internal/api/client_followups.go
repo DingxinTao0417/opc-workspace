@@ -21,6 +21,13 @@ import (
 var validClientFollowupStatuses = map[string]struct{}{"planned": {}, "completed": {}, "skipped": {}, "cancelled": {}}
 var validClientFollowupPriorities = map[string]struct{}{"low": {}, "normal": {}, "high": {}}
 
+const (
+	clientFollowupTimeKeyLayout      = "2006-01-02T15:04:05.000000000"
+	clientFollowupScheduledTimeKey   = `(substr(client_followups.scheduled_at, 1, 19) || '.' || substr((CASE WHEN substr(client_followups.scheduled_at, 20, 1) = '.' THEN substr(client_followups.scheduled_at, 21, length(client_followups.scheduled_at) - 21) ELSE '' END) || '000000000', 1, 9))`
+	clientFollowupOverduePredicate   = `client_followups.status = 'planned' AND ` + clientFollowupScheduledTimeKey + ` < ?`
+	clientFollowupOverdueFilterValue = "overdue"
+)
+
 type createClientFollowupRequest struct {
 	ClientID        string  `json:"client_id"`
 	AssignedActorID string  `json:"assigned_actor_id"`
@@ -140,6 +147,15 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 			return
 		}
 	}
+	dueState := strings.TrimSpace(c.Query("due_state"))
+	if dueState != "" && dueState != clientFollowupOverdueFilterValue {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_state must be overdue")
+		return
+	}
+	if dueState != "" && status != "" && status != "planned" {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_state can only be combined with status=planned")
+		return
+	}
 	actorID := strings.TrimSpace(c.Query("assigned_actor_id"))
 	if actorID != "" {
 		parsed, err := uuid.Parse(actorID)
@@ -171,6 +187,12 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 		}
 		if actorID != "" {
 			query = query.Where("client_followups.assigned_actor_id = ?", actorID)
+		}
+		if dueState == clientFollowupOverdueFilterValue {
+			query = query.Where(
+				clientFollowupOverduePredicate,
+				a.options.Now().UTC().Format(clientFollowupTimeKeyLayout),
+			)
 		}
 		if err := query.Count(&total).Error; err != nil {
 			return err

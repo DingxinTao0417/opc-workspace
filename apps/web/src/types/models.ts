@@ -1091,6 +1091,7 @@ export interface ClientFollowupListParams {
   page?: number;
   pageSize?: number;
   status?: ClientFollowupStatus;
+  dueState?: "overdue";
   assignedActorId?: string;
 }
 

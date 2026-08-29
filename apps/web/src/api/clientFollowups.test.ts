@@ -108,6 +108,7 @@ describe("client followup API contract", () => {
       page: 2,
       pageSize: 5,
       status: "planned",
+      dueState: "overdue",
       assignedActorId: " owner-1 ",
     });
 
@@ -117,6 +118,7 @@ describe("client followup API contract", () => {
       page: "2",
       page_size: "5",
       status: "planned",
+      due_state: "overdue",
       assigned_actor_id: "owner-1",
     });
     expect(result.meta).toEqual({ page: 2, pageSize: 5, total: 6 });

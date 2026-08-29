@@ -6857,6 +6857,7 @@ export async function getClientFollowups(
     page_size: String(input.pageSize ?? 20),
   });
   if (input.status) params.set("status", input.status);
+  if (input.dueState) params.set("due_state", input.dueState);
   if (input.assignedActorId?.trim()) {
     params.set("assigned_actor_id", input.assignedActorId.trim());
   }

@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.59
+> 文档版本：2.60
 > 日期：2026-08-29
-> 依据：[PRD v9.39](opc-workspace-PRD.md)
+> 依据：[PRD v9.40](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.59 说明：Actor 停用在既有活动 Task Assignment、active Client contact 之外，新增待回访 Client Followup 的责任门禁；任一 `planned` 回访存在即拒绝停用，终态历史不阻塞。计划仍由 Client Followup 保有事实与命令，Actor 只提供责任主体，不自动改派、完成或取消回访。既有状态/负责人分页筛选、IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
+> 2.60 说明：Client Followup 的“逾期”列表筛选由 Sidecar 当前时钟与计划 UTC 事实按纳秒时间键派生，固定为 `planned + scheduled_at < server_now`；浏览器只传受限 `due_state=overdue`，不得把自己的时钟结果当作分页筛选事实。它可与 `status=planned`、负责人组合，仍不创建新的持久状态或命令入口。既有 Actor 停用责任门禁、IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 

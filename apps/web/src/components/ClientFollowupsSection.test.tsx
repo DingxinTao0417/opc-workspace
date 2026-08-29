@@ -142,6 +142,22 @@ describe("ClientFollowupsSection", () => {
     expect(screen.getByText("已完成 1 条")).toBeTruthy();
   });
 
+  it("filters the client timeline through the service-derived overdue query", () => {
+    render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.change(screen.getByLabelText("回访状态筛选"), {
+      target: { value: "overdue" },
+    });
+
+    expect(state.query).toHaveBeenLastCalledWith("client-1", {
+      dueState: "overdue",
+      page: 1,
+      pageSize: 6,
+      status: "planned",
+    });
+    expect(screen.getByText("已逾期 1 条")).toBeTruthy();
+  });
+
   it("filters the client timeline by its active local assignee", () => {
     render(<ClientFollowupsSection clientId="client-1" />);
 

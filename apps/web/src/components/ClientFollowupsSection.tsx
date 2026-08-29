@@ -52,6 +52,11 @@ const statusLabel: Record<ClientFollowupStatus, string> = {
   cancelled: "已取消",
 };
 
+const filterLabel: Record<ClientFollowupStatus | "overdue", string> = {
+  ...statusLabel,
+  overdue: "已逾期",
+};
+
 const priorityLabel: Record<ClientFollowupPriority, string> = {
   low: "低优先级",
   normal: "普通优先级",
@@ -310,15 +315,19 @@ function PlanFields({
 
 export function ClientFollowupsSection({ clientId }: { clientId: string }) {
   const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<ClientFollowupStatus | "">(
-    "",
-  );
+  const [statusFilter, setStatusFilter] = useState<
+    ClientFollowupStatus | "overdue" | ""
+  >("");
   const [assignedActorFilter, setAssignedActorFilter] = useState("");
   const queryInput = useMemo(
     () => ({
       page,
       pageSize: 6,
-      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(statusFilter === "overdue"
+        ? { status: "planned" as const, dueState: "overdue" as const }
+        : statusFilter
+          ? { status: statusFilter }
+          : {}),
       ...(assignedActorFilter ? { assignedActorId: assignedActorFilter } : {}),
     }),
     [assignedActorFilter, page, statusFilter],
@@ -567,12 +576,15 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
             aria-label="回访状态筛选"
             disabled={query.isPending}
             onChange={(event) => {
-              setStatusFilter(event.target.value as ClientFollowupStatus | "");
+              setStatusFilter(
+                event.target.value as ClientFollowupStatus | "overdue" | "",
+              );
               setPage(1);
             }}
             value={statusFilter}
           >
             <option value="">全部状态</option>
+            <option value="overdue">仅已逾期</option>
             {Object.entries(statusLabel).map(([status, label]) => (
               <option key={status} value={status}>
                 {label}
@@ -602,7 +614,7 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
         </label>
         {query.isSuccess ? (
           <small>
-            {statusFilter ? statusLabel[statusFilter] : "全部"}{" "}
+            {statusFilter ? filterLabel[statusFilter] : "全部"}{" "}
             {query.data?.meta.total ?? 0} 条
           </small>
         ) : null}
