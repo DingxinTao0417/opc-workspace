@@ -27,6 +27,10 @@ import type {
   ClientFollowupPriority,
   ClientFollowupStatus,
 } from "../types/models";
+import {
+  formatDateTimeLocalInTimeZone,
+  localDateTimeToZonedISOString,
+} from "../lib/zonedDateTime";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
 type FollowupAction = "complete" | "skip" | "cancel" | "reschedule";
@@ -80,7 +84,10 @@ function emptyPlanDraft(actorId = ""): PlanDraft {
 function planDraftFromFollowup(followup: ClientFollowup): PlanDraft {
   return {
     assignedActorId: followup.assignedActorId,
-    scheduledAt: localDateTime(followup.scheduledAt),
+    scheduledAt: formatDateTimeLocalInTimeZone(
+      followup.scheduledAt,
+      followup.timezone,
+    ),
     timezone: followup.timezone,
     channel: followup.channel,
     purpose: followup.purpose,
@@ -89,16 +96,21 @@ function planDraftFromFollowup(followup: ClientFollowup): PlanDraft {
   };
 }
 
-function formatTime(value: string): string {
+function formatTime(value: string, timezone: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return value;
+  }
 }
 
 function isOverdue(followup: ClientFollowup): boolean {
@@ -145,14 +157,17 @@ function followupError(error: unknown): string | null {
 
 function planError(draft: PlanDraft): string | null {
   if (!draft.assignedActorId) return "请选择负责人。";
-  if (
-    !draft.scheduledAt ||
-    Number.isNaN(new Date(draft.scheduledAt).getTime())
-  ) {
-    return "请选择有效的计划时间。";
-  }
   if (!draft.timezone.trim() || draft.timezone.trim().length > 100) {
     return "请填写有效的 IANA 时区。";
+  }
+  const scheduledAt = localDateTimeToZonedISOString(
+    draft.scheduledAt,
+    draft.timezone.trim(),
+  );
+  if (scheduledAt.kind === "invalid")
+    return "请选择有效的计划时间和 IANA 时区。";
+  if (scheduledAt.kind === "nonexistent") {
+    return "该时间在所选时区的夏令时切换中不存在，请调整计划时间。";
   }
   if (!draft.channel.trim() || draft.channel.trim().length > 100) {
     return "渠道需填写 1–100 个字符。";
@@ -165,9 +180,16 @@ function planError(draft: PlanDraft): string | null {
 }
 
 function planInput(draft: PlanDraft) {
+  const scheduledAt = localDateTimeToZonedISOString(
+    draft.scheduledAt,
+    draft.timezone.trim(),
+  );
+  if (scheduledAt.kind !== "valid") {
+    throw new Error("Client followup plan must be validated before submission");
+  }
   return {
     assignedActorId: draft.assignedActorId,
-    scheduledAt: new Date(draft.scheduledAt).toISOString(),
+    scheduledAt: scheduledAt.iso,
     timezone: draft.timezone.trim(),
     channel: draft.channel.trim(),
     purpose: draft.purpose.trim(),
@@ -752,8 +774,9 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                   {copy ? <p>{copy}</p> : null}
                   <small>
                     <CalendarClock size={11} />{" "}
-                    {formatTime(followup.scheduledAt)} · {followup.channel} ·
-                    负责人 {followup.assignedActorName}
+                    {formatTime(followup.scheduledAt, followup.timezone)} ·{" "}
+                    {followup.timezone} · {followup.channel} · 负责人{" "}
+                    {followup.assignedActorName}
                   </small>
                   {followup.nextStep ? (
                     <small className="client-followup-next-step">

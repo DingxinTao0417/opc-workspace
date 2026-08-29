@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.55
+> 文档版本：2.56
 > 日期：2026-08-29
-> 依据：[PRD v9.35](opc-workspace-PRD.md)
+> 依据：[PRD v9.36](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.55 说明：客户回访完成时可选同事务创建下一次本地计划。完成事实、下一条计划和各自 Workflow Event 要么一起提交，要么一起回滚；下一条负责人仍须为 active owner/person。既有到期投影归档和 Today/Inbox 只读深链边界不变，React 不直接写 Inbox 或联系客户。
+> 2.56 说明：客户回访表单的墙上时间由计划 IANA 时区解释，编辑不同电脑上的同一计划不会再把浏览器时区误写回 SQLite UTC 事实。夏令时前跳的不存在时间拒绝保存；秋季回拨的重复时间确定性选择较早物理时刻。既有到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 
