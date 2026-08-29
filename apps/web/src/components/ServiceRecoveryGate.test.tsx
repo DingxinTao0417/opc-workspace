@@ -15,6 +15,7 @@ const ready: RuntimeDiagnostics = {
   environment: "desktop",
   phase: "ready",
   generation: 1,
+  startupStage: null,
   appVersion: "0.1.0",
   apiVersion: "v1",
   schemaVersion: "29",
@@ -129,6 +130,31 @@ describe("ServiceRecoveryGate", () => {
     expect(screen.queryByText("业务页面")).toBeNull();
     await act(async () => vi.advanceTimersByTimeAsync(50));
     expect(screen.getByText("业务页面")).toBeVisible();
+  });
+
+  it("shows the bounded restore stage without exposing raw startup details", async () => {
+    const loadRuntime = vi
+      .fn<() => Promise<RuntimeDiagnostics>>()
+      .mockResolvedValue({
+        ...ready,
+        phase: "starting",
+        generation: 1,
+        startupStage: "verifying_restore_package",
+      });
+    renderWithQueryClient(
+      <ServiceRecoveryGate
+        desktop
+        loadRuntime={loadRuntime}
+        pollIntervalMs={50}
+      >
+        <div>业务页面</div>
+      </ServiceRecoveryGate>,
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "正在验证待恢复备份",
+    );
+    expect(screen.queryByText("业务页面")).toBeNull();
   });
 
   it("clears one stale query epoch across ready, restarting and ready", async () => {

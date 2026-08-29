@@ -6,7 +6,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 
 ## 当前完成范围
 
-- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 generation-aware Go Sidecar 生命周期；恢复计划挂起后可从设置页安全关闭受管 Sidecar 并重启桌面应用，受管 child 必须以 code 0 且无 signal 退出；内置 Sidecar 尚未创建 child 的启动失败仍允许重启应用，延迟到达的干净退出确认后可再次请求
+- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 generation-aware Go Sidecar 生命周期；恢复计划挂起后可从设置页安全关闭受管 Sidecar 并重启桌面应用，受管 child 必须以 code 0 且无 signal 退出；内置 Sidecar 在 HTTP 就绪前通过固定启动阶段显示恢复、迁移与数据库打开进度，且不传递路径、备份 ID、令牌或原始错误；尚未创建 child 的启动失败仍允许重启应用，延迟到达的干净退出确认后可再次请求
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
@@ -40,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已交付代码所有 Adapter 登记与安全诊断，但 Runner/Run 尚未实现，平台隔离未验证前执行保持关闭。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF 和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v34。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.25](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已交付代码所有 Adapter 登记与安全诊断，但 Runner/Run 尚未实现，平台隔离未验证前执行保持关闭。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动阶段进度和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v34。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.26](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.25）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.26）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -182,7 +182,7 @@ appLogDir/
 - Sidecar 仅监听 `127.0.0.1`；开发默认固定端口，桌面生产运行使用端口 `0` 获取随机空闲端口。
 - 生产请求（包括 `/health`）必须携带 `Authorization: Bearer <session-token>`。
 - Tauri 通过环境变量把数据库路径、日志目录、端口和令牌交给 Sidecar，令牌不出现在命令行。
-- 桌面 `sidecar_status` 当前只使用 `starting / restarting / ready / error`，并为受管内置 Sidecar 返回 `generation`；每代生成新令牌并重新请求动态端口。非 ready 状态会清除前端运行期连接与 TanStack Query 缓存，`generation` 变化还能覆盖前端漏过中间 `restarting` 轮询的情况。
+- 桌面 `sidecar_status` 当前只使用 `starting / restarting / ready / error`，并为受管内置 Sidecar 返回 `generation`；`starting` 可携带受控 `startupStage`，只允许固定的锁、恢复、迁移、数据库和本地 API 阶段。每代生成新令牌并重新请求动态端口。非 ready 状态会清除前端运行期连接与 TanStack Query 缓存，`generation` 变化还能覆盖前端漏过中间 `restarting` 轮询的情况。
 - Tauri 启动内置 Sidecar 时固定注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父控制管道 EOF 会触发 Go 的 HTTP drain、WAL checkpoint 和数据库关闭；外部/开发模式默认 `false`，普通 stdin EOF 不会使服务自行退出。
 - Sidecar 在 pending restore、迁移和数据库打开前获取数据库父目录 `.opc-sidecar-run.lock` 的 OS 独占锁；锁冲突立即失败且不触碰数据库。
 - Sidecar 通过 `OPC_LOG_DIR` 或 `--logs` 使用独立诊断目录；开发默认使用数据库同级 `logs/`。该目录不得与受控 Artifact 或备份根重叠。
@@ -364,4 +364,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.25](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全和桌面恢复基座；v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则。真实浏览器/WebView 休眠/时区切换、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。
+[PRD v9.26](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全和桌面恢复基座；v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则。真实浏览器/WebView 休眠/时区切换、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。

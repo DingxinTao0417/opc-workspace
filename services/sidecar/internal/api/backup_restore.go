@@ -55,6 +55,19 @@ type StartupRestoreResult struct {
 	CleanupWarning   string
 }
 
+// StartupRestoreStage is a bounded, non-sensitive progress fact for the
+// desktop shell. It never includes a local path, backup identifier, error or
+// user-controlled text because it is emitted before the HTTP API is ready.
+type StartupRestoreStage string
+
+const (
+	StartupRestoreCheckingPending    StartupRestoreStage = "checking_pending_restore"
+	StartupRestoreVerifyingPackage   StartupRestoreStage = "verifying_restore_package"
+	StartupRestoreApplying           StartupRestoreStage = "applying_restore"
+	StartupRestoreVerifyingWorkspace StartupRestoreStage = "verifying_restored_workspace"
+	StartupRestoreFinalizing         StartupRestoreStage = "finalizing_restore"
+)
+
 var publishPendingRestorePackage = (*backupStore).publishPendingRestore
 
 func (a *API) recordBackupRestoreFailure(c *gin.Context) {
@@ -379,6 +392,20 @@ func readStrictJSONFile(path string, limit int64, destination any) error {
 // It is restart-safe: a published plan and its private package remain intact
 // until both live resources have been replaced and verified.
 func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchema int) (StartupRestoreResult, error) {
+	return ApplyPendingRestoreWithProgress(backupRoot, databasePath, artifactRoot, maxSchema, nil)
+}
+
+// ApplyPendingRestoreWithProgress runs the same restart-safe restore sequence
+// as ApplyPendingRestore and optionally reports bounded startup stages. The
+// observer is informational only: an unavailable parent UI must never alter
+// recovery correctness.
+func ApplyPendingRestoreWithProgress(backupRoot, databasePath, artifactRoot string, maxSchema int, progress func(StartupRestoreStage)) (StartupRestoreResult, error) {
+	report := func(stage StartupRestoreStage) {
+		if progress != nil {
+			progress(stage)
+		}
+	}
+	report(StartupRestoreCheckingPending)
 	absoluteBackup, err := filepath.Abs(strings.TrimSpace(backupRoot))
 	if err != nil {
 		return StartupRestoreResult{}, err
@@ -407,6 +434,7 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 	pendingPath := filepath.Join(absoluteBackup, pendingRestoreDirectory)
 	packagePath := filepath.Join(pendingPath, "package")
 	store := &backupStore{root: absoluteBackup, databasePath: absoluteDatabase}
+	report(StartupRestoreVerifyingPackage)
 	manifest, err := store.verifyPackage(packagePath, plan.BackupID, maxSchema)
 	if err != nil {
 		return StartupRestoreResult{}, fmt.Errorf("verify pending restore package: %w", err)
@@ -440,6 +468,7 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 	if err := prepareRestoreSwap(paths, packagePath, manifest, maxSchema); err != nil {
 		return StartupRestoreResult{}, err
 	}
+	report(StartupRestoreApplying)
 	if err := applyRestoreSwap(paths); err != nil {
 		rollbackErr := rollbackRestoreSwap(paths)
 		var quarantineErr error
@@ -448,6 +477,7 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 		}
 		return StartupRestoreResult{}, errors.Join(err, rollbackErr, quarantineErr)
 	}
+	report(StartupRestoreVerifyingWorkspace)
 	if err := verifyLiveRestore(paths.database, absoluteArtifacts, manifest, maxSchema); err != nil {
 		rollbackErr := rollbackRestoreSwap(paths)
 		var quarantineErr error
@@ -456,6 +486,7 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 		}
 		return StartupRestoreResult{}, errors.Join(fmt.Errorf("verify applied restore: %w", err), rollbackErr, quarantineErr)
 	}
+	report(StartupRestoreFinalizing)
 	appliedPath := filepath.Join(absoluteBackup, appliedRestorePrefix+plan.OperationID)
 	if err := os.Rename(pendingPath, appliedPath); err != nil {
 		return StartupRestoreResult{}, err

@@ -43,6 +43,15 @@ type readyEvent struct {
 	SchemaVersion int    `json:"schema_version"`
 }
 
+type startupEvent struct {
+	Event string `json:"event"`
+	Stage string `json:"stage"`
+}
+
+func writeStartupStage(writer io.Writer, stage string) error {
+	return json.NewEncoder(writer).Encode(startupEvent{Event: "startup", Stage: stage})
+}
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -66,6 +75,10 @@ func run(args []string) int {
 			}
 		}()
 	}
+	if err := writeStartupStage(os.Stdout, "acquiring_workspace_lock"); err != nil {
+		logger.Printf("startup progress event failed: %v", err)
+		return 1
+	}
 	runLease, err := runlease.Acquire(cfg.DatabasePath)
 	if err != nil {
 		if errors.Is(err, runlease.ErrAlreadyHeld) {
@@ -88,7 +101,14 @@ func run(args []string) int {
 		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
-	restoreResult, err := api.ApplyPendingRestore(cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, latestSchema)
+	restoreResult, err := api.ApplyPendingRestoreWithProgress(
+		cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, latestSchema,
+		func(stage api.StartupRestoreStage) {
+			if progressErr := writeStartupStage(os.Stdout, string(stage)); progressErr != nil {
+				logger.Printf("startup progress event failed: %v", progressErr)
+			}
+		},
+	)
 	if err != nil {
 		logger.Printf("pending restore failed safely before database startup: %v", err)
 		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
@@ -105,6 +125,10 @@ func run(args []string) int {
 		}
 	}
 
+	if err := writeStartupStage(os.Stdout, "opening_database"); err != nil {
+		logger.Printf("startup progress event failed: %v", err)
+		return 1
+	}
 	store, migrationGate, err := database.OpenBeforeDestructiveMigrations(cfg.DatabasePath)
 	if err != nil {
 		logger.Printf("database initialization failed: %v", err)
@@ -112,6 +136,11 @@ func run(args []string) int {
 		return 1
 	}
 	if migrationGate != nil {
+		if err := writeStartupStage(os.Stdout, "creating_migration_rollback"); err != nil {
+			_ = store.Close()
+			logger.Printf("startup progress event failed: %v", err)
+			return 1
+		}
 		backupID, backupErr := api.CreatePreMigrationBackup(store.DB, api.Options{
 			AppVersion:    appVersion,
 			Commit:        commit,
@@ -141,6 +170,10 @@ func run(args []string) int {
 			recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseMigration, logger)
 			return 1
 		}
+		if err := writeStartupStage(os.Stdout, "applying_database_migration"); err != nil {
+			logger.Printf("startup progress event failed: %v", err)
+			return 1
+		}
 		store, err = database.Open(cfg.DatabasePath)
 		if err != nil {
 			logger.Printf("database migration failed after verified rollback backup %s: %v", backupID, err)
@@ -154,6 +187,10 @@ func run(args []string) int {
 		}
 	}()
 
+	if err := writeStartupStage(os.Stdout, "initializing_workspace"); err != nil {
+		logger.Printf("startup progress event failed: %v", err)
+		return 1
+	}
 	if cfg.Seed {
 		if err := database.SeedDevelopmentData(store.DB); err != nil {
 			logger.Printf("development seed failed: %v", err)
@@ -165,6 +202,10 @@ func run(args []string) int {
 		logger.Printf("startup incident replay deferred: %v", err)
 	}
 
+	if err := writeStartupStage(os.Stdout, "starting_local_api"); err != nil {
+		logger.Printf("startup progress event failed: %v", err)
+		return 1
+	}
 	router, err := api.NewRouter(store.DB, api.Options{
 		AppVersion:     appVersion,
 		Commit:         commit,

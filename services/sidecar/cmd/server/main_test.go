@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +17,20 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/runlease"
 )
+
+func TestWriteStartupStageUsesBoundedProtocol(t *testing.T) {
+	var output bytes.Buffer
+	if err := writeStartupStage(&output, "checking_pending_restore"); err != nil {
+		t.Fatalf("write startup stage: %v", err)
+	}
+	var payload startupEvent
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatalf("decode startup stage: %v", err)
+	}
+	if payload != (startupEvent{Event: "startup", Stage: "checking_pending_restore"}) {
+		t.Fatalf("startup event = %#v", payload)
+	}
+}
 
 func TestWatchStdinForShutdown(t *testing.T) {
 	for _, exitOnEOF := range []bool{false, true} {

@@ -31,7 +31,13 @@ Outside explicit development mode a non-empty session token is required. Every e
 
 After configuration succeeds, operational logs go to stderr and `<log-root>/opc-sidecar.log`. The file rotates before an entry would exceed 5 MiB and retains `opc-sidecar.log.1` through `.3`. Session-token literals and Bearer values are redacted at the final writer; access entries contain only request ID, method, route template, status, and duration. File logging failures fall back to stderr without preventing startup. Raw logs are intentionally excluded from the diagnostic package.
 
-After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event:
+After configuration succeeds and before the database is opened, stdout may emit newline-terminated bounded startup events. They use only a fixed stage code; no path, backup ID, token, error or user-controlled text is permitted. The bundled desktop shell accepts only the listed codes and maps them to local UI copy:
+
+```json
+{"event":"startup","stage":"checking_pending_restore"}
+```
+
+Allowed stages are `acquiring_workspace_lock`, `checking_pending_restore`, `verifying_restore_package`, `applying_restore`, `verifying_restored_workspace`, `finalizing_restore`, `opening_database`, `creating_migration_rollback`, `applying_database_migration`, `initializing_workspace`, and `starting_local_api`. After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event:
 
 ```json
 {

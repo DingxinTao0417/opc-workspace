@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29），本轮无桌面 migration。schema v12–v34 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29），本轮无桌面 migration。schema v12–v34 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.25](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.26](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,8 +31,9 @@
 - Go Sidecar 在检查 pending restore、执行迁移或打开 SQLite 前，先在数据库父目录对固定 `.opc-sidecar-run.lock` 获取非阻塞 OS 独占运行锁；冲突立即失败且不接触数据库。锁文件退出后可保留，所有权只由 OS lock 表示。
 - Sidecar 随后校验 Artifact root marker 的 `format_version / database_id / store_id`，用不可变数据库 ID 与一次性 `artifact_store_id` 做双向绑定，获取并持有独立的 Artifact root 进程锁，再依据 Artifact 事实和 immutable deletion tombstone 协调 `.staging/`、`objects/`、`.trash/`、`.quarantine/`；数据库运行锁和 Artifact root 锁分工不同，均不能省略。
 - 解析 stdout ready JSON，拒绝非 loopback、端口 0、带凭据或带额外路径的地址。
+- Sidecar 在 ready 前可输出 `{"event":"startup","stage":"…"}`；Tauri 严格只接受锁、恢复包校验/应用/复验/收尾、数据库、迁移、工作区和本地 API 的固定 stage code，并映射为恢复页文案。未知 JSON、未知 stage 或非 ready 协议行会终止本代；状态不保留本机路径、备份 ID、令牌、原始错误或用户输入。
 - Tauri 原生健康探测与前端 sidecar_status 连接握手。
-- `sidecar_status` 当前只使用 `starting / restarting / ready / error`，为受管内置 Sidecar 返回 `generation`，并可返回 app/API/schema 版本。
+- `sidecar_status` 当前只使用 `starting / restarting / ready / error`，为受管内置 Sidecar 返回 `generation`，并可在 `starting` 返回白名单 `startupStage`，同时返回 app/API/schema 版本。
 - 已启动 generation 只有真实 `Terminated` 才触发下一代，自动恢复最多 2 次，退避固定为 500 ms、2 s；当前 generation 连续 Ready 30 秒后重置预算。外部模式、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；内置二进制定位/child spawn 失败可在同一预算内重试。
 - React 根节点的桌面服务恢复闸门：`starting / restarting` 时不渲染业务页，ready 后放行并持续观察，error/读取失败时显示不含原始 message 的全局恢复页。从 ready 进入非 ready 会清除运行期连接、取消并清空 TanStack Query；ready generation 变化也会覆盖漏过中间 `restarting` 的轮询。浏览器开发模式直接放行。
 - 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。并发 shutdown 调用共享同一次 stop，后续调用等待第一次完成；若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited。Tauri 还为内置模式注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父控制管道 EOF 触发同样的 Go 优雅退出；外部/开发默认 false。
@@ -43,7 +44,7 @@
 尚未实现或仍待真实验收：
 
 - 真实 Tauri/Sidecar 父进程崩溃、进程树、Windows/macOS/Linux 和安装包生命周期验收；当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
-- 数据库打开前的备份选择、恢复实时进度与安全回滚交互；当前全局恢复页 v1 只消费白名单状态/版本并提供重查、日志和重启。
+- 数据库打开前的备份选择与安全回滚交互；当前恢复页已显示白名单恢复/迁移进度，但不提供路径、备份 ID、原始错误或启动前选择器。
 - `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
 - 系统托盘、原生通知、OS 全局快捷键、开机启动和业务文件对话框。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
@@ -57,7 +58,7 @@
 - 建立明确桌面状态机：初始化目录、启动 Sidecar、ready 握手、健康检查、兼容校验、可用或恢复。
 - 检查桌面应用、Sidecar、API 和 schema 版本兼容，阻止错误组合进入写入模式。
 - 启动超时、ready 格式错误、健康失败或迁移失败时显示专用恢复页。
-- 恢复页 v1 已支持状态重查、打开脱敏日志、查看白名单版本和受控应用重启；检查数据目录、选择备份与显示实时恢复进度仍待实现。
+- 恢复页已支持状态重查、打开脱敏日志、查看白名单版本、受控应用重启，以及数据库打开前的白名单恢复/迁移进度；检查数据目录和启动前选择备份仍待实现。
 - 已实现内置 Sidecar 的两次有界自动重启、固定退避和 30 秒稳定预算重置；重试耗尽后进入 error 并要求用户处理。
 - 新 generation 只在旧代真实 `Terminated` 或 child 尚未创建的 spawn failure 后启动；数据库运行锁进一步阻止未知旧进程与新进程同时接触数据库。
 
@@ -131,7 +132,7 @@
 
 1. Tauri 获取单实例锁并初始化 appDataDir / appLogDir，包括 `artifacts/` 目录。
 2. 为本 generation 生成新令牌并以端口 0 启动内置 Sidecar，同时注入 `OPC_EXIT_ON_STDIN_CLOSE=true`。
-3. Sidecar 先取得数据库父目录 `.opc-sidecar-run.lock`，再检查 pending restore、执行安全迁移并打开数据库；之后读取数据库身份、校验/创建绑定 marker、获取 Artifact root 独占锁并协调受控 store，全部成功后才输出 ready。
+3. Sidecar 在每个数据库打开前阶段向受管父进程写入固定 stage code：取得数据库运行锁、检查或验证/应用/复验 pending restore、打开/迁移数据库、初始化工作区和启动本地 API；之后读取数据库身份、校验/创建绑定 marker、获取 Artifact root 独占锁并协调受控 store，全部成功后才输出 ready。任一进度码都不含路径、备份 ID 或原始错误。
 4. Tauri 校验 loopback 地址并携带令牌调用 /health。
 5. 版本与 schema 兼容后，WebView 取得当前进程内连接信息并加载业务页面。
 6. 核心功能从首次启动起可离线使用。

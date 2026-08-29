@@ -13,6 +13,7 @@ import {
   isDesktopRuntime,
   openDesktopLogDirectory,
   requestApplicationRestart,
+  type StartupStage,
   type RuntimeDiagnostics,
 } from "../api/desktop";
 
@@ -30,6 +31,21 @@ interface ServiceRecoveryGateProps {
 }
 
 const readyPollIntervalMs = 3_000;
+
+const startupStageMessages: Record<StartupStage, string> = {
+  waiting_for_sidecar: "正在连接本地服务。",
+  acquiring_workspace_lock: "正在确认本地工作区未被其他进程占用。",
+  checking_pending_restore: "正在检查是否有待完成的本地恢复。",
+  verifying_restore_package: "正在验证待恢复备份。",
+  applying_restore: "正在恢复本地数据，请勿退出应用。",
+  verifying_restored_workspace: "正在验证已恢复的本地数据。",
+  finalizing_restore: "正在完成恢复清理。",
+  opening_database: "正在打开本地数据库。",
+  creating_migration_rollback: "正在为数据升级创建安全回滚点。",
+  applying_database_migration: "正在更新本地数据结构。",
+  initializing_workspace: "正在初始化本地工作区。",
+  starting_local_api: "正在启动本地 API。",
+};
 
 export function ServiceRecoveryGate({
   children,
@@ -155,6 +171,9 @@ export function ServiceRecoveryGate({
 
   if (state === "checking" || state === "starting" || state === "restarting") {
     const recovering = state === "restarting";
+    const startupMessage = diagnostics?.startupStage
+      ? startupStageMessages[diagnostics.startupStage]
+      : null;
     return (
       <main className="service-recovery-page" role="status">
         <div className="service-recovery-card service-recovery-starting">
@@ -166,7 +185,8 @@ export function ServiceRecoveryGate({
           <p>
             {recovering
               ? "正在重新建立本地 API 连接，业务页面会在新服务就绪后重新载入。"
-              : "正在完成数据库检查和本地 API 握手，业务页面会在服务就绪后显示。"}
+              : (startupMessage ??
+                "正在完成数据库检查和本地 API 握手，业务页面会在服务就绪后显示。")}
           </p>
           <small>
             {recovering

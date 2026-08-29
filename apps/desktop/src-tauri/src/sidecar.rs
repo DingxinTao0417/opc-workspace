@@ -39,6 +39,7 @@ pub struct SidecarRuntimeStatus {
     pub base_url: Option<String>,
     pub session_token: Option<String>,
     pub message: Option<String>,
+    pub startup_stage: Option<String>,
     pub app_version: Option<String>,
     pub api_version: Option<String>,
     pub schema_version: Option<String>,
@@ -56,6 +57,7 @@ impl SidecarRuntimeStatus {
             base_url,
             session_token,
             message: Some("正在连接本地服务".to_owned()),
+            startup_stage: Some("waiting_for_sidecar".to_owned()),
             app_version: None,
             api_version: None,
             schema_version: None,
@@ -71,6 +73,76 @@ pub enum SidecarPhase {
     Restarting,
     Ready,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupStage {
+    WaitingForSidecar,
+    AcquiringWorkspaceLock,
+    CheckingPendingRestore,
+    VerifyingRestorePackage,
+    ApplyingRestore,
+    VerifyingRestoredWorkspace,
+    FinalizingRestore,
+    OpeningDatabase,
+    CreatingMigrationRollback,
+    ApplyingDatabaseMigration,
+    InitializingWorkspace,
+    StartingLocalApi,
+}
+
+impl StartupStage {
+    fn parse(raw: &str) -> Option<Self> {
+        Some(match raw {
+            "waiting_for_sidecar" => Self::WaitingForSidecar,
+            "acquiring_workspace_lock" => Self::AcquiringWorkspaceLock,
+            "checking_pending_restore" => Self::CheckingPendingRestore,
+            "verifying_restore_package" => Self::VerifyingRestorePackage,
+            "applying_restore" => Self::ApplyingRestore,
+            "verifying_restored_workspace" => Self::VerifyingRestoredWorkspace,
+            "finalizing_restore" => Self::FinalizingRestore,
+            "opening_database" => Self::OpeningDatabase,
+            "creating_migration_rollback" => Self::CreatingMigrationRollback,
+            "applying_database_migration" => Self::ApplyingDatabaseMigration,
+            "initializing_workspace" => Self::InitializingWorkspace,
+            "starting_local_api" => Self::StartingLocalApi,
+            _ => return None,
+        })
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::WaitingForSidecar => "waiting_for_sidecar",
+            Self::AcquiringWorkspaceLock => "acquiring_workspace_lock",
+            Self::CheckingPendingRestore => "checking_pending_restore",
+            Self::VerifyingRestorePackage => "verifying_restore_package",
+            Self::ApplyingRestore => "applying_restore",
+            Self::VerifyingRestoredWorkspace => "verifying_restored_workspace",
+            Self::FinalizingRestore => "finalizing_restore",
+            Self::OpeningDatabase => "opening_database",
+            Self::CreatingMigrationRollback => "creating_migration_rollback",
+            Self::ApplyingDatabaseMigration => "applying_database_migration",
+            Self::InitializingWorkspace => "initializing_workspace",
+            Self::StartingLocalApi => "starting_local_api",
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::WaitingForSidecar => "正在连接本地服务",
+            Self::AcquiringWorkspaceLock => "正在确认本地工作区未被其他进程占用",
+            Self::CheckingPendingRestore => "正在检查是否有待完成的本地恢复",
+            Self::VerifyingRestorePackage => "正在验证待恢复备份",
+            Self::ApplyingRestore => "正在恢复本地数据，请勿退出应用",
+            Self::VerifyingRestoredWorkspace => "正在验证已恢复的本地数据",
+            Self::FinalizingRestore => "正在完成恢复清理",
+            Self::OpeningDatabase => "正在打开本地数据库",
+            Self::CreatingMigrationRollback => "正在为数据升级创建安全回滚点",
+            Self::ApplyingDatabaseMigration => "正在更新本地数据结构",
+            Self::InitializingWorkspace => "正在初始化本地工作区",
+            Self::StartingLocalApi => "正在启动本地 API",
+        }
+    }
 }
 
 trait SidecarChildControl: Send {
@@ -237,6 +309,24 @@ impl SidecarManager {
         true
     }
 
+    fn set_startup_stage_if_current(&self, generation: u64, stage: StartupStage) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) || state.shutting_down {
+            return false;
+        }
+        self.update(|runtime| {
+            if runtime.phase == SidecarPhase::Starting {
+                runtime.startup_stage = Some(stage.as_str().to_owned());
+                runtime.message = Some(stage.message().to_owned());
+            }
+        });
+        true
+    }
+
     fn set_restarting(&self, reservation: RestartReservation) -> bool {
         let state = self
             .inner
@@ -251,6 +341,7 @@ impl SidecarManager {
             runtime.phase = SidecarPhase::Restarting;
             runtime.base_url = None;
             runtime.session_token = None;
+            runtime.startup_stage = None;
             runtime.message = Some(format!(
                 "本地服务意外退出，正在进行第 {}/{} 次自动恢复",
                 reservation.attempt, MAX_RESTART_ATTEMPTS
@@ -274,6 +365,7 @@ impl SidecarManager {
             runtime.base_url = Some(ready.base_url.clone());
             runtime.session_token = session_token;
             runtime.message = None;
+            runtime.startup_stage = None;
             runtime.app_version = ready.app_version.clone();
             runtime.api_version = ready.api_version.clone();
             runtime.schema_version = ready.schema_version.clone();
@@ -289,6 +381,7 @@ impl SidecarManager {
             runtime.base_url = Some(base_url);
             runtime.session_token = session_token;
             runtime.message = None;
+            runtime.startup_stage = None;
             runtime.generation = None;
         });
     }
@@ -300,6 +393,7 @@ impl SidecarManager {
             runtime.base_url = None;
             runtime.session_token = None;
             runtime.message = Some(message.into());
+            runtime.startup_stage = None;
         });
     }
 
@@ -318,6 +412,7 @@ impl SidecarManager {
             runtime.base_url = None;
             runtime.session_token = None;
             runtime.message = Some(message.into());
+            runtime.startup_stage = None;
         });
         true
     }
@@ -1000,8 +1095,11 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
             match event {
                 CommandEvent::Stdout(bytes) if !reached_ready && !stopping_after_error => {
                     let line = String::from_utf8_lossy(&bytes);
-                    match parse_ready_line(line.trim()) {
-                        Ok(ready) => {
+                    match parse_sidecar_stdout_line(line.trim()) {
+                        Ok(SidecarStdoutLine::Startup(stage)) => {
+                            manager.set_startup_stage_if_current(generation, stage);
+                        }
+                        Ok(SidecarStdoutLine::Ready(ready)) => {
                             reached_ready = true;
                             match verify_health(&ready.base_url, Some(&token)).await {
                                 Ok(()) => {
@@ -1180,6 +1278,7 @@ async fn verify_health(base_url: &str, token: Option<&str>) -> Result<(), String
 struct RawReadyLine {
     event: Option<String>,
     status: Option<String>,
+    stage: Option<String>,
     host: Option<String>,
     address: Option<String>,
     url: Option<String>,
@@ -1198,9 +1297,33 @@ struct ReadyLine {
     schema_version: Option<String>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SidecarStdoutLine {
+    Startup(StartupStage),
+    Ready(ReadyLine),
+}
+
+fn parse_sidecar_stdout_line(line: &str) -> Result<SidecarStdoutLine, String> {
+    let raw: RawReadyLine =
+        serde_json::from_str(line).map_err(|error| format!("不是合法 JSON：{error}"))?;
+    if raw.event.as_deref() == Some("startup") {
+        let stage = raw
+            .stage
+            .as_deref()
+            .and_then(StartupStage::parse)
+            .ok_or("startup 阶段不受支持")?;
+        return Ok(SidecarStdoutLine::Startup(stage));
+    }
+    parse_ready_payload(raw).map(SidecarStdoutLine::Ready)
+}
+
 fn parse_ready_line(line: &str) -> Result<ReadyLine, String> {
     let raw: RawReadyLine =
         serde_json::from_str(line).map_err(|error| format!("不是合法 JSON：{error}"))?;
+    parse_ready_payload(raw)
+}
+
+fn parse_ready_payload(raw: RawReadyLine) -> Result<ReadyLine, String> {
     let is_ready = raw.event.as_deref() == Some("ready") || raw.status.as_deref() == Some("ready");
     if !is_ready {
         return Err("event/status 不是 ready".to_owned());
@@ -1287,8 +1410,8 @@ mod tests {
 
     use super::{
         MAX_RESTART_ATTEMPTS, RESTART_BACKOFFS, SidecarChildControl, SidecarManager, SidecarPhase,
-        SidecarRuntimeStatus, handle_ready_handshake_timeout, parse_ready_line,
-        receive_before_ready_deadline,
+        SidecarRuntimeStatus, SidecarStdoutLine, StartupStage, handle_ready_handshake_timeout,
+        parse_ready_line, parse_sidecar_stdout_line, receive_before_ready_deadline,
     };
 
     #[derive(Default)]
@@ -1384,6 +1507,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_bounded_startup_progress_without_treating_it_as_ready() {
+        let progress =
+            parse_sidecar_stdout_line(r#"{"event":"startup","stage":"verifying_restore_package"}"#)
+                .expect("startup progress should parse");
+        assert_eq!(
+            progress,
+            SidecarStdoutLine::Startup(StartupStage::VerifyingRestorePackage)
+        );
+        assert!(
+            parse_ready_line(r#"{"event":"startup","stage":"verifying_restore_package"}"#).is_err()
+        );
+        assert!(parse_sidecar_stdout_line(r#"{"event":"startup","stage":"unknown"}"#).is_err());
+    }
+
+    #[test]
     fn rejects_non_loopback_ready_address() {
         let error =
             parse_ready_line(r#"{"event":"ready","url":"http://0.0.0.0:9876","port":9876}"#)
@@ -1406,6 +1544,7 @@ mod tests {
             base_url: Some("http://127.0.0.1:9876".to_owned()),
             session_token: Some("token".to_owned()),
             message: None,
+            startup_stage: None,
             app_version: Some("0.1.0".to_owned()),
             api_version: Some("v1".to_owned()),
             schema_version: Some("1".to_owned()),
@@ -1416,6 +1555,7 @@ mod tests {
         assert_eq!(json["phase"], "ready");
         assert_eq!(json["baseUrl"], "http://127.0.0.1:9876");
         assert_eq!(json["sessionToken"], "token");
+        assert_eq!(json["startupStage"], serde_json::Value::Null);
         assert_eq!(json["schemaVersion"], "1");
         assert_eq!(json["generation"], 7);
     }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -891,9 +892,22 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("close database before restore: %v", err)
 	}
 
-	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 34)
+	var restoreStages []StartupRestoreStage
+	result, err := ApplyPendingRestoreWithProgress(backupDir, databasePath, artifactDir, 34, func(stage StartupRestoreStage) {
+		restoreStages = append(restoreStages, stage)
+	})
 	if err != nil {
-		t.Fatalf("ApplyPendingRestore() error = %v", err)
+		t.Fatalf("ApplyPendingRestoreWithProgress() error = %v", err)
+	}
+	wantRestoreStages := []StartupRestoreStage{
+		StartupRestoreCheckingPending,
+		StartupRestoreVerifyingPackage,
+		StartupRestoreApplying,
+		StartupRestoreVerifyingWorkspace,
+		StartupRestoreFinalizing,
+	}
+	if !reflect.DeepEqual(restoreStages, wantRestoreStages) {
+		t.Fatalf("restore stages = %#v, want %#v", restoreStages, wantRestoreStages)
 	}
 	if !result.Applied || result.BackupID != target.ID || result.RollbackBackupID != scheduledEnvelope.Data.RollbackBackupID {
 		t.Fatalf("startup restore result = %#v", result)

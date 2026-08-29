@@ -39,6 +39,7 @@ describe("runtime diagnostics", () => {
       environment: "browser",
       phase: "external",
       generation: null,
+      startupStage: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -61,6 +62,7 @@ describe("runtime diagnostics", () => {
       environment: "desktop",
       phase: "ready",
       generation: 7,
+      startupStage: null,
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "28",
@@ -92,6 +94,23 @@ describe("runtime diagnostics", () => {
       ).rejects.toThrow("Invalid desktop runtime generation");
     },
   );
+
+  it("accepts only known bounded startup stages", async () => {
+    await expect(
+      getRuntimeDiagnostics(async () => ({
+        phase: "starting",
+        generation: 1,
+        startupStage: "verifying_restore_package",
+      })),
+    ).resolves.toMatchObject({ startupStage: "verifying_restore_package" });
+    await expect(
+      getRuntimeDiagnostics(async () => ({
+        phase: "starting",
+        generation: 1,
+        startupStage: "C:\\private\\workspace.db",
+      })),
+    ).rejects.toThrow("Invalid desktop startup stage");
+  });
 
   it("rejects malformed desktop lifecycle data", async () => {
     await expect(

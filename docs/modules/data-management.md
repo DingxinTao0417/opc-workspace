@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查与全局启动故障恢复页 v1 也已交付；数据库打开前备份选择/实时恢复进度、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.25](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.26](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -329,7 +329,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 - [x] 健康启动后的 pending/applied/failed/invalid 恢复结果诊断、脱敏计数和设置页重启门禁恢复。
 - [x] 全局启动故障恢复页 v1：桌面 starting/restarting/error 闸门、generation、非 ready 查询清理、状态重查、打开脱敏日志和安全重启；不展示原始错误。
-- [ ] 数据库打开前的备份选择与实时恢复进度。
+- [ ] 数据库打开前的备份选择；恢复/迁移实时进度已通过桌面白名单启动阶段交付。
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
