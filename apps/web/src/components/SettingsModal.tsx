@@ -36,6 +36,7 @@ import {
   useCommitAppSettingsWithAvatar,
   useHealthQuery,
   useDownloadDiagnosticPackage,
+  useStorageCapacityQuery,
   useUpdateAppSettings,
 } from "../api/hooks";
 import {
@@ -131,6 +132,12 @@ function displayCommit(commit: string): string {
   const dirty = commit.endsWith("-dirty");
   const revision = dirty ? commit.slice(0, -"-dirty".length) : commit;
   return `${revision.slice(0, 12)}${dirty ? "-dirty" : ""}`;
+}
+
+function formatStorageBytes(value: number): string {
+  const gib = value / (1024 * 1024 * 1024);
+  if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 0 : 1)} GiB`;
+  return `${(value / (1024 * 1024)).toFixed(0)} MiB`;
 }
 
 const defaultRouteOptions: { value: DefaultRoute; label: string }[] = [
@@ -287,6 +294,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     open && (activeModule === "about" || activeModule === "diagnostics"),
   );
   const diagnosticPackageMutation = useDownloadDiagnosticPackage();
+  const storageCapacityQuery = useStorageCapacityQuery(
+    open && activeModule === "data",
+  );
 
   useEffect(() => {
     if (!open || activeModule !== "diagnostics") return;
@@ -901,6 +911,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
 
     if (activeModule === "data") {
+      const capacityLabels = {
+        database: "本地数据库",
+        artifacts: "受控文件",
+        backups: "本地备份",
+      } as const;
       return (
         <BackupSettings
           storageSettings={
@@ -918,6 +933,75 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                 当前预览：可用空间低于 {storageThresholdDraft} GiB
                 时提醒；保存后从下一次容量检查起生效。
               </p>
+              {storageCapacityQuery.isPending ? (
+                <div className="settings-state" role="status">
+                  <LoaderCircle className="animate-spin" size={16} />
+                  正在检查受控位置容量…
+                </div>
+              ) : storageCapacityQuery.isError || !storageCapacityQuery.data ? (
+                <div
+                  className="settings-state settings-state-error"
+                  role="alert"
+                >
+                  <AlertCircle size={16} />
+                  <div>
+                    <strong>容量检查未完成</strong>
+                    <span>未读取或展示本机路径，可保留阈值草稿后重试。</span>
+                  </div>
+                  <button
+                    className="button button-secondary"
+                    onClick={() => void storageCapacityQuery.refetch()}
+                    type="button"
+                  >
+                    <RefreshCw size={14} />
+                    重试
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="settings-about">
+                    {storageCapacityQuery.data.locations.map((location) => (
+                      <div className="settings-about-row" key={location.kind}>
+                        <span>{capacityLabels[location.kind]}</span>
+                        <strong
+                          className="settings-health-state"
+                          data-status={
+                            location.status === "healthy" ? "ok" : "error"
+                          }
+                        >
+                          {location.status === "unavailable"
+                            ? "检查不可用"
+                            : `${location.status === "low" ? "空间不足 · " : ""}${formatStorageBytes(location.availableBytes!)} 可用 / ${formatStorageBytes(location.totalBytes!)}`}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="settings-about-actions">
+                    <span className="settings-diagnostic-feedback">
+                      本次按已保存阈值 {storageCapacityQuery.data.thresholdGiB}{" "}
+                      GiB 检查，不展示路径
+                    </span>
+                    <button
+                      className="button button-secondary"
+                      disabled={storageCapacityQuery.isFetching}
+                      onClick={() => void storageCapacityQuery.refetch()}
+                      type="button"
+                    >
+                      <RefreshCw
+                        className={
+                          storageCapacityQuery.isFetching
+                            ? "animate-spin"
+                            : undefined
+                        }
+                        size={14}
+                      />
+                      {storageCapacityQuery.isFetching
+                        ? "检查中…"
+                        : "重新检查容量"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           }
         />

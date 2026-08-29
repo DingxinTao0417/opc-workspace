@@ -4,6 +4,7 @@ import {
   commitAppSettingsWithAvatar,
   getAppSetting,
   getAppSettings,
+  getStorageCapacity,
   getWorkspaceAvatarBlob,
   normalizeAppSettingsResponse,
   updateAppSettings,
@@ -78,6 +79,52 @@ afterEach(() => {
 });
 
 describe("settings API", () => {
+  it("strictly reads pathless storage capacity diagnostics", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                checked_at: "2026-08-28T12:00:00Z",
+                threshold_gib: 5,
+                locations: [
+                  {
+                    kind: "database",
+                    status: "healthy",
+                    available_bytes: 10,
+                    total_bytes: 20,
+                  },
+                  {
+                    kind: "artifacts",
+                    status: "low",
+                    available_bytes: 2,
+                    total_bytes: 20,
+                  },
+                  {
+                    kind: "backups",
+                    status: "unavailable",
+                    available_bytes: null,
+                    total_bytes: null,
+                  },
+                ],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    await expect(getStorageCapacity()).resolves.toMatchObject({
+      thresholdGiB: 5,
+      locations: [
+        { kind: "database", status: "healthy", availableBytes: 10 },
+        { kind: "artifacts", status: "low", availableBytes: 2 },
+        { kind: "backups", status: "unavailable", availableBytes: null },
+      ],
+    });
+  });
+
   it("strictly normalizes all five settings modules", () => {
     const settings = normalizeAppSettingsResponse(validPayload());
 

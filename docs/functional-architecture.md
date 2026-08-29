@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.26
+> 文档版本：2.27
 > 日期：2026-08-28
-> 依据：[PRD v9.3](opc-workspace-PRD.md)
+> 依据：[PRD v9.4](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
 ## 1. 目的
@@ -315,7 +315,7 @@ Sidecar ready 前 + 每 5 分钟
   → 数据库不可写：安全 journal 延迟到健康启动补偿
 ```
 
-该读操作不冻结业务写入；后台扫描在恢复维护锁下运行，pending restore 时跳过。探测失败只写固定脱敏日志，不创建错误的低空间事项。Inbox/journal 只保存固定来源和提示，不保存根路径、盘符、总量或剩余字节。阈值默认 1 GiB，可在“数据与备份”以 1–100 GiB 预览并保存，下一轮扫描生效；分卷详情与主动手动检查未交付。
+该读操作不冻结业务写入；后台扫描在恢复维护锁下运行，pending restore 时跳过。探测失败只写固定脱敏日志，不创建错误的低空间事项。Inbox/journal 只保存固定来源和提示，不保存根路径、盘符、总量或剩余字节。阈值默认 1 GiB，可在“数据与备份”以 1–100 GiB 预览并保存，下一轮扫描生效。鉴权 `GET /api/v1/diagnostics/storage` 支持手动刷新数据库、受控文件、备份三个逻辑位置的容量和 `healthy/low/unavailable` 状态；响应不含路径和探测错误，部分失败不伪造其他位置。物理卷去重/身份仍未交付。
 
 ## 7. 状态传播规则
 
@@ -389,7 +389,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | Sidecar 启动失败                | 桌面平台                         | 展示全局恢复页；业务页面不得显示伪数据；shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止                                                                                                                                                                                                                                                                   |
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
 | 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。`BACKUP_INVALID` 与可解释业务结果不投影；启动应用失败转入下一行的 journal 补偿                                                                                                                                         |
-| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志及可配置低空间监测已交付；恢复页、跨进程 request ID 和分卷详情仍待实现 |
+| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、可配置低空间监测和无路径手动容量检查已交付；恢复页、跨进程 request ID 和物理卷身份仍待实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。健康启动后只读诊断 API 汇总 pending、本次 applied、清理残留、失败隔离和 invalid 记录，设置页恢复门禁并脱敏展示；数据库打开前实时进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                              |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                      |

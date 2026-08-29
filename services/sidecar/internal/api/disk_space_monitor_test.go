@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,6 +160,65 @@ func TestDiskSpaceMonitorUsesStoredThresholdOnTheNextScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStorageIncidentCount(t, store, 1)
+}
+
+func TestStorageCapacityEndpointReturnsSafeLogicalLocationStatus(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "workspace.db")
+	store, err := database.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	setting := models.AppSetting{
+		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 1, Version: 1,
+		UpdatedByActorID: models.BuiltinOwnerActorID, UpdatedAt: "2026-08-28T21:45:00Z",
+	}
+	if err := store.DB.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		DatabasePath: databasePath, ArtifactDir: filepath.Join(root, "artifacts"), BackupDir: filepath.Join(root, "backups"),
+		Logger: log.New(io.Discard, "", 0), Now: func() time.Time { return time.Date(2026, 8, 28, 21, 45, 0, 0, time.UTC) },
+		DiskSpaceCheck: func(path string) (uint64, uint64, error) {
+			if strings.HasSuffix(path, "backups") {
+				return 0, 0, errors.New("private probe failure")
+			}
+			if strings.HasSuffix(path, "artifacts") {
+				return 2 << 30, 100 << 30, nil
+			}
+			return 10 << 30, 100 << 30, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+
+	recorder := performRequest(router.Engine, http.MethodGet, "/api/v1/diagnostics/storage", nil, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("storage diagnostics status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), root) || strings.Contains(recorder.Body.String(), "private probe failure") {
+		t.Fatalf("storage diagnostics leaked private details: %s", recorder.Body.String())
+	}
+	var envelope struct {
+		Data storageCapacityResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Data.ThresholdGiB != 5 || envelope.Data.CheckedAt != "2026-08-28T21:45:00Z" || len(envelope.Data.Locations) != 3 {
+		t.Fatalf("storage capacity response=%#v", envelope.Data)
+	}
+	if envelope.Data.Locations[0].Kind != "database" || envelope.Data.Locations[0].Status != "healthy" ||
+		envelope.Data.Locations[1].Kind != "artifacts" || envelope.Data.Locations[1].Status != "low" ||
+		envelope.Data.Locations[2].Kind != "backups" || envelope.Data.Locations[2].Status != "unavailable" ||
+		envelope.Data.Locations[2].AvailableBytes != nil || envelope.Data.Locations[2].TotalBytes != nil {
+		t.Fatalf("storage locations=%#v", envelope.Data.Locations)
+	}
 }
 
 func assertStorageIncidentCount(t *testing.T, store *database.Store, want int64) {

@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v29。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间来源投影均已接真实 SQLite/API/UI。分卷容量详情、主动手动检查和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间来源投影均已接真实 SQLite/API/UI。无路径手动容量检查已在“数据与备份”交付；物理卷身份/同卷去重和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -161,13 +161,13 @@
 - Sidecar 在 ready 前及每 5 分钟检查数据库父目录、受控文件根和备份根；规范化绝对路径并去除重复路径，每轮读取 `app_settings.storage`，任一根可用空间低于默认 1 GiB、可配置 1–100 GiB 的阈值即形成 `storage:low_space`、`failure_code=storage_low_space` 的 P1 系统维护事项。
 - 同一进程内持续低空间只触发一次；即使用户先解决事项也不会每 5 分钟重开。全部受控根恢复到阈值以上后解除周期锁存，之后再次跌破可形成新的独立 incident。重启后仍低空间会按新的运行周期检查，但活动事项仍由数据库唯一约束去重。
 - 数据库不可写时复用并发安全 journal，以 `storage_low_space` 白名单 kind 在下次健康启动补偿。payload 和 journal 不保存盘符、根路径、精确容量或底层探测错误；探测 API 失败只写固定内部日志，不把“无法检测”伪装成“空间不足”。
-- 前端严格接受该固定来源，显示“本地存储 / 容量检查”并提供“打开数据与备份”。阈值可在设置中预览并保存；分卷容量详情尚未开放。
+- 前端严格接受该固定来源，显示“本地存储 / 容量检查”并提供“打开数据与备份”。阈值可在设置中预览并保存，三个固定逻辑位置可无路径手动检查；物理卷身份/同卷去重和卷级趋势尚未开放。
 
 ### 明确未交付
 
 - 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
 - Project 完成以外的独立里程碑、Client/Invoice，以及其他尚未接入的系统故障来源投影；
-- 分卷容量详情和用户主动手动检查；
+- 物理卷身份、同卷去重和卷级容量趋势；
 - 已交付来源以外的多态删除协调、Inbox Item 硬删除；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
@@ -343,7 +343,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办             |
 | Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                               |
 | 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                          | 随 T-11E 来源投影自然纳入更多业务事件            |
-| 系统维护 | 备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间已安全投影；相关事项可打开数据与备份 | 分卷详情、主动手动检查和桌面恢复页仍待 |
+| 系统维护 | 备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间已安全投影；相关事项可打开数据与备份，无路径手动容量检查也已交付 | 物理卷身份/同卷去重和桌面恢复页仍待 |
 | Agent    | 未实现                                                                                           | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件 |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
@@ -357,7 +357,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派（已完成）**：原子多任务/父子拆分、owner/person Assignment、统一 reconciliation、自动解决/重开和 force-resolve。
 7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
-8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已完成；后续按真实业务模块继续来源投影，分卷详情与主动检查独立评审。
+8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已完成；无路径手动容量检查已在设置页交付，后续按真实业务模块继续来源投影并独立评审物理卷身份/同卷去重。
 9. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
 10. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
 

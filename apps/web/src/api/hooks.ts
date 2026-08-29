@@ -59,6 +59,7 @@ import {
   getAllTasks,
   getBackups,
   getRestoreDiagnostics,
+  getStorageCapacity,
   getInboxStats,
   getActor,
   getActors,
@@ -225,6 +226,7 @@ export function useSearchQuery(input: SearchListParams, enabled = true) {
 
 export const backupQueryKey = ["backups"] as const;
 export const restoreDiagnosticsQueryKey = ["restore-diagnostics"] as const;
+export const storageCapacityQueryKey = ["diagnostics", "storage"] as const;
 
 export function useBackupsQuery(enabled = true) {
   return useQuery({
@@ -242,6 +244,17 @@ export function useRestoreDiagnosticsQuery(enabled = true) {
     queryKey: restoreDiagnosticsQueryKey,
     queryFn: getRestoreDiagnostics,
     enabled,
+  });
+}
+
+export function useStorageCapacityQuery(enabled = true) {
+  return useQuery({
+    queryKey: storageCapacityQueryKey,
+    queryFn: getStorageCapacity,
+    enabled,
+    retry: 1,
+    retryDelay: 500,
+    staleTime: 10_000,
   });
 }
 

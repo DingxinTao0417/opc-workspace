@@ -180,6 +180,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	v1.Use(service.maintenanceReadMiddleware())
 	{
 		v1.GET("/diagnostics/package", service.downloadDiagnosticPackage)
+		v1.GET("/diagnostics/storage", service.getStorageCapacity)
 		v1.GET("/exports/business-data", service.exportBusinessData)
 		v1.GET("/exports/business-package", service.exportBusinessPackage)
 		v1.POST("/imports/business-data/preview", service.previewBusinessImport)

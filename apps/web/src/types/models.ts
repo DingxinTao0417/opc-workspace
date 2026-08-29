@@ -1689,3 +1689,18 @@ export interface DiagnosticPackageDownload {
   fileName: string;
   formatVersion: 1;
 }
+
+export type StorageCapacityStatus = "healthy" | "low" | "unavailable";
+
+export interface StorageCapacityLocation {
+  kind: "database" | "artifacts" | "backups";
+  status: StorageCapacityStatus;
+  availableBytes: number | null;
+  totalBytes: number | null;
+}
+
+export interface StorageCapacityResult {
+  checkedAt: string;
+  thresholdGiB: number;
+  locations: StorageCapacityLocation[];
+}

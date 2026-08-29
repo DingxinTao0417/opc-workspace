@@ -70,6 +70,8 @@ import type {
   FocusSettingValue,
   GeneralSettingValue,
   StorageSettingValue,
+  StorageCapacityResult,
+  StorageCapacityStatus,
   InboxEventListParams,
   InboxEventListResult,
   InboxItem,
@@ -5564,6 +5566,72 @@ export async function downloadDiagnosticPackage(): Promise<DiagnosticPackageDown
     "application/zip",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
+}
+
+export async function getStorageCapacity(): Promise<StorageCapacityResult> {
+  const payload = await apiRequest<unknown>("/api/v1/diagnostics/storage");
+  if (
+    !isRecord(payload) ||
+    !hasExactKeys(payload, ["data"]) ||
+    !isRecord(payload.data)
+  ) {
+    return invalidResponse("存储容量响应格式无效");
+  }
+  const data = payload.data;
+  if (
+    !hasExactKeys(data, ["checked_at", "threshold_gib", "locations"]) ||
+    typeof data.checked_at !== "string" ||
+    Number.isNaN(Date.parse(data.checked_at)) ||
+    !Array.isArray(data.locations) ||
+    data.locations.length !== 3
+  ) {
+    return invalidResponse("存储容量响应格式无效");
+  }
+  const kinds = ["database", "artifacts", "backups"] as const;
+  const locations = data.locations.map((location, index) => {
+    if (
+      !isRecord(location) ||
+      !hasExactKeys(location, [
+        "kind",
+        "status",
+        "available_bytes",
+        "total_bytes",
+      ]) ||
+      location.kind !== kinds[index] ||
+      (location.status !== "healthy" &&
+        location.status !== "low" &&
+        location.status !== "unavailable")
+    ) {
+      return invalidResponse("存储容量位置响应格式无效");
+    }
+    const unavailable = location.status === "unavailable";
+    if (
+      (unavailable &&
+        (location.available_bytes !== null || location.total_bytes !== null)) ||
+      (!unavailable &&
+        (typeof location.available_bytes !== "number" ||
+          typeof location.total_bytes !== "number" ||
+          !Number.isSafeInteger(location.available_bytes) ||
+          !Number.isSafeInteger(location.total_bytes) ||
+          location.available_bytes < 0 ||
+          location.total_bytes < 1 ||
+          location.available_bytes > location.total_bytes))
+    ) {
+      return invalidResponse("存储容量位置响应值无效");
+    }
+    const status = location.status as StorageCapacityStatus;
+    return {
+      kind: kinds[index],
+      status,
+      availableBytes: unavailable ? null : (location.available_bytes as number),
+      totalBytes: unavailable ? null : (location.total_bytes as number),
+    };
+  });
+  return {
+    checkedAt: data.checked_at,
+    thresholdGiB: positiveInteger(data.threshold_gib, "低空间阈值"),
+    locations,
+  };
 }
 
 export async function getTags(
