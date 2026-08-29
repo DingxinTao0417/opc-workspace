@@ -143,9 +143,9 @@ func TestClientFollowupListFiltersServiceDerivedOverduePlans(t *testing.T) {
 	listed := performRequest(router, http.MethodGet, "/api/v1/clients/"+client.ID+"/followups?due_state=overdue&status=planned", nil, nil)
 	var envelope struct {
 		Data []clientFollowupResponse `json:"data"`
-		Meta pageMeta                 `json:"meta"`
+		Meta clientFollowupPageMeta   `json:"meta"`
 	}
-	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &envelope) != nil || envelope.Meta.Total != 1 || len(envelope.Data) != 1 || envelope.Data[0].ID != expired.ID {
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &envelope) != nil || envelope.Meta.Total != 1 || envelope.Meta.ServerNow != now.Format(time.RFC3339Nano) || len(envelope.Data) != 1 || envelope.Data[0].ID != expired.ID {
 		t.Fatalf("overdue followup list = %d: %s", listed.Code, listed.Body.String())
 	}
 	invalid := performRequest(router, http.MethodGet, "/api/v1/clients/"+client.ID+"/followups?due_state=overdue&status=completed", nil, nil)

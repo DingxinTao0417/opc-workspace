@@ -120,6 +120,11 @@ type clientFollowupRow struct {
 	ClientVersion         int64  `gorm:"column:client_version"`
 }
 
+type clientFollowupPageMeta struct {
+	pageMeta
+	ServerNow string `json:"server_now"`
+}
+
 func (a *API) listClientFollowups(c *gin.Context) { a.listClientFollowupsForClient(c, "") }
 
 func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string) {
@@ -165,6 +170,7 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 		}
 		actorID = parsed.String()
 	}
+	serverNow := a.options.Now().UTC()
 
 	var total int64
 	var rows []clientFollowupRow
@@ -191,7 +197,7 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 		if dueState == clientFollowupOverdueFilterValue {
 			query = query.Where(
 				clientFollowupOverduePredicate,
-				a.options.Now().UTC().Format(clientFollowupTimeKeyLayout),
+				serverNow.Format(clientFollowupTimeKeyLayout),
 			)
 		}
 		if err := query.Count(&total).Error; err != nil {
@@ -214,7 +220,7 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 	for i := range rows {
 		items[i] = clientFollowupResponseFromRow(rows[i])
 	}
-	c.JSON(http.StatusOK, gin.H{"data": items, "meta": pageMeta{Page: page, PageSize: pageSize, Total: total}})
+	c.JSON(http.StatusOK, gin.H{"data": items, "meta": clientFollowupPageMeta{pageMeta: pageMeta{Page: page, PageSize: pageSize, Total: total}, ServerNow: serverNow.Format(time.RFC3339Nano)}})
 }
 
 func (a *API) listClientFollowupsForClientRoute(c *gin.Context) {

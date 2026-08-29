@@ -99,7 +99,12 @@ describe("client followup API contract", () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
       jsonResponse({
         data: [followupPayload()],
-        meta: { page: 2, page_size: 5, total: 6 },
+        meta: {
+          page: 2,
+          page_size: 5,
+          total: 6,
+          server_now: "2026-08-29T12:34:56.789123Z",
+        },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -121,7 +126,12 @@ describe("client followup API contract", () => {
       due_state: "overdue",
       assigned_actor_id: "owner-1",
     });
-    expect(result.meta).toEqual({ page: 2, pageSize: 5, total: 6 });
+    expect(result.meta).toEqual({
+      page: 2,
+      pageSize: 5,
+      total: 6,
+      serverNow: "2026-08-29T12:34:56.789123Z",
+    });
   });
 
   it("uses idempotency and versioned commands for the complete local workflow", async () => {

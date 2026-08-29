@@ -6871,6 +6871,8 @@ export async function getClientFollowups(
   ) {
     return invalidResponse("客户回访列表响应格式无效");
   }
+  const serverNow = stringField(payload.meta, "server_now", "serverNow");
+  if (!serverNow) return invalidResponse("客户回访列表缺少服务端时间基准");
   return {
     items: payload.data.map(normalizeClientFollowup),
     meta: {
@@ -6880,6 +6882,7 @@ export async function getClientFollowups(
         "客户回访每页数量",
       ),
       total: nonNegativeInteger(payload.meta.total, "客户回访总数"),
+      serverNow,
     },
   };
 }

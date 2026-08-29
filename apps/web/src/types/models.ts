@@ -1084,7 +1084,7 @@ export interface ClientFollowup {
 
 export interface ClientFollowupListResult {
   items: ClientFollowup[];
-  meta: PageMeta;
+  meta: PageMeta & { serverNow: string };
 }
 
 export interface ClientFollowupListParams {

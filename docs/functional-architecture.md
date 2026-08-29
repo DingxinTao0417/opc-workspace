@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.62
+> 文档版本：2.63
 > 日期：2026-08-29
-> 依据：[PRD v9.42](opc-workspace-PRD.md)
+> 依据：[PRD v9.43](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.62 说明：Client Followup 的 inactive 边界由 Sidecar 强制，客户详情再按同一状态主动隐藏安排、编辑、重排与完成时下一计划入口，避免显示必然失败的命令；完成、跳过和确认取消既有计划仍可用。恢复为 `active/lead` 后 UI 与 API 一同恢复计划类写入。逾期筛选、Actor 责任门禁、IANA/DST 墙上时间解释、到期投影归档和 Today/Inbox 只读深链边界不变。
+> 2.63 说明：Client Followup 列表把同一 Sidecar 时刻作为 `meta.server_now` 返回；浏览器用它标记未筛选列表的逾期事实，`due_state=overdue` 和徽标不再各自依赖不同机器时钟。inactive 客户的收口边界、Actor 责任门禁、IANA/DST 墙上时间解释、到期投影归档和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 

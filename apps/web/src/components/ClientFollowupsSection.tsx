@@ -119,10 +119,17 @@ function formatTime(value: string, timezone: string): string {
   }
 }
 
-function isOverdue(followup: ClientFollowup): boolean {
+function isOverdue(
+  followup: ClientFollowup,
+  serverNow: string | undefined,
+): boolean {
+  const scheduledAt = new Date(followup.scheduledAt).getTime();
+  const currentTime = serverNow ? new Date(serverNow).getTime() : Number.NaN;
   return (
     followup.status === "planned" &&
-    new Date(followup.scheduledAt).getTime() < Date.now()
+    Number.isFinite(scheduledAt) &&
+    Number.isFinite(currentTime) &&
+    scheduledAt < currentTime
   );
 }
 
@@ -835,7 +842,7 @@ export function ClientFollowupsSection({
       {items.length > 0 ? (
         <div className="client-followup-list">
           {items.map((followup) => {
-            const overdue = isOverdue(followup);
+            const overdue = isOverdue(followup, query.data?.meta.serverNow);
             const Icon =
               followup.status === "completed"
                 ? CircleCheck

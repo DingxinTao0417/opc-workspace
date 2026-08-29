@@ -79,7 +79,15 @@ vi.mock("../api/hooks", () => ({
 describe("ClientFollowupsSection", () => {
   beforeEach(() => {
     state.query.mockReturnValue({
-      data: { items: [followup], meta: { page: 1, pageSize: 6, total: 1 } },
+      data: {
+        items: [followup],
+        meta: {
+          page: 1,
+          pageSize: 6,
+          total: 1,
+          serverNow: "2026-08-29T12:00:00Z",
+        },
+      },
       isError: false,
       isFetching: false,
       isPending: false,
@@ -170,6 +178,29 @@ describe("ClientFollowupsSection", () => {
       page: 1,
       pageSize: 6,
     });
+  });
+
+  it("uses the Sidecar clock rather than the browser clock for overdue labels", () => {
+    state.query.mockReturnValue({
+      data: {
+        items: [followup],
+        meta: {
+          page: 1,
+          pageSize: 6,
+          total: 1,
+          serverNow: "2026-10-01T00:00:00Z",
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    render(<ClientFollowupsSection clientId="client-1" />);
+
+    expect(screen.getByText("已逾期")).toBeTruthy();
   });
 
   it("requires a result before issuing a versioned completion command", () => {
