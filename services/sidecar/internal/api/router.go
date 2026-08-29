@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +30,8 @@ type Options struct {
 	DatabasePath           string
 	BackupDir              string
 	LogDir                 string
+	DiskSpaceCheck         func(path string) (availableBytes uint64, totalBytes uint64, err error)
+	DiskSpaceScanInterval  time.Duration
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration
 	ReminderScanInterval   time.Duration
@@ -42,6 +45,7 @@ type API struct {
 	backupStore    *backupStore
 	maintenance    *sync.RWMutex
 	restorePending atomic.Bool
+	lowDiskActive  atomic.Bool
 }
 
 type Router struct {
@@ -51,6 +55,8 @@ type Router struct {
 	focusHeartbeatDone   chan struct{}
 	reminderScanCancel   context.CancelFunc
 	reminderScanDone     chan struct{}
+	diskSpaceScanCancel  context.CancelFunc
+	diskSpaceScanDone    chan struct{}
 	closeOnce            sync.Once
 	closeErr             error
 }
@@ -67,6 +73,10 @@ func (r *Router) Close() error {
 		if r.reminderScanCancel != nil {
 			r.reminderScanCancel()
 			<-r.reminderScanDone
+		}
+		if r.diskSpaceScanCancel != nil {
+			r.diskSpaceScanCancel()
+			<-r.diskSpaceScanDone
 		}
 		if r.artifactStore != nil {
 			r.closeErr = r.artifactStore.close()
@@ -90,6 +100,13 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.ReminderScanInterval == 0 {
 		options.ReminderScanInterval = 15 * time.Second
+	}
+	if options.DiskSpaceScanInterval == 0 {
+		if strings.TrimSpace(options.LogDir) == "" {
+			options.DiskSpaceScanInterval = -1
+		} else {
+			options.DiskSpaceScanInterval = 5 * time.Minute
+		}
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -151,6 +168,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			_ = artifacts.close()
 		}
 		return nil, fmt.Errorf("project due Tasks: %w", err)
+	}
+	if options.DiskSpaceScanInterval > 0 {
+		if err := service.scanDiskSpace(); err != nil && options.Logger != nil {
+			options.Logger.Print("storage capacity check could not be completed safely")
+		}
 	}
 	router.GET("/health", service.health)
 	v1 := router.Group("/api/" + Version)
@@ -341,6 +363,32 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					}
 					if err != nil && !errors.Is(err, context.Canceled) {
 						service.recordRuntimeDatabaseFailure("due-source-scan")
+					}
+				}
+			}
+		}()
+	}
+	if options.DiskSpaceScanInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result.diskSpaceScanCancel = cancel
+		result.diskSpaceScanDone = make(chan struct{})
+		go func() {
+			defer close(result.diskSpaceScanDone)
+			ticker := time.NewTicker(options.DiskSpaceScanInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if service.restorePending.Load() {
+						continue
+					}
+					service.maintenance.RLock()
+					err := service.scanDiskSpace()
+					service.maintenance.RUnlock()
+					if err != nil && options.Logger != nil {
+						options.Logger.Print("storage capacity check could not be completed safely")
 					}
 				}
 			}

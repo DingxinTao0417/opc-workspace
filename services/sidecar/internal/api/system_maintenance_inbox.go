@@ -80,6 +80,13 @@ var (
 		title:       "本地数据库运行需要处理",
 		message:     "运行中的本地数据库操作失败。请检查可用磁盘空间和应用日志，并在继续重要写入前创建或校验备份。",
 	}
+	storageLowSpaceMaintenanceIncident = systemMaintenanceIncident{
+		component:   "storage",
+		operation:   "low_space",
+		failureCode: "storage_low_space",
+		title:       "本地存储空间不足",
+		message:     "本地数据或备份所在磁盘的可用空间已低于 1 GiB。请释放空间，并在继续重要写入前创建或校验备份。",
+	}
 )
 
 func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
@@ -87,7 +94,8 @@ func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
 	case backupCreateMaintenanceIncident, backupVerifyMaintenanceIncident,
 		backupDrillMaintenanceIncident, backupRestoreMaintenanceIncident,
 		databaseStartupMaintenanceIncident, databaseMigrationMaintenanceIncident,
-		sidecarStartupMaintenanceIncident, runtimeDatabaseMaintenanceIncident:
+		sidecarStartupMaintenanceIncident, runtimeDatabaseMaintenanceIncident,
+		storageLowSpaceMaintenanceIncident:
 		return true
 	default:
 		return false
@@ -192,4 +200,14 @@ func (a *API) recordRuntimeDatabaseFailure(requestID string) {
 	if err := RecordStartupIncident(a.options.LogDir, StartupIncidentDatabaseRuntime, a.options.Now()); err != nil && a.options.Logger != nil {
 		a.options.Logger.Print("runtime database incident could not be persisted safely")
 	}
+}
+
+func (a *API) recordStorageLowSpace() error {
+	if err := a.projectSystemMaintenanceFailure(storageLowSpaceMaintenanceIncident, "disk-space-monitor"); err == nil {
+		return nil
+	}
+	if strings.TrimSpace(a.options.LogDir) == "" {
+		return errors.New("storage incident journal is unavailable")
+	}
+	return RecordStartupIncident(a.options.LogDir, StartupIncidentStorageLowSpace, a.options.Now())
 }

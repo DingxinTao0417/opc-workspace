@@ -24,6 +24,7 @@ const (
 	StartupIncidentDatabaseMigration StartupIncidentKind = "database_migration"
 	StartupIncidentSidecarStartup    StartupIncidentKind = "sidecar_startup"
 	StartupIncidentDatabaseRuntime   StartupIncidentKind = "database_runtime"
+	StartupIncidentStorageLowSpace   StartupIncidentKind = "storage_low_space"
 
 	startupIncidentJournalName = "startup-incidents-v1.json"
 	startupIncidentFormat      = 1
@@ -54,6 +55,8 @@ func startupIncidentDefinition(kind StartupIncidentKind) (systemMaintenanceIncid
 		return sidecarStartupMaintenanceIncident, true
 	case StartupIncidentDatabaseRuntime:
 		return runtimeDatabaseMaintenanceIncident, true
+	case StartupIncidentStorageLowSpace:
+		return storageLowSpaceMaintenanceIncident, true
 	default:
 		return systemMaintenanceIncident{}, false
 	}

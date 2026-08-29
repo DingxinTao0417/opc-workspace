@@ -360,6 +360,38 @@ describe("InboxSourceContext", () => {
     expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
   });
 
+  it("shows a low-space incident with the data recovery entry", () => {
+    const message =
+      "本地数据或备份所在磁盘的可用空间已低于 1 GiB。请释放空间，并在继续重要写入前创建或校验备份。";
+    render(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{
+            ...sourceItem,
+            title: "本地存储空间不足",
+            summary: message,
+            sourceEntityType: "system_maintenance",
+            sourceEntityId: "storage:low_space",
+            sourceEventKey:
+              "system:storage:low_space:018f0000-0000-7000-8000-000000000823",
+            dueAt: null,
+            payloadJson: {
+              component: "storage",
+              operation: "low_space",
+              failure_code: "storage_low_space",
+              occurred_at: "2026-08-28T12:00:00.000000000Z",
+              message,
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("本地存储空间不足")).toBeTruthy();
+    expect(screen.getByText("容量检查")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
+  });
+
   it("shows a Sidecar startup incident without inventing an unavailable log action", () => {
     const message =
       "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。";

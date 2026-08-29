@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动和运行期数据库操作失败会尽力投影安全的系统维护 Inbox Item。数据库打开前恢复页、主动低磁盘阈值、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和固定 1 GiB 低空间会投影安全的系统维护 Inbox Item。数据库打开前恢复页、磁盘阈值配置、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.0](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -65,7 +65,7 @@
 
 - 非空目标冲突预览/映射与跨 schema 导入；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 主动剩余磁盘容量检查和低空间阈值 Inbox 投影；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
+- 用户可配置磁盘阈值、分卷容量详情和手动检查；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
 ## 当前应用数据布局
@@ -274,7 +274,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
 - [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；备份失败 Inbox Item 也可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
-- [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误或路径写成业务事件。`BACKUP_INVALID` 不投影。主动低磁盘阈值来源仍待开发。
+- [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败和低空间先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误、路径或精确容量写成业务事件。`BACKUP_INVALID` 不投影。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
 
@@ -321,7 +321,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
 - [x] 版本化 API 非预期数据库错误、health、Focus 心跳与到期来源扫描失败投影；数据库不可写时安全 journal 降级和健康启动补偿。
-- [ ] 主动磁盘容量探测、可配置低空间阈值与跨数据/备份根预警。
+- [x] ready 前及每 5 分钟跨数据库/受控文件/备份根主动容量探测、固定 1 GiB 低空间预警、持续周期抑制与安全 journal 降级。
+- [ ] 用户可配置低空间阈值、分卷容量详情与主动手动检查。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
 - [ ] 非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
 

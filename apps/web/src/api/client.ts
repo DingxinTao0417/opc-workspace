@@ -2418,6 +2418,13 @@ const systemMaintenanceDefinitions = {
     message:
       "运行中的本地数据库操作失败。请检查可用磁盘空间和应用日志，并在继续重要写入前创建或校验备份。",
   },
+  "storage:low_space": {
+    component: "storage",
+    operation: "low_space",
+    failureCode: "storage_low_space",
+    message:
+      "本地数据或备份所在磁盘的可用空间已低于 1 GiB。请释放空间，并在继续重要写入前创建或校验备份。",
+  },
   "sidecar:startup": {
     component: "sidecar",
     operation: "startup",

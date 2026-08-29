@@ -52,7 +52,7 @@ interface ProjectCompletionSourceSnapshot {
 }
 
 interface SystemMaintenanceSourceSnapshot {
-  component: "backup" | "database" | "sidecar";
+  component: "backup" | "database" | "sidecar" | "storage";
   operation:
     | "create"
     | "verify"
@@ -60,7 +60,8 @@ interface SystemMaintenanceSourceSnapshot {
     | "restore"
     | "startup"
     | "migration"
-    | "runtime";
+    | "runtime"
+    | "low_space";
   failureCode:
     | "backup_create_failed"
     | "backup_verify_failed"
@@ -69,6 +70,7 @@ interface SystemMaintenanceSourceSnapshot {
     | "database_startup_failed"
     | "database_migration_failed"
     | "database_runtime_failed"
+    | "storage_low_space"
     | "sidecar_startup_failed";
   occurredAt: string;
   message: string;
@@ -232,6 +234,7 @@ function systemMaintenanceSnapshot(
     "database:startup": "database_startup_failed",
     "database:migration": "database_migration_failed",
     "database:runtime": "database_runtime_failed",
+    "storage:low_space": "storage_low_space",
     "sidecar:startup": "sidecar_startup_failed",
   } as const;
   const key = `${String(component)}:${String(operation)}`;
@@ -273,6 +276,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
       "database:startup": ["本地数据库启动失败", "本地数据库", "启动"],
       "database:migration": ["本地数据库迁移失败", "本地数据库", "迁移"],
       "database:runtime": ["本地数据库运行失败", "本地数据库", "运行"],
+      "storage:low_space": ["本地存储空间不足", "本地存储", "容量检查"],
       "sidecar:startup": ["本地服务启动失败", "本地服务", "启动"],
     } as const;
     const [summaryLabel, componentLabel, operationLabel] =
