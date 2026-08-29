@@ -3104,6 +3104,11 @@ kbd {
   color: var(--text-muted);
   font-size: 12px;
 }
+.content-calendar-keyboard-note {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 .content-calendar-day-item:disabled {
   cursor: wait;
   opacity: 0.72;

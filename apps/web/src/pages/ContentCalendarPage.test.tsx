@@ -184,6 +184,33 @@ describe("ContentCalendarPage", () => {
     );
   });
 
+  it("moves an editable item one day with the documented keyboard shortcut", () => {
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    const card = screen.getByRole("button", { name: "编辑 发布产品更新" });
+    expect(card).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowLeft Alt+ArrowRight",
+    );
+
+    fireEvent.keyDown(card, { altKey: true, key: "ArrowRight" });
+
+    expect(hooks.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "content-1",
+        input: expect.objectContaining({
+          scheduledAt: "2026-09-05T01:00:00.000Z",
+          scheduledTimezone: "Asia/Shanghai",
+          expectedVersion: 1,
+        }),
+      }),
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
   it("previews a dropped date immediately and rolls back after a save failure", () => {
     const refetch = vi.fn();
     hooks.items.mockReturnValue({

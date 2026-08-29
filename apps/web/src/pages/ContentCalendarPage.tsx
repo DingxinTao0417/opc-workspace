@@ -55,6 +55,11 @@ const editableStatuses: Array<Exclude<ContentItemStatus, "published">> = [
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
+function shiftDateKey(value: string, offset: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1, day + offset));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+}
 function calendarForMonth(month: Date) {
   const start = new Date(month.getFullYear(), month.getMonth(), 1);
   start.setDate(start.getDate() - start.getDay());
@@ -560,7 +565,7 @@ export function ContentCalendarPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ContentItem | null>(null);
   const [status, setStatus] = useState<ContentItemStatus | "">("");
-  const [dragError, setDragError] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [schedulePreviews, setSchedulePreviews] = useState<
     Record<string, string>
   >({});
@@ -637,7 +642,13 @@ export function ContentCalendarPage() {
     if (
       scheduledDateKey(item.scheduledAt, item.scheduledTimezone) === targetDate
     ) {
-      setDragError(null);
+      setMoveError(null);
+      return;
+    }
+    const firstVisibleDate = dateKey(calendar.days[0]);
+    const lastVisibleDate = dateKey(calendar.days.at(-1) ?? calendar.days[0]);
+    if (targetDate < firstVisibleDate || targetDate > lastVisibleDate) {
+      setMoveError("已到当前月格边界，请切换月份或使用详情表单改期。");
       return;
     }
     const timezone =
@@ -650,14 +661,14 @@ export function ContentCalendarPage() {
       timezone,
     );
     if (converted.kind !== "valid") {
-      setDragError(
+      setMoveError(
         converted.kind === "nonexistent"
           ? "目标日期的原发布时间落在夏令时跳转空档，请使用详情表单选择时间。"
           : "无法解析目标排期时间。",
       );
       return;
     }
-    setDragError(null);
+    setMoveError(null);
     schedule.reset();
     setSchedulePreviews((current) => ({
       ...current,
@@ -679,7 +690,7 @@ export function ContentCalendarPage() {
             delete next[item.id];
             return next;
           });
-          setDragError(`排期未保存，已恢复原日期。${mutationMessage(error)}`);
+          setMoveError(`排期未保存，已恢复原日期。${mutationMessage(error)}`);
           void query.refetch();
         },
       },
@@ -767,14 +778,20 @@ export function ContentCalendarPage() {
         />
       ) : null}
       {query.isPending ? <SkeletonRows count={4} /> : null}
-      {dragError || schedule.isError ? (
+      {moveError || schedule.isError ? (
         <p className="form-field-error content-calendar-drag-error">
-          {dragError ?? mutationMessage(schedule.error)}
+          {moveError ?? mutationMessage(schedule.error)}
         </p>
       ) : null}
       {schedule.isPending ? (
         <p className="content-calendar-drag-status" role="status">
           正在保存排期调整…
+        </p>
+      ) : null}
+      {query.isSuccess && items.length > 0 ? (
+        <p className="content-calendar-keyboard-note">
+          键盘改期：聚焦可编辑卡片后按 Alt + ← / →
+          移动一天；精确时间可在详情中调整。
         </p>
       ) : null}
       {query.isSuccess ? (
@@ -825,6 +842,26 @@ export function ContentCalendarPage() {
                         item.status !== "cancelled"
                       }
                       key={item.id}
+                      onKeyDown={(event) => {
+                        if (
+                          !event.altKey ||
+                          (event.key !== "ArrowLeft" &&
+                            event.key !== "ArrowRight") ||
+                          !item.scheduledAt
+                        )
+                          return;
+                        event.preventDefault();
+                        moveItem(
+                          item.id,
+                          shiftDateKey(
+                            scheduledDateKey(
+                              item.scheduledAt,
+                              item.scheduledTimezone,
+                            ),
+                            event.key === "ArrowLeft" ? -1 : 1,
+                          ),
+                        );
+                      }}
                       onClick={() => setEditing(item)}
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = "move";
@@ -834,6 +871,13 @@ export function ContentCalendarPage() {
                         );
                       }}
                       type="button"
+                      {...(item.status !== "published" &&
+                      item.status !== "archived" &&
+                      item.status !== "cancelled"
+                        ? {
+                            "aria-keyshortcuts": "Alt+ArrowLeft Alt+ArrowRight",
+                          }
+                        : {})}
                     >
                       <strong>{item.title}</strong>
                       <span>
