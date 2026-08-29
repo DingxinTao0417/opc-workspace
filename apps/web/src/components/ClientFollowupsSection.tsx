@@ -310,7 +310,17 @@ function PlanFields({
 
 export function ClientFollowupsSection({ clientId }: { clientId: string }) {
   const [page, setPage] = useState(1);
-  const queryInput = useMemo(() => ({ page, pageSize: 6 }), [page]);
+  const [statusFilter, setStatusFilter] = useState<ClientFollowupStatus | "">(
+    "",
+  );
+  const queryInput = useMemo(
+    () => ({
+      page,
+      pageSize: 6,
+      ...(statusFilter ? { status: statusFilter } : {}),
+    }),
+    [page, statusFilter],
+  );
   const query = useClientFollowupsQuery(clientId, queryInput);
   const actorsQuery = useClientFollowupActorOptionsQuery(true);
   const createMutation = useCreateClientFollowup();
@@ -547,6 +557,33 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
         >
           <Plus size={14} /> 安排回访
         </button>
+      </div>
+      <div className="client-followup-filters">
+        <label>
+          <span>显示</span>
+          <select
+            aria-label="回访状态筛选"
+            disabled={query.isPending}
+            onChange={(event) => {
+              setStatusFilter(event.target.value as ClientFollowupStatus | "");
+              setPage(1);
+            }}
+            value={statusFilter}
+          >
+            <option value="">全部状态</option>
+            {Object.entries(statusLabel).map(([status, label]) => (
+              <option key={status} value={status}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {query.isSuccess ? (
+          <small>
+            {statusFilter ? statusLabel[statusFilter] : "全部"}{" "}
+            {query.data?.meta.total ?? 0} 条
+          </small>
+        ) : null}
       </div>
       {actorsQuery.isError ? (
         <ErrorState

@@ -46,6 +46,7 @@ const followup: ClientFollowup = {
 };
 
 const state = vi.hoisted(() => ({
+  query: vi.fn(),
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   complete: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
@@ -60,14 +61,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/hooks", () => ({
-  useClientFollowupsQuery: () => ({
-    data: { items: [followup], meta: { page: 1, pageSize: 6, total: 1 } },
-    isError: false,
-    isFetching: false,
-    isPending: false,
-    isSuccess: true,
-    refetch: vi.fn(),
-  }),
+  useClientFollowupsQuery: state.query,
   useClientFollowupActorOptionsQuery: () => ({
     data: [actor],
     isError: false,
@@ -84,7 +78,24 @@ vi.mock("../api/hooks", () => ({
 
 describe("ClientFollowupsSection", () => {
   beforeEach(() => {
-    for (const mutation of Object.values(state)) mutation.mutate.mockClear();
+    state.query.mockReturnValue({
+      data: { items: [followup], meta: { page: 1, pageSize: 6, total: 1 } },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    for (const mutation of [
+      state.create,
+      state.update,
+      state.complete,
+      state.skip,
+      state.cancel,
+      state.reschedule,
+    ]) {
+      mutation.mutate.mockClear();
+    }
   });
 
   afterEach(() => {
@@ -114,6 +125,21 @@ describe("ClientFollowupsSection", () => {
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+  });
+
+  it("filters the client timeline through the existing paginated status query", () => {
+    render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.change(screen.getByLabelText("回访状态筛选"), {
+      target: { value: "completed" },
+    });
+
+    expect(state.query).toHaveBeenLastCalledWith("client-1", {
+      page: 1,
+      pageSize: 6,
+      status: "completed",
+    });
+    expect(screen.getByText("已完成 1 条")).toBeTruthy();
   });
 
   it("requires a result before issuing a versioned completion command", () => {
