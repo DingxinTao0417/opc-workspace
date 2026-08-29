@@ -59,6 +59,22 @@ function firstDateFor(year: number, quarter: number) {
   return `${year}-${String((quarter - 1) * 3 + 1).padStart(2, "0")}-01`;
 }
 
+function quarterCalendarMonths(year: number, quarter: number) {
+  return [0, 1, 2].map((offset) => {
+    const month = (quarter - 1) * 3 + offset + 1;
+    const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return {
+      label: `${month} 月`,
+      leadingDays: (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7,
+      dates: Array.from(
+        { length: days },
+        (_, index) =>
+          `${year}-${String(month).padStart(2, "0")}-${String(index + 1).padStart(2, "0")}`,
+      ),
+    };
+  });
+}
+
 function milestoneStatusClass(status: RoadmapMilestoneStatus) {
   if (status === "active") return "status-purple";
   if (status === "achieved") return "status-green";
@@ -73,6 +89,8 @@ function RoadmapMilestoneCard({
   onOpen,
   ordering = false,
   quarterMoving = false,
+  dateMoving = false,
+  dateDraft,
   orderIndex = 0,
   orderTotal = 0,
   dragging = false,
@@ -80,6 +98,8 @@ function RoadmapMilestoneCard({
   onDragEnd,
   onDrop,
   onMove,
+  onDateDraftChange,
+  onDateSave,
   moveDisabled = false,
 }: {
   milestone: RoadmapMilestone;
@@ -88,6 +108,8 @@ function RoadmapMilestoneCard({
   onOpen: (milestone: RoadmapMilestone) => void;
   ordering?: boolean;
   quarterMoving?: boolean;
+  dateMoving?: boolean;
+  dateDraft?: string;
   orderIndex?: number;
   orderTotal?: number;
   dragging?: boolean;
@@ -95,13 +117,15 @@ function RoadmapMilestoneCard({
   onDragEnd?: () => void;
   onDrop?: () => void;
   onMove?: (direction: -1 | 1) => void;
+  onDateDraftChange?: (value: string) => void;
+  onDateSave?: () => void;
   moveDisabled?: boolean;
 }) {
   const archive = useArchiveRoadmapMilestone();
   const restore = useRestoreRoadmapMilestone();
   const busy = archive.isPending || restore.isPending;
   const error = archive.error ?? restore.error;
-  const movable = ordering || quarterMoving;
+  const movable = ordering || quarterMoving || dateMoving;
   const dragEnabled = movable && !moveDisabled;
 
   return (
@@ -175,7 +199,34 @@ function RoadmapMilestoneCard({
         <p className="form-field-error">操作未完成，请刷新后重试。</p>
       ) : null}
       <footer className="roadmap-card-actions">
-        {quarterMoving ? (
+        {dateMoving ? (
+          <div className="roadmap-date-controls">
+            <label>
+              <span className="sr-only">目标日期：{milestone.title}</span>
+              <input
+                aria-label={`目标日期：${milestone.title}`}
+                disabled={moveDisabled}
+                max={targetDateFor(milestone.year, milestone.quarter)}
+                min={firstDateFor(milestone.year, milestone.quarter)}
+                onChange={(event) => onDateDraftChange?.(event.target.value)}
+                type="date"
+                value={dateDraft ?? milestone.targetDate}
+              />
+            </label>
+            <button
+              aria-label={`应用目标日期：${milestone.title}`}
+              className="button button-secondary"
+              disabled={
+                moveDisabled || !dateDraft || dateDraft === milestone.targetDate
+              }
+              onClick={onDateSave}
+              type="button"
+            >
+              <CalendarDays size={14} />
+              应用日期
+            </button>
+          </div>
+        ) : quarterMoving ? (
           <div className="roadmap-reorder-controls">
             <span aria-live="polite">当前季度 Q{milestone.quarter}</span>
             <button
@@ -734,14 +785,18 @@ export function RoadmapPage() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
   const [quarterMoving, setQuarterMoving] = useState(false);
+  const [dateMoving, setDateMoving] = useState(false);
+  const [dateDrafts, setDateDrafts] = useState<Record<string, string>>({});
+  const [dateDraftInitialized, setDateDraftInitialized] = useState(false);
   const [reorderInitialized, setReorderInitialized] = useState(false);
   const [draftOrder, setDraftOrder] = useState<RoadmapMilestone[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const reorder = useReorderRoadmapMilestones();
   const periodMove = useUpdateRoadmapMilestone();
+  const dateMove = useUpdateRoadmapMilestone();
   const query = useRoadmapMilestonesQuery({
-    page: reordering ? 1 : page,
-    pageSize: reordering || viewMode === "year" ? 100 : 20,
+    page: reordering || dateMoving ? 1 : page,
+    pageSize: reordering || dateMoving || viewMode === "year" ? 100 : 20,
     year,
     quarter: viewMode === "quarter" ? quarter : undefined,
     status: status || undefined,
@@ -754,6 +809,13 @@ export function RoadmapPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const reorderReady =
     reordering &&
+    query.isSuccess &&
+    !query.isFetching &&
+    query.data.meta.page === 1 &&
+    query.data.meta.pageSize === 100 &&
+    query.data.items.length === query.data.meta.total;
+  const dateMoveReady =
+    dateMoving &&
     query.isSuccess &&
     !query.isFetching &&
     query.data.meta.page === 1 &&
@@ -786,18 +848,52 @@ export function RoadmapPage() {
           : query.isFetching || !query.isSuccess
             ? "路线图仍在读取，请稍候。"
             : null;
+  const dateMoveDisabledReason = status
+    ? "请先切换到未归档的全部状态。"
+    : projectId
+      ? "请先清除 Project 筛选。"
+      : total > 100
+        ? "当前季度超过 100 个里程碑，暂不支持完整日期调整。"
+        : total < 1
+          ? "当前季度没有可调整日期的里程碑。"
+          : query.isFetching || !query.isSuccess
+            ? "路线图仍在读取，请稍候。"
+            : null;
+  const calendarMonths = useMemo(
+    () => quarterCalendarMonths(year, quarter),
+    [quarter, year],
+  );
 
   useEffect(() => {
-    if (reordering || !query.data || query.isFetching || page <= totalPages)
+    if (
+      reordering ||
+      dateMoving ||
+      !query.data ||
+      query.isFetching ||
+      page <= totalPages
+    )
       return;
     setPage(totalPages);
-  }, [page, query.data, query.isFetching, reordering, totalPages]);
+  }, [dateMoving, page, query.data, query.isFetching, reordering, totalPages]);
 
   useEffect(() => {
     if (!reorderReady || reorderInitialized) return;
     setDraftOrder(query.data.items);
     setReorderInitialized(true);
   }, [query.data, reorderInitialized, reorderReady]);
+
+  useEffect(() => {
+    if (!dateMoveReady || dateMove.isPending || dateDraftInitialized) return;
+    setDateDrafts(
+      Object.fromEntries(
+        query.data.items.map((milestone) => [
+          milestone.id,
+          milestone.targetDate,
+        ]),
+      ),
+    );
+    setDateDraftInitialized(true);
+  }, [dateDraftInitialized, dateMove.isPending, dateMoveReady, query.data]);
 
   const cancelReorder = () => {
     if (reorder.isPending) return;
@@ -870,30 +966,76 @@ export function RoadmapPage() {
       { onError: () => void query.refetch() },
     );
   };
+  const moveToDate = (milestone: RoadmapMilestone, targetDate: string) => {
+    if (
+      dateMove.isPending ||
+      targetDate < firstDateFor(year, quarter) ||
+      targetDate > targetDateFor(year, quarter) ||
+      targetDate === milestone.targetDate
+    )
+      return;
+    dateMove.reset();
+    dateMove.mutate(
+      {
+        id: milestone.id,
+        input: { targetDate, expectedVersion: milestone.version },
+      },
+      {
+        onSuccess: () => {
+          setDraggedId(null);
+          setDateDraftInitialized(false);
+        },
+        onError: () => {
+          setDraggedId(null);
+          setDateDraftInitialized(false);
+          void query.refetch();
+        },
+      },
+    );
+  };
 
   return (
     <div className="page">
       <PageHeader
         actions={
           <div className="roadmap-header-actions">
-            {!reordering && !quarterMoving ? (
+            {!reordering && !quarterMoving && !dateMoving ? (
               viewMode === "quarter" ? (
-                <button
-                  className="button button-secondary"
-                  disabled={Boolean(reorderDisabledReason)}
-                  onClick={() => {
-                    setPage(1);
-                    setReordering(true);
-                    setReorderInitialized(false);
-                    setDraftOrder([]);
-                    reorder.reset();
-                  }}
-                  title={reorderDisabledReason ?? "调整本季度里程碑顺序"}
-                  type="button"
-                >
-                  <GripVertical size={15} />
-                  调整顺序
-                </button>
+                <>
+                  <button
+                    className="button button-secondary"
+                    disabled={Boolean(reorderDisabledReason)}
+                    onClick={() => {
+                      setPage(1);
+                      setReordering(true);
+                      setReorderInitialized(false);
+                      setDraftOrder([]);
+                      reorder.reset();
+                    }}
+                    title={reorderDisabledReason ?? "调整本季度里程碑顺序"}
+                    type="button"
+                  >
+                    <GripVertical size={15} />
+                    调整顺序
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    disabled={Boolean(dateMoveDisabledReason)}
+                    onClick={() => {
+                      setPage(1);
+                      setDateMoving(true);
+                      setDateDrafts({});
+                      setDateDraftInitialized(false);
+                      setDraggedId(null);
+                      dateMove.reset();
+                    }}
+                    title={dateMoveDisabledReason ?? "调整本季度精确目标日期"}
+                    type="button"
+                  >
+                    <CalendarDays size={15} />
+                    调整日期
+                  </button>
+                </>
               ) : (
                 <button
                   className="button button-secondary"
@@ -913,7 +1055,7 @@ export function RoadmapPage() {
             ) : null}
             <button
               className="button button-primary"
-              disabled={reordering || quarterMoving}
+              disabled={reordering || quarterMoving || dateMoving}
               onClick={() => setCreating(true)}
               type="button"
             >
@@ -937,11 +1079,12 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">展示范围</span>
           <select
-            disabled={reordering || quarterMoving}
+            disabled={reordering || quarterMoving || dateMoving}
             onChange={(event) => {
               setViewMode(event.target.value as "quarter" | "year");
               setPage(1);
               setQuarterMoving(false);
+              setDateMoving(false);
               setDraggedId(null);
             }}
             value={viewMode}
@@ -953,7 +1096,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">年份</span>
           <select
-            disabled={reordering || quarterMoving}
+            disabled={reordering || quarterMoving || dateMoving}
             onChange={(event) => {
               setYear(Number(event.target.value));
               setPage(1);
@@ -970,7 +1113,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">季度</span>
           <select
-            disabled={reordering || quarterMoving}
+            disabled={reordering || quarterMoving || dateMoving}
             onChange={(event) => {
               setQuarter(Number(event.target.value) as 1 | 2 | 3 | 4);
               setPage(1);
@@ -987,7 +1130,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">状态</span>
           <select
-            disabled={reordering || quarterMoving}
+            disabled={reordering || quarterMoving || dateMoving}
             onChange={(event) => {
               setStatus(event.target.value as RoadmapMilestoneStatus | "");
               setPage(1);
@@ -1003,7 +1146,7 @@ export function RoadmapPage() {
         </label>
         <ProjectSelect
           ariaLabel="关联项目筛选"
-          disabled={reordering || quarterMoving}
+          disabled={reordering || quarterMoving || dateMoving}
           emptyLabel="全部项目"
           includeArchived
           onChange={(value) => {
@@ -1014,6 +1157,93 @@ export function RoadmapPage() {
           variant="toolbar"
         />
       </div>
+      {dateMoving ? (
+        <>
+          <section
+            className="roadmap-reorder-bar"
+            aria-label="目标日期调整工具"
+          >
+            <div>
+              <strong>调整精确目标日期</strong>
+              <span>
+                把卡片拖到下方具体日期，或在卡片内输入日期后应用；每次移动都会检查当前版本并立即保存。
+              </span>
+              {!dateMoveReady ? (
+                <span role="status">正在读取本季度完整里程碑列表…</span>
+              ) : null}
+              {dateMove.isError ? (
+                <span className="form-field-error" role="alert">
+                  日期调整失败，卡片仍保留原日期；数据可能已变化，请重试。
+                </span>
+              ) : null}
+            </div>
+            <div className="roadmap-reorder-actions">
+              <button
+                className="button button-secondary"
+                disabled={dateMove.isPending}
+                onClick={() => {
+                  setDateMoving(false);
+                  setDateDrafts({});
+                  setDateDraftInitialized(false);
+                  setDraggedId(null);
+                  dateMove.reset();
+                }}
+                type="button"
+              >
+                <X size={14} />
+                完成
+              </button>
+            </div>
+          </section>
+          {dateMoveReady ? (
+            <section
+              aria-label={`${year} 年 Q${quarter} 目标日期日历`}
+              className="roadmap-date-calendar"
+            >
+              {calendarMonths.map((month) => (
+                <section className="roadmap-date-month" key={month.label}>
+                  <header>{month.label}</header>
+                  <div className="roadmap-date-days">
+                    {(["一", "二", "三", "四", "五", "六", "日"] as const).map(
+                      (weekday) => (
+                        <span className="roadmap-date-weekday" key={weekday}>
+                          {weekday}
+                        </span>
+                      ),
+                    )}
+                    {Array.from({ length: month.leadingDays }, (_, index) => (
+                      <span
+                        aria-hidden="true"
+                        className="roadmap-date-placeholder"
+                        key={`blank-${index}`}
+                      />
+                    ))}
+                    {month.dates.map((date) => (
+                      <button
+                        aria-label={`移动到 ${date}`}
+                        className="roadmap-date-drop"
+                        disabled={dateMove.isPending}
+                        key={date}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => {
+                          const moving = visibleMilestones.find(
+                            (milestone) => milestone.id === draggedId,
+                          );
+                          if (moving) moveToDate(moving, date);
+                          else setDraggedId(null);
+                        }}
+                        type="button"
+                      >
+                        {Number(date.slice(-2))}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </section>
+          ) : null}
+        </>
+      ) : null}
       {quarterMoving ? (
         <section className="roadmap-reorder-bar" aria-label="季度移动工具">
           <div>
@@ -1189,7 +1419,7 @@ export function RoadmapPage() {
             </section>
           ) : (
             <section
-              className={`roadmap-grid${reordering ? " is-reordering" : ""}`}
+              className={`roadmap-grid${reordering || dateMoving ? " is-reordering" : ""}`}
               aria-label={`${year} 年 Q${quarter} 路线图`}
             >
               <header className="roadmap-section-heading">
@@ -1203,12 +1433,26 @@ export function RoadmapPage() {
               </header>
               {visibleMilestones.map((milestone, index) => (
                 <RoadmapMilestoneCard
+                  dateDraft={dateDrafts[milestone.id]}
+                  dateMoving={dateMoving}
                   dragging={draggedId === milestone.id}
                   key={milestone.id}
                   milestone={milestone}
                   onDelete={setDeleting}
                   onDragEnd={() => setDraggedId(null)}
                   onDragStart={() => setDraggedId(milestone.id)}
+                  onDateDraftChange={(value) =>
+                    setDateDrafts((drafts) => ({
+                      ...drafts,
+                      [milestone.id]: value,
+                    }))
+                  }
+                  onDateSave={() =>
+                    moveToDate(
+                      milestone,
+                      dateDrafts[milestone.id] ?? milestone.targetDate,
+                    )
+                  }
                   onDrop={() => {
                     if (!draggedId || draggedId === milestone.id) {
                       setDraggedId(null);
@@ -1229,7 +1473,7 @@ export function RoadmapPage() {
               ))}
             </section>
           )}
-          {!reordering && totalPages > 1 ? (
+          {!reordering && !dateMoving && totalPages > 1 ? (
             <nav aria-label="路线图分页" className="pagination">
               <button
                 className="button button-secondary"

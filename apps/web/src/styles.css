@@ -2769,6 +2769,24 @@ kbd {
   width: 100%;
   justify-content: flex-end;
 }
+.roadmap-date-controls {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+.roadmap-date-controls label {
+  margin-right: auto;
+}
+.roadmap-date-controls input {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
 .roadmap-reorder-controls > span {
   margin-right: auto;
   color: var(--text-muted);
@@ -2788,6 +2806,57 @@ kbd {
 .roadmap-reorder-bar > div:first-child {
   display: grid;
   gap: 3px;
+}
+.roadmap-date-calendar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.roadmap-date-month {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.roadmap-date-month > header {
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.roadmap-date-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.roadmap-date-drop {
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+}
+.roadmap-date-weekday {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+.roadmap-date-placeholder {
+  height: 28px;
+}
+.roadmap-date-drop:not(:disabled) {
+  cursor: copy;
+}
+.roadmap-date-drop:not(:disabled):hover,
+.roadmap-date-drop:not(:disabled):focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
 }
 .roadmap-reorder-bar strong {
   color: var(--text);
@@ -3135,7 +3204,8 @@ kbd {
 
 @media (max-width: 900px) {
   .roadmap-grid,
-  .roadmap-quarter-grid {
+  .roadmap-quarter-grid,
+  .roadmap-date-calendar {
     grid-template-columns: 1fr;
   }
   .roadmap-reorder-bar {

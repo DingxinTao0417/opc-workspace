@@ -389,6 +389,93 @@ describe("RoadmapPage", () => {
     );
   });
 
+  it("moves a milestone to an exact dropped calendar date", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone, secondMilestone],
+          meta: { page: input.page, pageSize: input.pageSize, total: 2 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "调整日期" }));
+    const dateTarget = await screen.findByRole("button", {
+      name: "移动到 2026-09-15",
+    });
+    const movingCard = screen.getByText("路线图 API").closest("article");
+    expect(movingCard).toBeTruthy();
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, pageSize: 100, quarter: 3 }),
+    );
+    fireEvent.dragStart(movingCard!);
+    fireEvent.dragOver(dateTarget);
+    fireEvent.drop(dateTarget);
+
+    expect(hooks.update).toHaveBeenCalledWith(
+      {
+        id: milestone.id,
+        input: {
+          targetDate: "2026-09-15",
+          expectedVersion: milestone.version,
+        },
+      },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it("offers an exact date input as the keyboard alternative", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone],
+          meta: { page: input.page, pageSize: input.pageSize, total: 1 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "调整日期" }));
+    const input = await screen.findByLabelText("目标日期：路线图 API");
+    fireEvent.change(input, { target: { value: "2026-09-12" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "应用目标日期：路线图 API" }),
+    );
+
+    expect(hooks.update).toHaveBeenCalledWith(
+      {
+        id: milestone.id,
+        input: {
+          targetDate: "2026-09-12",
+          expectedVersion: milestone.version,
+        },
+      },
+      expect.any(Object),
+    );
+  });
+
   it("does not offer a partial reorder above the API batch limit", () => {
     hooks.milestones.mockReturnValue({
       data: { items: [milestone], meta: { page: 1, pageSize: 20, total: 101 } },
@@ -409,6 +496,12 @@ describe("RoadmapPage", () => {
     expect(button).toHaveAttribute(
       "title",
       "当前季度超过 100 个里程碑，暂不支持完整批量排序。",
+    );
+    const dateButton = screen.getByRole("button", { name: "调整日期" });
+    expect(dateButton).toBeDisabled();
+    expect(dateButton).toHaveAttribute(
+      "title",
+      "当前季度超过 100 个里程碑，暂不支持完整日期调整。",
     );
     fireEvent.change(screen.getByLabelText("展示范围"), {
       target: { value: "year" },
