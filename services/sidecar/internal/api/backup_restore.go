@@ -54,6 +54,14 @@ type StartupRestoreResult struct {
 	CleanupWarning   string
 }
 
+var publishPendingRestorePackage = (*backupStore).publishPendingRestore
+
+func (a *API) recordBackupRestoreFailure(c *gin.Context) {
+	if err := a.projectBackupRestoreFailure(requestIDFromContext(c)); err != nil {
+		a.logBackupError("record restore maintenance incident", err)
+	}
+}
+
 func (a *API) scheduleBackupRestore(c *gin.Context) {
 	if a.backupStore == nil {
 		writeError(c, http.StatusServiceUnavailable, "BACKUP_UNAVAILABLE", "Verified local backups are unavailable")
@@ -80,6 +88,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 	defer a.backupStore.mu.Unlock()
 	if existing, found, err := loadPendingRestore(a.backupStore.root); err != nil {
 		a.logBackupError("read pending restore", err)
+		a.recordBackupRestoreFailure(c)
 		writeError(c, http.StatusConflict, "RESTORE_PENDING_INVALID", "An existing pending restore could not be validated")
 		return
 	} else if found {
@@ -102,6 +111,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 			return
 		}
 		a.logBackupError("inspect restore source", err)
+		a.recordBackupRestoreFailure(c)
 		writeError(c, http.StatusInternalServerError, "RESTORE_SCHEDULE_FAILED", "The restore source could not be inspected")
 		return
 	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -119,6 +129,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		"SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1",
 	).Row().Scan(&currentDatabaseID, &currentStoreID); err != nil {
 		a.logBackupError("read restore identity", err)
+		a.recordBackupRestoreFailure(c)
 		writeError(c, http.StatusInternalServerError, "RESTORE_SCHEDULE_FAILED", "The current workspace identity could not be read")
 		return
 	}
@@ -126,8 +137,9 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		writeError(c, http.StatusConflict, "RESTORE_WORKSPACE_MISMATCH", "The backup belongs to a different workspace or Artifact store")
 		return
 	}
-	if _, err := a.backupStore.runRestoreDrill(packagePath, manifest, a.options.SchemaVersion); err != nil {
+	if _, err := runBackupRestoreDrill(a.backupStore, packagePath, manifest, a.options.SchemaVersion); err != nil {
 		a.logBackupError("pre-restore drill", err)
+		a.recordBackupDrillFailure(c)
 		writeError(c, http.StatusConflict, "BACKUP_NOT_RESTORABLE", "The backup could not be opened safely in an isolated temporary data root")
 		return
 	}
@@ -138,6 +150,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 	)
 	if err != nil {
 		a.logBackupError("create pre-restore rollback", err)
+		a.recordBackupRestoreFailure(c)
 		writeError(c, http.StatusInternalServerError, "RESTORE_ROLLBACK_BACKUP_FAILED", "A rollback backup could not be created; no restore was scheduled")
 		return
 	}
@@ -148,8 +161,9 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		DatabaseID: manifest.DatabaseID, ArtifactStoreID: manifest.ArtifactStoreID,
 		SourceSchema: manifest.SchemaVersion,
 	}
-	if err := a.backupStore.publishPendingRestore(packagePath, manifest, plan, a.options.SchemaVersion); err != nil {
+	if err := publishPendingRestorePackage(a.backupStore, packagePath, manifest, plan, a.options.SchemaVersion); err != nil {
 		a.logBackupError("publish pending restore", err)
+		a.recordBackupRestoreFailure(c)
 		writeError(c, http.StatusInternalServerError, "RESTORE_SCHEDULE_FAILED", "The restore could not be scheduled; current data was not changed")
 		return
 	}

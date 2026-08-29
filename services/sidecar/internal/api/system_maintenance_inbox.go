@@ -37,11 +37,26 @@ var (
 		title:       "本地备份校验需要处理",
 		message:     "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
 	}
+	backupDrillMaintenanceIncident = systemMaintenanceIncident{
+		component:   systemMaintenanceBackupComponent,
+		operation:   "drill",
+		failureCode: "backup_drill_failed",
+		title:       "本地备份恢复演练需要处理",
+		message:     "无法在隔离环境中完成本地备份恢复演练。现有工作区数据没有被修改。请检查备份状态后重试。",
+	}
+	backupRestoreMaintenanceIncident = systemMaintenanceIncident{
+		component:   systemMaintenanceBackupComponent,
+		operation:   "restore",
+		failureCode: "backup_restore_failed",
+		title:       "本地备份恢复需要处理",
+		message:     "无法安全安排本地备份恢复。现有工作区数据没有被修改。请检查本地存储后重试。",
+	}
 )
 
 func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
 	switch incident {
-	case backupCreateMaintenanceIncident, backupVerifyMaintenanceIncident:
+	case backupCreateMaintenanceIncident, backupVerifyMaintenanceIncident,
+		backupDrillMaintenanceIncident, backupRestoreMaintenanceIncident:
 		return true
 	default:
 		return false
@@ -114,4 +129,12 @@ func (a *API) projectBackupCreateFailure(requestID string) error {
 
 func (a *API) projectBackupVerifyFailure(requestID string) error {
 	return a.projectSystemMaintenanceFailure(backupVerifyMaintenanceIncident, requestID)
+}
+
+func (a *API) projectBackupDrillFailure(requestID string) error {
+	return a.projectSystemMaintenanceFailure(backupDrillMaintenanceIncident, requestID)
+}
+
+func (a *API) projectBackupRestoreFailure(requestID string) error {
+	return a.projectSystemMaintenanceFailure(backupRestoreMaintenanceIncident, requestID)
 }

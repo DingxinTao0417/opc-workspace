@@ -393,6 +393,94 @@ func TestBackupVerifyFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance' AND source_entity_id = ?", 2, sourceID)
 }
 
+func TestBackupDrillFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T) {
+	router, store, _, backupDir := newBackupTestAPI(t)
+	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create backup fixture = %d: %s", created.Code, created.Body.String())
+	}
+	summary := decodeBackupSummary(t, created.Body.Bytes())
+	originalDrill := runBackupRestoreDrill
+	runBackupRestoreDrill = func(_ *backupStore, _ string, _ backupManifest, _ int) (backupRestoreDrillResult, error) {
+		return backupRestoreDrillResult{}, errors.New("simulated drill failure at " + backupDir)
+	}
+	t.Cleanup(func() { runBackupRestoreDrill = originalDrill })
+
+	for attempt := 0; attempt < 2; attempt++ {
+		failed := performRequest(router, http.MethodPost, "/api/v1/backups/"+summary.ID+"/drill", []byte(`{}`), nil)
+		if failed.Code != http.StatusConflict || responseErrorCode(t, failed.Body.Bytes()) != "BACKUP_NOT_RESTORABLE" {
+			t.Fatalf("failed drill %d = %d: %s", attempt, failed.Code, failed.Body.String())
+		}
+	}
+
+	assertSafeBackupMaintenanceIncident(t, store, backupDrillMaintenanceIncident, backupDir, summary.ID, "simulated drill failure")
+}
+
+func TestBackupRestoreScheduleFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T) {
+	router, store, _, backupDir := newBackupTestAPI(t)
+	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create backup fixture = %d: %s", created.Code, created.Body.String())
+	}
+	summary := decodeBackupSummary(t, created.Body.Bytes())
+	originalPublish := publishPendingRestorePackage
+	publishPendingRestorePackage = func(_ *backupStore, _ string, _ backupManifest, _ pendingRestorePlan, _ int) error {
+		return errors.New("simulated restore scheduling failure at " + backupDir)
+	}
+	t.Cleanup(func() { publishPendingRestorePackage = originalPublish })
+
+	failed := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/backups/"+summary.ID+"/restore",
+		[]byte(`{"confirm":true}`),
+		nil,
+	)
+	if failed.Code != http.StatusInternalServerError || responseErrorCode(t, failed.Body.Bytes()) != "RESTORE_SCHEDULE_FAILED" {
+		t.Fatalf("failed restore schedule = %d: %s", failed.Code, failed.Body.String())
+	}
+
+	assertSafeBackupMaintenanceIncident(t, store, backupRestoreMaintenanceIncident, backupDir, summary.ID, "simulated restore scheduling failure")
+}
+
+func assertSafeBackupMaintenanceIncident(
+	t *testing.T,
+	store *database.Store,
+	incidentType systemMaintenanceIncident,
+	forbidden ...string,
+) {
+	t.Helper()
+	sourceID := systemMaintenanceSourceID(incidentType.component, incidentType.operation)
+	var incident models.InboxItem
+	if err := store.DB.Where(
+		"source_entity_type = ? AND source_entity_id = ?",
+		systemMaintenanceInboxSourceType,
+		sourceID,
+	).First(&incident).Error; err != nil {
+		t.Fatalf("load %s maintenance incident: %v", incidentType.operation, err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance' AND source_entity_id = ?", 1, sourceID)
+	if incident.Kind != "event" || incident.Priority != "P1" || incident.Title != incidentType.title ||
+		incident.Summary != incidentType.message || incident.SourceEventKey == nil ||
+		!strings.HasPrefix(*incident.SourceEventKey, "system:"+sourceID+":") {
+		t.Fatalf("%s incident facts = %#v", incidentType.operation, incident)
+	}
+	for _, value := range forbidden {
+		if strings.Contains(incident.PayloadJSON, value) {
+			t.Fatalf("%s incident leaked %q: %s", incidentType.operation, value, incident.PayloadJSON)
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(incident.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode %s incident payload: %v", incidentType.operation, err)
+	}
+	if len(payload) != 5 || payload["component"] != incidentType.component ||
+		payload["operation"] != incidentType.operation || payload["failure_code"] != incidentType.failureCode ||
+		payload["message"] != incidentType.message {
+		t.Fatalf("%s incident payload = %#v", incidentType.operation, payload)
+	}
+}
+
 func TestBackupVerificationRejectsTamperingAndUnexpectedFiles(t *testing.T) {
 	router, store, _, backupDir := newBackupTestAPI(t)
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{}`), nil)

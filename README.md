@@ -33,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控头像、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付。Focus 高级分析/原生反馈、客户外部来源/回访/财务、其他系统故障来源、重复提醒、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v7.0](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控头像、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；备份创建、校验、恢复演练和恢复安排的操作性失败均会投影安全的系统维护 Inbox Item。Focus 高级分析/原生反馈、客户外部来源/回访/财务、迁移/启动等其他系统故障来源、重复提醒、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v7.1](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v7.0）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v7.1）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -325,4 +325,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v7.0](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控工作区头像、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败的系统维护来源投影；明确未交付 Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、其他系统故障来源、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。
+[PRD v7.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控工作区头像、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验/恢复演练/恢复安排失败的系统维护来源投影；明确未交付 Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、迁移/启动等其他系统故障来源、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。

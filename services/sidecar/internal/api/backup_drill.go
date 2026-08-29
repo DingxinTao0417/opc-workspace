@@ -23,6 +23,14 @@ type backupRestoreDrillResult struct {
 	TemporaryDataClean bool   `json:"temporary_data_cleaned"`
 }
 
+var runBackupRestoreDrill = (*backupStore).runRestoreDrill
+
+func (a *API) recordBackupDrillFailure(c *gin.Context) {
+	if err := a.projectBackupDrillFailure(requestIDFromContext(c)); err != nil {
+		a.logBackupError("record restore drill maintenance incident", err)
+	}
+}
+
 func (a *API) drillBackupRestore(c *gin.Context) {
 	if a.backupStore == nil {
 		writeError(c, http.StatusServiceUnavailable, "BACKUP_UNAVAILABLE", "Verified local backups are unavailable")
@@ -43,6 +51,7 @@ func (a *API) drillBackupRestore(c *gin.Context) {
 			return
 		}
 		a.logBackupError("inspect restore drill", err)
+		a.recordBackupDrillFailure(c)
 		writeError(c, http.StatusInternalServerError, "BACKUP_DRILL_FAILED", "The local backup restore drill could not start")
 		return
 	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -55,9 +64,10 @@ func (a *API) drillBackupRestore(c *gin.Context) {
 		writeError(c, http.StatusConflict, "BACKUP_INVALID", "The local backup package failed integrity verification")
 		return
 	}
-	result, err := a.backupStore.runRestoreDrill(packagePath, manifest, a.options.SchemaVersion)
+	result, err := runBackupRestoreDrill(a.backupStore, packagePath, manifest, a.options.SchemaVersion)
 	if err != nil {
 		a.logBackupError("restore drill", err)
+		a.recordBackupDrillFailure(c)
 		writeError(c, http.StatusConflict, "BACKUP_NOT_RESTORABLE", "The backup could not be opened safely in an isolated temporary data root")
 		return
 	}
