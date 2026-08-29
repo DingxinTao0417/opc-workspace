@@ -28,6 +28,7 @@ type Options struct {
 	ArtifactDir            string
 	DatabasePath           string
 	BackupDir              string
+	LogDir                 string
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration
 	ReminderScanInterval   time.Duration
@@ -306,6 +307,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
 						options.Logger.Printf("Focus Session heartbeat failed: %v", err)
 					}
+					if err != nil && !errors.Is(err, context.Canceled) {
+						service.recordRuntimeDatabaseFailure("focus-heartbeat")
+					}
 				}
 			}
 		}()
@@ -335,6 +339,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
 						options.Logger.Printf("due source scan failed: %v", err)
 					}
+					if err != nil && !errors.Is(err, context.Canceled) {
+						service.recordRuntimeDatabaseFailure("due-source-scan")
+					}
 				}
 			}
 		}()
@@ -345,6 +352,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 func (a *API) health(c *gin.Context) {
 	sqlDB, err := a.db.DB()
 	if err != nil || sqlDB.PingContext(c.Request.Context()) != nil {
+		a.recordRuntimeDatabaseFailure(requestIDFromContext(c))
 		writeError(c, http.StatusServiceUnavailable, "DATABASE_UNAVAILABLE", "The local database is unavailable")
 		return
 	}

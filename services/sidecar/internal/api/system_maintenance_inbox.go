@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
@@ -72,6 +73,13 @@ var (
 		title:       "本地服务启动需要处理",
 		message:     "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。",
 	}
+	runtimeDatabaseMaintenanceIncident = systemMaintenanceIncident{
+		component:   "database",
+		operation:   "runtime",
+		failureCode: "database_runtime_failed",
+		title:       "本地数据库运行需要处理",
+		message:     "运行中的本地数据库操作失败。请检查可用磁盘空间和应用日志，并在继续重要写入前创建或校验备份。",
+	}
 )
 
 func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
@@ -79,7 +87,7 @@ func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
 	case backupCreateMaintenanceIncident, backupVerifyMaintenanceIncident,
 		backupDrillMaintenanceIncident, backupRestoreMaintenanceIncident,
 		databaseStartupMaintenanceIncident, databaseMigrationMaintenanceIncident,
-		sidecarStartupMaintenanceIncident:
+		sidecarStartupMaintenanceIncident, runtimeDatabaseMaintenanceIncident:
 		return true
 	default:
 		return false
@@ -172,4 +180,16 @@ func (a *API) projectBackupDrillFailure(requestID string) error {
 
 func (a *API) projectBackupRestoreFailure(requestID string) error {
 	return a.projectSystemMaintenanceFailure(backupRestoreMaintenanceIncident, requestID)
+}
+
+func (a *API) recordRuntimeDatabaseFailure(requestID string) {
+	if strings.TrimSpace(a.options.LogDir) == "" {
+		return
+	}
+	if err := a.projectSystemMaintenanceFailure(runtimeDatabaseMaintenanceIncident, requestID); err == nil {
+		return
+	}
+	if err := RecordStartupIncident(a.options.LogDir, StartupIncidentDatabaseRuntime, a.options.Now()); err != nil && a.options.Logger != nil {
+		a.options.Logger.Print("runtime database incident could not be persisted safely")
+	}
 }

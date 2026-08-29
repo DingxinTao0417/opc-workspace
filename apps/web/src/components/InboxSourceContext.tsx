@@ -54,7 +54,13 @@ interface ProjectCompletionSourceSnapshot {
 interface SystemMaintenanceSourceSnapshot {
   component: "backup" | "database" | "sidecar";
   operation:
-    "create" | "verify" | "drill" | "restore" | "startup" | "migration";
+    | "create"
+    | "verify"
+    | "drill"
+    | "restore"
+    | "startup"
+    | "migration"
+    | "runtime";
   failureCode:
     | "backup_create_failed"
     | "backup_verify_failed"
@@ -62,6 +68,7 @@ interface SystemMaintenanceSourceSnapshot {
     | "backup_restore_failed"
     | "database_startup_failed"
     | "database_migration_failed"
+    | "database_runtime_failed"
     | "sidecar_startup_failed";
   occurredAt: string;
   message: string;
@@ -224,6 +231,7 @@ function systemMaintenanceSnapshot(
     "backup:restore": "backup_restore_failed",
     "database:startup": "database_startup_failed",
     "database:migration": "database_migration_failed",
+    "database:runtime": "database_runtime_failed",
     "sidecar:startup": "sidecar_startup_failed",
   } as const;
   const key = `${String(component)}:${String(operation)}`;
@@ -264,6 +272,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
       "backup:restore": ["本地备份恢复安排失败", "本地备份", "恢复安排"],
       "database:startup": ["本地数据库启动失败", "本地数据库", "启动"],
       "database:migration": ["本地数据库迁移失败", "本地数据库", "迁移"],
+      "database:runtime": ["本地数据库运行失败", "本地数据库", "运行"],
       "sidecar:startup": ["本地服务启动失败", "本地服务", "启动"],
     } as const;
     const [summaryLabel, componentLabel, operationLabel] =

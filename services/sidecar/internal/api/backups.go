@@ -151,6 +151,7 @@ func pathContains(parent, candidate string) bool {
 
 func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		c.Set(apiContextKey, a)
 		if a.restorePending.Load() {
 			backupRootPath := "/api/" + Version + "/backups"
 			isRestoreReplay := c.Request.Method == http.MethodPost &&

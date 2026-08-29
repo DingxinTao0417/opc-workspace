@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.8](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.9](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -10,7 +10,7 @@
 - [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；看板与 Agent 待开发）
 - [项目管理](projects.md)（基础纵切、任务树/平铺及项目内搜索/状态筛选/服务端分页、Client、笔记、附件、Task Artifact 聚合、活动时间线、显式 follow-up 产出和 Project 完成节点→Inbox 已交付；高级分析待开发）
 - [客户管理](clients.md)（基础资料 CRUD、Project 关联、人工活动时间线、受控附件和 person 显式关联已交付；外部来源/回访/财务仍待开发）
-- [收件箱工作编排](inbox.md)（T-11A1/A2/A3/B/C/F 和 T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成、备份操作、数据库启动/迁移和 Sidecar 启动失败已交付；其他系统故障来源和 Agent 待开发）
+- [收件箱工作编排](inbox.md)（T-11A1/A2/A3/B/C/F 和 T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成、备份操作、数据库启动/迁移、Sidecar 启动及运行期数据库操作失败已交付；主动磁盘监测等来源和 Agent 待开发）
 - [本地提醒](reminders.md)（T-11A3 一次性本地 Reminder、启动补偿和到期 Inbox 投影已交付；重复提醒与原生/远程通知待开发）
 - [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
 - [专注与工时](focus.md)（Core A 事实迁移、B API/事务、C 前端接入已交付；历史/报告/原生桌面反馈 D 延后）

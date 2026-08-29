@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v28。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v28。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败来源投影均已接真实 SQLite/API/UI。其他系统故障来源和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源投影均已接真实 SQLite/API/UI。主动低磁盘阈值等其他系统故障来源和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -149,10 +149,17 @@
 - Inbox 详情展示“项目完成”、完成时间、项目名和完成时未结任务数，并直达 `/projects/:id`。这只要求用户确认交付收尾、归档或其他人工后续，不自动创建 Task，不伪造验收、开票、收入或客户消息。
 - 活动完成事项会阻止 Project 永久删除。全部来源事项先 resolve/dismiss 后，Project 删除事务写入 `source_deleted_at` 和 `source_deleted` Event，再删除 Project；历史 Inbox Item 保留快照并停止提供失效链接。
 
+### 已交付：T-11E 第九项——运行期数据库故障降级
+
+- 版本化 API 通过统一数据库错误出口捕获非预期 SQLite 操作失败；`/health` 数据库 Ping、Focus Session 心跳和 Reminder/Task 到期来源扫描失败也进入同一链路。原 HTTP 状态、API 错误码及后台任务行为保持不变。
+- 数据库仍可写时，Sidecar 尽力创建 `source_entity_id=database:runtime`、`failure_code=database_runtime_failed` 的 P1 系统维护事项；同一 source id 只保留一个活动 incident，用户解决/忽略后发生的新失败可创建新事项。
+- 数据库不可写导致直接投影失败时，只把 `database_runtime`、稳定 UUID 和 UTC 时间写入并发安全的 `startup-incidents-v1.json`；下一次健康启动按既有严格校验和稳定 event key 补偿。Inbox/journal 均不含 SQL error、路径、Token、请求正文或业务数据。
+- 这是故障后安全投影，可提示检查磁盘空间，但不主动采集剩余容量，也没有配置低空间阈值。
+
 ### 明确未交付
 
 - 重复 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
-- Project 完成以外的独立里程碑、Client/Invoice，以及运行期数据库不可写、磁盘空间和其他尚未接入的系统故障来源投影；
+- Project 完成以外的独立里程碑、Client/Invoice，以及主动低磁盘阈值和其他尚未接入的系统故障来源投影；
 - 已交付来源以外的多态删除协调、Inbox Item 硬删除；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
 - AI、LLM、自然语言解析、智能排程或自动报告。
@@ -239,7 +246,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 | `kind`                              | 表约束 manual/event/reminder；公开创建 API 仅 manual，内部 Reminder 使用 reminder，其余已交付业务来源使用 event             |
 | `title / summary`                   | 标题 2–200；摘要最多 10,000                                                                                                 |
 | `source_entity_type`                | 公开创建 API 固定 manual；内部已使用 reminder/task_artifact/task/task_due/project_completion/system_maintenance             |
-| `source_entity_id`                  | 当前手工项必须为 null；系统维护项为 `backup:create/verify/drill/restore`、`database:startup/migration` 或 `sidecar:startup` |
+| `source_entity_id`                  | 当前手工项必须为 null；系统维护项为 `backup:create/verify/drill/restore`、`database:startup/migration/runtime` 或 `sidecar:startup` |
 | `source_event_key`                  | nullable；非空值受部分唯一索引保护；Artifact、Task 阻塞/临期、Project 完成和系统维护分别使用稳定键                          |
 | `source_deleted_at`                 | 手工/Reminder/系统维护为 null；Artifact/Task/Task due/Project 完成来源归档后删除时原子写入，且不可再次修改                  |
 | `priority`                          | P0 / P1 / P2 / P3                                                                                                           |
@@ -328,7 +335,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办             |
 | Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                               |
 | 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                          | 随 T-11E 来源投影自然纳入更多业务事件            |
-| 系统维护 | 备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已安全投影；备份事项可打开数据与备份入口     | 运行期数据库不可写、磁盘空间、完整日志/诊断仍待  |
+| 系统维护 | 备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败已安全投影；备份事项可打开数据与备份入口 | 主动低磁盘阈值、Tauri 壳日志/打开日志入口仍待 |
 | Agent    | 未实现                                                                                           | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件 |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。
@@ -342,7 +349,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 5. **T-11A3 Reminder 事实（已完成）**：schema v14、创建/查询/编辑/取消、启动补偿、15 秒扫描、稳定事件键与幂等到期 Inbox 投影。
 6. **T-11C 拆分与分派（已完成）**：原子多任务/父子拆分、owner/person Assignment、统一 reconciliation、自动解决/重开和 force-resolve。
 7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
-8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移和 Sidecar 启动失败已完成；后续继续实现运行期数据库不可写等其他系统故障并逐项验证稳定事件键。
+8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败已完成；后续继续实现主动低磁盘阈值等其他系统故障并逐项验证稳定事件键。
 9. **T-11D v0.2 Agent**：健康 Adapter、Run、受控产出、取消/重试、人工验收、返工和崩溃恢复。
 10. **后续业务事件**：随 v0.3/v0.4 路线图、发票和回访模块交付后启用。
 
@@ -367,7 +374,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [x] T-11C 批量拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
 - [x] 进度完全从活动必需 Task 派生，零必需任务不自动解决。
 - [x] 非 done Task 不误触发自动解决；自动完成后依赖失效会重开，手工/强制解决不会误重开。
-- [x] Reminder 与 Task 临期跨扫描/重启、follow-up Artifact 跨提交重放、同一次 Task block 幂等重放，以及同一备份/数据库/Sidecar 系统维护 source id 的活动 incident 均只生成一条 Inbox Item；启动 journal 模糊清理重放不重复。Task 改期、重复阻塞和归档后再失败按各自稳定事实生成独立来源。`BACKUP_INVALID` 不创建系统维护 incident。
+- [x] Reminder 与 Task 临期跨扫描/重启、follow-up Artifact 跨提交重放、同一次 Task block 幂等重放，以及同一备份/数据库/Sidecar 系统维护 source id 的活动 incident 均只生成一条 Inbox Item；启动/运行期 journal 模糊清理重放不重复。Task 改期、重复阻塞和归档后再失败按各自稳定事实生成独立来源。`BACKUP_INVALID` 不创建系统维护 incident。
 - [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
 - [x] Task Artifact/Task 阻塞/Task 临期多态来源删除会先限制活动项，归档后原子标记来源删除并保留快照；系统维护来源禁止 `source_deleted_at`。其他未来来源仍需逐项实现。
 - [x] Sidebar/Today 计数与 risk 深链已接真实统计；真实浏览器键盘/焦点、长列表和窄屏视觉仍需专项验收。

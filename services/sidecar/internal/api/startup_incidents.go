@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,12 +23,15 @@ const (
 	StartupIncidentDatabaseStartup   StartupIncidentKind = "database_startup"
 	StartupIncidentDatabaseMigration StartupIncidentKind = "database_migration"
 	StartupIncidentSidecarStartup    StartupIncidentKind = "sidecar_startup"
+	StartupIncidentDatabaseRuntime   StartupIncidentKind = "database_runtime"
 
 	startupIncidentJournalName = "startup-incidents-v1.json"
 	startupIncidentFormat      = 1
 	maxStartupIncidentBytes    = 64 << 10
 	maxStartupIncidentRecords  = 16
 )
+
+var startupIncidentJournalMu sync.Mutex
 
 type startupIncidentJournal struct {
 	FormatVersion int                     `json:"format_version"`
@@ -48,6 +52,8 @@ func startupIncidentDefinition(kind StartupIncidentKind) (systemMaintenanceIncid
 		return databaseMigrationMaintenanceIncident, true
 	case StartupIncidentSidecarStartup:
 		return sidecarStartupMaintenanceIncident, true
+	case StartupIncidentDatabaseRuntime:
+		return runtimeDatabaseMaintenanceIncident, true
 	default:
 		return systemMaintenanceIncident{}, false
 	}
@@ -56,6 +62,8 @@ func startupIncidentDefinition(kind StartupIncidentKind) (systemMaintenanceIncid
 // RecordStartupIncident persists only a whitelisted incident identity and time.
 // Raw startup errors, paths, tokens and request data never enter this journal.
 func RecordStartupIncident(logDir string, kind StartupIncidentKind, now time.Time) error {
+	startupIncidentJournalMu.Lock()
+	defer startupIncidentJournalMu.Unlock()
 	if _, ok := startupIncidentDefinition(kind); !ok {
 		return errors.New("unsupported startup incident")
 	}
@@ -92,6 +100,8 @@ func RecordStartupIncident(logDir string, kind StartupIncidentKind, now time.Tim
 // successful open. Stable incident IDs make retries safe even if journal cleanup
 // failed after a prior projection.
 func ReplayStartupIncidents(db *gorm.DB, logDir string, logger *log.Logger) error {
+	startupIncidentJournalMu.Lock()
+	defer startupIncidentJournalMu.Unlock()
 	path, err := startupIncidentJournalPath(logDir)
 	if err != nil {
 		return err

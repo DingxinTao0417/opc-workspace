@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。数据库打开前恢复页、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动和运行期数据库操作失败会尽力投影安全的系统维护 Inbox Item。数据库打开前恢复页、主动低磁盘阈值、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -49,7 +49,7 @@
 - 备份先写同一 backup root 下的 `.staging-<uuid>`，manifest 记录 app/commit/API/schema、创建与校验时间、可选说明、数据库/marker/Artifact 相对路径及 size/SHA-256；`quick_check`、`foreign_key_check`、schema、身份、active Artifact 元数据、文件全集和总量均通过后才原子重命名为 `backups/<backup-id>/`。
 - 创建支持可选 `Idempotency-Key`；Sidecar 只在备份 manifest 保存 key 的 SHA-256 与规范请求摘要。模糊响应可安全重放同一包，不同说明复用同一 key 返回冲突。
 - 创建失败仍返回 `BACKUP_CREATE_FAILED`，现有数据不变；Sidecar 随后尽力投影 `source_entity_type=system_maintenance`、`source_entity_id=backup:create` 的 Inbox Item。payload 只含 `component=backup`、`operation=create`、`failure_code=backup_create_failed`、`occurred_at` 和固定用户提示，不保存 Go error、本机路径、备份 note、Token 或请求正文。同一活动 incident 去重，resolve/dismiss 后再失败可开新条目。投影失败只记内部日志，不改变备份错误。
-- 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。恢复演练的操作性失败或已验证包在隔离演练中不可安全打开时投影 `backup:drill`；恢复安排的 pending 检查、工作区身份读取、回滚点创建或计划发布失败投影 `backup:restore`。payload 均只含固定安全字段。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox；请求错误、包不存在、工作区不匹配和已有恢复计划也不投影。恢复在下一次启动实际应用失败时先写 `sidecar:startup` 安全 journal，下一次健康启动再补偿投影。运行期数据库不可写仍未实现；诊断包 v1 已提供错误码级系统维护汇总。
+- 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。恢复演练的操作性失败或已验证包在隔离演练中不可安全打开时投影 `backup:drill`；恢复安排的 pending 检查、工作区身份读取、回滚点创建或计划发布失败投影 `backup:restore`。payload 均只含固定安全字段。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox；请求错误、包不存在、工作区不匹配和已有恢复计划也不投影。恢复在下一次启动实际应用失败时先写 `sidecar:startup` 安全 journal，下一次健康启动再补偿投影。版本化 API、health、Focus 心跳与到期扫描的数据库故障投影为 `database:runtime`；数据库不可写时写入同一安全 journal，健康启动再补偿。诊断包 v1 已提供错误码级系统维护汇总。
 - `GET /api/v1/backups` 只读取已发布 UUID 包并展示上次校验记录；损坏清单以 invalid 项显示。`POST /api/v1/backups/:id/verify` 重新逐字节校验完整包并刷新 `verified_at`，篡改、缺失、额外文件、路径或数据库事实不一致均拒绝。
 - `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker、objects 与 avatars 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证全部 active 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
@@ -65,7 +65,7 @@
 
 - 非空目标冲突预览/映射与跨 schema 导入；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 运行期数据库不可写或磁盘空间的 Inbox 投影；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
+- 主动剩余磁盘容量检查和低空间阈值 Inbox 投影；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
 ## 当前应用数据布局
@@ -274,7 +274,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
 - [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；备份失败 Inbox Item 也可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
-- [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal、下一次健康启动补偿为 `system_maintenance` Inbox Item。两条链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误或路径写成业务事件。`BACKUP_INVALID` 不投影。运行期数据库不可写等来源仍待开发。
+- [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误或路径写成业务事件。`BACKUP_INVALID` 不投影。主动低磁盘阈值来源仍待开发。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
 
@@ -320,7 +320,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
-- [ ] 运行期数据库不可写与磁盘空间投影。
+- [x] 版本化 API 非预期数据库错误、health、Focus 心跳与到期来源扫描失败投影；数据库不可写时安全 journal 降级和健康启动补偿。
+- [ ] 主动磁盘容量探测、可配置低空间阈值与跨数据/备份根预警。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
 - [ ] 非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
 

@@ -159,6 +159,7 @@ func run(args []string) int {
 		ArtifactDir:    cfg.ArtifactDir,
 		DatabasePath:   cfg.DatabasePath,
 		BackupDir:      cfg.BackupDir,
+		LogDir:         cfg.LogDir,
 		StartupRestore: restoreResult,
 	})
 	if err != nil {

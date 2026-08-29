@@ -2411,6 +2411,13 @@ const systemMaintenanceDefinitions = {
     message:
       "上次启动未能完成受保护的数据库迁移。已有数据未被新版本继续使用；请检查回滚备份和应用日志。",
   },
+  "database:runtime": {
+    component: "database",
+    operation: "runtime",
+    failureCode: "database_runtime_failed",
+    message:
+      "运行中的本地数据库操作失败。请检查可用磁盘空间和应用日志，并在继续重要写入前创建或校验备份。",
+  },
   "sidecar:startup": {
     component: "sidecar",
     operation: "startup",

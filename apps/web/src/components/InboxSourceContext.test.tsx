@@ -328,6 +328,38 @@ describe("InboxSourceContext", () => {
     expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
   });
 
+  it("shows a runtime database incident with the data recovery entry", () => {
+    const message =
+      "运行中的本地数据库操作失败。请检查可用磁盘空间和应用日志，并在继续重要写入前创建或校验备份。";
+    render(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{
+            ...sourceItem,
+            title: "本地数据库运行需要处理",
+            summary: message,
+            sourceEntityType: "system_maintenance",
+            sourceEntityId: "database:runtime",
+            sourceEventKey:
+              "system:database:runtime:018f0000-0000-7000-8000-000000000822",
+            dueAt: null,
+            payloadJson: {
+              component: "database",
+              operation: "runtime",
+              failure_code: "database_runtime_failed",
+              occurred_at: "2026-08-28T12:00:00.000000000Z",
+              message,
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("本地数据库运行失败")).toBeTruthy();
+    expect(screen.getByText("运行")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "打开数据与备份" })).toBeTruthy();
+  });
+
   it("shows a Sidecar startup incident without inventing an unavailable log action", () => {
     const message =
       "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。";
