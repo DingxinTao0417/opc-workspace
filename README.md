@@ -37,7 +37,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar 脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和固定 1 GiB 低空间监测均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、磁盘阈值配置、非空目标/跨 schema 冲突合并、Tauri 壳日志与数据库打开前恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.1](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和固定 1 GiB 低空间监测均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、磁盘阈值配置、非空目标/跨 schema 冲突合并、数据库打开前恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.2](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.1）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.2）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -166,7 +166,7 @@ appLogDir/
   startup-incidents-v1.json # 启动前安全故障 journal；成功补偿后删除
   .startup-incidents-invalid-*.json # 损坏 journal 隔离；不自动读取
   opc-sidecar.log            # Sidecar 脱敏运行日志，5 MiB，保留 .1～.3
-  opc-workspace.log          # Tauri 桌面壳日志预留，尚未接入
+  opc-workspace.log          # Tauri 桌面壳白名单 JSONL 日志，5 MiB，保留 .1～.3
 ```
 
 具体物理路径由操作系统和应用标识 `com.opcworkspace.desktop` 决定，业务代码不硬编码该路径。升级应用程序文件不会覆盖这里的数据。
@@ -333,4 +333,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar 脱敏轮转日志及桌面打开日志目录、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障及固定低空间投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、磁盘阈值配置、Tauri 壳日志/数据库打开前恢复页、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障及固定低空间投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、磁盘阈值配置、数据库打开前恢复页、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

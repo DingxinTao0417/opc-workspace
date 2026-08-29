@@ -98,8 +98,8 @@
 
 ### 日志与诊断
 
-- Sidecar 已写入 appLogDir 的脱敏轮转日志；Tauri 壳日志仍待接入。
-- 日志包含 request ID、进程阶段、版本、错误码和耗时，不包含令牌、完整客户资料、发票正文或 Agent 输入输出。
+- Sidecar 与 Tauri 壳已分别写入 appLogDir 的脱敏轮转日志；桌面壳只记录白名单生命周期 JSONL。
+- Sidecar 日志保留受控进程阶段、版本、错误码和耗时；桌面壳日志只保留生命周期事件与时间。两者均不包含令牌、完整客户资料、发票正文或 Agent 输入输出；跨进程 request ID 仍待实现。
 - 诊断页显示当前状态、最近失败和路径，支持复制脱敏摘要与打开日志目录。
 - 系统维护失败可以幂等生成本地收件箱项。
 
@@ -235,8 +235,8 @@
 
 ### v0.1-B：日志与维护
 
-- 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar 脱敏日志、5 MiB/3 归档轮转、敏感令牌遮盖和文件故障降级；继续实现 Tauri 壳日志和跨进程 request ID。
-- 诊断页、脱敏摘要、诊断包 v1 和无参数 `open_log_directory` 已完成；继续实现 Tauri 壳自身日志。
+- 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar/Tauri 壳脱敏日志、5 MiB/3 归档轮转、敏感信息排除和文件故障降级；继续实现跨进程 request ID。
+- 诊断页、脱敏摘要、诊断包 v1、无参数 `open_log_directory` 和 Tauri 壳自身日志已完成；继续实现跨进程 request ID。
 - 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和固定 1 GiB 低空间已接 maintenance 状态；阈值配置与分卷详情仍待评审。
 
 ### v0.1-C：系统集成
@@ -276,7 +276,8 @@
 - [x] 脱敏诊断包 v1（不含原始日志）。
 - [x] Go Sidecar 脱敏日志落盘/轮转与 stderr 降级。
 - [x] 设置运行诊断可通过无参数 Tauri command 打开自身 `appLogDir`；浏览器模式不伪造路径。
-- [ ] 全局服务恢复页和 Tauri 壳自身日志。
+- [x] Tauri 壳白名单 JSONL 生命周期日志、5 MiB/3 归档、非普通目标拒绝与 stderr 降级。
+- [ ] 全局服务恢复页和跨进程 request ID。
 - [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。

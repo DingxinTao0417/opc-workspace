@@ -17,6 +17,8 @@ use tauri_plugin_shell::{
 use url::Url;
 use uuid::Uuid;
 
+use crate::desktop_log::{DesktopEvent, DesktopLogger};
+
 const SIDECAR_NAME: &str = "opc-sidecar";
 const LOOPBACK_HOST: &str = "127.0.0.1";
 const HEALTH_ATTEMPTS: usize = 10;
@@ -93,6 +95,7 @@ struct SidecarManagerInner {
     runtime: RwLock<SidecarRuntimeStatus>,
     child: Mutex<ManagedChildState>,
     exited: (Mutex<bool>, Condvar),
+    logger: RwLock<Option<DesktopLogger>>,
 }
 
 #[derive(Clone)]
@@ -107,6 +110,7 @@ impl SidecarManager {
                 runtime: RwLock::new(SidecarRuntimeStatus::starting(None, None)),
                 child: Mutex::new(ManagedChildState::default()),
                 exited: (Mutex::new(false), Condvar::new()),
+                logger: RwLock::new(None),
             }),
         }
     }
@@ -119,6 +123,26 @@ impl SidecarManager {
             .clone()
     }
 
+    pub fn attach_logger(&self, logger: DesktopLogger) {
+        *self
+            .inner
+            .logger
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(logger);
+    }
+
+    pub fn log_event(&self, event: DesktopEvent) {
+        if let Some(logger) = self
+            .inner
+            .logger
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+        {
+            logger.event(event);
+        }
+    }
+
     fn update(&self, update: impl FnOnce(&mut SidecarRuntimeStatus)) {
         let mut runtime = self
             .inner
@@ -129,12 +153,14 @@ impl SidecarManager {
     }
 
     fn set_starting(&self, base_url: Option<String>, session_token: Option<String>) {
+        self.log_event(DesktopEvent::SidecarStarting);
         self.update(|runtime| {
             *runtime = SidecarRuntimeStatus::starting(base_url, session_token);
         });
     }
 
     fn set_ready(&self, ready: &ReadyLine, session_token: Option<String>) {
+        self.log_event(DesktopEvent::SidecarReady);
         self.update(|runtime| {
             runtime.phase = SidecarPhase::Ready;
             runtime.base_url = Some(ready.base_url.clone());
@@ -147,6 +173,7 @@ impl SidecarManager {
     }
 
     fn set_external_ready(&self, base_url: String, session_token: Option<String>) {
+        self.log_event(DesktopEvent::SidecarReady);
         self.update(|runtime| {
             runtime.phase = SidecarPhase::Ready;
             runtime.base_url = Some(base_url);
@@ -156,6 +183,7 @@ impl SidecarManager {
     }
 
     fn set_error(&self, message: impl Into<String>) {
+        self.log_event(DesktopEvent::SidecarError);
         self.update(|runtime| {
             runtime.phase = SidecarPhase::Error;
             runtime.message = Some(message.into());
@@ -163,6 +191,7 @@ impl SidecarManager {
     }
 
     fn append_error(&self, message: impl Into<String>) {
+        self.log_event(DesktopEvent::SidecarError);
         let message = message.into();
         self.update(|runtime| {
             let existing = runtime.message.take();
@@ -257,7 +286,9 @@ impl SidecarManager {
     }
 
     pub fn shutdown(&self) {
+        self.log_event(DesktopEvent::SidecarShutdownStarted);
         self.shutdown_with_timeouts(GRACEFUL_SHUTDOWN_TIMEOUT, FORCED_TERMINATION_TIMEOUT);
+        self.log_event(DesktopEvent::SidecarShutdownFinished);
     }
 
     pub fn shutdown_for_restart(&self) -> Result<(), String> {
@@ -360,6 +391,7 @@ pub fn sidecar_status(state: State<'_, SidecarManager>) -> SidecarRuntimeStatus 
 
 #[tauri::command]
 pub fn restart_application(app: AppHandle, state: State<'_, SidecarManager>) -> Result<(), String> {
+    state.log_event(DesktopEvent::ApplicationRestartRequested);
     state.shutdown_for_restart()?;
     app.request_restart();
     Ok(())
