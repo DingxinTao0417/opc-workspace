@@ -110,7 +110,7 @@
 - **已完成脱敏运行诊断**：浏览器模式明确外部开发进程；桌面模式读取 `sidecar_status` 后只保留环境、`starting/ready/error` 生命周期和三类版本。版本与 `/health` 对照，摘要只包含环境、生命周期、版本、commit 和 health 状态。
 - **已完成诊断包 v1**：`GET /api/v1/diagnostics/package` 返回 manifest、runtime、database、maintenance 四个 JSON 的 ZIP；数据库部分只含 quick-check 结果、foreign-key/journal/page 摘要和迁移清单，维护部分只含错误码、状态、数量与最近时间。包不含业务行、附件、原始日志、Token、端口、地址、路径或底层错误。
 - 显示当前数据目录、日志目录、平台与架构，不展示令牌。
-- 已提供重新检查服务、复制脱敏诊断摘要、下载诊断包和桌面打开日志目录；该 command 不接受路径，浏览器模式禁用。Tauri 壳只写白名单生命周期 JSONL 并与 Sidecar 分文件轮转；手动恢复 Sidecar 与跨进程 request ID 仍待实现。
+- 已提供重新检查服务、复制脱敏诊断摘要、下载诊断包和桌面打开日志目录；该 command 不接受路径，浏览器模式禁用。Tauri 壳只写白名单生命周期 JSONL 并与 Sidecar 分文件轮转；WebView→Sidecar request ID 已可关联前端错误与访问日志，手动恢复 Sidecar 仍待实现。
 - 清楚区分当前已实现能力、后续版本和平台不支持能力。
 
 ## 关键用户流程

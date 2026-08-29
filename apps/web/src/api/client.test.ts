@@ -26,6 +26,7 @@ import {
   getAllProjects,
   getAllTasks,
   getBackups,
+  getHealth,
   getRestoreDiagnostics,
   getTags,
   getTaskPage,
@@ -152,6 +153,55 @@ function jsonResponse(body: unknown, status = 200) {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+describe("request correlation", () => {
+  it("adds one canonical request ID to every Sidecar request", async () => {
+    let requestId = "";
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestId = new Headers(init?.headers).get("X-Request-ID") ?? "";
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            app: { name: "opc-workspace", version: "0.1.0", commit: "test" },
+            api: { version: "v1" },
+            schema: { version: 29 },
+          }),
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "X-Request-ID": requestId,
+            },
+          },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getHealth()).resolves.toMatchObject({ status: "ok" });
+    expect(requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it("keeps the generated request ID on network failures", async () => {
+    let requestId = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestId = new Headers(init?.headers).get("X-Request-ID") ?? "";
+        throw new TypeError("connection failed");
+      }),
+    );
+
+    const error = await getHealth().catch((caught) => caught);
+    expect(error).toMatchObject({
+      code: "NETWORK_ERROR",
+      requestId,
+    });
+    expect(requestId).not.toBe("");
+  });
+});
 
 const actorPayload = {
   id: "00000000-0000-5000-8000-000000000003",

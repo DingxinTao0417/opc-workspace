@@ -404,13 +404,16 @@ async function apiFetch<T>(
 ): Promise<T> {
   const connection = await getRuntimeConnection();
   const headers = new Headers(init.headers);
+  const requestId = crypto.randomUUID();
   headers.set("Accept", accept);
+  headers.set("X-Request-ID", requestId);
   const multipart =
     typeof FormData !== "undefined" && init.body instanceof FormData;
   if (init.body && !multipart && !headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
   if (connection.token)
     headers.set("Authorization", `Bearer ${connection.token}`);
+  let correlatedRequestId: string = requestId;
 
   const controller = new AbortController();
   const upstreamSignal = init.signal;
@@ -428,6 +431,8 @@ async function apiFetch<T>(
       headers,
       signal: controller.signal,
     });
+    correlatedRequestId =
+      response.headers.get("X-Request-ID")?.trim() || requestId;
     if (!response.ok) {
       const body = await readResponseJSON(response);
       const errorBody = isRecord(body) ? body : {};
@@ -436,21 +441,37 @@ async function apiFetch<T>(
         {
           code: stringField(errorBody, "code") ?? "HTTP_ERROR",
           status: response.status,
-          requestId: stringField(errorBody, "request_id", "requestId"),
+          requestId:
+            correlatedRequestId ||
+            stringField(errorBody, "request_id", "requestId") ||
+            requestId,
         },
       );
     }
 
     return await consume(response);
   } catch (error) {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+      if (error.requestId) throw error;
+      throw new ApiError(error.message, {
+        code: error.code,
+        status: error.status,
+        requestId: correlatedRequestId,
+      });
+    }
     if (
       controller.signal.aborted ||
       (error instanceof DOMException && error.name === "AbortError")
     ) {
-      throw new ApiError("连接本地 Sidecar 超时", { code: "TIMEOUT" });
+      throw new ApiError("连接本地 Sidecar 超时", {
+        code: "TIMEOUT",
+        requestId,
+      });
     }
-    throw new ApiError("无法连接本地 Sidecar", { code: "NETWORK_ERROR" });
+    throw new ApiError("无法连接本地 Sidecar", {
+      code: "NETWORK_ERROR",
+      requestId,
+    });
   } finally {
     window.clearTimeout(timeout);
     upstreamSignal?.removeEventListener("abort", abortFromUpstream);

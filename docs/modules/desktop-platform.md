@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.4](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.5](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -99,11 +99,11 @@
 ### 日志与诊断
 
 - Sidecar 与 Tauri 壳已分别写入 appLogDir 的脱敏轮转日志；桌面壳只记录白名单生命周期 JSONL。
-- Sidecar 日志保留受控进程阶段、版本、错误码和耗时；桌面壳日志只保留生命周期事件与时间。两者均不包含令牌、完整客户资料、发票正文或 Agent 输入输出；跨进程 request ID 仍待实现。
+- Sidecar 日志保留受控进程阶段、版本、错误码、HTTP 路由模板、request ID 和耗时；桌面壳日志只保留生命周期事件与时间。两者均不包含令牌、完整客户资料、发票正文或 Agent 输入输出。WebView→Sidecar request ID 已实现；Tauri 壳不在 HTTP 请求路径上，不向生命周期事件伪造 request ID。
 - 诊断页显示当前状态、最近失败和路径，支持复制脱敏摘要与打开日志目录。
 - 系统维护失败可以幂等生成本地收件箱项。
 
-当前已交付启动故障安全层和 Sidecar 日志纵切：Tauri 传入 `OPC_LOG_DIR`，Sidecar 也支持 `--logs` 和数据库同级默认 `logs/`；数据库启动/迁移及 Sidecar 启动失败写白名单 journal，下一次成功启动在 ready 前补偿为 Inbox Item。Sidecar 同时写 stderr 与 `opc-sidecar.log`，单文件最多 5 MiB、保留 `.1`～`.3` 三份归档；最终写入层遮盖会话令牌和 Bearer 值，访问记录不含 query/header/body，文件失效后降级 stderr。设置诊断页与脱敏诊断包 v1 已交付且不包含原始日志；无参数 command 可打开自身 `appLogDir`。Tauri 壳自身日志和跨进程 request ID 串联仍是目标功能。
+当前已交付启动故障安全层和双进程日志纵切：Tauri 传入 `OPC_LOG_DIR`，Sidecar 也支持 `--logs` 和数据库同级默认 `logs/`；数据库启动/迁移及 Sidecar 启动失败写白名单 journal，下一次成功启动在 ready 前补偿为 Inbox Item。Sidecar 同时写 stderr 与 `opc-sidecar.log`，单文件最多 5 MiB、保留 `.1`～`.3` 三份归档；最终写入层遮盖会话令牌和 Bearer 值，访问记录不含 query/header/body，文件失效后降级 stderr。Tauri 壳以独立文件记录白名单生命周期事件。设置诊断页与脱敏诊断包 v1 已交付且不包含原始日志；无参数 command 可打开自身 `appLogDir`。WebView→Sidecar request ID 串联也已交付。
 
 ### 签名离线更新
 
@@ -210,7 +210,7 @@
 - 会话令牌每次 Sidecar 启动重新生成，只存在于进程内。
 - 基础地址只能是 http://127.0.0.1:非零端口。
 - 浏览器请求要求允许的 Origin 和 Bearer Token。
-- 日志通过 request ID 关联 Tauri、Sidecar 和前端错误。
+- WebView 每次请求生成 UUID v4；Sidecar 将规范 UUID 写入 `X-Request-ID` 响应头、统一错误体和脱敏访问日志，前端网络/超时错误也保留本次生成值。Tauri 生命周期日志保持独立白名单事件。
 - Sidecar 重启使旧令牌失效，前端清除缓存连接后重新获取。
 - 数据库路径和 Artifact root 由桌面层在每次启动时注入；WebView 不持有内部 `objects/<artifact-id>` 路径，也不能绕过 Sidecar 读取或删除文件。Sidecar HTTP read/write timeout 为 180 秒；Task 文件上传和下载采用 120 秒客户端端到端超时，普通小型 JSON API 继续使用较短超时。
 
@@ -235,8 +235,8 @@
 
 ### v0.1-B：日志与维护
 
-- 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar/Tauri 壳脱敏日志、5 MiB/3 归档轮转、敏感信息排除和文件故障降级；继续实现跨进程 request ID。
-- 诊断页、脱敏摘要、诊断包 v1、无参数 `open_log_directory` 和 Tauri 壳自身日志已完成；继续实现跨进程 request ID。
+- 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar/Tauri 壳脱敏日志、5 MiB/3 归档轮转、敏感信息排除和文件故障降级；WebView→Sidecar request ID 已完成。
+- 诊断页、脱敏摘要、诊断包 v1、无参数 `open_log_directory`、Tauri 壳自身日志和 API request ID 关联已完成。
 - 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和 1–100 GiB 可配置低空间已接 maintenance 状态；无路径手动容量检查已在设置页交付，物理卷身份/同卷去重仍待评审。
 
 ### v0.1-C：系统集成
@@ -277,7 +277,8 @@
 - [x] Go Sidecar 脱敏日志落盘/轮转与 stderr 降级。
 - [x] 设置运行诊断可通过无参数 Tauri command 打开自身 `appLogDir`；浏览器模式不伪造路径。
 - [x] Tauri 壳白名单 JSONL 生命周期日志、5 MiB/3 归档、非普通目标拒绝与 stderr 降级。
-- [ ] 全局服务恢复页和跨进程 request ID。
+- [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
+- [ ] 全局服务恢复页。
 - [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。

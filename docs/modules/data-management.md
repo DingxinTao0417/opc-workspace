@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item。三个受控逻辑位置的无路径手动容量检查也已交付；数据库打开前恢复页、物理卷身份、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -198,7 +198,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `027_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。
+新增 schema 只能从 `030_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。
 
 ## v0.1 备份/恢复目标与当前进度
 

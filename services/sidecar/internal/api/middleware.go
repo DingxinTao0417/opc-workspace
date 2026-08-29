@@ -18,8 +18,11 @@ const requestIDContextKey = "request_id"
 func requestIDMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		requestID := strings.TrimSpace(c.GetHeader("X-Request-ID"))
-		if _, err := uuid.Parse(requestID); err != nil {
+		parsed, err := uuid.Parse(requestID)
+		if err != nil {
 			requestID = uuid.NewString()
+		} else {
+			requestID = parsed.String()
 		}
 		c.Set(requestIDContextKey, requestID)
 		c.Header("X-Request-ID", requestID)

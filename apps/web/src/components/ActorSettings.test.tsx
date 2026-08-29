@@ -41,10 +41,13 @@ const person = {
   version: 3,
 };
 
-function response(body: unknown, status = 200) {
+function response(body: unknown, status = 200, requestId?: string) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(requestId ? { "X-Request-ID": requestId } : {}),
+    },
   });
 }
 
@@ -68,23 +71,28 @@ afterEach(() => {
 describe("ActorSettings", () => {
   it("shows a retryable API error without inventing local actors", async () => {
     let attempts = 0;
-    const fetchMock = vi.fn(async () => {
-      attempts += 1;
-      if (attempts <= 3) {
-        return response(
-          {
-            code: "DATABASE_ERROR",
-            message: "本地数据库暂时不可用",
-            request_id: "request-actor-list",
-          },
-          503,
-        );
-      }
-      return response({
-        data: [owner, systemActor],
-        meta: { page: 1, page_size: 100, total: 2 },
-      });
-    });
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        attempts += 1;
+        if (attempts <= 3) {
+          const requestId =
+            new Headers(init?.headers).get("X-Request-ID") ?? "";
+          return response(
+            {
+              code: "DATABASE_ERROR",
+              message: "本地数据库暂时不可用",
+              request_id: requestId,
+            },
+            503,
+            requestId,
+          );
+        }
+        return response({
+          data: [owner, systemActor],
+          meta: { page: 1, page_size: 100, total: 2 },
+        });
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     renderActors();
@@ -95,7 +103,7 @@ describe("ActorSettings", () => {
       }),
     ).toBeTruthy();
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "本地数据库暂时不可用 · 请求 request-actor-list",
+      /本地数据库暂时不可用 · 请求 [0-9a-f-]{36}/,
     );
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
 

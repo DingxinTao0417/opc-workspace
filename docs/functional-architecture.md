@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.27
+> 文档版本：2.28
 > 日期：2026-08-28
-> 依据：[PRD v9.4](opc-workspace-PRD.md)
+> 依据：[PRD v9.5](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
 ## 1. 目的
@@ -77,7 +77,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及按 1–100 GiB 设置阈值运行的低空间投影已接 Inbox；Sidecar/Tauri 壳脱敏轮转日志和桌面打开日志目录已交付，跨进程 request ID 与恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及按 1–100 GiB 设置阈值运行的低空间投影已接 Inbox；Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录和 WebView→Sidecar request ID 关联已交付，数据库打开前恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 
@@ -290,7 +290,7 @@ BACKUP_INVALID（损坏/篡改）
   → 全部成功后删除 journal；失败保留重试
 ```
 
-journal 最多 16 条/64 KiB，同 kind 未消费前只保留最早一条。文件必须是非 symlink 普通文件，JSON 拒绝未知字段、未知 kind、非规范 UUID、非 UTC 时间和重复记录；非法文件隔离，不参与投影。投影先按稳定 `source_event_key` 查重，再检查同 source id 的 active incident，因此“数据库已提交但 journal 清理不确定”不会在用户处理旧事项后制造重复。`OPC_LOG_DIR`/`--logs` 默认落在数据库同级 `logs/`，并与 Artifact/backup root 隔离；Sidecar 与 Tauri 壳均在该目录写 5 MiB/3 归档的脱敏轮转日志，设置可打开目录；跨进程 request ID 和恢复页仍未实现。
+journal 最多 16 条/64 KiB，同 kind 未消费前只保留最早一条。文件必须是非 symlink 普通文件，JSON 拒绝未知字段、未知 kind、非规范 UUID、非 UTC 时间和重复记录；非法文件隔离，不参与投影。投影先按稳定 `source_event_key` 查重，再检查同 source id 的 active incident，因此“数据库已提交但 journal 清理不确定”不会在用户处理旧事项后制造重复。`OPC_LOG_DIR`/`--logs` 默认落在数据库同级 `logs/`，并与 Artifact/backup root 隔离；Sidecar 与 Tauri 壳均在该目录写 5 MiB/3 归档的脱敏轮转日志，设置可打开目录。WebView 每次请求生成 UUID v4，Sidecar 规范化后在响应头、错误体和访问日志中复用；Tauri 生命周期日志保持独立白名单事件，不伪造 HTTP request ID。数据库打开前恢复页仍未实现。
 
 ### 6.10 运行期数据库故障投影与降级
 
@@ -389,7 +389,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | Sidecar 启动失败                | 桌面平台                         | 展示全局恢复页；业务页面不得显示伪数据；shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止                                                                                                                                                                                                                                                                   |
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
 | 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。`BACKUP_INVALID` 与可解释业务结果不投影；启动应用失败转入下一行的 journal 补偿                                                                                                                                         |
-| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、可配置低空间监测和无路径手动容量检查已交付；恢复页、跨进程 request ID 和物理卷身份仍待实现 |
+| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、WebView→Sidecar request ID、可配置低空间监测和无路径手动容量检查已交付；恢复页和物理卷身份仍待实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。健康启动后只读诊断 API 汇总 pending、本次 applied、清理残留、失败隔离和 invalid 记录，设置页恢复门禁并脱敏展示；数据库打开前实时进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                              |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                      |
@@ -413,7 +413,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → 已交付：一次性 Reminder / 启动补偿 / 到期 Inbox 投影
   → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / Project 完成 / 备份与启动故障来源
   → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期改期、安全的开始/完成/开始专注快捷操作，以及编辑/版本化确认删除入口
-  → 已交付数据库启动/迁移、Sidecar 启动、运行期数据库与可配置低空间故障补偿、Sidecar/Tauri 壳脱敏轮转日志；继续恢复页与跨进程 request ID
+  → 已交付数据库启动/迁移、Sidecar 启动、运行期数据库与可配置低空间故障补偿、Sidecar/Tauri 壳脱敏轮转日志和 WebView→Sidecar request ID；继续恢复页
   → v0.2 本地 Agent / 预设自动化 / Task 看板
   → v0.3 路线图 / 内容日历 / 高级数据管理
   → v0.4 财务 / 发票 / 客户回访

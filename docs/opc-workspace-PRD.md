@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.4
+> **一人公司操作系统** · PRD v9.5
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
-> **v9.4 更新说明**：交付无路径手动容量检查。新增鉴权 `GET /api/v1/diagnostics/storage`，固定返回数据库、受控文件和本地备份三个逻辑位置的 `healthy / low / unavailable`、可用/总字节、检查时间与已保存阈值；响应不包含路径、盘符或探测错误，单个位置失败不伪造其他位置。设置“数据与备份”提供加载、局部状态、错误重试和手动刷新，并同时展示阈值草稿与本次服务端检查实际使用的已保存阈值。该只读端点不投影 Inbox、不改变低空间周期锁存。API 保持 v1，schema 保持 v29。
+> **v9.5 更新说明**：交付 WebView→Sidecar request ID 关联。前端每次 API 调用生成 UUID v4 并发送 `X-Request-ID`；Sidecar 只接受 UUID，规范化合法值、替换非法值，并在响应头、统一错误体和脱敏访问日志中复用。前端 HTTP、网络和超时错误均保留可展示的本次 request ID。访问日志继续只记录路由模板、方法、状态、耗时和 request ID，不写 query/header/body；Tauri 生命周期日志不在 HTTP 路径上，保持独立白名单事件。API v1/schema v29 不变。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -889,7 +889,7 @@ v0.1 第一版可配置：
 
 **历史原型（已移除）**：`modal-command-palette.html`
 
-> **当前状态**：核心本地搜索、本地最近使用、设置运行诊断入口、脱敏诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录与全局渲染错误恢复已完成。支持已交付页面/安全操作命令、真实 Task/Project/Client/活动 Inbox 统一搜索、精确可刷新详情路由和完整键盘交互；空查询可展示有上限的非敏感最近命令/资源，并在确认资源 404 后清理。启动恢复页、跨进程 request ID 和 OS 全局快捷键仍待开发。
+> **当前状态**：核心本地搜索、本地最近使用、设置运行诊断入口、脱敏诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录、WebView→Sidecar request ID 与全局渲染错误恢复已完成。支持已交付页面/安全操作命令、真实 Task/Project/Client/活动 Inbox 统一搜索、精确可刷新详情路由和完整键盘交互；空查询可展示有上限的非敏感最近命令/资源，并在确认资源 404 后清理。启动恢复页和 OS 全局快捷键仍待开发。
 
 - 模糊搜索所有页面、任务、项目、客户、发票
 - 快速执行操作：新建任务、切换页面、开始专注、生成发票
@@ -1674,7 +1674,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影和无路径手动容量检查、T-06A–H、T-07A–D 和 T-04B 一致性备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表第 9.1 节的完整 MVP、Focus 原生反馈、物理卷身份、数据库打开前恢复页、跨进程 request ID、Agent 或冲突合并导入已经交付。
+> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、WebView→Sidecar request ID、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影和无路径手动容量检查、T-06A–H、T-07A–D 和 T-04B 一致性备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表第 9.1 节的完整 MVP、Focus 原生反馈、物理卷身份、数据库打开前恢复页、Agent 或冲突合并导入已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1694,7 +1694,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | Sidecar      | Go 1.22+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | API / Schema | API v1；SQLite schema v29                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 数据默认值   | 开发数据库默认空白，不自动注入 demo 业务数据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 明确边界     | 当前代码不使用 Docker；已实现 Task/Actor/D1/D2、Project、Client、Focus、Inbox/Reminder/Task 编排、已登记来源投影、运行期数据库故障、可配置低空间安全投影和无路径手动容量检查、基础备份闭环、业务 JSON 与含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志及打开目录；未实现 Client 外部来源、Focus 原生反馈、物理卷身份/同卷去重、桌面恢复页/跨进程 request ID、重复/原生通知、Agent、非空目标/跨 schema 冲突合并导入、AI、知识库、回访或财务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
+| 明确边界     | 当前代码不使用 Docker；已实现 Task/Actor/D1/D2、Project、Client、Focus、Inbox/Reminder/Task 编排、已登记来源投影、运行期数据库故障、可配置低空间安全投影和无路径手动容量检查、基础备份闭环、业务 JSON 与含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志及打开目录、WebView→Sidecar request ID；未实现 Client 外部来源、Focus 原生反馈、物理卷身份/同卷去重、桌面恢复页、重复/原生通知、Agent、非空目标/跨 schema 冲突合并导入、AI、知识库、回访或财务；person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
 ### 10.2 单项任务统一开发流程
 
@@ -1746,7 +1746,7 @@ pnpm dev
 - 生产请求，包括 `/health`，必须携带 Bearer 会话令牌。
 - v0.2 Agent Runtime 不接受上述 WebView 会话令牌；必须使用 ADR 定义的进程管道或专用路由与单次能力令牌。
 - 浏览器请求必须携带匹配精确白名单的 Origin；不允许通配符。
-- 请求 ID 使用 UUID；错误体统一为 `{code, message, request_id}`。
+- 前端每次请求生成 UUID v4 并发送 `X-Request-ID`；Sidecar 只接受 UUID、将合法值规范为 canonical lowercase，非法或缺失值替换为新 UUID。响应头和统一错误体 `{code, message, request_id}` 使用同一值；前端网络/超时错误沿用出站值。
 - JSON 请求限制为 1 MiB，拒绝未知字段和多余 JSON 值。
 - API 时间戳使用 RFC 3339 UTC，纯日期使用 `YYYY-MM-DD`，金额使用最小货币单位整数。
 - 写操作使用事务；可重试创建操作使用 `Idempotency-Key`。
@@ -1764,7 +1764,7 @@ pnpm dev
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v26，新增结构只能从 `027_*` 继续追加递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v29，新增结构只能从 `030_*` 继续追加递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1772,7 +1772,7 @@ pnpm dev
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–010 依次增加 Project、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实；011–014 依次交付 Focus Session、手工 Inbox、Inbox–Task 关系和一次性 Reminder；015 增加 Inbox 自动结清索引与数据库校验；016 增加空的版本化 `app_settings`；017 增加空的版本化 `task_saved_views`；018 增加客户活动；019 增加受控客户附件；020 增加 Client–person contact 关联；021 增加 Project Note；022 增加受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；023 增加 Task Artifact follow-up 来源保护；024 增加 Task 阻塞事件来源身份、查询索引、不可变和删除协调保护；025 增加 Task 临期来源保护；026 增加系统维护来源身份、活动 incident 唯一索引、不可变快照和禁止来源删除标记。迁移文件首行可声明 `-- migration: foreign_keys=off`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–010 依次增加 Project、Task、Actor/Assignment/Event、Submission/Artifact 与 Client 事实；011–014 依次交付 Focus Session、手工 Inbox、Inbox–Task 关系和一次性 Reminder；015 增加 Inbox 自动结清索引与数据库校验；016 增加空的版本化 `app_settings`；017 增加空的版本化 `task_saved_views`；018 增加客户活动；019 增加受控客户附件；020 增加 Client–person contact 关联；021 增加 Project Note；022 增加受控 Project Attachment、完整性/删除墓碑、跨领域 object ID 唯一保护和 Project 聚合版本传播；023 增加 Task Artifact follow-up 来源保护；024 增加 Task 阻塞事件来源身份、查询索引、不可变和删除协调保护；025 增加 Task 临期来源保护；026 增加系统维护来源身份、活动 incident 唯一索引、不可变快照和禁止来源删除标记；027 增加受控 Workspace Avatar 事实与 guards；028 增加 Project 完成节点 Inbox 来源与删除协调；029 经破坏性迁移闸门扩展 `app_settings.storage` 并保留既有设置事实。迁移文件头可声明连续组合的 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回；破坏性迁移还要求先生成并验证回滚包。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -1791,7 +1791,7 @@ pnpm dev
 | T-10 收入、支出与发票                | 页面骨架                     | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                                                                                                                                                                                                                  |
 | T-11 收件箱与工作编排中心            | 部分完成                     | T-11A1/A2/A3/B/C/F 已交付；T-11E 已交付 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间投影；无路径手动容量检查已在设置页交付，物理卷身份/同卷去重与 Agent 待实现                                                                                                                                                     |
 | T-12 专注设置与全局计时              | Core+D1+D2a+D2b 分析完成     | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1/D2b：终态历史分页、7/30 天/本月/最多 93 天自定义本地日趋势、Streak、项目/当前标签分布、DST 安全小时分布/最佳时段与周几×小时二维热力图；D2a：Task 详情按需专注记录已交付；通知/托盘/DND 延后                                                            |
-| T-13 命令面板与基础反馈              | 核心搜索、诊断与恢复反馈完成 | WebView 快捷键、已交付页面命令、Task/Project/Client/活动 Inbox 统一本地搜索、稳定详情路由、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护、加载/错误/重试/空状态、非敏感最近使用/404 资源清理、脱敏运行诊断/诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、打开日志目录与全局渲染错误恢复；桌面恢复页、跨进程 request ID 和 OS 全局快捷键待后续                                                                               |
+| T-13 命令面板与基础反馈              | 核心搜索、诊断与恢复反馈完成 | WebView 快捷键、已交付页面命令、Task/Project/Client/活动 Inbox 统一本地搜索、稳定详情路由、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护、加载/错误/重试/空状态、非敏感最近使用/404 资源清理、脱敏运行诊断/诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、打开日志目录、WebView→Sidecar request ID 与全局渲染错误恢复；桌面恢复页和 OS 全局快捷键待后续                                                                               |
 | T-14 设置持久化                      | 核心闭环完成                 | schema v16 四模块严格设置 + schema v27 受控头像；原子 PATCH/multipart、乐观锁、Query committed、即时预览/取消、旧 Data URL 迁移和备份恢复已交付；空工作区同 schema 业务 JSON/含文件 ZIP 导入已交付，非空目标/跨 schema 冲突合并待开发                                                                                                                                                                                                          |
 | T-20 测试、构建与桌面验收            | 部分完成                     | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制                                                                                                                                                                                                                                                                                                          |
 | T-15 AI 助手                         | 未开始                       | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码                                                                                                                                                                                                                                                                                                         |
@@ -2055,7 +2055,7 @@ pnpm build:desktop
 4. **继续收件箱来源投影**：T-11A1/A2/A3/B/C/F 的手工受理分诊、已有 Task 关系、Reminder、批量拆分/Assignment、统一 reconciliation、自动解决和运营统计，以及 follow-up Artifact/Task 阻塞/Task 临期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置主动低空间投影均已交付；无路径手动容量检查已在设置页交付，下一步继续真实业务来源并另行纵切物理卷身份/同卷去重。
 5. **扩展 Focus D2b**：Core A+B+C、D1、D2a 与日期范围回顾的持久化、恢复、精确工时、Today 统计、终态历史、7/30 天/本月/自定义趋势、Streak、项目/当前标签时间分布、DST 安全小时分布/最佳时段、周几×小时二维热力图和 Task 详情记录已交付；后续独立实现经平台验收的原生通知、托盘和 DND 引导。
 6. **补数据安全链路**：一致性备份完整闭环、迁移前自动回滚、启动后恢复结果诊断、业务 JSON 与含文件 ZIP 的空工作区同 schema 安全导入导出、脱敏诊断包 v1 已交付；下一步补跨 schema/非空目标冲突映射、大数据量进度与数据库打开前恢复页。
-7. **补桌面可靠性与发布能力**：Go Sidecar/Tauri 壳脱敏日志落盘/轮转和桌面打开日志目录已交付；继续实现跨进程 request ID、Sidecar 故障恢复、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页。
+7. **补桌面可靠性与发布能力**：Go Sidecar/Tauri 壳脱敏日志落盘/轮转、桌面打开日志目录和 WebView→Sidecar request ID 已交付；继续实现 Sidecar 故障恢复、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页。
 8. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、复用 D2 产出命令、取消/重试和审核返工。
 9. **实现本地规划与预设自动化**：路线图、内容日历和规则引擎只创建本地收件箱项/任务，不自动对外发送。
 10. **排期 v0.4 业务版**：实现客户回访、收入/支出/发票纵切及其本地事件源；先数据契约和 CRUD，再做提醒、统计图和 PDF。
@@ -2074,7 +2074,7 @@ pnpm build:desktop
 | 5    | 收件箱人工编排            | **T-11A1/A2/A3/B/C/F 已交付**：schema v12–v15 的 Inbox/关系/Reminder/编排事实，manual 受理、Task 拆分分派、自动结清/重开和实时运营计数；schema v23–v26 已交付 follow-up Artifact、Task 阻塞、Task 临期及备份创建/校验失败，当前已追加恢复演练/恢复安排、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测；无路径手动容量检查已在设置页交付，物理卷身份/同卷去重仍待评审 | **已交付**：三视图、详情/分诊、Reminder、Task 关系/拆分、强制例外、风险筛选、Sidebar 徽标、Today 风险卡，以及已交付来源的上下文/图标                                           | 当前覆盖离线、迁移、幂等/并发、事务回滚、实时进度、Task 删除互锁、Reminder/follow-up/阻塞/临期、备份四类操作失败、启动/运行期/低空间 journal 稳定重放与去重、低空间阈值、周期抑制、拆分全回滚、自动结清/重开和计数口径 |
 | 6    | 今日                      | 按本地日期、逾期和本周范围查询；完整计划组排序事务；版本化单任务改期/生命周期/删除命令；Focus Session 幂等创建；按 IANA 时区计算 UTC 边界；收件箱派生计数                                                                                                                                                                    | 日期导航、真实分组、按钮/同日/跨日期拖拽、空精确日期/未排期落点、任意日期安排、安全执行快捷操作及编辑/确认删除入口已交付；财务卡标后续                                         | 已覆盖完整分页、排序集合/版本、终态槽位、跨组乐观回滚、空组、改期冲突/模糊响应、排序部分成功、快捷策略和删除保护；仍需真实浏览器验证 hover/focus、日期控件、指针拖拽、窄屏及午夜/夏令时边界                                 |
 | 7    | 专注                      | **Core A+B 已交付**：A 为 schema v11 Session/interval/ledger 事实迁移；B 为状态 API、绝对时间、心跳/恢复、幂等并发、Task 工时事务与 IANA Today 统计                                                                                                                                                                          | **Core C 已交付**：任务选择、无绑定确认、共享活动快照、恢复弹窗、设置隔离与循环/休息；历史/周报/Streak/系统集成为 D                                                            | 自动化已覆盖跨午夜/DST、并发/重复 stop、恢复、余秒和事务；真实三平台后台/睡眠及 D 能力后续验收                                                                                                                              |
-| 8    | 设置与命令面板            | Actor API、health/version、Tauri Sidecar 生命周期、schema v16 app_settings、schema v27 受控头像、Query committed、旧 localStorage 迁移、手动备份/恢复/业务导出、诊断包、Sidecar/Tauri 壳轮转日志、打开日志目录及统一 search API 已接入                                                                                                              | “人员与责任”支持 owner/person；个人资料支持名称与头像即时预览/保存/取消；设置支持 8 个左栏模块，运行诊断可重查、复制脱敏摘要、下载诊断包并打开日志目录；命令面板支持多实体搜索和稳定详情路由 | 已覆盖设置/头像/备份/导出、诊断包白名单与隐私、双进程日志脱敏/轮转/降级、搜索契约、IME、焦点恢复、health 与桌面状态脱敏；仍需真实 WebView/窄屏验收，通知、OS 快捷键、跨进程 request ID 和恢复页仍为后续                                                |
+| 8    | 设置与命令面板            | Actor API、health/version、Tauri Sidecar 生命周期、schema v16 app_settings、schema v27 受控头像、Query committed、旧 localStorage 迁移、手动备份/恢复/业务导出、诊断包、Sidecar/Tauri 壳轮转日志、打开日志目录、WebView→Sidecar request ID 及统一 search API 已接入                                                                                                              | “人员与责任”支持 owner/person；个人资料支持名称与头像即时预览/保存/取消；设置支持 8 个左栏模块，运行诊断可重查、复制脱敏摘要、下载诊断包并打开日志目录；命令面板支持多实体搜索和稳定详情路由 | 已覆盖设置/头像/备份/导出、诊断包白名单与隐私、双进程日志脱敏/轮转/降级、request ID、搜索契约、IME、焦点恢复、health 与桌面状态脱敏；仍需真实 WebView/窄屏验收，通知、OS 快捷键和恢复页仍为后续                                                |
 | 9    | 数据安全                  | 已交付一致性快照、验证/演练/恢复/删除、迁移/恢复/导入前回滚点、启动后恢复结果诊断、业务 JSON 与含文件 ZIP 的空工作区安全导入导出、失败 Inbox 投影；v0.3 增加计划/映射 | 已交付备份全流程、恢复状态重查/门禁、两类业务下载及两类导入的预检、确认与结果反馈；冲突合并导入仍不开放 | 已覆盖真实 Artifact、篡改、恢复、恢复诊断脱敏、导出隐私/ZIP 完整性，以及 JSON/ZIP 导入门禁、回滚、trigger/外键、文件校验和失败补偿；仍须覆盖低磁盘、数据库打开前进度、跨 schema/非空目标与真实磁盘故障 |
 | 10   | 桌面与发布                | Sidecar 自动/手动恢复、孤儿治理、日志、版本兼容；托盘/通知/全局快捷键/文件对话框/自启/签名离线更新；三平台 CI                                                                                                                                                                                                                | 全局服务状态、恢复页、托盘语义、权限引导、离线安装/更新反馈                                                                                                                    | 崩溃/超时/退出无残留；签名、公证、干净机、性能和数据保留逐平台验证后才宣称支持                                                                                                                                              |
 | 11   | 本地 Agent（v0.2）        | Adapter ADR、专用鉴权、短时令牌、跨平台沙箱/网络边界、Agent Run、取消/重试/中断恢复                                                                                                                                                                                                                                          | 只显示健康且隔离已验证的 Agent；启动、运行、输出、失败、重试、待验收和返工                                                                                                     | 无任意 Shell/数据库/目录；禁网无法验证时执行保持禁用；成功进入 waiting_review；产出校验和历史完整                                                                                                                           |
@@ -2398,3 +2398,4 @@ pnpm build:desktop
 | v9.2     | 2026-08-28 | 交付 Tauri 壳自身脱敏轮转日志：`appLogDir/opc-workspace.log` 仅记录白名单 JSONL 生命周期事件与 Unix 毫秒时间，覆盖 setup、Sidecar 状态、shutdown/restart/exit；不接受任意文本、路径、Token、原始错误或业务数据。5 MiB/3 归档，拒绝 symlink/非普通目标，文件故障降级 stderr 不阻断启动；既有日志目录入口可查看，schema 保持 v28。 |
 | v9.3     | 2026-08-28 | 交付可配置低空间阈值：schema v29 在破坏性迁移闸门和已验证回滚包后扩展 `app_settings.storage`，保留既有设置事实/triggers；默认 1 GiB，只接受 1–100 GiB 整数。数据与备份页面点击即预览、保存后下一轮扫描生效、取消不写入；Sidecar 每轮读取最新设置，读取失败沿用进程最近安全值或默认值，既有周期抑制/journal 降级保持。Inbox 不记录阈值、路径或精确容量，API 保持 v1。 |
 | v9.4     | 2026-08-28 | 交付无路径手动容量检查：鉴权 `GET /api/v1/diagnostics/storage` 固定返回数据库/受控文件/备份三个逻辑位置的 `healthy/low/unavailable`、可用/总字节、检查时间和已保存阈值；不返回路径、盘符或探测错误，局部失败独立展示。设置页提供加载/重试/刷新并区分阈值草稿与实际检查阈值；只读检查不投影 Inbox、不改变周期锁存。API v1/schema v29 不变。 |
+| v9.5     | 2026-08-28 | 交付 WebView→Sidecar request ID：前端每次 API 调用生成 UUID v4 并发送 `X-Request-ID`；Sidecar 规范化合法 UUID、替换非法值，在响应头、错误体和脱敏访问日志中复用。HTTP/网络/超时错误均保留可展示 ID；日志不增加 query/header/body，Tauri 生命周期日志保持独立白名单事件。API v1/schema v29 不变。 |
