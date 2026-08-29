@@ -44,6 +44,7 @@ import {
   downloadClientAttachment,
   downloadProjectAttachment,
   downloadBusinessDataExport,
+  downloadDiagnosticPackage,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -285,6 +286,10 @@ export function useDeleteBackup() {
 
 export function useExportBusinessData() {
   return useMutation({ mutationFn: downloadBusinessDataExport });
+}
+
+export function useDownloadDiagnosticPackage() {
+  return useMutation({ mutationFn: downloadDiagnosticPackage });
 }
 
 export function useAppSettingsQuery(enabled = true) {

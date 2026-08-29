@@ -1614,3 +1614,9 @@ export interface BusinessDataExportDownload {
   fileName: string;
   formatVersion: 1;
 }
+
+export interface DiagnosticPackageDownload {
+  blob: Blob;
+  fileName: string;
+  formatVersion: 1;
+}

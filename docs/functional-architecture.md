@@ -2,7 +2,7 @@
 
 > 文档版本：2.19
 > 日期：2026-08-28
-> 依据：[PRD v8.2](opc-workspace-PRD.md)
+> 依据：[PRD v8.3](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
@@ -61,7 +61,7 @@
 - 归档项目不再接受新任务关联；schema v5 让任务、发票和客户聚合事实变化同步失效 Project `ETag`，避免基于旧汇总完成、归档或硬删除。
 - Client 列表/详情/创建/编辑/停用/恢复/确认硬删除已接真实 API；创建支持首次响应快照幂等，PATCH/DELETE 使用聚合 `ETag`，项目数从 Project 实时派生，最近动态从未删除 Activity 派生。人工 note/meeting 支持幂等创建、稳定分页、活动版本化编辑和带原因软删除；Client Attachment 支持严格 multipart 上传、稳定分页、完整性下载、软删历史和聚合删除文件补偿；Client contact 支持已有/原子新建 person 二选一、单 active 关系、带原因解除和不可变历史。相关变化都会使旧 Client 版本失效。Project 客户关联变化使旧 Client 版本失效，Client 名称变化继续使旧 Project 版本失效；Invoice 强引用阻止删除，Project 可选关联按外键置空。
 - schema v7 以固定 UUID 初始化唯一 owner 与 system，按历史任务完成状态幂等回填 owner Assignment 和 `migration_assignment_backfill` 事件；数据库保护内置主体、活动分派与引用历史。
-- 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。“关于”按需读取 `/health`；“运行诊断”再读取并白名单化 Tauri Sidecar 状态，展示环境/生命周期/版本兼容并可复制脱敏摘要，原始令牌、地址、错误与路径不进入诊断模型。
+- 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。“关于”按需读取 `/health`；“运行诊断”再读取并白名单化 Tauri Sidecar 状态，展示环境/生命周期/版本兼容、复制脱敏摘要并下载诊断包 v1。诊断包只含版本/平台、SQLite 健康/迁移和系统维护错误码汇总，原始令牌、地址、路径、错误和业务正文不进入诊断模型或 ZIP。
 - React 路由树由全局错误边界保护：页面或 AppShell 渲染失败时替换为安全恢复页，原始异常不显示或持久化；用户可重新渲染、返回今日，或打开位于错误边界外的设置运行诊断。路由变化会复位失败状态。
 - 设置事实层已接 schema v16 与 `GET/PATCH /api/v1/settings`，schema v27 再接 `POST /settings/avatar` 与鉴权 content：头像选择只写 preview，保存时受控文件 replace/remove 与变化设置原子提交，取消恢复 committed。历史 localStorage Data URL 仅在服务端无头像时一次性导入，已存在服务端引用始终优先；验证后清理本地内容。
 - 任务详情已接 Assignment API/UI：可查询当前 assignee/reviewer 与结束历史，完成首次分派、改派和结束；命令使用 Task `If-Match`/`version`、可选幂等快照和事务化 Workflow Event。完成 Task 会结束活动 Assignment，重新打开不会恢复旧记录。
@@ -116,7 +116,7 @@
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                                                 | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                              | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                               |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                                       | 单次受控执行                                                                                                                             | Agent Run、Task Artifact、待验收或失败事件                                                          |
 | [专注](modules/focus.md)                   | 当前 Task                                                                                                     | 活动 Session 和有效工时                                                                                                                  | Task actual_minutes、今日/统计数据                                                                  |
-| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health`、Tauri Sidecar 状态与数据维护 API | 本地偏好、person 管理、脱敏运行诊断、备份闭环和业务 JSON 下载；导入、完整日志/诊断包与恢复页待实现                                       | 布局、主题、Focus 默认值、Actor、运行版本、备份/导出和桌面行为                                      |
+| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、旧值缺失模块迁移、Actor API、`/health`、Tauri Sidecar 状态与数据维护 API | 本地偏好、person 管理、脱敏运行诊断/诊断包、备份闭环和业务 JSON 下载；导入、完整日志落盘/轮转与恢复页待实现                              | 布局、主题、Focus 默认值、Actor、运行版本、诊断、备份/导出和桌面行为                                |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                                       | 参数化统一本地查找、确定性相关排序、非敏感有上限最近使用与快捷操作入口                                                                   | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                                |
 | [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                             | 已实现 Task Artifact/Client Attachment 一致性、手动备份完整闭环、创建失败的安全 Inbox 投影和基础业务 JSON 导出；导入与含文件外部包仍规划 | 当前文件安全、已校验备份、恢复后的完整应用状态、备份失败 Inbox Item 与业务 JSON；未来导入包与诊断包 |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                       | 原生窗口、进程、权限、运行日志和发布                                                                                                     | 可运行、可诊断的本地应用环境                                                                        |
@@ -270,7 +270,7 @@ BACKUP_INVALID（损坏/篡改）
 → 原错误响应保持不变
 → Sidecar 尽力投影 source_entity_id=backup:restore
 
-该链路复用 schema v26 的系统维护约束，当前已交付 `create / verify / drill / restore` 四个 operation。payload 只含 `component / operation / failure_code / occurred_at / message`。投影失败只记内部日志，不改变备份错误响应；`BACKUP_INVALID`、请求错误、包不存在、工作区不匹配和已有恢复计划均不投影。数据库/Sidecar 启动失败由下一节的安全 journal 补偿；运行期数据库不可写和完整诊断包仍未实现。
+该链路复用 schema v26 的系统维护约束，当前已交付 `create / verify / drill / restore` 四个 operation。payload 只含 `component / operation / failure_code / occurred_at / message`。投影失败只记内部日志，不改变备份错误响应；`BACKUP_INVALID`、请求错误、包不存在、工作区不匹配和已有恢复计划均不投影。数据库/Sidecar 启动失败由下一节的安全 journal 补偿；运行期数据库不可写仍未实现。诊断包 v1 只导出这些来源的错误码、状态、数量和最近发生时间，不导出 payload 正文。
 
 ### 6.9 启动前故障 journal 与补偿投影
 

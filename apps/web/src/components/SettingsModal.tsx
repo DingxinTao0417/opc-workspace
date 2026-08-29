@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Copy,
   DatabaseBackup,
+  Download,
   Focus,
   ImagePlus,
   Info,
@@ -29,6 +30,7 @@ import {
   useAppSettingsQuery,
   useCommitAppSettingsWithAvatar,
   useHealthQuery,
+  useDownloadDiagnosticPackage,
   useUpdateAppSettings,
 } from "../api/hooks";
 import {
@@ -264,6 +266,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const [diagnosticCopyState, setDiagnosticCopyState] = useState<
     "idle" | "copied" | "error"
   >("idle");
+  const [diagnosticPackageFeedback, setDiagnosticPackageFeedback] = useState<
+    string | null
+  >(null);
   const settingsQuery = useAppSettingsQuery(open);
   const settingsMutation = useUpdateAppSettings();
   const avatarMutation = useCommitAppSettingsWithAvatar();
@@ -271,6 +276,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const healthQuery = useHealthQuery(
     open && (activeModule === "about" || activeModule === "diagnostics"),
   );
+  const diagnosticPackageMutation = useDownloadDiagnosticPackage();
 
   useEffect(() => {
     if (!open || activeModule !== "diagnostics") return;
@@ -278,6 +284,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setRuntimeDiagnosticsPending(true);
     setRuntimeDiagnosticsError(false);
     setDiagnosticCopyState("idle");
+    setDiagnosticPackageFeedback(null);
     void getRuntimeDiagnostics()
       .then((result) => {
         if (!cancelled) setRuntimeDiagnostics(result);
@@ -390,6 +397,34 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     } catch {
       setDiagnosticCopyState("error");
     }
+  };
+
+  const downloadDiagnostics = () => {
+    setDiagnosticPackageFeedback(null);
+    diagnosticPackageMutation.reset();
+    diagnosticPackageMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        if (typeof URL.createObjectURL !== "function") {
+          setDiagnosticPackageFeedback(
+            "当前运行环境不支持保存诊断包，请在桌面应用中重试。",
+          );
+          return;
+        }
+        const url = URL.createObjectURL(result.blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.fileName;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        setDiagnosticPackageFeedback(`诊断包已生成：${result.fileName}`);
+      },
+      onError: () => {
+        setDiagnosticPackageFeedback("诊断包生成失败，请保留当前页面并重试。");
+      },
+    });
   };
 
   const changeAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -966,12 +1001,26 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           ) : null}
           <div className="settings-about-actions settings-diagnostic-actions">
             <span aria-live="polite" className="settings-diagnostic-feedback">
-              {diagnosticCopyState === "copied"
-                ? "脱敏摘要已复制"
-                : diagnosticCopyState === "error"
-                  ? "浏览器未允许复制，请稍后重试"
-                  : ""}
+              {diagnosticPackageFeedback ??
+                (diagnosticCopyState === "copied"
+                  ? "脱敏摘要已复制"
+                  : diagnosticCopyState === "error"
+                    ? "浏览器未允许复制，请稍后重试"
+                    : "")}
             </span>
+            <button
+              className="button button-secondary"
+              disabled={diagnosticPackageMutation.isPending}
+              onClick={downloadDiagnostics}
+              type="button"
+            >
+              {diagnosticPackageMutation.isPending ? (
+                <LoaderCircle className="animate-spin" size={14} />
+              ) : (
+                <Download size={14} />
+              )}
+              {diagnosticPackageMutation.isPending ? "正在生成…" : "生成诊断包"}
+            </button>
             <button
               className="button button-secondary"
               onClick={() => void copyDiagnosticSummary()}
@@ -1000,7 +1049,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </button>
           </div>
           <p className="settings-inline-note">
-            摘要不会包含会话令牌、监听地址、本地路径、底层错误或业务数据。完整日志与诊断包仍未实现。
+            摘要与诊断包不会包含会话令牌、监听地址、本地路径、底层错误或业务数据；诊断包
+            v1
+            只包含版本、平台、数据库健康、迁移清单和系统维护错误码汇总，不包含原始日志。
           </p>
         </>
       );

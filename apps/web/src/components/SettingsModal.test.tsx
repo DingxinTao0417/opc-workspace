@@ -157,6 +157,16 @@ describe("SettingsModal", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (url.endsWith("/api/v1/diagnostics/package")) {
+          return new Response(new Uint8Array([80, 75, 3, 4]), {
+            headers: {
+              "Content-Type": "application/zip",
+              "Content-Disposition":
+                'attachment; filename="opc-workspace-diagnostics-test.zip"',
+              "X-Diagnostic-Format-Version": "1",
+            },
+          });
+        }
         return new Response(
           JSON.stringify(
             url.includes("/api/v1/settings")
@@ -473,9 +483,10 @@ describe("SettingsModal", () => {
     expect(screen.getByText("v0.1.0 · v1")).toBeVisible();
     expect(
       screen.getByText(
-        "摘要不会包含会话令牌、监听地址、本地路径、底层错误或业务数据。完整日志与诊断包仍未实现。",
+        "摘要与诊断包不会包含会话令牌、监听地址、本地路径、底层错误或业务数据；诊断包 v1 只包含版本、平台、数据库健康、迁移清单和系统维护错误码汇总，不包含原始日志。",
       ),
     ).toBeVisible();
+    expect(screen.getByRole("button", { name: "生成诊断包" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
   });
 

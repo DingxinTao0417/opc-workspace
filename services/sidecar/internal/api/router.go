@@ -154,6 +154,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	v1 := router.Group("/api/" + Version)
 	v1.Use(service.maintenanceReadMiddleware())
 	{
+		v1.GET("/diagnostics/package", service.downloadDiagnosticPackage)
 		v1.GET("/exports/business-data", service.exportBusinessData)
 		v1.GET("/backups", service.listBackups)
 		v1.POST("/backups", service.createBackup)

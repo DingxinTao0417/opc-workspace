@@ -13,6 +13,7 @@ import type {
   BackupRestoreDrillResult,
   BackupVerificationStatus,
   BusinessDataExportDownload,
+  DiagnosticPackageDownload,
   ScheduledBackupRestoreResult,
   SearchListParams,
   SearchListResult,
@@ -5144,6 +5145,31 @@ export async function downloadBusinessDataExport(): Promise<BusinessDataExportDo
     },
     {},
     "application/json",
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+}
+
+export async function downloadDiagnosticPackage(): Promise<DiagnosticPackageDownload> {
+  return apiFetch(
+    "/api/v1/diagnostics/package",
+    async (response) => {
+      if (
+        response.headers.get("X-Diagnostic-Format-Version") !== "1" ||
+        !response.headers.get("Content-Type")?.startsWith("application/zip")
+      ) {
+        return invalidResponse("诊断包响应格式无效");
+      }
+      return {
+        blob: await response.blob(),
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          "opc-workspace-diagnostics.zip",
+        ),
+        formatVersion: 1,
+      };
+    },
+    {},
+    "application/zip",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
 }
