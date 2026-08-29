@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Clock3,
   GitBranch,
   Hourglass,
   Inbox as InboxIcon,
@@ -13,7 +14,7 @@ import {
   RotateCcw,
   Target,
 } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
@@ -23,6 +24,7 @@ import {
   useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useResetTaskOrder,
+  useTaskPageQuery,
   useTaskLifecycleCommand,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
@@ -99,6 +101,10 @@ const todayGroupKeys = [
   "unscheduled",
 ] as const satisfies readonly (keyof TodayTaskGroups)[];
 
+type DueRiskFilter = "overdue" | "due_soon";
+
+const riskPageSize = 20;
+
 function previewTaskDrop(
   groups: TodayTaskGroups,
   source: Task,
@@ -164,12 +170,24 @@ export function TodayPage() {
   const today = new Date();
   const todayKey = localDateKey(today);
   const [dateKey, setDateKey] = useState(todayKey);
+  const [riskFilter, setRiskFilter] = useState<DueRiskFilter | null>(null);
+  const [riskPage, setRiskPage] = useState(1);
   const [planningTask, setPlanningTask] = useState<Task | null>(null);
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
   const selectedDate = dateFromKey(dateKey);
   const isToday = dateKey === todayKey;
   const taskGroupsQuery = useTodayTaskGroupsQuery(dateKey);
   const statsQuery = useTodayStatsQuery(dateKey);
+  const riskTasksQuery = useTaskPageQuery(
+    {
+      page: riskPage,
+      pageSize: riskPageSize,
+      status: "active",
+      dueState: riskFilter ?? undefined,
+      sort: "due_date",
+    },
+    riskFilter !== null,
+  );
   const inboxStatsQuery = useInboxStatsQuery();
   const focusQuery = useActiveFocusSessionQuery();
   const lifecycleMutation = useTaskLifecycleCommand();
@@ -185,13 +203,47 @@ export function TodayPage() {
   const focusCycles = useSettingsStore((state) => state.cycles);
   const focusPhase = useFocusCycleStore((state) => state.phase);
   const beginFocusWork = useFocusCycleStore((state) => state.beginWork);
+  const riskTotal = riskTasksQuery.data?.meta.total ?? 0;
+  const effectiveRiskPageSize = Math.max(
+    1,
+    riskTasksQuery.data?.meta.pageSize ?? riskPageSize,
+  );
+  const riskPageCount = Math.max(
+    1,
+    Math.ceil(riskTotal / effectiveRiskPageSize),
+  );
+  const riskPageOutOfRange = riskTotal > 0 && riskPage > riskPageCount;
+  const riskListReady =
+    riskFilter !== null &&
+    riskTasksQuery.isSuccess &&
+    !riskTasksQuery.isFetching &&
+    !riskTasksQuery.isPlaceholderData;
+
+  useEffect(() => {
+    if (
+      riskFilter !== null &&
+      riskTasksQuery.isSuccess &&
+      !riskTasksQuery.isPlaceholderData &&
+      riskPage > riskPageCount
+    ) {
+      setRiskPage(riskPageCount);
+    }
+  }, [
+    riskFilter,
+    riskPage,
+    riskPageCount,
+    riskTasksQuery.isPlaceholderData,
+    riskTasksQuery.isSuccess,
+  ]);
   const live = taskGroupsQuery.isSuccess;
+  const orderMutationPending =
+    moveMutation.isPending ||
+    crossPlanMutation.isPending ||
+    resetOrderMutation.isPending;
+  const riskSwitchDisabled =
+    orderMutationPending || sharedDraggingTask !== null;
   const reorderReady =
-    live &&
-    !taskGroupsQuery.isFetching &&
-    !moveMutation.isPending &&
-    !crossPlanMutation.isPending &&
-    !resetOrderMutation.isPending;
+    live && !taskGroupsQuery.isFetching && !orderMutationPending;
   const reorderError =
     reorderErrorText(crossPlanMutation.error) ??
     reorderErrorText(moveMutation.error) ??
@@ -208,10 +260,12 @@ export function TodayPage() {
       ? (createFocusMutation.variables?.taskId ?? null)
       : null;
   const quickActionsDisabled =
-    taskGroupsQuery.isFetching ||
     lifecycleMutation.isPending ||
     createFocusMutation.isPending ||
-    !reorderReady;
+    orderMutationPending ||
+    (riskFilter !== null
+      ? !riskListReady
+      : taskGroupsQuery.isFetching || !reorderReady);
   const focusActionDisabled =
     !focusQuery.isSuccess ||
     focusQuery.isFetching ||
@@ -245,6 +299,14 @@ export function TodayPage() {
       value: statsPending ? "…" : (realStats?.tasks.overdue ?? 0),
       label: "项已逾期",
       danger: true,
+      risk: "overdue" as const,
+    },
+    {
+      icon: Clock3,
+      value: statsPending ? "…" : (realStats?.tasks.dueSoon ?? 0),
+      label: "项临期",
+      warning: true,
+      risk: "due_soon" as const,
     },
   ];
   const inboxStats = [
@@ -367,7 +429,8 @@ export function TodayPage() {
     );
   };
   const taskQuickActionProps = {
-    focusActionDisabled,
+    focusActionDisabled:
+      focusActionDisabled || (riskFilter !== null && !riskListReady),
     onDeleteTask: setDeletingTask,
     onEditTask: (task: Task) => setTaskDetailId(task.id),
     onCompleteTask: (task: Task) => runLifecycleAction(task, "complete"),
@@ -375,6 +438,13 @@ export function TodayPage() {
     onStartTask: (task: Task) => runLifecycleAction(task, "start"),
     quickActionPendingId,
     quickActionsDisabled,
+  };
+  const toggleRiskFilter = (next: DueRiskFilter) => {
+    if (riskSwitchDisabled) return;
+    setRiskPage(1);
+    setDragPreview(null);
+    setSharedDraggingTask(null);
+    setRiskFilter((current) => (current === next ? null : next));
   };
 
   return (
@@ -434,18 +504,34 @@ export function TodayPage() {
       </header>
 
       <section className="stats-row" aria-label="今日统计">
-        {stats.map(({ icon: Icon, value, label, danger }) => (
-          <div
-            className={`stat-card${danger ? " stat-card-danger" : ""}`}
-            key={label}
-          >
-            <span className="stat-icon">
-              <Icon size={15} />
-            </span>
-            <strong>{value}</strong>
-            <span>{label}</span>
-          </div>
-        ))}
+        {stats.map(({ icon: Icon, value, label, danger, warning, risk }) => {
+          const className = `stat-card${danger ? " stat-card-danger" : ""}${warning ? " stat-card-warning" : ""}${risk ? " stat-card-button" : ""}${riskFilter === risk ? " stat-card-selected" : ""}`;
+          const content = (
+            <>
+              <span className="stat-icon">
+                <Icon size={15} />
+              </span>
+              <strong>{value}</strong>
+              <span>{label}</span>
+            </>
+          );
+          return risk ? (
+            <button
+              aria-pressed={riskFilter === risk}
+              className={className}
+              disabled={riskSwitchDisabled}
+              key={label}
+              onClick={() => toggleRiskFilter(risk)}
+              type="button"
+            >
+              {content}
+            </button>
+          ) : (
+            <div className={className} key={label}>
+              {content}
+            </div>
+          );
+        })}
         <div className="goal-card">
           <Target size={15} />
           <span>月收入目标</span>
@@ -493,7 +579,7 @@ export function TodayPage() {
         )}
       </section>
 
-      {taskGroupsQuery.isError ? (
+      {riskFilter === null && taskGroupsQuery.isError ? (
         <ErrorState
           compact
           message="无法读取任务；请确认本地服务已启动后重试。"
@@ -551,7 +637,114 @@ export function TodayPage() {
         </div>
       ) : null}
 
-      {groups.overdue.length > 0 ? (
+      {riskFilter !== null ? (
+        <section
+          aria-labelledby="today-risk-heading"
+          className="task-section today-risk-section"
+        >
+          <div className="section-heading compact-heading">
+            <div>
+              <span
+                className={`section-kicker${riskFilter === "overdue" ? " danger-text" : ""}`}
+              >
+                截止风险
+              </span>
+              <h2 id="today-risk-heading">
+                {riskFilter === "overdue" ? "逾期任务" : "临期任务"}
+              </h2>
+            </div>
+            <div className="today-task-heading-actions">
+              <span className="section-count">
+                {riskTasksQuery.data ? `共 ${riskTotal} 项` : "数量待加载"}
+              </span>
+              <button
+                className="button button-quiet today-clear-risk"
+                disabled={riskSwitchDisabled}
+                onClick={() => toggleRiskFilter(riskFilter)}
+                type="button"
+              >
+                清除筛选
+              </button>
+            </div>
+          </div>
+          <p className="today-risk-description">
+            {riskFilter === "overdue"
+              ? "显示全部仍处于活动状态且已经逾期的任务，按截止时间排序。"
+              : "显示全部仍处于活动状态且将在 24 小时内到期的任务，按截止时间排序。"}
+          </p>
+          {riskTasksQuery.isPending ||
+          riskTasksQuery.isPlaceholderData ||
+          riskPageOutOfRange ? (
+            <SkeletonRows count={3} />
+          ) : riskTasksQuery.isError ? (
+            <ErrorState
+              compact
+              message={`无法读取${riskFilter === "overdue" ? "逾期" : "临期"}任务。`}
+              onRetry={() => void riskTasksQuery.refetch()}
+            />
+          ) : riskTasksQuery.isSuccess && riskTotal === 0 ? (
+            <EmptyState
+              message={`当前没有活动的${riskFilter === "overdue" ? "逾期" : "临期"}任务。`}
+              title={riskFilter === "overdue" ? "没有逾期任务" : "没有临期任务"}
+            />
+          ) : riskTasksQuery.isSuccess ? (
+            <>
+              {riskTasksQuery.isFetching ? (
+                <p className="today-risk-refresh" role="status">
+                  正在刷新截止风险…
+                </p>
+              ) : null}
+              <TaskList
+                {...taskQuickActionProps}
+                compact
+                live={riskListReady}
+                onPlanTask={setPlanningTask}
+                tasks={riskTasksQuery.data.items}
+              />
+              {riskPageCount > 1 ? (
+                <nav
+                  aria-label="截止风险任务分页"
+                  className="pagination today-risk-pagination"
+                >
+                  <button
+                    className="button button-secondary"
+                    disabled={riskPage <= 1 || riskTasksQuery.isFetching}
+                    onClick={() =>
+                      setRiskPage((value) => Math.max(1, value - 1))
+                    }
+                    type="button"
+                  >
+                    上一页
+                  </button>
+                  <span>
+                    {(riskPage - 1) * effectiveRiskPageSize + 1}–
+                    {Math.min(
+                      (riskPage - 1) * effectiveRiskPageSize +
+                        riskTasksQuery.data.items.length,
+                      riskTotal,
+                    )}{" "}
+                    / {riskTotal}
+                  </span>
+                  <button
+                    className="button button-secondary"
+                    disabled={
+                      riskPage >= riskPageCount || riskTasksQuery.isFetching
+                    }
+                    onClick={() =>
+                      setRiskPage((value) => Math.min(riskPageCount, value + 1))
+                    }
+                    type="button"
+                  >
+                    下一页
+                  </button>
+                </nav>
+              ) : null}
+            </>
+          ) : null}
+        </section>
+      ) : null}
+
+      {riskFilter === null && groups.overdue.length > 0 ? (
         <section className="task-section">
           <div className="section-heading compact-heading">
             <div>
@@ -580,6 +773,7 @@ export function TodayPage() {
 
       <section
         className={`task-section${sharedDraggingTask ? " task-section-drag-target" : ""}`}
+        hidden={riskFilter !== null}
         onDragOver={acceptGroupDrag}
         onDrop={(event) => {
           event.preventDefault();
@@ -657,7 +851,8 @@ export function TodayPage() {
         )}
       </section>
 
-      {taskGroupsQuery.isPending || groups.thisWeek.length > 0 ? (
+      {riskFilter === null &&
+      (taskGroupsQuery.isPending || groups.thisWeek.length > 0) ? (
         <section className="task-section">
           <div className="section-heading compact-heading">
             <div>
@@ -688,7 +883,8 @@ export function TodayPage() {
         </section>
       ) : null}
 
-      {groups.unscheduled.length > 0 || sharedDraggingTask ? (
+      {riskFilter === null &&
+      (groups.unscheduled.length > 0 || sharedDraggingTask) ? (
         <section
           className={`task-section${sharedDraggingTask ? " task-section-drag-target" : ""}`}
           onDragOver={acceptGroupDrag}

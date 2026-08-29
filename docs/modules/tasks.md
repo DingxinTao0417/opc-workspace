@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v29 不改写 Task 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v29 不改写 Task 表。PRD v9.13 的 `due_state` 只是查询时派生的截止风险读模型，不新增 Task 字段或 migration。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.12](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.13](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -23,7 +23,7 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。列表 API 另提供仅供实时截止风险入口使用的 `due_state=overdue|due_soon`；Today 以该条件读取完整分页结果。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -261,6 +261,8 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 - 应用视图会原子替换搜索、状态、优先级、类型、项目、客户、标签、日期和排序并回到第一页，不恢复旧页码或任务选择；更新/删除携带当前视图版本，冲突时刷新列表且不自动覆盖。
 - 客户筛选复用 Client options，服务端沿 Task 的 Project 当前 `client_id` 过滤；Task 不保存客户副本。客户与项目、标签、状态及日期等条件取 AND，并完整保留到后续分页。
 - 计划日期支持精确值或起止范围二选一，截止日期支持独立起止范围；设置任一计划范围端点会清空精确值，设置精确值会清空计划范围。
+- `due_state=overdue|due_soon` 按单次请求捕获的 Sidecar UTC 时刻派生，并固定排除 done/cancelled；逾期为 `< now`，临期为 `[now, now+24h]`。它与按 UTC 日期片段过滤的 `due_from/due_to` 语义不同且不可同时提交；显式状态只允许 `active`。比较和 `due_date` 排序使用固定宽度 UTC 纳秒键，避免亚毫秒精度丢失与 RFC3339 整秒/小数秒文本排序误差。
+- `due_state` 当前只服务 Today 的动态风险快捷视图，不纳入 schema v17 保存视图。保存视图继续表示用户明确选择的静态任务页条件，不能静默保存或恢复会随服务端时钟自动变化的结果集。
 - 起点晚于终点时，对应日期控件显示无效状态和就地错误，主 Task Query 暂停，旧任务结果不继续展示；服务端仍二次校验格式和顺序，避免绕过 UI。
 - 任务页只有在选中一个精确计划日期、排序为 `manual_order` 且没有搜索、状态、优先级、类型、项目或标签筛选时启用排序；上移/下移与拖动手柄同时保留。
 - 拖拽限定在同一状态分组，不会通过视觉移动暗中改变 Task 生命周期。前端立即预览当前页相对位置，但 hook 按源/目标重新读取完整计划日期组，校验日期、状态和可见版本，再把同状态顺序织回完整组的原槽位并调用既有原子 reorder API。
@@ -313,6 +315,7 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
 - 任务页列表/看板切换、看板平铺查询、六列空状态、卡片详情直达、跨列命令映射/原因/确认/版本及人工验收门禁，以及与现有批量选择共用事实。
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
+- Today 截止风险客户端序列化、Sidecar 固定时钟边界/终态排除/冲突拒绝、稳定分页，以及同一时钟下逾期/临期列表 `meta.total` 与 Today 统计严格一致。
 - 任务页客户 options 与分页条件保持、客户端 `client_id` 序列化、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤。
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
 - schema v22→v23 不发明 Inbox 数据；follow-up Artifact 提交/幂等重放/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调和来源快照保留。

@@ -179,6 +179,7 @@ describe("TaskList", () => {
       <TaskList
         focusActionDisabled
         live
+        onPlanTask={vi.fn()}
         onStartFocus={vi.fn()}
         onStartTask={vi.fn()}
         quickActionsDisabled
@@ -192,6 +193,9 @@ describe("TaskList", () => {
     ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: `开始专注：${task.title}` }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: `安排任务日期：${task.title}` }),
     ).toBeDisabled();
   });
 

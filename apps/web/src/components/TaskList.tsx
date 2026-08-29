@@ -335,7 +335,9 @@ function TaskRow({
             {onPlanTask ? (
               <button
                 aria-label={`安排任务日期：${task.title}`}
-                disabled={!live || planPendingId === task.id}
+                disabled={
+                  !live || quickActionsDisabled || planPendingId === task.id
+                }
                 onClick={() => onPlanTask(task)}
                 title="安排日期"
                 type="button"

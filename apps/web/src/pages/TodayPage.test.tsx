@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   inbox: vi.fn(),
   stats: vi.fn(),
   taskGroups: vi.fn(),
+  riskTasks: vi.fn(),
   moveTask: vi.fn(),
   moveError: null as unknown,
   movePending: false,
@@ -82,12 +84,21 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.dragTask,
     reset: mocks.resetDrag,
   }),
-  useTaskPageQuery: () => ({
-    data: undefined,
-    isFetching: false,
-    isPlaceholderData: false,
-    isSuccess: false,
-  }),
+  useTaskPageQuery: (
+    input: { dueState?: "overdue" | "due_soon" },
+    enabled = true,
+  ) =>
+    input.dueState
+      ? mocks.riskTasks(input, enabled)
+      : {
+          data: undefined,
+          isError: false,
+          isFetching: false,
+          isPending: false,
+          isPlaceholderData: false,
+          isSuccess: false,
+          refetch: vi.fn(),
+        },
   useSetTaskPlannedDate: () => ({
     error: null,
     isError: false,
@@ -128,6 +139,84 @@ vi.mock("../store/ui", () => ({
     }),
 }));
 
+function makeRiskTask(id: string, title: string) {
+  return {
+    id,
+    title,
+    description: "",
+    kind: "work" as const,
+    status: "todo" as const,
+    reviewPolicy: "none" as const,
+    priority: "P2" as const,
+    projectId: null,
+    projectName: null,
+    parentTaskId: null,
+    parentTaskTitle: null,
+    completionCriteria: "",
+    tags: [],
+    dueDate: "2026-08-29T09:00:00Z",
+    plannedDate: null,
+    estimatedMinutes: 30,
+    actualMinutes: 0,
+    manualOrder: null,
+    version: 1,
+    subtaskTotal: 0,
+    subtaskCompleted: 0,
+    createdAt: "2026-08-28T00:00:00Z",
+    updatedAt: "2026-08-28T00:00:00Z",
+  };
+}
+
+function mockTodayShell(overdue = 2, dueSoon = 3) {
+  mocks.taskGroups.mockReturnValue({
+    data: { overdue: [], today: [], thisWeek: [], unscheduled: [] },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  });
+  mocks.stats.mockReturnValue({
+    data: {
+      date: "2026-08-28",
+      tasks: {
+        total: overdue + dueSoon,
+        completed: 0,
+        remaining: overdue + dueSoon,
+        overdue,
+        dueSoon,
+        estimatedMinutes: 60,
+        actualMinutes: 0,
+      },
+      focus: { sessions: 0, seconds: 0, minutes: 0 },
+    },
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  });
+  mocks.inbox.mockReturnValue({
+    data: undefined,
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  });
+}
+
+function riskQueryResult(
+  items: ReturnType<typeof makeRiskTask>[],
+  total = items.length,
+) {
+  return {
+    data: { items, meta: { page: 1, pageSize: 20, total } },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isPlaceholderData: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  };
+}
+
 describe("TodayPage Inbox overview", () => {
   afterEach(() => {
     cleanup();
@@ -143,6 +232,7 @@ describe("TodayPage Inbox overview", () => {
     mocks.createFocusPending = false;
     mocks.deleteTaskError = null;
     mocks.deleteTaskPending = false;
+    mocks.riskTasks.mockReset();
     vi.useRealTimers();
   });
 
@@ -209,6 +299,246 @@ describe("TodayPage Inbox overview", () => {
       "href",
       "/inbox?risk=blocked",
     );
+  });
+
+  it("toggles the overdue and due-soon cards as exclusive server filters", () => {
+    mockTodayShell(2, 3);
+    mocks.riskTasks.mockImplementation(
+      (input: { dueState: "overdue" | "due_soon" }) =>
+        riskQueryResult([
+          makeRiskTask(
+            input.dueState,
+            input.dueState === "overdue" ? "服务端逾期任务" : "服务端临期任务",
+          ),
+        ]),
+    );
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    const overdue = screen.getByRole("button", { name: /项已逾期/ });
+    const dueSoon = screen.getByRole("button", { name: /项临期/ });
+    expect(overdue).toHaveAttribute("aria-pressed", "false");
+    expect(dueSoon).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(overdue);
+    expect(overdue).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "逾期任务" })).toBeVisible();
+    expect(screen.getByText("服务端逾期任务")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "今天" })).toBeNull();
+    expect(mocks.riskTasks).toHaveBeenLastCalledWith(
+      {
+        page: 1,
+        pageSize: 20,
+        status: "active",
+        dueState: "overdue",
+        sort: "due_date",
+      },
+      true,
+    );
+
+    fireEvent.click(dueSoon);
+    expect(overdue).toHaveAttribute("aria-pressed", "false");
+    expect(dueSoon).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("服务端临期任务")).toBeVisible();
+
+    fireEvent.click(dueSoon);
+    expect(dueSoon).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("heading", { name: "今天" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "临期任务" })).toBeNull();
+  });
+
+  it("keeps risk navigation and row writes locked while task order is saving", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockReturnValue(
+      riskQueryResult([makeRiskTask("locked-risk", "风险锁定任务")]),
+    );
+    const view = render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /项已逾期/ }));
+    expect(screen.getByRole("heading", { name: "逾期任务" })).toBeVisible();
+
+    mocks.movePending = true;
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("正在保存任务顺序…")).toBeVisible();
+    const overdue = screen.getByRole("button", { name: /项已逾期/ });
+    const dueSoon = screen.getByRole("button", { name: /项临期/ });
+    expect(overdue).toBeDisabled();
+    expect(dueSoon).toBeDisabled();
+    expect(screen.getByRole("button", { name: "清除筛选" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "安排任务日期：风险锁定任务" }),
+    ).toBeDisabled();
+
+    fireEvent.click(dueSoon);
+    expect(screen.getByRole("heading", { name: "逾期任务" })).toBeVisible();
+  });
+
+  it("shows a dedicated loading state for the selected risk", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isFetching: true,
+      isPending: true,
+      isPlaceholderData: false,
+      isSuccess: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项临期/ }));
+
+    expect(screen.getByRole("status", { name: "正在加载" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "今天" })).toBeNull();
+  });
+
+  it("isolates a risk query error and retries only that query", () => {
+    mockTodayShell();
+    const refetch = vi.fn();
+    mocks.riskTasks.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      isPlaceholderData: false,
+      isSuccess: false,
+      refetch,
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项已逾期/ }));
+
+    expect(screen.getByText("无法读取逾期任务。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(mocks.taskGroups).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a truthful empty risk result", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockReturnValue(riskQueryResult([], 0));
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项临期/ }));
+
+    expect(screen.getByRole("heading", { name: "没有临期任务" })).toBeVisible();
+    expect(screen.getByText("当前没有活动的临期任务。")).toBeVisible();
+    expect(screen.getByText("共 0 项")).toBeVisible();
+  });
+
+  it("paginates the complete server risk result without enabling reorder", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockImplementation((input: { page: number }) => {
+      const items =
+        input.page === 1
+          ? Array.from({ length: 20 }, (_, index) =>
+              makeRiskTask(`risk-${index + 1}`, `风险任务 ${index + 1}`),
+            )
+          : Array.from({ length: 5 }, (_, index) =>
+              makeRiskTask(`risk-${index + 21}`, `风险任务 ${index + 21}`),
+            );
+      return {
+        ...riskQueryResult(items, 25),
+        data: { items, meta: { page: input.page, pageSize: 20, total: 25 } },
+      };
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项已逾期/ }));
+
+    expect(screen.getByText("共 25 项")).toBeVisible();
+    expect(screen.getByText("1–20 / 25")).toBeVisible();
+    expect(screen.queryByTitle(/拖动排序/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(mocks.riskTasks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, dueState: "overdue" }),
+      true,
+    );
+    expect(screen.getByText("21–25 / 25")).toBeVisible();
+    expect(screen.getByText("风险任务 25")).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑任务：风险任务 21" }),
+    );
+    expect(mocks.setTaskDetailId).toHaveBeenCalledWith("risk-21");
+  });
+
+  it("clamps a stale risk page after the server total shrinks", async () => {
+    mockTodayShell();
+    let shrunk = false;
+    mocks.riskTasks.mockImplementation((input: { page: number }) => {
+      if (shrunk) {
+        const items =
+          input.page === 1 ? [makeRiskTask("remaining", "剩余风险任务")] : [];
+        return {
+          ...riskQueryResult(items, 1),
+          data: { items, meta: { page: input.page, pageSize: 20, total: 1 } },
+        };
+      }
+      const items =
+        input.page === 1
+          ? Array.from({ length: 20 }, (_, index) =>
+              makeRiskTask(`before-${index}`, `收缩前任务 ${index + 1}`),
+            )
+          : [makeRiskTask("last-page", "末页风险任务")];
+      return {
+        ...riskQueryResult(items, 21),
+        data: { items, meta: { page: input.page, pageSize: 20, total: 21 } },
+      };
+    });
+    const view = render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项已逾期/ }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("末页风险任务")).toBeVisible();
+
+    shrunk = true;
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.riskTasks).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, dueState: "overdue" }),
+        true,
+      );
+    });
+    expect(screen.getByText("剩余风险任务")).toBeVisible();
+    expect(screen.getByText("共 1 项")).toBeVisible();
   });
 
   it("renders complete planned-date groups instead of arbitrary slices", () => {

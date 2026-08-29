@@ -21,6 +21,26 @@ import (
 
 const createTaskEndpoint = "POST /api/v1/tasks"
 
+const (
+	taskDueTimeKeyLayout     = "2006-01-02T15:04:05.000000000"
+	taskDueTimeKeyExpression = `(substr(tasks.due_date, 1, 19) || '.' || substr(
+		(CASE
+			WHEN substr(tasks.due_date, 20, 1) = '.'
+			THEN substr(tasks.due_date, 21, length(tasks.due_date) - 21)
+			ELSE ''
+		END) || '000000000',
+		1,
+		9
+	))`
+	taskOverduePredicate = `tasks.status NOT IN ('done', 'cancelled')
+		AND tasks.due_date IS NOT NULL
+		AND ` + taskDueTimeKeyExpression + ` < ?`
+	taskDueSoonPredicate = `tasks.status NOT IN ('done', 'cancelled')
+		AND tasks.due_date IS NOT NULL
+		AND ` + taskDueTimeKeyExpression + ` >= ?
+		AND ` + taskDueTimeKeyExpression + ` <= ?`
+)
+
 var (
 	errLifecycleCommandRequired = errors.New("tasks must be created in todo status; use a lifecycle command after creation")
 	validTaskStatuses           = map[string]struct{}{
@@ -132,6 +152,7 @@ type taskListFilters struct {
 	PlannedState string
 	DueFrom      string
 	DueTo        string
+	DueState     string
 	TagIDs       []string
 	ParentTaskID string
 	RootOnly     bool
@@ -153,12 +174,16 @@ func (a *API) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var dueNow time.Time
+	if filters.DueState != "" {
+		dueNow = a.options.Now().UTC()
+	}
 
 	var total int64
 	var tasks []models.Task
 	invalidSort := false
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		query := applyTaskFilters(tx.Model(&models.Task{}), filters)
+		query := applyTaskFilters(tx.Model(&models.Task{}), filters, dueNow)
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
@@ -203,6 +228,23 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 	if filters.Status != "" {
 		if _, valid := validTaskStatuses[filters.Status]; !valid && filters.Status != "active" {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
+			return taskListFilters{}, false
+		}
+	}
+	if rawDueState, present := c.GetQuery("due_state"); present {
+		filters.DueState = strings.TrimSpace(rawDueState)
+		if filters.DueState != "overdue" && filters.DueState != "due_soon" {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_state must be overdue or due_soon")
+			return taskListFilters{}, false
+		}
+		_, dueFromPresent := c.GetQueryArray("due_from")
+		_, dueToPresent := c.GetQueryArray("due_to")
+		if dueFromPresent || dueToPresent {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_state cannot be combined with due date filters")
+			return taskListFilters{}, false
+		}
+		if rawStatus, statusPresent := c.GetQuery("status"); statusPresent && strings.TrimSpace(rawStatus) != "active" {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "due_state can only be combined with status=active")
 			return taskListFilters{}, false
 		}
 	}
@@ -302,7 +344,7 @@ func taskFiltersFromRequest(c *gin.Context) (taskListFilters, bool) {
 	return filters, true
 }
 
-func applyTaskFilters(query *gorm.DB, filters taskListFilters) *gorm.DB {
+func applyTaskFilters(query *gorm.DB, filters taskListFilters, dueNow time.Time) *gorm.DB {
 	if filters.Status == "active" {
 		query = query.Where("tasks.status NOT IN ?", []string{"done", "cancelled"})
 	} else if filters.Status != "" {
@@ -341,6 +383,12 @@ func applyTaskFilters(query *gorm.DB, filters taskListFilters) *gorm.DB {
 		if filter.value != "" {
 			query = query.Where(filter.column+" "+filter.operator+" ?", filter.value)
 		}
+	}
+	if filters.DueState == "overdue" {
+		query = query.Where(taskOverduePredicate, dueNow.Format(taskDueTimeKeyLayout))
+	} else if filters.DueState == "due_soon" {
+		nowText := dueNow.Format(taskDueTimeKeyLayout)
+		query = query.Where(taskDueSoonPredicate, nowText, dueNow.Add(taskDueLeadTime).Format(taskDueTimeKeyLayout))
 	}
 	for _, tagID := range filters.TagIDs {
 		query = query.Where("EXISTS (SELECT 1 FROM task_tags WHERE task_tags.task_id = tasks.id AND task_tags.tag_id = ?)", tagID)
@@ -1121,12 +1169,12 @@ func applyTaskSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 			Order("tasks.manual_order ASC").
 			Order("CASE tasks.priority WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END ASC").
 			Order("CASE WHEN tasks.due_date IS NULL THEN 1 ELSE 0 END ASC").
-			Order("tasks.due_date ASC").
+			Order(taskDueTimeKeyExpression + " ASC").
 			Order("tasks.created_at ASC").
 			Order("tasks.id ASC"), true
 	}
 	allowed := map[string]string{
-		"manual_order": "tasks.manual_order", "priority": "tasks.priority", "due_date": "tasks.due_date",
+		"manual_order": "tasks.manual_order", "priority": "tasks.priority", "due_date": taskDueTimeKeyExpression,
 		"planned_date": "tasks.planned_date", "created_at": "tasks.created_at", "updated_at": "tasks.updated_at",
 		"title": "tasks.title", "status": "tasks.status", "kind": "tasks.kind",
 	}

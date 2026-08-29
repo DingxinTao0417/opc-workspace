@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.12
+> **一人公司操作系统** · PRD v9.13
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
-> **v9.12 更新说明**：交付 Project 详情的项目级 Focus 分析与终态 Session 历史。`GET /api/v1/focus-sessions` 与 `GET /api/v1/stats/focus` 新增可选 `project_id`，严格接受小写 canonical UUID；非法/非 canonical 返回 `400 INVALID_PROJECT_ID`，不存在返回 `404 PROJECT_NOT_FOUND`，归档 Project 仍可读。归属按 Session 绑定 Task 的查询时当前 Project 派生，Task 改绑会重分类旧 Session；无 Task、Task 已删除或当前无 Project 时不进入项目过滤结果。报告只统计 completed Session 的闭合正时长 interval，继续保持显式 IANA 时区、DST、跨午夜、1–93 当地日、Streak 与零事实序列；历史按稳定顺序展示 completed/cancelled/interrupted。项目详情提供 7 天/30 天/本月趋势、总时长、完成数、连续天数、终态历史分页，以及报告/历史独立加载、空、错误和重试。Query 缓存按项目/日期/页码隔离；可能改变 Task 当前项目、标题或标签归属的写入路径按读模型失效历史或报告，改期、排序、生命周期和产出等无关操作不触发。API v1/schema v29 不变，不新增 migration。
+> **v9.13 更新说明**：交付 Today 截止风险快捷筛选。`GET /api/v1/tasks` 新增只读 `due_state=overdue|due_soon`：每次请求只捕获一次 Sidecar UTC 当前时刻，逾期为 `due_date < now`，临期为 `now <= due_date <= now+24h`，二者固定排除 done/cancelled；显式 `status` 只允许 `active`，且不得与 `due_from/due_to` 混用，非法组合返回 `400 INVALID_FILTER`。列表、排序与 `/stats/today` 复用由规范 UTC 时间戳派生的固定宽度纳秒键，避免亚毫秒精度丢失及 RFC3339 整秒/小数秒文本排序差异，并在固定时钟下保持统计数与列表总数一致。Today 展示第四张临期卡，逾期/临期可点击切换完整服务端分页结果，再次点击或清除恢复原日期分组；覆盖加载、空、错误/重试、分页、页码收敛、任务既有快捷操作、键盘/`aria-pressed` 和 60 秒低频刷新，风险视图不提供拖拽排序。API v1/schema v29 不变，不新增 migration，也不把动态 `due_state` 写入静态保存视图。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -255,7 +255,7 @@ pnpm dev
 
 **历史原型（已移除）**：`today-v1.html`
 
-> **当前状态**：部分完成。真实任务、持久化 Focus Session 和 Today Focus 汇总已接入，右栏读取真实活动 Session；任务已按所选本地日期完整分为逾期、当天、本周稍后和未排期，并支持日期导航。所选精确日期与未排期组支持按钮式/同组拖拽排序，四个可见分组支持按真实日期跨组拖拽，所有活动行支持任意日期或未排期安排、按状态/验收策略约束的开始/完成/开始专注快捷操作，以及共享完整编辑与版本化确认删除；临期筛选、真实收入和客户动态尚未实现。
+> **当前状态**：部分完成。真实任务、持久化 Focus Session 和 Today Focus 汇总已接入，右栏读取真实活动 Session；任务已按所选本地日期完整分为逾期、当天、本周稍后和未排期，并支持日期导航。所选精确日期与未排期组支持按钮式/同组拖拽排序，四个可见分组支持按真实日期跨组拖拽，所有活动行支持任意日期或未排期安排、按状态/验收策略约束的开始/完成/开始专注快捷操作，以及共享完整编辑与版本化确认删除；顶部逾期/未来 24 小时临期统计可切换与服务端时钟一致的完整风险结果。真实收入和客户动态尚未实现。
 
 今日工作台是用户每天打开应用看到的默认首页，承担**晨间规划、当日执行、状态概览**三大职责。采用三栏布局。
 
@@ -275,16 +275,17 @@ pnpm dev
 1. 打开应用时按本地日期分页拉全逾期、今天、本周稍后和未排期活动任务，默认先按用户保存的手动顺序展示；未排序任务依次按优先级、截止时间和创建时间排列
 2. 目标交互为拖拽调整并立即持久化，且提供“恢复默认排序”；任务页已接上移/下移，Today 四个可见活动分组已接共享拖拽与失败回滚：同日期保存完整顺序，跨日期先确认改期再分别保存源/目标顺序，空的所选日期和未排期也可作为明确落点；所有活动行仍提供版本化任意日期/未排期安排作为键盘替代
 3. 任务行 hover/focus 提供安全快捷操作：todo 可开始，`in_progress + review_policy=none` 可完成，活动任务可在 Focus 服务端与本地循环均空闲时开始绑定专注；编辑直达共享详情，删除需要独立二次确认和当前版本，manual review、阻塞/取消等复杂流程继续进入详情页
-4. 用户也可从右侧概览面板进入专注模式并启动番茄钟（默认 50 分钟）；主内容区不再重复放置专注卡片
-5. 专注期间：当前已记录绑定任务的有效区间并显示环形进度；暂停本应用通知与系统级勿扰引导仍按平台能力延后
-6. 番茄钟结束：完成当前专注轮次并提示休息 5 分钟；专注工时自动累计，任务是否完成由用户确认
-7. 财务模块交付后，右侧收入数据根据本地已确认付款记录刷新；当前不得用静态数字模拟真实收入
-8. 客户动态只显示用户手动记录或本地业务状态产生的事件；第一阶段不追踪提案下载、邮件回复或其他线上客户行为
+4. 点击逾期或临期卡时，页面以 `status=active&due_state=...&sort=due_date` 分页读取完整服务端结果并替换普通四组；再次点击、切换另一卡或清除可恢复原日期分组。风险结果保留打开、编辑、安排、开始、完成、开始专注和删除入口，但不提供会混淆计划日期事实的拖拽/手动排序
+5. 用户也可从右侧概览面板进入专注模式并启动番茄钟（默认 50 分钟）；主内容区不再重复放置专注卡片
+6. 专注期间：当前已记录绑定任务的有效区间并显示环形进度；暂停本应用通知与系统级勿扰引导仍按平台能力延后
+7. 番茄钟结束：完成当前专注轮次并提示休息 5 分钟；专注工时自动累计，任务是否完成由用户确认
+8. 财务模块交付后，右侧收入数据根据本地已确认付款记录刷新；当前不得用静态数字模拟真实收入
+9. 客户动态只显示用户手动记录或本地业务状态产生的事件；第一阶段不追踪提案下载、邮件回复或其他线上客户行为
 
 #### 交互细节
 
 - 任务行 hover/focus 时显示快速操作：当前已按状态提供开始、无需验收时完成和开始专注；编辑按钮直达共享详情，删除按钮打开独立确认弹窗并使用当前版本调用确认删除 API
-- 统计条的逾期及临期数字可点击，快速筛选对应任务
+- 统计条的逾期及临期数字可点击，快速筛选对应任务；按钮用 `aria-pressed` 暴露选择状态，统计与启用中的风险结果每 60 秒低频重取，任务写入仍立即失效相关 Query
 - 日期 pill 点击可切换日期，查看过去/未来某天的任务安排
 - 连续专注天数已由 Focus D1 交付；“周几 × 小时”专注热力图已由 Focus D2b 交付
 
@@ -1612,9 +1613,9 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 **包含功能**：
 
-| 模块             | MVP 目标功能                                                                               | 当前状态（2026-08-28）                                                                                                                                                                                                                                                                                               |
+| 模块             | MVP 目标功能                                                                               | 当前状态（2026-08-29）                                                                                                                                                                                                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 今日工作台       | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板               | **部分完成**：日期导航、真实统计/四组任务、精确日期/未排期按钮式排序、四组共享同日/跨日期拖拽、空精确日期/未排期落点、任意日期/未排期安排、安全执行快捷操作、编辑/版本化确认删除入口、共享任务详情、真实 Focus 概览与 completed-only 汇总已接通；收入与客户动态待实现                                                |
+| 今日工作台       | 三栏布局、今日任务列表、手动排序、逾期及临期提示、任务详情操作、右侧概览面板               | **部分完成**：日期导航、真实统计/四组任务、精确日期/未排期按钮式排序、四组共享同日/跨日期拖拽、空精确日期/未排期落点、任意日期/未排期安排、安全执行快捷操作、编辑/版本化确认删除入口、共享任务详情、服务端逾期/未来 24 小时临期快捷筛选、真实 Focus 概览与 completed-only 汇总已接通；收入与客户动态待实现                                                |
 | 任务管理         | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键  | **部分完成**：schema v6–v9 事实、责任、六状态、时间线与 manual Submission/Artifact 验收，快照幂等、`ETag`/`If-Match`、分页筛选、层级、批量/排序和受控文件均已实现；schema v11 Focus 工时已接入；Today 与任务页均已消费计划组拖拽排序，六状态看板已接真实读取/筛选/分页/选择/详情和受控跨列生命周期命令 |
 | 项目管理         | 项目卡片、状态流转、项目进度、项目详情（任务列表）                                         | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务派生进度/工时、项目任务树/平铺切换及服务端搜索/状态/优先级/类型/标签/排期筛选与分页、客户选择/筛选、可编辑人工笔记、受控附件、产出聚合、活动时间线、项目级 Focus 报告/终态历史、显式 follow-up、Task 阻塞/临期与 Project 完成节点→Inbox 已实现；财务与真实里程碑增强待实现 |
 | 客户管理         | 客户列表表格、客户详情、基本 CRUD                                                          | **部分完成**：基础资料 CRUD、分页/搜索/状态筛选/排序、创建幂等、并发控制、基础详情、受约束删除、Project 关联、本地活动、受控附件和 person 显式关联已实现；外部来源投影、回访和财务待实现                                                                                                                             |
@@ -1679,7 +1680,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、WebView→Sidecar request ID、全局 Sidecar 启动故障恢复页 v1、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影、物理卷同卷去重和无路径手动容量检查、T-06A–H、T-07A–D 和 T-04B 手动一致性备份低空间准入/备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表内部自动回滚包已应用手动容量门禁，也不代表第 9.1 节的完整 MVP、Focus 原生反馈、卷级趋势、数据库打开前备份选择/实时恢复进度、Agent 或冲突合并导入已经交付。
+> 状态截止：2026-08-29。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、WebView→Sidecar request ID、全局 Sidecar 启动故障恢复页 v1、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影、物理卷同卷去重和无路径手动容量检查、T-06A–H 与截止风险快捷筛选、T-07A–D、Project 详情 Focus 分析/终态历史，以及 T-04B 手动一致性备份低空间准入/备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表内部自动回滚包已应用手动容量门禁，也不代表第 9.1 节的完整 MVP、Focus 原生反馈、卷级趋势、数据库打开前备份选择/实时恢复进度、Agent 或冲突合并导入已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1843,7 +1844,7 @@ pnpm dev
 - **用户流程**：设置 → 数据与备份可创建、校验、演练、恢复或删除真实本地包；“下载 JSON”保存轻量业务快照，“下载含文件 ZIP”保存 manifest、业务 JSON 和全部活动受控文件。选择 JSON 或 ZIP 后先显示 schema、总行数和可应用状态；ZIP 额外显示文件数与字节数。已有业务数据、不兼容版本、受控文件或活动 Focus 会在确认前阻断。可应用时用户再次确认，成功结果显示导入行数、文件数与自动回滚备份短 ID。
 - **实现方法**：`--backups` / `OPC_BACKUP_DIR` 声明与数据库同级且不和受控文件 root 重叠的安全 root。所有普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份、含文件导入导出和安排恢复取得写锁；手动 `POST /backups` 再持有备份互斥锁，先处理幂等重放，未命中时按 SQLite 分配/文件上界、active 受控文件、marker/manifest 及 20%（最低 64 MiB）余量估算，只探测 backup root，满足后才用 `VACUUM INTO` 创建 WAL 一致性 SQLite 快照并校验/原子发布完整包。不足/不可确认以 507/503 脱敏拒绝且不投影 generic incident，精确边界允许继续。业务 JSON 使用一个 SQLite 读事务和固定白名单；含文件 ZIP 在 backup root 私有临时文件中预检/生成，manifest 固定记录业务 JSON/活动文件的相对路径、size/SHA-256。ZIP 导入 preview 严格拒绝重复、额外、危险路径和 symlink，复验 format/API/schema、表列行、正文 hash/size 及数据库文件元数据；apply 强制确认并再次预检，先通过内部链创建已校验回滚备份，再把文件按既有 store 规则 staging 和无覆盖发布，数据库事务写入业务行、重建 `task_focus_totals`，并在提交前执行 `foreign_key_check/quick_check` 与磁盘正文复验；数据库失败补偿本次发布文件。导入/恢复/迁移内部回滚包不经过手动 HTTP 门禁。
 - **关键路径**：`services/sidecar/internal/api/backups.go`、`backup_restore.go`、`business_export.go`、`business_package_export.go`、`business_import.go`、`business_package_import.go`、相关 Go 测试、`apps/web/src/components/BackupSettings.tsx`、`api/client.ts`、`api/hooks.ts`。
-- **验证/剩余**：Go 集成测试覆盖备份恢复全链、手动容量需求的小载荷/溢出、空间差 1 字节拒绝、容量探测异常、只探测 backup root、响应脱敏、无 staging/包/业务/Inbox 副作用、精确边界放行与幂等重放绕过探测，以及启动恢复结果/残留/失败/无效记录诊断与脱敏、业务导出白名单/隐私、含文件 ZIP 的清单/正文/hash/空包/篡改拒绝/临时清理、JSON/ZIP 导入预检/确认/空目标/自动回滚/原子应用/补偿；前端组件测试覆盖 507/503 操作提示、note 草稿保留、不伪造成功/不自动重试和未知错误 request ID 回归。全量前端 72 个测试文件、431 项测试已通过。跨 schema 迁移、非空目标冲突合并、大数据量进度/取消、数据库打开前备份选择/实时恢复进度和真实磁盘故障仍未实现。
+- **验证/剩余**：Go 集成测试覆盖备份恢复全链、手动容量需求的小载荷/溢出、空间差 1 字节拒绝、容量探测异常、只探测 backup root、响应脱敏、无 staging/包/业务/Inbox 副作用、精确边界放行与幂等重放绕过探测，以及启动恢复结果/残留/失败/无效记录诊断与脱敏、业务导出白名单/隐私、含文件 ZIP 的清单/正文/hash/空包/篡改拒绝/临时清理、JSON/ZIP 导入预检/确认/空目标/自动回滚/原子应用/补偿；前端组件测试覆盖 507/503 操作提示、note 草稿保留、不伪造成功/不自动重试和未知错误 request ID 回归。当前全量前端 74 个测试文件、457 项测试已通过。跨 schema 迁移、非空目标冲突合并、大数据量进度/取消、数据库打开前备份选择/实时恢复进度和真实磁盘故障仍未实现。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -1857,15 +1858,16 @@ pnpm dev
 
 - **需求映射**：5.1。
 - **用户流程**：进入首页后读取本地任务和今日统计，可新建任务、完成/恢复任务、打开详情编辑或删除，并从右侧概览开始/暂停专注或打开专注设置。
-- **实现方法**：`TodayPage` 用用户本地日期和浏览器 IANA 时区请求 `/api/v1/stats/today`；任务 Query 用 `status=active`、计划日期范围及 `planned_state=unscheduled` 并行分页拉全四组。`TaskList` 可消费页面级共享拖拽源，使四个列表互为目标；落到具体任务使用该任务真实日期，所选日期和未排期另提供可接收空组的明确落点。`useMoveTaskAcrossPlans` 先拉全源/目标精确计划组并校验活动任务版本；同日期直接提交完整 reorder，跨日期先用 batch `set_planned_date` 确认改期，再并行提交源/目标完整 reorder 并分别报告结果。`TaskPlanModal` 继续提供任意日期键盘替代；网络/超时后回读 Task，仅当目标日期一致且版本前进才接受改期成功。行内开始/完成复用版本化 `POST /tasks/{id}/commands` 与现有幂等键，manual review 不显示完成；开始专注仅在活动 Session 查询成功且为空、本地循环为 idle 时调用幂等 create Session，成功后启动共享循环。Focus 统计只读取 completed Session 的已关闭正 interval，并按本地日 UTC 边界 overlap 求和。
-- **关键路径**：`apps/web/src/pages/TodayPage.tsx`、`apps/web/src/components/TaskPlanModal.tsx`、`TaskList.tsx`、`RightOverview.tsx`、`apps/web/src/api/hooks.ts`。
-- **当前限制**：逾期/本周是多日期聚合，只有落到具体任务时才有不含猜测的目标日期；空组级落点仅对精确所选日期和未排期开放。跨日期的日期事实与两个顺序事务不是一个数据库事务，改期确认后排序失败不会反向覆盖日期，而是刷新并明确提示部分成功。行内编辑/删除、需要原因的阻塞/取消以及 manual review 验收仍通过详情处理；快捷开始依赖活动负责人。真实收入和客户动态未实现。
+- **实现方法**：`TodayPage` 用用户本地日期和浏览器 IANA 时区请求 `/api/v1/stats/today`；任务 Query 用 `status=active`、计划日期范围及 `planned_state=unscheduled` 并行分页拉全四组。逾期/临期统计卡另用 `status=active&due_state=overdue|due_soon&sort=due_date` 读取完整风险分页；`due_state` 在 Sidecar 单次捕获 `Options.Now().UTC()`，并把已规范化的 UTC 截止时间与窗口边界转换为固定 9 位小数的 UTC 纳秒键，供 Today stats、筛选和 `due_date` 排序共同使用，保持亚毫秒精度及整秒/小数秒的真实时间顺序。两路时间派生 Query 每 60 秒低频刷新；风险视图以独立加载/空/错误/重试/分页状态替换四组，并保留 Task 行既有安全操作但关闭拖拽排序；排序写入期间锁定风险切换和行写操作，状态/错误在视图切换后仍可见。`TaskList` 可消费页面级共享拖拽源，使普通四个列表互为目标；落到具体任务使用该任务真实日期，所选日期和未排期另提供可接收空组的明确落点。`useMoveTaskAcrossPlans` 先拉全源/目标精确计划组并校验活动任务版本；同日期直接提交完整 reorder，跨日期先用 batch `set_planned_date` 确认改期，再并行提交源/目标完整 reorder 并分别报告结果。`TaskPlanModal` 继续提供任意日期键盘替代；网络/超时后回读 Task，仅当目标日期一致且版本前进才接受改期成功。行内开始/完成复用版本化 `POST /tasks/{id}/commands` 与现有幂等键，manual review 不显示完成；开始专注仅在活动 Session 查询成功且为空、本地循环为 idle 时调用幂等 create Session，成功后启动共享循环。Focus 统计只读取 completed Session 的已关闭正 interval，并按本地日 UTC 边界 overlap 求和。
+- **关键路径**：`services/sidecar/internal/api/tasks.go`、`stats.go`、`task_due_filters_test.go`、`apps/web/src/pages/TodayPage.tsx`、`TodayPage.test.tsx`、`apps/web/src/components/TaskPlanModal.tsx`、`TaskList.tsx`、`RightOverview.tsx`、`apps/web/src/api/client.ts`、`api/hooks.ts`。
+- **验证**：可变服务端时钟覆盖同一任务从临期转为逾期；固定带小数时钟覆盖同毫秒内已过期、无小数的刚过期值、`now`、`now+24h`、超窗、无截止、done/cancelled、混合小数精度真实排序、组合筛选、分页重放与非法冲突，并断言两张统计卡分别等于列表 `meta.total`。前端覆盖独立序列化、卡片互斥/再次清除、加载/空/错误重试、完整分页、页码收敛、详情入口、无排序控件、排序保存期间的风险切换/行写互斥和仅动态风险 Query 的低频轮询。
+- **当前限制**：计划日期“逾期/本周”仍是多日期聚合，只有落到具体任务时才有不含猜测的目标日期；空组级落点仅对精确所选日期和未排期开放。截止日期风险视图是查询时动态读模型，不写第二份状态、不纳入静态保存视图，也不等同于可归档的 `task_due` Inbox 历史事项。跨日期的日期事实与两个顺序事务不是一个数据库事务，改期确认后排序失败不会反向覆盖日期，而是刷新并明确提示部分成功。需要原因的阻塞/取消以及 manual review 验收仍通过详情处理；快捷开始依赖活动负责人。真实收入和客户动态未实现。
 
 #### 10.4.7 T-07 任务管理纵向闭环
 
 - **需求映射**：5.2、附录 C。
 - **用户流程**：用户按服务端条件搜索/筛选/分页任务，可按任务所属项目的当前客户筛选；客户与项目及其他条件取 AND。计划日期可选精确值或起止范围，截止日期可选起止范围，倒置区间就地提示且不发请求；常用完整条件可命名保存，之后选择即应用、以当前条件更新或确认删除。无筛选时展开根任务树，有筛选时查看父任务面包屑。新建可选择 none/manual；详情仅在 todo 且无任何 Submission 历史时允许改策略。manual Task 具备 active assignee 与 owner reviewer 后可填写摘要、text/link/structured/file 混合产出，提交待审后由 owner 接受或填写原因返工；历史批次分页查看，正文按需打开，文件安全下载，非 pending Artifact 可确认软删。
-- **实现方法**：schema v6 增加 Task facts/version，v8 扩展六状态，v9 增加 workspace identity、Submission/Artifact/deletion tombstone/current pointer/Event 关联，v17 增加独立 `task_saved_views`。通用 Task、生命周期、Assignment 和 D2 命令共享 Task `ETag`/`If-Match`；D2 可选稳定幂等快照。任务列表把 `client_id / planned_from / planned_to / due_from / due_to` 纳入版本化查询契约；`client_id` 严格校验 UUID 后使用 Project 关系子查询过滤，不向 Task 复制客户事实，也不因 JOIN 产生重复页。日期由服务端校验 ISO 格式和起止顺序，截止日期按已存时间戳的日期部分比较；Web 复用 Client options、保持精确计划日期与计划范围互斥，并在非法范围时停用 Query。保存视图复用同一筛选语义，最多 20 个、名称唯一，定义不包含页码/选择/结果；PATCH/DELETE 使用视图 `If-Match`。Sidecar 用数据库绑定 marker、进程级 root 锁与 `.staging/objects/.trash/.quarantine` 管理文件，固定相对路径为 `objects/<artifact-id>`，流式限制大小、计算 SHA-256、耐久同步关键文件/目录项、下载复验完整性，并为软删与 Task 硬删提供补偿。提交事务报错后仅清除能由数据库证明无引用的 object，模糊 COMMIT 保留给 reconcile；删除事务写 immutable tombstone，active trash 恢复前校验 size/SHA，错配隔离并记 mismatch。严格 JSON body、首 part multipart manifest 与 structured object 各限 1 MiB，单文件 50 MiB、完整 multipart 100 MiB；服务端 HTTP read/write timeout 180 秒，前端上传/下载超时 120 秒。物理文件缺失不会阻断确认软删或 Task 聚合硬删，软删记录 missing。前端严格解析响应，用 Query/Mutation 管理分页历史及 cache invalidation；所有 Task 写入互斥，冲突时刷新并保留 summary、text、link、structured 和浏览器 File 草稿，要求用户再次明确提交。
+- **实现方法**：schema v6 增加 Task facts/version，v8 扩展六状态，v9 增加 workspace identity、Submission/Artifact/deletion tombstone/current pointer/Event 关联，v17 增加独立 `task_saved_views`。通用 Task、生命周期、Assignment 和 D2 命令共享 Task `ETag`/`If-Match`；D2 可选稳定幂等快照。任务列表把 `client_id / planned_from / planned_to / due_from / due_to` 纳入版本化查询契约；`client_id` 严格校验 UUID 后使用 Project 关系子查询过滤，不向 Task 复制客户事实，也不因 JOIN 产生重复页。日期由服务端校验 ISO 格式和起止顺序，截止日期按已存时间戳的日期部分比较；Web 复用 Client options、保持精确计划日期与计划范围互斥，并在非法范围时停用 Query。`due_state=overdue|due_soon` 是不新增 schema 的动态查询条件，使用固定宽度 UTC 纳秒键与单次捕获的服务端时钟，不能和日期片段范围混用；当前只由 Today 风险入口消费，不写入保存视图。保存视图复用静态筛选语义，最多 20 个、名称唯一，定义不包含页码/选择/结果；PATCH/DELETE 使用视图 `If-Match`。Sidecar 用数据库绑定 marker、进程级 root 锁与 `.staging/objects/.trash/.quarantine` 管理文件，固定相对路径为 `objects/<artifact-id>`，流式限制大小、计算 SHA-256、耐久同步关键文件/目录项、下载复验完整性，并为软删与 Task 硬删提供补偿。提交事务报错后仅清除能由数据库证明无引用的 object，模糊 COMMIT 保留给 reconcile；删除事务写 immutable tombstone，active trash 恢复前校验 size/SHA，错配隔离并记 mismatch。严格 JSON body、首 part multipart manifest 与 structured object 各限 1 MiB，单文件 50 MiB、完整 multipart 100 MiB；服务端 HTTP read/write timeout 180 秒，前端上传/下载超时 120 秒。物理文件缺失不会阻断确认软删或 Task 聚合硬删，软删记录 missing。前端严格解析响应，用 Query/Mutation 管理分页历史及 cache invalidation；所有 Task 写入互斥，冲突时刷新并保留 summary、text、link、structured 和浏览器 File 草稿，要求用户再次明确提交。
 - **Actor/状态语义**：Artifact producer 从 active assignee 派生；Submission submitter 与 Artifact recorder 固定 owner；owner 审核/撤回/删除。submit → waiting_review/pending；accept → done/accepted 并结束 Assignment；request_changes → in_progress/changes_requested；waiting-review cancel → withdrawn；reopen 清 current pointer 但保留历史。
 - **关键路径**：`services/sidecar/internal/database/migrations/009_task_submissions_artifacts.sql`、`migrations/017_task_saved_views.sql`、`internal/api/tasks.go`、`internal/api/task_saved_views.go`、`internal/api/task_outputs.go`、`internal/api/artifact_store.go`、`apps/web/src/api/client.ts`、`api/hooks.ts`、`components/TaskSavedViewsControl.tsx`、`components/TaskDetailModal.tsx`、`components/TaskOutputsSection.tsx`。
 - **验证/剩余**：Go 测试覆盖 D1/D2 状态、JSON/multipart、限制、Actor 归属、并发/幂等、补偿、软/硬删除、文件完整性、Task→Project→Client 客户过滤、日期范围，以及保存视图迁移/约束/CRUD/并发/确认删除；数据库迁移套件通过。前端测试覆盖 manual 前置、混合提交、接受/返工、冲突保留 File、下载错误、软删确认、任务页拖拽、筛选、保存视图、列表/看板切换及跨列命令映射/确认/原因/人工验收门禁。Focus 自动工时已由 schema v11/T-12 接入；日期控件和窄屏专项真实浏览器验收仍未完成。
@@ -2041,13 +2043,13 @@ pnpm build:desktop
 | D2 API / Artifact store            | 通过         | Go 定向测试覆盖 manifest-first multipart、大小/类型/Actor 归属、提交/接受/返工/撤回、幂等/版本冲突、分页/详情、完整性下载、软删/Task 硬删 tombstone、数据库绑定 marker、进程锁、耐久同步、模糊 COMMIT、trash 哈希恢复、quarantine 和启动 reconcile |
 | 既有 Task/Actor/Assignment 回归    | 通过         | 六状态、策略锁定、Assignment 联动、Event 关联与不可变、旧 status 410、Task facts/Project 聚合及 Actor 权限由 Go 全量回归覆盖                                                                                                                       |
 | `pnpm --filter @opc/web typecheck` | 通过         | 覆盖 Task D2、Client/Project/Inbox API 类型、strict normalizer、Query hooks 和详情组件                                                                                                                                                             |
-| 前端测试                           | 通过         | `pnpm --filter @opc/web test` 全量 72 个测试文件、431 项测试通过；本次覆盖两种容量门禁错误、note 草稿保留、无成功/自动重试及其他错误 request ID。组件测试不替代浏览器视觉验收 |
+| 前端测试                           | 通过         | `pnpm --filter @opc/web test` 全量 74 个测试文件、457 项测试通过；本次新增覆盖截止风险客户端序列化、两张统计卡切换/清除、独立加载/空/错误重试、服务端分页/页码收敛、无拖拽、详情入口、排序写入互斥与 60 秒低频刷新。组件测试不替代浏览器视觉验收 |
 | Web 生产构建                       | 通过         | `pnpm --filter @opc/web build` / `pnpm build:web` 的 TypeScript 与 Vite 构建通过                                                                                                                                                                   |
 | 前端格式                           | 通过         | Web 范围 Prettier format check 通过                                                                                                                                                                                                                |
 | Go 全量测试与静态检查              | 通过         | `go test ./... -count=1` 与 `go vet ./...` 均通过；不虚构未统计的用例总数                                                                                                                                                                          |
-| 文档链接/过期措辞/diff             | 通过         | v2.5 文档更新完成后运行相对 Markdown 链接、绝对机器路径、过期 Inbox/schema 状态和 `git diff --check` 审计                                                                                                                                          |
+| 文档链接/过期措辞/diff             | 通过         | 本次 v9.13 文档更新后运行相对 Markdown 链接、绝对机器路径、过期状态和 `git diff --check` 审计                                                                                                                                                     |
 | Rust / Tauri 链接                  | 环境受限     | 当前主机缺少 MSVC `link.exe`（Visual C++ Build Tools / Windows SDK）；无法把 `cargo check`/Rust tests 或完整桌面链接声明为通过                                                                                                                     |
-| 浏览器渲染 / 窄屏视觉              | 本次未验收   | D2 与 Inbox 由组件测试覆盖，尚无本轮真实浏览器键盘、焦点、长列表和窄屏视觉证据                                                                                                                                                                     |
+| 浏览器渲染 / 窄屏视觉              | 本次未验收   | Today 截止风险由组件测试覆盖，尚无本轮真实浏览器键盘、焦点、长列表和窄屏视觉证据                                                                                                                                                                   |
 | 桌面安装包与三平台验收             | 未执行       | 安装包、签名/公证、干净系统、性能和三平台矩阵仍未完成                                                                                                                                                                                              |
 
 根 `pnpm check` 当前只执行 TypeScript、Go 测试、Web 构建和 `cargo check`，没有覆盖前端测试、Rust 单元测试或格式检查；在修正聚合脚本前不得把单次 `pnpm check` 视为完整质量门禁。
@@ -2159,7 +2161,7 @@ pnpm build:desktop
 | 方法                 | 路径                                      | 说明                                                                                     | 当前状态                                                                                                                                                                                                                                                              |
 | -------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET                  | /health                                   | 健康检查，返回 app/API/schema 版本                                                       | 已实现                                                                                                                                                                                                                                                                |
-| GET                  | /api/v1/tasks                             | 分页查询任务                                                                             | 已实现；默认 50/最大 100，支持六个精确状态及 `status=active`、优先级/类型/项目/客户、计划与截止范围、`planned_state=scheduled/unscheduled`、搜索、重复标签 AND、父级/根任务和稳定排序；客户沿 Task→Project→Client 当前关系筛选；返回项目/父任务标题、标签、子任务统计 |
+| GET                  | /api/v1/tasks                             | 分页查询任务                                                                             | 已实现；默认 50/最大 100，支持六个精确状态及 `status=active`、优先级/类型/项目/客户、计划与截止范围、`planned_state=scheduled/unscheduled`、实时 `due_state=overdue/due_soon`、搜索、重复标签 AND、父级/根任务和稳定排序；截止风险排除终态并与 Today 统计共享时钟口径，且拒绝与 due 范围混用；客户沿 Task→Project→Client 当前关系筛选；返回项目/父任务标题、标签、子任务统计 |
 | POST                 | /api/v1/tasks                             | 新建任务                                                                                 | 已实现；只允许 todo，支持 `review_policy=none/manual`、类型、父任务、完成标准和标签；`Idempotency-Key` 保存快照；返回 `ETag`                                                                                                                                          |
 | GET / DELETE         | /api/v1/tasks/:id                         | 获取、删除任务                                                                           | 已实现；读取返回完整任务事实、`current_submission_id` 与 `ETag`；删除要求 `If-Match`，活动 Inbox 关系返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，软解除后可删；历史关系的实时 FK 置空但原 Task ID/标题快照保留。其余聚合删除继续协调 Artifact 并级联成员              |
 | PATCH                | /api/v1/tasks/:id                         | 更新非生命周期字段                                                                       | 已实现；支持 `review_policy` 与其他任务事实并要求 `If-Match`，拒绝 `status`；策略变化仅允许 todo 且无任何 Submission 历史                                                                                                                                             |
@@ -2413,3 +2415,4 @@ pnpm build:desktop
 | v9.10    | 2026-08-28 | 交付项目任务浏览器组合筛选：搜索/状态之外新增优先级、类型、标签和已/未排期，全部与 `project_id` 在真实 Task API 取 AND；筛选强制平铺并显示父任务上下文，清除后恢复树，工具栏响应窄屏。API v1/schema v29 不变。 |
 | v9.11    | 2026-08-28 | 交付仅手动 `POST /backups` 的一致性备份低空间准入：双锁内先幂等重放，再于 staging/VACUUM 前按 SQLite 上界、经路径/实际大小复核的 active 文件、marker/manifest 加 20% 且最低 64 MiB 余量，只探测 backup root；精确边界放行，不足/不可确认返回 507/503。拒绝不泄露机器容量信息、不建包、不改业务事实、不投影 generic incident；UI 保留 note 并提供清理/刷新指引。内部自动回滚包不在范围。API v1/schema v29 不变。 |
 | v9.12    | 2026-08-29 | 交付 Project 详情项目级 Focus 分析与终态 Session 历史：历史/周期 API 可选 canonical UUID `project_id`，非法/非 canonical 返回 400、不存在返回 404、归档可读；按 Task 查询时当前 Project 归属，改绑重分类，无 Task/Task 已删/无项目不进入过滤。报告只统计 completed 的闭合正时长 interval，保持 IANA/DST/跨午夜/Streak；详情提供 7/30 天/本月、总时长/完成数/连续天数、稳定历史分页和两路独立反馈，并精确失效相关 Query。API v1/schema v29 不变，无 migration。 |
+| v9.13    | 2026-08-29 | 交付 Today 截止风险快捷筛选：Task 列表新增 `due_state=overdue/due_soon`，单请求固定 Sidecar UTC `now`，以固定宽度 UTC 纳秒键分别计算 `< now` 与 `[now, now+24h]` 并排除 done/cancelled，同时保证混合小数精度的真实截止顺序；拒绝 due 范围或非 active 状态冲突，固定时钟下列表总数与 Today 统计完全一致。Today 补齐临期卡和逾期/临期可访问切换，提供完整服务端分页、加载/空/错误/重试/页码收敛、既有安全任务操作与低频时钟刷新；排序写入期间锁定风险切换与行写，关闭筛选恢复日期分组且风险视图不拖拽。API v1/schema v29 不变，无 migration，不改保存视图。 |

@@ -1375,6 +1375,7 @@ export function useTaskPageQuery(input: TaskListParams = {}, enabled = true) {
     queryFn: () => getTaskPage(input),
     enabled,
     placeholderData: keepPreviousData,
+    refetchInterval: input.dueState ? 60_000 : false,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
@@ -1931,6 +1932,7 @@ export function useTodayStatsQuery(date: string) {
   return useQuery({
     queryKey: ["stats", "today", date, timezone],
     queryFn: () => getTodayStats(date, timezone),
+    refetchInterval: 60_000,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,

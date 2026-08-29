@@ -1319,6 +1319,29 @@ describe("task list requests", () => {
     expect(url.searchParams.getAll("tag_id")).toEqual(["tag-1", "tag-2"]);
     expect(result.meta).toEqual({ page: 3, pageSize: 25, total: 61 });
   });
+
+  it("serializes the mutually exclusive due-state filter on its own", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({ data: [], meta: { page: 1, page_size: 20, total: 0 } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getTaskPage({
+      page: 1,
+      pageSize: 20,
+      status: "active",
+      dueState: "due_soon",
+      sort: "due_date",
+    });
+
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(url.searchParams.get("due_state")).toBe("due_soon");
+    expect(url.searchParams.has("due_from")).toBe(false);
+    expect(url.searchParams.has("due_to")).toBe(false);
+  });
 });
 
 const savedViewDefinition = {

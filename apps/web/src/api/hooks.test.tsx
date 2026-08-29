@@ -44,6 +44,7 @@ import {
   useDeleteTask,
   useTaskPageQuery,
   useTodayTaskGroupsQuery,
+  useTodayStatsQuery,
   useTasksQuery,
 } from "./hooks";
 
@@ -62,6 +63,7 @@ const reviewTaskSubmissionMock = vi.hoisted(() => vi.fn());
 const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
 const deleteTaskMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
+const getTodayStatsMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllTasksMock = vi.hoisted(() => vi.fn());
 const reorderTasksMock = vi.hoisted(() => vi.fn());
@@ -88,6 +90,7 @@ vi.mock("./client", async () => {
     deleteTaskArtifact: deleteTaskArtifactMock,
     deleteTask: deleteTaskMock,
     getTaskPage: getTaskPageMock,
+    getTodayStats: getTodayStatsMock,
     getTask: getTaskMock,
     getTasks: getTasksMock,
     getAllTasks: getAllTasksMock,
@@ -268,7 +271,10 @@ function wrapperFor(queryClient: QueryClient) {
   };
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
 
 describe("useCreateProject", () => {
   it("reuses the same idempotency key when the same request is retried", async () => {
@@ -315,6 +321,74 @@ describe("task queries", () => {
       items: [task],
       meta: { page: 2, pageSize: 25, total: 51 },
     });
+  });
+
+  it("polls only due-state task pages to keep deadline risk current", async () => {
+    vi.useFakeTimers();
+    getTaskPageMock.mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const dueParams = {
+      page: 1,
+      pageSize: 20,
+      status: "active" as const,
+      dueState: "due_soon" as const,
+      sort: "due_date",
+    };
+    const dueHook = renderHook(() => useTaskPageQuery(dueParams), {
+      wrapper: wrapperFor(queryClient),
+    });
+    await act(async () => Promise.resolve());
+    expect(getTaskPageMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(getTaskPageMock).toHaveBeenCalledTimes(2);
+    dueHook.unmount();
+    queryClient.clear();
+    getTaskPageMock.mockClear();
+
+    const normalParams = { page: 1, pageSize: 20, status: "active" as const };
+    const normalHook = renderHook(() => useTaskPageQuery(normalParams), {
+      wrapper: wrapperFor(queryClient),
+    });
+    await act(async () => Promise.resolve());
+    expect(getTaskPageMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(getTaskPageMock).toHaveBeenCalledTimes(1);
+    normalHook.unmount();
+    queryClient.clear();
+  });
+
+  it("polls Today statistics every minute to prevent clock drift", async () => {
+    vi.useFakeTimers();
+    getTodayStatsMock.mockResolvedValue({
+      date: "2026-08-28",
+      tasks: {
+        total: 0,
+        completed: 0,
+        remaining: 0,
+        overdue: 0,
+        dueSoon: 0,
+        estimatedMinutes: 0,
+        actualMinutes: 0,
+      },
+      focus: { sessions: 0, seconds: 0, minutes: 0 },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const hook = renderHook(() => useTodayStatsQuery("2026-08-28"), {
+      wrapper: wrapperFor(queryClient),
+    });
+    await act(async () => Promise.resolve());
+    expect(getTodayStatsMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(getTodayStatsMock).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    queryClient.clear();
   });
 
   it("keeps the legacy useTasksQuery result as Task[]", async () => {
