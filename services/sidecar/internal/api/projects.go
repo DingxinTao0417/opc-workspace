@@ -632,6 +632,7 @@ func (a *API) transitionProject(c *gin.Context) {
 			); err != nil {
 				return err
 			}
+			a.executeProjectCompletionAutomationsSafely(tx, eventID, row.Project, updatedAt)
 		}
 		response = projectResponseFromRow(row)
 		return nil

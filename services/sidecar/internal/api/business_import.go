@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -188,6 +189,9 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		if table.Name == "reminders" && tableHasInvalidReminderRecurrence(table) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "A Reminder recurrence rule is invalid"}
 		}
+		if table.Name == "automation_rules" && tableHasInvalidAutomationRules(table) {
+			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Automation preset configuration is invalid"}
+		}
 		counts[table.Name] = len(table.Rows)
 		total += len(table.Rows)
 	}
@@ -222,12 +226,16 @@ func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData bu
 		if err := importActorRows(tx, tables["actors"]); err != nil {
 			return err
 		}
+		if err := tx.Exec("DELETE FROM automation_rules").Error; err != nil {
+			return err
+		}
 		order := []string{
 			"clients", "projects", "task_submissions", "tasks", "tags", "task_tags", "invoices",
 			"task_assignments", "task_artifacts", "workflow_events",
 			"client_activities", "client_attachments", "client_actor_links", "project_notes", "project_attachments",
 			"focus_sessions", "focus_session_intervals", "inbox_items", "inbox_item_tasks",
-			"reminders", "workspace_avatars", "app_settings", "task_saved_views",
+			"reminders", "automation_rules", "automation_runs",
+			"workspace_avatars", "app_settings", "task_saved_views",
 		}
 		for _, name := range order {
 			var err error
@@ -440,6 +448,8 @@ func businessTargetEmpty(db *gorm.DB) (bool, error) {
 		query := "SELECT COUNT(*) FROM " + quoteIdentifier(spec.Name)
 		if spec.Name == "actors" {
 			query += " WHERE is_builtin = 0"
+		} else if spec.Name == "automation_rules" {
+			query += " WHERE enabled = 1 OR version <> 1"
 		}
 		var count int64
 		if err := db.Raw(query).Row().Scan(&count); err != nil {
@@ -516,6 +526,60 @@ func tableHasInvalidReminderRecurrence(table businessExportTable) bool {
 		}
 	}
 	return false
+}
+
+func tableHasInvalidAutomationRules(table businessExportTable) bool {
+	indexes := make(map[string]int, len(table.Columns))
+	for index, column := range table.Columns {
+		indexes[column] = index
+	}
+	required := []string{"id", "preset_key", "enabled", "config_json", "next_run_at", "version"}
+	for _, column := range required {
+		if _, ok := indexes[column]; !ok {
+			return true
+		}
+	}
+	if len(table.Rows) != len(automationPresets) {
+		return true
+	}
+	seen := make(map[string]struct{}, len(table.Rows))
+	for _, row := range table.Rows {
+		id, idOK := row[indexes["id"]].(string)
+		presetKey, keyOK := row[indexes["preset_key"]].(string)
+		configJSON, configOK := row[indexes["config_json"]].(string)
+		enabled, enabledOK := businessImportInt64(row[indexes["enabled"]])
+		version, versionOK := businessImportInt64(row[indexes["version"]])
+		preset, exists := automationPresetByKey(presetKey)
+		if !idOK || !keyOK || !configOK || !enabledOK || (enabled != 0 && enabled != 1) ||
+			!versionOK || version < 1 || !exists || preset.ID != id {
+			return true
+		}
+		if _, duplicate := seen[presetKey]; duplicate {
+			return true
+		}
+		seen[presetKey] = struct{}{}
+		if _, err := decodeAutomationConfig(presetKey, configJSON); err != nil {
+			return true
+		}
+		nextValue := row[indexes["next_run_at"]]
+		if enabled == 0 || preset.TriggerType == "event" {
+			if nextValue != nil {
+				return true
+			}
+		} else {
+			next, ok := nextValue.(string)
+			if !ok {
+				return true
+			}
+			if _, err := time.Parse(time.RFC3339Nano, next); err != nil {
+				return true
+			}
+		}
+		if enabled == 1 && !preset.Available {
+			return true
+		}
+	}
+	return len(seen) != len(automationPresets)
 }
 
 func businessImportInt64(value any) (int64, bool) {

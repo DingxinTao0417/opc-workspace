@@ -156,6 +156,7 @@ describe("CommandPalette", () => {
     expect(screen.queryByRole("option", { name: /收入/ })).toBeNull();
     expect(screen.queryByRole("option", { name: /发票/ })).toBeNull();
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /自动化设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
   });
 

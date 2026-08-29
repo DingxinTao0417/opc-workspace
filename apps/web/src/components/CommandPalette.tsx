@@ -9,6 +9,7 @@ import {
   Settings2,
   Sun,
   Users,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -79,6 +80,7 @@ const settingsCommands: {
   { id: "settings-appearance", label: "外观设置", module: "appearance" },
   { id: "settings-focus", label: "专注设置", module: "focus" },
   { id: "settings-actors", label: "人员与责任设置", module: "actors" },
+  { id: "settings-automation", label: "自动化设置", module: "automation" },
   { id: "settings-data", label: "数据与备份", module: "data" },
   { id: "settings-diagnostics", label: "运行诊断", module: "diagnostics" },
   { id: "settings-about", label: "关于", module: "about" },
@@ -256,7 +258,7 @@ export function CommandPalette() {
         id,
         label,
         hint: `设置 · ${label === "打开设置" ? "通用" : label.replace(/设置$/, "")}`,
-        icon: Settings2,
+        icon: module === "automation" ? Zap : Settings2,
         run: () => {
           recordRecentCommand(id);
           setOpen(false);

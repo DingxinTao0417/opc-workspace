@@ -15,6 +15,8 @@ import {
   createBackup,
   drillBackupRestore,
   cancelFocusSession,
+  disableAutomationRule,
+  enableAutomationRule,
   createClient,
   createClientActivity,
   createClientAttachment,
@@ -71,6 +73,8 @@ import {
   getFocusSessions,
   getHealth,
   getAppSettings,
+  getAutomationRules,
+  getAutomationRuns,
   commitAppSettingsWithAvatar,
   getInboxItem,
   getInboxItemEvents,
@@ -97,6 +101,7 @@ import {
   getProjectNotes,
   getProjects,
   pauseFocusSession,
+  previewAutomationRule,
   createInboxItem,
   executeInboxItemCommand,
   forceResolveInboxItem,
@@ -108,6 +113,7 @@ import {
   reassignTaskAssignment,
   resumeFocusSession,
   reviewTaskSubmission,
+  retryAutomationRun,
   scheduleBackupRestore,
   submitTaskOutput,
   splitInboxItem,
@@ -121,6 +127,7 @@ import {
   updateTaskSavedView,
   transitionProject,
   updateActor,
+  updateAutomationRule,
   updateProject,
   updateProjectNote,
   updateReminder,
@@ -131,6 +138,8 @@ import {
 import type {
   ActorListParams,
   AppSettingUpdate,
+  AutomationConfig,
+  AutomationRunListParams,
   CreateBackupInput,
   BatchUpdateTasksInput,
   CreateTaskSavedViewInput,
@@ -1007,6 +1016,116 @@ export function useCancelReminder() {
       if (reminderFactsNeedRefresh(error)) {
         await invalidateReminderFacts(queryClient, variables.id);
       }
+    },
+  });
+}
+
+export const automationQueryKey = ["automations"] as const;
+export const automationRulesQueryKey = [
+  ...automationQueryKey,
+  "rules",
+] as const;
+export const automationRunsQueryKey = [...automationQueryKey, "runs"] as const;
+
+export function useAutomationRulesQuery(enabled = true) {
+  return useQuery({
+    queryKey: automationRulesQueryKey,
+    queryFn: getAutomationRules,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useAutomationRunsQuery(
+  input: AutomationRunListParams = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...automationRunsQueryKey, input],
+    queryFn: () => getAutomationRuns(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 1,
+    staleTime: 5_000,
+    refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,
+  });
+}
+
+async function invalidateAutomationFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: automationQueryKey }),
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    queryClient.invalidateQueries({ queryKey: reminderQueryKey }),
+  ]);
+}
+
+export function usePreviewAutomationRule() {
+  return useMutation({
+    mutationFn: ({ id, config }: { id: string; config: AutomationConfig }) =>
+      previewAutomationRule(id, config),
+  });
+}
+
+export function useUpdateAutomationRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      config,
+      expectedVersion,
+    }: {
+      id: string;
+      config: AutomationConfig;
+      expectedVersion: number;
+    }) => updateAutomationRule(id, config, expectedVersion),
+    onSuccess: async () => invalidateAutomationFacts(queryClient),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        await queryClient.invalidateQueries({
+          queryKey: automationRulesQueryKey,
+        });
+      }
+    },
+  });
+}
+
+export function useSetAutomationRuleEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      enabled,
+      expectedVersion,
+    }: {
+      id: string;
+      enabled: boolean;
+      expectedVersion: number;
+    }) =>
+      enabled
+        ? enableAutomationRule(id, expectedVersion)
+        : disableAutomationRule(id, expectedVersion),
+    onSuccess: async () => invalidateAutomationFacts(queryClient),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        await queryClient.invalidateQueries({
+          queryKey: automationRulesQueryKey,
+        });
+      }
+    },
+  });
+}
+
+export function useRetryAutomationRun() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: retryAutomationRun,
+    onSuccess: async () => invalidateAutomationFacts(queryClient),
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: automationRunsQueryKey });
     },
   });
 }

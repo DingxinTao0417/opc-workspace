@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.22](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.23](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -22,7 +22,7 @@
 ## v0.2 本地编排
 
 - [本地 Agent Runtime](local-agents.md)
-- [预设自动化](automation.md)
+- [预设自动化](automation.md)（schema v33、三个可用预设、两个依赖不可用预设、设置预览/启停、Run/重试、IANA/DST 与离线折叠已交付；Agent/发票/自由规则待开发）
 
 任务看板已交付读取、筛选、分页、选择、详情入口及跨列受控生命周期交互；人工验收仍必须在任务详情完成，详见 [任务管理](tasks.md)。
 

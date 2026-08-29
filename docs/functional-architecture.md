@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.45
+> 文档版本：2.46
 > 日期：2026-08-29
-> 依据：[PRD v9.22](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v32
+> 依据：[PRD v9.23](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v33
 
-> 2.45 说明：schema v32 交付本地 daily/weekly 重复 Reminder。每次 occurrence 保持独立不可变终态和唯一 Inbox 投影，同一事务按 IANA 当地日历创建下一 occurrence；跨 DST 保持当地钟点，离线积压只补当前一条并推进序号，重复扫描/重启不重复。取消当前唯一 scheduled occurrence 即停止系列。业务导入在创建回滚包前验证重复规则和时区。app v0.1.0 / API v1 不变。
+> 2.46 说明：schema v33 交付首个受限预设自动化纵切。代码所有的五规则中，Project 完成 Inbox、daily 今日任务 Reminder、weekly 周五复盘 Reminder 可用，发票/Agent 规则保持 unavailable。事件/计划拥有稳定唯一键、事务动作、来源失败隔离、三次 attempt、IANA/DST 与离线窗口折叠；设置、Run 历史/重试和业务导入导出已接通。没有 Shell/SQL/HTTP、外发、AI/LLM、Agent Runtime 或自由规则。app v0.1.0 / API v1 不变。
 
 ## 1. 目的
 
@@ -58,7 +58,7 @@
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema v32：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`；schema v30 非破坏性增加 `task_submissions.origin` 并约束 system child_rollup；schema v31 为 Project Workflow Event→Client system reference 增加来源唯一约束；schema v32 为 Reminder 追加系列、重复规则、时区和 occurrence 唯一事实。v30–v32 都不创建 demo 数据，v32 只把既有一次性 Reminder 补成 `none/1/UTC` 系列首项。
+- SQLite 当前为 schema v33：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v31 增加来源 guards、受控头像、存储设置、父任务 rollup 与 Project→Client Activity；schema v32 为 Reminder 追加系列、重复规则、时区和 occurrence；schema v33 新增空的 Automation Rule/Run 表与身份、形状、去重、重试和不可变约束。v30–v33 都不创建 demo 数据，v33 预设由 Sidecar 幂等登记且默认禁用，不创建业务 Run。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
 - 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。手工 `POST /api/v1/backups` 在幂等重放未命中后，迁移/导入/恢复内部链在各自不可逆边界前，统一按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；恢复另把目标包 pending 副本与 plan 上界加入同一次需求。精确等于需求允许继续；空间不足/容量无法确认分别以 507/503 或启动失败安全拒绝。拒绝无备份 staging、新回滚包、业务变化或 generic incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排通过容量准入后创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
@@ -136,7 +136,7 @@
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划与结果                                                                                                                                                         | Inbox 到期项、客户活动                                                                                                                   |
 | [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                         | 季度和里程碑规划                                                                                                                                                           | 临期/达成 Inbox 事件                                                                                                                     |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                           | 内容计划和准备工作                                                                                                                                                         | 准备 Task、审核/发布时间 Inbox 事件                                                                                                      |
-| [自动化](modules/automation.md)            | Workflow Event、本地时钟                                                                                      | 预设规则和去重执行                                                                                                                                                         | 本地 Inbox Item、Task 或 Reminder                                                                                                        |
+| [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                    | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                     | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                             |
 | [知识库](modules/knowledge-base.md)        | 本地文件                                                                                                      | 导入、FTS 索引、来源定位和删除                                                                                                                                             | 搜索结果、可选 AI 上下文                                                                                                                 |
 | [AI 助手](modules/ai-assistant.md)         | 用户显式选择的本地上下文                                                                                      | 本地问答、摘要和建议                                                                                                                                                       | 建议或待验收 Task Artifact                                                                                                               |
 
@@ -244,6 +244,24 @@ owner 创建 Reminder(scheduled)
 Reminder occurrence 是调度事实；Inbox Item 是该次到期后的处理事实。两者不复用状态。
 
 该链路由 schema v14/T-11A3 建立一次性事实，schema v32 扩展 daily/weekly 系列：Sidecar 在 ready 前补扫到期 Reminder，运行中每 15 秒按稳定顺序扫描最多 100 条；每个到期 occurrence 以 `reminder:<id>:due` 为唯一事件键，在一个事务中创建或复用 Reminder Inbox Item、写 system Inbox Event、标记 Reminder fired、写 system Reminder Event，并按 IANA 当地日历创建同系列唯一下一 occurrence。跨 DST 保持当地钟点；离线漏过多个周期只补当前一条并把序号推进到下一未来时刻。取消唯一 scheduled occurrence 停止系列。系统原生通知、每月/自定义日历规则仍未实现。
+
+### 6.4.1 受限预设自动化（v0.2 首个纵切已实现）
+
+```text
+Project project_completed Workflow Event ─┐
+                                          ├→ 匹配 enabled 代码预设
+本地 daily/weekly IANA 计划窗口 ──────────┘
+  → 生成 logical_key / dedupe_key
+  → action savepoint 内创建本地 Inbox Item 或 Reminder
+  → 同事务写 immutable terminal Automation Run + Workflow Event
+  → 失败回滚动作，写 failed Run；1/5 分钟有界重试，最多 3 次 attempt
+```
+
+schema v33 只保存五个稳定预设的可编辑配置与 Run 快照，规则名称、触发、动作和权限由代码目录所有。Project 完成规则以 `rule_id + source_event_id` 唯一，计划规则以 `rule_id + scheduled_for` 唯一，所有 attempt 再以 `logical_key + attempt` 唯一。Project 来源调用外层 savepoint 隔离整个自动化基础设施，失败不会回滚已经完成的 Project；成功动作、Run 与审计仍原子提交。
+
+daily/weekly 调度先执行到期重试，再按 `next_run_at/id` 扫描最多 100 条；DST 缺失分钟落到首个有效分钟，重复分钟取第一次。离线跨多个窗口只保留最新 due：旧当地日期写一条 `skipped/SCHEDULE_WINDOW_EXPIRED` 并推进，不创建过期 Reminder；当前当地日最多创建一条 Reminder。停用规则阻止新运行和后台重试但不删除历史。Automation 自身 Workflow Event 没有预设消费者，因此当前不能形成递归链；因果深度字段仍由数据库限制在 0–4。
+
+设置界面通过 `/api/v1/automations` 读取规则、服务端预览、`If-Match` 保存/启停并展示 Run/手动重试。发票 Task 和 Agent failure Inbox 预设因依赖未交付固定 unavailable。动作执行器没有 Shell、SQL、HTTP 或外发路径；业务 JSON/ZIP 导入导出包含 Rule/Run，并在回滚包前验证稳定身份、配置、关系和 fresh-target。
 
 ### 6.5 Task 临期来源
 
@@ -406,7 +424,7 @@ Sidecar ready 前 + 每 5 分钟
 ### 8.1 事件来源
 
 - v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含可解释容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
-- v0.2：Agent Runner 追加 Workflow Event，内置自动化投影器以统一 source_event_key 作为 Agent 失败/验收 Inbox Item 的唯一生产者；其他预设自动化也复用同一去重框架。
+- v0.2 当前：Project complete/reopen 已追加 Workflow Event；首个自动化消费者只订阅 `project_completed`。未来 Agent Runner 追加事件后，才启用固定的 Agent 失败预设；Automation Run 自身事件不进入当前消费者。
 - v0.3：路线图里程碑、内容审核与发布时间。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
 
@@ -414,7 +432,7 @@ Sidecar ready 前 + 每 5 分钟
 
 - 每个本地业务事件产生稳定 `source_event_key`。
 - Artifact follow-up key 包含 Artifact ID；Agent 验收 key 包含 Run ID。
-- 自动化使用 `rule_id + event_id` 去重。
+- 自动化事件首轮使用 `rule_id + source_event_id`、计划首轮使用 `rule_id + scheduled_for`，所有 attempt 使用 `logical_key + attempt` 去重；目标对象另使用稳定来源键防止重放。
 - 当前可重试写请求按 `Idempotency-Key + endpoint` 查找，并把 Task 预期版本及规范化 payload 纳入 SHA-256 请求摘要；调用 Actor 作用域仍是未来强化项。
 - 同 key/endpoint 不同请求摘要返回 `409 IDEMPOTENCY_CONFLICT`。
 - 幂等重放不重复写 Workflow Event。

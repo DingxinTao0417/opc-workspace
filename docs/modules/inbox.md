@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v32。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。重复 Reminder 继续为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v33。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；重复 Reminder 继续为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.22](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.23](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
 
 ## 定位与边界
 
@@ -27,6 +27,7 @@
 - `read_at`、`snoozed_until` 与 Inbox Item 主状态彼此独立；已读或稍后都不等于任务完成。
 - 收件箱不复制 Task 进度或负责人事实。
 - 项目、客户、发票继续维护各自状态；当前手工 Inbox Item 不会自动改写这些对象。
+- 已启用的“项目完成后提醒检查开票”预设只创建本地 Inbox Item，不生成或发送发票，也不改变 Project/Client/财务事实。
 - 第一阶段不提供多人登录、云同步、远程通知、邮件/消息自动发送、线上 Agent 或模型服务。
 
 ## 当前实现状态
@@ -157,6 +158,12 @@
 - Inbox 详情展示“项目完成”、完成时间、项目名和完成时未结任务数，并直达 `/projects/:id`。这只要求用户确认交付收尾、归档或其他人工后续，不自动创建 Task，不伪造验收、开票、收入或客户消息。
 - 活动完成事项会阻止 Project 永久删除。全部来源事项先 resolve/dismiss 后，Project 删除事务写入 `source_deleted_at` 和 `source_deleted` Event，再删除 Project；历史 Inbox Item 保留快照并停止提供失效链接。
 
+### 已交付：预设自动化的 Project 完成本地提醒
+
+- schema v33 的 `project-completed-inbox` 预设默认禁用；用户在设置中预览并显式启用后，新发生的 Project complete 事件会追加一条标题为“检查开票”的本地 Inbox Item。
+- 动作使用稳定 Rule/事件 dedupe key；同一完成版本重放不会重复创建，失败只留下 Automation Run 并按受控次数重试。自动化基础设施失败由外层 savepoint 隔离，不能回滚已成功提交的 Project 完成事实。
+- 该条目只保存 Project ID/名称/完成版本等最小本地上下文，不创建发票、不确认收入、不联系客户，也不调用外部 API、AI、LLM 或 Agent。
+
 ### 已交付：T-11E 第九项——运行期数据库故障降级
 
 - 版本化 API 通过统一数据库错误出口捕获非预期 SQLite 操作失败；`/health` 数据库 Ping、Focus Session 心跳和 Reminder/Task 到期来源扫描失败也进入同一链路。原 HTTP 状态、API 错误码及后台任务行为保持不变。
@@ -173,8 +180,8 @@
 
 ### 明确未交付
 
-- 每月/自定义 Reminder、系统原生通知，以及 Task/Project/Client 等业务来源自动创建 Reminder；
-- Project 完成以外的独立里程碑、Client/Invoice，以及其他尚未接入的系统故障来源投影；
+- 每月/自定义 Reminder、系统原生通知，以及 Task/Project/Client 等自由业务来源自动创建 Reminder；当前只有两个固定日历自动化预设；
+- Project 完成以外的独立里程碑、Client/Invoice，以及其他尚未接入的系统故障来源投影；“检查开票”仅为本地人工提示，不是 Invoice 领域实现；
 - 卷级容量历史趋势；
 - 已交付来源以外的多态删除协调、Inbox Item 硬删除；
 - Agent Actor、Adapter、Agent Run、自动执行、取消/重试、能力令牌和崩溃恢复；
@@ -255,7 +262,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v32 延续）
+### `inbox_items`（schema v12，在当前 schema v33 延续）
 
 | 字段                                | 当前约束 / 说明                                                                                                                                          |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

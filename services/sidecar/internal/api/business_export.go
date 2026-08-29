@@ -45,6 +45,8 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "inbox_items", OrderBy: "id"},
 	{Name: "inbox_item_tasks", OrderBy: "inbox_item_id, task_id"},
 	{Name: "reminders", OrderBy: "id"},
+	{Name: "automation_rules", OrderBy: "id"},
+	{Name: "automation_runs", OrderBy: "attempt, started_at, id"},
 	{Name: "app_settings", OrderBy: "key"},
 	{Name: "workspace_avatars", OrderBy: "created_at, id"},
 	{Name: "task_saved_views", OrderBy: "id"},

@@ -21,6 +21,7 @@ import {
   Trash2,
   UserRound,
   UsersRound,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
@@ -65,6 +66,7 @@ import {
 import { useUiStore, type SettingsModule } from "../store/ui";
 import type { AppSettingUpdate } from "../types/models";
 import { ActorSettings } from "./ActorSettings";
+import { AutomationSettings } from "./AutomationSettings";
 import { BackupSettings } from "./BackupSettings";
 import { Modal } from "./Modal";
 
@@ -78,6 +80,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "appearance", label: "外观", icon: Palette },
   { id: "focus", label: "专注", icon: Focus },
   { id: "actors", label: "人员与责任", icon: UsersRound },
+  { id: "automation", label: "自动化", icon: Zap },
   { id: "data", label: "数据与备份", icon: DatabaseBackup },
   { id: "diagnostics", label: "运行诊断", icon: Activity },
   { id: "about", label: "关于", icon: Info },
@@ -910,6 +913,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       return <ActorSettings />;
     }
 
+    if (activeModule === "automation") {
+      return <AutomationSettings />;
+    }
+
     if (activeModule === "data") {
       const capacityLabels = {
         database: "本地数据库",
@@ -1356,6 +1363,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     <Modal
       footer={
         activeModule === "actors" ||
+        activeModule === "automation" ||
         activeModule === "diagnostics" ||
         activeModule === "about" ? (
           <>
@@ -1443,6 +1451,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         >
           {moduleContent}
           {activeModule !== "actors" &&
+          activeModule !== "automation" &&
           activeModule !== "data" &&
           activeModule !== "about" &&
           !settingsQuery.data &&
@@ -1456,6 +1465,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </div>
           ) : null}
           {activeModule !== "actors" &&
+          activeModule !== "automation" &&
           activeModule !== "data" &&
           activeModule !== "about" &&
           saveError ? (

@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v32。v9.22 交付 daily/weekly 本地重复 Reminder：独立 occurrence、IANA/DST 当地钟点、离线积压折叠、幂等下一 occurrence、系列取消与导入预检均已接通。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v33。v9.23 交付首个受限预设自动化纵切：三个本地规则可用，两个缺少依赖的规则保持 unavailable；设置、运行记录、IANA/DST、离线折叠、重试、去重和业务导入导出均已接通。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.22）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.23）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -45,7 +45,7 @@
 | 客户回访         | 未开始                | v0.4     | [client-followups.md](modules/client-followups.md) |
 | 路线图           | 占位页                | v0.3     | [roadmap.md](modules/roadmap.md)                   |
 | 内容日历         | 占位页                | v0.3     | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 未开始                | v0.2     | [automation.md](modules/automation.md)             |
+| 预设自动化       | 首个纵向切片完成      | v0.2     | [automation.md](modules/automation.md)             |
 | 本地知识库       | 未开始                | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
 | AI 助手          | 未开始                | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
 

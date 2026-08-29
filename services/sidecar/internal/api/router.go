@@ -159,6 +159,18 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		db: db, options: options, artifactStore: artifacts, backupStore: backups,
 		maintenance: &sync.RWMutex{},
 	}
+	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("initialize preset Automations: %w", err)
+	}
+	if err := service.projectDueAutomations(options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("project due Automations: %w", err)
+	}
 	if err := service.projectDueReminders(context.Background()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
@@ -305,6 +317,15 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/reminders/:id", service.getReminder)
 		v1.PATCH("/reminders/:id", service.updateReminder)
 		v1.DELETE("/reminders/:id", service.cancelReminder)
+		v1.GET("/automations/rules", service.listAutomationRules)
+		v1.GET("/automations/rules/:id", service.getAutomationRule)
+		v1.PATCH("/automations/rules/:id", service.updateAutomationRule)
+		v1.POST("/automations/rules/:id/preview", service.previewAutomationRule)
+		v1.POST("/automations/rules/:id/enable", service.enableAutomationRule)
+		v1.POST("/automations/rules/:id/disable", service.disableAutomationRule)
+		v1.GET("/automations/runs", service.listAutomationRuns)
+		v1.GET("/automations/runs/:id", service.getAutomationRun)
+		v1.POST("/automations/runs/:id/retry", service.retryAutomationRun)
 		v1.GET("/stats/today", service.todayStats)
 		v1.GET("/stats/focus", service.focusPeriodStats)
 		v1.GET("/stats/inbox", service.inboxStats)
@@ -356,7 +377,10 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 						continue
 					}
 					service.maintenance.RLock()
-					err := service.projectDueReminders(ctx)
+					err := service.projectDueAutomations(options.Now().UTC())
+					if err == nil {
+						err = service.projectDueReminders(ctx)
+					}
 					if err == nil {
 						err = service.projectDueTasks(ctx)
 					}

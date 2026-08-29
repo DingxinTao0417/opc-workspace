@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v32（2026-08-29），本轮无桌面 migration。schema v12–v32 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v33（2026-08-29），本轮无桌面 migration。schema v12–v33 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.22](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.23](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

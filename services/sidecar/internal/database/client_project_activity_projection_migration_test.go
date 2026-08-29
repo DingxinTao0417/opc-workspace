@@ -84,7 +84,7 @@ func TestClientProjectActivityProjectionMigrationUpgradesV30WithoutBackfill(t *t
 		t.Fatalf("upgrade v30 database: %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 32 {
+	if gate != nil || store.SchemaVersion != 33 {
 		t.Fatalf("v30 to v31 migration store=%d gate=%#v", store.SchemaVersion, gate)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM client_activities"); got != 4 {

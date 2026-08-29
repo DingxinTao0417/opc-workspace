@@ -45,7 +45,7 @@ After migrations, Artifact reconciliation, and listening succeed, stdout receive
   "version": "0.1.0",
   "app_version": "0.1.0",
   "api_version": "v1",
-  "schema_version": 31
+  "schema_version": 33
 }
 ```
 
@@ -71,7 +71,8 @@ The Sidecar exposes:
 - Client contact relationship query/link/unlink with aggregate concurrency, idempotent snapshots, atomic person creation, one active contact per Client, and immutable unlink history;
 - Inbox Item create/query/detail, read/snooze/resolve/dismiss/reopen commands and immutable Inbox workflow history;
 - Inbox Item–Task active/history relationships, server-derived progress, required-flag updates, reasoned soft unlinking, and active-relation protection for Task hard deletion;
-- one-time local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, periodic due scanning, and exactly-once Reminder-to-Inbox projection;
+- one-time plus daily/weekly local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, IANA/DST-aware periodic due scanning, offline folding, and exactly-once Reminder-to-Inbox/next-occurrence projection;
+- five code-owned preset Automation Rules with strict preview/configuration, optimistic enable/disable, immutable Run history, event/schedule dedupe, bounded retry, and three currently available local-only actions; Invoice and Agent-dependent presets remain unavailable;
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands, terminal history pagination, timezone-aware today/period aggregation with streaks, and optional current-Task-attributed Project filtering for history and reports;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 - synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active controlled Task Artifact or Client Attachment through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
@@ -143,6 +144,15 @@ POST   /api/v1/reminders
 GET    /api/v1/reminders/:id
 PATCH  /api/v1/reminders/:id
 DELETE /api/v1/reminders/:id
+GET    /api/v1/automations/rules
+GET    /api/v1/automations/rules/:id
+PATCH  /api/v1/automations/rules/:id
+POST   /api/v1/automations/rules/:id/preview
+POST   /api/v1/automations/rules/:id/enable
+POST   /api/v1/automations/rules/:id/disable
+GET    /api/v1/automations/runs
+GET    /api/v1/automations/runs/:id
+POST   /api/v1/automations/runs/:id/retry
 ```
 
 Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; Client Attachment upload/deletion and Client contact link/unlink use the containing Client `If-Match`. Stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events or file writes, and reject key reuse with different input.
@@ -209,9 +219,11 @@ An active Inbox relationship makes `DELETE /api/v1/tasks/:id` return `409 TASK_H
 
 ### One-time Reminder contract
 
-`GET /api/v1/reminders` provides stable pagination plus `q`, `status`, and allow-listed sorting. POST creates a manual one-time Reminder whose RFC 3339 `trigger_at` must be in the future according to the server clock. Create accepts an optional `Idempotency-Key` and snapshots the first response. Detail, PATCH, and DELETE return or consume the Reminder ETag; PATCH can change title, summary, priority, and trigger time only while scheduled. DELETE is a reasoned soft cancellation, also supports idempotent replay, and never removes the row.
+`GET /api/v1/reminders` provides stable pagination plus `q`, `status`, and allow-listed sorting. POST creates a manual one-time, daily, or weekly Reminder whose RFC 3339 `trigger_at` must be in the future according to the server clock. Create accepts an optional `Idempotency-Key` and snapshots the first response. Detail, PATCH, and DELETE return or consume the Reminder ETag; PATCH can change title, summary, priority, trigger time, and recurrence only while scheduled. DELETE is a reasoned soft cancellation, also supports idempotent replay, and never removes the row.
 
-Router startup synchronously projects overdue scheduled rows before readiness, then scans every 15 seconds in stable batches of 100. Each projection transaction finds or creates one `kind=reminder` Inbox Item using `reminder:<id>:due`, appends the system Inbox event, marks the Reminder fired with the Inbox ID, and appends the system Reminder event. The unique event key, conditional Reminder update, and transaction make repeated scans and restarts safe. Native OS notifications, recurrence, remote delivery, and business-source Reminder creation are not implemented.
+Router startup synchronously projects overdue scheduled rows before readiness, then scans every 15 seconds in stable batches of 100. Each projection transaction finds or creates one `kind=reminder` Inbox Item using `reminder:<id>:due`, appends the system Inbox event, marks the Reminder fired with the Inbox ID, appends the system Reminder event, and for daily/weekly rules creates the one next occurrence by IANA local-calendar arithmetic. The unique event key, series/occurrence constraints, conditional update, and transaction make repeated scans and restarts safe. Native OS notifications, remote delivery, monthly/custom rules, and free-form business-source rules are not implemented.
+
+`GET /api/v1/automations/rules` exposes five stable presets in code order. Configuration preview is server-authoritative; PATCH and enable/disable require `If-Match`. Three presets are currently usable: Project completion creates a local invoice-check Inbox Item, and daily/weekly schedules create local Reminder facts. Every attempt writes an immutable terminal Run with a stable logical/dedupe key; failed local actions retry at most twice after the initial attempt. Rule actions are limited to allow-listed local Inbox/Reminder writes: there is no Shell, SQL, HTTP, external send, AI/LLM, or Agent Runtime execution.
 
 ### Client facts contract
 
@@ -300,7 +312,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v31. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 adds indexes and guards for required-Task reconciliation. Migration 016 adds an initially empty `app_settings` table and its guards. Migration 017 adds constrained, versioned Task saved views. Migrations 018–022 add Client activities/attachments/contact relationships and Project notes/attachments. Migrations 023–026 add Task Artifact, blocked, due and system-maintenance Inbox-source guards. Migration 027 adds controlled Workspace Avatars; migration 028 adds Project-completion Inbox projection and deletion coordination; migration 029 adds versioned storage-threshold settings. Migration 030 is additive: it adds immutable `task_submissions.origin` with `manual | child_rollup`, preserves all v29 rows as manual, restricts child rollups to the built-in system/non-inferred/no-Artifact contract, and performs no historical hierarchy backfill. Migration 031 is additive: it creates a partial unique index for Client `system_reference` rows sourced from Project Workflow Events; it adds no source foreign key and does not backfill historical Project events. These migrations do not seed demo data. The project-scoped Focus read model uses existing Task/Project/Session relationships and introduces no migration. Future changes must start at `032_*`; never edit a shipped migration. A migration that deletes, rebuilds, or irreversibly rewrites existing facts must include `-- migration: destructive` in its consecutive header directives. Existing workspaces stop before the first such migration, publish a fully verified SQLite and controlled-file rollback package, then reopen and continue; backup failure leaves destructive SQL unapplied and prevents ready.
+The current schema is v33. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migration 015 adds indexes and guards for required-Task reconciliation. Migration 016 adds an initially empty `app_settings` table and its guards. Migration 017 adds constrained, versioned Task saved views. Migrations 018–022 add Client activities/attachments/contact relationships and Project notes/attachments. Migrations 023–026 add Task Artifact, blocked, due and system-maintenance Inbox-source guards. Migration 027 adds controlled Workspace Avatars; migration 028 adds Project-completion Inbox projection and deletion coordination; migration 029 adds versioned storage-threshold settings; migration 030 adds immutable Submission origin; migration 031 constrains Project Workflow Event-sourced Client Activities; migration 032 adds Reminder series, daily/weekly recurrence, IANA timezone, and occurrence constraints; migration 033 adds empty Automation Rule/Run tables with identity, shape, dedupe, retry, causal-depth, and immutable-history constraints. Sidecar startup idempotently registers the five default-disabled code-owned presets; migration/startup does not create business Runs or replay historical Project events. These migrations do not seed demo business data. Future changes must start at `034_*`; never edit a shipped migration. A migration that deletes, rebuilds, or irreversibly rewrites existing facts must include `-- migration: destructive` in its consecutive header directives. Existing workspaces stop before the first such migration, publish a fully verified SQLite and controlled-file rollback package, then reopen and continue; backup failure leaves destructive SQL unapplied and prevents ready.
 
 Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
 

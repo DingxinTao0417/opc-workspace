@@ -40,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。内置 Sidecar 的 generation-aware 有界自动重启、数据库父目录运行锁、父管道 EOF 退出和前端连接世代清理也已接通。手工备份及迁移、恢复、JSON/ZIP 导入前的自动回滚包均在落盘前执行脱敏容量准入，恢复安排还预留 pending 目标副本。根脚本提供可在缺少桌面链接器时运行的源码门禁，以及包含 Rust/Tauri 链接测试的完整门禁。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 不变，SQLite 当前为 schema v32。T-02 仍是部分完成：真实 Tauri/Sidecar 父进程崩溃、进程树、三平台和安装包尚未验收，也没有 OS Job Object、进程组或孙进程治理；hard-hung orphan 当前只会被运行锁阻止再次打开同库，不会自动回收。[PRD v9.22](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF 和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v33。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.23](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.22）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.23）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -293,6 +293,15 @@ POST   /api/v1/reminders
 GET    /api/v1/reminders/:id
 PATCH  /api/v1/reminders/:id
 DELETE /api/v1/reminders/:id
+GET    /api/v1/automations/rules
+GET    /api/v1/automations/rules/:id
+PATCH  /api/v1/automations/rules/:id
+POST   /api/v1/automations/rules/:id/preview
+POST   /api/v1/automations/rules/:id/enable
+POST   /api/v1/automations/rules/:id/disable
+GET    /api/v1/automations/runs
+GET    /api/v1/automations/runs/:id
+POST   /api/v1/automations/runs/:id/retry
 GET    /api/v1/focus-sessions?page=1&page_size=20&status=terminal&project_id=<UUID>
 GET    /api/v1/focus-sessions/active
 POST   /api/v1/focus-sessions
@@ -335,13 +344,15 @@ Client contact 关系列表默认每页 20、最大 100，按 `linked_at DESC, i
 
 Task 关系 GET 返回实时 progress，活动关系与仍有实时 Task 的历史关系可打开共享 Task 详情。split 可原子创建父子 Task、独立完成条件、owner/person Assignment、manual owner reviewer、显式 required 关系与事件；可信来源 Project 作为默认值带入但可逐项清除/改选，person 只作本地责任记录。自动策略由 system 结清/重开；父子层级和 child_rollup 不创建 Inbox 关系，也不继承或改写 required。所有会改变 follow-up 的成功 Inbox mutation 失效来源 Project，split 另失效 Task、Today、Project。`submit-output` 对每个显式 follow-up Artifact 同事务创建稳定去重来源项；活动来源阻止 Artifact/Task 删除，归档后保留来源快照。当前没有公开来源创建或 Inbox 删除路由。
 
-Reminder API 提供一次性本地提醒的分页/搜索/状态列表、创建、详情、并发安全编辑和带原因软取消。公开创建固定为 manual 来源且触发时间必须晚于服务端当前时间；创建和取消支持幂等快照，PATCH/DELETE 使用 `ETag`/`If-Match`，fired/cancelled 为不可变终态。Sidecar 启动先补扫到期项，随后每 15 秒扫描最多 100 条；稳定 `source_event_key`、条件更新和单事务保证 Reminder、Reminder Inbox Item 及 Workflow Event 恰好一次投影。当前没有重复提醒、系统原生通知、远程推送或业务来源自动建提醒。
+Reminder API 提供一次性及 daily/weekly 本地提醒的分页/搜索/状态列表、创建、详情、并发安全编辑和带原因停止系列。公开创建固定为 manual 来源；自动化调度器可创建 `source_entity_type=automation` 的一次性 Reminder。Sidecar ready 前补扫，随后每 15 秒扫描；稳定键、系列唯一约束和单事务保证 occurrence、Inbox 与下一 occurrence 恰好一次。跨 DST 保持当地钟点，离线积压折叠；系统原生通知、远程推送、每月和自由日历规则仍未实现。
+
+Automation API 只暴露五个代码所有的稳定预设，不提供创建任意 trigger/action 的接口。规则配置、启停使用版本化 `If-Match`；preview 由服务端规范化参数并返回下一计划与权限。当前可用 Project 完成 Inbox、daily/weekly Reminder；发票 Task 和 Agent failure Inbox 固定 unavailable。Run 保留终态、attempt、快照、结果/安全错误码，失败最多三次并可手动重试。没有 Shell、SQL、HTTP、外发、AI/LLM 或 Agent Runtime。
 
 Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时、Today 和周期报告；Today/周期报告以 IANA 本地日边界与已关闭正时长 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。终态历史和周期报告均可选严格 canonical UUID `project_id`：空值、非法或非 canonical 返回 `400 INVALID_PROJECT_ID`，不存在返回 `404 PROJECT_NOT_FOUND`，归档项目仍可读。项目筛选按 Session 绑定 Task 的查询时当前 `project_id` 归类，Task 改绑会重分类旧 Session；无 Task、Task 已删除或当前无项目的记录不进入项目过滤结果。
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v32；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key，v30 非破坏性增加 `task_submissions.origin`、保留既有提交为 manual 并约束 system child_rollup，v31 为 Project Workflow Event→Client system reference 建立来源唯一约束，v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；迁移不创建 demo 数据。后续从 `033_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v33；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v31 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件及来源 guards；v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；v33 新增空的 Automation Rule/Run 表及稳定身份、事件/计划形状、去重、重试和不可变约束。迁移不创建 demo 数据或 Automation Run；五个默认禁用预设由 Sidecar 幂等登记。后续从 `034_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -351,4 +362,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.22](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、一次性及 daily/weekly Reminder、Inbox/Task 编排、Project Artifact→Inbox→Task 人工闭环、内置 Sidecar 有界自动恢复、全部当前回滚包容量准入和统一源码质量门禁；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。
+[PRD v9.23](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全和桌面恢复基座；v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作。明确无 AI/LLM/Agent Runtime、外发和自由规则。真实浏览器/WebView 休眠/时区切换、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。

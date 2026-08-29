@@ -1,10 +1,10 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v32（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v33（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v33 的预设自动化可创建来源为 automation 的一次性 Reminder，但不改变 Reminder 表。
 >
-> 版本边界：T-11A3 一次性本地 Reminder 及每日/每周重复规则已交付。每月/自定义日历规则、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
+> 版本边界：T-11A3 一次性本地 Reminder 及每日/每周重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”已能按 IANA 时区创建本地一次性 Reminder。每月/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.22](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.23](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 
@@ -12,7 +12,7 @@ Reminder 是“某个提醒系列中的一次时间调度事实”，Inbox Item 
 
 当前模块只负责：
 
-- 由 owner 创建未来某一时刻触发的一次性、按天或按周重复的本地提醒；
+- 由 owner 创建未来某一时刻触发的一次性、按天或按周重复的本地提醒，或由已启用的受限预设自动化创建下一条一次性提醒；
 - 在提醒仍为 scheduled 时编辑标题、摘要、优先级、触发时间和重复规则，或带原因取消当前唯一的后续 occurrence；
 - Sidecar 启动时补扫、运行中定时扫描到期提醒；
 - 以 occurrence 专属稳定事件键在同一 SQLite 事务中生成一个 Reminder 类型 Inbox Item；重复系列同时创建下一条 scheduled occurrence；
@@ -35,22 +35,22 @@ Reminder 是“某个提醒系列中的一次时间调度事实”，Inbox Item 
 
 schema v14 的 `014_reminders.sql` 新增 `reminders`，schema v32 的 `032_recurring_reminders.sql` 追加系列字段与约束：
 
-| 字段                                                   | 说明                                                         |
-| ------------------------------------------------------ | ------------------------------------------------------------ |
-| `id`                                                   | UUID 主键                                                    |
-| `source_entity_type / source_entity_id`                | 当前公开创建固定为 `manual / null`；业务来源接入留待独立纵切 |
-| `title / summary / priority`                           | 标题 2–200 字符，摘要最多 10,000 字符，优先级 P0–P3          |
-| `trigger_at`                                           | RFC 3339 UTC，一次性触发时间                                 |
-| `status`                                               | `scheduled / fired / cancelled`                              |
-| `source_event_key`                                     | 创建时生成稳定唯一键 `reminder:<id>:due`                     |
-| `created_by_actor_id`                                  | 当前固定内置 owner                                           |
-| `series_id`                                            | 系列稳定 ID；首个 occurrence 等于自己的 Reminder ID          |
-| `recurrence_type / recurrence_interval`                | `none / daily / weekly` 与 1–365 间隔                        |
-| `recurrence_timezone`                                  | 重复规则使用的稳定 IANA 时区；一次性固定 `UTC`               |
-| `occurrence_number`                                    | 系列序号；离线跳过周期时按实际日历步数递增                   |
-| `fired_at / inbox_item_id`                             | fired 时成组出现并引用唯一 Inbox Item                        |
-| `cancelled_by_actor_id / cancelled_at / cancel_reason` | cancelled 时成组出现，原因非空                               |
-| `version / created_at / updated_at`                    | 乐观并发版本和 UTC 时间戳                                    |
+| 字段                                                   | 说明                                                                    |
+| ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `id`                                                   | UUID 主键                                                               |
+| `source_entity_type / source_entity_id`                | 公开创建固定为 `manual / null`；预设调度器使用 `automation / <rule-id>` |
+| `title / summary / priority`                           | 标题 2–200 字符，摘要最多 10,000 字符，优先级 P0–P3                     |
+| `trigger_at`                                           | RFC 3339 UTC，一次性触发时间                                            |
+| `status`                                               | `scheduled / fired / cancelled`                                         |
+| `source_event_key`                                     | 创建时生成稳定唯一键 `reminder:<id>:due`                                |
+| `created_by_actor_id`                                  | 当前固定内置 owner                                                      |
+| `series_id`                                            | 系列稳定 ID；首个 occurrence 等于自己的 Reminder ID                     |
+| `recurrence_type / recurrence_interval`                | `none / daily / weekly` 与 1–365 间隔                                   |
+| `recurrence_timezone`                                  | 重复规则使用的稳定 IANA 时区；一次性固定 `UTC`                          |
+| `occurrence_number`                                    | 系列序号；离线跳过周期时按实际日历步数递增                              |
+| `fired_at / inbox_item_id`                             | fired 时成组出现并引用唯一 Inbox Item                                   |
+| `cancelled_by_actor_id / cancelled_at / cancel_reason` | cancelled 时成组出现，原因非空                                          |
+| `version / created_at / updated_at`                    | 乐观并发版本和 UTC 时间戳                                               |
 
 数据库约束和 trigger 共同保证：
 
@@ -62,7 +62,7 @@ schema v14 的 `014_reminders.sql` 新增 `reminders`，schema v32 的 `032_recu
 - fired/cancelled 为不可变终态，Reminder 不允许硬删除；
 - 创建者和取消者必须是有效 Actor，当前公开 API 只使用内置 owner，触发事件由内置 system 记录。
 
-schema v32 为普通加法迁移：既有 Reminder 幂等回填 `series_id=id / recurrence_type=none / interval=1 / timezone=UTC / occurrence=1`，不创建 demo Reminder，也不改变其标题、状态、触发时间、Inbox 引用或历史事件。后续迁移必须从 `033_*` 继续。
+schema v32 为普通加法迁移：既有 Reminder 幂等回填 `series_id=id / recurrence_type=none / interval=1 / timezone=UTC / occurrence=1`，不创建 demo Reminder，也不改变其标题、状态、触发时间、Inbox 引用或历史事件。schema v33 新增 Automation Rule/Run 表，未启用规则不会创建 Reminder；后续迁移必须从 `034_*` 继续。
 
 ## API 契约
 
@@ -108,6 +108,7 @@ Inbox Item 继承 Reminder 的标题、摘要、优先级和触发时间，`sour
 - 业务导入对篡改 recurrence timezone 的预检拒绝；
 - 前端 API 规范化、Query/Mutation 缓存行为、创建/编辑/取消、冲突草稿和终态跳转；
 - Reminder Inbox 投影的一致性校验。
+- 预设自动化的 IANA/DST 预览、离线折叠、稳定来源键和失败重试不会重复创建 Reminder。
 
 相关代码：
 
@@ -118,12 +119,13 @@ Inbox Item 继承 Reminder 的标题、摘要、优先级和触发时间，`sour
 - [Reminder 迁移测试](../../services/sidecar/internal/database/reminder_migration_test.go)
 - [前端提醒管理器](../../apps/web/src/components/ReminderManagerModal.tsx)
 - [前端 Reminder API](../../apps/web/src/api/client.ts)
+- [预设自动化引擎](../../services/sidecar/internal/api/automation_engine.go)
 
 ## 后续范围
 
 - 原生系统通知、托盘/角标、声音及 DND 引导；
 - 每月、工作日、自定义日历规则、系列批量改期和单次例外；
-- Task、Project、Client 回访、发票等业务来源自动创建 Reminder；
+- Task、Project、Client 回访、发票等自由业务来源自动创建 Reminder；当前仅开放两个固定日历预设；
 - Reminder 到期后已自然进入 Today/Sidebar 的 Inbox 派生计数；独立“待提醒/即将提醒”计数仍未实现；
 - 用户可配置扫描频率、产品化历史清理或导出；
 - 任何远程推送、邮件、短信、第三方日历或云同步。
