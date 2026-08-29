@@ -13,7 +13,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite schema v29、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
-- 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选
+- 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
 - 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联，以及人工备注/会议活动的幂等创建、稳定分页、版本化编辑与带原因软删除已接真实 API
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
@@ -28,16 +28,16 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 含文件业务 ZIP 导出：设置页可下载 manifest、同一版本化业务 JSON 和全部 active 受控文件；Sidecar 在维护写锁内逐文件复验 size/SHA-256，完整生成后才响应，缺失或篡改不会留下部分下载
 - 业务 JSON 安全导入 v1：设置页先预检官方 JSON，再显式确认；仅支持当前 schema、无受控文件/活动 Focus 且目标为空，应用前自动创建已校验回滚备份，整批事务失败不改变现有数据
 - 含文件业务 ZIP 安全导入 v1：设置页先预检 manifest、业务 JSON、文件全集/哈希与数据库元数据，再以独立确认词应用；仅支持当前 schema、终态 Focus 且目标为空，应用前自动创建已校验回滚备份，文件无覆盖发布并在 DB 提交前复验，失败补偿本次文件
-- React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
+- React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出、项目级 Focus 报告与终态 Session 历史，并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块；空查询优先显示本地最近使用，容量/保留期受限且不保存搜索词或业务正文，已删资源在本地确认 404 后自动清理；具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护
-- Focus Core A+B+C+D1+D2a 和 D2b 日期范围回顾/项目/标签/小时/热力图：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、7/30 天/本月/最多 93 天自定义趋势与 Streak、按 Task 当前归属的项目分布与非互斥当前标签分布、DST 安全 24 小时分布/最佳时段与周几×小时二维热力图、Task 详情按需专注记录，以及共享前端循环/恢复 UI
+- Focus Core A+B+C+D1+D2a 和 D2b 日期范围回顾/项目/标签/小时/热力图：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、7/30 天/本月/最多 93 天自定义趋势与 Streak、按 Task 当前归属的项目分布与非互斥当前标签分布、DST 安全 24 小时分布/最佳时段与周几×小时二维热力图、Task 详情按需专注记录、项目详情按当前 Task 项目归属查看报告与历史，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
 - Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.11](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.12](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.11）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.12）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -284,6 +284,7 @@ POST   /api/v1/reminders
 GET    /api/v1/reminders/:id
 PATCH  /api/v1/reminders/:id
 DELETE /api/v1/reminders/:id
+GET    /api/v1/focus-sessions?page=1&page_size=20&status=terminal&project_id=<UUID>
 GET    /api/v1/focus-sessions/active
 POST   /api/v1/focus-sessions
 POST   /api/v1/focus-sessions/:id/pause
@@ -291,6 +292,7 @@ POST   /api/v1/focus-sessions/:id/resume
 POST   /api/v1/focus-sessions/:id/recover
 POST   /api/v1/focus-sessions/:id/stop
 POST   /api/v1/focus-sessions/:id/cancel
+GET    /api/v1/stats/focus?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&timezone=<IANA>&project_id=<UUID>
 GET    /api/v1/stats/today?date=YYYY-MM-DD&timezone=<IANA>
 ```
 
@@ -320,7 +322,7 @@ Task 关系 GET 返回实时 progress；split 可原子创建父子 Task、Assig
 
 Reminder API 提供一次性本地提醒的分页/搜索/状态列表、创建、详情、并发安全编辑和带原因软取消。公开创建固定为 manual 来源且触发时间必须晚于服务端当前时间；创建和取消支持幂等快照，PATCH/DELETE 使用 `ETag`/`If-Match`，fired/cancelled 为不可变终态。Sidecar 启动先补扫到期项，随后每 15 秒扫描最多 100 条；稳定 `source_event_key`、条件更新和单事务保证 Reminder、Reminder Inbox Item 及 Workflow Event 恰好一次投影。当前没有重复提醒、系统原生通知、远程推送或业务来源自动建提醒。
 
-Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时和 Today 统计；Today 以 IANA 本地日边界与已关闭 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。
+Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining_seconds`，有 Session 时携带 ETag。`planned_seconds` 为 300–7200；已有 Session 命令强制 `If-Match`，create/stop/cancel 支持 `Idempotency-Key`，匹配终态的重复 stop/cancel 不重复记账。Sidecar 启动把遗留 active 变为 recovery_pending，用户必须选择计入中断间隔继续、排除间隔继续或中断。只有 completed Session 进入 Task 工时、Today 和周期报告；Today/周期报告以 IANA 本地日边界与已关闭正时长 interval 的实际 overlap 计算，兼容旧 `timezone_offset_minutes`。终态历史和周期报告均可选严格 canonical UUID `project_id`：空值、非法或非 canonical 返回 `400 INVALID_PROJECT_ID`，不存在返回 `404 PROJECT_NOT_FOUND`，归档项目仍可读。项目筛选按 Session 绑定 Task 的查询时当前 `project_id` 归类，Task 改绑会重分类旧 Session；无 Task、Task 已删除或当前无项目的记录不进入项目过滤结果。
 
 ## SQLite 与迁移
 
@@ -334,4 +336,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.11](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2 与六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查；明确未交付 Focus 原生反馈、内容日历、客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.12](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2 与六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史；明确未交付 Focus 原生反馈、内容日历、客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

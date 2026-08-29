@@ -2398,6 +2398,24 @@ kbd {
   margin-bottom: 12px;
 }
 
+.project-focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 12px;
+}
+
+.project-focus-panel {
+  background: var(--panel-2);
+}
+
+.project-focus-panel .feedback {
+  margin-top: 14px;
+}
+
+.project-focus-panel .focus-history-list article {
+  background: var(--panel);
+}
+
 .project-artifact-heading-actions,
 .project-history-toggle,
 .project-artifact-row,
@@ -9109,7 +9127,8 @@ kbd {
 }
 
 @media (max-width: 860px) {
-  .focus-insights {
+  .focus-insights,
+  .project-focus-grid {
     grid-template-columns: 1fr;
   }
 

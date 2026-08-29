@@ -551,6 +551,7 @@ export interface FocusSessionListParams {
   pageSize?: number;
   status?: FocusSessionHistoryStatus;
   taskId?: string;
+  projectId?: string;
 }
 
 export interface FocusSessionListResult {
@@ -619,6 +620,7 @@ export interface FocusReportParams {
   dateFrom: string;
   dateTo: string;
   timezone: string;
+  projectId?: string;
 }
 
 export interface CreateFocusSessionInput {

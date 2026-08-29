@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v29 不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录），以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付；原生桌面反馈仍属后续。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-29）。Focus 结构仍由 schema v11 引入；schema v12–v29 不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付；原生桌面反馈仍属后续。
 
 ## 定位与边界
 
@@ -34,8 +34,8 @@
 
 ### 已实现：v0.1-D1 历史与七日报告
 
-- `GET /api/v1/focus-sessions` 默认只列终态 Session，支持 completed/cancelled/interrupted、可选 Task 筛选和稳定分页；active 仍由单独快照端点负责。
-- `GET /api/v1/stats/focus` 接受显式 IANA 时区和 1–93 个本地自然日；未传日期时默认最近七天。它只聚合 completed Session 的已关闭 interval，并按每日本地边界 overlap 切分，兼容跨午夜和 DST。
+- `GET /api/v1/focus-sessions` 默认只列终态 Session，支持 completed/cancelled/interrupted、可选 Task/Project 筛选和稳定分页；active 仍由单独快照端点负责。
+- `GET /api/v1/stats/focus` 接受显式 IANA 时区、1–93 个本地自然日和可选 Project 筛选；未传日期时默认最近七天。它只聚合 completed Session 的已关闭正时长 interval，并按每日本地边界 overlap 切分，兼容跨午夜和 DST。
 - 报告返回区间 distinct Session、精确秒数、向下取整分钟、逐日事实、项目分布、当前标签分布、0–23 点小时分布、周一至周日×24 小时热力图、截至 `date_to` 的当前连续天数，以及区间内最长连续天数；零事实日、小时和热力格保留在序列中。
 - FocusPage 展示最近七日指标/柱形趋势、终态历史分页，以及独立的加载、错误、重试和空状态。Session 结束后自动失效 Today、周期报告与历史缓存。
 
@@ -56,9 +56,17 @@
 - 同一次区间遍历还把 interval 归入固定 168 格，顺序为周一至周日、每行 0–23 点；distinct Session 在每格独立去重。Focus 页以 7×24 矩阵展示当地星期/小时规律，支持横向滚动和逐格分钟/块数提示。
 - 标签分布读取 Session 绑定 Task 的查询时当前 `task_tags`；一个 Task 有多个标签时，同一有效 interval 分别完整计入每个标签，所以标签分钟之和可能超过区间总分钟。无任务、Task 已删除或当前无标签统一归入“未加标签”。标签改绑/删除会重分类旧 Session，不是历史标签快照。
 
+### 已实现：Project 详情专注分析与终态历史
+
+- 两个 D1 读接口可选 `project_id`，且不改变未传参数时的全局响应。参数必须为小写 canonical UUID；空、非法、大小写或其他非 canonical 形式返回 `400 INVALID_PROJECT_ID`，规范但不存在的 Project 返回 `404 PROJECT_NOT_FOUND`，归档 Project 仍可读。
+- Project 归属按 Session 绑定 Task 的**查询时当前** `project_id` 派生；Task 从 Project A 改绑到 B 后，旧 Session 会从 A 重分类到 B。无 Task、Task 已删除或当前 Task 无 Project 的 Session 不进入项目过滤结果。
+- Project 详情在任务区之后独立加载 7 天、30 天和本月报告，展示 completed-only 总时长、distinct Session 完成数、当前/区间最长连续天数及每日趋势。
+- 同一区块另以每页 6 条稳定分页展示 completed/cancelled/interrupted 终态历史；取消/中断仅显示审计“记录时长”，不进入报告或 Task 工时。
+- 报告与历史各自提供加载、空、错误、重试和分页状态，任一失败不阻塞 Project 主详情或另一卡；总页数回缩时前端收敛到有效页，归档 Project 保持只读可查。
+- 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型；schema 保持 v29，不新增迁移。
+
 ### 尚未实现：D2b 其余能力与后续增强
 
-- 原生本地通知、托盘和系统勿扰联动。
 - 原生本地通知、托盘控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。
 - 长休息策略、白噪音和网站屏蔽。
 - 完整 SQLite `app_settings`；Focus 参数和本地休息/轮次协调仍保存在当前 WebView。
@@ -98,6 +106,14 @@
 2. 自动到时的 stop 成功后，presentation coordinator 按本轮 committed 设置进入休息或完成整轮，并在允许时播放提示音。
 3. 休息使用绝对 `breakEndsAtMs` 和本地持久状态，支持暂停和跳过，不写 Session 或 Task 工时。
 4. 休息结束后，用户手动开始或按 `autoStartFocus` 创建下一工作 Session；新的 Session 使用当时已保存的设置。
+
+### 在项目详情查看专注事实
+
+1. 用户进入存在或已归档 Project 的详情页，Focus 区分别请求带该 Project canonical UUID 的报告和终态历史；主详情不等待这两个请求。
+2. 用户切换 7 天、30 天或本月时，只改变报告的本地日期范围；历史页码与活动 Session 不受影响。
+3. 报告继续按浏览器 IANA 时区切分 completed Session 的闭合正时长 interval；历史可同时展示 cancelled/interrupted 作为审计记录。
+4. Task 改绑、删除或移出 Project 后，刷新结果按当前关系重分类；本功能不维护历史 Project 快照，也不回写 Task、Project 或 Session。
+5. 某一卡失败时用户可独立重试；空报告与空历史分别展示明确空态。归档 Project 可读，已永久删除的 Project 返回 `404 PROJECT_NOT_FOUND`。
 
 ## 数据契约
 
@@ -161,6 +177,8 @@ stop 的分钟增量为 `floor(exact_seconds / 60) - applied_minutes`，因此�
 | `POST /api/v1/focus-sessions/:id/recover` | 要求 `If-Match`；body action 为三种恢复动作之一                                                        |
 | `POST /api/v1/focus-sessions/:id/stop`    | 要求 `If-Match`；支持幂等快照，完成 Session 并原子累计 Task 工时                                       |
 | `POST /api/v1/focus-sessions/:id/cancel`  | 要求 `If-Match`；支持幂等快照，取消且不累计 Task 工时                                                  |
+| `GET /api/v1/focus-sessions`              | 终态历史；支持 `task_id/status/page/page_size` 及可选 canonical UUID `project_id`，按 `ended_at DESC, id ASC` 稳定分页 |
+| `GET /api/v1/stats/focus`                 | 1–93 个当地日的 completed-only 报告；支持显式 IANA 时区和可选 canonical UUID `project_id`              |
 | `GET /api/v1/stats/today?date=&timezone=` | `timezone` 接受 IANA 名称；按当地日边界聚合 completed interval overlap                                 |
 
 所有 Session 响应使用：
@@ -185,6 +203,9 @@ stop 的分钟增量为 `floor(exact_seconds / 60) - applied_minutes`，因此�
 - 已 completed 的重复 stop、已 cancelled 的重复 cancel，即使携带旧版本或新 key，也返回当前稳定终态，不重复写 interval、Task 工时或事件。
 - 同时 create 只有一个成功；同时 stop 可都取得同一终态，但 Session、Task 工时和完成事件只写一次。
 - 主要领域冲突包括 `ACTIVE_FOCUS_SESSION_EXISTS`、`INVALID_FOCUS_SESSION_STATE`、`TASK_CANCELLED` 和 `TASK_HAS_OPEN_FOCUS_SESSION`。
+- `project_id` 缺失时维持全局读模型；空、非法或非 canonical 返回 `400 INVALID_PROJECT_ID`，canonical 但不存在返回 `404 PROJECT_NOT_FOUND`。归档 Project 不冲突，按正常只读结果返回。
+
+前端 Focus 派生读模型使用独立 Query 前缀，并把 Project、日期范围、Task/状态和页码保留在 key 中。当前精确失效边界为：Task 编辑/删除及批量 `set_project` 刷新历史与报告；批量标签变更、Tag 更新/删除和 Project 更新只刷新报告；Project 删除只把报告标为 stale 且不在详情导航前重取已删除 ID。计划日期、排序、生命周期和 Artifact/Submission 等不改变当前标题/项目/标签归属的操作不刷新这两个派生读模型；Focus stop/cancel/recover 仍按既有 Focus 事实边界刷新活动、历史、报告、Today、Task 与 Project 查询。
 
 ## 状态机与事件
 
@@ -207,7 +228,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 
 - [任务](tasks.md)：选择未取消 Task；stop 递增 `actual_minutes` 与 Task version。活动 Session 阻止 Task 硬删除，Focus 不改变 Task 状态。
 - [今日](today.md)：RightOverview 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
-- [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Session 不复制 Project 状态。
+- [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Project 详情另以可选 `project_id` 按 Task 当前归属读取报告和终态历史，Session 不复制 Project 状态或历史归属。
 - [设置](settings.md)：committed 参数用于新 Session 与自动下一轮；draft/preview 不改写活动 Session。
 - [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，并可让“专注设置”直达 focus 模块；从命令结果直接绑定任务仍未交付。
 - [桌面平台](desktop-platform.md)：原生通知、托盘和系统勿扰仍待实现。
@@ -248,6 +269,12 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - 原生通知、托盘、应用通知暂停与系统勿扰引导。
 - 真实桌面环境的后台挂起、休眠、异常退出与三平台矩阵；当前已有可控时钟、跨午夜、DST、并发和恢复自动测试，不能替代桌面验收。
 
+### Project 详情读取（已完成）
+
+- D1 历史与周期报告增加可选 `project_id`，严格 canonical UUID/400/404、归档可读和当前 Task 项目归属语义已完成。
+- Project 详情已接 7 天/30 天/本月趋势、总时长、完成数、连续天数、终态历史分页，以及报告/历史独立加载、空、错误和重试。
+- 该读取不增加 schema migration；API 保持 v1，SQLite schema 保持 v29。
+
 ### 后续增强
 
 - 长休息、白噪音和网站屏蔽。
@@ -263,6 +290,8 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - Sidecar 启动恢复、15 秒心跳不递增业务版本、Router 关闭后停止心跳。
 - 活动 Task 删除被阻止；终态 Task 删除后 Session 与 interval 保留。
 - IANA 时区、跨午夜、DST 23/25 小时边界、completed-only 和 distinct Session 统计。
+- Project 过滤覆盖 canonical UUID 400、不存在 404、归档/空 Project、当前 Task 项目重分类、Task 删除/无项目排除、终态历史分页，以及 completed-only 报告的跨午夜/DST/零事实序列。
+- Project 详情覆盖 7 天/30 天/本月、总时长/完成数/Streak、终态历史、分页收敛、两路独立加载/空/错误/重试和归档只读；缓存测试覆盖必要失效与改期/排序等无关写入不失效。
 - 前端快照规范化、稳定幂等重试、缓存失效、刷新恢复、设置草稿隔离、恢复对话框、RightOverview 与番茄循环。
 
 ## 相关代码/PRD 链接
@@ -278,5 +307,6 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [全局 ticker](../../apps/web/src/components/FocusTicker.tsx)
 - [专注页面](../../apps/web/src/pages/FocusPage.tsx)
 - [Task 详情专注记录](../../apps/web/src/components/TaskFocusHistorySection.tsx)
+- [Project 详情专注分析](../../apps/web/src/components/ProjectFocusSection.tsx)
 - [恢复对话框](../../apps/web/src/components/FocusRecoveryModal.tsx)
 - [右侧概览](../../apps/web/src/components/RightOverview.tsx)

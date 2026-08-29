@@ -2215,8 +2215,20 @@ export function normalizeFocusSessionListResult(
   ) {
     return invalidResponse("专注历史响应格式无效");
   }
+  const items = payload.data.map(normalizeFocusSession);
+  if (
+    items.some(
+      (item) =>
+        (item.status !== "completed" &&
+          item.status !== "cancelled" &&
+          item.status !== "interrupted") ||
+        item.endedAt === null,
+    )
+  ) {
+    return invalidResponse("专注历史响应格式无效");
+  }
   return {
-    items: payload.data.map(normalizeFocusSession),
+    items,
     meta: {
       page: positiveInteger(payload.meta.page, "专注历史页码"),
       pageSize: positiveInteger(
@@ -6869,6 +6881,7 @@ export async function getFocusSessions(
     status: input.status ?? "terminal",
   });
   if (input.taskId) params.set("task_id", input.taskId);
+  if (input.projectId) params.set("project_id", input.projectId);
   const payload = await apiRequest<unknown>(`/api/v1/focus-sessions?${params}`);
   return normalizeFocusSessionListResult(payload);
 }
@@ -6881,6 +6894,7 @@ export async function getFocusReport(
     date_to: input.dateTo,
     timezone: input.timezone,
   });
+  if (input.projectId) params.set("project_id", input.projectId);
   const payload = await apiRequest<unknown>(`/api/v1/stats/focus?${params}`);
   return normalizeFocusReport(payload);
 }

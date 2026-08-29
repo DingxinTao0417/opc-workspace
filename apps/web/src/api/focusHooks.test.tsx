@@ -2,18 +2,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FocusSessionSnapshot } from "../types/models";
+import type {
+  FocusReport,
+  FocusSessionListResult,
+  FocusSessionSnapshot,
+} from "../types/models";
 import { ApiError } from "./client";
 import {
   focusSessionQueryKey,
+  focusReportQueryKey,
+  focusSessionHistoryQueryKey,
   projectQueryKey,
   taskQueryKey,
   useCreateFocusSession,
+  useFocusReportQuery,
+  useFocusSessionHistoryQuery,
   useStopFocusSession,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   create: vi.fn(),
+  history: vi.fn(),
+  report: vi.fn(),
   stop: vi.fn(),
 }));
 
@@ -22,6 +32,8 @@ vi.mock("./client", async () => {
   return {
     ...actual,
     createFocusSession: calls.create,
+    getFocusReport: calls.report,
+    getFocusSessions: calls.history,
     stopFocusSession: calls.stop,
   };
 });
@@ -71,6 +83,62 @@ function wrapperFor(queryClient: QueryClient) {
 afterEach(() => vi.clearAllMocks());
 
 describe("focus hooks", () => {
+  it("keeps project-scoped report and history queries in distinct caches", async () => {
+    const reportInput = {
+      dateFrom: "2026-08-22",
+      dateTo: "2026-08-28",
+      timezone: "UTC",
+      projectId: "project-1",
+    };
+    const historyInput = {
+      page: 1,
+      pageSize: 6,
+      status: "terminal" as const,
+      projectId: "project-1",
+    };
+    const report = {
+      dateFrom: reportInput.dateFrom,
+      dateTo: reportInput.dateTo,
+      timezone: "UTC",
+      totals: { sessions: 0, seconds: 0, minutes: 0 },
+      days: [],
+      projects: [],
+      hours: [],
+      heatmap: [],
+      tags: [],
+      currentStreakDays: 0,
+      longestStreakDays: 0,
+    } satisfies FocusReport;
+    const history = {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0 },
+    } satisfies FocusSessionListResult;
+    calls.report.mockResolvedValue(report);
+    calls.history.mockResolvedValue(history);
+    const queryClient = createQueryClient();
+    const wrapper = wrapperFor(queryClient);
+    const reportHook = renderHook(() => useFocusReportQuery(reportInput), {
+      wrapper,
+    });
+    const historyHook = renderHook(
+      () => useFocusSessionHistoryQuery(historyInput),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(reportHook.result.current.isSuccess).toBe(true));
+    await waitFor(() =>
+      expect(historyHook.result.current.isSuccess).toBe(true),
+    );
+    expect(calls.report).toHaveBeenCalledWith(reportInput);
+    expect(calls.history).toHaveBeenCalledWith(historyInput);
+    expect(
+      queryClient.getQueryData([...focusReportQueryKey, reportInput]),
+    ).toEqual(report);
+    expect(
+      queryClient.getQueryData([...focusSessionHistoryQueryKey, historyInput]),
+    ).toEqual(history);
+  });
+
   it("reuses one create idempotency key after a lost response", async () => {
     calls.create
       .mockRejectedValueOnce(new Error("response lost"))

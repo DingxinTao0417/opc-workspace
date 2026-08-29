@@ -42,6 +42,8 @@ const project: Project = {
 const transition = vi.hoisted(() => vi.fn());
 const projectRefetch = vi.hoisted(() => vi.fn());
 const taskPageInput = vi.hoisted(() => vi.fn());
+const focusReportInput = vi.hoisted(() => vi.fn());
+const focusHistoryInput = vi.hoisted(() => vi.fn());
 
 const rootTask: Task = {
   id: "task-1",
@@ -161,6 +163,43 @@ vi.mock("../api/hooks", () => ({
     isSuccess: true,
     refetch: vi.fn(),
   }),
+  useFocusReportQuery: (input: unknown) => {
+    focusReportInput(input);
+    return {
+      data: {
+        dateFrom: "2026-08-22",
+        dateTo: "2026-08-28",
+        timezone: "UTC",
+        totals: { sessions: 0, seconds: 0, minutes: 0 },
+        days: [],
+        projects: [],
+        hours: [],
+        heatmap: [],
+        tags: [],
+        currentStreakDays: 0,
+        longestStreakDays: 0,
+      },
+      error: null,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: vi.fn(),
+    };
+  },
+  useFocusSessionHistoryQuery: (input: unknown) => {
+    focusHistoryInput(input);
+    return {
+      data: {
+        items: [],
+        meta: { page: 1, pageSize: 6, total: 0 },
+      },
+      error: null,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: vi.fn(),
+    };
+  },
   useCreateProjectAttachment: () => ({
     error: null,
     isPending: false,
@@ -274,6 +313,10 @@ describe("ProjectDetailPage", () => {
     transition.mockReset();
     projectRefetch.mockReset();
     taskPageInput.mockReset();
+    focusReportInput.mockReset();
+    focusHistoryInput.mockReset();
+    project.status = "in_progress";
+    project.availableActions = ["pause", "complete", "archive"];
     project.taskSummary.remaining = 2;
     project.taskSummary.total = 3;
     projectTasks = [];
@@ -325,6 +368,30 @@ describe("ProjectDetailPage", () => {
       newTaskOpen: true,
       newTaskProjectId: project.id,
     });
+  });
+
+  it("integrates project-scoped Focus after tasks and keeps it visible when archived", () => {
+    project.status = "archived";
+    project.availableActions = ["restore"];
+    renderPage();
+
+    const taskHeading = screen.getByRole("heading", { name: "项目任务" });
+    const focusHeading = screen.getByRole("heading", { name: "项目专注" });
+    const notesHeading = screen.getByRole("heading", { name: "项目笔记" });
+    expect(
+      taskHeading.compareDocumentPosition(focusHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      focusHeading.compareDocumentPosition(notesHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(focusReportInput).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: project.id }),
+    );
+    expect(focusHistoryInput).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: project.id, status: "terminal" }),
+    );
   });
 
   it("shows project tasks as a hierarchy and can switch to a flat list", () => {

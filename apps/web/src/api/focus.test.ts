@@ -7,6 +7,7 @@ import {
   getFocusReport,
   getFocusSessions,
   getTodayStats,
+  normalizeFocusSessionListResult,
   normalizeFocusSessionSnapshot,
   pauseFocusSession,
   recoverFocusSession,
@@ -88,6 +89,12 @@ describe("focus API contract", () => {
       normalizeFocusSessionSnapshot(
         snapshotBody(focusSession({ status: "invented" })),
       ),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeFocusSessionListResult({
+        data: [focusSession()],
+        meta: { page: 1, page_size: 20, total: 1 },
+      }),
     ).toThrow(ApiError);
   });
 
@@ -193,6 +200,7 @@ describe("focus API contract", () => {
       page: 2,
       pageSize: 6,
       status: "completed",
+      projectId: "018f0000-0000-7000-8000-000000000201",
     });
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
     expect(url.pathname).toBe("/api/v1/focus-sessions");
@@ -200,11 +208,31 @@ describe("focus API contract", () => {
       page: "2",
       page_size: "6",
       status: "completed",
+      project_id: "018f0000-0000-7000-8000-000000000201",
     });
     expect(result.meta).toEqual({ page: 2, pageSize: 6, total: 8 });
     expect(result.items[0]).toMatchObject({
       status: "completed",
       taskTitle: "整理交付清单",
+    });
+  });
+
+  it("keeps the project history filter optional for existing callers", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [],
+        meta: { page: 1, page_size: 20, total: 0 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getFocusSessions();
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.searchParams.has("project_id")).toBe(false);
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "1",
+      page_size: "20",
+      status: "terminal",
     });
   });
 
@@ -262,9 +290,13 @@ describe("focus API contract", () => {
       dateFrom: "2026-08-22",
       dateTo: "2026-08-28",
       timezone: "America/Los_Angeles",
+      projectId: "018f0000-0000-7000-8000-000000000201",
     });
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
     expect(url.searchParams.get("timezone")).toBe("America/Los_Angeles");
+    expect(url.searchParams.get("project_id")).toBe(
+      "018f0000-0000-7000-8000-000000000201",
+    );
     expect(report).toMatchObject({
       totals: { sessions: 2, seconds: 3000, minutes: 50 },
       currentStreakDays: 1,
@@ -296,5 +328,16 @@ describe("focus API contract", () => {
         }),
       ],
     });
+
+    await getFocusReport({
+      dateFrom: "2026-08-22",
+      dateTo: "2026-08-28",
+      timezone: "America/Los_Angeles",
+    });
+    const unscopedUrl = new URL(
+      String(fetchMock.mock.calls[1][0]),
+      "http://local",
+    );
+    expect(unscopedUrl.searchParams.has("project_id")).toBe(false);
   });
 });

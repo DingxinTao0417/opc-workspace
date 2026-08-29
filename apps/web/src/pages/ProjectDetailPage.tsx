@@ -24,6 +24,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
 import { ProjectEventsSection } from "../components/ProjectEventsSection";
+import { ProjectFocusSection } from "../components/ProjectFocusSection";
 import { ProjectArtifactsSection } from "../components/ProjectArtifactsSection";
 import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSection";
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
@@ -557,6 +558,8 @@ export function ProjectDetailPage() {
           </nav>
         ) : null}
       </section>
+
+      <ProjectFocusSection projectId={project.id} />
 
       <section className="project-detail-section project-actions-section">
         <div className="project-detail-heading">

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const maxFocusStatsDays = 93
@@ -101,37 +103,61 @@ func (a *API) listFocusSessions(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_FOCUS_STATUS", "status must be terminal, completed, cancelled, or interrupted")
 		return
 	}
-
-	query := a.db.WithContext(c.Request.Context()).Table("focus_sessions AS focus_session")
-	if status == "terminal" {
-		query = query.Where("focus_session.status IN ?", []string{"completed", "cancelled", "interrupted"})
-	} else {
-		query = query.Where("focus_session.status = ?", status)
+	projectID, ok := focusProjectFilter(c)
+	if !ok {
+		return
 	}
+
+	var taskID *string
 	if rawTaskID, present := c.GetQuery("task_id"); present {
-		taskID := strings.TrimSpace(rawTaskID)
-		parsed, err := uuid.Parse(taskID)
+		value := strings.TrimSpace(rawTaskID)
+		parsed, err := uuid.Parse(value)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_TASK_ID", "task_id must be a UUID")
 			return
 		}
-		query = query.Where("focus_session.task_id = ?", parsed.String())
+		canonical := parsed.String()
+		taskID = &canonical
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		writeDatabaseError(c)
-		return
-	}
 	rows := make([]focusSessionRow, 0)
-	if err := query.
-		Select("focus_session.*, task.title AS task_title").
-		Joins("LEFT JOIN tasks AS task ON task.id = focus_session.task_id").
-		Order("focus_session.ended_at DESC").
-		Order("focus_session.id ASC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Scan(&rows).Error; err != nil {
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := requireFocusProject(tx, projectID); err != nil {
+			return err
+		}
+		query := tx.Table("focus_sessions AS focus_session")
+		if projectID != nil {
+			query = query.
+				Joins("JOIN tasks AS task ON task.id = focus_session.task_id").
+				Where("task.project_id = ?", *projectID)
+		} else {
+			query = query.Joins("LEFT JOIN tasks AS task ON task.id = focus_session.task_id")
+		}
+		if status == "terminal" {
+			query = query.Where("focus_session.status IN ?", []string{"completed", "cancelled", "interrupted"})
+		} else {
+			query = query.Where("focus_session.status = ?", status)
+		}
+		if taskID != nil {
+			query = query.Where("focus_session.task_id = ?", *taskID)
+		}
+		if err := query.Count(&total).Error; err != nil {
+			return err
+		}
+		return query.
+			Select("focus_session.*, task.title AS task_title").
+			Order("focus_session.ended_at DESC").
+			Order("focus_session.id ASC").
+			Offset((page - 1) * pageSize).
+			Limit(pageSize).
+			Scan(&rows).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
+			return
+		}
 		writeDatabaseError(c)
 		return
 	}
@@ -151,6 +177,10 @@ func (a *API) listFocusSessions(c *gin.Context) {
 }
 
 func (a *API) focusPeriodStats(c *gin.Context) {
+	projectID, ok := focusProjectFilter(c)
+	if !ok {
+		return
+	}
 	location, ok := statsLocation(c)
 	if !ok {
 		return
@@ -196,7 +226,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	rangeStartUTC := localStart.UTC()
 	rangeEndUTC := localEnd.AddDate(0, 0, 1).UTC()
 	var intervals []completedFocusInterval
-	if err := a.db.WithContext(c.Request.Context()).Raw(`
+	intervalQuery := `
 		SELECT interval.session_id, session.task_id, interval.started_at, interval.ended_at, interval.duration_seconds,
 		       task.project_id, project.name AS project_name
 		FROM focus_session_intervals AS interval
@@ -208,7 +238,53 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		  AND interval.duration_seconds > 0
 		  AND julianday(interval.ended_at) > julianday(?)
 		  AND julianday(interval.started_at) < julianday(?)
-	`, rangeStartUTC.Format(time.RFC3339Nano), rangeEndUTC.Format(time.RFC3339Nano)).Scan(&intervals).Error; err != nil {
+	`
+	intervalArgs := []any{rangeStartUTC.Format(time.RFC3339Nano), rangeEndUTC.Format(time.RFC3339Nano)}
+	if projectID != nil {
+		intervalQuery += " AND task.project_id = ?"
+		intervalArgs = append(intervalArgs, *projectID)
+	}
+	type taskTagRow struct {
+		TaskID string `gorm:"column:task_id"`
+		TagID  string `gorm:"column:tag_id"`
+		Name   string `gorm:"column:name"`
+		Color  string `gorm:"column:color"`
+	}
+	var taskTags []taskTagRow
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := requireFocusProject(tx, projectID); err != nil {
+			return err
+		}
+		if err := tx.Raw(intervalQuery, intervalArgs...).Scan(&intervals).Error; err != nil {
+			return err
+		}
+		taskIDs := make([]string, 0)
+		seenTaskIDs := make(map[string]struct{})
+		for _, interval := range intervals {
+			if interval.TaskID == nil {
+				continue
+			}
+			if _, exists := seenTaskIDs[*interval.TaskID]; exists {
+				continue
+			}
+			seenTaskIDs[*interval.TaskID] = struct{}{}
+			taskIDs = append(taskIDs, *interval.TaskID)
+		}
+		if len(taskIDs) == 0 {
+			return nil
+		}
+		return tx.Table("task_tags").
+			Select("task_tags.task_id, tags.id AS tag_id, tags.name, tags.color").
+			Joins("JOIN tags ON tags.id = task_tags.tag_id").
+			Where("task_tags.task_id IN ?", taskIDs).
+			Order("LOWER(tags.name) ASC").Order("tags.id ASC").
+			Scan(&taskTags).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
+			return
+		}
 		writeDatabaseError(c)
 		return
 	}
@@ -315,37 +391,9 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		}
 		return leftID < rightID
 	})
-	type taskTagRow struct {
-		TaskID string `gorm:"column:task_id"`
-		TagID  string `gorm:"column:tag_id"`
-		Name   string `gorm:"column:name"`
-		Color  string `gorm:"column:color"`
-	}
-	taskIDs := make([]string, 0)
-	seenTaskIDs := make(map[string]struct{})
-	for _, interval := range intervals {
-		if interval.TaskID != nil {
-			if _, exists := seenTaskIDs[*interval.TaskID]; !exists {
-				seenTaskIDs[*interval.TaskID] = struct{}{}
-				taskIDs = append(taskIDs, *interval.TaskID)
-			}
-		}
-	}
 	tagsByTaskID := make(map[string][]taskTagRow)
-	if len(taskIDs) > 0 {
-		var taskTags []taskTagRow
-		if err := a.db.WithContext(c.Request.Context()).Table("task_tags").
-			Select("task_tags.task_id, tags.id AS tag_id, tags.name, tags.color").
-			Joins("JOIN tags ON tags.id = task_tags.tag_id").
-			Where("task_tags.task_id IN ?", taskIDs).
-			Order("LOWER(tags.name) ASC").Order("tags.id ASC").
-			Scan(&taskTags).Error; err != nil {
-			writeDatabaseError(c)
-			return
-		}
-		for _, taskTag := range taskTags {
-			tagsByTaskID[taskTag.TaskID] = append(tagsByTaskID[taskTag.TaskID], taskTag)
-		}
+	for _, taskTag := range taskTags {
+		tagsByTaskID[taskTag.TaskID] = append(tagsByTaskID[taskTag.TaskID], taskTag)
 	}
 	type tagAccumulator struct {
 		tagID    *string
@@ -478,6 +526,35 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		Days:   days, Projects: projects, Hours: hours, Heatmap: heatmap, Tags: tags,
 		CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
 	}})
+}
+
+func focusProjectFilter(c *gin.Context) (*string, bool) {
+	raw, present := c.GetQuery("project_id")
+	if !present {
+		return nil, true
+	}
+	value := strings.TrimSpace(raw)
+	parsed, err := uuid.Parse(value)
+	if err != nil || parsed.String() != value {
+		writeError(c, http.StatusBadRequest, "INVALID_PROJECT_ID", "project_id must be a canonical UUID")
+		return nil, false
+	}
+	canonical := parsed.String()
+	return &canonical, true
+}
+
+func requireFocusProject(tx *gorm.DB, projectID *string) error {
+	if projectID == nil {
+		return nil
+	}
+	var count int64
+	if err := tx.Table("projects").Where("id = ?", *projectID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func focusIntervalOverlapSeconds(interval completedFocusInterval, rangeStart, rangeEnd time.Time) (int64, error) {

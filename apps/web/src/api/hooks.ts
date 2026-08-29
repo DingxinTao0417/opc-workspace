@@ -1710,6 +1710,29 @@ export function useTaskOptionsQuery(enabled = true) {
 }
 
 export const focusSessionQueryKey = ["focus-sessions", "active"] as const;
+export const focusSessionHistoryQueryKey = [
+  "focus-sessions",
+  "history",
+] as const;
+export const focusReportQueryKey = ["stats", "focus"] as const;
+
+async function invalidateFocusReadModels(
+  queryClient: QueryClient,
+  scopes: { history?: boolean; report?: boolean },
+): Promise<void> {
+  const invalidations: Array<Promise<unknown>> = [];
+  if (scopes.report) {
+    invalidations.push(
+      queryClient.invalidateQueries({ queryKey: focusReportQueryKey }),
+    );
+  }
+  if (scopes.history) {
+    invalidations.push(
+      queryClient.invalidateQueries({ queryKey: focusSessionHistoryQueryKey }),
+    );
+  }
+  await Promise.all(invalidations);
+}
 
 const openFocusStatuses = new Set(["active", "paused", "recovery_pending"]);
 
@@ -1735,8 +1758,8 @@ async function invalidateFocusDependents(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
     queryClient.invalidateQueries({ queryKey: projectQueryKey }),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
-    queryClient.invalidateQueries({ queryKey: ["stats", "focus"] }),
-    queryClient.invalidateQueries({ queryKey: ["focus-sessions", "history"] }),
+    queryClient.invalidateQueries({ queryKey: focusReportQueryKey }),
+    queryClient.invalidateQueries({ queryKey: focusSessionHistoryQueryKey }),
   ]);
 }
 
@@ -1772,7 +1795,7 @@ export function useFocusSessionHistoryQuery(
   enabled = true,
 ) {
   return useQuery({
-    queryKey: ["focus-sessions", "history", input],
+    queryKey: [...focusSessionHistoryQueryKey, input],
     queryFn: () => getFocusSessions(input),
     enabled,
     placeholderData: keepPreviousData,
@@ -1784,7 +1807,7 @@ export function useFocusSessionHistoryQuery(
 
 export function useFocusReportQuery(input: FocusReportParams, enabled = true) {
   return useQuery({
-    queryKey: ["stats", "focus", input],
+    queryKey: [...focusReportQueryKey, input],
     queryFn: () => getFocusReport(input),
     enabled,
     retry: 2,
@@ -2229,6 +2252,10 @@ export function useUpdateTask() {
     onSuccess: async (task) => {
       queryClient.setQueryData(taskDetailQueryKey(task.id), task);
       await invalidateTaskOutputAggregate(queryClient, task.id);
+      await invalidateFocusReadModels(queryClient, {
+        history: true,
+        report: true,
+      });
     },
   });
 }
@@ -2257,10 +2284,20 @@ export function useDeleteTask() {
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+      await invalidateFocusReadModels(queryClient, {
+        history: true,
+        report: true,
+      });
       await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
     },
     onError: async (error) => {
-      if (isTaskFactsStale(error)) await invalidateTaskFacts(queryClient);
+      if (isTaskFactsStale(error)) {
+        await invalidateTaskFacts(queryClient);
+        await invalidateFocusReadModels(queryClient, {
+          history: true,
+          report: true,
+        });
+      }
     },
   });
 }
@@ -2285,10 +2322,34 @@ export function useBatchUpdateTasks() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: BatchUpdateTasksInput) => batchUpdateTasks(input),
-    onSuccess: async () => invalidateTaskFacts(queryClient),
-    onError: async (error) => {
+    onSuccess: async (_, input) => {
+      await invalidateTaskFacts(queryClient);
+      if (input.action === "set_project") {
+        await invalidateFocusReadModels(queryClient, {
+          history: true,
+          report: true,
+        });
+      } else if (
+        input.action === "add_tags" ||
+        input.action === "remove_tags"
+      ) {
+        await invalidateFocusReadModels(queryClient, { report: true });
+      }
+    },
+    onError: async (error, input) => {
       if (isTaskFactsStale(error)) {
         await invalidateTaskFacts(queryClient);
+        if (input.action === "set_project") {
+          await invalidateFocusReadModels(queryClient, {
+            history: true,
+            report: true,
+          });
+        } else if (
+          input.action === "add_tags" ||
+          input.action === "remove_tags"
+        ) {
+          await invalidateFocusReadModels(queryClient, { report: true });
+        }
       }
     },
   });
@@ -2873,11 +2934,13 @@ export function useUpdateTag() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: tagQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      await invalidateFocusReadModels(queryClient, { report: true });
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: tagQueryKey });
         await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+        await invalidateFocusReadModels(queryClient, { report: true });
       }
     },
   });
@@ -2896,11 +2959,13 @@ export function useDeleteTag() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: tagQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+      await invalidateFocusReadModels(queryClient, { report: true });
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: tagQueryKey });
         await queryClient.invalidateQueries({ queryKey: taskQueryKey });
+        await invalidateFocusReadModels(queryClient, { report: true });
       }
     },
   });
@@ -3216,6 +3281,7 @@ export function useUpdateProject() {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await invalidateFocusReadModels(queryClient, { report: true });
     },
   });
 }
@@ -3259,6 +3325,13 @@ export function useDeleteProject() {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      // The deleted project's report is still actively observed until the
+      // detail page navigates away. Mark all derived reports stale without
+      // refetching that now-invalid project id and delaying the navigation.
+      await queryClient.invalidateQueries({
+        queryKey: focusReportQueryKey,
+        refetchType: "none",
+      });
     },
   });
 }
