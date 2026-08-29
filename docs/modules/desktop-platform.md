@@ -278,7 +278,7 @@
 - [x] 内置 Sidecar 最多按 500 ms、2 s 自动重启两次，当前 generation 连续 Ready 30 秒重置预算；只有真实 `Terminated` 才为已启动代际重拉，外部/shutdown/无 Terminated 流关闭均不触发。
 - [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确 child generation；并发调用共享一次 stop，ready 超时竞态不会伪造 exited，父管道 EOF 由 `OPC_EXIT_ON_STDIN_CLOSE=true` 触发 Go 优雅关闭。
 - [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，受管 child 只接受 code 0/no signal，未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试。
-- [x] Web 全量 79 个文件 / 528 项、Go `go test ./... -count=1` 与 `go vet ./...` 均通过；Rust 格式通过，新增单元测试源码已完成 P0/P1=0 的静态复核，但受工具链限制未执行 Rust 测试。
+- [x] 当前源码门禁通过 Web 全量 90 个文件 / 602 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收

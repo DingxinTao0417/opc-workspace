@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v35。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断与启动恢复均已交付。非空目标/跨 schema 高级导入、数据库打开前恢复进度和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema v41。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，后续迁移均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断、数据库打开前白名单启动进度与启动恢复均已交付。非空目标/跨 schema 高级导入、启动前备份选择和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -54,7 +54,7 @@
 - 五个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor、自动化、Agent Adapter 诊断、低空间阈值、备份/导入导出和脱敏诊断；但仍没有通知、非空目标/跨 schema 冲突合并、快捷键、数据库打开前恢复进度或可执行 Agent Runner。Adapter 设置只登记代码清单并显示 blocked，不等于 agent 身份、分派或执行能力。
+- 已有 Actor、自动化、Agent Adapter 诊断、低空间阈值、备份/导入导出、脱敏诊断和数据库打开前白名单启动进度；但仍没有通知、非空目标/跨 schema 冲突合并、快捷键自定义、启动前备份选择或可执行 Agent Runner。Adapter 设置只登记代码清单并显示 blocked，不等于 agent 身份、分派或执行能力。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
