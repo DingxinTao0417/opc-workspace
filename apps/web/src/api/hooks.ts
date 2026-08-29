@@ -10,6 +10,7 @@ import { useRef } from "react";
 import {
   ApiError,
   applyBusinessDataImport,
+  applyBusinessPackageImport,
   batchUpdateTasks,
   createBackup,
   drillBackupRestore,
@@ -48,6 +49,7 @@ import {
   downloadBusinessPackage,
   downloadDiagnosticPackage,
   previewBusinessDataImport,
+  previewBusinessPackageImport,
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
@@ -303,6 +305,20 @@ export function useApplyBusinessDataImport() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: applyBusinessDataImport,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
+}
+
+export function usePreviewBusinessPackageImport() {
+  return useMutation({ mutationFn: previewBusinessPackageImport });
+}
+
+export function useApplyBusinessPackageImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: applyBusinessPackageImport,
     onSuccess: async () => {
       await queryClient.invalidateQueries();
     },

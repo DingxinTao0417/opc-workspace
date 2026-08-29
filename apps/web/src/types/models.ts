@@ -1621,6 +1621,24 @@ export interface BusinessPackageDownload {
   formatVersion: 1;
 }
 
+export interface BusinessPackageImportPreview {
+  formatVersion: 1;
+  schemaVersion: number;
+  exportedAt: string;
+  tableCounts: Record<string, number>;
+  totalRows: number;
+  fileCount: number;
+  fileBytes: number;
+  canApply: boolean;
+  blocker: "target_not_empty" | null;
+}
+
+export interface BusinessPackageImportResult {
+  importedRows: number;
+  importedFiles: number;
+  backupId: string;
+}
+
 export interface BusinessImportPreview {
   formatVersion: 1;
   schemaVersion: number;

@@ -120,11 +120,22 @@ func decodeBusinessImport(c *gin.Context) (businessExportPackage, error) {
 }
 
 func (a *API) validateBusinessImport(c *gin.Context, packageData businessExportPackage) (businessImportPreview, error) {
+	return a.validateBusinessImportData(c, packageData, false)
+}
+
+func (a *API) validateBusinessImportWithFiles(c *gin.Context, packageData businessExportPackage) (businessImportPreview, error) {
+	return a.validateBusinessImportData(c, packageData, true)
+}
+
+func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExportPackage, allowControlledFiles bool) (businessImportPreview, error) {
 	if packageData.FormatVersion != businessExportFormatVersion || packageData.Source.APIVersion != Version || packageData.Source.SchemaVersion != a.options.SchemaVersion {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The export format, API, or schema version is not compatible"}
 	}
-	if packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount != 0 || packageData.ArtifactFiles.ActiveBytes != 0 {
+	if !allowControlledFiles && (packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount != 0 || packageData.ArtifactFiles.ActiveBytes != 0) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import does not support workspaces with controlled files"}
+	}
+	if allowControlledFiles && (!packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount < 0 || packageData.ArtifactFiles.ActiveBytes < 0) {
+		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "The controlled-file package summary is invalid"}
 	}
 	if !equalStrings(packageData.ExcludedOperationalTables, businessExportExcludedTables) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The operational-table exclusion manifest is invalid"}
@@ -156,7 +167,7 @@ func (a *API) validateBusinessImport(c *gin.Context, packageData businessExportP
 				}
 			}
 		}
-		if tableContainsControlledFiles(table) {
+		if !allowControlledFiles && tableContainsControlledFiles(table) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import cannot restore controlled-file metadata"}
 		}
 		if table.Name == "focus_sessions" && tableHasValuesOutside(table, "status", "completed", "cancelled", "interrupted") {
@@ -181,6 +192,10 @@ func (a *API) validateBusinessImport(c *gin.Context, packageData businessExportP
 }
 
 func (a *API) replaceBusinessTables(c *gin.Context, packageData businessExportPackage) error {
+	return a.replaceBusinessTablesWithValidation(c, packageData, nil)
+}
+
+func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData businessExportPackage, validate func(*gorm.DB) error) error {
 	return a.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("PRAGMA defer_foreign_keys = ON").Error; err != nil {
 			return err
@@ -195,9 +210,9 @@ func (a *API) replaceBusinessTables(c *gin.Context, packageData businessExportPa
 		order := []string{
 			"clients", "projects", "task_submissions", "tasks", "tags", "task_tags", "invoices",
 			"task_assignments", "task_artifacts", "workflow_events",
-			"client_activities", "client_actor_links", "project_notes",
+			"client_activities", "client_attachments", "client_actor_links", "project_notes", "project_attachments",
 			"focus_sessions", "focus_session_intervals", "inbox_items", "inbox_item_tasks",
-			"reminders", "app_settings", "task_saved_views",
+			"reminders", "workspace_avatars", "app_settings", "task_saved_views",
 		}
 		for _, name := range order {
 			var err error
@@ -229,6 +244,11 @@ func (a *API) replaceBusinessTables(c *gin.Context, packageData businessExportPa
 		var quickCheck string
 		if err := tx.Raw("PRAGMA quick_check").Row().Scan(&quickCheck); err != nil || quickCheck != "ok" {
 			return fmt.Errorf("database quick check failed: result=%s err=%w", quickCheck, err)
+		}
+		if validate != nil {
+			if err := validate(tx); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

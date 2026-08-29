@@ -18,12 +18,14 @@ import { requestApplicationRestart } from "../api/desktop";
 import {
   useBackupsQuery,
   useApplyBusinessDataImport,
+  useApplyBusinessPackageImport,
   useCreateBackup,
   useDeleteBackup,
   useDrillBackupRestore,
   useExportBusinessData,
   useExportBusinessPackage,
   usePreviewBusinessDataImport,
+  usePreviewBusinessPackageImport,
   useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
@@ -107,6 +109,24 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "IMPORT_FILES_UNSUPPORTED") {
       return "这个快照包含受控文件；当前 JSON 导入不能恢复文件正文。";
+    }
+    if (error.code === "IMPORT_PACKAGE_UNAVAILABLE") {
+      return "当前数据目录未配置含文件业务包导入。";
+    }
+    if (error.code === "IMPORT_PACKAGE_TOO_LARGE") {
+      return "含文件业务包不能超过 2 GiB。";
+    }
+    if (error.code === "INVALID_IMPORT_PACKAGE") {
+      return "所选文件不是有效的 opc-workspace 业务 ZIP。";
+    }
+    if (
+      error.code === "IMPORT_PACKAGE_MANIFEST_INVALID" ||
+      error.code === "IMPORT_PACKAGE_FILE_INVALID"
+    ) {
+      return "含文件业务包的清单、业务数据或文件完整性校验失败。";
+    }
+    if (error.code === "IMPORT_PACKAGE_APPLY_FAILED") {
+      return "含文件业务包未能原子应用；业务数据和受控文件均未导入。";
     }
     if (error.code === "IMPORT_ACTIVE_FOCUS_UNSUPPORTED") {
       return "源工作区仍有活动专注，请先结束或取消后重新导出。";
@@ -246,7 +266,10 @@ export function BackupSettings() {
   const packageExportMutation = useExportBusinessPackage();
   const importPreviewMutation = usePreviewBusinessDataImport();
   const importApplyMutation = useApplyBusinessDataImport();
+  const packageImportPreviewMutation = usePreviewBusinessPackageImport();
+  const packageImportApplyMutation = useApplyBusinessPackageImport();
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [packageImportFile, setPackageImportFile] = useState<File | null>(null);
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
@@ -272,7 +295,9 @@ export function BackupSettings() {
     exportMutation.isPending ||
     packageExportMutation.isPending ||
     importPreviewMutation.isPending ||
-    importApplyMutation.isPending;
+    importApplyMutation.isPending ||
+    packageImportPreviewMutation.isPending ||
+    packageImportApplyMutation.isPending;
   const locked = pending || scheduledRestore !== null;
   const mutationError =
     createMutation.error ??
@@ -284,6 +309,8 @@ export function BackupSettings() {
     packageExportMutation.error ??
     importPreviewMutation.error ??
     importApplyMutation.error ??
+    packageImportPreviewMutation.error ??
+    packageImportApplyMutation.error ??
     downloadError;
 
   const resetExportFeedback = () => {
@@ -465,6 +492,9 @@ export function BackupSettings() {
     setDownloadError(null);
     importApplyMutation.reset();
     importPreviewMutation.reset();
+    packageImportApplyMutation.reset();
+    packageImportPreviewMutation.reset();
+    setPackageImportFile(null);
     setImportFile(file);
     if (!file) return;
     if (file.size > 16 * 1024 * 1024) {
@@ -473,6 +503,24 @@ export function BackupSettings() {
       return;
     }
     importPreviewMutation.mutate(file);
+  };
+
+  const choosePackageImportFile = (file: File | null) => {
+    setSuccess(null);
+    setDownloadError(null);
+    importApplyMutation.reset();
+    importPreviewMutation.reset();
+    packageImportApplyMutation.reset();
+    packageImportPreviewMutation.reset();
+    setImportFile(null);
+    setPackageImportFile(file);
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024 * 1024) {
+      setPackageImportFile(null);
+      setDownloadError("含文件业务包不能超过 2 GiB。");
+      return;
+    }
+    packageImportPreviewMutation.mutate(file);
   };
 
   const applyBusinessImport = () => {
@@ -485,6 +533,22 @@ export function BackupSettings() {
         importPreviewMutation.reset();
         setSuccess(
           `已原子导入 ${result.importedRows} 行业务数据；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+        );
+      },
+    });
+  };
+
+  const applyBusinessPackageImport = () => {
+    if (!packageImportFile || !packageImportPreviewMutation.data?.canApply)
+      return;
+    setSuccess(null);
+    packageImportApplyMutation.reset();
+    packageImportApplyMutation.mutate(packageImportFile, {
+      onSuccess: (result) => {
+        setPackageImportFile(null);
+        packageImportPreviewMutation.reset();
+        setSuccess(
+          `已原子导入 ${result.importedRows} 行业务数据和 ${result.importedFiles} 个受控文件；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
         );
       },
     });
@@ -689,6 +753,88 @@ export function BackupSettings() {
         ) : null}
       </div>
 
+      <div className="settings-group settings-backup-export">
+        <div className="settings-backup-intro">
+          <Archive size={18} />
+          <div>
+            <strong>导入含文件业务包</strong>
+            <span>
+              选择官方 ZIP
+              后先校验清单、业务数据和全部文件；仅可导入空工作区，应用前自动创建回滚备份。
+            </span>
+          </div>
+        </div>
+        <label className="button button-secondary settings-backup-export-button">
+          {packageImportPreviewMutation.isPending ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <Upload size={14} />
+          )}
+          {packageImportPreviewMutation.isPending ? "正在校验…" : "选择 ZIP"}
+          <input
+            accept="application/zip,.zip"
+            aria-label="选择含文件业务 ZIP"
+            disabled={locked}
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              choosePackageImportFile(file);
+            }}
+            type="file"
+          />
+        </label>
+        {packageImportFile && packageImportPreviewMutation.data ? (
+          <div className="settings-backup-confirm">
+            <Archive size={18} />
+            <div>
+              <strong>{packageImportFile.name}</strong>
+              <p>
+                schema v{packageImportPreviewMutation.data.schemaVersion} · 共{" "}
+                {packageImportPreviewMutation.data.totalRows} 行 ·{" "}
+                {packageImportPreviewMutation.data.fileCount} 个受控文件 ·{" "}
+                {formatBytes(packageImportPreviewMutation.data.fileBytes)}
+              </p>
+              {!packageImportPreviewMutation.data.canApply ? (
+                <small>当前工作区已有业务数据，已禁止覆盖导入。</small>
+              ) : (
+                <small>
+                  应用前会自动创建并校验回滚备份；数据库或任一文件失败都会整批补偿。
+                </small>
+              )}
+            </div>
+            <div className="settings-backup-confirm-actions">
+              <button
+                className="button button-secondary"
+                disabled={packageImportApplyMutation.isPending}
+                onClick={() => choosePackageImportFile(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="button button-danger"
+                disabled={
+                  !packageImportPreviewMutation.data.canApply ||
+                  packageImportApplyMutation.isPending
+                }
+                onClick={applyBusinessPackageImport}
+                type="button"
+              >
+                {packageImportApplyMutation.isPending ? (
+                  <LoaderCircle className="animate-spin" size={13} />
+                ) : (
+                  <Upload size={13} />
+                )}
+                {packageImportApplyMutation.isPending
+                  ? "正在导入文件…"
+                  : "确认含文件导入"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       {success ? (
         <p className="settings-backup-success" role="status">
           <ShieldCheck size={14} />
@@ -885,9 +1031,8 @@ export function BackupSettings() {
       ) : null}
 
       <p className="settings-inline-note">
-        当前已开放版本化业务 JSON、含活动受控文件的 ZIP 导出与空工作区安全 JSON
-        导入，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；含文件
-        ZIP 暂不支持直接导入。
+        当前已开放版本化业务 JSON、含活动受控文件的 ZIP
+        导入导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；两类导入都只允许空工作区并先创建回滚备份。
       </p>
     </>
   );

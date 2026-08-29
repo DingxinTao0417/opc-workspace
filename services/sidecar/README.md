@@ -71,7 +71,7 @@ The Sidecar exposes:
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands, terminal history pagination, and timezone-aware today/period aggregation with streaks;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 - synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active controlled Task Artifact or Client Attachment through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
-- versioned business JSON export, a controlled-file business ZIP export, plus strict JSON import preview/application for an empty same-schema workspace without controlled files. The ZIP contains a manifest, business JSON and every active controlled file after size/SHA-256 verification. JSON apply requires explicit confirmation, creates a verified rollback backup, replaces allowlisted business tables atomically, rebuilds derived Focus totals, restores triggers, and rechecks foreign keys/database integrity.
+- versioned business JSON and controlled-file business ZIP export/import for an empty same-schema workspace. Both imports require explicit confirmation and a verified rollback backup. ZIP preview verifies the manifest, business JSON, safe file set, size/SHA-256 and database metadata; apply publishes files without overwrite, verifies them before the database transaction commits, and compensates this import's files on database failure.
 
 ```text
 GET    /api/v1/settings
@@ -81,6 +81,8 @@ GET    /api/v1/exports/business-data
 GET    /api/v1/exports/business-package
 POST   /api/v1/imports/business-data/preview
 POST   /api/v1/imports/business-data
+POST   /api/v1/imports/business-package/preview
+POST   /api/v1/imports/business-package
 POST   /api/v1/backups
 POST   /api/v1/backups/:id/verify
 POST   /api/v1/backups/:id/drill
@@ -158,7 +160,9 @@ Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "cod
 
 `GET /api/v1/exports/business-data` returns an attachment using business-export format v1. It reads an explicit allowlist of business tables in one SQLite transaction with deterministic table/column/row structure. Controlled-file metadata is included while file bytes are deliberately omitted and summarized together. Session credentials, absolute machine paths, workspace identity, idempotency responses, tombstones, migrations and derived focus totals are not exported. The synchronous endpoint fails closed if an allowlisted table is unavailable.
 
-`GET /api/v1/exports/business-package` takes the maintenance write gate and fully stages a business-package format v1 ZIP before serving it. `manifest.json` records source metadata plus the path, size and SHA-256 of `business-data.json` and every active controlled file; bodies use only `files/objects/<uuid>` and `files/avatars/<uuid>.<ext>`. File metadata is checked again while copying. A missing, changed or unsafe source fails the entire request and removes the staging ZIP. SQLite, workspace identity, the Artifact marker, session credentials, absolute paths and operational tables are excluded. This ZIP is export-only; the current import endpoints still accept only a no-file business JSON package.
+`GET /api/v1/exports/business-package` takes the maintenance write gate and fully stages a business-package format v1 ZIP before serving it. `manifest.json` records source metadata plus the path, size and SHA-256 of `business-data.json` and every active controlled file; bodies use only `files/objects/<uuid>` and `files/avatars/<uuid>.<ext>`. File metadata is checked again while copying. A missing, changed or unsafe source fails the entire request and removes the staging ZIP. SQLite, workspace identity, the Artifact marker, session credentials, absolute paths and operational tables are excluded.
+
+`POST /api/v1/imports/business-package/preview` accepts at most 2 GiB and 10,000 controlled files, stages the upload privately, and rejects duplicate, extra, unsafe, directory or symlink entries. It strictly verifies manifest/source totals, the embedded business export, each file body and its corresponding database metadata. `POST /api/v1/imports/business-package` requires `X-Import-Confirmation: replace-empty-workspace-with-controlled-files`, repeats preflight under the maintenance write gate, requires an empty target and terminal Focus state, creates a verified rollback backup, publishes files with no-replace semantics, and verifies disk bodies before committing the business transaction. A database failure removes files published by that attempt.
 
 ### Inbox Item–Task relationship contract
 
@@ -272,4 +276,4 @@ go vet ./...
 go build ./cmd/server
 ```
 
-At the PRD v8.6 / schema v28 baseline, regression coverage includes historical migration preservation; Task/Actor/Assignment/Submission/Artifact lifecycles; Client and Project activities, contacts, notes and controlled attachments; Focus interval reports; Inbox/Reminder/source projection; settings and controlled avatars; verified SQLite+controlled-file backup creation, verification, drills, restart restore and deletion; deterministic business JSON export; empty-workspace JSON import with rollback; controlled-file business ZIP manifest/body/integrity checks; diagnostics; and strict frontend contracts. The Tauri shell exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Controlled-file ZIP import, non-empty/cross-schema merge, remaining runtime-failure projection, native notifications, Agent Runtime, finance and release packaging remain separate future work.
+At the PRD v8.7 / schema v28 baseline, regression coverage includes historical migration preservation; Task/Actor/Assignment/Submission/Artifact lifecycles; Client and Project activities, contacts, notes and controlled attachments; Focus interval reports; Inbox/Reminder/source projection; settings and controlled avatars; verified SQLite+controlled-file backup creation, verification, drills, restart restore and deletion; deterministic business JSON export; empty-workspace JSON and controlled-file ZIP import with rollback, manifest/body/integrity checks and file compensation; diagnostics; and strict frontend contracts. The Tauri shell exposes a safe application restart after a restore is scheduled; browser development mode intentionally leaves the externally managed Sidecar under developer control. Non-empty/cross-schema merge, remaining runtime-failure projection, native notifications, Agent Runtime, finance and release packaging remain separate future work.

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   applyBusinessDataImport,
+  applyBusinessPackageImport,
   batchUpdateTasks,
   createBackup,
   createPersonActor,
@@ -36,6 +37,7 @@ import {
   downloadTaskArtifact,
   normalizeActor,
   previewBusinessDataImport,
+  previewBusinessPackageImport,
   normalizeActorSummary,
   normalizeBackupSummary,
   normalizeHealthResponse,
@@ -1604,6 +1606,71 @@ describe("verified local backups", () => {
     await expect(downloadBusinessPackage()).rejects.toMatchObject({
       code: "INVALID_RESPONSE",
     });
+  });
+
+  it("previews and explicitly confirms a controlled-file business ZIP import", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              format_version: 1,
+              schema_version: 28,
+              exported_at: "2026-08-28T12:00:00Z",
+              table_counts: { tasks: 2, task_artifacts: 1 },
+              total_rows: 3,
+              file_count: 1,
+              file_bytes: 2048,
+              can_apply: true,
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              imported_rows: 3,
+              imported_files: 1,
+              backup_id: "018f0000-0000-7000-8000-000000001798",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["PK"], "workspace.zip", {
+      type: "application/zip",
+    });
+
+    const preview = await previewBusinessPackageImport(file);
+    const result = await applyBusinessPackageImport(file);
+
+    expect(preview).toMatchObject({
+      formatVersion: 1,
+      schemaVersion: 28,
+      totalRows: 3,
+      fileCount: 1,
+      fileBytes: 2048,
+      canApply: true,
+      blocker: null,
+    });
+    expect(result).toEqual({
+      importedRows: 3,
+      importedFiles: 1,
+      backupId: "018f0000-0000-7000-8000-000000001798",
+    });
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(file);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/imports/business-package/preview",
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get(
+        "X-Import-Confirmation",
+      ),
+    ).toBe("replace-empty-workspace-with-controlled-files");
   });
 
   it("previews and explicitly confirms a business JSON import", async () => {

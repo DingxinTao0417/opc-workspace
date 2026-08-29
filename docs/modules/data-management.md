@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、基础业务 JSON、含文件业务 ZIP 导出和空工作区同 schema/无文件安全导入已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。含文件导入、非空目标冲突合并、计划备份、恢复诊断和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。非空目标冲突合并、计划备份、恢复诊断和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.7](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -57,11 +57,12 @@
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
 - `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。`workspace_avatars` 元数据与其他业务/历史表进入导出，文件正文不嵌入；摘要统计全部 active Task/Client/Project/Avatar 受控文件。schema migrations、workspace identity、幂等响应、四类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - `GET /api/v1/exports/business-package` 在维护写锁内先完整生成临时 ZIP，再开始响应。根目录固定为 `manifest.json` 与 `business-data.json`，活动受控文件按 `files/objects/<uuid>` 或 `files/avatars/<uuid>.<ext>` 写入；manifest format v1 记录 source、业务 JSON 和每个文件的相对路径、size/SHA-256、文件数与未压缩字节总量。复制时重新读取并校验每个 regular file，任一缺失、size/hash 漂移或不安全路径都整体失败并清理临时包。ZIP 不包含 SQLite、workspace identity、store marker、会话令牌、机器绝对路径或运行维护表。
-- 设置“数据与备份”提供业务 JSON、含文件 ZIP 下载和安全 JSON 导入，以及备份说明、创建、加载/空/错误状态、摘要、重新校验、恢复演练、二次确认恢复和永久删除。导入先选择 JSON 并显示 schema/总行数/空目标阻断，确认后才应用；长操作使用 180 秒客户端窗口。页面明确含文件 ZIP 暂不能直接导入。备份创建失败 Inbox Item 的详情可打开同一设置模块。
+- `POST /api/v1/imports/business-package/preview` 把上传 ZIP 写入 backup root 私有临时文件并严格校验：最大 2 GiB、最多 10,000 个受控文件，拒绝重复/额外/目录/symlink/反斜杠/绝对或穿越路径；manifest、业务 JSON、source、表列行、文件全集、size/SHA-256 和数据库文件元数据必须一致。`POST /api/v1/imports/business-package` 要求固定确认头、当前 schema、无活动 Focus 和空目标；应用前创建已校验回滚备份，随后按现有 store 规则 staging、无覆盖发布文件，并在数据库事务提交前复验磁盘正文。DB 失败会补偿本次发布文件。
+- 设置“数据与备份”提供业务 JSON 与含文件 ZIP 的下载和安全导入，以及备份说明、创建、加载/空/错误状态、摘要、重新校验、恢复演练、二次确认恢复和永久删除。导入先显示 schema/总行数/空目标阻断；ZIP 额外显示文件数与字节数，确认后才应用。长操作使用 180 秒客户端窗口。备份创建失败 Inbox Item 的详情可打开同一设置模块。
 
 ### 仍未实现
 
-- 含文件导入、非空目标冲突预览/映射与跨 schema 导入；
+- 非空目标冲突预览/映射与跨 schema 导入；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 运行期数据库不可写或磁盘空间的 Inbox 投影；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
@@ -234,7 +235,9 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v28 的完整固定表/列清单与标量行；`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor，任何已有业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
 
-正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema、非空目标 UUID/冲突映射和含文件导入仍待独立设计。
+正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标 UUID/冲突映射仍待独立设计。
+
+含文件 ZIP 导入 v1 复用业务 JSON 的表契约，并增加严格 manifest 和物理文件验证。apply 使用独立确认词；受控文件先写 staging，再以 no-replace 语义发布，随后数据库事务导入 Task/Client/Project 文件元数据和 Workspace Avatar/设置引用，并在提交前执行 `verifyArtifactObjects`。导入只支持空目标，因此不会覆盖已有文件或业务事实。
 
 ### 计划备份（v0.3）
 
@@ -256,8 +259,10 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 | `GET /api/v1/exports/business-package` | 维护写锁内生成 format v1 ZIP；包含 manifest、业务 JSON 与全部 active 受控文件，逐项复验 size/SHA-256，失败不返回部分包 |
 | `POST /api/v1/imports/business-data/preview` | strict 预检业务 JSON，返回 schema、各表/总行数、`can_apply` 与空目标 blocker；不改变数据 |
 | `POST /api/v1/imports/business-data` | 固定确认头后再次预检，导入前自动已校验备份，维护写锁内原子替换与完整性复验 |
+| `POST /api/v1/imports/business-package/preview` | strict 预检含文件 ZIP，返回 schema、表/总行数、文件数/字节数、`can_apply` 与空目标 blocker；不改变数据 |
+| `POST /api/v1/imports/business-package` | 独立固定确认头后再次预检，导入前自动已校验备份；受控文件无覆盖发布，DB 提交前复验正文，失败补偿本次文件 |
 
-含文件 ZIP 当前只有导出路由，导入 preview/apply 仍明确拒绝文件。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把同步导入导出升级为可取消作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
+恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。JSON 与含文件 ZIP 导入当前都只支持空目标和同 schema。数据量增长后再把同步导入导出升级为可取消作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
 
 当前备份成功事实只存在于备份包的 manifest，不写 `workflow_events`，避免把机器维护动作伪装成 Task/Project 业务事件。创建失败的系统维护 Inbox Item 由 Inbox 领域持有，并由 system Actor 写 `source_projected` Event；它不是备份成功审计。未来若增加诊断事件，最少包含 `backup_created / backup_verified / restore_started / restore_completed / restore_failed / export_completed / import_completed`，但不得记录业务正文、文件内容、凭据或机器绝对路径。
 
@@ -266,7 +271,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
-- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除、业务 JSON/含文件 ZIP 导出和空工作区安全 JSON 导入；备份失败 Inbox Item 也可打开同一模块。未来再接原生路径选择、含文件导入和作业诊断。
+- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；备份失败 Inbox Item 也可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
 - [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal、下一次健康启动补偿为 `system_maintenance` Inbox Item。两条链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误或路径写成业务事件。`BACKUP_INVALID` 不投影。运行期数据库不可写等来源仍待开发。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
@@ -313,7 +318,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
 - [ ] 运行期数据库不可写与磁盘空间投影。
-- [ ] 含文件导入、非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
+- [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
+- [ ] 非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
@@ -343,6 +349,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [业务 JSON 导出](../../services/sidecar/internal/api/business_export.go)
 - [含文件业务 ZIP 导出](../../services/sidecar/internal/api/business_package_export.go)
 - [业务 JSON 导入](../../services/sidecar/internal/api/business_import.go)
+- [含文件业务 ZIP 导入](../../services/sidecar/internal/api/business_package_import.go)
+- [含文件业务 ZIP 导入测试](../../services/sidecar/internal/api/business_package_import_test.go)
 - [设置备份界面](../../apps/web/src/components/BackupSettings.tsx)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Client Attachment API](../../services/sidecar/internal/api/client_attachments.go)

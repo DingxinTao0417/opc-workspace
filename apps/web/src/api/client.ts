@@ -14,6 +14,8 @@ import type {
   BackupVerificationStatus,
   BusinessDataExportDownload,
   BusinessPackageDownload,
+  BusinessPackageImportPreview,
+  BusinessPackageImportResult,
   BusinessImportPreview,
   BusinessImportResult,
   DiagnosticPackageDownload,
@@ -5187,6 +5189,113 @@ export async function downloadBusinessPackage(): Promise<BusinessPackageDownload
     "application/zip",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
+}
+
+function normalizeBusinessPackageImportPreview(
+  value: unknown,
+): BusinessPackageImportPreview {
+  const body = isRecord(value) && "data" in value ? value.data : value;
+  if (!isRecord(body)) return invalidResponse("含文件业务包预检响应格式无效");
+  const formatVersion = numberField(body, "format_version", "formatVersion");
+  const schemaVersion = numberField(body, "schema_version", "schemaVersion");
+  const exportedAt = stringField(body, "exported_at", "exportedAt");
+  const totalRows = numberField(body, "total_rows", "totalRows");
+  const fileCount = numberField(body, "file_count", "fileCount");
+  const fileBytes = numberField(body, "file_bytes", "fileBytes");
+  const canApply = fieldValue(body, "can_apply", "canApply");
+  const blocker = fieldValue(body, "blocker");
+  const rawCounts = fieldValue(body, "table_counts", "tableCounts");
+  if (
+    formatVersion !== 1 ||
+    !schemaVersion ||
+    !Number.isInteger(schemaVersion) ||
+    !exportedAt ||
+    Number.isNaN(Date.parse(exportedAt)) ||
+    totalRows === undefined ||
+    !Number.isInteger(totalRows) ||
+    totalRows < 0 ||
+    fileCount === undefined ||
+    !Number.isInteger(fileCount) ||
+    fileCount < 0 ||
+    fileBytes === undefined ||
+    !Number.isSafeInteger(fileBytes) ||
+    fileBytes < 0 ||
+    typeof canApply !== "boolean" ||
+    !isRecord(rawCounts) ||
+    (blocker !== undefined && blocker !== "target_not_empty") ||
+    (canApply && blocker !== undefined) ||
+    (!canApply && blocker !== "target_not_empty")
+  ) {
+    return invalidResponse("含文件业务包预检响应格式无效");
+  }
+  const tableCounts: Record<string, number> = {};
+  for (const [key, count] of Object.entries(rawCounts)) {
+    if (!key || !Number.isInteger(count) || (count as number) < 0) {
+      return invalidResponse("含文件业务包预检响应格式无效");
+    }
+    tableCounts[key] = count as number;
+  }
+  if (
+    Object.values(tableCounts).reduce((sum, count) => sum + count, 0) !==
+    totalRows
+  ) {
+    return invalidResponse("含文件业务包预检响应格式无效");
+  }
+  return {
+    formatVersion: 1,
+    schemaVersion,
+    exportedAt,
+    tableCounts,
+    totalRows,
+    fileCount,
+    fileBytes,
+    canApply,
+    blocker: blocker === "target_not_empty" ? blocker : null,
+  };
+}
+
+export async function previewBusinessPackageImport(
+  file: File,
+): Promise<BusinessPackageImportPreview> {
+  return apiRequest<unknown>(
+    "/api/v1/imports/business-package/preview",
+    { method: "POST", body: file },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  ).then(normalizeBusinessPackageImportPreview);
+}
+
+export async function applyBusinessPackageImport(
+  file: File,
+): Promise<BusinessPackageImportResult> {
+  const payload = await apiRequest<unknown>(
+    "/api/v1/imports/business-package",
+    {
+      method: "POST",
+      body: file,
+      headers: {
+        "X-Import-Confirmation":
+          "replace-empty-workspace-with-controlled-files",
+      },
+    },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("含文件业务包导入响应格式无效");
+  const importedRows = numberField(body, "imported_rows", "importedRows");
+  const importedFiles = numberField(body, "imported_files", "importedFiles");
+  const backupId = stringField(body, "backup_id", "backupId");
+  if (
+    importedRows === undefined ||
+    !Number.isInteger(importedRows) ||
+    importedRows < 0 ||
+    importedFiles === undefined ||
+    !Number.isInteger(importedFiles) ||
+    importedFiles < 0 ||
+    !backupId
+  ) {
+    return invalidResponse("含文件业务包导入响应格式无效");
+  }
+  return { importedRows, importedFiles, backupId };
 }
 
 function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {

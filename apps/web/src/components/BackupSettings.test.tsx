@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   exportPackage: vi.fn(),
   previewImport: vi.fn(),
   applyImport: vi.fn(),
+  previewPackageImport: vi.fn(),
+  applyPackageImport: vi.fn(),
   restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
@@ -135,6 +137,29 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  usePreviewBusinessPackageImport: () => ({
+    mutate: mocks.previewPackageImport,
+    reset: mocks.reset,
+    data: {
+      formatVersion: 1,
+      schemaVersion: 28,
+      exportedAt: "2026-08-28T12:00:00Z",
+      tableCounts: { tasks: 2 },
+      totalRows: 2,
+      fileCount: 3,
+      fileBytes: 4096,
+      canApply: true,
+      blocker: null,
+    },
+    isPending: false,
+    error: null,
+  }),
+  useApplyBusinessPackageImport: () => ({
+    mutate: mocks.applyPackageImport,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
 }));
 
 describe("BackupSettings", () => {
@@ -150,6 +175,8 @@ describe("BackupSettings", () => {
     mocks.exportPackage.mockClear();
     mocks.previewImport.mockClear();
     mocks.applyImport.mockClear();
+    mocks.previewPackageImport.mockClear();
+    mocks.applyPackageImport.mockClear();
     mocks.restartApplication.mockReset();
     mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
@@ -231,6 +258,20 @@ describe("BackupSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(mocks.applyImport).toHaveBeenCalledWith(
       importFile,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    const packageFile = new File(["PK"], "workspace.zip", {
+      type: "application/zip",
+    });
+    fireEvent.change(screen.getByLabelText("选择含文件业务 ZIP"), {
+      target: { files: [packageFile] },
+    });
+    expect(mocks.previewPackageImport).toHaveBeenCalledWith(packageFile);
+    expect(screen.getByText(/3 个受控文件/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "确认含文件导入" }));
+    expect(mocks.applyPackageImport).toHaveBeenCalledWith(
+      packageFile,
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
