@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoadmapMilestone } from "../types/models";
@@ -41,6 +47,27 @@ vi.mock("../api/hooks", () => ({
   }),
 }));
 
+vi.mock("../components/ProjectSelect", () => ({
+  ProjectSelect: ({
+    ariaLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">全部项目</option>
+      <option value="project-2">第二个项目</option>
+    </select>
+  ),
+}));
+
 const milestone: RoadmapMilestone = {
   id: "milestone-1",
   title: "路线图 API",
@@ -67,6 +94,7 @@ describe("RoadmapPage", () => {
     hooks.milestones.mockReturnValue({
       data: { items: [milestone], meta: { page: 1, pageSize: 50, total: 1 } },
       isError: false,
+      isFetching: false,
       isPending: false,
       isSuccess: true,
       refetch: vi.fn(),
@@ -152,6 +180,80 @@ describe("RoadmapPage", () => {
     expect(hooks.remove).toHaveBeenCalledWith(
       { id: milestone.id, expectedVersion: milestone.version },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("paginates server results and resets to page one for a project filter", () => {
+    hooks.milestones.mockReturnValue({
+      data: { items: [milestone], meta: { page: 1, pageSize: 20, total: 41 } },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("1–1 / 41")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, pageSize: 20 }),
+    );
+
+    fireEvent.change(screen.getByLabelText("关联项目筛选"), {
+      target: { value: "project-2" },
+    });
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        pageSize: 20,
+        projectId: "project-2",
+      }),
+    );
+  });
+
+  it("clamps a stale page after the server total shrinks", async () => {
+    let shrunk = false;
+    hooks.milestones.mockImplementation((input: { page: number }) => ({
+      data: {
+        items: shrunk && input.page > 1 ? [] : [milestone],
+        meta: {
+          page: input.page,
+          pageSize: 20,
+          total: shrunk ? 1 : 41,
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    }));
+    const view = render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 }),
+    );
+    shrunk = true;
+    view.rerender(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(hooks.milestones).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1 }),
+      ),
     );
   });
 });

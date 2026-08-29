@@ -9,7 +9,7 @@ import {
   RotateCcw,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   useArchiveRoadmapMilestone,
@@ -23,6 +23,7 @@ import {
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
+import { ProjectSelect } from "../components/ProjectSelect";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
 
 const statusLabels: Record<RoadmapMilestoneStatus, string> = {
@@ -608,16 +609,29 @@ export function RoadmapPage() {
   const [year, setYear] = useState(initial.year);
   const [quarter, setQuarter] = useState(initial.quarter);
   const [status, setStatus] = useState<RoadmapMilestoneStatus | "">("");
+  const [projectId, setProjectId] = useState("");
+  const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
   const query = useRoadmapMilestonesQuery({
+    page,
+    pageSize: 20,
     year,
     quarter,
     status: status || undefined,
+    projectId: projectId || undefined,
     includeArchived: status === "archived",
   });
   const milestones = query.data?.items ?? [];
+  const total = query.data?.meta.total ?? 0;
+  const pageSize = query.data?.meta.pageSize ?? 20;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    if (!query.data || query.isFetching || page <= totalPages) return;
+    setPage(totalPages);
+  }, [page, query.data, query.isFetching, totalPages]);
 
   return (
     <div className="page">
@@ -647,7 +661,10 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">年份</span>
           <select
-            onChange={(event) => setYear(Number(event.target.value))}
+            onChange={(event) => {
+              setYear(Number(event.target.value));
+              setPage(1);
+            }}
             value={year}
           >
             {[year - 1, year, year + 1].map((item) => (
@@ -660,9 +677,10 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">季度</span>
           <select
-            onChange={(event) =>
-              setQuarter(Number(event.target.value) as 1 | 2 | 3 | 4)
-            }
+            onChange={(event) => {
+              setQuarter(Number(event.target.value) as 1 | 2 | 3 | 4);
+              setPage(1);
+            }}
             value={quarter}
           >
             {[1, 2, 3, 4].map((item) => (
@@ -675,9 +693,10 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">状态</span>
           <select
-            onChange={(event) =>
-              setStatus(event.target.value as RoadmapMilestoneStatus | "")
-            }
+            onChange={(event) => {
+              setStatus(event.target.value as RoadmapMilestoneStatus | "");
+              setPage(1);
+            }}
             value={status}
           >
             <option value="">未归档</option>
@@ -687,7 +706,23 @@ export function RoadmapPage() {
             <option value="archived">已归档</option>
           </select>
         </label>
+        <ProjectSelect
+          ariaLabel="关联项目筛选"
+          emptyLabel="全部项目"
+          includeArchived
+          onChange={(value) => {
+            setProjectId(value);
+            setPage(1);
+          }}
+          value={projectId}
+          variant="toolbar"
+        />
       </div>
+      {query.isFetching && !query.isPending ? (
+        <p className="roadmap-refresh" role="status">
+          正在刷新路线图…
+        </p>
+      ) : null}
       {query.isError ? (
         <ErrorState
           message="无法读取路线图数据，请确认本地服务已连接。"
@@ -712,28 +747,57 @@ export function RoadmapPage() {
         />
       ) : null}
       {milestones.length > 0 ? (
-        <section
-          className="roadmap-grid"
-          aria-label={`${year} 年 Q${quarter} 路线图`}
-        >
-          <header className="roadmap-section-heading">
-            <Map size={17} />
-            <div>
-              <strong>
-                {year} 年 · Q{quarter}
-              </strong>
-              <span>按目标日期和手动排序展示</span>
-            </div>
-          </header>
-          {milestones.map((milestone) => (
-            <RoadmapMilestoneCard
-              key={milestone.id}
-              milestone={milestone}
-              onDelete={setDeleting}
-              onEdit={setEditing}
-            />
-          ))}
-        </section>
+        <>
+          <section
+            className="roadmap-grid"
+            aria-label={`${year} 年 Q${quarter} 路线图`}
+          >
+            <header className="roadmap-section-heading">
+              <Map size={17} />
+              <div>
+                <strong>
+                  {year} 年 · Q{quarter}
+                </strong>
+                <span>按目标日期和手动排序展示</span>
+              </div>
+            </header>
+            {milestones.map((milestone) => (
+              <RoadmapMilestoneCard
+                key={milestone.id}
+                milestone={milestone}
+                onDelete={setDeleting}
+                onEdit={setEditing}
+              />
+            ))}
+          </section>
+          {totalPages > 1 ? (
+            <nav aria-label="路线图分页" className="pagination">
+              <button
+                className="button button-secondary"
+                disabled={page <= 1 || query.isFetching}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                type="button"
+              >
+                上一页
+              </button>
+              <span>
+                {(page - 1) * pageSize + 1}–
+                {Math.min((page - 1) * pageSize + milestones.length, total)} /{" "}
+                {total}
+              </span>
+              <button
+                className="button button-secondary"
+                disabled={page >= totalPages || query.isFetching}
+                onClick={() =>
+                  setPage((value) => Math.min(totalPages, value + 1))
+                }
+                type="button"
+              >
+                下一页
+              </button>
+            </nav>
+          ) : null}
+        </>
       ) : null}
       <CreateRoadmapMilestoneModal
         onClose={() => setCreating(false)}
