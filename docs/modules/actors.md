@@ -1,6 +1,6 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）；Actor/D2 结构仍分别由 schema v7/v9 引入；v16 的 app_settings、v18 的客户活动、v19 的客户附件、v21 的项目笔记和 v22 的项目附件引用 active Actor，v20 新增 Client–person 显式关联及停用保护；v23–v29 不改变 Actor 契约，v30 增加 Task Submission 来源，v31 的 Project→Client 系统活动固定由内置 system 创建，v32 扩展 Reminder，v33 新增受限 Automation Rule/Run，v34 新增不关联 Actor 的 Adapter 诊断事实，均不改变 Actor 表或人物管理契约。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）；Actor/D2 结构仍分别由 schema v7/v9 引入；v16 的 app_settings、v18 的客户活动、v19 的客户附件、v21 的项目笔记和 v22 的项目附件引用 active Actor，v20 新增 Client–person 显式关联及停用保护；v23–v29 不改变 Actor 契约，v30 增加 Task Submission 来源，v31 的 Project→Client 系统活动固定由内置 system 创建，v32 扩展 Reminder，v33 新增受限 Automation Rule/Run，v34 新增不关联 Actor 的 Adapter 诊断事实；v35 的 Client Followup 允许 active owner/person 作为计划负责人，并阻止仍有 `planned` 回访的 person 停用，均不改变 Actor 表结构。
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
@@ -31,7 +31,7 @@ Assignment 保存某个 Task 在某段时间内的角色事实：
 - Task start 要求 active assignee；complete/cancel/accept 在同一事务结束全部活动 Assignment；reopen 不恢复旧分派。
 - manual 输出提交要求 active assignee 和 active owner reviewer。Artifact producer 由服务端取当前 assignee，recorder 固定 owner；Submission submitter、reviewer、withdrawer 和 Artifact deleter 也固定 owner。
 - Workflow Event 已覆盖 Actor、Assignment、Task 生命周期、策略修改、输出提交、验收、返工、撤回、Artifact 删除和迁移回填，并带可空 Assignment/Submission/Artifact 关联。
-- Client 详情可显式关联已有 active person，或在一个事务中新建 person 后关联。每个 Client 同时最多一个 active contact；解除保留不可变原因与操作者历史，active Client 关联会阻止 person 停用。
+- Client 详情可显式关联已有 active person，或在一个事务中新建 person 后关联。每个 Client 同时最多一个 active contact；解除保留不可变原因与操作者历史，active Client 关联会阻止 person 停用。待回访 Client Followup 也会阻止其负责人停用，终态回访仅保留历史，不会阻止停用。
 
 ## Actor 归属语义
 
@@ -77,8 +77,8 @@ UI 应表达为“负责人产出 / 我代录”。`submitted_by` 与 `produced_
 
 ### 停用 person
 
-1. 若 person 仍有活动 Assignment 或 active Client contact 关联，API 返回冲突，不递增 Actor version、不写事件。
-2. 先通过 Task 详情改派/结束全部活动 Assignment，并在客户详情解除所有 active 联系人关联；解除必须填写原因。
+1. 若 person 仍有活动 Assignment、active Client contact 关联或 `planned` Client Followup，API 返回冲突，不递增 Actor version、不写事件。
+2. 先通过 Task 详情改派/结束全部活动 Assignment，在客户详情解除所有 active 联系人关联，并改派、完成、跳过或取消全部待回访计划；解除和终态命令均保留原因或结果。
 3. 使用 Actor `If-Match` 把状态改为 inactive；历史 Assignment、Artifact producer 与 Event Actor 摘要继续保留。
 
 ### 关联客户联系人
@@ -157,7 +157,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [x] Inbox 可关联/解除已有 Task，关系动作不隐式创建 Assignment。
 - [x] 一次性 Reminder 的 owner 创建/取消与 system 到期触发审计。
 - [x] Inbox Task 批量拆分、owner/person 初始分派与 system 自动结清/重开。
-- [x] Client contact 显式关联/解除、原子新建 person、单 active 约束和停用保护。
+- [x] Client contact 显式关联/解除、原子新建 person、单 active 约束，以及活动分派/联系人/待回访计划的停用保护。
 - [x] 已登记的非 Reminder Inbox 来源事件消费：follow-up Artifact、Task 阻塞/临期、Project 完成和系统维护事件。
 - [ ] 未来 Client/Invoice/其他里程碑来源与 v0.2 Agent 事件消费。
 

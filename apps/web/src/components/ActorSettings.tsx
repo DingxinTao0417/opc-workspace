@@ -56,6 +56,9 @@ function formatError(error: unknown): string {
     if (error.code === "ACTOR_HAS_ACTIVE_ASSIGNMENTS") {
       return "该人员仍有负责中的任务，请先改派这些任务，再停用人员。";
     }
+    if (error.code === "ACTOR_HAS_PLANNED_CLIENT_FOLLOWUPS") {
+      return "该人员仍有待回访计划，请先改派、完成、跳过或取消这些回访，再停用人员。";
+    }
     const request = error.requestId ? ` · 请求 ${error.requestId}` : "";
     return `${error.message}${request}`;
   }

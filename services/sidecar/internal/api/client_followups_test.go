@@ -125,6 +125,29 @@ func TestClientFollowupRejectsUnavailableAssigneeAndInvalidTimezone(t *testing.T
 	}
 }
 
+func TestClientFollowupBlocksAssigneeDeactivationUntilPlanIsClosed(t *testing.T) {
+	router, _ := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Followup Responsibility Client"}`, nil)
+	actor := createActorForTest(t, router, `{"type":"person","display_name":"Followup Owner"}`, nil)
+	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"`+actor.ID+`","scheduled_at":"2026-09-01T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"confirm delivery"}`), nil)
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("create followup = %d: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	followup := decodeClientFollowupResponse(t, createdRecorder.Body.Bytes())
+	blocked := performRequest(router, http.MethodPatch, "/api/v1/actors/"+actor.ID, []byte(`{"status":"inactive"}`), map[string]string{"If-Match": `"1"`})
+	if blocked.Code != http.StatusConflict || responseErrorCode(t, blocked.Body.Bytes()) != "ACTOR_HAS_PLANNED_CLIENT_FOLLOWUPS" {
+		t.Fatalf("planned followup actor deactivation = %d: %s", blocked.Code, blocked.Body.String())
+	}
+	completed := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+followup.ID+"/complete", []byte(`{"result":"confirmed"}`), map[string]string{"If-Match": `"1"`})
+	if completed.Code != http.StatusOK {
+		t.Fatalf("complete followup = %d: %s", completed.Code, completed.Body.String())
+	}
+	deactivated := performRequest(router, http.MethodPatch, "/api/v1/actors/"+actor.ID, []byte(`{"status":"inactive"}`), map[string]string{"If-Match": `"1"`})
+	if deactivated.Code != http.StatusOK || decodeActorResponse(t, deactivated.Body.Bytes()).Status != "inactive" {
+		t.Fatalf("deactivate actor after terminal followup = %d: %s", deactivated.Code, deactivated.Body.String())
+	}
+}
+
 func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Followup Transition Client"}`, nil)
@@ -234,6 +257,10 @@ func TestClientFollowupCompletionCanAtomicallyScheduleNextPlan(t *testing.T) {
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM client_followups WHERE client_id = ?", 2, client.ID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND aggregate_id = ? AND action = 'client_followup_completed'", 1, created.ID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND aggregate_id = ? AND action = 'client_followup_created_from_completion'", 1, completed.NextFollowup.ID)
+	closeNext := performRequest(router, http.MethodDelete, "/api/v1/client-followups/"+completed.NextFollowup.ID+"?confirm=true", []byte(`{"reason":"prepare inactive assignee guard"}`), map[string]string{"If-Match": `"1"`})
+	if closeNext.Code != http.StatusOK {
+		t.Fatalf("close next plan before inactivating actor = %d: %s", closeNext.Code, closeNext.Body.String())
+	}
 
 	if recorder := performRequest(router, http.MethodPatch, "/api/v1/actors/"+actor.ID, []byte(`{"status":"inactive"}`), map[string]string{"If-Match": `"1"`}); recorder.Code != http.StatusOK {
 		t.Fatalf("inactivate next actor = %d: %s", recorder.Code, recorder.Body.String())

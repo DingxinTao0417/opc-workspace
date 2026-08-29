@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.58
+> 文档版本：2.59
 > 日期：2026-08-29
-> 依据：[PRD v9.38](opc-workspace-PRD.md)
+> 依据：[PRD v9.39](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.58 说明：客户详情的回访时间线可组合状态和 active owner/person 负责人筛选；它仅把 `status` / `assigned_actor_id` 传给既有分页读取契约，并在任一筛选切换时回到第一页，不创建第二套状态或命令入口。既有 IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
+> 2.59 说明：Actor 停用在既有活动 Task Assignment、active Client contact 之外，新增待回访 Client Followup 的责任门禁；任一 `planned` 回访存在即拒绝停用，终态历史不阻塞。计划仍由 Client Followup 保有事实与命令，Actor 只提供责任主体，不自动改派、完成或取消回访。既有状态/负责人分页筛选、IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 

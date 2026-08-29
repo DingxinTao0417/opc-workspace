@@ -464,6 +464,15 @@ func actorUpdates(tx *gorm.DB, actor models.Actor, input updateActorRequest) (ma
 			if activeAssignments > 0 {
 				return nil, actorHasActiveAssignmentsError()
 			}
+			var plannedFollowups int64
+			if err := tx.Table("client_followups").
+				Where("assigned_actor_id = ? AND status = 'planned'", actor.ID).
+				Count(&plannedFollowups).Error; err != nil {
+				return nil, err
+			}
+			if plannedFollowups > 0 {
+				return nil, actorHasPlannedClientFollowupsError()
+			}
 		}
 		updates["status"] = status
 	}
@@ -725,6 +734,14 @@ func actorHasActiveClientLinksError() error {
 		http.StatusConflict,
 		"ACTOR_HAS_ACTIVE_CLIENT_LINKS",
 		"Unlink this actor from every active client contact before deactivating it",
+	)
+}
+
+func actorHasPlannedClientFollowupsError() error {
+	return newProjectRequestError(
+		http.StatusConflict,
+		"ACTOR_HAS_PLANNED_CLIENT_FOLLOWUPS",
+		"Reassign, complete, skip, or cancel this actor's planned client followups before deactivating it",
 	)
 }
 
