@@ -153,6 +153,43 @@ func TestRoadmapMilestoneRejectsInvalidMutations(t *testing.T) {
 	}
 }
 
+func TestRoadmapMilestonePeriodMoveAppendsToDestinationOrder(t *testing.T) {
+	router, _ := newProjectTestAPI(t)
+	destinationRecorder := performRequest(router, http.MethodPost, "/api/v1/roadmap/milestones", []byte(`{
+		"title":"Existing destination","year":2026,"quarter":2,"target_date":"2026-05-10"
+	}`), nil)
+	destination := decodeRoadmapMilestoneResponse(t, destinationRecorder.Body.Bytes())
+	if destinationRecorder.Code != http.StatusCreated || destination.ManualOrder != roadmapMilestoneOrderStep {
+		t.Fatalf("create destination milestone = %d %#v", destinationRecorder.Code, destination)
+	}
+	movingRecorder := performRequest(router, http.MethodPost, "/api/v1/roadmap/milestones", []byte(`{
+		"title":"Move between quarters","year":2026,"quarter":1,"target_date":"2026-03-20"
+	}`), nil)
+	moving := decodeRoadmapMilestoneResponse(t, movingRecorder.Body.Bytes())
+	if movingRecorder.Code != http.StatusCreated {
+		t.Fatalf("create moving milestone = %d: %s", movingRecorder.Code, movingRecorder.Body.String())
+	}
+
+	movedRecorder := performRequest(router, http.MethodPatch, "/api/v1/roadmap/milestones/"+moving.ID, []byte(`{
+		"year":2026,"quarter":2,"target_date":"2026-06-30"
+	}`), map[string]string{"If-Match": `"1"`})
+	moved := decodeRoadmapMilestoneResponse(t, movedRecorder.Body.Bytes())
+	if movedRecorder.Code != http.StatusOK || moved.Version != 2 || moved.Quarter != 2 || moved.ManualOrder != 2*roadmapMilestoneOrderStep {
+		t.Fatalf("move milestone period = %d %#v", movedRecorder.Code, moved)
+	}
+
+	destinationList := performRequest(router, http.MethodGet, "/api/v1/roadmap/milestones?year=2026&quarter=2", nil, nil)
+	destinationItems, _ := decodeRoadmapMilestoneList(t, destinationList.Body.Bytes())
+	if destinationList.Code != http.StatusOK || len(destinationItems) != 2 || destinationItems[0].ID != destination.ID || destinationItems[1].ID != moving.ID {
+		t.Fatalf("destination order after move = %d %#v", destinationList.Code, destinationItems)
+	}
+	sourceList := performRequest(router, http.MethodGet, "/api/v1/roadmap/milestones?year=2026&quarter=1", nil, nil)
+	sourceItems, _ := decodeRoadmapMilestoneList(t, sourceList.Body.Bytes())
+	if sourceList.Code != http.StatusOK || len(sourceItems) != 0 {
+		t.Fatalf("source quarter after move = %d %#v", sourceList.Code, sourceItems)
+	}
+}
+
 func TestProjectDeleteExplainsRoadmapMilestoneProtection(t *testing.T) {
 	router, _ := newProjectTestAPI(t)
 	project := createProjectForTest(t, router, `{"name":"Protected roadmap project"}`, nil)

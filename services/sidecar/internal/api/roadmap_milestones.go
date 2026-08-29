@@ -231,6 +231,13 @@ func (a *API) updateRoadmapMilestone(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		if updates["year"] != milestone.Year || updates["quarter"] != milestone.Quarter {
+			order, err := nextRoadmapMilestoneOrder(tx, updates["year"].(int), updates["quarter"].(int))
+			if err != nil {
+				return err
+			}
+			updates["manual_order"] = order
+		}
 		if input.Status.Set && input.Status.Value != nil && *input.Status.Value == "archived" {
 			return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "Use the archive endpoint to archive a roadmap milestone")
 		}

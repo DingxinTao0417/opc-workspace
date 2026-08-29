@@ -40,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通，本地 Agent 已交付代码所有 Adapter 登记与安全诊断但 Runner/Run 尚未实现。客户回访已完成本地计划、终态、到期 Inbox 与跨时区/DST 边界；路线图已完成数据/API、R3 基础界面和 R4 同季度安全排序首个纵切。内容日历已完成数据/API、六周月格、安全拖拽、详情编辑、人工发布确认、准备 Task 关联、六周范围自动分页聚合，以及审核/发布到期的启动补偿、周期扫描、版本化去重、旧来源终结与 Inbox 详情；schema v38 不变。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v38。T-02 仍部分完成。[PRD v9.63](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通，本地 Agent 已交付代码所有 Adapter 登记与安全诊断但 Runner/Run 尚未实现。客户回访已完成本地计划、终态、到期 Inbox 与跨时区/DST 边界；路线图已完成数据/API、R3 基础界面和 R4 同季度安全排序首个纵切，并补齐跨季度更新的目标季度尾部排序语义。内容日历已完成数据/API、六周月格、安全拖拽、详情编辑、人工发布确认、准备 Task 关联、六周范围自动分页聚合，以及审核/发布到期的启动补偿、周期扫描、版本化去重、旧来源终结与 Inbox 详情；schema v38 不变。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v38。T-02 仍部分完成。[PRD v9.64](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.63）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.64）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖

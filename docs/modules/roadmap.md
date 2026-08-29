@@ -18,6 +18,7 @@
 - 已交付本地鉴权 API：`GET/POST /api/v1/roadmap/milestones`、`GET/PATCH/DELETE /api/v1/roadmap/milestones/:id`、`PUT /api/v1/roadmap/milestones/reorder`、归档/恢复端点。列表支持 year/quarter/status/project/归档筛选和分页；创建、编辑、项目关联、归档恢复与重排都由 Sidecar 校验，编辑/归档/恢复/删除使用 `If-Match`，重排的每项使用 `expected_version` 并在一个事务提交。响应只从关联 Project/Task 读取项目摘要及任务完成度，不写入第二份进度。
 - 当前界面可创建当前季度里程碑、选择最多 100 个已读取的非归档 Project 关联，并直接归档或恢复；非归档里程碑可编辑标题、说明、年份、季度、目标日期、状态和项目关联，所有写入携带当前 `version`。永久删除只在归档视图提供，必须先打开确认弹窗再提交，Sidecar 继续强制 `confirm=true`、`If-Match` 和“仅已归档可删”。卡片可按 ID 读取最新详情，展示完整说明、派生任务进度、Project 深链、期间、版本和审计时间；加载、错误重试、归档只读提示及用详情最新版本进入编辑均已接通。
 - 同季度顺序调整已接入界面：只在“未归档全部状态、无 Project 筛选、本季度 2–100 条”时开放；进入后强制读取第 1 页、`page_size=100` 的完整季度集合，隐藏分页并冻结筛选/新增/卡片写操作。用户可拖动卡片或使用有明确名称的上移/下移按钮预览顺序，保存时提交所有 `{id, expected_version}`；Sidecar 在单事务中校验同季度、非归档和版本后重写 `manual_order`。失败不修改已查询事实，界面恢复服务端顺序并提示重试；超过 API 100 条上限时明确禁用，避免局部分页重排破坏隐藏条目。
+- PATCH 调整 `year` 或 `quarter` 时，Sidecar 在同一事务读取目标季度当前最大 `manual_order`，把里程碑追加到目标季度尾部并递增版本；源季度不留副本，避免沿用旧季度序号与目标季度现有条目碰撞。前端多季度拖拽尚未开放，此规则也适用于现有编辑表单的季度调整。
 - 里程碑暂未写入 Workflow Event、Inbox 或 Reminder；目标日期拖拽、跨季度批量调整和通知仍未交付。创建/编辑表单的多项目选择仍是单页 100 个项目，不等于已交付大数据量多选器。
 - 历史路线图视觉原型已移除，后续以当前 React 占位实现、本文和 PRD 为准。
 - 现有项目 API 和完整任务事实层也尚未完成，是本模块的前置依赖。
@@ -57,7 +58,7 @@
 - `POST /api/v1/roadmap/milestones/:id/archive`
 - `POST /api/v1/roadmap/milestones/:id/restore`
 
-列表支持年份、季度、状态、项目和归档筛选；重排必须作为单事务保存并检查 `expected_version`。
+列表支持年份、季度、状态、项目和归档筛选；重排必须作为单事务保存并检查 `expected_version`。PATCH 跨年或跨季度时必须把 `manual_order` 原子重置为目标季度尾部，不能沿用源季度顺序。
 
 ### 状态与事件
 
