@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
@@ -35,6 +41,7 @@ const project: Project = {
 
 const transition = vi.hoisted(() => vi.fn());
 const projectRefetch = vi.hoisted(() => vi.fn());
+const taskPageInput = vi.hoisted(() => vi.fn());
 
 const rootTask: Task = {
   id: "task-1",
@@ -177,28 +184,40 @@ vi.mock("../api/hooks", () => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   }),
-  useTasksQuery: () => ({
-    data: projectTasks,
-    isError: false,
-    isPending: false,
-    isSuccess: true,
-    refetch: vi.fn(),
-  }),
-  useTaskPageQuery: (input: { parentTaskId?: string }) => ({
-    data:
-      input.parentTaskId === rootTask.id
-        ? {
-            items: [childTask],
-            meta: { page: 1, pageSize: 100, total: 1 },
-          }
-        : undefined,
-    isError: false,
-    isFetching: false,
-    isPending: false,
-    isPlaceholderData: false,
-    isSuccess: true,
-    refetch: vi.fn(),
-  }),
+  useTaskPageQuery: (input: {
+    page?: number;
+    pageSize?: number;
+    parentTaskId?: string;
+    q?: string;
+    rootOnly?: boolean;
+    status?: string;
+  }) => {
+    taskPageInput(input);
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 20;
+    const matchingTasks = projectTasks.filter((task) => {
+      if (input.parentTaskId) return task.parentTaskId === input.parentTaskId;
+      if (input.rootOnly && task.parentTaskId !== null) return false;
+      if (input.status && task.status !== input.status) return false;
+      if (input.q && !`${task.title} ${task.description}`.includes(input.q)) {
+        return false;
+      }
+      return true;
+    });
+    const start = (page - 1) * pageSize;
+    return {
+      data: {
+        items: matchingTasks.slice(start, start + pageSize),
+        meta: { page, pageSize, total: matchingTasks.length },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    };
+  },
   useTransitionProject: () => ({
     error: null,
     isPending: false,
@@ -227,7 +246,9 @@ describe("ProjectDetailPage", () => {
   beforeEach(() => {
     transition.mockReset();
     projectRefetch.mockReset();
+    taskPageInput.mockReset();
     project.taskSummary.remaining = 2;
+    project.taskSummary.total = 3;
     projectTasks = [];
   });
 
@@ -286,7 +307,7 @@ describe("ProjectDetailPage", () => {
     expect(screen.getByRole("tree")).toBeTruthy();
     expect(screen.getByText("完成首页设计")).toBeTruthy();
     expect(screen.queryByText("校对移动端间距")).toBeNull();
-    expect(screen.getByText("2 项 · 1 个根任务")).toBeTruthy();
+    expect(screen.getByText("3 项 · 1 个根任务")).toBeTruthy();
 
     fireEvent.click(
       screen.getByRole("button", { name: "展开子任务：完成首页设计" }),
@@ -297,6 +318,56 @@ describe("ProjectDetailPage", () => {
     expect(screen.queryByRole("tree")).toBeNull();
     expect(screen.getByText("2 项")).toBeTruthy();
     expect(screen.getByText("校对移动端间距")).toBeTruthy();
+  });
+
+  it("searches, filters and paginates project tasks through the server query", () => {
+    project.taskSummary.total = 21;
+    projectTasks = Array.from({ length: 21 }, (_, index) => ({
+      ...rootTask,
+      id: `task-${index + 1}`,
+      title: index === 20 ? "最后一项交付" : `项目任务 ${index + 1}`,
+      status: index === 20 ? "done" : "todo",
+      subtaskTotal: 0,
+    }));
+    renderPage();
+
+    expect(screen.getByText("1–20 / 21")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("最后一项交付")).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "项目任务状态" }), {
+      target: { value: "done" },
+    });
+    expect(screen.getByText("1 / 21 项")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "任务树视图" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    expect(
+      screen
+        .getByRole("button", { name: "平铺列表视图" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+
+    vi.useFakeTimers();
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "搜索项目任务标题或描述" }),
+      { target: { value: "不存在" } },
+    );
+    act(() => vi.advanceTimersByTime(300));
+    vi.useRealTimers();
+
+    expect(screen.getByText("没有匹配任务")).toBeTruthy();
+    expect(taskPageInput).toHaveBeenCalledWith(
+      expect.objectContaining({
+        page: 1,
+        projectId: project.id,
+        q: "不存在",
+        rootOnly: false,
+        status: "done",
+      }),
+    );
   });
 
   it("opens confirmation when the server detects newly added open tasks", () => {

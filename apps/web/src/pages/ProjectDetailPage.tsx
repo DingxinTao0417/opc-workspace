@@ -7,15 +7,16 @@ import {
   List,
   ListTree,
   Plus,
+  Search,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useDeleteProject,
   useProjectQuery,
-  useTasksQuery,
+  useTaskPageQuery,
   useTransitionProject,
 } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -27,7 +28,11 @@ import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSecti
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
 import { TaskList } from "../components/TaskList";
 import { useUiStore } from "../store/ui";
-import type { ProjectStatus, ProjectTransitionAction } from "../types/models";
+import type {
+  ProjectStatus,
+  ProjectTransitionAction,
+  TaskStatus,
+} from "../types/models";
 
 const statusLabels: Record<ProjectStatus, string> = {
   planning: "规划中",
@@ -80,7 +85,6 @@ export function ProjectDetailPage() {
   const projectId = useParams().projectId ?? "";
   const navigate = useNavigate();
   const projectQuery = useProjectQuery(projectId || null);
-  const tasksQuery = useTasksQuery({ projectId, loadAll: true });
   const transitionMutation = useTransitionProject();
   const deleteMutation = useDeleteProject();
   const openNewTaskForProject = useUiStore(
@@ -91,15 +95,40 @@ export function ProjectDetailPage() {
     useState<ProjectTransitionAction | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [taskView, setTaskView] = useState<"tree" | "flat">("tree");
+  const [taskPage, setTaskPage] = useState(1);
+  const [taskSearchInput, setTaskSearchInput] = useState("");
+  const [taskQueryText, setTaskQueryText] = useState("");
+  const [taskStatus, setTaskStatus] = useState<TaskStatus | "">("");
+  const hasTaskFilters = Boolean(taskQueryText || taskStatus);
+  const hierarchicalTasks = taskView === "tree" && !hasTaskFilters;
+  const tasksQuery = useTaskPageQuery({
+    page: taskPage,
+    pageSize: 20,
+    projectId,
+    q: taskQueryText || undefined,
+    rootOnly: hierarchicalTasks,
+    sort: hierarchicalTasks ? "manual_order" : undefined,
+    status: taskStatus || undefined,
+  });
   const project = projectQuery.data;
-  const projectTasks = tasksQuery.data ?? [];
-  const rootProjectTasks = projectTasks.filter(
-    (task) => task.parentTaskId === null,
+  const projectTasks = tasksQuery.data?.items ?? [];
+  const projectTaskResultTotal = tasksQuery.data?.meta.total ?? 0;
+  const projectTaskPages = Math.max(
+    1,
+    Math.ceil(projectTaskResultTotal / (tasksQuery.data?.meta.pageSize ?? 20)),
   );
   const busy = transitionMutation.isPending || deleteMutation.isPending;
   const operationError =
     errorMessage(transitionMutation.error) ??
     errorMessage(deleteMutation.error);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTaskQueryText(taskSearchInput.trim());
+      setTaskPage(1);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [taskSearchInput]);
 
   const runTransition = (
     action: ProjectTransitionAction,
@@ -279,27 +308,39 @@ export function ProjectDetailPage() {
           </div>
           <div className="project-task-heading-actions">
             <span>
-              {projectTasks.length} 项
-              {taskView === "tree" && projectTasks.length > 0
-                ? ` · ${rootProjectTasks.length} 个根任务`
-                : ""}
+              {hierarchicalTasks
+                ? `${project.taskSummary.total} 项 · ${projectTaskResultTotal} 个根任务`
+                : hasTaskFilters
+                  ? `${projectTaskResultTotal} / ${project.taskSummary.total} 项`
+                  : `${projectTaskResultTotal} 项`}
             </span>
             <div aria-label="项目任务视图" className="segmented" role="group">
               <button
                 aria-label="任务树视图"
-                aria-pressed={taskView === "tree"}
-                className={taskView === "tree" ? "segmented-active" : ""}
-                onClick={() => setTaskView("tree")}
-                title="任务树视图"
+                aria-pressed={hierarchicalTasks}
+                className={hierarchicalTasks ? "segmented-active" : ""}
+                disabled={hasTaskFilters}
+                onClick={() => {
+                  setTaskView("tree");
+                  setTaskPage(1);
+                }}
+                title={
+                  hasTaskFilters
+                    ? "清除搜索和状态条件后使用任务树"
+                    : "任务树视图"
+                }
                 type="button"
               >
                 <ListTree size={14} />
               </button>
               <button
                 aria-label="平铺列表视图"
-                aria-pressed={taskView === "flat"}
-                className={taskView === "flat" ? "segmented-active" : ""}
-                onClick={() => setTaskView("flat")}
+                aria-pressed={!hierarchicalTasks}
+                className={!hierarchicalTasks ? "segmented-active" : ""}
+                onClick={() => {
+                  setTaskView("flat");
+                  setTaskPage(1);
+                }}
                 title="平铺列表视图"
                 type="button"
               >
@@ -307,6 +348,36 @@ export function ProjectDetailPage() {
               </button>
             </div>
           </div>
+        </div>
+        <div className="project-task-toolbar">
+          <label className="toolbar-search">
+            <Search size={14} />
+            <input
+              aria-label="搜索项目任务标题或描述"
+              onChange={(event) => setTaskSearchInput(event.target.value)}
+              placeholder="搜索项目任务…"
+              value={taskSearchInput}
+            />
+          </label>
+          <label className="toolbar-select">
+            <span className="sr-only">项目任务状态</span>
+            <select
+              aria-label="项目任务状态"
+              onChange={(event) => {
+                setTaskStatus(event.target.value as TaskStatus | "");
+                setTaskPage(1);
+              }}
+              value={taskStatus}
+            >
+              <option value="">全部状态</option>
+              <option value="todo">待办</option>
+              <option value="in_progress">进行中</option>
+              <option value="blocked">阻塞</option>
+              <option value="waiting_review">待验收</option>
+              <option value="done">已完成</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </label>
         </div>
         {tasksQuery.isPending ? <SkeletonRows count={4} /> : null}
         {tasksQuery.isError ? (
@@ -316,10 +387,23 @@ export function ProjectDetailPage() {
             onRetry={() => void tasksQuery.refetch()}
           />
         ) : null}
-        {tasksQuery.isSuccess && tasksQuery.data.length === 0 ? (
+        {tasksQuery.isSuccess && projectTaskResultTotal === 0 ? (
           <EmptyState
             action={
-              project.status !== "archived" ? (
+              hasTaskFilters ? (
+                <button
+                  className="button button-secondary"
+                  onClick={() => {
+                    setTaskSearchInput("");
+                    setTaskQueryText("");
+                    setTaskStatus("");
+                    setTaskPage(1);
+                  }}
+                  type="button"
+                >
+                  清除条件
+                </button>
+              ) : project.status !== "archived" ? (
                 <button
                   className="button button-primary"
                   disabled={busy}
@@ -331,17 +415,49 @@ export function ProjectDetailPage() {
                 </button>
               ) : null
             }
-            message="项目还没有关联任务。"
-            title="任务列表为空"
+            message={
+              hasTaskFilters
+                ? "当前项目没有符合这些条件的任务。"
+                : "项目还没有关联任务。"
+            }
+            title={hasTaskFilters ? "没有匹配任务" : "任务列表为空"}
           />
         ) : null}
         {projectTasks.length ? (
           <TaskList
-            hierarchical={taskView === "tree"}
+            hierarchical={hierarchicalTasks}
             live={tasksQuery.isSuccess}
-            showParent={taskView === "flat"}
-            tasks={taskView === "tree" ? rootProjectTasks : projectTasks}
+            showParent={!hierarchicalTasks}
+            tasks={projectTasks}
           />
+        ) : null}
+        {tasksQuery.isSuccess && projectTaskPages > 1 ? (
+          <nav aria-label="项目任务分页" className="pagination">
+            <button
+              className="button button-secondary"
+              disabled={taskPage <= 1 || tasksQuery.isFetching}
+              onClick={() => setTaskPage((value) => Math.max(1, value - 1))}
+              type="button"
+            >
+              上一页
+            </button>
+            <span>
+              {(taskPage - 1) * tasksQuery.data.meta.pageSize + 1}–
+              {Math.min(
+                taskPage * tasksQuery.data.meta.pageSize,
+                projectTaskResultTotal,
+              )}{" "}
+              / {projectTaskResultTotal}
+            </span>
+            <button
+              className="button button-secondary"
+              disabled={taskPage >= projectTaskPages || tasksQuery.isFetching}
+              onClick={() => setTaskPage((value) => value + 1)}
+              type="button"
+            >
+              下一页
+            </button>
+          </nav>
         ) : null}
       </section>
 

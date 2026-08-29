@@ -2384,6 +2384,13 @@ kbd {
   margin-left: 0;
 }
 
+.project-task-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .project-artifact-heading-actions,
 .project-history-toggle,
 .project-artifact-row,
