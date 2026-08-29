@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.49
+> 文档版本：2.50
 > 日期：2026-08-29
-> 依据：[PRD v9.28](opc-workspace-PRD.md)
+> 依据：[PRD v9.29](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.49 说明：新增客户回访 C2 数据契约。schema v35 的 `client_followups` 在本地保存计划和不可重开的终态组合，负责人受 active owner/person 限制，客户有回访历史时禁止硬删除；业务导入导出以显式白名单包含该表。CRUD、执行、提醒和页面仍待后续纵切。
+> 2.50 说明：客户回访 C3 已接计划 API。全局及客户详情纵向列表使用分页和显式筛选；创建遵循 Idempotency-Key，详情/编辑遵循 ETag/If-Match，创建/编辑会同事务写入不可变 Workflow Event。终态执行、提醒和页面仍待后续纵切。
 
 ## 1. 目的
 

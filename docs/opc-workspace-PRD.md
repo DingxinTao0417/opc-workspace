@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.28
+> **一人公司操作系统** · PRD v9.29
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> **v9.28 更新说明**：交付 T-17/C2 客户回访数据契约。schema v35 新增本地 `client_followups`：计划/完成/跳过/取消字段组合、active owner/person 负责人、终态不可重开、乐观版本步进、重排来源与 Client/Actor 删除保护均在 SQLite 约束；写入同步刷新客户聚合版本。业务 JSON/ZIP 的显式导入导出表白名单已包含该表。尚未提供回访 API、提醒、时间线、Today 或 Inbox 投影。app v0.1.0 / API v1 不变。
+> **v9.29 更新说明**：交付 T-17/C3 客户回访计划 API。`GET/POST /client-followups`、详情、`PATCH` 与客户纵向列表已遵循分页、显式筛选、创建幂等、`If-Match` 乐观锁和不可变 Workflow Event；active owner/person 负责人和 IANA 时区在 API 与 SQLite 双层验证。终态执行、重排、提醒、时间线、Today 与 Inbox 投影仍待。app v0.1.0 / API v1 / schema v35 不变。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -2499,3 +2499,4 @@ pnpm build:desktop
 | v9.26    | 2026-08-29 | 交付数据库打开前桌面启动进度：Sidecar 在 ready 前以 stdout 发送固定 stage code，覆盖数据库运行锁、pending restore 检查/验证/应用/复验/收尾、数据库迁移、工作区初始化和本地 API 启动；Tauri 拒绝未知协议/阶段，并仅将白名单 `startupStage` 交给全局恢复页显示。阶段不携带路径、备份 ID、令牌、原始错误或用户输入；Go 覆盖实际恢复阶段序列和 stdout 编码，Web 覆盖严格运行期契约与恢复页文案。启动前备份选择、真实父崩溃/进程树、三平台及安装包仍待；app v0.1.0/API v1/schema v34 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                 |
 | v9.27    | 2026-08-29 | 交付 T-13 原生全局快捷键：Tauri 尝试注册命令面板/新建任务的 `⌘/Ctrl+Shift+K/N`，触发时显示/聚焦主窗口并向 WebView 发送固定 action；注册失败仅暴露 `registered/unavailable`，继续保留应用内快捷键。设置运行诊断读取白名单状态，前端拒绝未知 action 或状态；自定义、专注、页面切换和真实三平台验收仍待。app v0.1.0/API v1/schema v34 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | v9.28    | 2026-08-29 | 交付客户回访 C2 数据契约：schema v35 新增空的 `client_followups`，计划/完成/跳过/取消字段组合、active owner/person 负责人、版本步进、终态不可重开和客户历史保护均由 SQLite 约束；写入会刷新客户聚合版本，业务 JSON/ZIP 导入导出显式包含该表。回访 CRUD、执行、提醒、今日/收件箱及详情 UI 尚未交付。app v0.1.0/API v1 不变，SQLite 升至 schema v35。 |
+| v9.29    | 2026-08-29 | 交付客户回访 C3 计划 API：全局/客户纵向分页列表支持 client、负责人和状态筛选；创建采用 Idempotency-Key，详情/编辑采用 ETag/If-Match，计划字段、IANA 时区和 active owner/person 负责人受 API 与 SQLite 双层门禁。创建、编辑同事务追加不可变 Workflow Event，回放不重复写入。完成、跳过、取消、重排、提醒与界面仍待。app v0.1.0/API v1/schema v35 不变，无 migration。 |
