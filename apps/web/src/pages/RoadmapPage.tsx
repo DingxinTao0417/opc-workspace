@@ -59,6 +59,21 @@ function firstDateFor(year: number, quarter: number) {
   return `${year}-${String((quarter - 1) * 3 + 1).padStart(2, "0")}-01`;
 }
 
+function adjacentQuarter(
+  year: number,
+  quarter: 1 | 2 | 3 | 4,
+  direction: -1 | 1,
+) {
+  if (quarter === 1 && direction === -1)
+    return { year: year - 1, quarter: 4 as const };
+  if (quarter === 4 && direction === 1)
+    return { year: year + 1, quarter: 1 as const };
+  return {
+    year,
+    quarter: (quarter + direction) as 1 | 2 | 3 | 4,
+  };
+}
+
 function quarterCalendarMonths(year: number, quarter: number) {
   return [0, 1, 2].map((offset) => {
     const month = (quarter - 1) * 3 + offset + 1;
@@ -228,11 +243,13 @@ function RoadmapMilestoneCard({
           </div>
         ) : quarterMoving ? (
           <div className="roadmap-reorder-controls">
-            <span aria-live="polite">当前季度 Q{milestone.quarter}</span>
+            <span aria-live="polite">
+              当前季度 {milestone.year} Q{milestone.quarter}
+            </span>
             <button
               aria-label={`移到上一季度：${milestone.title}`}
               className="button button-secondary"
-              disabled={moveDisabled || milestone.quarter === 1}
+              disabled={moveDisabled}
               onClick={() => onMove?.(-1)}
               type="button"
             >
@@ -242,7 +259,7 @@ function RoadmapMilestoneCard({
             <button
               aria-label={`移到下一季度：${milestone.title}`}
               className="button button-secondary"
-              disabled={moveDisabled || milestone.quarter === 4}
+              disabled={moveDisabled}
               onClick={() => onMove?.(1)}
               type="button"
             >
@@ -944,12 +961,16 @@ export function RoadmapPage() {
       },
     );
   };
-  const moveToQuarter = (milestone: RoadmapMilestone, nextQuarter: number) => {
+  const moveToQuarter = (
+    milestone: RoadmapMilestone,
+    nextYear: number,
+    nextQuarter: number,
+  ) => {
     if (
       periodMove.isPending ||
       nextQuarter < 1 ||
       nextQuarter > 4 ||
-      nextQuarter === milestone.quarter
+      (nextYear === milestone.year && nextQuarter === milestone.quarter)
     )
       return;
     periodMove.reset();
@@ -957,9 +978,9 @@ export function RoadmapPage() {
       {
         id: milestone.id,
         input: {
-          year,
+          year: nextYear,
           quarter: nextQuarter as 1 | 2 | 3 | 4,
-          targetDate: targetDateFor(year, nextQuarter),
+          targetDate: targetDateFor(nextYear, nextQuarter),
           expectedVersion: milestone.version,
         },
       },
@@ -1249,8 +1270,8 @@ export function RoadmapPage() {
           <div>
             <strong>调整所属季度</strong>
             <span>
-              把卡片拖到
-              Q1–Q4，或使用上一季度/下一季度按钮；移动会把目标日期设为目标季度末。
+              把卡片拖到 Q1–Q4
+              或年度边界，或使用上一季度/下一季度按钮；移动会把目标日期设为目标季度末。
             </span>
             {periodMove.isError ? (
               <span className="form-field-error" role="alert">
@@ -1353,6 +1374,24 @@ export function RoadmapPage() {
               aria-label={`${year} 年路线图`}
               className="roadmap-year-panel"
             >
+              {quarterMoving ? (
+                <div
+                  aria-label={`移动到 ${year - 1} 年 Q4`}
+                  className="roadmap-year-boundary-drop"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    const moving = visibleMilestones.find(
+                      (milestone) => milestone.id === draggedId,
+                    );
+                    if (moving) moveToQuarter(moving, year - 1, 4);
+                    setDraggedId(null);
+                  }}
+                  role="region"
+                >
+                  <ArrowUp size={14} />
+                  上一年 Q4 · {year - 1}
+                </div>
+              ) : null}
               {([1, 2, 3, 4] as const).map((itemQuarter) => {
                 const quarterMilestones = visibleMilestones.filter(
                   (milestone) => milestone.quarter === itemQuarter,
@@ -1372,7 +1411,8 @@ export function RoadmapPage() {
                             const moving = visibleMilestones.find(
                               (milestone) => milestone.id === draggedId,
                             );
-                            if (moving) moveToQuarter(moving, itemQuarter);
+                            if (moving)
+                              moveToQuarter(moving, year, itemQuarter);
                             setDraggedId(null);
                           }
                         : undefined
@@ -1402,12 +1442,18 @@ export function RoadmapPage() {
                           onDragEnd={() => setDraggedId(null)}
                           onDragStart={() => setDraggedId(milestone.id)}
                           onEdit={setEditing}
-                          onMove={(direction) =>
+                          onMove={(direction) => {
+                            const target = adjacentQuarter(
+                              milestone.year,
+                              milestone.quarter,
+                              direction,
+                            );
                             moveToQuarter(
                               milestone,
-                              milestone.quarter + direction,
-                            )
-                          }
+                              target.year,
+                              target.quarter,
+                            );
+                          }}
                           onOpen={(value) => setDetailId(value.id)}
                           quarterMoving={quarterMoving}
                         />
@@ -1416,6 +1462,24 @@ export function RoadmapPage() {
                   </section>
                 );
               })}
+              {quarterMoving ? (
+                <div
+                  aria-label={`移动到 ${year + 1} 年 Q1`}
+                  className="roadmap-year-boundary-drop"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    const moving = visibleMilestones.find(
+                      (milestone) => milestone.id === draggedId,
+                    );
+                    if (moving) moveToQuarter(moving, year + 1, 1);
+                    setDraggedId(null);
+                  }}
+                  role="region"
+                >
+                  <ArrowDown size={14} />
+                  下一年 Q1 · {year + 1}
+                </div>
+              ) : null}
             </section>
           ) : (
             <section

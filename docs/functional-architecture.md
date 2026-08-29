@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.79
+> 文档版本：2.80
 > 日期：2026-08-29
-> 依据：[PRD v9.68](opc-workspace-PRD.md)
+> 依据：[PRD v9.69](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v39
 
-> 2.79 说明：内容日历 CC4 拖拽新增立即视觉预移；月格按条目 IANA 排期时区归日，失败/冲突回滚卡片并回读服务端，成功后以服务端新版本收敛。schema 仍为 v39。
+> 2.80 说明：路线图 R4 补齐跨年度连续排期；年度首尾提供上一年 Q4/下一年 Q1 拖拽落点，卡片上一/下一季度按钮在 Q1/Q4 边界跨年，继续复用版本化 PATCH 与目标季度末规则。schema 仍为 v39。
 
 ## 1. 目的
 
@@ -134,7 +134,7 @@
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                                 | 原生窗口、受管 Sidecar generation/重启预算/父管道与 shutdown、权限、运行日志和发布                                                                                                        | 可运行、可恢复、可诊断的本地应用环境                                                                                                                             |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                             | 财务与发票业务事实                                                                                                                                                                        | 本地提醒、Inbox Item、客户聚合                                                                                                                                   |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                                 | 本地回访计划、终态结果、完成时原子安排下一次计划、客户详情管理、Today 待办和 Inbox→客户详情入口                                                                                           | Inbox 到期项；不自动创建客户活动或外部通信                                                                                                                       |
-| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除、同季度安全排序、年度跨季度移动和季度内精确日期调整；跨年度移动待后续          | 里程碑到期/达成已投影本地 Inbox 事件；原生通知待后续                                                                                                             |
+| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除、同季度安全排序、年度跨季度/跨年度移动和季度内精确日期调整                     | 里程碑到期/达成已投影本地 Inbox 事件；原生通知待后续                                                                                                             |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、拖拽即时预移与失败回滚、准备 Task 关系、本地发布确认；CC2–CC5-B 已交付                                                                             | 准备 Task（读写已交付）；当前版本审核/发布时间到期事实投影到 Inbox（已交付）                                                                                     |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                                    | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                     |
 | [知识库](modules/knowledge-base.md)        | 本地文件                                                                                                                | 导入、FTS 索引、来源定位和删除                                                                                                                                                            | 搜索结果、可选 AI 上下文                                                                                                                                         |
@@ -440,7 +440,7 @@ Sidecar ready 前 + 每 5 分钟
 
 - v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含可解释容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
 - v0.2 当前：Project complete/reopen 已追加 Workflow Event；首个自动化消费者只订阅 `project_completed`。未来 Agent Runner 追加事件后，才启用固定的 Agent 失败预设；Automation Run 自身事件不进入当前消费者。
-- v0.3：内容审核/发布时间与路线图里程碑到期/达成已投影为本地 Inbox 事件；路线图季度内精确日期拖拽和键盘输入已交付，跨年度移动与原生通知仍待。
+- v0.3：内容审核/发布时间与路线图里程碑到期/达成已投影为本地 Inbox 事件；路线图季度内精确日期和跨年度移动已交付，原生通知仍待。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
 
 ### 8.2 去重规则
