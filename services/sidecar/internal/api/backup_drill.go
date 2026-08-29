@@ -138,7 +138,7 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 			err = errors.Join(err, fmt.Errorf("close restore drill Artifact store: %w", closeErr))
 		}
 	}()
-	rows, err := listActiveControlledFiles(store.DB)
+	rows, err := listActiveControlledFiles(store.DB, store.SchemaVersion)
 	if err != nil {
 		return backupRestoreDrillResult{}, fmt.Errorf("read restore drill Artifacts: %w", err)
 	}

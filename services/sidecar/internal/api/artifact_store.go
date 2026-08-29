@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -144,6 +145,46 @@ func newArtifactStore(root, databaseID, boundStoreID string) (*artifactStore, er
 	}
 	if err := store.cleanupOrphans(store.stagingDir); err != nil {
 		return nil, fmt.Errorf("clean Artifact staging directory: %w", err)
+	}
+	initialized = true
+	return store, nil
+}
+
+func openWorkspaceArtifactStore(db *gorm.DB, root string, reconcile bool) (*artifactStore, error) {
+	var databaseID string
+	var boundStoreID sql.NullString
+	if err := db.Raw("SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&databaseID, &boundStoreID); err != nil {
+		return nil, fmt.Errorf("read workspace identity: %w", err)
+	}
+	store, err := newArtifactStore(root, databaseID, boundStoreID.String)
+	if err != nil {
+		return nil, err
+	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			_ = store.close()
+		}
+	}()
+	if !boundStoreID.Valid {
+		result := db.Exec(
+			"UPDATE workspace_identity SET artifact_store_id = ? WHERE singleton = 1 AND artifact_store_id IS NULL",
+			store.storeID,
+		)
+		if result.Error != nil {
+			return nil, fmt.Errorf("bind Artifact root to workspace database: %w", result.Error)
+		}
+		if result.RowsAffected == 0 {
+			var current string
+			if err := db.Raw("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&current); err != nil || current != store.storeID {
+				return nil, errors.New("workspace database was concurrently bound to a different Artifact root")
+			}
+		}
+	}
+	if reconcile {
+		if err := store.reconcile(db); err != nil {
+			return nil, err
+		}
 	}
 	initialized = true
 	return store, nil

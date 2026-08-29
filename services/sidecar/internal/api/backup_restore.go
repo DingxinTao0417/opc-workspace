@@ -549,15 +549,15 @@ func verifyLiveRestore(databasePath, artifactRoot string, manifest backupManifes
 		_ = store.Close()
 		return err
 	}
-	verifyErr := verifyArtifactObjects(store.DB, artifacts, manifest.ArtifactCount)
+	verifyErr := verifyArtifactObjects(store.DB, artifacts, store.SchemaVersion, manifest.ArtifactCount)
 	closeArtifactErr := artifacts.close()
 	checkpointErr := store.Checkpoint()
 	closeStoreErr := store.Close()
 	return errors.Join(verifyErr, closeArtifactErr, checkpointErr, closeStoreErr)
 }
 
-func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, expectedCount int) error {
-	rows, err := listActiveControlledFiles(db)
+func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion, expectedCount int) error {
+	rows, err := listActiveControlledFiles(db, schemaVersion)
 	if err != nil {
 		return err
 	}

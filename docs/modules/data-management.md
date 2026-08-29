@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v26（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task Artifact 与 Client Attachment 受控文件，以及 T-04B 手动一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、迁移前自动备份、计划备份和完整跨版本恢复矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.8](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -24,6 +24,7 @@
 - SQLite 使用单物理连接、`foreign_keys=ON`、WAL 和 5000 ms `busy_timeout`；正常退出执行 `wal_checkpoint(TRUNCATE)`。
 - 迁移 SQL 通过 Go `embed` 编入 Sidecar，按编号记录到 `schema_migrations`；未知版本/文件名不一致拒绝启动。
 - 需要重建表的迁移可用首行 `-- migration: foreign_keys=off`，迁移器在固定连接上事务外关闭外键、事务内执行 SQL 与 `foreign_key_check`，成功或失败均恢复外键。
+- 会删除、重建或不可逆改写既有事实的迁移必须在连续文件头声明 `-- migration: destructive`。已有工作区启动先执行此前的非破坏性迁移，再停在首个破坏性边界；Sidecar 使用边界处 schema 创建并完整校验 SQLite + 全部 active 受控文件回滚包，关闭数据库后才重新打开并执行余下迁移。自动备份失败时不运行破坏性 SQL、不输出 ready；全新空库不会生成无意义备份。
 - schema v9 新增单例 `workspace_identity`：`database_id` 永久不可变，`artifact_store_id` 只能从空值绑定一次；两者把受控 Artifact root 与数据库一一对应。迁移还新增不可变 `artifact_deletion_tombstones`，在 file Artifact 软删或 Task 聚合硬删的同一事务保留删除授权事实；Submission/Artifact 迁移只对无歧义 manual 状态回填 inferred Submission 和 system 事件，不虚构 Artifact。
 - schema v10 为 Client 增加聚合 `version`、名称/状态/更新时间查询索引和 Project 关联变化触发器，并把历史空白可选资料归一为 `NULL`；迁移不改写 schema v9 的 Artifact store 契约。
 - schema v11 重建 `focus_sessions`，新增有效工作区间账本 `focus_session_intervals` 和精确秒数余量账本 `task_focus_totals`；旧 Focus 记录按终态映射并补 interval，不二次增加 Task 工时，并用只适用于迁入终态的 `legacy_imported` 标记无损保留旧 schema 中超过 120 分钟的合法记录。
@@ -60,7 +61,6 @@
 
 - 导入预览/执行、包含 Artifact 文件正文的外部包；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 破坏性迁移前产品化自动备份；
 - 迁移失败、Sidecar 启动前失败、数据库不可写或完整诊断包的 Inbox 投影；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
@@ -184,7 +184,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `027_*` 继续追加，不修改已发布迁移。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚以及外键状态恢复。
+新增 schema 只能从 `027_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。
 
 ## v0.1 备份/恢复目标与当前进度
 
@@ -228,15 +228,15 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 
 当前创建和校验是同步本地命令，API 只在完整成功后返回；前端使用 180 秒超时并展示进行中状态。已实现：
 
-| 方法与路径                          | 当前契约                                                                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/backups`               | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                    |
-| `POST /api/v1/backups`              | 可选 `note`（最多 200 字）和 `Idempotency-Key`；冻结写入、创建、完整校验并原子发布 SQLite+Artifact 包。失败返回 `BACKUP_CREATE_FAILED`，并尽力投影安全系统维护 Inbox Item |
+| 方法与路径                          | 当前契约                                                                                                                                                                                                                       |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/v1/backups`               | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                                                                                                                         |
+| `POST /api/v1/backups`              | 可选 `note`（最多 200 字）和 `Idempotency-Key`；冻结写入、创建、完整校验并原子发布 SQLite+Artifact 包。失败返回 `BACKUP_CREATE_FAILED`，并尽力投影安全系统维护 Inbox Item                                                      |
 | `POST /api/v1/backups/:id/verify`   | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact。操作失败返回 `BACKUP_VERIFY_FAILED` 并尽力投影安全 Inbox Item；包无效返回 `BACKUP_INVALID` 且不投影 |
-| `POST /api/v1/backups/:id/drill`    | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                    |
-| `POST /api/v1/backups/:id/restore`  | 严格确认后重验目标、创建当前状态回滚包并挂起计划；下一次 Sidecar 启动前原子替换并最终复验，失败恢复旧资源                 |
-| `DELETE /api/v1/backups/:id`        | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝           |
-| `GET /api/v1/exports/business-data` | 单事务生成 format v1 业务 JSON attachment；显式白名单、稳定结构，文件仅元数据，排除运行维护事实和机器私有信息             |
+| `POST /api/v1/backups/:id/drill`    | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                                                                                                                         |
+| `POST /api/v1/backups/:id/restore`  | 严格确认后重验目标、创建当前状态回滚包并挂起计划；下一次 Sidecar 启动前原子替换并最终复验，失败恢复旧资源                                                                                                                      |
+| `DELETE /api/v1/backups/:id`        | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝                                                                                                                |
+| `GET /api/v1/exports/business-data` | 单事务生成 format v1 业务 JSON attachment；显式白名单、稳定结构，文件仅元数据，排除运行维护事实和机器私有信息                                                                                                                  |
 
 导入与含文件导出尚无路由。恢复安排同步返回 `202` 和目标/回滚 ID，实际应用发生在下一次启动，期间普通 v1 API 返回 `503 RESTORE_RESTART_REQUIRED`。数据量增长后再把同步 JSON 导出和其他长操作升级为 `queued / running / verifying / succeeded / failed / cancelled` 作业；迁移前需先写 ADR，不能把同步成功响应和后台状态混用。
 
@@ -287,7 +287,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 ### 仍未实现
 
 - [ ] 启动恢复进度页和 applied 清理警告诊断。
-- [ ] 破坏性迁移前自动备份。
+- [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [ ] 迁移失败、Sidecar 启动前失败、数据库不可写或完整诊断包投影。
 - [ ] 数据导入、含文件导出包、保留策略、计划备份和跨版本兼容矩阵。
 

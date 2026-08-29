@@ -20,10 +20,23 @@ type Store struct {
 }
 
 func Open(path string) (*Store, error) {
+	store, _, err := open(path, false)
+	return store, err
+}
+
+// OpenBeforeDestructiveMigrations opens the database and applies every pending
+// non-destructive migration. For an existing workspace it stops before the
+// first migration explicitly marked as destructive, allowing startup to create
+// and verify a rollback package before any destructive SQL runs.
+func OpenBeforeDestructiveMigrations(path string) (*Store, *MigrationGate, error) {
+	return open(path, true)
+}
+
+func open(path string, stopBeforeDestructive bool) (*Store, *MigrationGate, error) {
 	if path != ":memory:" {
 		parent := filepath.Dir(path)
 		if err := os.MkdirAll(parent, 0o700); err != nil {
-			return nil, fmt.Errorf("create database directory: %w", err)
+			return nil, nil, fmt.Errorf("create database directory: %w", err)
 		}
 	}
 
@@ -32,11 +45,11 @@ func Open(path string) (*Store, error) {
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("open SQLite database: %w", err)
+		return nil, nil, fmt.Errorf("open SQLite database: %w", err)
 	}
 	sqlDB, err := db.DB()
 	if err != nil {
-		return nil, fmt.Errorf("get SQLite connection: %w", err)
+		return nil, nil, fmt.Errorf("get SQLite connection: %w", err)
 	}
 
 	// A single desktop user does not need a wide write pool. Keeping one physical
@@ -51,21 +64,21 @@ func Open(path string) (*Store, error) {
 	} {
 		if err := db.Exec(pragma).Error; err != nil {
 			_ = sqlDB.Close()
-			return nil, fmt.Errorf("configure SQLite (%s): %w", pragma, err)
+			return nil, nil, fmt.Errorf("configure SQLite (%s): %w", pragma, err)
 		}
 	}
 
-	version, err := applyMigrations(sqlDB)
+	version, gate, err := applyMigrations(sqlDB, stopBeforeDestructive)
 	if err != nil {
 		_ = sqlDB.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	if err := sqlDB.Ping(); err != nil {
 		_ = sqlDB.Close()
-		return nil, fmt.Errorf("ping SQLite database: %w", err)
+		return nil, nil, fmt.Errorf("ping SQLite database: %w", err)
 	}
 
-	return &Store{DB: db, SQL: sqlDB, SchemaVersion: version}, nil
+	return &Store{DB: db, SQL: sqlDB, SchemaVersion: version}, gate, nil
 }
 
 func (s *Store) Checkpoint() error {

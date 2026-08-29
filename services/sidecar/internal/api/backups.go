@@ -397,7 +397,7 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 		return backupSummary{}, errors.New("Artifact marker does not match workspace identity")
 	}
 
-	rows, err := listActiveControlledFiles(db)
+	rows, err := listActiveControlledFiles(db, options.SchemaVersion)
 	if err != nil {
 		return backupSummary{}, fmt.Errorf("list active Artifact objects: %w", err)
 	}
@@ -660,22 +660,31 @@ func verifyBackupDatabase(path string, manifest backupManifest) error {
 	return nil
 }
 
-func listActiveControlledFiles(db *gorm.DB) ([]controlledFileBackupRow, error) {
+func listActiveControlledFiles(db *gorm.DB, schemaVersion int) ([]controlledFileBackupRow, error) {
 	var rows []controlledFileBackupRow
-	err := db.Raw(`
+	query := `
 		SELECT id, relative_path, size_bytes, sha256
 		FROM task_artifacts
 		WHERE storage_kind = 'file' AND deleted_at IS NULL
-		UNION ALL
-		SELECT id, relative_path, size_bytes, sha256
-		FROM client_attachments
-		WHERE deleted_at IS NULL
-		UNION ALL
-		SELECT id, relative_path, size_bytes, sha256
-		FROM project_attachments
-		WHERE deleted_at IS NULL
-		ORDER BY id ASC
-	`).Scan(&rows).Error
+	`
+	if schemaVersion >= 19 {
+		query += `
+			UNION ALL
+			SELECT id, relative_path, size_bytes, sha256
+			FROM client_attachments
+			WHERE deleted_at IS NULL
+		`
+	}
+	if schemaVersion >= 22 {
+		query += `
+			UNION ALL
+			SELECT id, relative_path, size_bytes, sha256
+			FROM project_attachments
+			WHERE deleted_at IS NULL
+		`
+	}
+	query = "SELECT id, relative_path, size_bytes, sha256 FROM (" + query + ") ORDER BY id ASC"
+	err := db.Raw(query).Scan(&rows).Error
 	return rows, err
 }
 

@@ -22,7 +22,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 受控 Artifact 文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。提交事务报错只清除数据库可证明无引用的 object，模糊 COMMIT 留给 reconcile；软删除与 Task 聚合硬删除通过 immutable tombstone 协调数据库和文件事务补偿
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
 - 客户责任关联纵切：客户详情可选择已有 active person，或原子新建 person 后显式关联；每个客户只允许一个 active contact，解除必须填写原因并保留不可变历史，关联变化传播 Client 聚合版本
-- 手动一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将 Task Artifact、Client Attachment 的全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；桌面模式可一键等待受管 Sidecar 真实退出后重启应用，浏览器开发模式明确要求手动重启服务。下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用。删除把精确 UUID 包原子移入隐藏态后清理并同步，损坏包可删，不安全文件系统项会拒绝
+- 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并创建同规格自动回滚包；备份失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
 - 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task Artifact 与 Client Attachment 元数据但不嵌入文件正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
@@ -33,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；启动门禁、Query committed、按变化模块保存、旧 localStorage 缺失模块迁移及 committed/draft/preview 隔离已接通，预览或取消不会改写活动 Session；头像暂保留为本地兼容值
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、备份恢复/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；schema v23–v26 进一步交付显式 follow-up Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护来源投影、上下文和删除/incident 协调。受控头像文件、Focus 高级分析/原生反馈、客户外部来源/回访/财务、其他系统故障来源、重复提醒、迁移前自动备份、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v6.8](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；schema v23–v26 进一步交付显式 follow-up Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护来源投影、上下文和删除/incident 协调。受控头像文件、Focus 高级分析/原生反馈、客户外部来源/回访/财务、其他系统故障来源、重复提醒、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v6.9](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v6.8）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v6.9）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -318,8 +318,8 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 - `PRAGMA journal_mode = WAL`
 - `PRAGMA busy_timeout = 5000`
 
-新增迁移时只添加新的递增版本文件，不修改已发布迁移。当前已支持用户手动选择已校验备份并在下一次 Sidecar 启动前原子恢复；破坏性迁移前自动备份仍未实现。
+新增迁移时只添加新的递增版本文件，不修改已发布迁移。会删除、重建或不可逆改写既有事实的迁移必须在连续文件头标记 `-- migration: destructive`；已有工作区启动时先完成安全迁移，再在首个破坏性迁移前生成并验证自动回滚包。新建空库不创建无意义的迁移备份，备份失败则数据库停留在破坏性边界之前并拒绝 ready。
 
 ## 产品边界
 
-[PRD v6.8](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、手工一致性备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败的系统维护来源投影；明确未交付受控头像文件、Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、其他系统故障来源、重复/原生通知、Agent Runtime、导入、迁移前自动备份、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。
+[PRD v6.9](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败的系统维护来源投影；明确未交付受控头像文件、Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、其他系统故障来源、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。

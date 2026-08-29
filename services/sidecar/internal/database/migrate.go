@@ -16,13 +16,26 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-const foreignKeysOffMigrationMarker = "-- migration: foreign_keys=off"
+const (
+	foreignKeysOffMigrationMarker = "-- migration: foreign_keys=off"
+	destructiveMigrationMarker    = "-- migration: destructive"
+)
 
 type migration struct {
 	version        int
 	name           string
 	sql            string
 	foreignKeysOff bool
+	destructive    bool
+}
+
+// MigrationGate describes the migration boundary at which startup must create
+// a verified rollback package. PendingVersions includes the destructive
+// migration and every later migration in this binary.
+type MigrationGate struct {
+	CurrentVersion  int
+	TargetVersion   int
+	PendingVersions []int
 }
 
 // LatestSchemaVersion reports the newest embedded migration without opening or
@@ -39,11 +52,19 @@ func LatestSchemaVersion() (int, error) {
 	return migrations[len(migrations)-1].version, nil
 }
 
-func applyMigrations(db *sql.DB) (int, error) {
+func applyMigrations(db *sql.DB, stopBeforeDestructive bool) (int, *MigrationGate, error) {
+	migrations, err := loadMigrations()
+	if err != nil {
+		return 0, nil, err
+	}
+	return applyMigrationSet(db, migrations, stopBeforeDestructive)
+}
+
+func applyMigrationSet(db *sql.DB, migrations []migration, stopBeforeDestructive bool) (int, *MigrationGate, error) {
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("reserve SQLite migration connection: %w", err)
+		return 0, nil, fmt.Errorf("reserve SQLite migration connection: %w", err)
 	}
 	defer conn.Close()
 
@@ -53,13 +74,9 @@ func applyMigrations(db *sql.DB) (int, error) {
 			name TEXT NOT NULL,
 			applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`); err != nil {
-		return 0, fmt.Errorf("create schema_migrations: %w", err)
+		return 0, nil, fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	migrations, err := loadMigrations()
-	if err != nil {
-		return 0, err
-	}
 	applied := make(map[int]string)
 	available := make(map[int]string, len(migrations))
 	for _, item := range migrations {
@@ -67,46 +84,67 @@ func applyMigrations(db *sql.DB) (int, error) {
 	}
 	rows, err := conn.QueryContext(ctx, "SELECT version, name FROM schema_migrations ORDER BY version")
 	if err != nil {
-		return 0, fmt.Errorf("read schema migrations: %w", err)
+		return 0, nil, fmt.Errorf("read schema migrations: %w", err)
 	}
 	for rows.Next() {
 		var version int
 		var name string
 		if err := rows.Scan(&version, &name); err != nil {
 			_ = rows.Close()
-			return 0, fmt.Errorf("scan schema migration: %w", err)
+			return 0, nil, fmt.Errorf("scan schema migration: %w", err)
 		}
 		applied[version] = name
 	}
 	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("close schema migration rows: %w", err)
+		return 0, nil, fmt.Errorf("close schema migration rows: %w", err)
 	}
 	for version, name := range applied {
 		migrationName, exists := available[version]
 		if !exists {
-			return 0, fmt.Errorf("database schema version %d (%s) is newer than or unknown to this Sidecar", version, name)
+			return 0, nil, fmt.Errorf("database schema version %d (%s) is newer than or unknown to this Sidecar", version, name)
 		}
 		if migrationName != name {
-			return 0, fmt.Errorf("migration %d name mismatch: database=%q binary=%q", version, name, migrationName)
+			return 0, nil, fmt.Errorf("migration %d name mismatch: database=%q binary=%q", version, name, migrationName)
 		}
 	}
 
 	latest := 0
-	for _, item := range migrations {
+	hadExistingSchema := len(applied) > 0
+	for index, item := range migrations {
 		if existing, ok := applied[item.version]; ok {
 			if existing != item.name {
-				return 0, fmt.Errorf("migration %d name mismatch: database=%q binary=%q", item.version, existing, item.name)
+				return 0, nil, fmt.Errorf("migration %d name mismatch: database=%q binary=%q", item.version, existing, item.name)
 			}
 			latest = item.version
 			continue
 		}
+		if gate := pendingMigrationGate(migrations, applied, index, latest, stopBeforeDestructive, hadExistingSchema); gate != nil {
+			return latest, gate, nil
+		}
 
 		if err := applyMigration(ctx, conn, item); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		latest = item.version
 	}
-	return latest, nil
+	return latest, nil, nil
+}
+
+func pendingMigrationGate(migrations []migration, applied map[int]string, index, currentVersion int, stop, hadExistingSchema bool) *MigrationGate {
+	if !stop || !hadExistingSchema || index < 0 || index >= len(migrations) || !migrations[index].destructive {
+		return nil
+	}
+	pending := make([]int, 0, len(migrations)-index)
+	for _, candidate := range migrations[index:] {
+		if _, alreadyApplied := applied[candidate.version]; !alreadyApplied {
+			pending = append(pending, candidate.version)
+		}
+	}
+	return &MigrationGate{
+		CurrentVersion:  currentVersion,
+		TargetVersion:   migrations[len(migrations)-1].version,
+		PendingVersions: pending,
+	}
 }
 
 func applyMigration(ctx context.Context, conn *sql.Conn, item migration) (err error) {
@@ -232,14 +270,27 @@ func loadMigrations() ([]migration, error) {
 			return nil, fmt.Errorf("read migration %q: %w", entry.Name(), err)
 		}
 		migrationSQL := string(contents)
-		firstLine, _, _ := strings.Cut(migrationSQL, "\n")
+		markers := migrationMarkers(migrationSQL)
 		items = append(items, migration{
 			version:        version,
 			name:           entry.Name(),
 			sql:            migrationSQL,
-			foreignKeysOff: strings.TrimSpace(firstLine) == foreignKeysOffMigrationMarker,
+			foreignKeysOff: markers[foreignKeysOffMigrationMarker],
+			destructive:    markers[destructiveMigrationMarker],
 		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].version < items[j].version })
 	return items, nil
+}
+
+func migrationMarkers(contents string) map[string]bool {
+	markers := make(map[string]bool)
+	for _, line := range strings.Split(contents, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "-- migration:") {
+			break
+		}
+		markers[trimmed] = true
+	}
+	return markers
 }

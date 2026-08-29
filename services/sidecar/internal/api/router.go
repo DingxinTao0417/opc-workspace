@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -112,35 +111,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 
 	var artifacts *artifactStore
 	if options.ArtifactDir != "" {
-		var databaseID string
-		var boundStoreID sql.NullString
-		if err := db.Raw("SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&databaseID, &boundStoreID); err != nil {
-			return nil, err
-		}
 		var err error
-		artifacts, err = newArtifactStore(options.ArtifactDir, databaseID, boundStoreID.String)
+		artifacts, err = openWorkspaceArtifactStore(db, options.ArtifactDir, true)
 		if err != nil {
-			return nil, err
-		}
-		if !boundStoreID.Valid {
-			result := db.Exec(
-				"UPDATE workspace_identity SET artifact_store_id = ? WHERE singleton = 1 AND artifact_store_id IS NULL",
-				artifacts.storeID,
-			)
-			if result.Error != nil {
-				_ = artifacts.close()
-				return nil, fmt.Errorf("bind Artifact root to workspace database: %w", result.Error)
-			}
-			if result.RowsAffected == 0 {
-				var current string
-				if err := db.Raw("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&current); err != nil || current != artifacts.storeID {
-					_ = artifacts.close()
-					return nil, errors.New("workspace database was concurrently bound to a different Artifact root")
-				}
-			}
-		}
-		if err := artifacts.reconcile(db); err != nil {
-			_ = artifacts.close()
 			return nil, err
 		}
 	}

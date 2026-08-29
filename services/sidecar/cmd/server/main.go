@@ -74,10 +74,44 @@ func run(args []string) int {
 		}
 	}
 
-	store, err := database.Open(cfg.DatabasePath)
+	store, migrationGate, err := database.OpenBeforeDestructiveMigrations(cfg.DatabasePath)
 	if err != nil {
 		logger.Printf("database initialization failed: %v", err)
 		return 1
+	}
+	if migrationGate != nil {
+		backupID, backupErr := api.CreatePreMigrationBackup(store.DB, api.Options{
+			AppVersion:    appVersion,
+			Commit:        commit,
+			SchemaVersion: store.SchemaVersion,
+			ArtifactDir:   cfg.ArtifactDir,
+			DatabasePath:  cfg.DatabasePath,
+			BackupDir:     cfg.BackupDir,
+		}, migrationGate.TargetVersion)
+		if backupErr != nil {
+			_ = store.Close()
+			logger.Printf(
+				"pre-migration backup failed; schema remains at v%d and migration was not started: %v",
+				migrationGate.CurrentVersion,
+				backupErr,
+			)
+			return 1
+		}
+		logger.Printf(
+			"verified pre-migration backup created backup_id=%s schema=%d target_schema=%d",
+			backupID,
+			migrationGate.CurrentVersion,
+			migrationGate.TargetVersion,
+		)
+		if err := store.Close(); err != nil {
+			logger.Printf("close database before destructive migration failed: %v", err)
+			return 1
+		}
+		store, err = database.Open(cfg.DatabasePath)
+		if err != nil {
+			logger.Printf("database migration failed after verified rollback backup %s: %v", backupID, err)
+			return 1
+		}
 	}
 	defer func() {
 		if err := store.Close(); err != nil {
