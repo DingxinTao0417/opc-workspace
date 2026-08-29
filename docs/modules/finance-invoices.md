@@ -17,7 +17,7 @@
 ## 当前实现状态
 
 - `/income` 与 `/invoices` 路由、标题、空状态和外观按钮已经存在，但按钮没有业务行为，数据计数固定为零。
-- 当前 schema v33 仍保留由迁移 001 创建的 `invoices` 表及客户、项目外键；v12–v29 的后续迁移均不改变发票结构，v30–v33 分别扩展 Task Submission、Client Activity 来源、Reminder 与受限 Automation Rule/Run，同样不改变发票表契约。Client 基础 CRUD、人工/Project 状态活动、受控附件、person 显式关联与 Focus Core 已交付，但尚无发票 model、API、Query、CRUD、状态命令或 PDF 服务；自动化中的发票预设因此明确 unavailable。
+- 当前 schema v35 仍保留由迁移 001 创建的 `invoices` 表及客户、项目外键；v12–v29 的后续迁移均不改变发票结构，v30–v35 分别扩展 Task Submission、Client Activity 来源、Reminder、受限 Automation Rule/Run、Agent Adapter 与 Client Followup，同样不改变发票表契约。Client 基础 CRUD、人工/Project 状态活动、受控附件、person 显式关联与 Focus Core 已交付，但尚无发票 model、API、Query、CRUD、状态命令或 PDF 服务；自动化中的发票预设因此明确 unavailable。
 - 尚无 `financial_entries` 表，因此收入、支出、净现金流、KPI 和趋势统计均未实现。
 - Sidecar 已注册任务、项目、客户、Actor 等基础 API，但没有财务或发票业务端点。
 - 历史财务视觉原型已移除，后续以当前 React 实现、本文和 PRD 为准。

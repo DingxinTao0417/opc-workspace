@@ -24,7 +24,7 @@
 
 - [ADR-003](../adr/003-local-agent-runtime-security.md) 已冻结首版 Runtime 边界：每个 Run 一个短生命周期子进程；Sidecar 匿名 stdin/stdout 管道是唯一能力通道；不开放 Runtime HTTP、不传 WebView Token、不接受任意命令/路径；资源只用业务 ID 和单次 staging；各平台进程沙箱与禁网未验证时 `execution_ready=false`，不得创建可分派 agent Actor 或启动 Run。
 
-- 当前 SQLite schema v34 新增空的 `agent_adapters`，保存代码所有清单、协议、启停、诊断、隔离和 `execution_ready`；迁移不创建 Adapter、agent Actor、Assignment 或 Run。身份字段不可变，未达到 healthy + verified 时数据库拒绝 enabled，诊断观察不递增用户版本。
+- 当前 SQLite schema v35；其中 schema v34 新增空的 `agent_adapters`，保存代码所有清单、协议、启停、诊断、隔离和 `execution_ready`，schema v35 仅新增 Client Followup，不改变 Adapter 契约。迁移不创建 Adapter、agent Actor、Assignment 或 Run。身份字段不可变，未达到 healthy + verified 时数据库拒绝 enabled，诊断观察不递增用户版本。
 - Sidecar 已提供 Adapter 列表、幂等登记、详情、手动诊断、启用拒绝和停用 API。唯一预设为 `builtin-local-text-v1`；响应不暴露 `executable_ref`。当前诊断只验证代码清单并记录 `blocked / PLATFORM_ISOLATION_UNVERIFIED`，不会启动进程。
 - 设置新增独立“本地 Agent”模块和命令面板入口，覆盖加载、空、错误、登记、能力/安全闸门、诊断反馈与禁用启用入口；当前没有 agent 负责人选项、Run 详情、输出预览或 Agent 验收入口。
 - 业务 JSON/ZIP 导入导出包含 Adapter 行，并严格接受代码所有身份、disabled、version=1、`execution_ready=false` 以及 unknown 或固定 blocked 诊断状态；普通备份随 SQLite 自动包含该事实，恢复后仍必须重新诊断。

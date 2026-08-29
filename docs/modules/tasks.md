@@ -1,6 +1,6 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 给 Submission 增加来源并交付父任务自动发起验收；schema v31 只约束 Project→Client Activity 来源，schema v32 只扩展 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，均不改变 Task 表、API 或既有 manual 提交。v9.17 的 ProjectSelect 复用既有 Project API，不改变 app/API/schema 版本，也不新增迁移。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 给 Submission 增加来源并交付父任务自动发起验收；schema v31 只约束 Project→Client Activity 来源，schema v32 只扩展 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，schema v35 新增 Client Followup，均不改变 Task 表、API 或既有 manual 提交。v9.17 的 ProjectSelect 复用既有 Project API，不改变 app/API/schema 版本，也不新增迁移。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、共享服务端 Project 选择、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox，以及有门禁的父任务自动发起验收已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
@@ -330,7 +330,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - 给 `task_submissions` 增加非空 `origin`，只允许 `manual / child_rollup`；既有行通过默认值保持 manual，不重写其状态、Actor、摘要或时间；
 - 约束 child_rollup 只能由内置 system 创建、必须 `is_inferred=0`，并禁止其拥有 Task Artifact；`origin` 与其他 Submission 身份事实同样不可变；
 - 不在 migration 或 Sidecar 启动时扫描、补写既有父任务层级。只有迁移后的相关 Task/Assignment/review policy 写命令触发事务内 reconciliation；
-- 不改变 Inbox 表或 `inbox_item_tasks.is_required`，不创建 demo 数据。schema v31 已追加 Project→Client Activity 来源约束，schema v32 已扩展 Reminder，schema v33 已新增受限 Automation Rule/Run；下一迁移只能从 `034_*` 追加。
+- 不改变 Inbox 表或 `inbox_item_tasks.is_required`，不创建 demo 数据。schema v31 已追加 Project→Client Activity 来源约束，schema v32 已扩展 Reminder，schema v33 已新增受限 Automation Rule/Run，schema v34 已新增 Agent Adapter，schema v35 已新增 Client Followup；下一迁移只能从 `036_*` 追加。
 
 ## 已验证与后续
 

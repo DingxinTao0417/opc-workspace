@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v35。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；schema v34 的 Adapter 诊断不创建 Inbox；schema v35 的到期 Client Followup 会创建本地来源并只深链客户详情；重复 Reminder 继续为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.45](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.46](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
 
 ## 定位与边界
 
@@ -263,7 +263,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v33 延续）
+### `inbox_items`（schema v12，在当前 schema v35 延续）
 
 | 字段                                | 当前约束 / 说明                                                                                                                                          |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |

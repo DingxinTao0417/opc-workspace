@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v34。schema v34 新增独立 Agent Adapter 诊断事实，不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断与启动恢复均已交付。非空目标/跨 schema 高级导入、数据库打开前恢复进度和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema v35。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断与启动恢复均已交付。非空目标/跨 schema 高级导入、数据库打开前恢复进度和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -285,7 +285,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v34 延续。schema v12–v29 的其他迁移不改变 Assignment 约束；schema v30–v34 的扩展不改变 Actor、Assignment 或设置表契约。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v35 延续。schema v12–v29 的其他迁移不改变 Assignment 约束；schema v30–v35 的扩展不改变 Actor、Assignment 或设置表契约。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整导出/导入后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导入导出中/失败、预检阻断、挂起提示和 invalid 包均有明确状态。

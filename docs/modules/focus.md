@@ -273,7 +273,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 
 - D1 历史与周期报告增加可选 `project_id`，严格 canonical UUID/400/404、归档可读和当前 Task 项目归属语义已完成。
 - Project 详情已接 7 天/30 天/本月趋势、总时长、完成数、连续天数、终态历史分页，以及报告/历史独立加载、空、错误和重试。
-- 该读取不增加 schema migration；API 保持 v1，SQLite 当前为 schema v34，v30–v34 不改变 Focus 表或读取契约。
+- 该读取不增加 schema migration；API 保持 v1，SQLite 当前为 schema v35，v30–v35 不改变 Focus 表或读取契约。
 
 ### 后续增强
 
