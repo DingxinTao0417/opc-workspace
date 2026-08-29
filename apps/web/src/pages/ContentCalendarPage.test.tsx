@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentItem } from "../types/models";
@@ -10,6 +16,7 @@ const hooks = vi.hoisted(() => ({
   tasks: vi.fn(),
   update: vi.fn(),
   schedule: vi.fn(),
+  scheduleReset: vi.fn(),
   publish: vi.fn(),
   link: vi.fn(),
   unlink: vi.fn(),
@@ -30,7 +37,9 @@ vi.mock("../api/hooks", () => ({
   }),
   useScheduleContentItem: () => ({
     isPending: false,
+    isError: false,
     error: null,
+    reset: hooks.scheduleReset,
     mutate: hooks.schedule,
   }),
   usePublishContentItem: () => ({
@@ -76,6 +85,7 @@ describe("ContentCalendarPage", () => {
   beforeEach(() => {
     hooks.update.mockReset();
     hooks.schedule.mockReset();
+    hooks.scheduleReset.mockReset();
     hooks.publish.mockReset();
     hooks.link.mockReset();
     hooks.unlink.mockReset();
@@ -170,7 +180,52 @@ describe("ContentCalendarPage", () => {
           expectedVersion: 1,
         }),
       }),
+      expect.objectContaining({ onError: expect.any(Function) }),
     );
+  });
+
+  it("previews a dropped date immediately and rolls back after a save failure", () => {
+    const refetch = vi.fn();
+    hooks.items.mockReturnValue({
+      data: {
+        pages: [{ items: [item], meta: { page: 1, pageSize: 100, total: 1 } }],
+      },
+      isError: false,
+      isFetchNextPageError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      isPending: false,
+      isSuccess: true,
+      fetchNextPage: vi.fn(),
+      refetch,
+    });
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    const source = screen.getByRole("gridcell", {
+      name: "2026-09-04，1 条内容",
+    });
+    const target = screen.getByRole("gridcell", {
+      name: "2026-09-05，0 条内容",
+    });
+
+    fireEvent.drop(target, {
+      dataTransfer: { getData: () => "content-1" },
+    });
+
+    expect(source).toHaveAccessibleName("2026-09-04，0 条内容");
+    expect(target).toHaveAccessibleName("2026-09-05，1 条内容");
+    const [, options] = hooks.schedule.mock.calls[0] as [
+      unknown,
+      { onError: (error: Error) => void },
+    ];
+    act(() => options.onError(new Error("版本冲突")));
+    expect(source).toHaveAccessibleName("2026-09-04，1 条内容");
+    expect(target).toHaveAccessibleName("2026-09-05，0 条内容");
+    expect(screen.getByText("排期未保存，已恢复原日期。版本冲突")).toBeTruthy();
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it("automatically advances through all visible-range pages", () => {

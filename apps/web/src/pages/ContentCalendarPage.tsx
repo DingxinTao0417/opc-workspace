@@ -85,6 +85,17 @@ function localDateTime(value: string | null, timezone?: string | null) {
       )
     : "";
 }
+function scheduledDateKey(value: string, timezone?: string | null) {
+  return formatDateTimeLocalInTimeZone(
+    value,
+    timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  ).slice(0, 10);
+}
+function isSameInstant(left: string | null, right: string) {
+  return (
+    left !== null && new Date(left).getTime() === new Date(right).getTime()
+  );
+}
 function mutationMessage(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
@@ -550,6 +561,9 @@ export function ContentCalendarPage() {
   const [editing, setEditing] = useState<ContentItem | null>(null);
   const [status, setStatus] = useState<ContentItemStatus | "">("");
   const [dragError, setDragError] = useState<string | null>(null);
+  const [schedulePreviews, setSchedulePreviews] = useState<
+    Record<string, string>
+  >({});
   const schedule = useScheduleContentItem();
   const calendar = useMemo(() => calendarForMonth(month), [month]);
   const query = useContentItemsInfiniteQuery({
@@ -577,16 +591,34 @@ export function ContentCalendarPage() {
     () => query.data?.pages.flatMap((page) => page.items) ?? [],
     [query.data?.pages],
   );
+  useEffect(() => {
+    setSchedulePreviews((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const [itemID, scheduledAt] of Object.entries(current)) {
+        const serverItem = items.find((item) => item.id === itemID);
+        if (!serverItem || isSameInstant(serverItem.scheduledAt, scheduledAt)) {
+          delete next[itemID];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [items]);
   const total = query.data?.pages[0]?.meta.total ?? 0;
   const itemsByDate = useMemo(() => {
     const groups = new Map<string, ContentItem[]>();
     for (const item of items) {
-      if (!item.scheduledAt) continue;
-      const key = dateKey(new Date(item.scheduledAt));
-      groups.set(key, [...(groups.get(key) ?? []), item]);
+      const scheduledAt = schedulePreviews[item.id] ?? item.scheduledAt;
+      if (!scheduledAt) continue;
+      const key = scheduledDateKey(scheduledAt, item.scheduledTimezone);
+      groups.set(key, [
+        ...(groups.get(key) ?? []),
+        scheduledAt === item.scheduledAt ? item : { ...item, scheduledAt },
+      ]);
     }
     return groups;
-  }, [items]);
+  }, [items, schedulePreviews]);
   const shift = (offset: number) =>
     setMonth(
       (current) =>
@@ -595,12 +627,19 @@ export function ContentCalendarPage() {
   const moveItem = (itemID: string, targetDate: string) => {
     const item = items.find((candidate) => candidate.id === itemID);
     if (
+      schedule.isPending ||
       !item?.scheduledAt ||
       item.status === "published" ||
       item.status === "archived" ||
       item.status === "cancelled"
     )
       return;
+    if (
+      scheduledDateKey(item.scheduledAt, item.scheduledTimezone) === targetDate
+    ) {
+      setDragError(null);
+      return;
+    }
     const timezone =
       item.scheduledTimezone ||
       Intl.DateTimeFormat().resolvedOptions().timeZone ||
@@ -619,14 +658,32 @@ export function ContentCalendarPage() {
       return;
     }
     setDragError(null);
-    schedule.mutate({
-      id: item.id,
-      input: {
-        scheduledAt: converted.iso,
-        scheduledTimezone: timezone,
-        expectedVersion: item.version,
+    schedule.reset();
+    setSchedulePreviews((current) => ({
+      ...current,
+      [item.id]: converted.iso,
+    }));
+    schedule.mutate(
+      {
+        id: item.id,
+        input: {
+          scheduledAt: converted.iso,
+          scheduledTimezone: timezone,
+          expectedVersion: item.version,
+        },
       },
-    });
+      {
+        onError: (error) => {
+          setSchedulePreviews((current) => {
+            const next = { ...current };
+            delete next[item.id];
+            return next;
+          });
+          setDragError(`排期未保存，已恢复原日期。${mutationMessage(error)}`);
+          void query.refetch();
+        },
+      },
+    );
   };
 
   return (
@@ -635,6 +692,7 @@ export function ContentCalendarPage() {
         actions={
           <button
             className="button button-primary"
+            disabled={schedule.isPending}
             onClick={() => setCreating(true)}
             type="button"
           >
@@ -659,6 +717,7 @@ export function ContentCalendarPage() {
         <button
           aria-label="上个月"
           className="button button-secondary button-icon"
+          disabled={schedule.isPending}
           onClick={() => shift(-1)}
           type="button"
         >
@@ -670,6 +729,7 @@ export function ContentCalendarPage() {
         <button
           aria-label="下个月"
           className="button button-secondary button-icon"
+          disabled={schedule.isPending}
           onClick={() => shift(1)}
           type="button"
         >
@@ -678,6 +738,7 @@ export function ContentCalendarPage() {
         <label className="toolbar-select">
           <span className="sr-only">状态</span>
           <select
+            disabled={schedule.isPending}
             onChange={(event) =>
               setStatus(event.target.value as ContentItemStatus | "")
             }
@@ -709,6 +770,11 @@ export function ContentCalendarPage() {
       {dragError || schedule.isError ? (
         <p className="form-field-error content-calendar-drag-error">
           {dragError ?? mutationMessage(schedule.error)}
+        </p>
+      ) : null}
+      {schedule.isPending ? (
+        <p className="content-calendar-drag-status" role="status">
+          正在保存排期调整…
         </p>
       ) : null}
       {query.isSuccess ? (
@@ -751,7 +817,9 @@ export function ContentCalendarPage() {
                     <button
                       aria-label={`编辑 ${item.title}`}
                       className={`content-calendar-day-item ${statusClass[item.status]}`}
+                      disabled={schedule.isPending}
                       draggable={
+                        !schedule.isPending &&
                         item.status !== "published" &&
                         item.status !== "archived" &&
                         item.status !== "cancelled"

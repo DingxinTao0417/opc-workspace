@@ -3080,6 +3080,15 @@ kbd {
 .content-calendar-drag-error {
   margin: 0 0 10px;
 }
+.content-calendar-drag-status {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.content-calendar-day-item:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
 .content-calendar-list {
   display: grid;
   gap: 10px;
