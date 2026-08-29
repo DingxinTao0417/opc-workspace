@@ -12,7 +12,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import { requestApplicationRestart } from "../api/desktop";
 import {
@@ -256,7 +256,11 @@ function BackupCard({
   );
 }
 
-export function BackupSettings() {
+interface BackupSettingsProps {
+  storageSettings?: ReactNode;
+}
+
+export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const backupsQuery = useBackupsQuery();
   const restoreDiagnosticsQuery = useRestoreDiagnosticsQuery();
   const createMutation = useCreateBackup();
@@ -594,6 +598,8 @@ export function BackupSettings() {
         <h3>数据与备份</h3>
         <p>创建 SQLite 与受控文件处于同一写入边界的本地备份。</p>
       </header>
+
+      {storageSettings}
 
       <div className="settings-group settings-backup-export">
         <div className="settings-backup-intro">

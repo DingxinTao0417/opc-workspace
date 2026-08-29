@@ -123,6 +123,42 @@ func TestDiskSpaceMonitorKeepsKnownLowSpaceWhenAnotherProbeFails(t *testing.T) {
 	assertStorageIncidentCount(t, store, 1)
 }
 
+func TestDiskSpaceMonitorUsesStoredThresholdOnTheNextScan(t *testing.T) {
+	root := t.TempDir()
+	store, err := database.Open(filepath.Join(root, "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	setting := models.AppSetting{
+		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 1, Version: 1,
+		UpdatedByActorID: models.BuiltinOwnerActorID, UpdatedAt: "2026-08-28T21:40:00Z",
+	}
+	if err := store.DB.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := &API{db: store.DB, options: Options{
+		DatabasePath: filepath.Join(root, "workspace.db"), LogDir: filepath.Join(root, "logs"),
+		Logger: log.New(io.Discard, "", 0), Now: time.Now,
+		DiskSpaceCheck: func(string) (uint64, uint64, error) { return 2 << 30, 100 << 30, nil },
+	}}
+	if err := service.scanDiskSpace(); err != nil {
+		t.Fatal(err)
+	}
+	assertStorageIncidentCount(t, store, 1)
+
+	if err := store.DB.Model(&models.AppSetting{}).Where("key = ?", "storage").Updates(map[string]any{
+		"value_json": `{"low_space_threshold_gib":1}`, "version": 2,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service.lowDiskActive.Store(false)
+	if err := service.scanDiskSpace(); err != nil {
+		t.Fatal(err)
+	}
+	assertStorageIncidentCount(t, store, 1)
+}
+
 func assertStorageIncidentCount(t *testing.T, store *database.Store, want int64) {
 	t.Helper()
 	var count int64

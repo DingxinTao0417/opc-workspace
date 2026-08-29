@@ -60,6 +60,15 @@ const validPayload = (): any => ({
         updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
         updated_at: "2026-08-28T12:00:00Z",
       },
+      {
+        key: "storage",
+        value: { low_space_threshold_gib: 1 },
+        schema_version: 1,
+        version: 0,
+        stored: false,
+        updated_by_actor_id: null,
+        updated_at: null,
+      },
     ],
   },
 });
@@ -69,7 +78,7 @@ afterEach(() => {
 });
 
 describe("settings API", () => {
-  it("strictly normalizes all four settings modules", () => {
+  it("strictly normalizes all five settings modules", () => {
     const settings = normalizeAppSettingsResponse(validPayload());
 
     expect(settings.schemaVersion).toBe(1);
@@ -78,6 +87,7 @@ describe("settings API", () => {
       "general",
       "appearance",
       "focus",
+      "storage",
     ]);
     expect(getAppSetting(settings, "general")).toMatchObject({
       stored: true,
@@ -169,6 +179,11 @@ describe("settings API", () => {
                 sound_enabled: true,
               },
             },
+            {
+              key: "storage",
+              expected_version: 0,
+              value: { low_space_threshold_gib: 5 },
+            },
           ],
         });
       }
@@ -193,6 +208,11 @@ describe("settings API", () => {
             autoStartFocus: false,
             soundEnabled: true,
           },
+        },
+        {
+          key: "storage",
+          expectedVersion: 0,
+          value: { lowSpaceThresholdGiB: 5 },
         },
       ]),
     ).resolves.toMatchObject({ schemaVersion: 1 });

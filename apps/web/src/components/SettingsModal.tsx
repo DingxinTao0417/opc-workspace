@@ -83,6 +83,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
 ];
 
 const MAX_AVATAR_FILE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_LOW_SPACE_THRESHOLD_GIB = 1;
 const supportedAvatarTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -254,6 +255,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     DEFAULT_PROFILE_SETTINGS,
   );
   const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
+  const [storageThresholdDraft, setStorageThresholdDraft] = useState(
+    DEFAULT_LOW_SPACE_THRESHOLD_GIB,
+  );
+  const storageDraftInitialized = useRef(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarOperation, setAvatarOperation] = useState<
@@ -337,6 +342,18 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       cancelPreview();
     };
   }, [beginPreview, cancelPreview, open, requestedModule]);
+
+  useEffect(() => {
+    if (!open) {
+      storageDraftInitialized.current = false;
+      return;
+    }
+    if (storageDraftInitialized.current || !settingsQuery.data) return;
+    setStorageThresholdDraft(
+      getAppSetting(settingsQuery.data, "storage").value.lowSpaceThresholdGiB,
+    );
+    storageDraftInitialized.current = true;
+  }, [open, settingsQuery.data]);
 
   const previewSettings = (
     focus: FocusSettings,
@@ -494,6 +511,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   };
 
   const restoreDefaults = () => {
+    if (activeModule === "data") {
+      setStorageThresholdDraft(DEFAULT_LOW_SPACE_THRESHOLD_GIB);
+      setSaveError(null);
+      return;
+    }
     if (avatarPreviewUrl.current && typeof URL.revokeObjectURL === "function") {
       URL.revokeObjectURL(avatarPreviewUrl.current);
     }
@@ -502,6 +524,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setGeneralDraft(DEFAULT_GENERAL_SETTINGS);
     setProfileDraft(DEFAULT_PROFILE_SETTINGS);
     setThemeDraft(DEFAULT_THEME);
+    setStorageThresholdDraft(DEFAULT_LOW_SPACE_THRESHOLD_GIB);
     setAvatarError(null);
     setAvatarFile(null);
     setAvatarOperation(
@@ -533,6 +556,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     const currentGeneral = getAppSetting(settingsQuery.data, "general");
     const currentAppearance = getAppSetting(settingsQuery.data, "appearance");
     const currentFocus = getAppSetting(settingsQuery.data, "focus");
+    const currentStorage = getAppSetting(settingsQuery.data, "storage");
     const updates: AppSettingUpdate[] = [];
     const nextWorkspace = {
       displayName: nextProfile.displayName,
@@ -567,6 +591,13 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         key: "focus",
         expectedVersion: currentFocus.version,
         value: nextFocus,
+      });
+    }
+    if (storageThresholdDraft !== currentStorage.value.lowSpaceThresholdGiB) {
+      updates.push({
+        key: "storage",
+        expectedVersion: currentStorage.version,
+        value: { lowSpaceThresholdGiB: storageThresholdDraft },
       });
     }
 
@@ -870,7 +901,27 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
 
     if (activeModule === "data") {
-      return <BackupSettings />;
+      return (
+        <BackupSettings
+          storageSettings={
+            <div className="settings-group">
+              <Stepper
+                description="本地数据、受控文件或备份所在磁盘低于该值时创建维护提醒"
+                label="低空间提醒阈值"
+                max={100}
+                min={1}
+                onChange={setStorageThresholdDraft}
+                unit="GiB"
+                value={storageThresholdDraft}
+              />
+              <p className="settings-inline-note" aria-live="polite">
+                当前预览：可用空间低于 {storageThresholdDraft} GiB
+                时提醒；保存后从下一次容量检查起生效。
+              </p>
+            </div>
+          }
+        />
+      );
     }
 
     if (activeModule === "diagnostics") {
@@ -1219,7 +1270,6 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     <Modal
       footer={
         activeModule === "actors" ||
-        activeModule === "data" ||
         activeModule === "diagnostics" ||
         activeModule === "about" ? (
           <>

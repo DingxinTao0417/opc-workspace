@@ -89,6 +89,15 @@ function settingsPayload(): any {
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
           updated_at: "2026-08-28T12:00:00Z",
         },
+        {
+          key: "storage",
+          value: { low_space_threshold_gib: 1 },
+          schema_version: 1,
+          version: 1,
+          stored: true,
+          updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
+          updated_at: "2026-08-28T12:00:00Z",
+        },
       ],
     },
   };
@@ -517,7 +526,7 @@ describe("SettingsModal", () => {
     );
   });
 
-  it("opens the data module with real local backup facts and no settings save action", async () => {
+  it("previews and saves the low-space threshold beside real backup facts", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -557,10 +566,22 @@ describe("SettingsModal", () => {
     ).toBeVisible();
     expect(await screen.findByText("发布前")).toBeVisible();
     expect(screen.getByRole("button", { name: "立即备份" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(
-      screen.getByText("关闭", { selector: ".modal-footer button" }),
-    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "增加低空间提醒阈值" }));
+    expect(screen.getByText(/当前预览：可用空间低于 2 GiB/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(useUiStore.getState().settingsOpen).toBe(false));
+    const settingsCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(settingsCall?.[1]?.body))).toEqual({
+      updates: [
+        {
+          key: "storage",
+          expected_version: 1,
+          value: { low_space_threshold_gib: 2 },
+        },
+      ],
+    });
   });
 
   it("opens local actor management without implying an online account", async () => {

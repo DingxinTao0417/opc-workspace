@@ -21,8 +21,8 @@ import (
 const settingsSchemaVersion = 1
 
 var (
-	settingKeys      = []string{"workspace", "general", "appearance", "focus"}
-	settingKeySet    = map[string]struct{}{"workspace": {}, "general": {}, "appearance": {}, "focus": {}}
+	settingKeys      = []string{"workspace", "general", "appearance", "focus", "storage"}
+	settingKeySet    = map[string]struct{}{"workspace": {}, "general": {}, "appearance": {}, "focus": {}, "storage": {}}
 	controlledAvatar = regexp.MustCompile(`^avatars/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp)$`)
 )
 
@@ -48,6 +48,10 @@ type focusSettingValue struct {
 	AutoStartBreak bool `json:"auto_start_break"`
 	AutoStartFocus bool `json:"auto_start_focus"`
 	SoundEnabled   bool `json:"sound_enabled"`
+}
+
+type storageSettingValue struct {
+	LowSpaceThresholdGiB int `json:"low_space_threshold_gib"`
 }
 
 type settingResponse struct {
@@ -158,7 +162,7 @@ func prepareSettingUpdates(input []settingUpdateRequest) ([]preparedSettingUpdat
 		return nil, errors.New("updates must contain at least one setting module")
 	}
 	if len(input) > len(settingKeys) {
-		return nil, errors.New("updates cannot contain more than four setting modules")
+		return nil, errors.New("updates cannot contain more than five setting modules")
 	}
 	seen := make(map[string]struct{}, len(input))
 	prepared := make([]preparedSettingUpdate, 0, len(input))
@@ -347,6 +351,21 @@ func normalizeSettingValue(key string, raw json.RawMessage) (string, error) {
 			return "", errors.New("cycles must be 1 to 8")
 		}
 		return marshalSettingObject(value)
+	case "storage":
+		var value storageSettingValue
+		if err := decodeSettingObject(trimmed, &value); err != nil {
+			return "", err
+		}
+		if err := requireSettingFields(trimmed, "low_space_threshold_gib"); err != nil {
+			return "", err
+		}
+		if err := requireNonNullSettingFields(trimmed, "low_space_threshold_gib"); err != nil {
+			return "", err
+		}
+		if value.LowSpaceThresholdGiB < 1 || value.LowSpaceThresholdGiB > 100 {
+			return "", errors.New("low_space_threshold_gib must be 1 to 100")
+		}
+		return marshalSettingObject(value)
 	default:
 		return "", errors.New("unsupported setting key")
 	}
@@ -410,6 +429,8 @@ func defaultSettingValue(key string) string {
 		value = appearanceSettingValue{Theme: "dark"}
 	case "focus":
 		value = focusSettingValue{FocusMinutes: 50, BreakMinutes: 5, Cycles: 4, AutoStartBreak: true, AutoStartFocus: false, SoundEnabled: true}
+	case "storage":
+		value = storageSettingValue{LowSpaceThresholdGiB: 1}
 	}
 	encoded, _ := json.Marshal(value)
 	return string(encoded)

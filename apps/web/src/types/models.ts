@@ -19,7 +19,8 @@ export type ActorType = "owner" | "person" | "system" | "agent";
 export type ActorStatus = "active" | "inactive";
 export type AssignmentRole = "assignee" | "reviewer";
 
-export type AppSettingKey = "workspace" | "general" | "appearance" | "focus";
+export type AppSettingKey =
+  "workspace" | "general" | "appearance" | "focus" | "storage";
 
 export interface WorkspaceSettingValue {
   displayName: string;
@@ -45,6 +46,10 @@ export interface FocusSettingValue {
   soundEnabled: boolean;
 }
 
+export interface StorageSettingValue {
+  lowSpaceThresholdGiB: number;
+}
+
 interface AppSettingItemBase {
   schemaVersion: 1;
   version: number;
@@ -59,6 +64,7 @@ export type AppSettingItem = AppSettingItemBase &
     | { key: "general"; value: GeneralSettingValue }
     | { key: "appearance"; value: AppearanceSettingValue }
     | { key: "focus"; value: FocusSettingValue }
+    | { key: "storage"; value: StorageSettingValue }
   );
 
 export interface AppSettingsResult {
@@ -86,6 +92,11 @@ export type AppSettingUpdate =
       key: "focus";
       expectedVersion: number;
       value: FocusSettingValue;
+    }
+  | {
+      key: "storage";
+      expectedVersion: number;
+      value: StorageSettingValue;
     };
 
 export interface Actor {

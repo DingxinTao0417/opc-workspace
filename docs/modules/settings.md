@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v28。设置持久化、受控头像、Focus 解耦、Actor、备份闭环、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志和桌面打开日志目录已交付。非空目标/跨 schema 高级导入和数据库打开前恢复页仍是后续范围。
+> 文档状态：部分实现；当前 schema v29。设置持久化、受控头像、Focus 解耦、1–100 GiB 低空间阈值、Actor、备份闭环、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志和桌面打开日志目录已交付。非空目标/跨 schema 高级导入和数据库打开前恢复页仍是后续范围。
 
 ## 定位与边界
 
@@ -25,10 +25,10 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
-- 数据与备份：从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前自动创建已校验回滚备份。
+- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前自动创建已校验回滚备份。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
-- 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取四个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
+- 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取五个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
 - 当前设置状态明确分为三层：服务端确认值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存成功后才以服务端规范化响应替换 committed；取消丢弃 preview。
 - Zustand persist 不再保存头像内容；运行态只持有由鉴权 content 响应创建的 Blob URL。历史 `opc-settings-local-v1` 仅作为一次性迁移源，服务端事实确认后清理。
 - Focus 页齿轮可直接打开 focus 模块；弹窗 draft 可以预览下一轮时长，但创建 Session 与全局 Focus ticker 都只读取 committed 设置。
@@ -38,20 +38,21 @@
 当前 Sidecar 设置事实层已实现：
 
 - schema v16 新增空表 `app_settings`，迁移不写默认行、不改写既有业务事实，也不创建 demo 数据；GET 对缺失模块返回服务端默认值并显式标记 `stored=false / version=0`。
-- 固定模块 key 为 `workspace / general / appearance / focus`；每个值必须是完整 JSON object，服务端拒绝未知、缺失、null 非空字段、越界值和未受控头像引用。
-- `PATCH /api/v1/settings` 可一次原子保存 1–4 个不同模块；每项携带 `expected_version`，缺失行要求 0，旧版本返回 `409 SETTINGS_VERSION_CONFLICT`，任一项失败整批回滚。
+- schema v29 通过破坏性迁移闸门在保留既有设置行、版本、Actor 和时间的前提下扩展 `storage` key，并重建 active Actor、key 不可变、硬删除保护和头像引用 triggers；迁移前由启动链创建已验证回滚包。
+- 固定模块 key 为 `workspace / general / appearance / focus / storage`；每个值必须是完整 JSON object，服务端拒绝未知、缺失、null 非空字段、越界值和未受控头像引用。`storage.low_space_threshold_gib` 仅允许 1–100 的整数。
+- `PATCH /api/v1/settings` 可一次原子保存 1–5 个不同模块；每项携带 `expected_version`，缺失行要求 0，旧版本返回 `409 SETTINGS_VERSION_CONFLICT`，任一项失败整批回滚。
 - 写入者固定为当前内置 owner；数据库 trigger 要求 active Actor、禁止改变 key 和硬删除设置行。
 - 每个成功模块写一条不可变 `settings_updated` Workflow Event；事件只记录 stored/version/schema 元数据，不写设置值、头像引用或敏感凭据。
 - schema v27 新增 `workspace_avatars` 与 `workspace_avatar_deletion_tombstones`；最多一个 active 头像，路径固定 `avatars/<uuid>.<png|jpg|webp>`，记录 MIME、size、SHA-256 和完整性状态，并与 Task/Client/Project 受控文件 ID 互斥。
-- `POST /api/v1/settings/avatar` 以首 part `manifest` + 可选唯一 `file` 原子提交 replace/remove 和 1–4 个设置模块；通用 PATCH 只能原样携带已有 `avatar_ref`，不能伪造或绕过受控文件入口。
+- `POST /api/v1/settings/avatar` 以首 part `manifest` + 可选唯一 `file` 原子提交 replace/remove 和 1–5 个设置模块；通用 PATCH 只能原样携带已有 `avatar_ref`，不能伪造或绕过受控文件入口。
 - `GET /api/v1/settings/avatar/content` 只读取当前 active 引用，逐次复验 size/SHA-256，缺失或篡改时更新完整性事实并拒绝输出。
 
 当前限制：
 
-- 四个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
+- 五个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor 设置页、手动备份完整闭环、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出和脱敏运行诊断/诊断包；Sidecar 已落盘脱敏轮转日志并可从桌面打开目录，但仍没有 Tauri 壳自身日志、通知、非空目标/跨 schema 冲突合并导入、快捷键、数据库打开前恢复页或 Agent 设置页。
+- 已有 Actor 设置页、低空间阈值、手动备份完整闭环、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出和脱敏运行诊断/诊断包；Sidecar/Tauri 壳均已落盘脱敏轮转日志并可从桌面打开目录，但仍没有通知、非空目标/跨 schema 冲突合并导入、快捷键、数据库打开前恢复页或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
@@ -98,6 +99,7 @@
 - 手动创建一致性备份、导出、校验并查看结果。
 - 选择恢复包，先校验再确认原子恢复。
 - 显示数据目录、备份目录、最近成功时间和失败诊断。
+- 设置 1–100 GiB 低空间提醒阈值；修改时就地展示提醒口径，保存后由 Sidecar 下一轮扫描读取。
 - v0.3 增加外部备份目录、计划、保留策略和高级导入。
 - 彻底删除数据属于独立危险操作，必须二次确认并与普通“恢复默认设置”分离。
 
@@ -134,7 +136,7 @@
 
 1. 启动先读取 `app_settings`，再清洗历史键 `opc-focus-settings`；格式损坏的缓存不会被当作有效迁移源。
 2. 只为 `stored=false / version=0` 的模块生成更新；已经存在的服务端模块始终优先，不被旧缓存覆盖。
-3. workspace/general/appearance/focus 的缺失模块在同一个 PATCH 中原子回填；没有旧缓存时不为默认值创建无意义的设置行。
+3. workspace/general/appearance/focus 的缺失模块在同一个 PATCH 中原子回填；storage 没有历史 localStorage 来源，保持服务端默认且不创建无意义的设置行。
 4. 响应成功后使用服务端返回快照；若写请求发生冲突、网络中断或超时，则重新读取并且只有在全部目标模块已经存在时才接受为成功，否则保留旧键供下次重试。
 5. 服务端已有 `avatar_ref` 时始终优先，不接受 localStorage 覆盖；服务端无头像时，显式本地头像快照优先于更旧缓存，Data URL 被解码为 File 并与缺失模块更新一次原子提交。
 6. 只有重新读取服务端确认 `avatar_ref` 与设置模块后才删除历史键；Data URL 不写入 SQLite、事件、日志或业务导出。
@@ -177,21 +179,21 @@
 
 | 字段                | 用途                                                       |
 | ------------------- | ---------------------------------------------------------- |
-| key                 | 模块化稳定 key，例如 workspace、general、appearance、focus |
+| key                 | 模块化稳定 key：workspace、general、appearance、focus、storage |
 | value_json          | 经服务端 schema 清洗的非敏感值                             |
 | schema_version      | 当前固定为 1；未知版本不能被旧 Sidecar 覆盖                |
 | version             | 乐观并发版本                                               |
 | updated_by_actor_id | 修改者；交互设置通常为 owner                               |
 | updated_at          | UTC 更新时间                                               |
 
-设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行：缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
+设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行；schema v29 只扩展允许的 storage key，不写默认行。缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
 
 ### API
 
 | 方法与路径                          | 用途                                                                                                            |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| GET /api/v1/settings                | **已实现**：按稳定顺序返回四个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                        |
-| PATCH /api/v1/settings              | **已实现**：原子更新 1–4 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
+| GET /api/v1/settings                | **已实现**：按稳定顺序返回五个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                        |
+| PATCH /api/v1/settings              | **已实现**：原子更新 1–5 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
 | POST /api/v1/settings/avatar        | **已实现**：严格 multipart replace/remove；头像文件与全部设置更新共同成功或失败，通用 PATCH 不可改头像引用      |
 | GET /api/v1/settings/avatar/content | **已实现**：鉴权读取当前头像，复验 MIME/size/SHA-256，缺失或篡改拒绝输出                                        |
 | GET / POST /api/v1/actors           | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
@@ -276,7 +278,7 @@
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。
-- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v28 延续。schema v12–v28 的其他迁移不改变 Assignment 约束。
+- person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v29 延续。schema v12–v29 的其他迁移不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整导出/导入后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导入导出中/失败、预检阻断、挂起提示和 invalid 包均有明确状态。

@@ -1,6 +1,6 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）；schema v28 不改变 Reminder 契约。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）；schema v28 不改变 Reminder 契约。
 >
 > 版本边界：T-11A3 一次性本地 Reminder 已交付。重复提醒、系统原生通知、远程推送、邮件/短信、业务来源自动建提醒和用户可配置扫描频率仍未实现。
 

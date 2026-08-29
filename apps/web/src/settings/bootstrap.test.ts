@@ -84,6 +84,12 @@ function payload(storedKeys: string[] = []): any {
           schema_version: 1,
           ...meta("focus"),
         },
+        {
+          key: "storage",
+          value: { low_space_threshold_gib: 1 },
+          schema_version: 1,
+          ...meta("storage"),
+        },
       ],
     },
   };

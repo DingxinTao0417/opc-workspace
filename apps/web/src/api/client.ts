@@ -69,6 +69,7 @@ import type {
   HealthResponse,
   FocusSettingValue,
   GeneralSettingValue,
+  StorageSettingValue,
   InboxEventListParams,
   InboxEventListResult,
   InboxItem,
@@ -3262,6 +3263,7 @@ const appSettingKeys: AppSettingKey[] = [
   "general",
   "appearance",
   "focus",
+  "storage",
 ];
 const controlledAvatarReference =
   /^avatars\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(?:png|jpg|webp)$/;
@@ -3357,6 +3359,18 @@ function normalizeAppSettingValue(key: AppSettingKey, value: unknown) {
         soundEnabled: value.sound_enabled,
       };
     }
+    case "storage": {
+      if (
+        !hasExactKeys(value, ["low_space_threshold_gib"]) ||
+        typeof value.low_space_threshold_gib !== "number" ||
+        !Number.isInteger(value.low_space_threshold_gib) ||
+        value.low_space_threshold_gib < 1 ||
+        value.low_space_threshold_gib > 100
+      ) {
+        return invalidResponse("存储设置响应值无效");
+      }
+      return { lowSpaceThresholdGiB: value.low_space_threshold_gib };
+    }
   }
 }
 
@@ -3429,6 +3443,12 @@ function normalizeAppSettingItem(
         ...base,
         key: expectedKey,
         value: normalizedValue as FocusSettingValue,
+      };
+    case "storage":
+      return {
+        ...base,
+        key: expectedKey,
+        value: normalizedValue as StorageSettingValue,
       };
   }
 }
@@ -3508,6 +3528,13 @@ function serializeAppSettingUpdate(update: AppSettingUpdate) {
           auto_start_break: update.value.autoStartBreak,
           auto_start_focus: update.value.autoStartFocus,
           sound_enabled: update.value.soundEnabled,
+        },
+      };
+    case "storage":
+      return {
+        ...base,
+        value: {
+          low_space_threshold_gib: update.value.lowSpaceThresholdGiB,
         },
       };
   }

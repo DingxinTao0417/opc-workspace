@@ -10,7 +10,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v28、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调
+- SQLite schema v29、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`
@@ -37,7 +37,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和固定 1 GiB 低空间监测均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、磁盘阈值配置、非空目标/跨 schema 冲突合并、数据库打开前恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.2](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.3](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.2）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.3）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -323,7 +323,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v28；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调；均不回填旧事实或创建 demo 数据。后续从 `029_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v29；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key；均不回填旧事实或创建 demo 数据。后续从 `030_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -333,4 +333,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障及固定低空间投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、磁盘阈值配置、数据库打开前恢复页、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.3](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障及可配置低空间投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、数据库打开前恢复页、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

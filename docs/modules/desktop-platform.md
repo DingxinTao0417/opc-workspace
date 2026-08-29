@@ -1,6 +1,6 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）。schema v12–v28 的业务事实均不改变 Tauri 桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
 导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
@@ -237,7 +237,7 @@
 
 - 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar/Tauri 壳脱敏日志、5 MiB/3 归档轮转、敏感信息排除和文件故障降级；继续实现跨进程 request ID。
 - 诊断页、脱敏摘要、诊断包 v1、无参数 `open_log_directory` 和 Tauri 壳自身日志已完成；继续实现跨进程 request ID。
-- 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和固定 1 GiB 低空间已接 maintenance 状态；阈值配置与分卷详情仍待评审。
+- 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和 1–100 GiB 可配置低空间已接 maintenance 状态；分卷详情与主动手动检查仍待评审。
 
 ### v0.1-C：系统集成
 

@@ -85,7 +85,7 @@ var (
 		operation:   "low_space",
 		failureCode: "storage_low_space",
 		title:       "本地存储空间不足",
-		message:     "本地数据或备份所在磁盘的可用空间已低于 1 GiB。请释放空间，并在继续重要写入前创建或校验备份。",
+		message:     "本地数据或备份所在磁盘的可用空间已低于设置阈值。请释放空间，并在继续重要写入前创建或校验备份。",
 	}
 )
 

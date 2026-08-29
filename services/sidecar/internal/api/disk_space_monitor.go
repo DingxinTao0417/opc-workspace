@@ -1,13 +1,41 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/opc-workspace/opc-sidecar/internal/models"
+	"gorm.io/gorm"
 )
 
-const defaultLowDiskThresholdBytes uint64 = 1 << 30
+const bytesPerGiB uint64 = 1 << 30
+
+func loadLowDiskThresholdBytes(db *gorm.DB) (uint64, error) {
+	var row models.AppSetting
+	err := db.First(&row, "key = ?", "storage").Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return bytesPerGiB, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load storage setting: %w", err)
+	}
+	if row.SchemaVersion != settingsSchemaVersion {
+		return 0, errors.New("unsupported stored storage setting schema")
+	}
+	normalized, err := normalizeSettingValue("storage", []byte(row.ValueJSON))
+	if err != nil {
+		return 0, fmt.Errorf("decode storage setting: %w", err)
+	}
+	var value storageSettingValue
+	if err := json.Unmarshal([]byte(normalized), &value); err != nil {
+		return 0, fmt.Errorf("decode normalized storage setting: %w", err)
+	}
+	return uint64(value.LowSpaceThresholdGiB) * bytesPerGiB, nil
+}
 
 func storageProbePaths(options Options) []string {
 	candidates := []string{options.ArtifactDir, options.BackupDir}
@@ -39,6 +67,14 @@ func storageProbePaths(options Options) []string {
 }
 
 func (a *API) scanDiskSpace() error {
+	thresholdBytes := a.lowDiskThresholdBytes.Load()
+	if thresholdBytes == 0 {
+		thresholdBytes = bytesPerGiB
+	}
+	if configuredThreshold, err := loadLowDiskThresholdBytes(a.db); err == nil {
+		thresholdBytes = configuredThreshold
+		a.lowDiskThresholdBytes.Store(configuredThreshold)
+	}
 	checker := a.options.DiskSpaceCheck
 	if checker == nil {
 		checker = diskFreeBytes
@@ -51,7 +87,7 @@ func (a *API) scanDiskSpace() error {
 			probeFailed = true
 			continue
 		}
-		if available < defaultLowDiskThresholdBytes {
+		if available < thresholdBytes {
 			low = true
 		}
 	}

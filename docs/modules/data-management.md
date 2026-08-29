@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v28（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和固定 1 GiB 低空间会投影安全的系统维护 Inbox Item。数据库打开前恢复页、磁盘阈值配置、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item。数据库打开前恢复页、分卷容量详情、主动手动容量检查、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -65,7 +65,7 @@
 
 - 非空目标冲突预览/映射与跨 schema 导入；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 用户可配置磁盘阈值、分卷容量详情和手动检查；诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
+- 分卷容量详情和手动检查；用户阈值配置已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
 ## 当前应用数据布局
@@ -169,7 +169,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v28：
+当前 schema v29：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -178,7 +178,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调。均不改写既有事实或创建附件/demo 数据。后续迁移从 `029_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实。均不创建附件/demo 数据。后续迁移从 `030_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -234,7 +234,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v28 的完整固定表/列清单与标量行；`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor，任何已有业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v29 的完整固定表/列清单与标量行；`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor，任何已有业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
 
 正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标 UUID/冲突映射仍待独立设计。
 
@@ -242,7 +242,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 计划备份（v0.3）
 
-后续再评审定时计划、保留数量、磁盘空间阈值、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
+后续再评审定时计划、保留数量、分卷容量详情、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
 
 ## 当前 API 与后续作业状态
 
@@ -312,6 +312,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 恢复挂起后桌面设置页可调用 `restart_application`；只在受管 Sidecar 真实退出后重启应用，浏览器/外部 Sidecar 明确降级为手动重启。
 - [x] schema v26 嵌入迁移、v25→v26 既有 Inbox 事实保留、系统维护来源身份/活动 incident 去重/禁止来源删除，以及备份创建、校验、恢复演练与恢复安排失败尽力投影安全 Inbox Item 已由迁移与 API 测试覆盖。`BACKUP_INVALID` 和可解释业务结果不投影 incident。
 - [x] schema v27 嵌入迁移、v26→v27 设置事实保留、空头像表、单 active/墓碑/引用/跨领域 ID guards 已覆盖；头像上传、读取、替换/移除、启动协调、业务 JSON、备份/演练/恢复集成测试已通过。
+- [x] schema v28 嵌入迁移、v27→v28 Project 完成来源、不可变快照和父删除协调已由迁移与 API 测试覆盖。
+- [x] schema v29 破坏性迁移闸门、v28 设置事实保留、`storage` key、Actor/key/硬删除/头像引用 guards 重建，以及 1–100 GiB 阈值 API/扫描/UI 已由定向测试覆盖。
 
 ### 仍未实现
 
@@ -321,8 +323,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
 - [x] 版本化 API 非预期数据库错误、health、Focus 心跳与到期来源扫描失败投影；数据库不可写时安全 journal 降级和健康启动补偿。
-- [x] ready 前及每 5 分钟跨数据库/受控文件/备份根主动容量探测、固定 1 GiB 低空间预警、持续周期抑制与安全 journal 降级。
-- [ ] 用户可配置低空间阈值、分卷容量详情与主动手动检查。
+- [x] ready 前及每 5 分钟跨数据库/受控文件/备份根主动容量探测、默认 1 GiB 且可配置为 1–100 GiB 的低空间预警、持续周期抑制与安全 journal 降级。
+- [ ] 分卷容量详情与主动手动检查。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
 - [ ] 非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
 
@@ -338,6 +340,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [schema v21 Project Note 迁移](../../services/sidecar/internal/database/migrations/021_project_notes.sql)
 - [schema v22 Project Attachment 迁移](../../services/sidecar/internal/database/migrations/022_project_attachments.sql)
 - [schema v26 系统维护 Inbox 投影迁移](../../services/sidecar/internal/database/migrations/026_system_maintenance_inbox_projection.sql)
+- [schema v29 存储设置迁移](../../services/sidecar/internal/database/migrations/029_storage_settings.sql)
 - [schema v27 工作区头像迁移](../../services/sidecar/internal/database/migrations/027_workspace_avatar.sql)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)

@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.25
+> 文档版本：2.26
 > 日期：2026-08-28
-> 依据：[PRD v9.2](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
+> 依据：[PRD v9.3](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
 ## 1. 目的
 
@@ -51,7 +51,7 @@
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 任务树/平铺及项目内任务服务端搜索/状态筛选/分页、可编辑人工笔记、所属 Task Artifact 产出聚合与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立产出/笔记/审计反馈状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
-- SQLite 当前为 schema v28：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源、不可变快照与父项目删除协调，不回填历史事实或创建 demo 数据。
+- SQLite 当前为 schema v29：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`，不回填默认设置或创建 demo 数据。
 - 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
@@ -77,7 +77,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、磁盘阈值配置、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及固定低空间投影到 Inbox；Sidecar/Tauri 壳脱敏轮转日志和桌面打开日志目录已交付，跨进程 request ID 与恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及按 1–100 GiB 设置阈值运行的低空间投影已接 Inbox；Sidecar/Tauri 壳脱敏轮转日志和桌面打开日志目录已交付，跨进程 request ID 与恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 
@@ -114,7 +114,7 @@
 | [任务](modules/tasks.md)                   | Project、Actor、Inbox 关系与来源                                                                              | 唯一工单、六态生命周期、完成条件、Submission/Artifact、manual 验收与阻塞来源投影                                                         | Project 进度、Task 事件、阻塞 Inbox Item、后续 Inbox 进度与 Focus 工时                              |
 | [项目](modules/projects.md)                | Client、Task、受控文件 store                                                                                  | 已实现资料、生命周期、任务/Artifact 聚合、笔记、附件、活动时间线、follow-up/阻塞/Task 临期及完成节点→Inbox                               | 完成收尾事项进入 Inbox；产出操作仍直达共享任务详情，其他里程碑随真实节点实现                        |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                                      | 当前已实现基础资料、状态、项目数/最近活动派生、Project 关联、人工时间线、Client Attachment 和显式 contact 关联                           | 外部来源、回访、发票和 Inbox 来源仍属后续纵切                                                       |
-| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期、备份、启动、运行期数据库及低空间故障 | 已交付受理分诊、来源上下文、Task 编排、自动结清/重开、来源删除协调、强制例外和运营计数/风险深链                                          | 输出 Event、实时进度及 Today/Sidebar 计数；阈值配置待评审                              |
+| [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期、备份、启动、运行期数据库及低空间故障 | 已交付受理分诊、来源上下文、Task 编排、自动结清/重开、来源删除协调、强制例外和运营计数/风险深链                                          | 输出 Event、实时进度及 Today/Sidebar 计数；阈值由设置模块提供                              |
 | [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                                    | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                                                   | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                            |
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                                                 | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                              | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                               |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                                       | 单次受控执行                                                                                                                             | Agent Run、Task Artifact、待验收或失败事件                                                          |
@@ -310,12 +310,12 @@ journal 最多 16 条/64 KiB，同 kind 未消费前只保留最早一条。文�
 Sidecar ready 前 + 每 5 分钟
   → 规范化数据库父目录 / Artifact root / backup root，去除重复路径
   → 查询各根所在文件系统的调用者可用字节
-  → 任一低于固定 1 GiB：投影 storage:low_space
+  → 每轮读取 app_settings.storage；任一低于 1–100 GiB 的已保存阈值：投影 storage:low_space
   → 持续低空间不重复；全部恢复后重新允许下一次低空间 incident
   → 数据库不可写：安全 journal 延迟到健康启动补偿
 ```
 
-该读操作不冻结业务写入；后台扫描在恢复维护锁下运行，pending restore 时跳过。探测失败只写固定脱敏日志，不创建错误的低空间事项。Inbox/journal 只保存固定来源和提示，不保存根路径、盘符、总量或剩余字节。当前阈值固定 1 GiB，设置入口和分卷详情未交付。
+该读操作不冻结业务写入；后台扫描在恢复维护锁下运行，pending restore 时跳过。探测失败只写固定脱敏日志，不创建错误的低空间事项。Inbox/journal 只保存固定来源和提示，不保存根路径、盘符、总量或剩余字节。阈值默认 1 GiB，可在“数据与备份”以 1–100 GiB 预览并保存，下一轮扫描生效；分卷详情与主动手动检查未交付。
 
 ## 7. 状态传播规则
 
@@ -351,7 +351,7 @@ Sidecar ready 前 + 每 5 分钟
 
 ### 8.1 事件来源
 
-- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和固定 1 GiB 低空间监测已交付；阈值配置待评审。
+- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
 - v0.2：Agent Runner 追加 Workflow Event，内置自动化投影器以统一 source_event_key 作为 Agent 失败/验收 Inbox Item 的唯一生产者；其他预设自动化也复用同一去重框架。
 - v0.3：路线图里程碑、内容审核与发布时间。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
@@ -389,7 +389,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | Sidecar 启动失败                | 桌面平台                         | 展示全局恢复页；业务页面不得显示伪数据；shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止                                                                                                                                                                                                                                                                   |
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
 | 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。`BACKUP_INVALID` 与可解释业务结果不投影；启动应用失败转入下一行的 journal 补偿                                                                                                                                         |
-| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志及固定 1 GiB 低空间监测已交付；恢复页、跨进程 request ID 和阈值配置仍待实现 |
+| 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志及可配置低空间监测已交付；恢复页、跨进程 request ID 和分卷详情仍待实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。健康启动后只读诊断 API 汇总 pending、本次 applied、清理残留、失败隔离和 invalid 记录，设置页恢复门禁并脱敏展示；数据库打开前实时进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                              |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                      |
@@ -413,7 +413,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → 已交付：一次性 Reminder / 启动补偿 / 到期 Inbox 投影
   → 已交付：批量拆分 / 人工分派 / 自动解决；T-11E 已交付 follow-up / 阻塞 / 临期 / Project 完成 / 备份与启动故障来源
   → 已交付：Focus 持久化/Task 工时/IANA Today Focus 统计、Today 完整日期分组/导航/按钮式排序、四组同日/跨日期拖拽与空精确日期/未排期落点、行内任意日期改期、安全的开始/完成/开始专注快捷操作，以及编辑/版本化确认删除入口
-  → 已交付数据库启动/迁移、Sidecar 启动、运行期数据库与固定低空间故障补偿、Sidecar 脱敏轮转日志；继续阈值配置评审 / Tauri 壳日志与恢复
+  → 已交付数据库启动/迁移、Sidecar 启动、运行期数据库与可配置低空间故障补偿、Sidecar/Tauri 壳脱敏轮转日志；继续恢复页与跨进程 request ID
   → v0.2 本地 Agent / 预设自动化 / Task 看板
   → v0.3 路线图 / 内容日历 / 高级数据管理
   → v0.4 财务 / 发票 / 客户回访
@@ -425,7 +425,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 ## 12. 跨模块验收基线
 
-- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/固定低空间来源投影、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；Client 外部活动来源和原生通知仍待交付。
+- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/可配置低空间来源投影、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；Client 外部活动来源和原生通知仍待交付。
 - 每个业务状态有且只有一个事实源。
 - 跨模块写操作具备事务、幂等和冲突检测。
 - 任何来源事件重扫和重启后不重复创建工作。

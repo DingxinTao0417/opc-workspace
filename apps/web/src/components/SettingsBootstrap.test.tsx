@@ -72,6 +72,11 @@ function storedSettingsPayload() {
           },
           ...metadata,
         },
+        {
+          key: "storage",
+          value: { low_space_threshold_gib: 1 },
+          ...metadata,
+        },
       ],
     },
   };

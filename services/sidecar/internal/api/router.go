@@ -39,13 +39,14 @@ type Options struct {
 }
 
 type API struct {
-	db             *gorm.DB
-	options        Options
-	artifactStore  *artifactStore
-	backupStore    *backupStore
-	maintenance    *sync.RWMutex
-	restorePending atomic.Bool
-	lowDiskActive  atomic.Bool
+	db                    *gorm.DB
+	options               Options
+	artifactStore         *artifactStore
+	backupStore           *backupStore
+	maintenance           *sync.RWMutex
+	restorePending        atomic.Bool
+	lowDiskActive         atomic.Bool
+	lowDiskThresholdBytes atomic.Uint64
 }
 
 type Router struct {

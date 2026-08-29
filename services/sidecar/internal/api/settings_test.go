@@ -69,10 +69,10 @@ func TestSettingsGetReturnsUnstoredServiceDefaults(t *testing.T) {
 		t.Fatalf("GET settings status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	response := decodeSettingsResponseForTest(t, recorder.Body.Bytes())
-	if response.SchemaVersion != 1 || len(response.Items) != 4 {
+	if response.SchemaVersion != 1 || len(response.Items) != 5 {
 		t.Fatalf("settings response = %#v", response)
 	}
-	wantKeys := []string{"workspace", "general", "appearance", "focus"}
+	wantKeys := []string{"workspace", "general", "appearance", "focus", "storage"}
 	for index, item := range response.Items {
 		if item.Key != wantKeys[index] || item.SchemaVersion != 1 || item.Stored || item.Version != 0 || item.UpdatedByActorID != nil || item.UpdatedAt != nil {
 			t.Fatalf("default item[%d] = %#v", index, item)
@@ -84,6 +84,9 @@ func TestSettingsGetReturnsUnstoredServiceDefaults(t *testing.T) {
 	if string(settingItemForTest(t, response, "appearance").Value) != `{"theme":"dark"}` {
 		t.Fatalf("appearance default = %s", settingItemForTest(t, response, "appearance").Value)
 	}
+	if string(settingItemForTest(t, response, "storage").Value) != `{"low_space_threshold_gib":1}` {
+		t.Fatalf("storage default = %s", settingItemForTest(t, response, "storage").Value)
+	}
 	var count int64
 	if err := store.DB.Table("app_settings").Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("stored setting count = %d, err = %v", count, err)
@@ -94,7 +97,8 @@ func TestSettingsPatchCreatesNormalizesAndAuditsWithoutValues(t *testing.T) {
 	router, store := newSettingsTestAPI(t)
 	body := []byte(`{"updates":[` +
 		`{"key":"workspace","expected_version":0,"value":{"display_name":"  My   Workspace  ","avatar_ref":null}},` +
-		`{"key":"general","expected_version":0,"value":{"default_route":"projects","show_right_overview":false,"reduce_motion":true}}` +
+		`{"key":"general","expected_version":0,"value":{"default_route":"projects","show_right_overview":false,"reduce_motion":true}},` +
+		`{"key":"storage","expected_version":0,"value":{"low_space_threshold_gib":5}}` +
 		`]}`)
 	recorder := performRequest(router, http.MethodPatch, "/api/v1/settings", body, nil)
 	if recorder.Code != http.StatusOK {
@@ -112,16 +116,20 @@ func TestSettingsPatchCreatesNormalizesAndAuditsWithoutValues(t *testing.T) {
 	if !general.Stored || general.Version != 1 || string(general.Value) != `{"default_route":"projects","show_right_overview":false,"reduce_motion":true}` {
 		t.Fatalf("general response = %#v", general)
 	}
+	storage := settingItemForTest(t, response, "storage")
+	if !storage.Stored || storage.Version != 1 || string(storage.Value) != `{"low_space_threshold_gib":5}` {
+		t.Fatalf("storage response = %#v", storage)
+	}
 	var settingCount int64
-	if err := store.DB.Table("app_settings").Count(&settingCount).Error; err != nil || settingCount != 2 {
+	if err := store.DB.Table("app_settings").Count(&settingCount).Error; err != nil || settingCount != 3 {
 		t.Fatalf("stored setting count = %d, err = %v", settingCount, err)
 	}
 	var events []models.WorkflowEvent
 	if err := store.DB.Where("aggregate_type = ?", "setting").Order("aggregate_id ASC").Find(&events).Error; err != nil {
 		t.Fatalf("load setting events: %v", err)
 	}
-	if len(events) != 2 {
-		t.Fatalf("setting event count = %d, want 2", len(events))
+	if len(events) != 3 {
+		t.Fatalf("setting event count = %d, want 3", len(events))
 	}
 	for _, event := range events {
 		if event.Action != "settings_updated" || event.ActorID == nil || *event.ActorID != models.BuiltinOwnerActorID || event.PreviousJSON == nil || event.CurrentJSON == nil {
@@ -207,6 +215,7 @@ func TestSettingsPatchRejectsUnknownSensitiveAndInvalidValues(t *testing.T) {
 		{name: "unknown sensitive field", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark","token":"secret"}}]}`},
 		{name: "data url avatar", body: `{"updates":[{"key":"workspace","expected_version":0,"value":{"display_name":"opc","avatar_ref":"data:image/png;base64,secret"}}]}`},
 		{name: "invalid focus bound", body: `{"updates":[{"key":"focus","expected_version":0,"value":{"focus_minutes":3,"break_minutes":5,"cycles":4,"auto_start_break":true,"auto_start_focus":false,"sound_enabled":true}}]}`},
+		{name: "invalid storage threshold", body: `{"updates":[{"key":"storage","expected_version":0,"value":{"low_space_threshold_gib":0}}]}`},
 		{name: "unknown top field", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark"}}],"token":"secret"}`},
 	}
 	for _, test := range tests {
