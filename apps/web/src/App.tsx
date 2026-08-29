@@ -18,6 +18,7 @@ import { InvoicesPage } from "./pages/InvoicesPage";
 import { LaterPage } from "./pages/LaterPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { RoadmapPage } from "./pages/RoadmapPage";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TodayPage } from "./pages/TodayPage";
@@ -53,7 +54,7 @@ export default function App() {
             <Route element={<InboxPage />} path="inbox" />
             <Route element={<InboxPage />} path="inbox/:inboxItemId" />
             <Route element={<FocusPage />} path="focus" />
-            <Route element={<LaterPage type="roadmap" />} path="roadmap" />
+            <Route element={<RoadmapPage />} path="roadmap" />
             <Route
               element={<LaterPage type="content-calendar" />}
               path="content-calendar"
