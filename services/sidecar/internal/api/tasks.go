@@ -512,6 +512,11 @@ func (a *API) createTask(c *gin.Context) {
 		if err := replaceTaskTags(tx, task.ID, tagIDs); err != nil {
 			return err
 		}
+		if err := reconcileTaskParentChain(
+			tx, task.ParentTaskID, requestIDFromContext(c), task.CreatedAt,
+		); err != nil {
+			return taskParentProgressError("reconcile created Task parent", err)
+		}
 		response, err = loadTask(tx, task.ID)
 		if err != nil {
 			return fmt.Errorf("load created task: %w", err)
@@ -789,17 +794,33 @@ func (a *API) updateTask(c *gin.Context) {
 			}
 		}
 		loaded, err := loadTask(tx, id)
-		task = loaded
 		if err != nil {
 			return err
 		}
-		if input.ReviewPolicy != nil && current.ReviewPolicy != task.ReviewPolicy {
+		if input.ReviewPolicy != nil && current.ReviewPolicy != loaded.ReviewPolicy {
 			_, err = recordTaskLifecycleEvent(
 				tx, "task_review_policy_changed", id,
-				taskLifecycleSnapshot(current, ""), taskLifecycleSnapshot(task, ""),
+				taskLifecycleSnapshot(current, ""), taskLifecycleSnapshot(loaded, ""),
 				requestIDFromContext(c), now, 1,
 			)
+			if err != nil {
+				return err
+			}
+			if _, err := reconcileTaskParentProgress(tx, loaded.ID, requestIDFromContext(c), now); err != nil {
+				return taskParentProgressError("reconcile Task review policy", err)
+			}
 		}
+		if input.ParentTaskID.Set {
+			if err := reconcileTaskParentChain(tx, current.ParentTaskID, requestIDFromContext(c), now); err != nil {
+				return taskParentProgressError("reconcile previous Task parent", err)
+			}
+			if !sameNullableString(current.ParentTaskID, loaded.ParentTaskID) {
+				if err := reconcileTaskParentChain(tx, loaded.ParentTaskID, requestIDFromContext(c), now); err != nil {
+					return taskParentProgressError("reconcile new Task parent", err)
+				}
+			}
+		}
+		task, err = loadTask(tx, id)
 		return err
 	})
 	if err != nil {
@@ -908,12 +929,16 @@ func (a *API) deleteTask(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		parentTaskID := task.ParentTaskID
 		result := tx.Delete(&models.Task{}, "id = ?", id)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
 			return taskVersionConflict()
+		}
+		if err := reconcileTaskParentChain(tx, parentTaskID, requestIDFromContext(c), deletedAt); err != nil {
+			return taskParentProgressError("reconcile deleted Task parent", err)
 		}
 		return nil
 	})
@@ -1206,7 +1231,8 @@ func withTaskProject(query *gorm.DB) *gorm.DB {
 			projects.name AS project_name,
 			parent_tasks.title AS parent_task_title,
 			(SELECT COUNT(*) FROM tasks AS subtasks WHERE subtasks.parent_task_id = tasks.id) AS subtask_total,
-			(SELECT COUNT(*) FROM tasks AS subtasks WHERE subtasks.parent_task_id = tasks.id AND subtasks.status = 'done') AS subtask_completed
+			(SELECT COUNT(*) FROM tasks AS subtasks WHERE subtasks.parent_task_id = tasks.id AND subtasks.status = 'done') AS subtask_completed,
+			(SELECT COUNT(*) FROM tasks AS subtasks WHERE subtasks.parent_task_id = tasks.id AND subtasks.status = 'cancelled') AS subtask_cancelled
 		`).
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
 		Joins("LEFT JOIN tasks AS parent_tasks ON parent_tasks.id = tasks.parent_task_id")

@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v29。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志、全局启动故障恢复页 v1、Inbox/Reminder/Task 编排及已登记来源投影已接通；项目详情已接 7 天/30 天/本月 Focus 分析与终态 Session 历史，Today 已接与服务端时钟一致的逾期/未来 24 小时临期快捷筛选。Focus 原生反馈、客户外部来源、数据库打开前备份选择/实时恢复进度、重复/原生通知、本地 Agent、非空目标/跨 schema 冲突合并、回访/财务仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v30。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志、全局启动故障恢复页 v1、Inbox/Reminder/Task 编排及已登记来源投影已接通；任务已支持有门禁的直属子任务汇总并最多自动进入待验收，项目详情已接 7 天/30 天/本月 Focus 分析与终态 Session 历史，Today 已接与服务端时钟一致的逾期/未来 24 小时临期快捷筛选。Focus 原生反馈、客户外部来源、数据库打开前备份选择/实时恢复进度、重复/原生通知、本地 Agent、非空目标/跨 schema 冲突合并、回访/财务仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.13）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.14）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -16,26 +16,26 @@
 
 ## 核心模块
 
-| 模块           | 当前状态                                                                    | 目标版本                  | 文档                                 |
-| -------------- | --------------------------------------------------------------------------- | ------------------------- | ------------------------------------ |
-| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）         | v0.1                      | [today.md](modules/today.md)         |
-| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、计划组拖拽与受控跨列看板已交付）    | v0.1                       | [tasks.md](modules/tasks.md)         |
-| 项目管理       | 部分完成（含项目级 Focus 分析与终态 Session 历史）                          | v0.1                      | [projects.md](modules/projects.md)   |
-| 客户管理       | 部分完成（基础资料、基础详情与 Project 客户关联已交付）                     | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
-| 收件箱工作编排 | 部分完成（手工编排、Reminder、follow-up/阻塞/临期和备份失败维护来源已交付） | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
-| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                            | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
-| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）   | v0.1                      | [actors.md](modules/actors.md)       |
-| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后    | v0.1                      | [focus.md](modules/focus.md)         |
+| 模块           | 当前状态                                                                                   | 目标版本                  | 文档                                 |
+| -------------- | ------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------ |
+| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）                       | v0.1                      | [today.md](modules/today.md)         |
+| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、计划组拖拽、受控跨列看板与父任务自动待验收已交付） | v0.1                      | [tasks.md](modules/tasks.md)         |
+| 项目管理       | 部分完成（含项目级 Focus 分析与终态 Session 历史）                                         | v0.1                      | [projects.md](modules/projects.md)   |
+| 客户管理       | 部分完成（基础资料、基础详情与 Project 客户关联已交付）                                    | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
+| 收件箱工作编排 | 部分完成（手工编排、Reminder、follow-up/阻塞/临期和备份失败维护来源已交付）                | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
+| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                           | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
+| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                  | v0.1                      | [actors.md](modules/actors.md)       |
+| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                   | v0.1                      | [focus.md](modules/focus.md)         |
 
 ## 平台与共享能力
 
-| 模块                       | 当前状态                                                                                                   | 目标版本            | 文档                                               |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 未开始                                                                                                     | v0.2                | [local-agents.md](modules/local-agents.md)         |
-| 设置                       | 部分完成                                                                                                   | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
-| 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续           | v0.1                | [command-search.md](modules/command-search.md)     |
+| 模块                       | 当前状态                                                                                                                                                                                        | 目标版本            | 文档                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
+| 本地 Agent Runtime         | 未开始                                                                                                                                                                                          | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 设置                       | 部分完成                                                                                                                                                                                        | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
+| 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                                | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、启动后恢复结果诊断、全局启动故障恢复页 v1、失败 Inbox、业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；数据库打开前备份选择/实时恢复进度及高级合并待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
-| 桌面平台与发布             | 基座部分完成                                                                                               | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
+| 桌面平台与发布             | 基座部分完成                                                                                                                                                                                    | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
 
@@ -77,18 +77,18 @@
 
 ## 核心术语
 
-| 术语              | 含义                                                                                    |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| Inbox Item        | 说明为什么需要处理、来源和跟进策略，不承担任务执行状态                                  |
-| Inbox–Task 关系   | 保存活动/历史关联、required、顺序和软解除；进度实时从 Task 派生                         |
-| Task              | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略                              |
-| Actor             | 本地责任主体：owner、person、agent、system                                              |
-| Assignment        | Task 当前负责人和历史改派记录                                                           |
-| Task Submission   | 一次产出提交批次，保存摘要、pending/accepted/changes_requested/withdrawn 状态与操作责任 |
-| Agent Run         | 本地 Agent 的一次执行尝试；成功不等于 Task 完成                                         |
-| Task Artifact     | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计     |
-| Client Attachment | 客户本地受控文件，可选关联 Activity，带完整性、软删除和聚合删除补偿                     |
-| Client Actor Link | Client 与 active person 的显式本地 contact 关系，带不可变解除历史                       |
-| Reminder          | 本地调度事实；到期后幂等生成 Inbox Item                                                 |
-| Workflow Event    | 创建、拆分、分派、执行、验收和返工的追加式审计时间线                                    |
-| Focus Session     | 服务端持久化的一次工作段；interval 保存实际计入区间，前端 ticker 只派生显示             |
+| 术语              | 含义                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| Inbox Item        | 说明为什么需要处理、来源和跟进策略，不承担任务执行状态                                            |
+| Inbox–Task 关系   | 保存活动/历史关联、required、顺序和软解除；进度实时从 Task 派生                                   |
+| Task              | 唯一可执行工单实体，保存工作内容、状态、完成条件和验收策略                                        |
+| Actor             | 本地责任主体：owner、person、agent、system                                                        |
+| Assignment        | Task 当前负责人和历史改派记录                                                                     |
+| Task Submission   | 一次提交批次；`origin=manual/child_rollup` 区分人工产出和系统子任务汇总，并保存审核状态与操作责任 |
+| Agent Run         | 本地 Agent 的一次执行尝试；成功不等于 Task 完成                                                   |
+| Task Artifact     | text/file/link/structured 产出，区分实际产出者与 owner 录入者，带完整性和软删除审计               |
+| Client Attachment | 客户本地受控文件，可选关联 Activity，带完整性、软删除和聚合删除补偿                               |
+| Client Actor Link | Client 与 active person 的显式本地 contact 关系，带不可变解除历史                                 |
+| Reminder          | 本地调度事实；到期后幂等生成 Inbox Item                                                           |
+| Workflow Event    | 创建、拆分、分派、执行、验收和返工的追加式审计时间线                                              |
+| Focus Session     | 服务端持久化的一次工作段；interval 保存实际计入区间，前端 ticker 只派生显示                       |

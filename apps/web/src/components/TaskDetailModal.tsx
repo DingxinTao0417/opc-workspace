@@ -482,7 +482,11 @@ export function TaskDetailModal() {
             <span>更新于 {formatUpdatedAt(task.updatedAt)}</span>
             {task.subtaskTotal > 0 ? (
               <span>
-                子任务 {task.subtaskCompleted}/{task.subtaskTotal}
+                子任务完成 {task.subtaskCompleted}/
+                {Math.max(0, task.subtaskTotal - (task.subtaskCancelled ?? 0))}
+                {(task.subtaskCancelled ?? 0) > 0
+                  ? ` · 已取消 ${task.subtaskCancelled}`
+                  : ""}
               </span>
             ) : null}
           </div>

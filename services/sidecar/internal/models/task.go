@@ -21,6 +21,7 @@ type Task struct {
 	Version             int64   `gorm:"column:version" json:"version"`
 	SubtaskTotal        int64   `gorm:"column:subtask_total;->" json:"subtask_total"`
 	SubtaskCompleted    int64   `gorm:"column:subtask_completed;->" json:"subtask_completed"`
+	SubtaskCancelled    int64   `gorm:"column:subtask_cancelled;->" json:"subtask_cancelled"`
 	Tags                []Tag   `gorm:"-" json:"tags"`
 	CreatedAt           string  `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt           string  `gorm:"column:updated_at" json:"updated_at"`

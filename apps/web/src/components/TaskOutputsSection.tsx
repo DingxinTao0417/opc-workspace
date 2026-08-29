@@ -325,6 +325,7 @@ function ConflictNotice({
 }
 
 function SubmissionSummary({ submission }: { submission: TaskSubmission }) {
+  const childRollup = submission.origin === "child_rollup";
   return (
     <div className="task-submission-summary">
       <div>
@@ -332,11 +333,14 @@ function SubmissionSummary({ submission }: { submission: TaskSubmission }) {
         <span className={`task-submission-status is-${submission.status}`}>
           {submissionLabels[submission.status]}
         </span>
-        {submission.isInferred ? <em>迁移推定</em> : null}
+        {childRollup ? <em>子任务汇总</em> : null}
+        {!childRollup && submission.isInferred ? <em>迁移推定</em> : null}
       </div>
       <p>
-        {submission.submittedByActor.displayName} 录入 ·{" "}
-        {formatTime(submission.submittedAt)}
+        {childRollup
+          ? "系统根据非取消子任务完成情况发起验收"
+          : `${submission.submittedByActor.displayName} 录入`}{" "}
+        · {formatTime(submission.submittedAt)}
       </p>
       {submission.summary ? (
         <blockquote>{submission.summary}</blockquote>
@@ -454,6 +458,13 @@ export function TaskOutputsSection({
     !submissionsQuery.isError &&
     reviewer !== null &&
     currentSubmission?.status === "pending_review";
+  const cancelledSubtasks = task.subtaskCancelled ?? 0;
+  const nonCancelledSubtasks = Math.max(
+    0,
+    task.subtaskTotal - cancelledSubtasks,
+  );
+  const childRollupReady =
+    nonCancelledSubtasks > 0 && task.subtaskCompleted === nonCancelledSubtasks;
 
   useEffect(() => {
     onBusyChange?.(operationBusy);
@@ -790,6 +801,37 @@ export function TaskOutputsSection({
         </div>
       ) : null}
 
+      {childRollupReady &&
+      (task.status === "todo" || task.status === "in_progress") &&
+      task.reviewPolicy === "none" ? (
+        <div className="task-output-policy-note">
+          <Check size={14} />
+          <div>
+            <strong>非取消子任务已全部完成</strong>
+            <span>
+              当前任务不会自动完成；请在“任务状态”中明确完成，或在待办且无提交历史时改为人工验收。
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {childRollupReady &&
+      (task.status === "todo" || task.status === "in_progress") &&
+      task.reviewPolicy === "manual" &&
+      !assignmentsQuery.isPending &&
+      !assignmentsQuery.isError &&
+      (!assignee || !reviewer) ? (
+        <div className="task-output-prerequisites">
+          <AlertTriangle size={14} />
+          <div>
+            <strong>子任务已就绪，自动验收仍缺门禁</strong>
+            <span>
+              补齐负责人和所有者审核人后才能继续；仅在没有人工提交或返工历史时，系统会自动发起父任务验收。
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {task.reviewPolicy === "none" ? (
         <div className="task-output-policy-note">
           <Check size={14} />
@@ -822,6 +864,7 @@ export function TaskOutputsSection({
           ) : null}
           {!assignmentsQuery.isPending &&
           !assignmentsQuery.isError &&
+          !childRollupReady &&
           (!assignee || !reviewer) ? (
             <div className="task-output-prerequisites">
               <AlertTriangle size={14} />

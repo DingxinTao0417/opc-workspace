@@ -128,6 +128,7 @@ function taskPayload(overrides: Record<string, unknown> = {}) {
     version: 7,
     subtask_total: 3,
     subtask_completed: 2,
+    subtask_cancelled: 1,
     tags: [
       {
         id: "tag-1",
@@ -225,6 +226,15 @@ const ownerSummaryPayload = {
   version: 1,
 };
 
+const systemSummaryPayload = {
+  id: "00000000-0000-5000-8000-000000000002",
+  type: "system",
+  display_name: "系统",
+  status: "active",
+  is_builtin: true,
+  version: 1,
+};
+
 const personSummaryPayload = {
   id: actorPayload.id,
   type: "person",
@@ -306,6 +316,7 @@ function submissionPayload(overrides: Record<string, unknown> = {}) {
     task_id: "task-1",
     sequence: 1,
     status: "pending_review",
+    origin: "manual",
     summary: "请验收本次交付",
     submitted_by_actor_id: ownerSummaryPayload.id,
     submitted_by_actor: ownerSummaryPayload,
@@ -632,6 +643,7 @@ describe("normalizeTask", () => {
       version: 7,
       subtaskTotal: 3,
       subtaskCompleted: 2,
+      subtaskCancelled: 1,
       tags: [
         expect.objectContaining({
           id: "tag-1",
@@ -770,6 +782,50 @@ describe("task submissions and artifacts", () => {
       }),
     ]) {
       expect(() => normalizeTaskArtifactSummary(invalidArtifact)).toThrow(
+        ApiError,
+      );
+    }
+  });
+
+  it("defaults legacy submissions to manual origin", () => {
+    const legacySubmission = submissionPayload();
+    Reflect.deleteProperty(legacySubmission, "origin");
+
+    expect(normalizeTaskSubmission(legacySubmission).origin).toBe("manual");
+  });
+
+  it("accepts only artifact-free, non-inferred system child rollups", () => {
+    const childRollup = submissionPayload({
+      origin: "child_rollup",
+      submitted_by_actor_id: systemSummaryPayload.id,
+      submitted_by_actor: systemSummaryPayload,
+      artifacts: [],
+    });
+
+    expect(normalizeTaskSubmission(childRollup)).toMatchObject({
+      origin: "child_rollup",
+      submittedByActor: { type: "system", isBuiltin: true },
+      isInferred: false,
+      artifacts: [],
+    });
+
+    for (const invalidSubmission of [
+      submissionPayload({ origin: "automatic" }),
+      submissionPayload({ origin: "child_rollup", artifacts: [] }),
+      submissionPayload({
+        origin: "child_rollup",
+        submitted_by_actor_id: systemSummaryPayload.id,
+        submitted_by_actor: systemSummaryPayload,
+        is_inferred: true,
+        artifacts: [],
+      }),
+      submissionPayload({
+        origin: "child_rollup",
+        submitted_by_actor_id: systemSummaryPayload.id,
+        submitted_by_actor: systemSummaryPayload,
+      }),
+    ]) {
+      expect(() => normalizeTaskSubmission(invalidSubmission)).toThrow(
         ApiError,
       );
     }
@@ -1992,6 +2048,36 @@ describe("controlled task lifecycle", () => {
           : {},
       );
     });
+  });
+
+  it("accepts a lifecycle event version up to the final task version", async () => {
+    const responseForEventVersion = (eventVersion: number) =>
+      jsonResponse({
+        data: {
+          task: taskPayload({ status: "in_progress", version: 9 }),
+          event: eventPayload({
+            action: "task_started",
+            current: { status: "in_progress", version: eventVersion },
+          }),
+        },
+      });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(responseForEventVersion(8))
+      .mockResolvedValueOnce(responseForEventVersion(10))
+      .mockResolvedValueOnce(responseForEventVersion(7));
+    vi.stubGlobal("fetch", fetchMock);
+    const input = { action: "start" as const, expectedVersion: 7 };
+
+    await expect(
+      executeTaskLifecycleCommand("task-1", input),
+    ).resolves.toMatchObject({ task: { version: 9 } });
+    await expect(
+      executeTaskLifecycleCommand("task-1", input),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(
+      executeTaskLifecycleCommand("task-1", input),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
   it("maps atomic batch lifecycle commands and their shared reason", async () => {

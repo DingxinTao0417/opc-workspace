@@ -53,6 +53,15 @@ const person: ActorSummary = {
   version: 1,
 };
 
+const system: ActorSummary = {
+  id: "actor-system",
+  type: "system",
+  displayName: "系统",
+  status: "active",
+  isBuiltin: true,
+  version: 1,
+};
+
 const task: Task = {
   id: "task-1",
   title: "交付视觉稿",
@@ -147,6 +156,7 @@ const submission: TaskSubmission = {
   taskId: task.id,
   sequence: 1,
   status: "pending_review",
+  origin: "manual",
   summary: "请验收最终稿",
   submittedByActorId: owner.id,
   submittedByActor: owner,
@@ -219,6 +229,59 @@ describe("TaskOutputsSection", () => {
     expect(await screen.findByText("此任务无需验收")).toBeVisible();
     expect(screen.getByText(/可在“任务状态”中直接完成/)).toBeVisible();
     expect(screen.queryByRole("button", { name: "提交验收" })).toBeNull();
+  });
+
+  it("explains that completed non-cancelled children do not auto-complete a none-policy parent", async () => {
+    renderSection({
+      ...task,
+      reviewPolicy: "none",
+      subtaskTotal: 3,
+      subtaskCompleted: 2,
+      subtaskCancelled: 1,
+    });
+
+    expect(await screen.findByText("非取消子任务已全部完成")).toBeVisible();
+    expect(screen.getByText(/当前任务不会自动完成/)).toBeVisible();
+  });
+
+  it("labels system-generated child-rollup submissions", async () => {
+    const childRollupSubmission: TaskSubmission = {
+      ...submission,
+      origin: "child_rollup",
+      submittedByActorId: system.id,
+      submittedByActor: system,
+      summary: "所有非取消子任务已完成，等待父任务验收。",
+      artifacts: [],
+    };
+    const waitingParent: Task = {
+      ...task,
+      status: "waiting_review",
+      currentSubmissionId: childRollupSubmission.id,
+      subtaskTotal: 3,
+      subtaskCompleted: 2,
+      subtaskCancelled: 1,
+      version: task.version + 1,
+    };
+    apiMocks.getTaskSubmissions.mockResolvedValue({
+      items: [childRollupSubmission],
+      meta: {
+        page: 1,
+        pageSize: 10,
+        total: 1,
+        taskVersion: waitingParent.version,
+      },
+    });
+
+    renderSection(waitingParent);
+
+    expect(await screen.findByText("子任务汇总")).toBeVisible();
+    expect(
+      screen.getByText(/系统根据非取消子任务完成情况发起验收/),
+    ).toBeVisible();
+    expect(
+      screen.getByText("所有非取消子任务已完成，等待父任务验收。"),
+    ).toBeVisible();
+    expect(screen.getByText("本批次仅提交了摘要。")).toBeVisible();
   });
 
   it("blocks manual submission until both assignee and reviewer exist", async () => {

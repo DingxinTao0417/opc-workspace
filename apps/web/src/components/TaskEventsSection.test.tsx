@@ -127,6 +127,62 @@ describe("TaskEventsSection", () => {
     expect(screen.queryByText(/schema_v7/)).toBeNull();
   });
 
+  it("presents child-rollup lifecycle events and internal reasons", async () => {
+    const systemActor = {
+      ...event.actor!,
+      id: "actor-system",
+      type: "system" as const,
+      displayName: "系统",
+    };
+    apiMocks.getTaskEvents.mockResolvedValue({
+      items: [
+        {
+          ...event,
+          id: "event-parent-review",
+          action: "task_parent_review_requested",
+          actor: systemActor,
+          previous: { status: "in_progress", version: 6 },
+          current: { status: "waiting_review", version: 7 },
+        },
+        {
+          ...event,
+          id: "event-parent-withdrawn",
+          action: "task_parent_review_withdrawn",
+          actor: systemActor,
+          previous: { status: "waiting_review", version: 7 },
+          current: { status: "in_progress", version: 8 },
+          reason: "child_rollup_gate_lost",
+        },
+        {
+          ...event,
+          id: "event-parent-reopened",
+          action: "task_parent_reopened",
+          actor: systemActor,
+          previous: { status: "done", version: 8 },
+          current: { status: "todo", version: 9 },
+          reason: "child_rollup_invalidated",
+        },
+      ],
+      meta: { page: 1, pageSize: 20, total: 3, taskVersion: 9 },
+    });
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+
+    expect(
+      await screen.findByText("子任务完成，系统发起父任务验收"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("子任务条件变化，系统撤回父任务验收"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("子任务条件变化，系统重新打开父任务"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("原因：父任务负责人或审核人门禁不再满足"),
+    ).toBeVisible();
+    expect(screen.getByText("原因：非取消子任务不再全部完成")).toBeVisible();
+  });
+
   it("loads older pages without duplicating events", async () => {
     apiMocks.getTaskEvents.mockImplementation(
       async (_taskId: string, input: { page: number }) => ({

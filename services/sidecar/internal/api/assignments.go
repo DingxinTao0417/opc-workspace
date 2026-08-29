@@ -308,6 +308,11 @@ func (a *API) createTaskAssignment(c *gin.Context) {
 		); err != nil {
 			return err
 		}
+		loadedTask, err = reconcileTaskParentProgress(tx, taskIDValue, requestIDFromContext(c), now)
+		if err != nil {
+			return taskParentProgressError("reconcile assigned parent Task", err)
+		}
+		response.Task = loadedTask
 		return recordAssignmentIdempotency(
 			tx, idempotencyKey, endpoint, assignment.ID, requestHash,
 			http.StatusCreated, response, now,
@@ -442,6 +447,11 @@ func (a *API) reassignTask(c *gin.Context) {
 		); err != nil {
 			return err
 		}
+		loadedTask, err = reconcileTaskParentProgress(tx, taskIDValue, requestIDFromContext(c), now)
+		if err != nil {
+			return taskParentProgressError("reconcile reassigned parent Task", err)
+		}
+		response.Task = loadedTask
 		return recordAssignmentIdempotency(
 			tx, idempotencyKey, endpoint, newAssignment.ID, requestHash,
 			http.StatusOK, response, now,
@@ -548,6 +558,11 @@ func (a *API) endAssignment(c *gin.Context) {
 		); err != nil {
 			return err
 		}
+		loadedTask, err = reconcileTaskParentProgress(tx, task.ID, requestIDFromContext(c), now)
+		if err != nil {
+			return taskParentProgressError("reconcile unassigned parent Task", err)
+		}
+		response.Task = loadedTask
 		return recordAssignmentIdempotency(
 			tx, idempotencyKey, endpoint, assignment.ID, requestHash,
 			http.StatusOK, response, now,

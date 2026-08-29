@@ -1572,6 +1572,11 @@ export function normalizeTask(value: unknown): Task {
       "已完成子任务数",
       0,
     ),
+    subtaskCancelled: nonNegativeInteger(
+      fieldValue(value, "subtask_cancelled", "subtaskCancelled"),
+      "已取消子任务数",
+      0,
+    ),
     createdAt: String(fieldValue(value, "created_at", "createdAt") ?? ""),
     updatedAt: String(fieldValue(value, "updated_at", "updatedAt") ?? ""),
     completedAt: nullableString(
@@ -1624,6 +1629,14 @@ function asSubmissionStatus(value: unknown): TaskSubmission["status"] {
     return value;
   }
   return invalidResponse("任务提交状态响应无效");
+}
+
+function asTaskSubmissionOrigin(value: unknown): TaskSubmission["origin"] {
+  // Durable v29 idempotency snapshots do not carry origin; those records were
+  // all created by the manual/migration path and are safe to normalize.
+  if (value === undefined || value === "manual") return "manual";
+  if (value === "child_rollup") return value;
+  return invalidResponse("任务提交来源响应无效");
 }
 
 function nullableActorSummary(
@@ -1870,6 +1883,7 @@ export function normalizeTaskSubmission(value: unknown): TaskSubmission {
     return invalidResponse("任务提交责任主体响应不一致");
   }
   const status = asSubmissionStatus(value.status);
+  const origin = asTaskSubmissionOrigin(value.origin);
   const artifacts = value.artifacts.map(normalizeTaskArtifactSummary);
   if (
     artifacts.some(
@@ -1881,11 +1895,21 @@ export function normalizeTaskSubmission(value: unknown): TaskSubmission {
   ) {
     return invalidResponse("任务提交产出响应不一致");
   }
+  if (
+    origin === "child_rollup" &&
+    (submittedByActor.type !== "system" ||
+      !submittedByActor.isBuiltin ||
+      fieldValue(value, "is_inferred", "isInferred") !== false ||
+      artifacts.length !== 0)
+  ) {
+    return invalidResponse("父任务汇总提交来源不一致");
+  }
   return {
     id,
     taskId,
     sequence: positiveInteger(value.sequence, "任务提交序号"),
     status,
+    origin,
     summary: value.summary,
     submittedByActorId,
     submittedByActor,
@@ -4717,11 +4741,12 @@ export async function executeTaskLifecycleCommand(
   }
   const task = normalizeTask(payload.data.task);
   const event = normalizeTaskWorkflowEvent(payload.data.event);
+  const eventVersion = event.current?.version;
   if (
     task.id !== id ||
     event.action !== taskLifecycleEventActions[input.action] ||
-    (typeof event.current?.version === "number" &&
-      event.current.version !== task.version)
+    (typeof eventVersion === "number" &&
+      (eventVersion <= input.expectedVersion || eventVersion > task.version))
   ) {
     return invalidResponse("任务生命周期命令响应不一致");
   }

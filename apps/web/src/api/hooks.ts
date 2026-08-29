@@ -1459,17 +1459,21 @@ export function useTaskQuery(id: string | null) {
   });
 }
 
+export const taskAssignmentQueryRootKey = ["task-assignments"] as const;
 export const taskAssignmentQueryKey = (taskId: string) =>
-  ["task-assignments", taskId] as const;
+  [...taskAssignmentQueryRootKey, taskId] as const;
 
+export const taskEventQueryRootKey = ["task-events"] as const;
 export const taskEventQueryKey = (taskId: string) =>
-  ["task-events", taskId] as const;
+  [...taskEventQueryRootKey, taskId] as const;
 
+export const taskSubmissionQueryRootKey = ["task-submissions"] as const;
 export const taskSubmissionQueryKey = (taskId: string) =>
-  ["task-submissions", taskId] as const;
+  [...taskSubmissionQueryRootKey, taskId] as const;
 
+export const taskArtifactQueryRootKey = ["task-artifacts"] as const;
 export const taskArtifactQueryKey = (taskId: string) =>
-  ["task-artifacts", taskId] as const;
+  [...taskArtifactQueryRootKey, taskId] as const;
 
 export const taskArtifactDetailQueryKey = (artifactId: string) =>
   ["task-artifact", artifactId] as const;
@@ -1587,15 +1591,8 @@ function setTaskDetailIfNotOlder(queryClient: QueryClient, task: Task): void {
 
 async function invalidateTaskAssignments(
   queryClient: QueryClient,
-  taskId: string,
 ): Promise<void> {
-  await Promise.all([
-    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
-    queryClient.invalidateQueries({
-      queryKey: taskAssignmentQueryKey(taskId),
-    }),
-    queryClient.invalidateQueries({ queryKey: taskEventQueryKey(taskId) }),
-  ]);
+  await invalidateTaskAggregates(queryClient);
 }
 
 function assignmentErrorNeedsRefresh(error: unknown): boolean {
@@ -1627,11 +1624,11 @@ export function useCreateTaskAssignment() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskAssignments(queryClient, result.task.id);
+      await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient, variables.taskId);
+        await invalidateTaskAssignments(queryClient);
       }
     },
   });
@@ -1657,11 +1654,11 @@ export function useReassignTaskAssignment() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskAssignments(queryClient, result.task.id);
+      await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient, variables.taskId);
+        await invalidateTaskAssignments(queryClient);
       }
     },
   });
@@ -1689,11 +1686,11 @@ export function useEndTaskAssignment() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskAssignments(queryClient, result.task.id);
+      await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient, variables.taskId);
+        await invalidateTaskAssignments(queryClient);
       }
     },
   });
@@ -1952,9 +1949,7 @@ export function useCreateTask() {
     },
     onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+      await invalidateTaskAggregates(queryClient);
     },
   });
 }
@@ -2024,31 +2019,14 @@ export function useTaskLifecycleCommand() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+      await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (
         error instanceof ApiError &&
         (error.status === 404 || error.status === 409)
       ) {
-        await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-        await queryClient.invalidateQueries({
-          queryKey: taskAssignmentQueryKey(variables.id),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: taskEventQueryKey(variables.id),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: taskSubmissionQueryKey(variables.id),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: taskArtifactQueryKey(variables.id),
-        });
-        await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
-        if (error.status === 409) {
-          await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-          await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
-        }
+        await invalidateTaskAggregates(queryClient);
       }
     },
   });
@@ -2093,19 +2071,15 @@ function submitOutputFingerprint(
   });
 }
 
-async function invalidateTaskOutputAggregate(
+async function invalidateTaskAggregates(
   queryClient: QueryClient,
-  taskId: string,
 ): Promise<void> {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
-    queryClient.invalidateQueries({ queryKey: taskSubmissionQueryKey(taskId) }),
-    queryClient.invalidateQueries({ queryKey: taskArtifactQueryKey(taskId) }),
-    queryClient.invalidateQueries({ queryKey: taskAssignmentQueryKey(taskId) }),
-    queryClient.invalidateQueries({ queryKey: taskEventQueryKey(taskId) }),
-    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
-    queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
-    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    invalidateTaskFacts(queryClient),
+    queryClient.invalidateQueries({ queryKey: taskSubmissionQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskArtifactQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskAssignmentQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskEventQueryRootKey }),
   ]);
 }
 
@@ -2143,11 +2117,11 @@ export function useSubmitTaskOutput() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+      await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+        await invalidateTaskAggregates(queryClient);
       }
     },
   });
@@ -2173,11 +2147,11 @@ export function useReviewTaskSubmission() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+      await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+        await invalidateTaskAggregates(queryClient);
       }
     },
   });
@@ -2208,11 +2182,11 @@ export function useDeleteTaskArtifact() {
         queryKey: taskArtifactDetailQueryKey(result.artifact.id),
       });
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskOutputAggregate(queryClient, result.task.id);
+      await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error, variables) => {
+    onError: async (error) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskOutputAggregate(queryClient, variables.taskId);
+        await invalidateTaskAggregates(queryClient);
       }
     },
   });
@@ -2252,8 +2226,8 @@ export function useUpdateTask() {
         ),
       }),
     onSuccess: async (task) => {
-      queryClient.setQueryData(taskDetailQueryKey(task.id), task);
-      await invalidateTaskOutputAggregate(queryClient, task.id);
+      setTaskDetailIfNotOlder(queryClient, task);
+      await invalidateTaskAggregates(queryClient);
       await invalidateFocusReadModels(queryClient, {
         history: true,
         report: true,
@@ -2283,18 +2257,15 @@ export function useDeleteTask() {
       queryClient.removeQueries({ queryKey: taskEventQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskSubmissionQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskArtifactQueryKey(id) });
-      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
+      await invalidateTaskAggregates(queryClient);
       await invalidateFocusReadModels(queryClient, {
         history: true,
         report: true,
       });
-      await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
     },
     onError: async (error) => {
       if (isTaskFactsStale(error)) {
-        await invalidateTaskFacts(queryClient);
+        await invalidateTaskAggregates(queryClient);
         await invalidateFocusReadModels(queryClient, {
           history: true,
           report: true,
@@ -2305,10 +2276,12 @@ export function useDeleteTask() {
 }
 
 async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
-  await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-  await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-  await queryClient.invalidateQueries({ queryKey: ["stats", "today"] });
-  await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+  ]);
 }
 
 function isTaskFactsStale(error: unknown): boolean {
@@ -2320,12 +2293,25 @@ function isTaskFactsStale(error: unknown): boolean {
   );
 }
 
+function batchCanReconcileTaskHierarchy(
+  action: BatchUpdateTasksInput["action"],
+): boolean {
+  return (
+    action !== "set_project" &&
+    action !== "set_planned_date" &&
+    action !== "add_tags" &&
+    action !== "remove_tags"
+  );
+}
+
 export function useBatchUpdateTasks() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: BatchUpdateTasksInput) => batchUpdateTasks(input),
     onSuccess: async (_, input) => {
-      await invalidateTaskFacts(queryClient);
+      await (batchCanReconcileTaskHierarchy(input.action)
+        ? invalidateTaskAggregates(queryClient)
+        : invalidateTaskFacts(queryClient));
       if (input.action === "set_project") {
         await invalidateFocusReadModels(queryClient, {
           history: true,
@@ -2340,7 +2326,9 @@ export function useBatchUpdateTasks() {
     },
     onError: async (error, input) => {
       if (isTaskFactsStale(error)) {
-        await invalidateTaskFacts(queryClient);
+        await (batchCanReconcileTaskHierarchy(input.action)
+          ? invalidateTaskAggregates(queryClient)
+          : invalidateTaskFacts(queryClient));
         if (input.action === "set_project") {
           await invalidateFocusReadModels(queryClient, {
             history: true,

@@ -44,6 +44,18 @@ const eventPresentations: Record<string, EventPresentation> = {
   task_review_accepted: { icon: Check, label: "接受产出并完成任务" },
   task_changes_requested: { icon: RotateCcw, label: "要求返工" },
   task_submission_withdrawn: { icon: XCircle, label: "撤回待验收提交" },
+  task_parent_review_requested: {
+    icon: Send,
+    label: "子任务完成，系统发起父任务验收",
+  },
+  task_parent_review_withdrawn: {
+    icon: XCircle,
+    label: "子任务条件变化，系统撤回父任务验收",
+  },
+  task_parent_reopened: {
+    icon: RotateCcw,
+    label: "子任务条件变化，系统重新打开父任务",
+  },
   task_artifact_deleted: { icon: Trash2, label: "软删除任务产出" },
   assignment_created: { icon: UserRound, label: "创建责任分派" },
   assignment_reassigned: { icon: UserRoundCog, label: "改派责任人" },
@@ -72,6 +84,8 @@ const internalReasonLabels: Record<string, string> = {
   "Task cancelled": "任务取消后自动结束",
   schema_v7_migration_inferred_owner: "历史责任记录由迁移推定",
   schema_v9_migration_inferred_submission: "历史提交记录由迁移推定",
+  child_rollup_invalidated: "非取消子任务不再全部完成",
+  child_rollup_gate_lost: "父任务负责人或审核人门禁不再满足",
 };
 
 function formatEventTime(value: string): string {

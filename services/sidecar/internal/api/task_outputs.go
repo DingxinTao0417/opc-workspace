@@ -84,6 +84,7 @@ type taskSubmissionOutput struct {
 	TaskID             string                  `json:"task_id"`
 	Sequence           int                     `json:"sequence"`
 	Status             string                  `json:"status"`
+	Origin             string                  `json:"origin"`
 	Summary            string                  `json:"summary"`
 	SubmittedByActorID string                  `json:"submitted_by_actor_id"`
 	SubmittedByActor   assignmentActorSummary  `json:"submitted_by_actor"`
@@ -252,6 +253,10 @@ func taskArtifactRowsQuery(db *gorm.DB) *gorm.DB {
 }
 
 func submissionOutputFromRow(row taskSubmissionRow) (taskSubmissionOutput, error) {
+	origin := row.Origin
+	if origin == "" {
+		origin = taskSubmissionOriginManual
+	}
 	submitted := assignmentActorSummary{
 		ID: row.SubmittedByActorID, Type: row.SubmittedType, DisplayName: row.SubmittedName,
 		Status: row.SubmittedStatus, IsBuiltin: row.SubmittedBuiltin, Version: row.SubmittedVersion,
@@ -271,7 +276,7 @@ func submissionOutputFromRow(row taskSubmissionRow) (taskSubmissionOutput, error
 		return taskSubmissionOutput{}, err
 	}
 	return taskSubmissionOutput{
-		ID: row.ID, TaskID: row.TaskID, Sequence: row.Sequence, Status: row.Status, Summary: row.Summary,
+		ID: row.ID, TaskID: row.TaskID, Sequence: row.Sequence, Status: row.Status, Origin: origin, Summary: row.Summary,
 		SubmittedByActorID: row.SubmittedByActorID, SubmittedByActor: submitted,
 		SubmittedAt: normalizeTimestamp(row.SubmittedAt), ReviewedByActorID: row.ReviewedByActorID,
 		ReviewedByActor: reviewed, ReviewedAt: normalizeOptionalTimestamp(row.ReviewedAt), ReviewReason: row.ReviewReason,
@@ -774,7 +779,8 @@ func (a *API) submitTaskOutput(c *gin.Context) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		submission := models.TaskSubmission{
 			ID: uuid.NewString(), TaskID: taskIDValue, Sequence: sequence, Status: "pending_review",
-			Summary: input.Summary, SubmittedByActorID: models.BuiltinOwnerActorID, SubmittedAt: now,
+			Origin: taskSubmissionOriginManual, Summary: input.Summary,
+			SubmittedByActorID: models.BuiltinOwnerActorID, SubmittedAt: now,
 		}
 		if err := tx.Create(&submission).Error; err != nil {
 			return mapTaskOutputConstraintError(err)
@@ -859,6 +865,7 @@ func (a *API) submitTaskOutput(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTaskSubmissionOutputOrigin(&response.Submission)
 	normalizeTask(&response.Task)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
@@ -1044,6 +1051,11 @@ func (a *API) reviewTaskOutput(c *gin.Context) {
 		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
 			return err
 		}
+		if input.Decision == "accept" {
+			if err := reconcileTaskParentChain(tx, updated.ParentTaskID, requestID, now); err != nil {
+				return taskParentProgressError("reconcile reviewed Task parent", err)
+			}
+		}
 		response = reviewTaskOutputResponse{Task: updated, Submission: submissionOutput, Event: event}
 		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, taskIDValue, requestHash, statusCode, response, now)
 	})
@@ -1054,6 +1066,7 @@ func (a *API) reviewTaskOutput(c *gin.Context) {
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
 	}
+	normalizeTaskSubmissionOutputOrigin(&response.Submission)
 	normalizeTask(&response.Task)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
@@ -1681,6 +1694,26 @@ func recordTaskOutputEvent(
 	requestID, createdAt string,
 	commandSequence int,
 ) (taskWorkflowEventOutput, error) {
+	return recordTaskOutputEventAs(
+		tx, action, taskIDValue, submissionID, artifactIDValue,
+		previous, current, models.BuiltinOwnerActorID, requestID, createdAt, commandSequence,
+	)
+}
+
+func normalizeTaskSubmissionOutputOrigin(submission *taskSubmissionOutput) {
+	if submission.Origin == "" {
+		submission.Origin = taskSubmissionOriginManual
+	}
+}
+
+func recordTaskOutputEventAs(
+	tx *gorm.DB,
+	action, taskIDValue string,
+	submissionID, artifactIDValue *string,
+	previous, current map[string]any,
+	actorIDValue, requestID, createdAt string,
+	commandSequence int,
+) (taskWorkflowEventOutput, error) {
 	var previousJSON *string
 	if previous != nil {
 		encoded, err := json.Marshal(previous)
@@ -1695,10 +1728,9 @@ func recordTaskOutputEvent(
 		return taskWorkflowEventOutput{}, err
 	}
 	currentJSON := string(encoded)
-	ownerID := models.BuiltinOwnerActorID
 	event := models.WorkflowEvent{
 		ID: uuid.NewString(), AggregateType: "task", AggregateID: taskIDValue, Action: action,
-		ActorID: &ownerID, SubmissionID: submissionID, ArtifactID: artifactIDValue,
+		ActorID: &actorIDValue, SubmissionID: submissionID, ArtifactID: artifactIDValue,
 		RequestID: &requestID, CommandSeq: &commandSequence, PreviousJSON: previousJSON,
 		CurrentJSON: &currentJSON, CreatedAt: createdAt,
 	}

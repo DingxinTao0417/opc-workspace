@@ -5,6 +5,7 @@ type TaskSubmission struct {
 	TaskID             string  `gorm:"column:task_id" json:"task_id"`
 	Sequence           int     `gorm:"column:sequence" json:"sequence"`
 	Status             string  `gorm:"column:status" json:"status"`
+	Origin             string  `gorm:"column:origin;default:manual" json:"origin"`
 	Summary            string  `gorm:"column:summary" json:"summary"`
 	SubmittedByActorID string  `gorm:"column:submitted_by_actor_id" json:"submitted_by_actor_id"`
 	SubmittedAt        string  `gorm:"column:submitted_at" json:"submitted_at"`

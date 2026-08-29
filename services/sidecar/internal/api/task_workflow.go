@@ -190,6 +190,17 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 		if err != nil {
 			return err
 		}
+		if command == taskLifecycleComplete || command == taskLifecycleCancel || command == taskLifecycleReopen {
+			if err := reconcileTaskParentChain(tx, updated.ParentTaskID, requestID, now); err != nil {
+				return taskParentProgressError("reconcile lifecycle Task parent", err)
+			}
+		}
+		if command == taskLifecycleStart || command == taskLifecycleUnblock {
+			updated, err = reconcileTaskParentProgress(tx, updated.ID, requestID, now)
+			if err != nil {
+				return taskParentProgressError("reconcile lifecycle parent Task", err)
+			}
+		}
 		response = taskLifecycleResponse{Task: updated, Event: event}
 		return recordTaskLifecycleIdempotency(
 			tx,

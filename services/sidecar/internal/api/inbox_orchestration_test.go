@@ -48,7 +48,8 @@ func TestInboxSplitCreatesHierarchyAssignmentsRelationsAndReplays(t *testing.T) 
 	prepare := created.Created[0]
 	publish := created.Created[1]
 	if prepare.Key != "prepare" || prepare.Relation.RelationType != "created" || prepare.Relation.Position != 1 ||
-		len(prepare.Assignments) != 1 || prepare.Assignments[0].Role != "assignee" || prepare.Task.Version != 2 {
+		len(prepare.Assignments) != 1 || prepare.Assignments[0].Role != "assignee" || prepare.Task.Version != 3 ||
+		prepare.Relation.Task == nil || prepare.Relation.Task.Version != 3 {
 		t.Fatalf("prepare output = %#v", prepare)
 	}
 	if publish.Task.ParentTaskID == nil || *publish.Task.ParentTaskID != prepare.Task.ID ||

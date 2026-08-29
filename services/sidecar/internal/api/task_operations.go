@@ -211,14 +211,39 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339Nano)
+		affectedParents := make(map[string]struct{})
+		affectedParentOrder := make([]string, 0)
+		selfReconcileTasks := make(map[string]struct{})
+		selfReconcileTaskOrder := make([]string, 0)
 		for _, id := range orderedIDs {
 			task := currentByID[id]
 			changed := false
 			if lifecycleCommand != "" {
+				latest, err := loadTask(tx, id)
+				if err != nil {
+					return err
+				}
+				if err := validateTaskLifecycleTransition(tx, latest, lifecycleCommand); err != nil {
+					return err
+				}
 				if _, _, err := applyValidatedTaskLifecycleTransition(
-					tx, task, lifecycleCommand, lifecycleReason, requestIDFromContext(c), now,
+					tx, latest, lifecycleCommand, lifecycleReason, requestIDFromContext(c), now,
 				); err != nil {
 					return err
+				}
+				if lifecycleCommand == taskLifecycleComplete || lifecycleCommand == taskLifecycleCancel || lifecycleCommand == taskLifecycleReopen {
+					if latest.ParentTaskID != nil {
+						if _, exists := affectedParents[*latest.ParentTaskID]; !exists {
+							affectedParents[*latest.ParentTaskID] = struct{}{}
+							affectedParentOrder = append(affectedParentOrder, *latest.ParentTaskID)
+						}
+					}
+				}
+				if lifecycleCommand == taskLifecycleStart || lifecycleCommand == taskLifecycleUnblock {
+					if _, exists := selfReconcileTasks[id]; !exists {
+						selfReconcileTasks[id] = struct{}{}
+						selfReconcileTaskOrder = append(selfReconcileTaskOrder, id)
+					}
 				}
 				response.Changed++
 				continue
@@ -284,6 +309,17 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			}
 			if changed {
 				response.Changed++
+			}
+		}
+		for _, id := range selfReconcileTaskOrder {
+			if _, err := reconcileTaskParentProgress(tx, id, requestIDFromContext(c), now); err != nil {
+				return taskParentProgressError("reconcile batch lifecycle parent Task", err)
+			}
+		}
+		for _, id := range affectedParentOrder {
+			parentID := id
+			if err := reconcileTaskParentChain(tx, &parentID, requestIDFromContext(c), now); err != nil {
+				return taskParentProgressError("reconcile batch lifecycle Task parent", err)
 			}
 		}
 

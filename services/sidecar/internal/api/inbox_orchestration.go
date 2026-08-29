@@ -204,6 +204,22 @@ func (a *API) splitInboxItem(c *gin.Context) {
 				Key: entry.Key, Task: loadedTask, Assignments: assignments, Relation: relationOutput,
 			})
 		}
+		// Creating a later child increments its already-created parent through
+		// the hierarchy trigger. Reload every Task and relation only after the
+		// full split graph exists so the response and idempotency snapshot never
+		// preserve an intermediate parent version.
+		for index := range response.Created {
+			loadedTask, err := loadTask(tx, response.Created[index].Task.ID)
+			if err != nil {
+				return err
+			}
+			relationOutput, err := loadInboxTaskRelationOutput(tx, response.Created[index].Relation.ID)
+			if err != nil {
+				return err
+			}
+			response.Created[index].Task = loadedTask
+			response.Created[index].Relation = relationOutput
+		}
 
 		triagedAt := current.TriagedAt
 		if triagedAt == nil {

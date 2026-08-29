@@ -19,11 +19,15 @@ import {
   projectQueryKey,
   taskQueryKey,
   taskAssignmentQueryKey,
+  taskAssignmentQueryRootKey,
   taskArtifactDetailQueryKey,
   taskArtifactQueryKey,
+  taskArtifactQueryRootKey,
   taskDetailQueryKey,
   taskEventQueryKey,
+  taskEventQueryRootKey,
   taskSubmissionQueryKey,
+  taskSubmissionQueryRootKey,
   useCreateProject,
   useCreateTag,
   useCreateTaskAssignment,
@@ -46,6 +50,7 @@ import {
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
   useTasksQuery,
+  useUpdateTask,
 } from "./hooks";
 
 const createProjectMock = vi.hoisted(() => vi.fn());
@@ -69,6 +74,7 @@ const getAllTasksMock = vi.hoisted(() => vi.fn());
 const reorderTasksMock = vi.hoisted(() => vi.fn());
 const batchUpdateTasksMock = vi.hoisted(() => vi.fn());
 const getTaskMock = vi.hoisted(() => vi.fn());
+const updateTaskMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
@@ -95,6 +101,7 @@ vi.mock("./client", async () => {
     getTasks: getTasksMock,
     getAllTasks: getAllTasksMock,
     reorderTasks: reorderTasksMock,
+    updateTask: updateTaskMock,
   };
 });
 
@@ -233,6 +240,7 @@ const submission: TaskSubmission = {
   taskId: task.id,
   sequence: 1,
   status: "pending_review",
+  origin: "manual",
   summary: "请验收",
   submittedByActorId: owner.id,
   submittedByActor: owner,
@@ -1016,7 +1024,7 @@ describe("task deletion mutation", () => {
 });
 
 describe("controlled task lifecycle mutations", () => {
-  it("requires the observed version and invalidates every affected view", async () => {
+  it("requires the observed version and invalidates parent aggregates globally", async () => {
     executeTaskLifecycleCommandMock.mockResolvedValue({
       task: { ...task, status: "done", version: 5 },
       event: taskEvent,
@@ -1028,6 +1036,16 @@ describe("controlled task lifecycle mutations", () => {
       },
     });
     queryClient.setQueryData(taskDetailQueryKey(task.id), task);
+    const parentTaskId = "task-parent";
+    const parentAggregateKeys = [
+      [...taskAssignmentQueryKey(parentTaskId), "history"] as const,
+      [...taskEventQueryKey(parentTaskId), "timeline"] as const,
+      [...taskSubmissionQueryKey(parentTaskId), "history"] as const,
+      [...taskArtifactQueryKey(parentTaskId), "history"] as const,
+    ];
+    parentAggregateKeys.forEach((queryKey) => {
+      queryClient.setQueryData(queryKey, { cached: true });
+    });
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useTaskLifecycleCommand(), {
       wrapper: wrapperFor(queryClient),
@@ -1046,10 +1064,19 @@ describe("controlled task lifecycle mutations", () => {
       expect.any(String),
     );
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskAssignmentQueryKey(task.id),
+      queryKey: taskAssignmentQueryRootKey,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskEventQueryKey(task.id),
+      queryKey: taskEventQueryRootKey,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskSubmissionQueryRootKey,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskArtifactQueryRootKey,
+    });
+    parentAggregateKeys.forEach((queryKey) => {
+      expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
     });
   });
 
@@ -1114,6 +1141,57 @@ describe("controlled task lifecycle mutations", () => {
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["stats", "today"],
+    });
+  });
+});
+
+describe("task update mutation", () => {
+  it("does not replace a newer detail cache with an older replay response", async () => {
+    updateTaskMock.mockResolvedValue({
+      ...task,
+      title: "较早的重放响应",
+      version: task.version + 1,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    queryClient.setQueryData(taskDetailQueryKey(task.id), {
+      ...task,
+      title: "缓存中的更新版本",
+      version: task.version + 3,
+    });
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: task.id,
+        input: {
+          title: "本次编辑",
+          description: task.description,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          plannedDate: task.plannedDate,
+          estimatedMinutes: task.estimatedMinutes,
+          expectedVersion: task.version,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(updateTaskMock).toHaveBeenCalledWith(
+      task.id,
+      expect.objectContaining({ expectedVersion: task.version }),
+    );
+    expect(
+      queryClient.getQueryData<Task>(taskDetailQueryKey(task.id)),
+    ).toMatchObject({
+      title: "缓存中的更新版本",
+      version: task.version + 3,
     });
   });
 });
@@ -1245,16 +1323,16 @@ describe("task output mutations", () => {
     );
     expect(submitTaskOutputMock.mock.calls[1][1].artifacts[0].file).toBe(file);
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskSubmissionQueryKey(task.id),
+      queryKey: taskSubmissionQueryRootKey,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskArtifactQueryKey(task.id),
+      queryKey: taskArtifactQueryRootKey,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskAssignmentQueryKey(task.id),
+      queryKey: taskAssignmentQueryRootKey,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: taskEventQueryKey(task.id),
+      queryKey: taskEventQueryRootKey,
     });
   });
 

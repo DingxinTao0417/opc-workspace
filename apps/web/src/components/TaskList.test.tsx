@@ -233,6 +233,25 @@ describe("TaskList", () => {
     expect(useUiStore.getState().taskDetailId).toBe("task-15");
   });
 
+  it("shows cancelled children outside the completion denominator", () => {
+    render(
+      <TaskList
+        live
+        tasks={[
+          {
+            ...task,
+            subtaskTotal: 3,
+            subtaskCompleted: 2,
+            subtaskCancelled: 1,
+          },
+        ]}
+      />,
+    );
+
+    const progress = screen.getByTitle("非取消子任务完成 2/2，已取消 1");
+    expect(progress).toHaveTextContent("2/2 · −1");
+  });
+
   it("loads and renders children only after expanding a parent", () => {
     render(
       <TaskList hierarchical live tasks={[{ ...task, subtaskTotal: 1 }]} />,

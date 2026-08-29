@@ -5,6 +5,7 @@ export type TaskKind = "work" | "review" | "followup" | "reminder";
 export type TaskReviewPolicy = "none" | "manual";
 export type TaskSubmissionStatus =
   "pending_review" | "accepted" | "changes_requested" | "withdrawn";
+export type TaskSubmissionOrigin = "manual" | "child_rollup";
 export type TaskArtifactStorageKind = "text" | "link" | "structured" | "file";
 export type TaskArtifactIntegrityStatus =
   "unverified" | "verified" | "missing" | "mismatch";
@@ -240,6 +241,8 @@ export interface Task {
   version: number;
   subtaskTotal: number;
   subtaskCompleted: number;
+  /** Added in schema v30; optional keeps durable v29 idempotency snapshots readable. */
+  subtaskCancelled?: number;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -285,6 +288,7 @@ export interface TaskSubmission {
   taskId: string;
   sequence: number;
   status: TaskSubmissionStatus;
+  origin: TaskSubmissionOrigin;
   summary: string;
   submittedByActorId: string;
   submittedByActor: ActorSummary;

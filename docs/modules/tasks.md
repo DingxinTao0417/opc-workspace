@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards，schema v26–v29 不改写 Task 表。PRD v9.13 的 `due_state` 只是查询时派生的截止风险读模型，不新增 Task 字段或 migration。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v30（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 只给 Submission 增加来源并交付父任务自动发起验收，不新增 API 版本，也不改写既有 manual 提交。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期，以及显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox 已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox，以及有门禁的父任务自动发起验收已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.13](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.14](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -16,10 +16,11 @@ Task 是 opc-workspace 唯一可执行工单。项目、未来 Inbox、提醒和
 - assignee/reviewer 的当前责任与历史 Assignment；
 - 六状态受控生命周期和追加式 Workflow Event；
 - `none` 直接完成与 `manual` 提交验收两种策略；
+- 直属子任务完成度派生、父任务自动进入待验收及失效后的撤回/重开；
 - Submission 批次、四种 Artifact、受控文件下载、审计软删除及 Task 聚合硬删除；
 - 所有真实页面的加载、空数据、错误、重试、版本冲突和草稿保留。
 
-Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通知、自动生成产出、AI 分析或知识库。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令调用 Inbox reconciliation。schema v23 在产出提交事务内消费显式 follow-up 标记，schema v24 在 block 生命周期事务内消费本次阻塞事实；schema v25 的本地扫描器消费当前 Task 截止时间事实。Inbox 仍拥有来源、关系和结清策略。
+Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通知、自动生成产出、AI 分析或知识库。Inbox 拆分复用 Task 创建约束；Task 生命周期、提交与验收命令调用 Inbox reconciliation。schema v23 在产出提交事务内消费显式 follow-up 标记，schema v24 在 block 生命周期事务内消费本次阻塞事实；schema v25 的本地扫描器消费当前 Task 截止时间事实。Inbox 仍拥有来源、关系和结清策略。父子层级不会创建 Inbox–Task 关系、不会继承或改写 `is_required`；Inbox 自动结清继续只看用户显式标为 required 的活动关系，与父任务自动验收彼此独立。
 
 ## 已实现状态
 
@@ -38,6 +39,8 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 - Task 详情可按需分页读取该任务的终态 Focus Session；completed 显示为已计入工时，cancelled/interrupted 仅作审计展示，读取或翻页不会修改 Task 草稿、版本或生命周期。
 - Task 存在 active/paused/recovery_pending Focus Session 时，硬删除返回 `409 TASK_HAS_OPEN_FOCUS_SESSION`；Session 进入终态后可删除 Task，历史 Session 的 `task_id` 自动置空。
 - Task 存在任一活动 Inbox 关系时，硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，不会移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除。已解除历史关系的实时 `task_id` 随删除置空，但原 Task UUID/标题快照继续保留。
+- 父任务只统计直属子任务。只要至少有 1 个非取消直属子任务且它们全部为 done，并且父任务是 todo/in_progress、策略为 manual、存在 active owner/person assignee 和 active 内置 owner reviewer，系统才会创建无 Artifact 的 `child_rollup` Submission，并把父任务最多推进到 waiting_review；它不会自动 accept 或结束 Assignment。
+- manual Submission 历史、既有 pending Submission，或曾被 `request_changes` 的 `child_rollup` 会阻止系统覆盖或重复提交。自动门禁或子任务完成条件失效时，pending 系统批次撤回；已经被 owner 接受的父任务若随后因直属子任务失效而不再满足条件，则系统重开父任务并沿祖先链协调。
 
 ## 数据模型与约束
 
@@ -66,13 +69,14 @@ Task 创建仍只允许 `todo`；非 `todo` 创建返回 `LIFECYCLE_COMMAND_REQU
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `id / task_id / sequence`                            | UUID、所属 Task、Task 内从 1 递增且唯一的批次序号                                       |
 | `status`                                             | `pending_review / accepted / changes_requested / withdrawn`；每个 Task 至多一条 pending |
-| `summary`                                            | 可为空但最长 10,000 字符；提交时 summary 与 Artifact 至少一个存在                       |
-| `submitted_by_actor_id / submitted_at`               | 当前实现固定内置 owner 代录及提交时间                                                   |
+| `origin`                                             | `manual / child_rollup`；既有和用户提交固定 manual，系统父任务汇总固定 child_rollup     |
+| `summary`                                            | 可为空但最长 10,000 字符；manual 提交时 summary 与 Artifact 至少一个存在                |
+| `submitted_by_actor_id / submitted_at`               | manual 固定内置 owner 代录；child_rollup 固定内置 system；同时保存提交时间              |
 | `reviewed_by_actor_id / reviewed_at / review_reason` | 接受或返工时由内置 owner 记录；返工原因必填                                             |
-| `withdrawn_by_actor_id / withdrawn_at`               | waiting-review Task 取消时由内置 owner 记录                                             |
-| `is_inferred`                                        | schema v9 从无歧义旧 manual 状态回填的批次为 true                                       |
+| `withdrawn_by_actor_id / withdrawn_at`               | 用户取消 manual 待审时为内置 owner；自动批次失效撤回时为内置 system                     |
+| `is_inferred`                                        | schema v9 从无歧义旧 manual 状态回填的批次为 true；child_rollup 必须为 false            |
 
-Submission 的 Task、序号、摘要、提交人、提交时间和 inferred 标记不可修改；只有 `pending_review` 可一次性转为 accepted、changes_requested 或 withdrawn。Task 仍存在时禁止直接硬删 Submission。
+Submission 的 Task、序号、来源、摘要、提交人、提交时间和 inferred 标记不可修改；只有 `pending_review` 可一次性转为 accepted、changes_requested 或 withdrawn。`child_rollup` 必须由内置 system 创建、`is_inferred = 0` 且 Artifact 数为 0；Task 仍存在时禁止直接硬删 Submission。
 
 ### TaskArtifact
 
@@ -106,6 +110,9 @@ D2 新增事件：
 - `task_changes_requested`
 - `task_submission_withdrawn`
 - `task_artifact_deleted`
+- `task_parent_review_requested`（system 创建 child_rollup 并发起验收）
+- `task_parent_review_withdrawn`（system 因子任务或父任务门禁失效撤回）
+- `task_parent_reopened`（已接受父任务因子任务条件失效而由 system 重开）
 - `migration_submission_backfill`（system Actor，schema v9 inferred 历史）
 
 ## 状态机
@@ -125,6 +132,12 @@ todo ──start──> in_progress
 
 todo / in_progress / blocked / waiting_review ──cancel──> cancelled
 done / cancelled ──reopen──> todo
+
+直属非取消子任务至少 1 个且全部 done + 父任务 manual/责任门禁
+  ── system child_rollup ──> waiting_review ── owner accept ──> done
+                  │                    │
+                  └─ 门禁/子任务失效 ──┴─> withdrawn + in_progress
+accepted parent done + 子任务失效 ── system reopen ──> todo
 ```
 
 规则：
@@ -137,6 +150,11 @@ done / cancelled ──reopen──> todo
 - accept 在同一事务完成 Task 并结束所有活动 Assignment；request_changes 保留 Assignment 并返回 in_progress。
 - cancel 结束活动 Assignment；若当前是 waiting_review（包括从该状态 block 后），还会先把 pending Submission 撤回。
 - accept、request_changes、cancel 保留 `current_submission_id` 作为最近批次指针；reopen 清空指针和快速时间字段，但保留 Submission、Artifact 与 Event 历史，也不恢复旧 Assignment。
+- 自动父任务判定只看 `parent_task_id` 直接指向该父任务的子任务；cancelled 不进入分母，非取消数必须大于 0，且每一项都必须 done。孙任务只会先影响自己的直接父任务，再通过祖先协调逐层传播，不能绕过中间父任务。
+- 自动发起还要求父任务当前为 todo/in_progress、`review_policy = manual`、active assignee 为 owner/person、active reviewer 为 builtin owner；系统只创建固定摘要的无 Artifact `origin=child_rollup` Submission 并进入 waiting_review，最终仍由 owner review。
+- 任何 manual Submission 历史都阻止 child_rollup；系统也不覆盖现有 pending Submission，且 owner 对 child_rollup 要求返工后，该 `changes_requested` 历史阻止自动重提。manual 和 changes_requested 均保留人的明确决策优先级。
+- pending child_rollup 的子任务条件或 review policy/Assignment 门禁失效时由 system 撤回。普通父任务回到 in_progress；若父任务正 blocked 且 `blocked_from_status=waiting_review`，状态和阻塞原因/时间保持 blocked，只把 `blocked_from_status` 更新为 in_progress。
+- child_rollup 已 accepted 且父任务 done 后，如直属子任务条件失效，system 把父任务重开为 todo，清理当前快速提交/审核指针和终态事实，但保留 accepted Submission/Event；旧 Assignment 不自动恢复。系统沿祖先链继续协调。
 
 ## API 契约
 
@@ -152,7 +170,7 @@ done / cancelled ──reopen──> todo
 | POST   | `/api/v1/tasks/:id/{start\|block\|unblock\|complete\|cancel\|reopen}` | `If-Match`；可选稳定幂等键；显式状态机                                                  |
 | GET    | `/api/v1/tasks/:id/events`                                            | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version`                                 |
 
-批量生命周期使用与单任务命令相同的转换矩阵和领域副作用。服务端先读取并校验完整选择集的版本、状态、active assignee 和 review policy，确认全部可执行后才开始写入；complete/cancel 会结束活动 Assignment，waiting-review cancel 会撤回当前 Submission，block 会创建对应 Inbox 来源，每个 Task 都追加独立 Workflow Event。阻塞/取消使用一份 1–1,000 字符统一原因，前端对六种生命周期命令均要求二次确认。批量 API 依靠 expected version 保证重试可判定，不提供单任务命令的 Idempotency-Key 重放响应。
+批量生命周期使用与单任务命令相同的转换矩阵和领域副作用。服务端先读取并校验完整选择集的版本、状态、active assignee 和 review policy，确认全部可执行后才开始写入；complete/cancel 会结束活动 Assignment，waiting-review cancel 会撤回当前 Submission，block 会创建对应 Inbox 来源，每个 Task 都追加独立 Workflow Event。创建、改绑/解除父任务、删除，以及单条/批量 complete/cancel/reopen 和 review accept 都会在同一事务协调受影响的父任务与祖先；start/unblock 还会重算任务自身，使迁移前已经满足子任务条件但未回填的父任务可在后续明确写命令中进入待验收。批量会去重父任务并返回协调后的最终 version。阻塞/取消使用一份 1–1,000 字符统一原因，前端对六种生命周期命令均要求二次确认。批量 API 依靠 expected version 保证重试可判定，不提供单任务命令的 Idempotency-Key 重放响应。
 
 ### 提交
 
@@ -196,7 +214,7 @@ done / cancelled ──reopen──> todo
 - 可以在同一 manifest 中混合 text/link/structured/file；
 - 未被引用、重复引用、一个字段多个文件或额外文本字段均拒绝。
 
-服务端不接受 `produced_by_actor_id`。成功返回 `{data:{task,submission,artifacts,event}}` 并附新版 Task `ETag`。
+服务端不接受 `produced_by_actor_id`。成功返回 `{data:{task,submission,artifacts,event}}` 并附新版 Task `ETag`；该用户入口创建的 Submission 固定 `origin=manual`。
 
 本批次每个 `requires_followup=true` Artifact 都在同一 SQLite 事务中生成一个 `kind=event / source_entity_type=task_artifact` Inbox Item，并追加 system `source_projected` 事件；稳定键为 `task-artifact:<artifact-id>:followup`。快照只含来源导航/解释字段，不含正文或文件。提交或投影任一步失败时 Submission、Artifact、Task 状态、Inbox、事件和幂等快照全部回滚；同一提交幂等重放不重复投影。未标记 Artifact 不创建 Inbox Item。
 
@@ -216,16 +234,16 @@ done / cancelled ──reopen──> todo
 { "decision": "request_changes", "reason": "必须说明返工原因" }
 ```
 
-reason 最长 1,000 字符。只有 manual + waiting_review + current pending Submission + active owner reviewer 可审核。成功返回 `{data:{task,submission,event}}`。
+reason 最长 1,000 字符。只有 manual policy + waiting_review + current pending Submission + active owner reviewer 可审核；这里的 Submission 来源可以是 manual 或 child_rollup。成功返回 `{data:{task,submission,event}}`。owner 接受 child_rollup 后父任务才变 done；要求返工会保留 changes_requested 系统批次并禁止自动覆盖。
 
 ### 历史、详情与下载
 
-| 方法 | 路径                                                                           | 说明                                                                            |
-| ---- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| GET  | `/api/v1/tasks/:id/submissions?page=&page_size=`                               | sequence DESC；每条带 Actor 摘要、Artifact 摘要和总数；包含已软删 Artifact 摘要 |
-| GET  | `/api/v1/tasks/:id/artifacts?page=&page_size=&submission_id=&include_deleted=` | 默认隐藏软删；按批次倒序、position/id 正序                                      |
-| GET  | `/api/v1/artifacts/:id`                                                        | 返回元数据及按类型的正文；软删详情仍 200，但 payload 全为 null                  |
-| GET  | `/api/v1/artifacts/:id/content`                                                | 仅 file；鉴权后校验大小和 SHA-256，再作为 attachment 下载                       |
+| 方法 | 路径                                                                           | 说明                                                                                      |
+| ---- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| GET  | `/api/v1/tasks/:id/submissions?page=&page_size=`                               | sequence DESC；每条带 `origin`、Actor 摘要、Artifact 摘要和总数；包含已软删 Artifact 摘要 |
+| GET  | `/api/v1/tasks/:id/artifacts?page=&page_size=&submission_id=&include_deleted=` | 默认隐藏软删；按批次倒序、position/id 正序                                                |
+| GET  | `/api/v1/artifacts/:id`                                                        | 返回元数据及按类型的正文；软删详情仍 200，但 payload 全为 null                            |
+| GET  | `/api/v1/artifacts/:id/content`                                                | 仅 file；鉴权后校验大小和 SHA-256，再作为 attachment 下载                                 |
 
 两个列表默认 `page=1 / page_size=50`、最大 100，返回 `{data, meta:{page,page_size,total,task_version}}` 和 Task `ETag`。所有 Artifact 摘要和详情都必须带由父 Submission 派生的 `submission_status`；摘要不暴露正文或 `relative_path`。前端依据该必填状态禁用 pending-review 删除，但服务端仍执行最终授权校验。
 
@@ -272,6 +290,8 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 - 新建与详情编辑提供 review policy；详情只有在 todo 且无 current/历史 Submission 时开放修改。
 - 输出编辑器允许 summary 加最多 20 个条目；文件草稿保留浏览器 `File`，不会先复制或上传。
 - waiting_review 展示当前批次和完整 Artifact 摘要，接受与返工互斥；返工原因空白时前端阻止提交。
+- 列表与详情把进度分母显示为直属非取消子任务数，并另列取消数；child_rollup 标记为“子任务汇总”，明确这是系统发起的父任务验收且没有 Artifact，不伪装成人工产出。
+- manual 父任务缺少 assignee 或 builtin owner reviewer 时，产出区提示补齐门禁后才会自动发起；policy none 明确不会因子任务完成自动完成。系统请求、撤回和重开事件及失效原因在时间线中有独立文案。
 - Artifact 正文按需加载；missing/mismatch/deleted/corrupt 响应均有明确提示和重试边界，不将下载错误伪装为成功。
 - 上传与下载的 120 秒传输期间显示 busy 状态并锁定其他 Task 写入；超时或失败保留未提交草稿，不伪造成功。
 - 删除需要确认并填写原因；pending-review 项不显示可执行删除动作。
@@ -301,7 +321,14 @@ schema v23 的 `023_task_artifact_inbox_projection.sql` 不重建 Task/Submissio
 
 schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻塞 Task。它以阻塞后的 Task version 区分每次 block，约束 `source_entity_type=task` 的事件键和最小快照，冻结来源身份；活动来源阻止 Task 硬删除，来源项终态后删除事务先写 `source_deleted_at` 与 Inbox 审计，再删除 Task。
 
-schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入临期窗口的 Task。Sidecar ready 前及运行中每 15 秒扫描状态非终态且截止时间不晚于未来 24 小时的 Task，以 `task:<task-id>:due:<due-at>` 为稳定键；每批最多 100 条且排除已投影截止事实，积压可持续推进。改期形成新截止事实，已生成事项不随完成/取消/改期自动归档。活动来源阻止 Task 删除，来源项终态后复用统一删除协调保留快照。schema v26–v29 的系统维护、Workspace Avatar、Project 完成来源和存储设置迁移不改写 Task 表；下一迁移从 `030_*` 开始。
+schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入临期窗口的 Task。Sidecar ready 前及运行中每 15 秒扫描状态非终态且截止时间不晚于未来 24 小时的 Task，以 `task:<task-id>:due:<due-at>` 为稳定键；每批最多 100 条且排除已投影截止事实，积压可持续推进。改期形成新截止事实，已生成事项不随完成/取消/改期自动归档。活动来源阻止 Task 删除，来源项终态后复用统一删除协调保留快照。schema v26–v29 的系统维护、Workspace Avatar、Project 完成来源和存储设置迁移不改写 Task 表；schema v30 只给 `task_submissions` 增加 `origin` 并新增父任务推进规则，不改变 `tasks` 表字段或既有生命周期状态集合。
+
+schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
+
+- 给 `task_submissions` 增加非空 `origin`，只允许 `manual / child_rollup`；既有行通过默认值保持 manual，不重写其状态、Actor、摘要或时间；
+- 约束 child_rollup 只能由内置 system 创建、必须 `is_inferred=0`，并禁止其拥有 Task Artifact；`origin` 与其他 Submission 身份事实同样不可变；
+- 不在 migration 或 Sidecar 启动时扫描、补写既有父任务层级。只有迁移后的相关 Task/Assignment/review policy 写命令触发事务内 reconciliation；
+- 不改变 Inbox 表或 `inbox_item_tasks.is_required`，不创建 demo 数据。下一迁移只能从 `031_*` 追加。
 
 ## 已验证与后续
 
@@ -321,6 +348,12 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - schema v22→v23 不发明 Inbox 数据；follow-up Artifact 提交/幂等重放/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调和来源快照保留。
 - schema v23→v24 不回填既有 blocked Task；每次 block 的稳定来源、幂等重放、重复阻塞、前端来源上下文、活动删除阻止及终态后 Task 删除协调和快照保留。
 - schema v24→v25 不回填既有 Task；提前 24 小时/启动补偿扫描、逾期分类、稳定 Task+截止时间来源键、100 条批次推进、改期独立来源、事务回滚、前端上下文和 Task 删除协调。
+- schema v29→v30 数据保留、既有 Submission 默认 manual、origin/system/inferred/Artifact 约束、迁移失败回滚、外键完整性和无破坏性迁移门禁。
+- 直属子任务 done/cancelled 口径、零非取消子任务、manual/assignee/builtin owner reviewer 门禁、系统无 Artifact child_rollup、owner accept、失效撤回、blocked 来源更新、changes_requested/manual 不覆盖，以及 accepted 父任务与祖先重开。
+- 创建、改绑、解除父级、删除、单条与批量生命周期、review accept、policy 和 Assignment 变更均在事务内协调；批量去重且返回最终版本，Inbox 显式 required 关系保持独立。
+- 前端 origin/取消计数兼容规范化、“子任务汇总”/门禁/时间线文案、列表与详情的非取消进度展示；typecheck 与定向组件测试覆盖。
+
+已知环境边界：当前自动协调只由迁移后的相关写命令触发，没有全库启动回填；accepted 父任务被系统重开时不会恢复已经结束的 Assignment，需要 owner 重新分派后才能继续人工流转。祖先协调使用 visited 集合防止循环，并沿完整有效祖先链传播。Windows 桌面 Rust 原生测试在未安装 MSVC linker 的主机仍可能无法执行，这不影响已通过的 Go 定向测试和前端 typecheck，但不能据此宣称完整跨平台桌面验收。
 
 仍属后续：其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact、Task 阻塞与 Task 临期来源已经交付。
 
@@ -332,11 +365,13 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - [schema v23 Artifact 来源迁移](../../services/sidecar/internal/database/migrations/023_task_artifact_inbox_projection.sql)
 - [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
 - [schema v25 Task 临期来源迁移](../../services/sidecar/internal/database/migrations/025_task_due_inbox_projection.sql)
+- [schema v30 父任务自动推进迁移](../../services/sidecar/internal/database/migrations/030_task_parent_progress.sql)
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Inbox 来源投影服务](../../services/sidecar/internal/api/inbox_source_projections.go)
 - [Task 临期扫描服务](../../services/sidecar/internal/api/task_due_projections.go)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
+- [父任务自动推进服务](../../services/sidecar/internal/api/task_parent_progress.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)
 - [Task 保存视图 API](../../services/sidecar/internal/api/task_saved_views.go)
 - [schema v17 保存视图迁移](../../services/sidecar/internal/database/migrations/017_task_saved_views.sql)
@@ -350,6 +385,8 @@ schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入�
 - [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
 - [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)
+- [父任务自动推进测试](../../services/sidecar/internal/api/task_parent_progress_test.go)
+- [schema v30 迁移测试](../../services/sidecar/internal/database/task_parent_progress_migration_test.go)
 - [迁移测试](../../services/sidecar/internal/database/task_artifacts_migration_test.go)
 - [Inbox–Task 删除互锁测试](../../services/sidecar/internal/api/inbox_item_tasks_test.go)
 - [前端 D2 测试](../../apps/web/src/components/TaskOutputsSection.test.tsx)

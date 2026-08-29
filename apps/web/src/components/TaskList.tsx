@@ -274,8 +274,15 @@ function TaskRow({
           </span>
           <span className="task-meta">
             {task.subtaskTotal > 0 ? (
-              <span className="task-subtask-progress">
-                {task.subtaskCompleted}/{task.subtaskTotal}
+              <span
+                className="task-subtask-progress"
+                title={`非取消子任务完成 ${task.subtaskCompleted}/${Math.max(0, task.subtaskTotal - (task.subtaskCancelled ?? 0))}${(task.subtaskCancelled ?? 0) > 0 ? `，已取消 ${task.subtaskCancelled}` : ""}`}
+              >
+                {task.subtaskCompleted}/
+                {Math.max(0, task.subtaskTotal - (task.subtaskCancelled ?? 0))}
+                {(task.subtaskCancelled ?? 0) > 0
+                  ? ` · −${task.subtaskCancelled}`
+                  : ""}
               </span>
             ) : null}
             <span className="task-project">
