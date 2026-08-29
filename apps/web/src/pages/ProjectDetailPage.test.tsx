@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
-import type { Project } from "../types/models";
+import type { Project, Task } from "../types/models";
 import { ProjectDetailPage } from "./ProjectDetailPage";
 
 const project: Project = {
@@ -35,6 +35,49 @@ const project: Project = {
 
 const transition = vi.hoisted(() => vi.fn());
 const projectRefetch = vi.hoisted(() => vi.fn());
+
+const rootTask: Task = {
+  id: "task-1",
+  title: "完成首页设计",
+  description: "",
+  kind: "work",
+  status: "in_progress",
+  priority: "P1",
+  projectId: project.id,
+  projectName: project.name,
+  parentTaskId: null,
+  completionCriteria: "",
+  reviewPolicy: "none",
+  blockedReason: null,
+  blockedAt: null,
+  blockedFromStatus: null,
+  dueDate: null,
+  plannedDate: null,
+  estimatedMinutes: 120,
+  actualMinutes: 30,
+  manualOrder: 1,
+  version: 1,
+  subtaskTotal: 1,
+  subtaskCompleted: 0,
+  createdAt: "2026-08-27T08:00:00Z",
+  updatedAt: "2026-08-27T08:00:00Z",
+  completedAt: null,
+  submittedAt: null,
+  reviewedAt: null,
+  currentSubmissionId: null,
+  tags: [],
+};
+
+const childTask: Task = {
+  ...rootTask,
+  id: "task-2",
+  title: "校对移动端间距",
+  parentTaskId: rootTask.id,
+  parentTaskTitle: rootTask.title,
+  subtaskTotal: 0,
+};
+
+let projectTasks: Task[] = [];
 
 vi.mock("../api/hooks", () => ({
   useClientOptionsQuery: () => ({
@@ -135,9 +178,24 @@ vi.mock("../api/hooks", () => ({
     reset: vi.fn(),
   }),
   useTasksQuery: () => ({
-    data: [],
+    data: projectTasks,
     isError: false,
     isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+  useTaskPageQuery: (input: { parentTaskId?: string }) => ({
+    data:
+      input.parentTaskId === rootTask.id
+        ? {
+            items: [childTask],
+            meta: { page: 1, pageSize: 100, total: 1 },
+          }
+        : undefined,
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isPlaceholderData: false,
     isSuccess: true,
     refetch: vi.fn(),
   }),
@@ -170,6 +228,7 @@ describe("ProjectDetailPage", () => {
     transition.mockReset();
     projectRefetch.mockReset();
     project.taskSummary.remaining = 2;
+    projectTasks = [];
   });
 
   afterEach(() => {
@@ -218,6 +277,26 @@ describe("ProjectDetailPage", () => {
       newTaskOpen: true,
       newTaskProjectId: project.id,
     });
+  });
+
+  it("shows project tasks as a hierarchy and can switch to a flat list", () => {
+    projectTasks = [rootTask, childTask];
+    renderPage();
+
+    expect(screen.getByRole("tree")).toBeTruthy();
+    expect(screen.getByText("完成首页设计")).toBeTruthy();
+    expect(screen.queryByText("校对移动端间距")).toBeNull();
+    expect(screen.getByText("2 项 · 1 个根任务")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "展开子任务：完成首页设计" }),
+    );
+    expect(screen.getByText("校对移动端间距")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "平铺列表视图" }));
+    expect(screen.queryByRole("tree")).toBeNull();
+    expect(screen.getByText("2 项")).toBeTruthy();
+    expect(screen.getByText("校对移动端间距")).toBeTruthy();
   });
 
   it("opens confirmation when the server detects newly added open tasks", () => {

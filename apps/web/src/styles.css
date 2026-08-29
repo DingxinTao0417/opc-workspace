@@ -2368,6 +2368,22 @@ kbd {
   font-size: 10px;
 }
 
+.project-task-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.project-task-heading-actions > span {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.project-task-heading-actions .segmented {
+  margin-left: 0;
+}
+
 .project-artifact-heading-actions,
 .project-history-toggle,
 .project-artifact-row,

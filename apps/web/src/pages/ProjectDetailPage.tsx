@@ -4,6 +4,8 @@ import {
   CalendarDays,
   Clock3,
   Edit3,
+  List,
+  ListTree,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -88,7 +90,12 @@ export function ProjectDetailPage() {
   const [confirmAction, setConfirmAction] =
     useState<ProjectTransitionAction | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [taskView, setTaskView] = useState<"tree" | "flat">("tree");
   const project = projectQuery.data;
+  const projectTasks = tasksQuery.data ?? [];
+  const rootProjectTasks = projectTasks.filter(
+    (task) => task.parentTaskId === null,
+  );
   const busy = transitionMutation.isPending || deleteMutation.isPending;
   const operationError =
     errorMessage(transitionMutation.error) ??
@@ -270,7 +277,36 @@ export function ProjectDetailPage() {
             <h2>项目任务</h2>
             <p>进度只从这里的真实任务状态派生，不单独保存百分比。</p>
           </div>
-          <span>{tasksQuery.data?.length ?? 0} 项</span>
+          <div className="project-task-heading-actions">
+            <span>
+              {projectTasks.length} 项
+              {taskView === "tree" && projectTasks.length > 0
+                ? ` · ${rootProjectTasks.length} 个根任务`
+                : ""}
+            </span>
+            <div aria-label="项目任务视图" className="segmented" role="group">
+              <button
+                aria-label="任务树视图"
+                aria-pressed={taskView === "tree"}
+                className={taskView === "tree" ? "segmented-active" : ""}
+                onClick={() => setTaskView("tree")}
+                title="任务树视图"
+                type="button"
+              >
+                <ListTree size={14} />
+              </button>
+              <button
+                aria-label="平铺列表视图"
+                aria-pressed={taskView === "flat"}
+                className={taskView === "flat" ? "segmented-active" : ""}
+                onClick={() => setTaskView("flat")}
+                title="平铺列表视图"
+                type="button"
+              >
+                <List size={14} />
+              </button>
+            </div>
+          </div>
         </div>
         {tasksQuery.isPending ? <SkeletonRows count={4} /> : null}
         {tasksQuery.isError ? (
@@ -299,8 +335,13 @@ export function ProjectDetailPage() {
             title="任务列表为空"
           />
         ) : null}
-        {tasksQuery.data?.length ? (
-          <TaskList live={tasksQuery.isSuccess} tasks={tasksQuery.data} />
+        {projectTasks.length ? (
+          <TaskList
+            hierarchical={taskView === "tree"}
+            live={tasksQuery.isSuccess}
+            showParent={taskView === "flat"}
+            tasks={taskView === "tree" ? rootProjectTasks : projectTasks}
+          />
         ) : null}
       </section>
 
