@@ -3419,10 +3419,19 @@ export function useRoadmapMilestonesQuery(
   });
 }
 
-export function useContentItemsQuery(input: ContentItemListParams = {}) {
-  return useQuery({
-    queryKey: [...contentItemQueryKey, "list", input],
-    queryFn: ({ signal }) => getContentItems(input, signal),
+export function useContentItemsInfiniteQuery(
+  input: Omit<ContentItemListParams, "page"> = {},
+) {
+  const query = { ...input, pageSize: input.pageSize ?? 100 };
+  return useInfiniteQuery({
+    queryKey: [...contentItemQueryKey, "infinite-list", query],
+    queryFn: ({ pageParam, signal }) =>
+      getContentItems({ ...query, page: pageParam }, signal),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
+        ? lastPage.meta.page + 1
+        : undefined,
     placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,

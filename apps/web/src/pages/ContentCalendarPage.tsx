@@ -7,11 +7,11 @@ import {
   Plus,
   Send,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   useCreateContentItem,
   useProjectsQuery,
-  useContentItemsQuery,
+  useContentItemsInfiniteQuery,
   useLinkContentItemTask,
   usePublishContentItem,
   useScheduleContentItem,
@@ -552,14 +552,32 @@ export function ContentCalendarPage() {
   const [dragError, setDragError] = useState<string | null>(null);
   const schedule = useScheduleContentItem();
   const calendar = useMemo(() => calendarForMonth(month), [month]);
-  const query = useContentItemsQuery({
+  const query = useContentItemsInfiniteQuery({
     pageSize: 100,
     scheduledFrom: calendar.from,
     scheduledTo: calendar.to,
     status: status || undefined,
     includeArchived: status === "archived",
   });
-  const items = query.data?.items ?? [];
+  useEffect(() => {
+    if (
+      query.hasNextPage &&
+      !query.isFetchingNextPage &&
+      !query.isFetchNextPageError
+    ) {
+      void query.fetchNextPage();
+    }
+  }, [
+    query.fetchNextPage,
+    query.hasNextPage,
+    query.isFetchNextPageError,
+    query.isFetchingNextPage,
+  ]);
+  const items = useMemo(
+    () => query.data?.pages.flatMap((page) => page.items) ?? [],
+    [query.data?.pages],
+  );
+  const total = query.data?.pages[0]?.meta.total ?? 0;
   const itemsByDate = useMemo(() => {
     const groups = new Map<string, ContentItem[]>();
     for (const item of items) {
@@ -629,7 +647,9 @@ export function ContentCalendarPage() {
             {query.isPending
               ? "读取中"
               : query.isSuccess
-                ? `${query.data.meta.total} 条`
+                ? query.isFetchingNextPage
+                  ? `已读取 ${items.length} / ${total} 条`
+                  : `${total} 条`
                 : "数据不可用"}
           </span>
         }
@@ -676,6 +696,13 @@ export function ContentCalendarPage() {
         <ErrorState
           message="无法读取内容日历，请确认本地服务已连接。"
           onRetry={() => void query.refetch()}
+        />
+      ) : null}
+      {query.isFetchNextPageError ? (
+        <ErrorState
+          message={`已读取 ${items.length} / ${total} 条，后续页面暂时不可用。`}
+          onRetry={() => void query.fetchNextPage()}
+          title="内容日历未完整加载"
         />
       ) : null}
       {query.isPending ? <SkeletonRows count={4} /> : null}

@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.69
+> 文档版本：2.70
 > 日期：2026-08-29
-> 依据：[PRD v9.58](opc-workspace-PRD.md)
+> 依据：[PRD v9.59](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v38
 
-> 2.69 说明：内容日历 CC5-B2 已把当前内容版本的审核/发布到期事实接入 Sidecar 启动补偿、15 秒周期扫描和 Inbox；内容变更会终结旧投影，删除保留来源快照。外部发布仍由 owner 手工完成。
+> 2.70 说明：内容日历 CC6-A 已以稳定 Infinite Query 连续读取六周可见范围的全部 Content Item 页面，月格不再静默截断在 100 条；后续页失败保留已读事实并显式重试。
 
 ## 1. 目的
 

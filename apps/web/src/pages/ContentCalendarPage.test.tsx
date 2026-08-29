@@ -15,7 +15,7 @@ const hooks = vi.hoisted(() => ({
   unlink: vi.fn(),
 }));
 vi.mock("../api/hooks", () => ({
-  useContentItemsQuery: hooks.items,
+  useContentItemsInfiniteQuery: hooks.items,
   useProjectsQuery: hooks.projects,
   useTasksQuery: hooks.tasks,
   useCreateContentItem: () => ({
@@ -80,10 +80,16 @@ describe("ContentCalendarPage", () => {
     hooks.link.mockReset();
     hooks.unlink.mockReset();
     hooks.items.mockReturnValue({
-      data: { items: [item], meta: { page: 1, pageSize: 50, total: 1 } },
+      data: {
+        pages: [{ items: [item], meta: { page: 1, pageSize: 100, total: 1 } }],
+      },
       isError: false,
+      isFetchNextPageError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
       isPending: false,
       isSuccess: true,
+      fetchNextPage: vi.fn(),
       refetch: vi.fn(),
     });
     hooks.projects.mockReturnValue({ data: { items: [] }, isPending: false });
@@ -165,5 +171,72 @@ describe("ContentCalendarPage", () => {
         }),
       }),
     );
+  });
+
+  it("automatically advances through all visible-range pages", () => {
+    const fetchNextPage = vi.fn();
+    hooks.items.mockReturnValue({
+      data: {
+        pages: [
+          {
+            items: [item],
+            meta: { page: 1, pageSize: 100, total: 101 },
+          },
+        ],
+      },
+      isError: false,
+      isFetchNextPageError: false,
+      isFetchingNextPage: false,
+      hasNextPage: true,
+      isPending: false,
+      isSuccess: true,
+      fetchNextPage,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders items collected from every loaded page", () => {
+    const secondItem = {
+      ...item,
+      id: "content-2",
+      title: "跨页内容",
+      scheduledAt: "2026-09-05T01:00:00Z",
+    };
+    hooks.items.mockReturnValue({
+      data: {
+        pages: [
+          {
+            items: [item],
+            meta: { page: 1, pageSize: 1, total: 2 },
+          },
+          {
+            items: [secondItem],
+            meta: { page: 2, pageSize: 1, total: 2 },
+          },
+        ],
+      },
+      isError: false,
+      isFetchNextPageError: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      isPending: false,
+      isSuccess: true,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("发布产品更新")).toBeTruthy();
+    expect(screen.getByText("跨页内容")).toBeTruthy();
+    expect(screen.getByText("2 条")).toBeTruthy();
   });
 });
