@@ -50,8 +50,8 @@ func TestInboxOrchestrationMigrationPreservesV14Facts(t *testing.T) {
 		t.Fatalf("upgrade v14 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 37 {
-		t.Fatalf("SchemaVersion = %d, want 37", store.SchemaVersion)
+	if store.SchemaVersion != 38 {
+		t.Fatalf("SchemaVersion = %d, want 38", store.SchemaVersion)
 	}
 	var preserved models.InboxItem
 	if err := store.DB.First(&preserved, "id = ?", item.ID).Error; err != nil {

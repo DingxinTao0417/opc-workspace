@@ -1,6 +1,6 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v37（2026-08-29）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v38（2026-08-29）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
@@ -172,7 +172,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v37：
+当前 schema v38：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -181,7 +181,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实；schema v30 以非破坏性迁移给 `task_submissions` 增加 `origin=manual/child_rollup`；schema v31 以非破坏性部分唯一索引约束 `project_workflow_event` Client Activity 来源；schema v32 为 Reminder 增加稳定系列、重复规则和 occurrence 约束；schema v33 新增 Automation Rule 与不可变 Automation Run/重试事实表；schema v34 新增空的 `agent_adapters` 及代码所有身份、启停、诊断、隔离和就绪约束；schema v35 新增本地 `client_followups` 计划/终态、负责人、版本和客户历史保护约束；schema v36 新增空的路线图里程碑与项目关联，目标日期必须位于明确季度且关联项目不可被静默删除；schema v37 新增空的内容条目、准备 Task 关联、计划时区与本地发布确认约束。v34 不登记 Adapter，也不创建 agent Actor/Assignment/Run；v35 不创建回访计划；v36 不创建里程碑；v37 不创建内容条目。后续迁移从 `038_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实；schema v30 以非破坏性迁移给 `task_submissions` 增加 `origin=manual/child_rollup`；schema v31 以非破坏性部分唯一索引约束 `project_workflow_event` Client Activity 来源；schema v32 为 Reminder 增加稳定系列、重复规则和 occurrence 约束；schema v33 新增 Automation Rule 与不可变 Automation Run/重试事实表；schema v34–v37 依次新增 Agent Adapter、Client Followup、Roadmap 和 Content Item 数据契约；schema v38 增加 Content Item→Inbox 的版本化来源、去重与删除协调约束。v34–v38 迁移均不创建业务 demo 数据或内容 Inbox 投影。后续迁移从 `039_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；

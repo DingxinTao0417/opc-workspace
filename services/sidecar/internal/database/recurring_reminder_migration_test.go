@@ -27,8 +27,8 @@ func TestRecurringReminderMigrationUpgradesV31WithoutChangingOneTimeFacts(t *tes
 		t.Fatalf("upgrade v31 Reminder database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 37 {
-		t.Fatalf("SchemaVersion = %d, want 37", store.SchemaVersion)
+	if store.SchemaVersion != 38 {
+		t.Fatalf("SchemaVersion = %d, want 38", store.SchemaVersion)
 	}
 	var seriesID, recurrenceType, recurrenceTimezone string
 	var recurrenceInterval, occurrenceNumber int
