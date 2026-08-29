@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.47
+> **一人公司操作系统** · PRD v9.48
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v35
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v36
 
-> **v9.47 更新说明**：修正 PRD 总览中的历史遗留状态：固定原生快捷键及其运行诊断已交付；schema v35 的本地 Client Followup 已有客户详情、Today 和 Inbox 入口；Focus 设置已使用 SQLite。自定义快捷键、托盘/通知、外部客户来源和财务仍为后续。无代码、迁移、外发消息或 AI/LLM 变更。
+> **v9.48 更新说明**：路线图 R2 起点已交付 schema v36：空的里程碑及项目关联、季度/目标日期一致性、归档来源、乐观版本和项目删除保护；业务导入导出纳入两表。路线图 API/界面、拖拽与 Inbox 自动化仍待。无 AI/LLM、外发或 demo 数据。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -881,7 +881,7 @@ v0.1 第一版可配置：
 
 ### 5.8 路线图与内容日历
 
-> **当前状态**：两个路由均为明确的“后续版本”占位页，无表、API 或业务交互；目标版本为 v0.3。
+> **当前状态**：两个路由仍为明确的“后续版本”占位页。路线图 R2 已新增 schema v36 的空表与项目关联数据契约，但尚无 API 或业务交互；内容日历仍无表、API 或业务交互。目标版本为 v0.3。
 
 #### 路线图
 
@@ -2518,5 +2518,6 @@ pnpm build:desktop
 | v9.45    | 2026-08-29 | 客户回访 C6 陈旧草稿收口：客户详情在本窗口表单打开期间若重新读取到 `inactive`，立刻关闭新增、编辑或重排草稿并移除下一次计划选项；历史计划仍可完成、跳过或确认取消，Sidecar 继续作为最终写入门禁。无外发、无 AI、无 migration。app v0.1.0/API v1/schema v35 不变。 |
 | v9.46    | 2026-08-29 | 文档基线校准：任务、项目、设置、Focus、桌面、Inbox、本地 Agent 和发票模块统一标明当前 SQLite schema v35；schema v35 只新增 Client Followup，不改变这些模块既有数据/API 契约。无代码、迁移、外发或 AI/LLM 变更。 |
 | v9.47    | 2026-08-29 | 修正 PRD 总览遗留状态：固定原生快捷键及运行诊断、schema v35 本地客户回访详情/Today/Inbox 入口、Focus 的 SQLite 设置均已交付；自定义快捷键、托盘/通知、外部客户来源和财务仍为后续。无代码、迁移、外发或 AI/LLM 变更。 |
+| v9.48    | 2026-08-29 | 路线图 R2 数据契约起点：schema v36 新增空的 Roadmap Milestone/Project 关联、季度/目标日期一致性、归档来源、版本步进和项目删除保护；业务导入导出纳入两表。API/界面、拖拽和 Inbox 自动化仍待。无 AI/LLM、外发或 demo 数据。 |
 | v9.32    | 2026-08-29 | 交付客户回访 C5 客户详情只读时间线：React 通过 `GET /api/v1/clients/:id/followups` 严格校验、分页显示计划/终态、优先级、负责人、结果、下一步与页面派生逾期状态，并提供加载、空和错误重试；不显示未接入的创建/执行按钮。Today、Inbox 反向入口和执行页面仍待。app v0.1.0/API v1/schema v35 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | v9.31    | 2026-08-29 | 交付客户回访 C5 到期 Inbox 投影：启动及周期扫描读取到期 planned 回访，以 `followup:<id>:due:<version>` 创建本地 Inbox 事件并追加 `client_followup_due` 审计；重复扫描幂等，终态计划不投影。Today、详情时间线和页面执行入口仍待。app v0.1.0/API v1/schema v35 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

@@ -33,8 +33,8 @@ func TestTaskBlockedInboxProjectionMigrationGuardsSourceLifecycle(t *testing.T) 
 		t.Fatalf("upgrade v23 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 35 {
-		t.Fatalf("SchemaVersion = %d, want 35", store.SchemaVersion)
+	if store.SchemaVersion != 36 {
+		t.Fatalf("SchemaVersion = %d, want 36", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM inbox_items"); got != 0 {
 		t.Fatalf("migration invented %d Inbox Items", got)

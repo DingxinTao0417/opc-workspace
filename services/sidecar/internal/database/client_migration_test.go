@@ -39,8 +39,8 @@ func TestClientFactsMigrationUpgradesV9AndPropagatesAggregateVersions(t *testing
 		t.Fatalf("upgrade v9 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 35 {
-		t.Fatalf("SchemaVersion = %d, want 35", store.SchemaVersion)
+	if store.SchemaVersion != 36 {
+		t.Fatalf("SchemaVersion = %d, want 36", store.SchemaVersion)
 	}
 
 	for _, clientID := range []string{v9ClientOneID, v9ClientTwoID} {

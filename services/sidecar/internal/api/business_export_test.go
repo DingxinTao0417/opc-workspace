@@ -54,6 +54,18 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if err := store.DB.Exec(`
 		INSERT INTO projects(id, name, status, version, created_at, updated_at)
 		VALUES ('018f0000-0000-7000-8000-000000001706', 'Exported Project', 'in_progress', 1, '2026-08-28T08:00:00Z', '2026-08-28T08:00:00Z');
+		INSERT INTO roadmap_milestones(
+			id, title, year, quarter, target_date, status, manual_order,
+			version, created_at, updated_at
+		) VALUES (
+			'018f0000-0000-7000-8000-000000001709', 'Exported milestone', 2026, 3,
+			'2026-08-28', 'active', 10, 1, '2026-08-28T08:00:00Z', '2026-08-28T08:00:00Z'
+		);
+		INSERT INTO roadmap_milestone_projects(milestone_id, project_id, linked_at)
+		VALUES (
+			'018f0000-0000-7000-8000-000000001709',
+			'018f0000-0000-7000-8000-000000001706', '2026-08-28T08:00:00Z'
+		);
 		INSERT INTO project_notes(
 			id, project_id, title, body, occurred_at, created_by_actor_id,
 			version, created_at, updated_at
@@ -172,6 +184,12 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if notes := tables["project_notes"]; len(notes.Rows) != 1 {
 		t.Fatalf("Project notes were not exported: %#v", notes)
+	}
+	if milestones := tables["roadmap_milestones"]; len(milestones.Rows) != 1 {
+		t.Fatalf("Roadmap milestone was not exported: %#v", milestones)
+	}
+	if links := tables["roadmap_milestone_projects"]; len(links.Rows) != 1 {
+		t.Fatalf("Roadmap milestone project link was not exported: %#v", links)
 	}
 	if avatars := tables["workspace_avatars"]; len(avatars.Rows) != 1 {
 		t.Fatalf("Workspace avatar metadata was not exported: %#v", avatars)
