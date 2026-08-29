@@ -92,11 +92,23 @@ func TestListFocusSessionsFiltersAndPaginatesTerminalHistory(t *testing.T) {
 func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T) {
 	clock := &focusTestClock{now: time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)}
 	router, store := newFocusTestAPI(t, clock)
+	projectID := uuid.NewString()
+	taskID := uuid.NewString()
+	if _, err := store.SQL.Exec(`
+		INSERT INTO projects(id, name, status, created_at, updated_at)
+		VALUES (?, 'Client delivery', 'in_progress', '2026-03-01T08:00:00Z', '2026-03-01T08:00:00Z')
+	`, projectID); err != nil {
+		t.Fatalf("seed Focus report project: %v", err)
+	}
+	seedFocusTask(t, store, taskID, "todo", 0)
+	if _, err := store.SQL.Exec("UPDATE tasks SET project_id = ? WHERE id = ?", projectID, taskID); err != nil {
+		t.Fatalf("assign Focus report task project: %v", err)
+	}
 	firstID := uuid.NewString()
 	secondID := uuid.NewString()
 	cancelledID := uuid.NewString()
 	// America/Los_Angeles: this interval crosses local midnight from Mar 7 to Mar 8.
-	seedTerminalFocusSession(t, store, firstID, nil, "completed", "2026-03-08T07:50:00Z", "2026-03-08T08:10:00Z", 1200)
+	seedTerminalFocusSession(t, store, firstID, &taskID, "completed", "2026-03-08T07:50:00Z", "2026-03-08T08:10:00Z", 1200)
 	seedTerminalFocusSession(t, store, secondID, nil, "completed", "2026-03-09T12:00:00Z", "2026-03-09T12:30:00Z", 1800)
 	seedTerminalFocusSession(t, store, cancelledID, nil, "cancelled", "2026-03-10T12:00:00Z", "2026-03-10T12:20:00Z", 1200)
 
@@ -125,6 +137,11 @@ func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T)
 	}
 	if stats.CurrentStreakDays != 0 || stats.LongestStreakDays != 3 {
 		t.Fatalf("Focus streaks current=%d longest=%d", stats.CurrentStreakDays, stats.LongestStreakDays)
+	}
+	if len(stats.Projects) != 2 || stats.Projects[0].ProjectID != nil || stats.Projects[0].Seconds != 1800 ||
+		stats.Projects[1].ProjectID == nil || *stats.Projects[1].ProjectID != projectID || stats.Projects[1].ProjectName == nil ||
+		*stats.Projects[1].ProjectName != "Client delivery" || stats.Projects[1].Seconds != 1200 {
+		t.Fatalf("Focus project distribution=%#v", stats.Projects)
 	}
 }
 

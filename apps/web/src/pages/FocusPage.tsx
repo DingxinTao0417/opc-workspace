@@ -679,40 +679,78 @@ export function FocusPage() {
                       </span>
                     </div>
                   ) : (
-                    <div
-                      className="focus-bars"
-                      aria-label="每日专注分钟数"
-                      style={
-                        {
-                          "--focus-days": focusReport.data.days.length,
-                        } as React.CSSProperties
-                      }
-                    >
-                      {focusReport.data.days.map((day) => {
-                        const maxMinutes = Math.max(
-                          ...focusReport.data.days.map((item) => item.minutes),
-                          1,
-                        );
-                        return (
-                          <div className="focus-bar-column" key={day.date}>
-                            <span>{day.minutes || ""}</span>
+                    <>
+                      <div
+                        className="focus-bars"
+                        aria-label="每日专注分钟数"
+                        style={
+                          {
+                            "--focus-days": focusReport.data.days.length,
+                          } as React.CSSProperties
+                        }
+                      >
+                        {focusReport.data.days.map((day) => {
+                          const maxMinutes = Math.max(
+                            ...focusReport.data.days.map(
+                              (item) => item.minutes,
+                            ),
+                            1,
+                          );
+                          return (
+                            <div className="focus-bar-column" key={day.date}>
+                              <span>{day.minutes || ""}</span>
+                              <div>
+                                <i
+                                  style={{
+                                    height: `${Math.max((day.minutes / maxMinutes) * 100, day.minutes ? 8 : 2)}%`,
+                                  }}
+                                />
+                              </div>
+                              <small>
+                                {focusReportDayLabel(
+                                  day.date,
+                                  focusReport.data.days.length,
+                                )}
+                              </small>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div
+                        aria-label="项目专注时间分布"
+                        className="focus-project-distribution"
+                      >
+                        <div className="focus-project-distribution-heading">
+                          <strong>项目分布</strong>
+                          <span>按任务当前归属统计</span>
+                        </div>
+                        {focusReport.data.projects.map((project) => (
+                          <article key={project.projectId ?? "unassigned"}>
                             <div>
+                              <strong>
+                                {project.projectName ?? "未归项目"}
+                              </strong>
+                              <span>
+                                {project.sessions} 个专注块 · {project.minutes}{" "}
+                                分钟
+                              </span>
+                            </div>
+                            <div className="focus-project-distribution-track">
                               <i
                                 style={{
-                                  height: `${Math.max((day.minutes / maxMinutes) * 100, day.minutes ? 8 : 2)}%`,
+                                  width: `${Math.max(
+                                    (project.seconds /
+                                      focusReport.data.totals.seconds) *
+                                      100,
+                                    2,
+                                  )}%`,
                                 }}
                               />
                             </div>
-                            <small>
-                              {focusReportDayLabel(
-                                day.date,
-                                focusReport.data.days.length,
-                              )}
-                            </small>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          </article>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </>
               ) : null}

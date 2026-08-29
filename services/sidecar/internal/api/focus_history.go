@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,21 +25,32 @@ type focusPeriodDay struct {
 	Minutes  int    `json:"minutes"`
 }
 
+type focusPeriodProject struct {
+	ProjectID   *string `json:"project_id"`
+	ProjectName *string `json:"project_name"`
+	Sessions    int     `json:"sessions"`
+	Seconds     int64   `json:"seconds"`
+	Minutes     int     `json:"minutes"`
+}
+
 type focusPeriodStatsResponse struct {
-	DateFrom          string           `json:"date_from"`
-	DateTo            string           `json:"date_to"`
-	Timezone          string           `json:"timezone"`
-	Totals            focusStats       `json:"totals"`
-	Days              []focusPeriodDay `json:"days"`
-	CurrentStreakDays int              `json:"current_streak_days"`
-	LongestStreakDays int              `json:"longest_streak_days"`
+	DateFrom          string               `json:"date_from"`
+	DateTo            string               `json:"date_to"`
+	Timezone          string               `json:"timezone"`
+	Totals            focusStats           `json:"totals"`
+	Days              []focusPeriodDay     `json:"days"`
+	Projects          []focusPeriodProject `json:"projects"`
+	CurrentStreakDays int                  `json:"current_streak_days"`
+	LongestStreakDays int                  `json:"longest_streak_days"`
 }
 
 type completedFocusInterval struct {
-	SessionID       string `gorm:"column:session_id"`
-	StartedAt       string `gorm:"column:started_at"`
-	EndedAt         string `gorm:"column:ended_at"`
-	DurationSeconds int64  `gorm:"column:duration_seconds"`
+	SessionID       string  `gorm:"column:session_id"`
+	StartedAt       string  `gorm:"column:started_at"`
+	EndedAt         string  `gorm:"column:ended_at"`
+	DurationSeconds int64   `gorm:"column:duration_seconds"`
+	ProjectID       *string `gorm:"column:project_id"`
+	ProjectName     *string `gorm:"column:project_name"`
 }
 
 func (a *API) listFocusSessions(c *gin.Context) {
@@ -157,9 +169,12 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	rangeEndUTC := localEnd.AddDate(0, 0, 1).UTC()
 	var intervals []completedFocusInterval
 	if err := a.db.WithContext(c.Request.Context()).Raw(`
-		SELECT interval.session_id, interval.started_at, interval.ended_at, interval.duration_seconds
+		SELECT interval.session_id, interval.started_at, interval.ended_at, interval.duration_seconds,
+		       task.project_id, project.name AS project_name
 		FROM focus_session_intervals AS interval
 		JOIN focus_sessions AS session ON session.id = interval.session_id
+		LEFT JOIN tasks AS task ON task.id = session.task_id
+		LEFT JOIN projects AS project ON project.id = task.project_id
 		WHERE session.status = 'completed'
 		  AND interval.ended_at IS NOT NULL
 		  AND interval.duration_seconds > 0
@@ -209,10 +224,73 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	for _, day := range days {
 		totalSeconds += day.Seconds
 	}
+	type projectAccumulator struct {
+		projectID   *string
+		projectName *string
+		sessions    map[string]struct{}
+		seconds     int64
+	}
+	projectsByID := make(map[string]*projectAccumulator)
+	for _, interval := range intervals {
+		overlapSeconds, overlapErr := focusIntervalOverlapSeconds(interval, rangeStartUTC, rangeEndUTC)
+		if overlapErr != nil {
+			writeDatabaseError(c)
+			return
+		}
+		if overlapSeconds == 0 {
+			continue
+		}
+		key := ""
+		if interval.ProjectID != nil {
+			key = *interval.ProjectID
+		}
+		project := projectsByID[key]
+		if project == nil {
+			project = &projectAccumulator{
+				projectID: interval.ProjectID, projectName: interval.ProjectName,
+				sessions: make(map[string]struct{}),
+			}
+			projectsByID[key] = project
+		}
+		project.seconds += overlapSeconds
+		project.sessions[interval.SessionID] = struct{}{}
+	}
+	projects := make([]focusPeriodProject, 0, len(projectsByID))
+	for _, project := range projectsByID {
+		projects = append(projects, focusPeriodProject{
+			ProjectID: project.projectID, ProjectName: project.projectName,
+			Sessions: len(project.sessions), Seconds: project.seconds, Minutes: int(project.seconds / 60),
+		})
+	}
+	sort.Slice(projects, func(left, right int) bool {
+		if projects[left].Seconds != projects[right].Seconds {
+			return projects[left].Seconds > projects[right].Seconds
+		}
+		leftName := ""
+		rightName := ""
+		if projects[left].ProjectName != nil {
+			leftName = *projects[left].ProjectName
+		}
+		if projects[right].ProjectName != nil {
+			rightName = *projects[right].ProjectName
+		}
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		leftID := ""
+		rightID := ""
+		if projects[left].ProjectID != nil {
+			leftID = *projects[left].ProjectID
+		}
+		if projects[right].ProjectID != nil {
+			rightID = *projects[right].ProjectID
+		}
+		return leftID < rightID
+	})
 	c.JSON(http.StatusOK, gin.H{"data": focusPeriodStatsResponse{
 		DateFrom: dateFrom, DateTo: dateTo, Timezone: location.String(),
 		Totals: focusStats{Sessions: len(totalSessions), Seconds: totalSeconds, Minutes: int(totalSeconds / 60)},
-		Days:   days, CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
+		Days:   days, Projects: projects, CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
 	}})
 }
 

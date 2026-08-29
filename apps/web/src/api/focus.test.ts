@@ -219,6 +219,15 @@ describe("focus API contract", () => {
           days: [
             { date: "2026-08-28", sessions: 1, seconds: 1500, minutes: 25 },
           ],
+          projects: [
+            {
+              project_id: "project-1",
+              project_name: "客户门户",
+              sessions: 2,
+              seconds: 3000,
+              minutes: 50,
+            },
+          ],
           current_streak_days: 1,
           longest_streak_days: 2,
         },
@@ -237,6 +246,13 @@ describe("focus API contract", () => {
       totals: { sessions: 2, seconds: 3000, minutes: 50 },
       currentStreakDays: 1,
       longestStreakDays: 2,
+      projects: [
+        expect.objectContaining({
+          projectId: "project-1",
+          projectName: "客户门户",
+          minutes: 50,
+        }),
+      ],
     });
   });
 });

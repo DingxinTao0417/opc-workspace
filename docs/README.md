@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v28。Project/Task/Actor、Client 本地事实、Focus（含可选日期范围回顾）、Today、设置与受控工作区头像、统一本地搜索、备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败的来源投影已接通；Focus 高级分析/原生反馈、客户外部来源、完整日志/恢复页、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v28。Project/Task/Actor、Client 本地事实、Focus（含日期范围回顾与项目时间分布）、Today、设置与受控工作区头像、统一本地搜索、备份恢复/业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败的来源投影已接通；Focus 标签分布/热力图/最佳时段/原生反馈、客户外部来源、完整日志/恢复页、重复/原生通知、本地 Agent、数据导入/含文件导出、回访/财务仍是规划。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v7.8）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v7.9）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。

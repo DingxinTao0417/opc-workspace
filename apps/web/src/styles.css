@@ -4069,6 +4069,58 @@ kbd {
   white-space: nowrap;
 }
 
+.focus-project-distribution {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.focus-project-distribution-heading,
+.focus-project-distribution article > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.focus-project-distribution-heading strong,
+.focus-project-distribution article strong {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-project-distribution-heading span,
+.focus-project-distribution article span {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.focus-project-distribution article {
+  display: grid;
+  gap: 5px;
+}
+
+.focus-project-distribution-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+
+.focus-project-distribution-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-light));
+}
+
 .focus-empty-inline {
   display: flex;
   min-height: 112px;

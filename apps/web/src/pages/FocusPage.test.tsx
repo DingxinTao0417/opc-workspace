@@ -50,6 +50,7 @@ const mocks = vi.hoisted(() => ({
         seconds: 0,
         minutes: 0,
       })),
+      projects: [],
       currentStreakDays: 0,
       longestStreakDays: 0,
     } as FocusReport,
@@ -170,6 +171,22 @@ describe("FocusPage", () => {
     mocks.reportQuery.data = {
       ...mocks.reportQuery.data,
       totals: { sessions: 3, seconds: 4500, minutes: 75 },
+      projects: [
+        {
+          projectId: "project-1",
+          projectName: "客户门户",
+          sessions: 2,
+          seconds: 3000,
+          minutes: 50,
+        },
+        {
+          projectId: null,
+          projectName: null,
+          sessions: 1,
+          seconds: 1500,
+          minutes: 25,
+        },
+      ],
       currentStreakDays: 2,
       longestStreakDays: 4,
     };
@@ -200,6 +217,9 @@ describe("FocusPage", () => {
     expect(screen.getByText("整理交付")).toBeInTheDocument();
     expect(screen.getByText("25:00")).toBeInTheDocument();
     expect(screen.getByText("4 天")).toBeInTheDocument();
+    expect(screen.getByText("客户门户")).toBeInTheDocument();
+    expect(screen.getByText("未归项目")).toBeInTheDocument();
+    expect(screen.getByText("2 个专注块 · 50 分钟")).toBeInTheDocument();
   });
 
   it("switches local report ranges without changing active focus state", () => {

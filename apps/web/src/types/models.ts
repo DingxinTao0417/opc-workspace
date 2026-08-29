@@ -554,6 +554,14 @@ export interface FocusReportDay {
   minutes: number;
 }
 
+export interface FocusReportProject {
+  projectId: string | null;
+  projectName: string | null;
+  sessions: number;
+  seconds: number;
+  minutes: number;
+}
+
 export interface FocusReport {
   dateFrom: string;
   dateTo: string;
@@ -564,6 +572,7 @@ export interface FocusReport {
     minutes: number;
   };
   days: FocusReportDay[];
+  projects: FocusReportProject[];
   currentStreakDays: number;
   longestStreakDays: number;
 }

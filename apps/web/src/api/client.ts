@@ -2188,7 +2188,12 @@ export function normalizeFocusSessionListResult(
 export function normalizeFocusReport(payload: unknown): FocusReport {
   const body =
     isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
-  if (!isRecord(body) || !isRecord(body.totals) || !Array.isArray(body.days)) {
+  if (
+    !isRecord(body) ||
+    !isRecord(body.totals) ||
+    !Array.isArray(body.days) ||
+    !Array.isArray(body.projects)
+  ) {
     return invalidResponse("专注周期统计响应格式无效");
   }
   const dateFrom = stringField(body, "date_from", "dateFrom");
@@ -2215,6 +2220,25 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
         sessions: nonNegativeInteger(item.sessions, "每日专注块数"),
         seconds: nonNegativeInteger(item.seconds, "每日专注秒数"),
         minutes: nonNegativeInteger(item.minutes, "每日专注分钟数"),
+      };
+    }),
+    projects: body.projects.map((item) => {
+      if (!isRecord(item)) return invalidResponse("专注项目统计响应格式无效");
+      const projectId = nullableString(
+        fieldValue(item, "project_id", "projectId"),
+      );
+      const projectName = nullableString(
+        fieldValue(item, "project_name", "projectName"),
+      );
+      if ((projectId === null) !== (projectName === null)) {
+        return invalidResponse("专注项目统计响应格式无效");
+      }
+      return {
+        projectId,
+        projectName,
+        sessions: nonNegativeInteger(item.sessions, "项目专注块数"),
+        seconds: nonNegativeInteger(item.seconds, "项目专注秒数"),
+        minutes: nonNegativeInteger(item.minutes, "项目专注分钟数"),
       };
     }),
     currentStreakDays: nonNegativeInteger(
