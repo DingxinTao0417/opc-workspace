@@ -4086,16 +4086,65 @@ export function normalizeProjectArtifactItem(
   if (!taskId || !title || taskId !== artifact.taskId) {
     return invalidResponse("项目产出任务上下文不一致");
   }
+  const rawFollowup = value.followup;
+  let followup: ProjectArtifactItem["followup"] = null;
+  if (rawFollowup !== null) {
+    if (!isRecord(rawFollowup)) {
+      return invalidResponse("项目产出跟进响应格式无效");
+    }
+    const inboxItemId = stringField(
+      rawFollowup,
+      "inbox_item_id",
+      "inboxItemId",
+    );
+    const status = asInboxItemStatus(rawFollowup.status);
+    const inboxItemVersion = positiveInteger(
+      fieldValue(rawFollowup, "inbox_item_version", "inboxItemVersion"),
+      "项目产出跟进版本",
+    );
+    const resolutionPolicy = fieldValue(
+      rawFollowup,
+      "resolution_policy",
+      "resolutionPolicy",
+    );
+    const sourceDeletedAt = requiredNullableString(
+      fieldValue(rawFollowup, "source_deleted_at", "sourceDeletedAt"),
+      "项目产出跟进来源删除时间",
+    );
+    if (
+      !inboxItemId ||
+      (resolutionPolicy !== "manual" &&
+        resolutionPolicy !== "all_required_tasks_done") ||
+      (sourceDeletedAt !== null &&
+        status !== "resolved" &&
+        status !== "dismissed")
+    ) {
+      return invalidResponse("项目产出跟进响应不一致");
+    }
+    followup = {
+      inboxItemId,
+      inboxItemVersion,
+      status,
+      resolutionPolicy,
+      sourceDeletedAt,
+      progress: normalizeInboxTaskProgress(rawFollowup.progress),
+    };
+  }
+  if (!artifact.requiresFollowup && followup !== null) {
+    return invalidResponse("无需跟进的项目产出不能关联跟进事项");
+  }
   return {
     artifact,
     task: { id: taskId, title, status },
     submissionSequence,
+    followup,
   };
 }
 
 export async function getProjectArtifacts(
   projectId: string,
   input: ProjectArtifactListParams = {},
+  signal?: AbortSignal,
 ): Promise<ProjectArtifactListResult> {
   const params = new URLSearchParams({
     page: String(input.page ?? 1),
@@ -4106,28 +4155,37 @@ export async function getProjectArtifacts(
   }
   const payload = await apiRequest<unknown>(
     `/api/v1/projects/${encodeURIComponent(projectId)}/artifacts?${params}`,
+    { signal },
   );
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
     return invalidResponse("项目产出列表响应格式无效");
   }
   const items = payload.data.map(normalizeProjectArtifactItem);
   const meta = isRecord(payload.meta) ? payload.meta : {};
+  const page = positiveInteger(meta.page, "项目产出页码");
+  const pageSize = positiveInteger(
+    fieldValue(meta, "page_size", "pageSize"),
+    "项目产出每页数量",
+  );
+  const total = nonNegativeInteger(meta.total, "项目产出总数");
   if (
     items.some((item) => item.artifact.taskId !== item.task.id) ||
     (!input.includeDeleted &&
-      items.some((item) => item.artifact.deletedAt !== null))
+      items.some((item) => item.artifact.deletedAt !== null)) ||
+    page !== (input.page ?? 1) ||
+    pageSize !== (input.pageSize ?? 20) ||
+    items.length > pageSize ||
+    items.length > total ||
+    items.length > Math.max(0, total - (page - 1) * pageSize)
   ) {
     return invalidResponse("项目产出列表响应与请求不一致");
   }
   return {
     items,
     meta: {
-      page: positiveInteger(meta.page, "项目产出页码"),
-      pageSize: positiveInteger(
-        fieldValue(meta, "page_size", "pageSize"),
-        "项目产出每页数量",
-      ),
-      total: nonNegativeInteger(meta.total, "项目产出总数"),
+      page,
+      pageSize,
+      total,
       projectVersion: positiveInteger(
         fieldValue(meta, "project_version", "projectVersion"),
         "项目版本",

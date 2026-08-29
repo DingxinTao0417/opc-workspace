@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "../types/models";
 import { InboxTaskOrchestrationModal } from "./InboxTaskOrchestrationModal";
 
+const sourceProjectId = "018f0000-0000-7000-8000-000000000901";
+
 const item: InboxItem = {
   id: "inbox-1",
   kind: "manual",
@@ -71,6 +73,7 @@ vi.mock("./ProjectSelect", () => ({
     >
       <option value="">{emptyLabel}</option>
       <option value="project-1">官网发布</option>
+      <option value={sourceProjectId}>来源项目</option>
     </select>
   ),
 }));
@@ -131,6 +134,11 @@ describe("InboxTaskOrchestrationModal", () => {
         "owner-1",
       ),
     );
+    expect(
+      screen.getAllByRole("option", {
+        name: "外部协作者（仅本地责任记录）",
+      }),
+    ).not.toHaveLength(0);
     fireEvent.change(screen.getByLabelText("任务名称"), {
       target: { value: "准备发布资料" },
     });
@@ -146,6 +154,8 @@ describe("InboxTaskOrchestrationModal", () => {
     });
     const reviews = screen.getAllByLabelText("验收");
     fireEvent.change(reviews[1], { target: { value: "manual" } });
+    const criteria = screen.getAllByLabelText("完成条件");
+    fireEvent.change(criteria[1], { target: { value: "客户确认已上线" } });
 
     fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
 
@@ -169,10 +179,65 @@ describe("InboxTaskOrchestrationModal", () => {
           assigneeActorId: "person-1",
           projectId: "project-1",
           reviewPolicy: "manual",
+          completionCriteria: "客户确认已上线",
           isRequired: true,
         },
       ],
     });
+  });
+
+  it("inherits a trusted source Project for every draft and still allows clearing it", async () => {
+    const followupItem: InboxItem = {
+      ...item,
+      id: "inbox-followup",
+      kind: "event",
+      sourceEntityType: "task_artifact",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000902",
+      sourceEventKey:
+        "task-artifact:018f0000-0000-7000-8000-000000000902:followup",
+      payloadJson: { project_id: sourceProjectId },
+    };
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={followupItem}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText("第 1 个任务项目") as HTMLSelectElement).value,
+      ).toBe(sourceProjectId),
+    );
+    expect(screen.getByText(/已从来源带入项目/)).toBeVisible();
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "整理交付清单" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
+    const projectInputs = screen.getAllByLabelText(/第 \d+ 个任务项目/);
+    expect((projectInputs[1] as HTMLSelectElement).value).toBe(sourceProjectId);
+    fireEvent.change(projectInputs[0], { target: { value: "" } });
+    fireEvent.change(screen.getAllByLabelText("任务名称")[1], {
+      target: { value: "客户确认交付" },
+    });
+    fireEvent.change(screen.getAllByLabelText("完成条件")[1], {
+      target: { value: "客户书面确认" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
+
+    expect(mocks.split.mutate.mock.calls[0][0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "整理交付清单", projectId: null }),
+        expect.objectContaining({
+          title: "客户确认交付",
+          projectId: sourceProjectId,
+          completionCriteria: "客户书面确认",
+        }),
+      ]),
+    );
   });
 
   it("keeps the draft visible when the transaction fails", async () => {
@@ -229,5 +294,35 @@ describe("InboxTaskOrchestrationModal", () => {
       "自动解决策略至少需要一项必需任务",
     );
     expect(mocks.split.mutate).not.toHaveBeenCalled();
+  });
+
+  it("closes after a successful split even when the follow-up refresh fails", async () => {
+    const onClose = vi.fn();
+    const onCreated = vi.fn().mockRejectedValue(new Error("refresh failed"));
+    mocks.split.mutate.mockImplementationOnce(
+      (_input, options: { onSuccess: () => void }) => options.onSuccess(),
+    );
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={item}
+        onClose={onClose}
+        onCreated={onCreated}
+        open
+      />,
+    );
+    await waitFor(() =>
+      expect((screen.getByLabelText("负责人") as HTMLSelectElement).value).toBe(
+        "owner-1",
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "已经成功创建的任务" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
+    expect(mocks.split.mutate).toHaveBeenCalledTimes(1);
   });
 });

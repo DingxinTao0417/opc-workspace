@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ApiError } from "../api/client";
@@ -16,6 +17,7 @@ import {
 } from "../store/commandRecents";
 import { useUiStore } from "../store/ui";
 import { CommandPalette } from "./CommandPalette";
+import { Modal } from "./Modal";
 
 const mocks = vi.hoisted(() => ({
   searchQuery: vi.fn(),
@@ -58,6 +60,30 @@ function CurrentLocation() {
   );
 }
 
+function PaletteOverModalHarness() {
+  const [modalOpen, setModalOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setModalOpen(true)} type="button">
+        打开底层弹窗
+      </button>
+      <Modal
+        onClose={() => setModalOpen(false)}
+        open={modalOpen}
+        title="底层弹窗"
+      >
+        <button
+          onClick={() => useUiStore.getState().setCommandPaletteOpen(true)}
+          type="button"
+        >
+          打开命令面板
+        </button>
+      </Modal>
+      <CommandPalette />
+    </>
+  );
+}
+
 describe("CommandPalette", () => {
   afterEach(() => {
     cleanup();
@@ -70,6 +96,7 @@ describe("CommandPalette", () => {
       settingsModule: "general",
       taskDetailId: null,
     });
+    document.body.style.overflow = "";
   });
 
   it("debounces unified search and opens the exact stable resource route", () => {
@@ -295,6 +322,63 @@ describe("CommandPalette", () => {
     await waitFor(() => expect(opener).toHaveFocus());
     expect(useUiStore.getState().commandPaletteOpen).toBe(false);
     opener.remove();
+  });
+
+  it("closes only the top command palette and preserves the shared modal lock", async () => {
+    document.body.style.overflow = "scroll";
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    render(
+      <MemoryRouter>
+        <PaletteOverModalHarness />
+      </MemoryRouter>,
+    );
+    const pageOpener = screen.getByRole("button", {
+      name: "打开底层弹窗",
+    });
+    pageOpener.focus();
+    fireEvent.click(pageOpener);
+    const paletteOpener = await screen.findByRole("button", {
+      name: "打开命令面板",
+    });
+    paletteOpener.focus();
+    fireEvent.click(paletteOpener);
+
+    const palette = await screen.findByRole("dialog", { name: "命令面板" });
+    expect(palette.closest(".command-root")?.parentElement).toBe(document.body);
+    const modal = screen.getByRole("dialog", {
+      name: "底层弹窗",
+      hidden: true,
+    });
+    expect(modal.closest(".modal-root")).toHaveAttribute("inert");
+    expect(modal).not.toHaveAttribute("aria-modal");
+    expect(palette).toHaveAttribute("aria-modal", "true");
+    expect(document.body.style.overflow).toBe("hidden");
+    const input = screen.getByRole("combobox", {
+      name: "搜索页面、业务或操作",
+    });
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull(),
+    );
+    expect(screen.getByRole("dialog", { name: "底层弹窗" })).toHaveAttribute(
+      "aria-modal",
+      "true",
+    );
+    await waitFor(() => expect(paletteOpener).toHaveFocus());
+    expect(document.body.style.overflow).toBe("hidden");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(pageOpener).toHaveFocus());
+    expect(document.body.style.overflow).toBe("scroll");
   });
 
   it("does not execute the active command while an IME composition is active", () => {

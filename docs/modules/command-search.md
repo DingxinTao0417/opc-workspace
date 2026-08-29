@@ -32,7 +32,7 @@
 - 空查询优先展示最近使用。浏览器/WebView 本地记录最多 8 条命令或资源身份，保留 90 天；记录只含命令 ID 或资源类型/ID，不保存搜索词、标题、摘要或业务正文。
 - 面板打开时重新读取最近资源的本地详情；已删除资源确认返回 404 后自动清理记录，服务暂时不可用时保留记录但不伪造资源内容。
 - 上下方向键、Enter、Escape、鼠标 hover 和空结果反馈；输入框使用 combobox/listbox 活动项关联。
-- 打开时聚焦搜索框并锁定背景滚动，Tab/Shift+Tab 圈闭在面板内，关闭后恢复原触发元素焦点；输入法组合期间忽略执行和 WebView 全局快捷键。
+- 命令面板和业务 `Modal` 都通过 portal 挂载到 `document.body`。打开时聚焦搜索框并锁定背景滚动，Tab/Shift+Tab 圈闭在面板内，关闭后恢复原触发元素焦点；二者共用一个 overlay stack，只有最上层响应 Escape/获得 `aria-modal`，下层进入 `inert`，叠层逐层关闭或父子同批卸载都不会提前释放滚动锁或把焦点留在已删除节点；输入法组合期间忽略执行和 WebView 全局快捷键。
 - 完整路由/AppShell 由全局错误边界保护；渲染异常时使用不含原始错误的恢复页，可重新渲染、返回今日或打开位于边界外的运行诊断，路由变化自动复位。
 
 当前限制：
@@ -176,7 +176,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 
 - 将硬编码数组改为模块化命令注册表和可用条件。
 - **已完成**：指定设置模块、Task 精确详情打开和未实现收入/发票命令移除。
-- **已完成**：焦点圈闭、关闭后恢复、combobox/listbox 关联、输入法组合保护和键盘边界自动化测试；真实浏览器/桌面 WebView 验收仍待执行。
+- **已完成**：焦点圈闭、关闭后恢复、combobox/listbox 关联、输入法组合保护、共享 overlay stack 和键盘边界自动化测试；自动化覆盖命令面板叠加业务 Modal、父子 Modal 同批卸载及滚动锁恢复，真实浏览器/桌面 WebView 验收仍待执行。
 
 ### v0.1-B：统一本地搜索（已交付）
 
@@ -220,6 +220,7 @@ GET /api/v1/search?q=&types=&page=&page_size=
 - [PRD：T-13 命令面板、快捷键与反馈状态](../opc-workspace-PRD.md#10413-t-13-命令面板快捷键与反馈状态)
 - [PRD：全局快捷键](../opc-workspace-PRD.md#85-全局快捷键)
 - [当前命令面板](../../apps/web/src/components/CommandPalette.tsx)
+- [共享叠层管理](../../apps/web/src/components/overlayStack.ts)
 - [最近使用本地存储](../../apps/web/src/store/commandRecents.ts)
 - [统一搜索 API](../../services/sidecar/internal/api/search.go)
 - [统一搜索 API 测试](../../services/sidecar/internal/api/search_test.go)

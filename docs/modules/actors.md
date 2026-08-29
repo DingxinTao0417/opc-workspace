@@ -4,7 +4,7 @@
 >
 > 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.18](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 
@@ -140,7 +140,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 3. **T-18C（已完成）**：Assignment 查询、创建、改派、结束、Task 版本和责任 UI。
 4. **T-18D D1（已完成）**：schema v8 六状态、显式命令、事件顺序/不可变保护与时间线。
 5. **T-18D D2（已完成）**：schema v9、manual policy、Submission/Artifact、受控文件、提交/接受/返工/撤回/软删。
-6. **Inbox/Reminder（部分实现）**：独立手工 Inbox Item、人工分诊、已有 Task 关系、一次性 Reminder，以及 T-11C Task 拆分/owner-person 分派/系统自动结清已交付；其他来源消费和 Agent 未实现。
+6. **Inbox/Reminder（当前人工闭环已实现）**：独立手工 Inbox Item、人工分诊、已有 Task 关系、一次性 Reminder、T-11C Task 拆分/owner-person 分派/系统自动结清，以及已登记的 follow-up Artifact、Task 阻塞/临期、Project 完成和系统维护来源均已交付；未来 Client/Invoice/里程碑来源与 Agent 仍未实现。
 7. **Client contact（已完成）**：schema v20 显式关联、原子新建 person、单 active contact、带原因解除、不可变历史和 person 停用保护。
 8. **T-19 v0.2（未实现）**：agent Adapter、Run、能力令牌、取消/重试与崩溃恢复。
 
@@ -158,7 +158,8 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [x] 一次性 Reminder 的 owner 创建/取消与 system 到期触发审计。
 - [x] Inbox Task 批量拆分、owner/person 初始分派与 system 自动结清/重开。
 - [x] Client contact 显式关联/解除、原子新建 person、单 active 约束和停用保护。
-- [ ] 非 Reminder Inbox 来源事件消费。
+- [x] 已登记的非 Reminder Inbox 来源事件消费：follow-up Artifact、Task 阻塞/临期、Project 完成和系统维护事件。
+- [ ] 未来 Client/Invoice/其他里程碑来源与 v0.2 Agent 事件消费。
 
 ## 相关代码/PRD 链接
 

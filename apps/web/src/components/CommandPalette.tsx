@@ -11,7 +11,15 @@ import {
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   ApiError,
@@ -29,6 +37,11 @@ import {
 } from "../store/commandRecents";
 import { useUiStore, type SettingsModule } from "../store/ui";
 import type { SearchResourceType } from "../types/models";
+import {
+  isTopmostOverlay,
+  registerOverlay,
+  subscribeOverlayStack,
+} from "./overlayStack";
 
 interface Command {
   id: string;
@@ -150,6 +163,9 @@ export function CommandPalette() {
   >([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const overlayId = useRef(Symbol("command-palette")).current;
+  const [isTopmost, setIsTopmost] = useState(false);
   const normalizedQuery = query.trim();
   const resourcesQuery = useSearchQuery(
     { q: searchQuery, page: 1, pageSize: 12 },
@@ -413,23 +429,36 @@ export function CommandPalette() {
   }, [normalizedQuery, open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) return undefined;
+    setQuery("");
+    setSearchQuery("");
+    setActiveIndex(0);
+    const frame = window.requestAnimationFrame(() => {
+      if (isTopmostOverlay(overlayId)) inputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, overlayId]);
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!open || !root) return undefined;
     const previouslyFocused =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    setQuery("");
-    setSearchQuery("");
-    setActiveIndex(0);
-    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.body.style.overflow = previousOverflow;
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    const updateTopmost = () => {
+      const next = isTopmostOverlay(overlayId);
+      root.toggleAttribute("inert", !next);
+      setIsTopmost(next);
     };
-  }, [open]);
+    const unsubscribe = subscribeOverlayStack(updateTopmost);
+    const unregister = registerOverlay(overlayId, root, previouslyFocused);
+    updateTopmost();
+    return () => {
+      unsubscribe();
+      unregister();
+    };
+  }, [open, overlayId]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -452,11 +481,14 @@ export function CommandPalette() {
   if (!open) return null;
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (!isTopmostOverlay(overlayId)) return;
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
       return;
     }
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
       setOpen(false);
     } else if (event.key === "Tab") {
       const focusable = panelRef.current
@@ -492,8 +524,14 @@ export function CommandPalette() {
     }
   };
 
-  return (
-    <div className="command-root" onKeyDown={onKeyDown}>
+  return createPortal(
+    <div
+      aria-hidden={isTopmost ? undefined : true}
+      className="command-root"
+      data-overlay-root="true"
+      onKeyDown={onKeyDown}
+      ref={rootRef}
+    >
       <button
         aria-label="关闭命令面板"
         className="modal-backdrop"
@@ -502,7 +540,7 @@ export function CommandPalette() {
       />
       <section
         aria-label="命令面板"
-        aria-modal="true"
+        aria-modal={isTopmost ? "true" : undefined}
         className="command-panel"
         ref={panelRef}
         role="dialog"
@@ -585,6 +623,7 @@ export function CommandPalette() {
           </span>
         </footer>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

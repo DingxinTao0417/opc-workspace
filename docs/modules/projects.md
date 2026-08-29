@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v31。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束。项目级 Focus 读取复用既有 Task/Session 关系；v9.17 的 ProjectSelect 复用并收口既有 Project 列表读契约，不改写 Project/Focus 表，也不新增迁移。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束。项目级 Focus 读取复用既有 Task/Session 关系；v9.18 的 Project Artifact→Inbox→Task 收口只扩展读表示和现有 UI/缓存协作，不改表、不新增迁移，也不提升 API 版本。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内任务搜索/状态/优先级/类型/标签/排期筛选及服务端分页、Client 客户关联、供 Task 新建/编辑、筛选、批量和 Inbox 拆分使用的共享 Project 选择读模型、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up、Task 阻塞、Task 临期、Project 完成节点→Inbox，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史已实现，模块仍为**部分完成**；内嵌 Assignment/Submission、财务和其他真实里程碑尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内组合筛选及服务端分页、Client 客户关联、共享 Project 选择读模型、项目笔记/附件、所属 Task Artifact 聚合及 nullable follow-up/实时 required 进度、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up/阻塞/临期/完成节点来源，以及项目 Focus 分析与终态历史已实现，模块仍为**部分完成**；Assignment/Submission 写入继续复用共享 Task/Inbox 详情，财务和其他真实里程碑尚未交付。
 
 ## 定位与边界
 
@@ -12,13 +12,13 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 - Project 保存自己的业务状态，不把任务、收件箱或发票状态复制为项目状态。
 - 项目进度从关联任务派生，不在项目表维护第二份可写百分比。
-- 项目产出、阻塞、交付、验收和开票节点未来可以生成 Inbox Item，但 Inbox Item 只跟进下一步，不替代项目生命周期。
+- 显式 follow-up 产出、Task 阻塞/临期和 Project 完成节点已经生成 Inbox Item；独立交付验收或开票节点仍待真实业务状态。Inbox Item 只跟进下一步，不替代项目生命周期。
 - 任务可不归属项目；项目可暂时不关联客户。
 - 发票、收入、成本、客户回访等后续业务由各自模块管理，项目详情只聚合读取已落地的事实。
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、人工笔记、受控附件、所属 Task Artifact 聚合、项目级 Focus 报告与终态 Session 历史、显式 follow-up 产出→Inbox、追加式审计时间线、列表和详情纵切。
+当前状态为**部分完成**，已经具备可运行的项目资料、生命周期、人工笔记、受控附件、所属 Task Artifact 聚合及 follow-up/required 进度、项目级 Focus 报告与终态 Session 历史、显式 follow-up 产出→Inbox→Task 人工闭环、追加式审计时间线、列表和详情纵切。v0.1 不启用 AI、LLM 或 Agent Runtime。
 
 ### 已实现
 
@@ -43,8 +43,9 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目详情支持人工笔记的幂等创建、稳定分页、版本化编辑、带原因软删除及删除历史查看；记录人固定为本地 owner。每次创建、编辑或软删除都由数据库 trigger 原子递增 Project 聚合版本，归档项目只读。
 - 项目详情支持受控附件上传、稳定分页、按需下载、完整性状态、带原因软删除和删除历史；上传强制 metadata-first 严格 multipart，文件非空且最多 50 MiB，完整请求最多 100 MiB。创建/删除使用 Project `If-Match` 与可选幂等键，归档项目只读。
 - Project Attachment 文件与 Task Artifact、Client Attachment 共享数据库身份绑定的受控 store，但三类元数据保持独立。下载前复验 size/SHA-256；缺失或不匹配会持久化完整性状态并拒绝下载。永久删除 Project 时 active 文件先移入 trash，数据库事务失败则恢复，成功后清理并保留 `project_attachment_deletion_tombstones`。
-- `GET /api/v1/projects/:id/artifacts` 在同一只读事务中校验 Project、分页聚合其所属 Task 的既有 Artifact，并返回 Task 标题/当前状态、Submission 序号和 Project 聚合版本；默认隐藏已删除产出，可显式查看删除历史。它不复制 Artifact 正文、文件、删除或验收事实。
-- 项目详情提供独立的产出加载、空、错误/重试、分页与删除历史状态；每项展示类型、跟进标记、来源 Task/批次并可打开共享任务详情，实际正文查看、文件下载、删除和验收仍由 Task 领域完成。
+- `GET /api/v1/projects/:id/artifacts` 在同一只读事务中校验 Project、分页聚合其所属 Task 的既有 Artifact，并返回 Task 标题/当前状态、Submission 序号、Project 聚合版本，以及 nullable `followup`。存在稳定 task_artifact 来源时，follow-up 含 Inbox ID/version/status/policy/`source_deleted_at` 与实时 required 进度；未标记产出为 `null`。默认隐藏已删除产出，可显式查看删除历史；不复制 Artifact 正文、文件、删除或验收事实。
+- Artifact 列表继续返回 Project 聚合数值 `ETag`，并与 `meta.project_version` 表示同一 Project 并发版本；follow-up 变化不传播进 Project version。Inbox 写并发由 `followup.inbox_item_version` 表达，当前 Project UI 只深链 Inbox。所有会改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today 与 Project。
+- 项目详情把产出区放到任务区之后；每项展示类型、来源 Task/批次、待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消提示，可打开共享 Task 或深链 Inbox。实际正文、文件、删除和验收仍由 Task/Inbox 领域完成。
 - `GET /api/v1/focus-sessions` 与 `GET /api/v1/stats/focus` 均支持可选 `project_id`。参数必须是小写 canonical UUID；空、非法、大小写或其他非 canonical 表达返回 `400 INVALID_PROJECT_ID`，规范但不存在的 Project 返回 `404 PROJECT_NOT_FOUND`，归档 Project 仍允许读取。
 - 项目 Focus 归属在查询时通过 Session 当前绑定 Task 的当前 `project_id` 派生，不保存历史 Project 快照。Task 改绑后旧 Session 随当前归属重分类；Session 无 Task、Task 已删除或 Task 当前未归项目时，不进入任何项目过滤结果。
 - 项目详情 Focus 区可切换最近 7 天、最近 30 天和本月，显示 completed-only 总时长、完成 Session 数、当前/区间最长连续天数及每日趋势；终态历史包含 completed/cancelled/interrupted，按 `ended_at DESC, id ASC` 稳定分页，并把取消/中断时长明确作为审计“记录时长”，不冒充有效项目工时。
@@ -52,7 +53,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已知缺口
 
-- 项目详情任务区已改为每页 20 条的服务端分页，并提供树/平铺切换、标题/描述搜索、状态/优先级/类型/单标签/排期状态筛选和结果计数；子任务展开按每页 100 条读取并显示独立分页控件。ClientSelect 与 ProjectSelect 都已消除对应候选项的全量串行请求，生产代码不再保留 `getAllProjects`。ProjectSelect 默认不列归档候选，但选中详情或名称 fallback 会保留 Task 当前已归档项目；搜索、翻页或读取失败不会自动解除关联，只有显式清除才提交 `null`。两个选择器的真实浏览器/窄屏/1,000 或 10,000 条数据性能、项目任务大数据量实际响应性能和内嵌 Assignment/Submission 控件仍待验证；Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载。
+- 项目详情任务区已使用服务端分页、树/平铺和组合筛选；ClientSelect 与 ProjectSelect 已消除候选项全量串行请求。Project Artifact→Inbox→Task 的事实链与自动化金链已交付，但真实浏览器/WebView 的深链往返、弹层焦点、窄屏、1,000/10,000 条 Project/Task 和 Inbox 长列表仍待专项验收。Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载，不在 Project 复制写控件。
 - 项目工时继续对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目详情报告直接读取 completed Session 的闭合正时长 interval，终态历史读取 Session 审计事实；两者都不成为第二份可写工时。
 - 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
 - schema v23–v25 已接显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox；schema v28 把 Project `complete` 作为明确本地完成节点同事务投影到 Inbox。独立验收、开票等尚无真实 Project 状态，不提前伪造来源。
@@ -104,16 +105,18 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 ### 查看项目产出
 
 1. 项目详情按 Artifact 创建时间和 ID 稳定倒序读取所属任务的产出；默认每页 6 项，服务端最大每页 100 项。
-2. 列表只显示安全摘要、来源 Task、当前 Task 状态和 Submission 序号，不在 Project 创建第二份正文、文件或验收状态。
-3. owner 可切换删除历史；已删除项只展示墓碑摘要和原因。点击“打开任务”进入共享任务详情完成正文查看、文件下载、删除和验收。
-4. 归档项目仍可读取历史产出；Task 的后续合法变化会通过既有聚合 trigger 使 Project 版本失效，列表响应返回同事务读取的 `ETag` 和 `project_version`。
+2. 产出区紧随项目任务区；列表显示安全摘要、来源 Task、当前 Task 状态和 Submission 序号，不在 Project 创建第二份正文、文件或验收状态。
+3. `followup=null` 表示该 Artifact 没有稳定来源事项；存在时显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消提示，并提供 Inbox 深链。
+4. owner 可切换删除历史；已删除项只展示墓碑摘要和原因。“打开任务”进入共享详情处理正文、下载、删除和验收；“打开/查看跟进”进入 `/inbox/:id`。
+5. 归档项目仍可读取历史产出。列表 `ETag` 与 `meta.project_version` 都是 Project 聚合版本；follow-up 的 Inbox 并发版本单独位于 `followup.inbox_item_version`，实时变化依靠成功 Inbox mutation 失效 Project Query 刷新。
 
 ### 从项目产出发起后续工作
 
 1. owner 在项目所属的 manual Task 提交产出，并只对确实需要下一步工作的 Artifact 勾选 `requires_followup`。
 2. Sidecar 在提交事务内为每个标记 Artifact 创建一条稳定去重 Inbox Item；条目保存 Artifact/Task/Submission 及 Project ID/名称快照，不复制正文或项目状态。
-3. owner 在 Inbox 查看来源，复用已交付的关联或拆分面板创建修改、发布、客户确认等 Task，并按需要启用自动结清策略。
-4. 来源项仍活动时 Artifact 或来源 Task 不可删除；解决/忽略来源项后才可删除，Inbox 会保留快照并显示来源已删除。
+3. owner 从 Project 产出深链 Inbox；拆分面板对可信来源快照默认带入 Project，新增草稿同样继承，但每项可清除或改选。用户填写独立完成条件，选择 required、owner/person 负责人及 none/manual 验收策略；person 只记录本地责任。
+4. none Task 可直接 complete；manual Task 由 owner/person assignee 产出、owner reviewer 接受或返工。所有活动 required Task done 后 Inbox 自动 resolved/100%。
+5. 来源项仍活动时 Artifact 或来源 Task 不可删除；解决/忽略来源项后才可删除，Inbox 会保留快照并显示来源已删除。
 
 ### 管理项目附件
 
@@ -125,7 +128,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 查看项目专注分析与 Session 历史
 
-1. 项目详情在任务区之后独立加载 Focus 区；用户可切换最近 7 天、最近 30 天或本月。浏览器发送当前 IANA 时区，服务端按当地自然日边界处理跨午夜和 DST。
+1. 项目详情在任务区与产出区之后独立加载 Focus 区；用户可切换最近 7 天、最近 30 天或本月。浏览器发送当前 IANA 时区，服务端按当地自然日边界处理跨午夜和 DST。
 2. 报告卡展示 completed Session 的闭合正时长 interval 总时长、distinct 完成数、当前/区间最长连续天数和逐日趋势；零事实日期仍保留，空项目显示明确空态。
 3. 历史卡每页 6 条，按稳定终态顺序展示 completed/cancelled/interrupted、当前 Task 标题或“任务不可用”、结束时间与记录时长；翻页不会改变项目或 Task 事实。
 4. 报告与历史各自区分加载、错误、重试和空状态；任一区失败不阻塞另一卡或项目主详情。归档项目保持可读。
@@ -150,7 +153,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 | POST   | `/api/v1/projects`                             | 创建 `planning` 项目；可选 `Idempotency-Key` 保存规范化请求 SHA-256 与首次响应快照，同请求可稳定重放并拒绝不同请求复用                                                                                            |
 | GET    | `/api/v1/projects/:id`                         | 返回项目资料、派生任务汇总、发票数、允许操作和 `ETag`                                                                                                                                                             |
 | GET    | `/api/v1/projects/:id/events`                  | 项目活动时间线；`page` 默认 1，`page_size` 默认 20/最大 100，稳定倒序；返回 owner、request、前后快照、Project `ETag` 与 `meta.project_version`                                                                    |
-| GET    | `/api/v1/projects/:id/artifacts`               | 所属 Task Artifact 只读聚合；`page` 默认 1、`page_size` 默认 20/最大 100，按创建时间/ID 稳定倒序；`include_deleted=true` 可看删除历史；返回来源 Task/Submission 与 Project 版本，不返回 Artifact 正文             |
+| GET    | `/api/v1/projects/:id/artifacts`               | 所属 Task Artifact 只读聚合；稳定分页/删除历史；每项返回 nullable followup 的 Inbox ID/version/status/policy/source deletion/实时 required progress；响应 Project 数值 ETag 与 `meta.project_version`，不返回正文 |
 | GET    | `/api/v1/projects/:id/attachments`             | 项目附件稳定倒序分页；默认隐藏软删除记录，`include_deleted=true` 可查看删除历史；返回 Project `ETag` 与 `meta.project_version`                                                                                    |
 | POST   | `/api/v1/projects/:id/attachments`             | Project `If-Match` + 可选幂等键；严格 `metadata` + 单文件 multipart；归档项目拒绝写入                                                                                                                             |
 | GET    | `/api/v1/project-attachments/:id`              | 返回附件元数据、记录人、完整性/删除状态和当前 Project 聚合版本                                                                                                                                                    |
@@ -187,6 +190,8 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 项目 `version` 是整个响应的并发令牌：直接项目写入会显式递增，任务插入/删除、项目关联/状态/`actual_minutes` 变化、发票关联/增删，以及客户名称/删除由 schema v5 trigger 原子递增。这样用户在看到旧任务数、工时、发票数或客户名时，完成、归档、编辑和硬删除都会因旧 `If-Match` 被拒绝并刷新。
 
+Artifact 聚合沿用该 Project 数值 `ETag`，`meta.project_version` 与其相同；它不是完整响应内容哈希。Inbox 状态与实时 required 进度不递增 Project version；前端在成功 Inbox mutation 后先取消来源 Project 的在途读取，再失效查询，Artifact 请求消费 `AbortSignal`，避免旧响应回填。`followup.inbox_item_version` 才是 Inbox `If-Match` 值；当前 Project 页面仅导航到 Inbox，不直接提交写命令。
+
 ## 后续目标
 
 ### 客户与项目资料
@@ -198,8 +203,8 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 - 项目详情任务浏览器已复用 Task 父子事实、服务端搜索/状态/优先级/类型/标签/排期筛选、顶层与展开分页和共享详情入口。Assignment、完整生命周期和 Artifact 验收仍统一在共享任务详情处理，不在 Project 复制写命令。
 - 项目交付类 Task 提交 Artifact，或 owner 显式标记 `requires_followup` 时，才可按稳定事件键幂等生成 Inbox Item。
-- 上述显式标记链路已由 schema v23 交付：每个 Artifact 一条稳定来源，项目名称只作为不可变导航快照，不把 Project 状态复制到 Inbox。
-- owner 在收件箱把产出拆成修改、发布、客户确认等工单并分派给 owner/person；v0.2 才可选择健康且隔离已验证的本地 agent。
+- 上述显式标记链路已由 schema v23 交付：每个 Artifact 一条稳定来源，项目名称只作为不可变导航快照，不把 Project 状态复制到 Inbox。v9.18 读模型在 Project 暴露 nullable follow-up 和实时 required 进度，但保持 Project/Inbox 版本边界分离。
+- owner 在收件箱把产出拆成修改、发布、客户确认等工单，默认继承但可清除/改选来源 Project，填写完成条件并分派给 owner/person；manual Task 由 owner reviewer 验收。v0.1 不显示或执行 agent。
 - 项目达到交付、验收或开票节点的自动事件必须等 Workflow Event、Inbox 规则和对应业务模块交付后再启用。
 
 ### 项目详情增强
@@ -214,7 +219,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 任务      | 当前已支持项目选择、项目名展示、项目任务树/平铺列表、项目内搜索/状态/优先级/类型/标签/排期筛选与服务端分页、Task 父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；内嵌 D2 写控件不在 Project 复制。             |
 | 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、共享服务端搜索/稳定分页的表单选择和项目/任务筛选、改绑/解除、Client 详情中的完整关联项目读取、人工活动时间线、Project complete/reopen 只读系统活动、受控附件和 person 显式关联；其他外部来源仍待实现。 |
-| 收件箱    | 显式 follow-up Task Artifact、Task 阻塞/临期和 Project 完成节点已投影；完成事项携带不可变 Project 名称、时间、版本和未结任务数快照，并可直达项目。                                                                                                         |
+| 收件箱    | 显式 follow-up Task Artifact、Task 阻塞/临期和 Project 完成节点已投影；Artifact 聚合读取 Inbox version/status/policy/progress 并深链，split 可继承来源 Project；成功 mutation 失效来源 Project，保持两个聚合版本独立。                                     |
 | Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                                                                             |
 | 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目详情通过可选 `project_id` 按 Task 当前归属读取 completed-only 报告和终态历史，不复制 Session 或 Project 事实。                                      |
 | 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                                                                                                         |
@@ -231,7 +236,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
-8. **产出与 Inbox 协作（已实现当前真实节点）**：Task Artifact、Workflow Event、分派/验收、项目级产出聚合、Inbox 任务编排，以及显式 follow-up Artifact/Task 阻塞/Task 临期/Project 完成周期稳定投影与来源删除协调已交付。完成周期键为 `project:<project_id>:completed:<completion_version>`；reopen 后再次 complete 生成新事项，不把开票等未来节点混入当前状态机。
+8. **产出与 Inbox 协作（已实现当前人工闭环）**：Task Artifact、Workflow Event、项目级 nullable follow-up/实时 required 读模型、产出区状态与 Inbox 深链、来源 Project 继承/清除、完成条件、owner/person 分派、manual owner 验收、共享 Task 详情、缓存失效及自动解决已交付。Go 金链覆盖 complete + submit/waiting_review + accept→resolved/100%；不把开票等未来节点混入当前状态机，也不接 AI/Agent。
 9. **后续业务增强**：v0.3 里程碑，v0.4 发票/财务；不阻塞基础项目管理纵切。
 
 ## 验收口径
@@ -251,8 +256,9 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 有 Client 的 complete/reopen 各产生一条来源唯一的只读 Client Activity；无 Client、旧版本或失败事务不产生孤立活动，改绑不移动历史，Client 聚合版本和最近动态随成功投影更新。
 - 笔记创建可幂等重放且不重复写入；编辑与删除使用笔记版本，软删除隐藏正文并保留原因；归档项目拒绝笔记写入。
 - 笔记新增、编辑和删除分别只递增一次 Project 聚合版本；旧 Project 并发视图因此失效。
-- 项目产出只返回所属 Task Artifact，稳定分页、默认排除删除项、显式历史可见，且不泄漏正文；来源 Task/Submission 与 Project 聚合版本保持一致。
-- 项目详情产出区能区分加载、空、错误与删除历史，并通过精确 Task ID 打开共享任务详情，不在 Project 复制查看、下载或验收写命令。
+- 项目产出只返回所属 Task Artifact，稳定分页、默认排除删除项、显式历史可见且不泄漏正文；每项 `followup` 为 null 或严格包含 Inbox ID/version/status/policy/source deletion/实时 required progress。
+- Artifact 列表继续返回 Project 数值 `ETag / meta.project_version`；Inbox/Task 派生变化不传播为 Project version，`followup.inbox_item_version` 独立用于 Inbox 写并发；成功 mutation 的刷新按 cancel→invalidate 顺序执行，Artifact 请求消费 `AbortSignal`。
+- 项目详情产出区位于任务区之后，能区分加载、空、错误与删除历史，显示四种跟进状态及阻塞/待验收/取消提示，通过精确 Task ID 打开共享详情并深链 Inbox，不在 Project 复制查看、下载或验收写命令。
 - 项目附件上传严格限制请求顺序、数量和大小，使用幂等键与 Project 版本；列表稳定分页，下载复验完整性，软删除保留原因和墓碑，归档状态只读。
 - Project 永久删除对附件文件和数据库执行可补偿操作；手动备份/恢复包含 active Project objects，业务 JSON 只导出附件元数据与 active 文件摘要而不嵌入正文。
 - 时间线分页稳定，返回真实 owner、请求 ID、前后快照和 Project 版本；前端的加载、空、错误重试与“加载更早”不影响项目其他区域。
@@ -265,8 +271,8 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 - ClientSelect 的全量串行拉取已消除，但 1,000/10,000 条客户下的真实响应、输入和翻页性能，以及真实浏览器键盘/焦点/窄屏交互仍需专项验收；除 Project 状态外的其他活动来源、回访与财务不属于已交付客户纵切。
 - 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。ProjectSelect 同样只读取当前 20 条候选，但真实浏览器键盘/焦点/窄屏及 1,000/10,000 条项目下的搜索和翻页性能仍未专项验收；有界网络与 DOM 不能替代真实性能数据。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
-- 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出、Task 阻塞、Task 临期与 Project 完成投影另覆盖稳定事件键、重复完成周期、事务一致性、来源上下文、活动删除阻止、归档后来源删除协调与快照保留。
-- 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
+- 项目时间线、产出聚合和项目附件已有自动化覆盖；本轮另覆盖 nullable follow-up、来源 Project 继承/清除、完成条件、owner/person/manual reviewer、共享 Task 详情、缓存失效，以及 direct complete + submit/waiting_review + accept→automatic resolved/100% Go 金链。
+- 真实浏览器/WebView 的键盘、焦点、深链返回、窄屏和 1,000/10,000 条项目/任务及 Inbox 长列表仍待专项；自动化金链不能替代这项人工验收。
 
 ## 相关代码/PRD 链接
 
@@ -283,12 +289,15 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [projects.go](../../services/sidecar/internal/api/projects.go)
 - [project_notes.go](../../services/sidecar/internal/api/project_notes.go)
 - [project_artifacts.go](../../services/sidecar/internal/api/project_artifacts.go)
+- [Project Artifact follow-up/金链测试](../../services/sidecar/internal/api/project_artifacts_test.go)
 - [project_attachments.go](../../services/sidecar/internal/api/project_attachments.go)
 - [focus_history.go](../../services/sidecar/internal/api/focus_history.go)
 - [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
 - [ClientSelect.tsx](../../apps/web/src/components/ClientSelect.tsx)
 - [ProjectSelect.tsx](../../apps/web/src/components/ProjectSelect.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
+- [InboxItemTasksSection.tsx](../../apps/web/src/components/InboxItemTasksSection.tsx)
+- [InboxTaskOrchestrationModal.tsx](../../apps/web/src/components/InboxTaskOrchestrationModal.tsx)
 - [项目 API](../../services/sidecar/internal/api/projects.go)
 - [项目 API 测试](../../services/sidecar/internal/api/projects_test.go)
 - [Project model](../../services/sidecar/internal/models/project.go)

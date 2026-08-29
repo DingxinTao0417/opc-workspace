@@ -18,6 +18,9 @@ import { ProjectSelect } from "./ProjectSelect";
 
 type DraftTask = Omit<InboxSplitTaskInput, "key"> & { localId: number };
 
+const canonicalUUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
 const priorities: Array<{ value: TaskPriority; label: string }> = [
   { value: "P0", label: "紧急" },
   { value: "P1", label: "高" },
@@ -32,7 +35,24 @@ const kinds: Array<{ value: TaskKind; label: string }> = [
   { value: "reminder", label: "提醒" },
 ];
 
-function newDraft(localId: number, assigneeActorId = ""): DraftTask {
+function sourceProjectId(item: InboxItem): string | null {
+  if (
+    item.sourceEntityType !== "task_artifact" &&
+    item.sourceEntityType !== "task" &&
+    item.sourceEntityType !== "task_due" &&
+    item.sourceEntityType !== "project_completion"
+  ) {
+    return null;
+  }
+  const value = item.payloadJson.project_id;
+  return typeof value === "string" && canonicalUUID.test(value) ? value : null;
+}
+
+function newDraft(
+  localId: number,
+  assigneeActorId = "",
+  projectId: string | null = null,
+): DraftTask {
   return {
     localId,
     parentKey: null,
@@ -40,7 +60,7 @@ function newDraft(localId: number, assigneeActorId = ""): DraftTask {
     description: "",
     kind: "work",
     priority: "P2",
-    projectId: null,
+    projectId,
     completionCriteria: "",
     tagIds: [],
     dueDate: null,
@@ -79,10 +99,13 @@ export function InboxTaskOrchestrationModal({
 }) {
   const actorsQuery = useAssignmentActorOptionsQuery(open);
   const mutation = useSplitInboxItem();
+  const defaultProjectId = sourceProjectId(item);
   const [policy, setPolicy] = useState<InboxResolutionPolicy>(
     "all_required_tasks_done",
   );
-  const [tasks, setTasks] = useState<DraftTask[]>([newDraft(1)]);
+  const [tasks, setTasks] = useState<DraftTask[]>([
+    newDraft(1, "", defaultProjectId),
+  ]);
   const [nextId, setNextId] = useState(2);
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -99,11 +122,11 @@ export function InboxTaskOrchestrationModal({
   useEffect(() => {
     if (!open) return;
     setPolicy("all_required_tasks_done");
-    setTasks([newDraft(1)]);
+    setTasks([newDraft(1, "", defaultProjectId)]);
     setNextId(2);
     setValidationError(null);
     mutation.reset();
-  }, [item.id, open]);
+  }, [defaultProjectId, item.id, open]);
 
   useEffect(() => {
     const owner = actors.find((actor) => actor.type === "owner");
@@ -132,7 +155,7 @@ export function InboxTaskOrchestrationModal({
     const owner = actors.find((actor) => actor.type === "owner");
     setTasks((current) => [
       ...current,
-      newDraft(nextId, owner?.id ?? actors[0]?.id ?? ""),
+      newDraft(nextId, owner?.id ?? actors[0]?.id ?? "", defaultProjectId),
     ]);
     setNextId((value) => value + 1);
   };
@@ -203,9 +226,16 @@ export function InboxTaskOrchestrationModal({
         })),
       },
       {
-        onSuccess: async () => {
-          await onCreated?.();
+        onSuccess: () => {
           onClose();
+          void (async () => {
+            try {
+              await onCreated?.();
+            } catch {
+              // The write already succeeded and its hook updated the cache.
+              // A follow-up refetch must not leave a replayable stale draft open.
+            }
+          })();
         },
       },
     );
@@ -251,6 +281,9 @@ export function InboxTaskOrchestrationModal({
           <div>
             <strong>{item.title}</strong>
             <p>任务、父子关系、负责人和收件箱关系会在同一事务中保存。</p>
+            {defaultProjectId ? (
+              <p>已从来源带入项目；每项任务仍可单独清除或改选。</p>
+            ) : null}
           </div>
           <label className="form-field inbox-split-policy">
             <span>解决策略</span>
@@ -331,7 +364,9 @@ export function InboxTaskOrchestrationModal({
                       {actors.map((actor) => (
                         <option key={actor.id} value={actor.id}>
                           {actor.displayName}
-                          {actor.type === "owner" ? "（所有者）" : ""}
+                          {actor.type === "owner"
+                            ? "（所有者）"
+                            : "（仅本地责任记录）"}
                         </option>
                       ))}
                     </select>
@@ -452,9 +487,24 @@ export function InboxTaskOrchestrationModal({
                         description: event.target.value,
                       })
                     }
-                    placeholder="补充上下文或完成标准…"
+                    placeholder="补充来源、背景或执行说明…"
                     rows={2}
                     value={task.description}
+                  />
+                </label>
+                <label className="form-field form-field-last">
+                  <span>完成条件</span>
+                  <textarea
+                    disabled={mutation.isPending}
+                    maxLength={10_000}
+                    onChange={(event) =>
+                      updateTask(task.localId, {
+                        completionCriteria: event.target.value,
+                      })
+                    }
+                    placeholder="写清楚做到什么程度才算完成…"
+                    rows={2}
+                    value={task.completionCriteria}
                   />
                 </label>
               </section>

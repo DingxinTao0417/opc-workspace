@@ -559,6 +559,8 @@ export function ProjectDetailPage() {
         ) : null}
       </section>
 
+      <ProjectArtifactsSection projectId={project.id} />
+
       <ProjectFocusSection projectId={project.id} />
 
       <section className="project-detail-section project-actions-section">
@@ -636,8 +638,6 @@ export function ProjectDetailPage() {
         archived={project.status === "archived"}
         projectId={project.id}
       />
-
-      <ProjectArtifactsSection projectId={project.id} />
 
       <ProjectAttachmentsSection
         archived={project.status === "archived"}

@@ -338,6 +338,14 @@ export interface ProjectArtifactItem {
     status: TaskStatus;
   };
   submissionSequence: number;
+  followup: {
+    inboxItemId: string;
+    inboxItemVersion: number;
+    status: InboxItemStatus;
+    resolutionPolicy: InboxResolutionPolicy;
+    sourceDeletedAt: string | null;
+    progress: InboxTaskProgress;
+  } | null;
 }
 
 export interface ProjectArtifactListParams {

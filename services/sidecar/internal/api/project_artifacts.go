@@ -16,10 +16,20 @@ type projectArtifactTaskOutput struct {
 	Status string `json:"status"`
 }
 
+type projectArtifactFollowupOutput struct {
+	InboxItemID      string            `json:"inbox_item_id"`
+	InboxItemVersion int64             `json:"inbox_item_version"`
+	Status           string            `json:"status"`
+	ResolutionPolicy string            `json:"resolution_policy"`
+	SourceDeletedAt  *string           `json:"source_deleted_at"`
+	Progress         inboxTaskProgress `json:"progress"`
+}
+
 type projectArtifactOutput struct {
-	Artifact           taskArtifactSummary       `json:"artifact"`
-	Task               projectArtifactTaskOutput `json:"task"`
-	SubmissionSequence int                       `json:"submission_sequence"`
+	Artifact           taskArtifactSummary            `json:"artifact"`
+	Task               projectArtifactTaskOutput      `json:"task"`
+	SubmissionSequence int                            `json:"submission_sequence"`
+	Followup           *projectArtifactFollowupOutput `json:"followup"`
 }
 
 type projectArtifactMeta struct {
@@ -27,6 +37,11 @@ type projectArtifactMeta struct {
 	PageSize       int   `json:"page_size"`
 	Total          int64 `json:"total"`
 	ProjectVersion int64 `json:"project_version"`
+}
+
+type projectArtifactListResponse struct {
+	Data []projectArtifactOutput `json:"data"`
+	Meta projectArtifactMeta     `json:"meta"`
 }
 
 func (a *API) listProjectArtifacts(c *gin.Context) {
@@ -51,6 +66,7 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 	var project models.Project
 	var rows []taskArtifactRow
 	taskContext := make(map[string]projectArtifactTaskOutput)
+	followupContext := make(map[string]*projectArtifactFollowupOutput)
 	var total int64
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Select("id", "version").First(&project, "id = ?", projectIDValue).Error; err != nil {
@@ -79,8 +95,10 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 			return nil
 		}
 		taskIDs := make([]string, 0, len(rows))
+		artifactIDs := make([]string, 0, len(rows))
 		for _, row := range rows {
 			taskIDs = append(taskIDs, row.TaskID)
+			artifactIDs = append(artifactIDs, row.ID)
 		}
 		var tasks []models.Task
 		if err := tx.Select("id", "title", "status").Where("id IN ?", taskIDs).Find(&tasks).Error; err != nil {
@@ -88,6 +106,36 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 		}
 		for _, task := range tasks {
 			taskContext[task.ID] = projectArtifactTaskOutput{ID: task.ID, Title: task.Title, Status: task.Status}
+		}
+
+		var inboxItems []models.InboxItem
+		if err := tx.Select("id", "source_entity_id", "source_event_key", "source_deleted_at", "status", "resolution_policy", "version").
+			Where("source_entity_type = ? AND source_entity_id IN ?", taskArtifactInboxSourceType, artifactIDs).
+			Order("id ASC").Find(&inboxItems).Error; err != nil {
+			return err
+		}
+		inboxIDs := make([]string, 0, len(inboxItems))
+		for _, item := range inboxItems {
+			if item.SourceEntityID == nil || item.SourceEventKey == nil ||
+				*item.SourceEventKey != taskArtifactFollowupEventKey(*item.SourceEntityID) {
+				return errors.New("Project Artifact follow-up source is inconsistent")
+			}
+			if _, exists := followupContext[*item.SourceEntityID]; exists {
+				return errors.New("Project Artifact has duplicate follow-up sources")
+			}
+			inboxIDs = append(inboxIDs, item.ID)
+			followupContext[*item.SourceEntityID] = &projectArtifactFollowupOutput{
+				InboxItemID: item.ID, InboxItemVersion: item.Version,
+				Status: item.Status, ResolutionPolicy: item.ResolutionPolicy,
+				SourceDeletedAt: normalizeOptionalTimestamp(item.SourceDeletedAt),
+			}
+		}
+		progressByInboxID, err := loadInboxTaskProgressByInboxIDs(tx, inboxIDs)
+		if err != nil {
+			return err
+		}
+		for _, followup := range followupContext {
+			followup.Progress = progressByInboxID[followup.InboxItemID]
 		}
 		return nil
 	}, &sql.TxOptions{ReadOnly: true})
@@ -112,10 +160,14 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 			writeDatabaseError(c)
 			return
 		}
-		outputs[index] = projectArtifactOutput{Artifact: artifact, Task: task, SubmissionSequence: row.SubmissionSequence}
+		outputs[index] = projectArtifactOutput{
+			Artifact: artifact, Task: task, SubmissionSequence: row.SubmissionSequence,
+			Followup: followupContext[row.ID],
+		}
 	}
-	setProjectETag(c, project.Version)
-	c.JSON(http.StatusOK, gin.H{"data": outputs, "meta": projectArtifactMeta{
+	response := projectArtifactListResponse{Data: outputs, Meta: projectArtifactMeta{
 		Page: page, PageSize: pageSize, Total: total, ProjectVersion: project.Version,
-	}})
+	}}
+	setProjectETag(c, project.Version)
+	c.JSON(http.StatusOK, response)
 }

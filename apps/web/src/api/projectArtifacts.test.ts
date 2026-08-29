@@ -47,6 +47,24 @@ function itemPayload(overrides: Record<string, unknown> = {}) {
       status: "done",
     },
     submission_sequence: 2,
+    followup: {
+      inbox_item_id: "018f0000-0000-7000-8000-000000000041",
+      inbox_item_version: 3,
+      status: "tracking",
+      resolution_policy: "all_required_tasks_done",
+      source_deleted_at: null,
+      progress: {
+        active_total: 2,
+        required_total: 2,
+        required_done: 1,
+        required_remaining: 1,
+        required_blocked: 0,
+        required_waiting_review: 1,
+        required_cancelled: 0,
+        percent: 50,
+        all_required_done: false,
+      },
+    },
     ...overrides,
   };
 }
@@ -66,10 +84,57 @@ describe("project Artifact API contract", () => {
       },
       submissionSequence: 2,
       artifact: { name: "交付说明", requiresFollowup: true },
+      followup: {
+        inboxItemId: "018f0000-0000-7000-8000-000000000041",
+        inboxItemVersion: 3,
+        status: "tracking",
+        progress: {
+          requiredDone: 1,
+          requiredWaitingReview: 1,
+          percent: 50,
+        },
+      },
     });
     expect(() =>
       normalizeProjectArtifactItem(
         itemPayload({ task: { id: "other", title: "错误", status: "done" } }),
+      ),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeProjectArtifactItem(itemPayload({ followup: undefined })),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeProjectArtifactItem(
+        itemPayload({
+          followup: {
+            ...(itemPayload().followup as Record<string, unknown>),
+            source_deleted_at: undefined,
+          },
+        }),
+      ),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeProjectArtifactItem(
+        itemPayload({
+          followup: {
+            inbox_item_id: "inbox-1",
+            inbox_item_version: 2,
+            status: "tracking",
+            resolution_policy: "manual",
+            source_deleted_at: "2026-08-28T09:00:00Z",
+            progress: {
+              active_total: 0,
+              required_total: 0,
+              required_done: 0,
+              required_remaining: 0,
+              required_blocked: 0,
+              required_waiting_review: 0,
+              required_cancelled: 0,
+              percent: null,
+              all_required_done: false,
+            },
+          },
+        }),
       ),
     ).toThrow(ApiError);
   });
@@ -105,5 +170,52 @@ describe("project Artifact API contract", () => {
       total: 7,
       projectVersion: 9,
     });
+  });
+
+  it("rejects pagination metadata that does not match the requested page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [itemPayload()],
+              meta: { page: 1, page_size: 6, total: 1, project_version: 9 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    await expect(
+      getProjectArtifacts("project-1", { page: 2, pageSize: 6 }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+
+    const second = itemPayload();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: [
+                itemPayload(),
+                {
+                  ...second,
+                  artifact: {
+                    ...(second.artifact as Record<string, unknown>),
+                    id: "018f0000-0000-7000-8000-000000000012",
+                  },
+                },
+              ],
+              meta: { page: 2, page_size: 6, total: 7, project_version: 9 },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    await expect(
+      getProjectArtifacts("project-1", { page: 2, pageSize: 6 }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 });

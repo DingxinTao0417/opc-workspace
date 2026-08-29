@@ -14,6 +14,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
+- Project Artifact→Inbox→Task 人工闭环：Artifact 聚合返回 nullable follow-up 的 Inbox ID/version/status/policy/source deletion 和实时 required 进度，同时保留 Project 数值 `ETag / meta.project_version`；产出区位于任务后，显示待拆分/跟进中/已解决/已忽略及阻塞/待验收/取消并深链 Inbox。split 继承但可逐项清除/改选可信来源 Project，支持独立完成条件、owner/person 和 manual owner reviewer；关系行以 stack-aware Modal 复用共享 Task 详情。成功 Inbox mutation 先取消来源 Project 在途读取再失效查询，split 另失效 Task/Today/Project
 - Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用 `ProjectSelect`：每页只读 20 条，输入经 250 ms 防抖后使用既有 Project API 做服务端搜索，`q / page / includeArchived` 隔离 Query key，并向请求传递取消信号。候选按 ID 去重，显式清除才提交未归项目；选中详情或名称 fallback 使跨页、失败和当前已归档项目仍可见，默认候选不列其他归档项目。生产路径已移除串行拉取全部 Project 的 `getAllProjects`
 - 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联、人工备注/会议活动，以及关联 Project 完成/重新打开时生成的只读系统活动已接真实 API。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选：每页读取 20 条、250 ms 服务端搜索、稳定分页和取消信号，跨页或加载失败时保留当前选择，inactive 客户保持可见可选，并提供加载、空、错误重试、更多提示和 combobox 键盘语义；真实浏览器、窄屏及 1,000/10,000 条数据性能仍待专项验收
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
@@ -31,14 +32,14 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 含文件业务 ZIP 安全导入 v1：设置页先预检 manifest、业务 JSON、文件全集/哈希与数据库元数据，再以独立确认词应用；仅支持当前 schema、终态 Focus 且目标为空，应用前自动创建已校验回滚备份，文件无覆盖发布并在 DB 提交前复验，失败补偿本次文件
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出、项目级 Focus 报告与终态 Session 历史，并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除。统计条另提供与服务端当前时刻一致的逾期/未来 24 小时临期快捷筛选，读取完整分页结果而不拿当前日期分组冒充截止风险
-- `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块；空查询优先显示本地最近使用，容量/保留期受限且不保存搜索词或业务正文，已删资源在本地确认 404 后自动清理；具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护
+- `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块；空查询优先显示本地最近使用，容量/保留期受限且不保存搜索词或业务正文，已删资源在本地确认 404 后自动清理；具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护，并与业务 Modal 共用叠层、背景滚动锁和最上层 Escape 边界
 - Focus Core A+B+C+D1+D2a 和 D2b 日期范围回顾/项目/标签/小时/热力图：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、7/30 天/本月/最多 93 天自定义趋势与 Streak、按 Task 当前归属的项目分布与非互斥当前标签分布、DST 安全 24 小时分布/最佳时段与周几×小时二维热力图、Task 详情按需专注记录、项目详情按当前 Task 项目归属查看报告与历史，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
 - Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留。父子层级不会创建关系或继承/改写 required，Inbox 自动结清只看显式活动必需关系
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；Project 表单客户选择与 Project/Task 客户筛选已改为共享服务端搜索和稳定分页，不再串行拉全 Client，Task 新建/编辑、Tasks 项目筛选/批量目标及 Inbox 拆分也不再串行拉全 Project。Project complete/reopen 已能向事件发生当下的关联 Client 投影只读系统活动，但邮件、日历、客户回访等外部来源仍未接入。备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。ClientSelect 与 ProjectSelect 的真实浏览器键盘/焦点、窄屏和 1,000/10,000 条数据性能，以及 Focus 原生反馈、其他客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续验收或实现。[PRD v9.17](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Project Artifact→Inbox→Task 的 Go 金链使用 owner/person + manual owner reviewer，Web 表单也覆盖 person 本地责任提示与提交载荷。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 / schema v31 不变且本轮无 migration。真实浏览器/WebView 的完整人工深链、键盘/焦点、窄屏和 1,000/10,000 条 Project/Task/Inbox 性能仍待专项验收，不能由组件或 Go 测试替代；其他客户外部来源/回访/财务、数据库打开前恢复进度、系统快捷键及三平台安装包也仍属后续。[PRD v9.18](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -60,7 +61,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.17）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.18）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -311,6 +312,8 @@ Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` �
 
 Project 列表默认每页 50、最大 100，支持名称/描述 `q`、状态、客户、`include_archived` 和白名单排序；默认候选排除归档项目。所有排序追加 `id ASC`，同名项目也具有确定分页顺序；每次列表请求在同一只读事务内完成总数统计与当页读取，避免 `meta.total` 和结果页来自不同读快照。共享 `ProjectSelect` 固定每页 20 条、250 ms 服务端搜索，并把 `q / page / includeArchived` 纳入 Query key、向列表和选中详情请求传递取消信号。当前选中项可由详情或调用方名称补齐，加载失败不会自动清空；Task 详情中的既有归档关联继续可见但默认不能作为新的候选。
 
+`GET /api/v1/projects/:id/artifacts` 在 Artifact/Task/Submission 摘要之外，为每项返回 nullable `followup`。存在稳定 follow-up 来源时包含 `inbox_item_id / inbox_item_version / status / resolution_policy / source_deleted_at / progress`，其中 progress 实时从活动 Inbox–Task 关系与当前 Task 状态派生；未标记 Artifact 返回 `null`。响应继续使用 Project 聚合数值 `ETag`，并与 `meta.project_version` 表示同一 Project 并发版本；它不是完整响应内容哈希，也不能用于 Inbox 写入。`followup.inbox_item_version` 才是 Inbox `If-Match`，当前 Project UI 只深链 Inbox。Inbox/Task 变化不递增 Project version；前端刷新先取消来源 Project 的在途查询再失效缓存，Artifact 请求消费 `AbortSignal`，避免旧响应回填。
+
 Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count` 和未删除活动派生的 nullable `latest_activity_at`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
 
 Client Activity 列表默认每页 20、最大 100，按 `occurred_at DESC, id ASC` 稳定分页，默认隐藏软删除记录，可按 kind 筛选并用 `include_deleted=true` 查看审计历史。公开创建只接受人工 `note / meeting`，标题、正文与 RFC 3339 发生时间由服务端校验，可使用 `Idempotency-Key`；PATCH/DELETE 使用活动 `If-Match`，删除还要求 `confirm=true` 和原因。活动新增、修改或软删除会在同一事务递增 Client 聚合版本；删除响应不返回人工正文，删除记录和预留的 `system_reference` 均只读。
@@ -323,7 +326,7 @@ Client contact 关系列表默认每页 20、最大 100，按 `linked_at DESC, i
 
 当前 Inbox 创建 API 只接受 `kind / source_entity_type / resolution_policy = manual` 的手工条目，不接受来源 ID 或事件键。列表支持 `inbox / snoozed / archive` 三视图、标题/摘要搜索、优先级和分页；`meta.unread_total` 始终统计全局当前待处理视图的未读，不受当前视图或筛选影响。`read_at`、`snoozed_until` 与主状态相互独立；resolve/dismiss 要求 1–2,000 字符原因、清除稍后但不隐式已读，未读终态仍可直接 read。reopen 清除终态和稍后事实，保留 read/triaged，并按是否存在活动 Task 关系进入 `tracking / open`。PATCH 与单条命令使用 `ETag`/`If-Match`；创建、命令和 read-all 支持幂等快照。read-all 提交列表 `snapshot_at` 作为 `through_created_at` 时间截止，只标记创建与最后更新时间均不晚于 cutoff、且按该 cutoff 仍属于待处理可见范围的未读；截止后变化的条目保守跳过。
 
-Task 关系 GET 返回实时 progress；split 可原子创建父子 Task、Assignment、reviewer、显式 required 关系与事件；自动策略由 system 结清/重开。父子层级和 child_rollup 不创建 Inbox 关系，也不继承或改写 required。`GET /api/v1/stats/inbox` 实时派生运营计数。`submit-output` 对每个显式 follow-up Artifact 同事务创建稳定去重来源项；活动来源阻止 Artifact/Task 删除，归档后删除保留来源快照。当前没有公开来源创建或 Inbox 删除路由。
+Task 关系 GET 返回实时 progress，活动关系与仍有实时 Task 的历史关系可打开共享 Task 详情。split 可原子创建父子 Task、独立完成条件、owner/person Assignment、manual owner reviewer、显式 required 关系与事件；可信来源 Project 作为默认值带入但可逐项清除/改选，person 只作本地责任记录。自动策略由 system 结清/重开；父子层级和 child_rollup 不创建 Inbox 关系，也不继承或改写 required。所有会改变 follow-up 的成功 Inbox mutation 失效来源 Project，split 另失效 Task、Today、Project。`submit-output` 对每个显式 follow-up Artifact 同事务创建稳定去重来源项；活动来源阻止 Artifact/Task 删除，归档后保留来源快照。当前没有公开来源创建或 Inbox 删除路由。
 
 Reminder API 提供一次性本地提醒的分页/搜索/状态列表、创建、详情、并发安全编辑和带原因软取消。公开创建固定为 manual 来源且触发时间必须晚于服务端当前时间；创建和取消支持幂等快照，PATCH/DELETE 使用 `ETag`/`If-Match`，fired/cancelled 为不可变终态。Sidecar 启动先补扫到期项，随后每 15 秒扫描最多 100 条；稳定 `source_event_key`、条件更新和单事务保证 Reminder、Reminder Inbox Item 及 Workflow Event 恰好一次投影。当前没有重复提醒、系统原生通知、远程推送或业务来源自动建提醒。
 
@@ -341,4 +344,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.17](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、父任务有门禁自动待验收、六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、Project 表单与 Project/Task 筛选共用的服务端搜索 Client 选择器、Task 新建/编辑、Tasks 项目筛选/批量目标与 Inbox 拆分共用的服务端搜索 Project 选择器、Project complete/reopen→Client 只读系统活动、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查、项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史，以及 Today 逾期/未来 24 小时临期快捷筛选；明确未完成 ClientSelect/ProjectSelect 真实浏览器、窄屏与大数据量专项，也未交付 Focus 原生反馈、内容日历、其他客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.18](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、Inbox/Reminder/Task 编排和 Project Artifact→Inbox→Task 人工闭环；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、窄屏、焦点和大数据量专项，以及后续客户/财务/桌面能力仍未完成。

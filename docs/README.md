@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志、全局启动故障恢复页 v1、Inbox/Reminder/Task 编排及已登记来源投影已接通；任务已支持有门禁的直属子任务汇总并最多自动进入待验收。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选；共享 `ProjectSelect` 已覆盖 Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务。两个选择器都使用每页 20 条、250 ms 服务端搜索、稳定分页与取消信号，并在跨页或失败时保留当前选择；Project 候选默认不列归档项，但既有归档选择仍可见。Project complete/reopen 会把事件发生当下的关联 Client 写为只读系统活动，项目详情已接 7 天/30 天/本月 Focus 分析与终态 Session 历史，Today 已接与服务端时钟一致的逾期/未来 24 小时临期快捷筛选。两个选择器的真实浏览器/窄屏/大数据量专项、Focus 原生反馈、其他客户外部来源、数据库打开前备份选择/实时恢复进度、重复/原生通知、本地 Agent、非空目标/跨 schema 冲突合并、回访/财务仍是规划或待验收。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、数据安全，以及 Inbox/Reminder/Task 编排和已登记来源投影已接通。v9.18 交付 Project Artifact→Inbox→Task 人工闭环：Artifact 聚合返回 nullable follow-up 的 Inbox ID/version/status/policy/source deletion 与实时 required 进度，同时保留 Project 数值 `ETag / meta.project_version`；项目产出上移到任务后并深链 Inbox，split 继承但可清除/改选来源 Project，支持独立完成条件、owner/person 与 manual owner reviewer，关系行复用共享 Task 详情。成功 Inbox mutation 失效来源 Project，split 另失效 Task/Today/Project。无 migration，app/API/schema 不变；v0.1 无 AI/LLM/Agent。自动化金链已覆盖事实闭环，但真实浏览器/WebView、窄屏、焦点和 1,000/10,000 条数据仍待专项验收。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.17）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.18）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -16,16 +16,16 @@
 
 ## 核心模块
 
-| 模块           | 当前状态                                                                                                                                         | 目标版本                  | 文档                                 |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------ |
-| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）                                                                             | v0.1                      | [today.md](modules/today.md)         |
-| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、共享服务端 Client/Project 选择、计划组拖拽、受控跨列看板与父任务自动待验收已交付）                       | v0.1                      | [tasks.md](modules/tasks.md)         |
-| 项目管理       | 部分完成（含共享服务端 Client 选择/筛选、供 Task 使用的 Project 分页选择读模型、项目级 Focus 分析、终态 Session 历史及 Client 生命周期活动投影） | v0.1                      | [projects.md](modules/projects.md)   |
-| 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动与 Project 状态系统活动已交付）                                                    | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
-| 收件箱工作编排 | 部分完成（手工编排与共享 Project 选择、Reminder、follow-up/阻塞/临期和备份失败维护来源已交付）                                                   | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
-| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                                                                                 | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
-| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                                        | v0.1                      | [actors.md](modules/actors.md)       |
-| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                                         | v0.1                      | [focus.md](modules/focus.md)         |
+| 模块           | 当前状态                                                                                                                         | 目标版本                  | 文档                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------ |
+| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）                                                             | v0.1                      | [today.md](modules/today.md)         |
+| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、共享服务端 Client/Project 选择、计划组拖拽、受控跨列看板与父任务自动待验收已交付）       | v0.1                      | [tasks.md](modules/tasks.md)         |
+| 项目管理       | 部分完成（含 Artifact nullable follow-up/实时 required 进度、四种跟进状态、Inbox 深链、任务/Focus/Client 活动协作）              | v0.1                      | [projects.md](modules/projects.md)   |
+| 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动与 Project 状态系统活动已交付）                                    | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
+| 收件箱工作编排 | 部分完成（人工闭环含来源 Project 继承/清除、完成条件、person 本地责任、共享 Task 详情、缓存失效与 automatic resolved/100% 金链） | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
+| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                                                                 | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
+| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                        | v0.1                      | [actors.md](modules/actors.md)       |
+| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                         | v0.1                      | [focus.md](modules/focus.md)         |
 
 ## 平台与共享能力
 
@@ -53,6 +53,7 @@
 
 - 所有核心业务、Actor、任务、收件箱、提醒、产出和运行记录默认只保存在本机。
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
+- v0.1 不调用 AI/LLM，不创建或运行 Agent；Project Artifact→Inbox→Task 只使用 owner/person 与 owner manual review。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
 - Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、进程锁、耐久同步与 quarantine 防止错库、双写和误删。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空工作区安全导入导出；非空目标和跨 schema 合并仍未实现。

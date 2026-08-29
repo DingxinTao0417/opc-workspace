@@ -1,6 +1,18 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
+import {
+  isTopmostOverlay,
+  registerOverlay,
+  subscribeOverlayStack,
+} from "./overlayStack";
 
 export function Modal({
   open,
@@ -20,19 +32,39 @@ export function Modal({
   dismissible?: boolean;
 }) {
   const panelRef = useRef<HTMLElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const modalId = useRef(Symbol("modal")).current;
+  const [isTopmost, setIsTopmost] = useState(false);
   const titleId = useId();
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  useEffect(() => {
-    if (!open) return undefined;
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!open || !root) return undefined;
     const previouslyFocused =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
+    const updateTopmost = () => {
+      const next = isTopmostOverlay(modalId);
+      root.toggleAttribute("inert", !next);
+      setIsTopmost(next);
+    };
+    const unsubscribe = subscribeOverlayStack(updateTopmost);
+    const unregister = registerOverlay(modalId, root, previouslyFocused);
+    updateTopmost();
+    return () => {
+      unsubscribe();
+      unregister();
+    };
+  }, [modalId, open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
     const focusableSelector = [
       "button:not([disabled])",
       "[href]",
@@ -42,14 +74,17 @@ export function Modal({
       '[tabindex]:not([tabindex="-1"])',
     ].join(",");
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || !isTopmostOverlay(modalId)) return;
       if (
         event.key === "Escape" &&
         (event.isComposing || event.keyCode === 229)
       ) {
         return;
       }
-      if (event.key === "Escape" && dismissible) {
-        onCloseRef.current();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (dismissible) onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !panelRef.current) return;
@@ -73,7 +108,10 @@ export function Modal({
     };
     document.addEventListener("keydown", onKeyDown);
     const frame = window.requestAnimationFrame(() => {
-      if (!panelRef.current?.contains(document.activeElement)) {
+      if (
+        isTopmostOverlay(modalId) &&
+        !panelRef.current?.contains(document.activeElement)
+      ) {
         const target = panelRef.current?.querySelector<HTMLElement>(
           `[autofocus], ${focusableSelector}`,
         );
@@ -83,23 +121,18 @@ export function Modal({
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
-  }, [dismissible, open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [open]);
+  }, [dismissible, modalId, open]);
 
   if (!open) return null;
 
   return createPortal(
-    <div className="modal-root">
+    <div
+      aria-hidden={isTopmost ? undefined : true}
+      className="modal-root"
+      data-overlay-root="true"
+      ref={rootRef}
+    >
       {dismissible ? (
         <button
           aria-label="关闭弹窗"
@@ -112,7 +145,7 @@ export function Modal({
       )}
       <section
         aria-labelledby={titleId}
-        aria-modal="true"
+        aria-modal={isTopmost ? "true" : undefined}
         className="modal-panel"
         ref={panelRef}
         role="dialog"

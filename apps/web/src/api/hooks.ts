@@ -162,6 +162,7 @@ import type {
   ForceResolveInboxItemInput,
   CreateInboxItemInput,
   InboxEventListParams,
+  InboxItem,
   InboxItemCommandInput,
   InboxItemListParams,
   InboxItemTaskListParams,
@@ -1077,14 +1078,41 @@ export function useInboxItemTasksQuery(
   });
 }
 
+async function refreshProjectFacts(queryClient: QueryClient): Promise<void> {
+  await queryClient.cancelQueries({ queryKey: projectQueryKey });
+  await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+}
+
 async function invalidateInboxFacts(
   queryClient: QueryClient,
   id?: string,
+  item?: InboxItem,
+  projectsMayChange = false,
 ): Promise<void> {
-  await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+  const sourceItem =
+    item ??
+    (id
+      ? queryClient.getQueryData<InboxItem>(inboxDetailQueryKey(id))
+      : undefined);
+  const projectFactsMayChange =
+    projectsMayChange ||
+    (sourceItem &&
+      (sourceItem.sourceEntityType === "task_artifact" ||
+        sourceItem.sourceEntityType === "task" ||
+        sourceItem.sourceEntityType === "task_due" ||
+        sourceItem.sourceEntityType === "project_completion"));
+  const invalidations: Array<Promise<unknown>> = [
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+  ];
   if (id) {
-    await queryClient.invalidateQueries({ queryKey: inboxEventQueryKey(id) });
+    invalidations.push(
+      queryClient.invalidateQueries({ queryKey: inboxEventQueryKey(id) }),
+    );
   }
+  if (projectFactsMayChange) {
+    invalidations.push(refreshProjectFacts(queryClient));
+  }
+  await Promise.all(invalidations);
 }
 
 function inboxFactsNeedRefresh(error: unknown): boolean {
@@ -1110,7 +1138,7 @@ export function useCreateInboxItem() {
     onSuccess: async (item) => {
       attempt.current = null;
       queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
-      await invalidateInboxFacts(queryClient, item.id);
+      await invalidateInboxFacts(queryClient, item.id, item);
     },
   });
 }
@@ -1122,7 +1150,7 @@ export function useUpdateInboxItem() {
       updateInboxItem(id, input),
     onSuccess: async (item) => {
       queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
-      await invalidateInboxFacts(queryClient, item.id);
+      await invalidateInboxFacts(queryClient, item.id, item);
     },
     onError: async (error, variables) => {
       if (inboxFactsNeedRefresh(error)) {
@@ -1146,7 +1174,7 @@ export function useInboxItemCommand() {
     onSuccess: async (item) => {
       attempt.current = null;
       queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
-      await invalidateInboxFacts(queryClient, item.id);
+      await invalidateInboxFacts(queryClient, item.id, item);
     },
     onError: async (error, variables) => {
       if (inboxFactsNeedRefresh(error)) {
@@ -1198,7 +1226,11 @@ async function applyInboxTaskMutationResult(
     inboxDetailQueryKey(result.inboxItem.id),
     result.inboxItem,
   );
-  await invalidateInboxFacts(queryClient, result.inboxItem.id);
+  await invalidateInboxFacts(
+    queryClient,
+    result.inboxItem.id,
+    result.inboxItem,
+  );
 }
 
 export function useLinkInboxItemTask() {
@@ -1269,8 +1301,14 @@ export function useSplitInboxItem() {
         result.inboxItem,
       );
       await Promise.all([
-        invalidateInboxFacts(queryClient, result.inboxItem.id),
+        invalidateInboxFacts(
+          queryClient,
+          result.inboxItem.id,
+          result.inboxItem,
+          true,
+        ),
         queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+        queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
       ]);
     },
     onError: async (error, input) => {
@@ -1290,7 +1328,7 @@ export function useForceResolveInboxItem() {
     onSuccess: async (item) => {
       attempt.reset();
       queryClient.setQueryData(inboxDetailQueryKey(item.id), item);
-      await invalidateInboxFacts(queryClient, item.id);
+      await invalidateInboxFacts(queryClient, item.id, item);
     },
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
@@ -2286,7 +2324,7 @@ export function useDeleteTask() {
 async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
-    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    refreshProjectFacts(queryClient),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
   ]);
@@ -3086,7 +3124,7 @@ export function useProjectArtifactsQuery(
       "list",
       input,
     ],
-    queryFn: () => getProjectArtifacts(projectId!, input),
+    queryFn: ({ signal }) => getProjectArtifacts(projectId!, input, signal),
     enabled: Boolean(projectId),
     placeholderData: keepPreviousData,
     retry: 1,

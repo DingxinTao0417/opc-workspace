@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowUpRight,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
@@ -27,6 +28,7 @@ import type {
   InboxTaskProgress,
   TaskStatus,
 } from "../types/models";
+import { useUiStore } from "../store/ui";
 import { InboxTaskOrchestrationModal } from "./InboxTaskOrchestrationModal";
 
 const taskStatusLabels: Record<TaskStatus, string> = {
@@ -85,12 +87,14 @@ function TaskRelationRow({
   disabled,
   onRequirement,
   onUnlink,
+  onOpen,
 }: {
   relation: InboxItemTaskRelation;
   readOnly: boolean;
   disabled: boolean;
   onRequirement: () => void;
   onUnlink: () => void;
+  onOpen: () => void;
 }) {
   const task = relation.task;
   return (
@@ -118,26 +122,40 @@ function TaskRelationRow({
             : `${taskStatusLabels[task!.status]} · ${task!.projectName ?? "无项目"} · ${task!.priority}`}
         </p>
       </div>
-      {!readOnly && !relation.taskDeleted ? (
+      {!relation.taskDeleted ? (
         <div className="inbox-task-row-actions">
           <button
+            aria-label={`打开任务“${task?.title ?? relation.taskTitleSnapshot}”`}
             className="form-inline-action"
             disabled={disabled}
-            onClick={onRequirement}
+            onClick={onOpen}
             type="button"
           >
-            {relation.isRequired ? "改为可选" : "设为必需"}
+            <ArrowUpRight size={12} />
+            打开任务
           </button>
-          <button
-            aria-label={`解除与任务“${task?.title ?? relation.taskTitleSnapshot}”的关联`}
-            className="form-inline-action danger"
-            disabled={disabled}
-            onClick={onUnlink}
-            type="button"
-          >
-            <Unlink2 size={12} />
-            解除
-          </button>
+          {!readOnly ? (
+            <>
+              <button
+                className="form-inline-action"
+                disabled={disabled}
+                onClick={onRequirement}
+                type="button"
+              >
+                {relation.isRequired ? "改为可选" : "设为必需"}
+              </button>
+              <button
+                aria-label={`解除与任务“${task?.title ?? relation.taskTitleSnapshot}”的关联`}
+                className="form-inline-action danger"
+                disabled={disabled}
+                onClick={onUnlink}
+                type="button"
+              >
+                <Unlink2 size={12} />
+                解除
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
     </li>
@@ -219,6 +237,7 @@ export function InboxItemTasksSection({
   const requirementMutation = useUpdateInboxItemTaskRequirement();
   const unlinkMutation = useUnlinkInboxItemTask();
   const forceResolveMutation = useForceResolveInboxItem();
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
   const [editor, setEditor] = useState<EditorState>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -577,6 +596,9 @@ export function InboxItemTasksSection({
                     relation,
                     isRequired: !relation.isRequired,
                   });
+                }}
+                onOpen={() => {
+                  if (relation.task) setTaskDetailId(relation.task.id);
                 }}
                 onUnlink={() => {
                   resetMutationState();
@@ -939,6 +961,17 @@ export function InboxItemTasksSection({
                     {relation.unlinkReason} ·{" "}
                     {relation.unlinkedByActor?.displayName}
                   </small>
+                  {relation.task ? (
+                    <button
+                      aria-label={`打开任务“${relation.task.title}”`}
+                      className="form-inline-action"
+                      onClick={() => setTaskDetailId(relation.task!.id)}
+                      type="button"
+                    >
+                      <ArrowUpRight size={12} />
+                      打开任务
+                    </button>
+                  ) : null}
                 </li>
               ))}
             </ul>

@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useUiStore } from "../store/ui";
 import type { InboxItem, InboxItemTaskRelation, Task } from "../types/models";
 import { InboxItemTasksSection } from "./InboxItemTasksSection";
 
@@ -189,6 +190,7 @@ function relationPages(
 
 describe("InboxItemTasksSection", () => {
   beforeEach(() => {
+    useUiStore.setState({ taskDetailId: null });
     mocks.relations.mockReturnValue({
       data: relationPages(),
       fetchNextPage: vi.fn(),
@@ -246,6 +248,26 @@ describe("InboxItemTasksSection", () => {
       },
       expect.any(Object),
     );
+  });
+
+  it("opens an active linked Task in the shared Task detail", () => {
+    mocks.relations.mockReturnValue({
+      data: relationPages(2, [taskRelation()]),
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isError: false,
+      isFetchingNextPage: false,
+      isPending: false,
+      isPlaceholderData: false,
+      refetch: vi.fn(),
+    });
+
+    render(<InboxItemTasksSection item={item} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: `打开任务“${candidate.title}”` }),
+    );
+
+    expect(useUiStore.getState().taskDetailId).toBe(candidate.id);
   });
 
   it("preserves the selected task after conflict and retries with the refreshed version", async () => {

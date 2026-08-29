@@ -1,8 +1,14 @@
-import { FileOutput, History, Paperclip } from "lucide-react";
+import { ArrowUpRight, FileOutput, History, Paperclip } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useProjectArtifactsQuery } from "../api/hooks";
 import { useUiStore } from "../store/ui";
-import type { TaskArtifactStorageKind, TaskStatus } from "../types/models";
+import type {
+  InboxItemStatus,
+  ProjectArtifactItem,
+  TaskArtifactStorageKind,
+  TaskStatus,
+} from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
 const storageLabels: Record<TaskArtifactStorageKind, string> = {
@@ -20,6 +26,27 @@ const taskStatusLabels: Record<TaskStatus, string> = {
   done: "已完成",
   cancelled: "已取消",
 };
+
+const followupStatusLabels: Record<InboxItemStatus, string> = {
+  open: "待拆分",
+  tracking: "跟进中",
+  resolved: "已解决",
+  dismissed: "已忽略",
+};
+
+function followupProgressText(
+  followup: NonNullable<ProjectArtifactItem["followup"]>,
+): string {
+  if (followup.status === "resolved") return "后续事项已解决";
+  if (followup.status === "dismissed") return "后续事项已忽略";
+  if (followup.progress.requiredTotal > 0) {
+    return `必需任务 ${followup.progress.requiredDone}/${followup.progress.requiredTotal}`;
+  }
+  if (followup.progress.activeTotal > 0) {
+    return `${followup.progress.activeTotal} 个关联任务，尚未设为必需`;
+  }
+  return "尚未拆分后续任务";
+}
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -98,7 +125,7 @@ export function ProjectArtifactsSection({ projectId }: { projectId: string }) {
 
       {items.length ? (
         <div className="project-artifact-list">
-          {items.map(({ artifact, task, submissionSequence }) => (
+          {items.map(({ artifact, task, submissionSequence, followup }) => (
             <article
               className={`project-artifact-row${artifact.deletedAt ? " is-deleted" : ""}`}
               key={artifact.id}
@@ -127,14 +154,63 @@ export function ProjectArtifactsSection({ projectId }: { projectId: string }) {
                 {artifact.deletedAt ? (
                   <small>删除原因：{artifact.deleteReason ?? "未记录"}</small>
                 ) : null}
+                {followup ? (
+                  <div className="project-artifact-followup">
+                    <span
+                      className={`project-artifact-followup-status is-${followup.status}`}
+                    >
+                      {followupStatusLabels[followup.status]}
+                    </span>
+                    <span>{followupProgressText(followup)}</span>
+                    {followup.progress.requiredBlocked > 0 ? (
+                      <em>{followup.progress.requiredBlocked} 个阻塞</em>
+                    ) : null}
+                    {followup.progress.requiredWaitingReview > 0 ? (
+                      <em>
+                        {followup.progress.requiredWaitingReview} 个待验收
+                      </em>
+                    ) : null}
+                    {followup.progress.requiredCancelled > 0 ? (
+                      <em>
+                        {followup.progress.requiredCancelled}{" "}
+                        个已取消（仍未满足）
+                      </em>
+                    ) : null}
+                  </div>
+                ) : artifact.requiresFollowup && !artifact.deletedAt ? (
+                  <small className="project-artifact-followup-missing">
+                    跟进事项尚不可用，请打开任务核对提交记录。
+                  </small>
+                ) : null}
               </div>
-              <button
-                className="button button-secondary"
-                onClick={() => setTaskDetailId(task.id)}
-                type="button"
-              >
-                打开任务
-              </button>
+              <div className="project-artifact-actions">
+                <button
+                  aria-label={`打开任务“${task.title}”`}
+                  className="button button-secondary"
+                  onClick={() => setTaskDetailId(task.id)}
+                  type="button"
+                >
+                  打开任务
+                </button>
+                {followup ? (
+                  <Link
+                    aria-label={`${
+                      followup.status === "resolved" ||
+                      followup.status === "dismissed"
+                        ? "查看记录"
+                        : "打开跟进"
+                    }“${artifact.name}”`}
+                    className="button button-secondary"
+                    to={`/inbox/${followup.inboxItemId}`}
+                  >
+                    {followup.status === "resolved" ||
+                    followup.status === "dismissed"
+                      ? "查看记录"
+                      : "打开跟进"}
+                    <ArrowUpRight size={12} />
+                  </Link>
+                ) : null}
+              </div>
             </article>
           ))}
         </div>
