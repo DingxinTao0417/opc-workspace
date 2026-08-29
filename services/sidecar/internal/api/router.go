@@ -177,6 +177,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("project due Reminders: %w", err)
 	}
+	if err := service.projectDueClientFollowups(context.Background()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("project due Client Followups: %w", err)
+	}
 	if err := service.projectDueTasks(context.Background()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
@@ -395,6 +401,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					err := service.projectDueAutomations(options.Now().UTC())
 					if err == nil {
 						err = service.projectDueReminders(ctx)
+					}
+					if err == nil {
+						err = service.projectDueClientFollowups(ctx)
 					}
 					if err == nil {
 						err = service.projectDueTasks(ctx)
