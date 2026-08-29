@@ -29,6 +29,11 @@ function reminderPayload(overrides: Record<string, unknown> = {}) {
     status: "scheduled",
     source_event_key: `reminder:${id}:due`,
     created_by_actor_id: "00000000-0000-5000-8000-000000000001",
+    series_id: id,
+    recurrence_type: "none",
+    recurrence_interval: 1,
+    recurrence_timezone: "UTC",
+    occurrence_number: 1,
     fired_at: null,
     inbox_item_id: null,
     cancelled_by_actor_id: null,
@@ -54,6 +59,8 @@ describe("Reminder API contract", () => {
       status: "scheduled",
       priority: "P1",
       version: 1,
+      recurrenceType: "none",
+      recurrenceInterval: 1,
       availableActions: ["edit", "cancel"],
     });
     expect(
@@ -163,12 +170,18 @@ describe("Reminder API contract", () => {
         summary: "确认恢复点可用",
         priority: "P1",
         triggerAt: "2099-08-30T01:00:00Z",
+        recurrenceType: "daily",
+        recurrenceInterval: 2,
+        recurrenceTimezone: "Asia/Shanghai",
       },
       "reminder-create-1",
     );
     await updateReminder(id, {
       title: "复查本地恢复点",
       triggerAt: "2099-09-01T02:30:00Z",
+      recurrenceType: "weekly",
+      recurrenceInterval: 3,
+      recurrenceTimezone: "America/Los_Angeles",
       expectedVersion: 1,
     });
     await cancelReminder(
@@ -184,6 +197,9 @@ describe("Reminder API contract", () => {
       summary: "确认恢复点可用",
       priority: "P1",
       trigger_at: "2099-08-30T01:00:00Z",
+      recurrence_type: "daily",
+      recurrence_interval: 2,
+      recurrence_timezone: "Asia/Shanghai",
     });
     expect(
       new Headers(fetchMock.mock.calls[1][1]?.headers).get("If-Match"),
@@ -191,6 +207,9 @@ describe("Reminder API contract", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
       title: "复查本地恢复点",
       trigger_at: "2099-09-01T02:30:00Z",
+      recurrence_type: "weekly",
+      recurrence_interval: 3,
+      recurrence_timezone: "America/Los_Angeles",
     });
     expect(
       new Headers(fetchMock.mock.calls[2][1]?.headers).get("If-Match"),

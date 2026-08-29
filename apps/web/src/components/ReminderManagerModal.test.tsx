@@ -28,6 +28,11 @@ const scheduled: Reminder = {
   status: "scheduled",
   sourceEventKey: "reminder:018f0000-0000-7000-8000-000000001501:due",
   createdByActorId: "00000000-0000-5000-8000-000000000001",
+  seriesId: "018f0000-0000-7000-8000-000000001501",
+  recurrenceType: "none",
+  recurrenceInterval: 1,
+  recurrenceTimezone: "UTC",
+  occurrenceNumber: 1,
   firedAt: null,
   inboxItemId: null,
   cancelledByActorId: null,
@@ -106,6 +111,9 @@ describe("ReminderManagerModal", () => {
         title: "复查本地恢复点",
         summary: "确认恢复点可用",
         priority: "P1",
+        recurrenceType: "none",
+        recurrenceInterval: 1,
+        recurrenceTimezone: "UTC",
         expectedVersion: 3,
       },
     });
@@ -131,7 +139,37 @@ describe("ReminderManagerModal", () => {
       summary: "",
       priority: "P2",
       triggerAt: new Date("2099-09-01T10:30").toISOString(),
+      recurrenceType: "none",
+      recurrenceInterval: 1,
+      recurrenceTimezone: "UTC",
     });
+  });
+
+  it("creates a recurring reminder in the current IANA timezone", async () => {
+    render(<ReminderManagerModal onClose={vi.fn()} open />);
+    fireEvent.click(screen.getByRole("button", { name: "新建提醒" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "隔天检查交付" },
+    });
+    fireEvent.change(screen.getByLabelText("提醒时间"), {
+      target: { value: "2099-09-01T10:30" },
+    });
+    fireEvent.change(screen.getByLabelText("重复规则"), {
+      target: { value: "daily" },
+    });
+    fireEvent.change(screen.getByLabelText("重复间隔"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建提醒" }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({
+      title: "隔天检查交付",
+      recurrenceType: "daily",
+      recurrenceInterval: 2,
+      recurrenceTimezone: expect.any(String),
+    });
+    expect(mocks.create.mock.calls[0][0].recurrenceTimezone).not.toBe("Local");
   });
 
   it("requires and submits an auditable cancellation reason", async () => {

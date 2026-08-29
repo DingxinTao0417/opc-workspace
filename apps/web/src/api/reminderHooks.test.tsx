@@ -43,6 +43,11 @@ function reminder(
     status,
     sourceEventKey: "reminder:018f0000-0000-7000-8000-000000001501:due",
     createdByActorId: "00000000-0000-5000-8000-000000000001",
+    seriesId: "018f0000-0000-7000-8000-000000001501",
+    recurrenceType: "none",
+    recurrenceInterval: 1,
+    recurrenceTimezone: "UTC",
+    occurrenceNumber: 1,
     firedAt: status === "fired" ? "2099-08-30T01:00:01Z" : null,
     inboxItemId:
       status === "fired" ? "018f0000-0000-7000-8000-000000001502" : null,
@@ -114,6 +119,9 @@ describe("Reminder hooks", () => {
       summary: "",
       priority: "P2" as const,
       triggerAt: "2099-08-30T01:00:00Z",
+      recurrenceType: "none" as const,
+      recurrenceInterval: 1,
+      recurrenceTimezone: "UTC",
     };
     act(() => result.current.mutate(input));
     await waitFor(() => expect(result.current.isError).toBe(true));

@@ -38,9 +38,9 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
 - Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留。父子层级不会创建关系或继承/改写 required，Inbox 自动结清只看显式活动必需关系
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
-- 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
+- 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；内置 Sidecar 的 generation-aware 有界自动重启、数据库父目录运行锁、父管道 EOF 退出和前端连接世代清理也已接通。手工备份及迁移、恢复、JSON/ZIP 导入前的自动回滚包均在落盘前执行脱敏容量准入，恢复安排还预留 pending 目标副本。根脚本提供可在缺少桌面链接器时运行的源码门禁，以及包含 Rust/Tauri 链接测试的完整门禁。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 / schema v31 不变且本轮无 migration。T-02 仍是部分完成：真实 Tauri/Sidecar 父进程崩溃、进程树、三平台和安装包尚未验收，也没有 OS Job Object、进程组或孙进程治理；hard-hung orphan 当前只会被运行锁阻止再次打开同库，不会自动回收。[PRD v9.21](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。内置 Sidecar 的 generation-aware 有界自动重启、数据库父目录运行锁、父管道 EOF 退出和前端连接世代清理也已接通。手工备份及迁移、恢复、JSON/ZIP 导入前的自动回滚包均在落盘前执行脱敏容量准入，恢复安排还预留 pending 目标副本。根脚本提供可在缺少桌面链接器时运行的源码门禁，以及包含 Rust/Tauri 链接测试的完整门禁。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 不变，SQLite 当前为 schema v32。T-02 仍是部分完成：真实 Tauri/Sidecar 父进程崩溃、进程树、三平台和安装包尚未验收，也没有 OS Job Object、进程组或孙进程治理；hard-hung orphan 当前只会被运行锁阻止再次打开同库，不会自动回收。[PRD v9.22](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -64,7 +64,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.21）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.22）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -341,7 +341,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v31；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key，v30 非破坏性增加 `task_submissions.origin`、保留既有提交为 manual 并约束 system child_rollup，v31 为 Project Workflow Event→Client system reference 建立来源唯一约束；两项投影都不在迁移或启动时回填历史，也不创建 demo 数据。后续从 `032_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v32；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key，v30 非破坏性增加 `task_submissions.origin`、保留既有提交为 manual 并约束 system child_rollup，v31 为 Project Workflow Event→Client system reference 建立来源唯一约束，v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；迁移不创建 demo 数据。后续从 `033_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -351,4 +351,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.21](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、Inbox/Reminder/Task 编排、Project Artifact→Inbox→Task 人工闭环、内置 Sidecar 有界自动恢复、全部当前回滚包容量准入和统一源码质量门禁；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。
+[PRD v9.22](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、一次性及 daily/weekly Reminder、Inbox/Task 编排、Project Artifact→Inbox→Task 人工闭环、内置 Sidecar 有界自动恢复、全部当前回滚包容量准入和统一源码质量门禁；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。

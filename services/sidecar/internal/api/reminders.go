@@ -23,17 +23,23 @@ var validReminderStatuses = map[string]struct{}{
 }
 
 type createReminderRequest struct {
-	Title     string  `json:"title"`
-	Summary   *string `json:"summary"`
-	Priority  *string `json:"priority"`
-	TriggerAt string  `json:"trigger_at"`
+	Title              string  `json:"title"`
+	Summary            *string `json:"summary"`
+	Priority           *string `json:"priority"`
+	TriggerAt          string  `json:"trigger_at"`
+	RecurrenceType     *string `json:"recurrence_type"`
+	RecurrenceInterval *int    `json:"recurrence_interval"`
+	RecurrenceTimezone *string `json:"recurrence_timezone"`
 }
 
 type updateReminderRequest struct {
-	Title     nullableStringPatch `json:"title"`
-	Summary   nullableStringPatch `json:"summary"`
-	Priority  nullableStringPatch `json:"priority"`
-	TriggerAt nullableStringPatch `json:"trigger_at"`
+	Title              nullableStringPatch `json:"title"`
+	Summary            nullableStringPatch `json:"summary"`
+	Priority           nullableStringPatch `json:"priority"`
+	TriggerAt          nullableStringPatch `json:"trigger_at"`
+	RecurrenceType     nullableStringPatch `json:"recurrence_type"`
+	RecurrenceInterval nullableIntPatch    `json:"recurrence_interval"`
+	RecurrenceTimezone nullableStringPatch `json:"recurrence_timezone"`
 }
 
 type cancelReminderRequest struct {
@@ -41,10 +47,13 @@ type cancelReminderRequest struct {
 }
 
 type normalizedReminderCreate struct {
-	Title     string
-	Summary   string
-	Priority  string
-	TriggerAt string
+	Title              string
+	Summary            string
+	Priority           string
+	TriggerAt          string
+	RecurrenceType     string
+	RecurrenceInterval int
+	RecurrenceTimezone string
 }
 
 type reminderOutput struct {
@@ -58,6 +67,11 @@ type reminderOutput struct {
 	Status             string   `json:"status"`
 	SourceEventKey     string   `json:"source_event_key"`
 	CreatedByActorID   string   `json:"created_by_actor_id"`
+	SeriesID           string   `json:"series_id"`
+	RecurrenceType     string   `json:"recurrence_type"`
+	RecurrenceInterval int      `json:"recurrence_interval"`
+	RecurrenceTimezone string   `json:"recurrence_timezone"`
+	OccurrenceNumber   int64    `json:"occurrence_number"`
 	FiredAt            *string  `json:"fired_at"`
 	InboxItemID        *string  `json:"inbox_item_id"`
 	CancelledByActorID *string  `json:"cancelled_by_actor_id"`
@@ -77,10 +91,13 @@ type reminderListMeta struct {
 }
 
 type reminderCreateHash struct {
-	Title     string `json:"title"`
-	Summary   string `json:"summary"`
-	Priority  string `json:"priority"`
-	TriggerAt string `json:"trigger_at"`
+	Title              string `json:"title"`
+	Summary            string `json:"summary"`
+	Priority           string `json:"priority"`
+	TriggerAt          string `json:"trigger_at"`
+	RecurrenceType     string `json:"recurrence_type"`
+	RecurrenceInterval int    `json:"recurrence_interval"`
+	RecurrenceTimezone string `json:"recurrence_timezone"`
 }
 
 type reminderCancelHash struct {
@@ -187,7 +204,10 @@ func (a *API) createReminder(c *gin.Context) {
 			TriggerAt: normalized.TriggerAt, Status: "scheduled",
 			SourceEventKey:   "reminder:" + id + ":due",
 			CreatedByActorID: models.BuiltinOwnerActorID,
-			Version:          1, CreatedAt: nowText, UpdatedAt: nowText,
+			SeriesID:         id, RecurrenceType: normalized.RecurrenceType,
+			RecurrenceInterval: normalized.RecurrenceInterval,
+			RecurrenceTimezone: normalized.RecurrenceTimezone, OccurrenceNumber: 1,
+			Version: 1, CreatedAt: nowText, UpdatedAt: nowText,
 		}
 		if err := tx.Create(&reminder).Error; err != nil {
 			return fmt.Errorf("create Reminder: %w", err)
@@ -271,6 +291,9 @@ func (a *API) updateReminder(c *gin.Context) {
 		}
 		next := current
 		applyReminderPatch(&next, patch)
+		if err := validateReminderRecurrence(next.RecurrenceType, next.RecurrenceInterval, next.RecurrenceTimezone); err != nil {
+			return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		}
 		if reminderEditableEqual(current, next) {
 			response = reminderOutputFromModel(current)
 			return nil
@@ -280,6 +303,8 @@ func (a *API) updateReminder(c *gin.Context) {
 		updates := map[string]any{
 			"title": next.Title, "summary": next.Summary, "priority": next.Priority,
 			"trigger_at": next.TriggerAt, "version": next.Version, "updated_at": next.UpdatedAt,
+			"recurrence_type": next.RecurrenceType, "recurrence_interval": next.RecurrenceInterval,
+			"recurrence_timezone": next.RecurrenceTimezone,
 		}
 		result := tx.Model(&models.Reminder{}).
 			Where("id = ? AND version = ? AND status = 'scheduled'", id, expectedVersion).
@@ -488,8 +513,112 @@ func (a *API) projectReminder(ctx context.Context, id, nowText string) error {
 				return err
 			}
 		}
-		return recordReminderWorkflowEvent(tx, reminder.ID, "reminder_fired", reminderEventState(previous, ""), reminderEventState(reminder, ""), models.BuiltinSystemActorID, "", nowText)
+		if err := recordReminderWorkflowEvent(tx, reminder.ID, "reminder_fired", reminderEventState(previous, ""), reminderEventState(reminder, ""), models.BuiltinSystemActorID, "", nowText); err != nil {
+			return err
+		}
+		return scheduleNextReminderOccurrence(tx, reminder, nowText)
 	})
+}
+
+func scheduleNextReminderOccurrence(tx *gorm.DB, fired models.Reminder, nowText string) error {
+	if fired.RecurrenceType == "none" {
+		return nil
+	}
+	now, err := time.Parse(time.RFC3339Nano, nowText)
+	if err != nil {
+		return fmt.Errorf("parse Reminder projection time: %w", err)
+	}
+	nextAt, advances, err := nextReminderOccurrence(fired, now)
+	if err != nil {
+		return err
+	}
+	if advances < 1 || int64(advances) > (1<<63-1)-fired.OccurrenceNumber {
+		return errors.New("Reminder occurrence number overflow")
+	}
+	id := uuid.NewString()
+	next := models.Reminder{
+		ID: id, SourceEntityType: fired.SourceEntityType, SourceEntityID: fired.SourceEntityID,
+		Title: fired.Title, Summary: fired.Summary, Priority: fired.Priority,
+		TriggerAt: formatInboxTimestamp(nextAt.UTC()), Status: "scheduled",
+		SourceEventKey: "reminder:" + id + ":due", CreatedByActorID: fired.CreatedByActorID,
+		SeriesID: fired.SeriesID, RecurrenceType: fired.RecurrenceType,
+		RecurrenceInterval: fired.RecurrenceInterval, RecurrenceTimezone: fired.RecurrenceTimezone,
+		OccurrenceNumber: fired.OccurrenceNumber + int64(advances),
+		Version:          1, CreatedAt: nowText, UpdatedAt: nowText,
+	}
+	if err := tx.Create(&next).Error; err != nil {
+		return fmt.Errorf("create next recurring Reminder: %w", err)
+	}
+	return recordReminderWorkflowEvent(
+		tx, next.ID, "reminder_recurrence_scheduled", nil, reminderEventState(next, ""),
+		models.BuiltinSystemActorID, "", nowText,
+	)
+}
+
+func nextReminderOccurrence(reminder models.Reminder, now time.Time) (time.Time, int, error) {
+	if err := validateReminderRecurrence(reminder.RecurrenceType, reminder.RecurrenceInterval, reminder.RecurrenceTimezone); err != nil {
+		return time.Time{}, 0, fmt.Errorf("invalid recurring Reminder: %w", err)
+	}
+	triggerAt, err := time.Parse(time.RFC3339Nano, reminder.TriggerAt)
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("parse recurring Reminder trigger_at: %w", err)
+	}
+	location, err := time.LoadLocation(reminder.RecurrenceTimezone)
+	if err != nil {
+		return time.Time{}, 0, fmt.Errorf("load recurring Reminder timezone: %w", err)
+	}
+	stepDays := reminder.RecurrenceInterval
+	if reminder.RecurrenceType == "weekly" {
+		stepDays *= 7
+	}
+	base := triggerAt.In(location)
+	localNow := now.In(location)
+	baseDate := time.Date(base.Year(), base.Month(), base.Day(), 0, 0, 0, 0, time.UTC)
+	nowDate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.UTC)
+	differenceDays := int(nowDate.Sub(baseDate) / (24 * time.Hour))
+	advances := 1
+	if differenceDays > 0 {
+		advances = differenceDays / stepDays
+		if advances < 1 {
+			advances = 1
+		}
+	}
+	candidate := base.AddDate(0, 0, advances*stepDays)
+	for !candidate.After(now) {
+		advances++
+		candidate = base.AddDate(0, 0, advances*stepDays)
+	}
+	for advances > 1 {
+		previous := base.AddDate(0, 0, (advances-1)*stepDays)
+		if !previous.After(now) {
+			break
+		}
+		advances--
+		candidate = previous
+	}
+	return candidate, advances, nil
+}
+
+func validateReminderRecurrence(recurrenceType string, interval int, timezone string) error {
+	if recurrenceType != "none" && recurrenceType != "daily" && recurrenceType != "weekly" {
+		return errors.New("recurrence_type must be none, daily, or weekly")
+	}
+	if interval < 1 || interval > 365 {
+		return errors.New("recurrence_interval must be between 1 and 365")
+	}
+	if recurrenceType == "none" {
+		if interval != 1 || timezone != "UTC" {
+			return errors.New("one-time Reminders require recurrence_interval 1 and recurrence_timezone UTC")
+		}
+		return nil
+	}
+	if timezone == "" || len(timezone) > 100 || timezone == "Local" {
+		return errors.New("recurrence_timezone must be a stable IANA timezone")
+	}
+	if _, err := time.LoadLocation(timezone); err != nil {
+		return errors.New("recurrence_timezone must be a stable IANA timezone")
+	}
+	return nil
 }
 
 func normalizeReminderCreate(input createReminderRequest, now time.Time) (normalizedReminderCreate, error) {
@@ -519,11 +648,30 @@ func normalizeReminderCreate(input createReminderRequest, now time.Time) (normal
 	if !parsed.After(now) {
 		return normalizedReminderCreate{}, errors.New("trigger_at must be later than server_now")
 	}
-	return normalizedReminderCreate{Title: title, Summary: summary, Priority: priority, TriggerAt: triggerAt}, nil
+	recurrenceType := "none"
+	if input.RecurrenceType != nil {
+		recurrenceType = strings.TrimSpace(*input.RecurrenceType)
+	}
+	recurrenceInterval := 1
+	if input.RecurrenceInterval != nil {
+		recurrenceInterval = *input.RecurrenceInterval
+	}
+	recurrenceTimezone := "UTC"
+	if input.RecurrenceTimezone != nil {
+		recurrenceTimezone = strings.TrimSpace(*input.RecurrenceTimezone)
+	}
+	if err := validateReminderRecurrence(recurrenceType, recurrenceInterval, recurrenceTimezone); err != nil {
+		return normalizedReminderCreate{}, err
+	}
+	return normalizedReminderCreate{
+		Title: title, Summary: summary, Priority: priority, TriggerAt: triggerAt,
+		RecurrenceType: recurrenceType, RecurrenceInterval: recurrenceInterval,
+		RecurrenceTimezone: recurrenceTimezone,
+	}, nil
 }
 
-func normalizeReminderPatch(input updateReminderRequest, now time.Time) (map[string]string, error) {
-	patch := make(map[string]string)
+func normalizeReminderPatch(input updateReminderRequest, now time.Time) (map[string]any, error) {
+	patch := make(map[string]any)
 	if input.Title.Set {
 		if input.Title.Value == nil {
 			return nil, errors.New("title cannot be null")
@@ -568,27 +716,69 @@ func normalizeReminderPatch(input updateReminderRequest, now time.Time) (map[str
 		}
 		patch["trigger_at"] = value
 	}
+	if input.RecurrenceType.Set {
+		if input.RecurrenceType.Value == nil {
+			return nil, errors.New("recurrence_type cannot be null")
+		}
+		value := strings.TrimSpace(*input.RecurrenceType.Value)
+		if value != "none" && value != "daily" && value != "weekly" {
+			return nil, errors.New("recurrence_type must be none, daily, or weekly")
+		}
+		patch["recurrence_type"] = value
+	}
+	if input.RecurrenceInterval.Set {
+		if input.RecurrenceInterval.Value == nil {
+			return nil, errors.New("recurrence_interval cannot be null")
+		}
+		value := *input.RecurrenceInterval.Value
+		if value < 1 || value > 365 {
+			return nil, errors.New("recurrence_interval must be between 1 and 365")
+		}
+		patch["recurrence_interval"] = value
+	}
+	if input.RecurrenceTimezone.Set {
+		if input.RecurrenceTimezone.Value == nil {
+			return nil, errors.New("recurrence_timezone cannot be null")
+		}
+		value := strings.TrimSpace(*input.RecurrenceTimezone.Value)
+		if len(value) < 1 || len(value) > 100 {
+			return nil, errors.New("recurrence_timezone must contain 1 to 100 characters")
+		}
+		patch["recurrence_timezone"] = value
+	}
 	return patch, nil
 }
 
-func applyReminderPatch(reminder *models.Reminder, patch map[string]string) {
+func applyReminderPatch(reminder *models.Reminder, patch map[string]any) {
 	if value, ok := patch["title"]; ok {
-		reminder.Title = value
+		reminder.Title = value.(string)
 	}
 	if value, ok := patch["summary"]; ok {
-		reminder.Summary = value
+		reminder.Summary = value.(string)
 	}
 	if value, ok := patch["priority"]; ok {
-		reminder.Priority = value
+		reminder.Priority = value.(string)
 	}
 	if value, ok := patch["trigger_at"]; ok {
-		reminder.TriggerAt = value
+		reminder.TriggerAt = value.(string)
+	}
+	if value, ok := patch["recurrence_type"]; ok {
+		reminder.RecurrenceType = value.(string)
+	}
+	if value, ok := patch["recurrence_interval"]; ok {
+		reminder.RecurrenceInterval = value.(int)
+	}
+	if value, ok := patch["recurrence_timezone"]; ok {
+		reminder.RecurrenceTimezone = value.(string)
 	}
 }
 
 func reminderEditableEqual(first, second models.Reminder) bool {
 	return first.Title == second.Title && first.Summary == second.Summary &&
-		first.Priority == second.Priority && first.TriggerAt == second.TriggerAt
+		first.Priority == second.Priority && first.TriggerAt == second.TriggerAt &&
+		first.RecurrenceType == second.RecurrenceType &&
+		first.RecurrenceInterval == second.RecurrenceInterval &&
+		first.RecurrenceTimezone == second.RecurrenceTimezone
 }
 
 func applyReminderSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
@@ -636,7 +826,10 @@ func reminderOutputFromModel(reminder models.Reminder) reminderOutput {
 		SourceEntityID: reminder.SourceEntityID, Title: reminder.Title, Summary: reminder.Summary,
 		Priority: reminder.Priority, TriggerAt: reminder.TriggerAt, Status: reminder.Status,
 		SourceEventKey: reminder.SourceEventKey, CreatedByActorID: reminder.CreatedByActorID,
-		FiredAt: reminder.FiredAt, InboxItemID: reminder.InboxItemID,
+		SeriesID: reminder.SeriesID, RecurrenceType: reminder.RecurrenceType,
+		RecurrenceInterval: reminder.RecurrenceInterval, RecurrenceTimezone: reminder.RecurrenceTimezone,
+		OccurrenceNumber: reminder.OccurrenceNumber,
+		FiredAt:          reminder.FiredAt, InboxItemID: reminder.InboxItemID,
 		CancelledByActorID: reminder.CancelledByActorID, CancelledAt: reminder.CancelledAt,
 		CancelReason: reminder.CancelReason, Version: reminder.Version,
 		CreatedAt: reminder.CreatedAt, UpdatedAt: reminder.UpdatedAt, AvailableActions: actions,
@@ -649,7 +842,10 @@ func reminderEventState(reminder models.Reminder, reason string) map[string]any 
 		"title": reminder.Title, "summary": reminder.Summary, "priority": reminder.Priority,
 		"trigger_at": reminder.TriggerAt, "status": reminder.Status,
 		"source_event_key": reminder.SourceEventKey, "created_by_actor_id": reminder.CreatedByActorID,
-		"fired_at": reminder.FiredAt, "inbox_item_id": reminder.InboxItemID,
+		"series_id": reminder.SeriesID, "recurrence_type": reminder.RecurrenceType,
+		"recurrence_interval": reminder.RecurrenceInterval, "recurrence_timezone": reminder.RecurrenceTimezone,
+		"occurrence_number": reminder.OccurrenceNumber,
+		"fired_at":          reminder.FiredAt, "inbox_item_id": reminder.InboxItemID,
 		"cancelled_by_actor_id": reminder.CancelledByActorID, "cancelled_at": reminder.CancelledAt,
 		"cancel_reason": reminder.CancelReason, "version": reminder.Version,
 	}

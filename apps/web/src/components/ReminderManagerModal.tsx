@@ -22,6 +22,7 @@ import {
 import type {
   InboxItemPriority,
   Reminder,
+  ReminderRecurrenceType,
   ReminderStatus,
 } from "../types/models";
 import { EmptyState, SkeletonRows } from "./feedback";
@@ -44,6 +45,9 @@ type ReminderDraft = {
   summary: string;
   priority: InboxItemPriority;
   triggerAt: string;
+  recurrenceType: ReminderRecurrenceType;
+  recurrenceInterval: number;
+  recurrenceTimezone: string;
 };
 
 const emptyDraft = (): ReminderDraft => ({
@@ -51,7 +55,27 @@ const emptyDraft = (): ReminderDraft => ({
   summary: "",
   priority: "P2",
   triggerAt: "",
+  recurrenceType: "none",
+  recurrenceInterval: 1,
+  recurrenceTimezone: "UTC",
 });
+
+function currentIanaTimezone(): string {
+  try {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return timezone && timezone !== "Local" ? timezone : "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function recurrenceLabel(reminder: Reminder): string {
+  if (reminder.recurrenceType === "none") return "一次性";
+  const unit = reminder.recurrenceType === "daily" ? "天" : "周";
+  return reminder.recurrenceInterval === 1
+    ? `每${unit}`
+    : `每 ${reminder.recurrenceInterval} ${unit}`;
+}
 
 function unicodeLength(value: string): number {
   return Array.from(value).length;
@@ -89,6 +113,9 @@ function draftFromReminder(reminder: Reminder): ReminderDraft {
     summary: reminder.summary,
     priority: reminder.priority,
     triggerAt: toLocalDateTime(reminder.triggerAt),
+    recurrenceType: reminder.recurrenceType,
+    recurrenceInterval: reminder.recurrenceInterval,
+    recurrenceTimezone: reminder.recurrenceTimezone,
   };
 }
 
@@ -271,6 +298,23 @@ export function ReminderManagerModal({
       setValidationError("提醒时间必须晚于当前时间。");
       return null;
     }
+    if (
+      !Number.isInteger(draft.recurrenceInterval) ||
+      draft.recurrenceInterval < 1 ||
+      draft.recurrenceInterval > 365
+    ) {
+      setValidationError("重复间隔需要是 1–365 的整数。");
+      return null;
+    }
+    if (
+      draft.recurrenceType !== "none" &&
+      (!draft.recurrenceTimezone || draft.recurrenceTimezone === "Local")
+    ) {
+      setValidationError(
+        "当前系统没有提供稳定的 IANA 时区，暂时不能创建重复提醒。",
+      );
+      return null;
+    }
     setValidationError(null);
     return {
       value: { ...draft, title: cleanTitle, summary: cleanSummary },
@@ -386,7 +430,7 @@ export function ReminderManagerModal({
               <span>{statusLabels[key]}</span>
             </button>
           ))}
-          <p>一次性提醒仅保存在本机，不发送邮件、短信或远程通知。</p>
+          <p>一次性和重复提醒都只保存在本机，不发送邮件、短信或远程通知。</p>
         </aside>
 
         <section className="reminder-manager-content">
@@ -484,7 +528,7 @@ export function ReminderManagerModal({
                         <strong>{reminder.title}</strong>
                         <small>
                           {reminder.status === "scheduled"
-                            ? formatDateTime(reminder.triggerAt)
+                            ? `${formatDateTime(reminder.triggerAt)} · ${recurrenceLabel(reminder)}`
                             : reminder.status === "fired" && reminder.firedAt
                               ? `触发于 ${formatDateTime(reminder.firedAt)}`
                               : reminder.cancelledAt
@@ -537,7 +581,11 @@ export function ReminderManagerModal({
                     <div>
                       {creating ? <Plus size={16} /> : <Pencil size={16} />}
                       <strong>
-                        {creating ? "新建一次性提醒" : "编辑与改期"}
+                        {creating
+                          ? draft.recurrenceType === "none"
+                            ? "新建一次性提醒"
+                            : "新建重复提醒"
+                          : "编辑与改期"}
                       </strong>
                     </div>
                     {!creating && selected ? (
@@ -610,6 +658,70 @@ export function ReminderManagerModal({
                       />
                     </label>
                   </div>
+                  <div className="form-grid">
+                    <label className="form-field">
+                      <span>重复规则</span>
+                      <select
+                        aria-label="重复规则"
+                        disabled={busy}
+                        onChange={(event) => {
+                          const recurrenceType = event.target
+                            .value as ReminderRecurrenceType;
+                          setDraft((value) => ({
+                            ...value,
+                            recurrenceType,
+                            recurrenceInterval:
+                              recurrenceType === "none"
+                                ? 1
+                                : value.recurrenceType === "none"
+                                  ? 1
+                                  : value.recurrenceInterval,
+                            recurrenceTimezone:
+                              recurrenceType === "none"
+                                ? "UTC"
+                                : value.recurrenceType === "none"
+                                  ? currentIanaTimezone()
+                                  : value.recurrenceTimezone,
+                          }));
+                        }}
+                        value={draft.recurrenceType}
+                      >
+                        <option value="none">不重复</option>
+                        <option value="daily">按天重复</option>
+                        <option value="weekly">按周重复</option>
+                      </select>
+                    </label>
+                    {draft.recurrenceType !== "none" ? (
+                      <label className="form-field">
+                        <span>重复间隔</span>
+                        <input
+                          aria-label="重复间隔"
+                          disabled={busy}
+                          max={365}
+                          min={1}
+                          onChange={(event) =>
+                            setDraft((value) => ({
+                              ...value,
+                              recurrenceInterval: Number(event.target.value),
+                            }))
+                          }
+                          type="number"
+                          value={draft.recurrenceInterval}
+                        />
+                      </label>
+                    ) : (
+                      <div className="form-field">
+                        <span>时区</span>
+                        <small>一次性提醒按所选本地时间保存。</small>
+                      </div>
+                    )}
+                  </div>
+                  {draft.recurrenceType !== "none" ? (
+                    <p className="form-note">
+                      按 {draft.recurrenceTimezone}{" "}
+                      的当地钟点重复；应用离线期间只补一条已到期事项，下一次会推进到当前时间之后。
+                    </p>
+                  ) : null}
                   {operationError ? (
                     <div
                       className="form-error reminder-editor-error"
@@ -659,7 +771,11 @@ export function ReminderManagerModal({
                   {confirmingCancel && selected ? (
                     <div className="reminder-cancel-editor">
                       <strong>保留取消原因</strong>
-                      <p>取消会停止到期投影，但不会删除提醒事实。</p>
+                      <p>
+                        {selected.recurrenceType === "none"
+                          ? "取消会停止到期投影，但不会删除提醒事实。"
+                          : "取消会停止这个系列的后续提醒，但不会删除既有 occurrence 和收件箱事实。"}
+                      </p>
                       <label className="form-field">
                         <span>取消原因</span>
                         <textarea
@@ -694,7 +810,8 @@ export function ReminderManagerModal({
                     </div>
                   ) : null}
                   <p className="form-note">
-                    到期后会生成一条收件箱事项；重复扫描或重启不会重复生成。
+                    到期后会生成一条收件箱事项；扫描或重启不会重复生成同一次
+                    occurrence。
                   </p>
                 </form>
               ) : detailQuery.isPending && selectedId ? (
@@ -717,6 +834,15 @@ export function ReminderManagerModal({
                     <div>
                       <dt>优先级</dt>
                       <dd>{selected.priority}</dd>
+                    </div>
+                    <div>
+                      <dt>重复规则</dt>
+                      <dd>
+                        {recurrenceLabel(selected)}
+                        {selected.recurrenceType === "none"
+                          ? ""
+                          : ` · ${selected.recurrenceTimezone} · 第 ${selected.occurrenceNumber} 次`}
+                      </dd>
                     </div>
                     {selected.firedAt ? (
                       <div>
@@ -752,7 +878,7 @@ export function ReminderManagerModal({
                 <div className="reminder-manager-placeholder">
                   <CalendarClock size={28} />
                   <strong>选择一条提醒</strong>
-                  <p>查看详情，或新建一条只保存在本机的一次性提醒。</p>
+                  <p>查看详情，或新建一条只保存在本机的一次性/重复提醒。</p>
                 </div>
               )}
             </div>

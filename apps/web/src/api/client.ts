@@ -123,6 +123,7 @@ import type {
   ProjectTransitionAction,
   Reminder,
   ReminderAction,
+  ReminderRecurrenceType,
   ReminderListParams,
   ReminderListResult,
   ReminderStatus,
@@ -2734,6 +2735,13 @@ function asReminderStatus(value: unknown): ReminderStatus {
   return invalidResponse("提醒状态响应无效");
 }
 
+function asReminderRecurrenceType(value: unknown): ReminderRecurrenceType {
+  if (value === "none" || value === "daily" || value === "weekly") {
+    return value;
+  }
+  return invalidResponse("提醒重复规则响应无效");
+}
+
 const reminderActions = new Set<ReminderAction>(["edit", "cancel"]);
 
 export function normalizeReminder(value: unknown): Reminder {
@@ -2751,6 +2759,25 @@ export function normalizeReminder(value: unknown): Reminder {
     value,
     "created_by_actor_id",
     "createdByActorId",
+  );
+  const seriesId = stringField(value, "series_id", "seriesId");
+  const recurrenceType = asReminderRecurrenceType(
+    fieldValue(value, "recurrence_type", "recurrenceType"),
+  );
+  const recurrenceInterval = fieldValue(
+    value,
+    "recurrence_interval",
+    "recurrenceInterval",
+  );
+  const recurrenceTimezone = stringField(
+    value,
+    "recurrence_timezone",
+    "recurrenceTimezone",
+  );
+  const occurrenceNumber = fieldValue(
+    value,
+    "occurrence_number",
+    "occurrenceNumber",
   );
   const createdAt = stringField(value, "created_at", "createdAt");
   const updatedAt = stringField(value, "updated_at", "updatedAt");
@@ -2779,6 +2806,15 @@ export function normalizeReminder(value: unknown): Reminder {
     !triggerAt ||
     !sourceEventKey ||
     !createdByActorId ||
+    !seriesId ||
+    !Number.isInteger(recurrenceInterval) ||
+    Number(recurrenceInterval) < 1 ||
+    Number(recurrenceInterval) > 365 ||
+    !recurrenceTimezone ||
+    !Number.isInteger(occurrenceNumber) ||
+    Number(occurrenceNumber) < 1 ||
+    (recurrenceType === "none" &&
+      (recurrenceInterval !== 1 || recurrenceTimezone !== "UTC")) ||
     !createdAt ||
     !updatedAt ||
     fieldValue(value, "source_entity_type", "sourceEntityType") !== "manual" ||
@@ -2831,6 +2867,11 @@ export function normalizeReminder(value: unknown): Reminder {
     status,
     sourceEventKey,
     createdByActorId,
+    seriesId,
+    recurrenceType,
+    recurrenceInterval: Number(recurrenceInterval),
+    recurrenceTimezone,
+    occurrenceNumber: Number(occurrenceNumber),
     firedAt,
     inboxItemId,
     cancelledByActorId,
@@ -6603,6 +6644,9 @@ export async function createReminder(
       summary: input.summary,
       priority: input.priority,
       trigger_at: input.triggerAt,
+      recurrence_type: input.recurrenceType,
+      recurrence_interval: input.recurrenceInterval,
+      recurrence_timezone: input.recurrenceTimezone,
     }),
   });
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
@@ -6625,6 +6669,15 @@ export async function updateReminder(
         ...(input.triggerAt === undefined
           ? {}
           : { trigger_at: input.triggerAt }),
+        ...(input.recurrenceType === undefined
+          ? {}
+          : { recurrence_type: input.recurrenceType }),
+        ...(input.recurrenceInterval === undefined
+          ? {}
+          : { recurrence_interval: input.recurrenceInterval }),
+        ...(input.recurrenceTimezone === undefined
+          ? {}
+          : { recurrence_timezone: input.recurrenceTimezone }),
       }),
     },
   );

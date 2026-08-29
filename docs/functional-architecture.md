@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.44
+> 文档版本：2.45
 > 日期：2026-08-29
-> 依据：[PRD v9.21](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v31
+> 依据：[PRD v9.22](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v32
 
-> 2.44 说明：统一备份容量准入现已覆盖手工创建与全部当前内部自动回滚包。破坏性迁移、业务 JSON/含文件 ZIP 导入和恢复安排都在任何备份 staging/`VACUUM INTO` 与业务变化前只探测 backup root；恢复安排把当前工作区回滚包、目标 pending 副本及其 manifest/plan 上界合并计算 20% 且最低 64 MiB 余量。HTTP 操作以脱敏 507/503 拒绝且不投影通用备份故障，迁移则在破坏性边界前安全终止启动。app/API/schema 不变且无迁移。
+> 2.45 说明：schema v32 交付本地 daily/weekly 重复 Reminder。每次 occurrence 保持独立不可变终态和唯一 Inbox 投影，同一事务按 IANA 当地日历创建下一 occurrence；跨 DST 保持当地钟点，离线积压只补当前一条并推进序号，重复扫描/重启不重复。取消当前唯一 scheduled occurrence 即停止系列。业务导入在创建回滚包前验证重复规则和时区。app v0.1.0 / API v1 不变。
 
 ## 1. 目的
 
@@ -55,10 +55,10 @@
 - Go 受管 Sidecar 由 Tauri 注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父控制管道 EOF 进入与显式 shutdown 相同的 HTTP drain、WAL checkpoint 和数据库关闭；外部/开发模式默认 false。Sidecar 在检查 pending restore、执行迁移或打开 SQLite 前，先对数据库父目录固定 `.opc-sidecar-run.lock` 取得非阻塞 OS 独占锁；冲突立即失败且不接触数据库。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 任务树/平铺及项目内任务服务端搜索、状态/优先级/类型/标签/排期筛选和分页、可编辑人工笔记、所属 Task Artifact 产出聚合、项目级 Focus 报告/终态历史与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选：固定以每页 20 条读取既有 Client API，输入经 250 ms 防抖后服务端搜索，稳定分页并传递取消信号，跨页或失败时保留当前选择，inactive Client 保持可见可选，且具备加载、空、错误重试、更多提示和 combobox 键盘语义，不再串行拉取全部 Client。共享 `ProjectSelect` 已覆盖 Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务：固定每页 20 条，250 ms 防抖搜索既有 Project API，以 `q / page / includeArchived` 隔离 Query key 并传递取消信号；候选按 ID 去重，只有显式清除才提交未归项目，选中详情或名称 fallback 保留跨页、失败及当前已归档选择，默认候选不列其他归档项目。生产路径已移除 `getAllProjects` 串行拉全。任务页的选中客户仍只作为列表查询条件，服务端沿 Task→Project→Client 当前关系筛选；计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽均保持原契约。Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作、直达共享编辑、版本化确认删除，以及逾期/未来 24 小时临期快捷筛选，Project 已接独立产出/笔记/审计/Focus 反馈状态。
 - 任务看板与列表消费同一个严格 Task 契约：切换看板后使用平铺服务端分页，固定显示六状态列，复用全部筛选、最多 100 项批量选择及共享详情入口；跨列拖拽只映射既有生命周期命令，经过确认、版本、负责人、原因及人工验收门禁，服务端成功前不改卡片状态。
-- Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
+- Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema v31：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`；schema v30 非破坏性增加 `task_submissions.origin` 并约束 system child_rollup；schema v31 为 Project Workflow Event→Client system reference 增加来源唯一约束。v30/v31 都不在迁移或启动时回填历史业务事实，也不创建 demo 数据。
+- SQLite 当前为 schema v32：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`；schema v30 非破坏性增加 `task_submissions.origin` 并约束 system child_rollup；schema v31 为 Project Workflow Event→Client system reference 增加来源唯一约束；schema v32 为 Reminder 追加系列、重复规则、时区和 occurrence 唯一事实。v30–v32 都不创建 demo 数据，v32 只把既有一次性 Reminder 补成 `none/1/UTC` 系列首项。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
 - 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。手工 `POST /api/v1/backups` 在幂等重放未命中后，迁移/导入/恢复内部链在各自不可逆边界前，统一按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；恢复另把目标包 pending 副本与 plan 上界加入同一次需求。精确等于需求允许继续；空间不足/容量无法确认分别以 507/503 或启动失败安全拒绝。拒绝无备份 staging、新回滚包、业务变化或 generic incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排通过容量准入后创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
@@ -85,8 +85,8 @@
 - schema v30 已交付直属子任务自动协调：非取消直属子任务至少 1 个且全部 done、父任务为 todo/in_progress + manual、active owner/person assignee 与 active builtin owner reviewer 齐全时，由 system 创建零 Artifact 的 `origin=child_rollup` 批次并最多推进到 waiting_review。失效可撤回 pending 系统批次；accepted 父任务只在子任务完成条件失效时系统重开。manual 历史与 changes_requested 系统批次不被覆盖。
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 先在数据库父目录获取 `.opc-sidecar-run.lock`，再于 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，随后获取 Artifact root 独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。数据库运行锁防止第二个进程恢复、迁移或打开同库，Artifact 锁防止双进程协调同一文件根，两者不可互相替代。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）、Project 详情读取和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭正时长 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task/Project 详情按需读取关联历史，Project 过滤按 Task 查询时当前项目归属，均不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
-- T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 原生反馈、Client 的邮件/日历/回访等其他活动来源及财务、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Project 生命周期的本地系统活动投影已经交付，但不代表客户互动或对外通信。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及按 1–100 GiB 设置阈值运行的低空间投影已接 Inbox；Sidecar generation-aware 有界重启、父管道 EOF 退出、数据库运行锁、双进程日志、request ID 和全局恢复页已交付，数据库打开前备份选择/实时恢复进度仍未交付。T-02 仍部分完成：没有 OS Job Object、进程组或孙进程治理，hard-hung orphan 仅被运行锁挡住而不会自动回收，真实 Tauri/Sidecar 父崩溃、进程树、三平台与安装包尚未验收。
+- T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性及 daily/weekly 本地 Reminder、启动补偿、周期扫描、DST 安全推进和幂等 Inbox/下一 occurrence 投影。
+- 当前仍未实现 Focus 原生反馈、Client 的邮件/日历/回访等其他活动来源及财务、每月/自定义 Reminder、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Project 生命周期的本地系统活动投影已经交付，但不代表客户互动或对外通信。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及按 1–100 GiB 设置阈值运行的低空间投影已接 Inbox；Sidecar generation-aware 有界重启、父管道 EOF 退出、数据库运行锁、双进程日志、request ID 和全局恢复页已交付，数据库打开前备份选择/实时恢复进度仍未交付。T-02 仍部分完成：没有 OS Job Object、进程组或孙进程治理，hard-hung orphan 仅被运行锁挡住而不会自动回收，真实 Tauri/Sidecar 父崩溃、进程树、三平台与安装包尚未验收。
 
 ### 3.2 目标扩展
 
@@ -124,7 +124,7 @@
 | [项目](modules/projects.md)                | Client 服务端选择结果、Task、Focus、受控文件 store、Artifact 来源 Inbox                                       | 已实现资料、生命周期、稳定分页读模型、任务/Artifact 聚合、nullable follow-up/实时 required 进度、笔记、附件、项目级 Focus、活动时间线及来源投影                            | 产出状态深链 Inbox；完成收尾事项进入 Inbox；complete/reopen 向事件时关联 Client 输出只读系统活动；不复制 Inbox/Task 写事实               |
 | [客户](modules/clients.md)                 | Project、Invoice、Activity、受控文件 store、person Actor                                                      | 当前已实现基础资料、状态、项目数/最近活动派生、供 Project/Task 使用的服务端分页搜索选择读模型、Project 关联、人工/项目状态时间线、Client Attachment 和显式 contact 关联    | Project complete/reopen 只读系统活动；其他外部来源、回访、发票和 Inbox 来源仍属后续纵切                                                  |
 | [收件箱](modules/inbox.md)                 | owner 手工录入、Reminder 到期、已有/新建 Task、follow-up Artifact、Task 阻塞/临期、Project 完成与系统维护来源 | 已交付受理分诊、显式 required、来源 Project 继承/清除、完成条件、owner/person 分派、共享 Task 详情、自动结清/重开、来源删除协调和风险深链                                  | 输出 Event、实时进度及 Today/Sidebar 计数；成功 mutation 失效来源 Project，split 另失效 Task/Today/Project；Task 层级不隐式创建 required |
-| [本地提醒](modules/reminders.md)           | owner 输入与本地服务端时钟                                                                                    | 一次性 scheduled/fired/cancelled 调度事实、启动补偿与稳定键 Inbox 投影                                                                                                     | Reminder Workflow Event 与 Reminder Inbox Item；原生通知和重复规则待后续                                                                 |
+| [本地提醒](modules/reminders.md)           | owner 输入、本地服务端时钟与浏览器 IANA 时区                                                                  | 一次性/daily/weekly 系列、独立 occurrence、scheduled/fired/cancelled、启动补偿与稳定键投影                                                                                 | Reminder Workflow Event、Reminder Inbox Item 与下一 scheduled occurrence；原生通知和复杂日历规则待后续                                   |
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                                                 | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                                                                | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                                                                    |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                                       | 单次受控执行                                                                                                                                                               | Agent Run、Task Artifact、待验收或失败事件                                                                                               |
 | [专注](modules/focus.md)                   | 当前 Task 与查询时当前 Project/Tag 关系                                                                       | 活动 Session、有效工时、终态历史和 completed-only 周期读模型                                                                                                               | Task actual_minutes、今日/统计数据，以及 Task/Project 详情只读历史与分析                                                                 |
@@ -230,19 +230,20 @@ Project 达到开票节点
 
 付款事务不直接关闭 Inbox Item；若其他必需 Task 仍处于 blocked、waiting_review 或未完成状态，工作项继续跟踪。本地 Agent 只能生成草稿或 PDF Artifact，不能自动发送、确认付款或修改财务事实。
 
-### 6.4 一次性本地提醒
+### 6.4 一次性与重复本地提醒
 
 ```text
 owner 创建 Reminder(scheduled)
   → 本地调度器到期扫描
   → source_event_key 幂等生成 Inbox Item(open)
   → Reminder(fired) 记录 inbox_item_id
+  → daily/weekly 按 IANA 当地日历生成下一 occurrence
   → owner 解决、稍后提醒或拆分 Task
 ```
 
-Reminder 是调度事实；Inbox Item 是到期后的处理事实。两者不复用状态。
+Reminder occurrence 是调度事实；Inbox Item 是该次到期后的处理事实。两者不复用状态。
 
-该链路已由 schema v14/T-11A3 交付：Sidecar 在 ready 前补扫到期 Reminder，运行中每 15 秒按稳定顺序扫描最多 100 条；每个到期项以 `reminder:<id>:due` 为唯一事件键，在一个事务中创建或复用 Reminder Inbox Item、写 system Inbox Event、标记 Reminder fired 并写 system Reminder Event。应用关闭期间不会后台唤醒，下次启动补偿；重复提醒和系统原生通知仍未实现。
+该链路由 schema v14/T-11A3 建立一次性事实，schema v32 扩展 daily/weekly 系列：Sidecar 在 ready 前补扫到期 Reminder，运行中每 15 秒按稳定顺序扫描最多 100 条；每个到期 occurrence 以 `reminder:<id>:due` 为唯一事件键，在一个事务中创建或复用 Reminder Inbox Item、写 system Inbox Event、标记 Reminder fired、写 system Reminder Event，并按 IANA 当地日历创建同系列唯一下一 occurrence。跨 DST 保持当地钟点；离线漏过多个周期只补当前一条并把序号推进到下一未来时刻。取消唯一 scheduled occurrence 停止系列。系统原生通知、每月/自定义日历规则仍未实现。
 
 ### 6.5 Task 临期来源
 

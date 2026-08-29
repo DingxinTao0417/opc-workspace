@@ -11,6 +11,11 @@ type Reminder struct {
 	Status             string  `gorm:"column:status" json:"status"`
 	SourceEventKey     string  `gorm:"column:source_event_key" json:"source_event_key"`
 	CreatedByActorID   string  `gorm:"column:created_by_actor_id" json:"created_by_actor_id"`
+	SeriesID           string  `gorm:"column:series_id" json:"series_id"`
+	RecurrenceType     string  `gorm:"column:recurrence_type" json:"recurrence_type"`
+	RecurrenceInterval int     `gorm:"column:recurrence_interval" json:"recurrence_interval"`
+	RecurrenceTimezone string  `gorm:"column:recurrence_timezone" json:"recurrence_timezone"`
+	OccurrenceNumber   int64   `gorm:"column:occurrence_number" json:"occurrence_number"`
 	FiredAt            *string `gorm:"column:fired_at" json:"fired_at"`
 	InboxItemID        *string `gorm:"column:inbox_item_id" json:"inbox_item_id"`
 	CancelledByActorID *string `gorm:"column:cancelled_by_actor_id" json:"cancelled_by_actor_id"`

@@ -1523,6 +1523,7 @@ export interface InboxEventListResult {
 
 export type ReminderStatus = "scheduled" | "fired" | "cancelled";
 export type ReminderAction = "edit" | "cancel";
+export type ReminderRecurrenceType = "none" | "daily" | "weekly";
 export type ReminderSort =
   | "title"
   | "status"
@@ -1548,6 +1549,11 @@ export interface Reminder {
   status: ReminderStatus;
   sourceEventKey: string;
   createdByActorId: string;
+  seriesId: string;
+  recurrenceType: ReminderRecurrenceType;
+  recurrenceInterval: number;
+  recurrenceTimezone: string;
+  occurrenceNumber: number;
   firedAt: string | null;
   inboxItemId: string | null;
   cancelledByActorId: string | null;
@@ -1581,6 +1587,9 @@ export interface CreateReminderInput {
   summary: string;
   priority: InboxItemPriority;
   triggerAt: string;
+  recurrenceType: ReminderRecurrenceType;
+  recurrenceInterval: number;
+  recurrenceTimezone: string;
 }
 
 export interface UpdateReminderInput {
@@ -1588,6 +1597,9 @@ export interface UpdateReminderInput {
   summary?: string;
   priority?: InboxItemPriority;
   triggerAt?: string;
+  recurrenceType?: ReminderRecurrenceType;
+  recurrenceInterval?: number;
+  recurrenceTimezone?: string;
   expectedVersion: number;
 }
 

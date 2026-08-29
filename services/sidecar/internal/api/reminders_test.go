@@ -221,6 +221,8 @@ func seedReminderForProjection(t *testing.T, store *database.Store, id, title, t
 		ID: id, SourceEntityType: "manual", Title: title, Summary: "本地提醒说明",
 		Priority: "P2", TriggerAt: triggerAt, Status: status,
 		SourceEventKey: "reminder:" + id + ":due", CreatedByActorID: models.BuiltinOwnerActorID,
+		SeriesID: id, RecurrenceType: "none", RecurrenceInterval: 1,
+		RecurrenceTimezone: "UTC", OccurrenceNumber: 1,
 		Version: 1, CreatedAt: "2026-08-28T10:00:00.000000000Z", UpdatedAt: "2026-08-28T10:00:00.000000000Z",
 	}
 	if err := store.DB.Create(&reminder).Error; err != nil {

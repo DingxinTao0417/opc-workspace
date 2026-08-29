@@ -185,6 +185,9 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		if table.Name == "focus_sessions" && tableHasValuesOutside(table, "status", "completed", "cancelled", "interrupted") {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ACTIVE_FOCUS_UNSUPPORTED", "Stop or cancel the active Focus Session before exporting"}
 		}
+		if table.Name == "reminders" && tableHasInvalidReminderRecurrence(table) {
+			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "A Reminder recurrence rule is invalid"}
+		}
 		counts[table.Name] = len(table.Rows)
 		total += len(table.Rows)
 	}
@@ -487,6 +490,41 @@ func tableHasValuesOutside(table businessExportTable, column string, allowed ...
 		}
 	}
 	return false
+}
+
+func tableHasInvalidReminderRecurrence(table businessExportTable) bool {
+	indexes := make(map[string]int, len(table.Columns))
+	for index, column := range table.Columns {
+		indexes[column] = index
+	}
+	required := []string{"series_id", "recurrence_type", "recurrence_interval", "recurrence_timezone", "occurrence_number"}
+	for _, column := range required {
+		if _, ok := indexes[column]; !ok {
+			return len(table.Rows) != 0
+		}
+	}
+	for _, row := range table.Rows {
+		seriesID, seriesOK := row[indexes["series_id"]].(string)
+		recurrenceType, typeOK := row[indexes["recurrence_type"]].(string)
+		timezone, timezoneOK := row[indexes["recurrence_timezone"]].(string)
+		interval, intervalOK := businessImportInt64(row[indexes["recurrence_interval"]])
+		occurrence, occurrenceOK := businessImportInt64(row[indexes["occurrence_number"]])
+		if !seriesOK || strings.TrimSpace(seriesID) == "" || !typeOK || !timezoneOK ||
+			!intervalOK || interval > 365 || !occurrenceOK || occurrence < 1 ||
+			validateReminderRecurrence(recurrenceType, int(interval), timezone) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func businessImportInt64(value any) (int64, bool) {
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0, false
+	}
+	parsed, err := number.Int64()
+	return parsed, err == nil
 }
 
 func quoteIdentifier(value string) string { return `"` + strings.ReplaceAll(value, `"`, `""`) + `"` }

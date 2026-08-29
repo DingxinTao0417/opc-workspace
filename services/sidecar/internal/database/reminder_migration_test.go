@@ -49,8 +49,8 @@ func TestReminderMigrationUpgradesV13WithoutChangingExistingFacts(t *testing.T) 
 		t.Fatalf("upgrade v13 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 31 {
-		t.Fatalf("SchemaVersion = %d, want 31", store.SchemaVersion)
+	if store.SchemaVersion != 32 {
+		t.Fatalf("SchemaVersion = %d, want 32", store.SchemaVersion)
 	}
 	var preservedTask models.Task
 	if err := store.DB.First(&preservedTask, "id = ?", taskID).Error; err != nil {
@@ -88,6 +88,8 @@ func TestReminderMigrationConstrainsLifecycleAndProjection(t *testing.T) {
 		ID: reminderID, SourceEntityType: "manual", Title: "提交本地提醒", Summary: "只在本机处理",
 		Priority: "P1", TriggerAt: "2026-08-28T11:00:00.000000000Z", Status: "scheduled",
 		SourceEventKey: "reminder:" + reminderID + ":due", CreatedByActorID: models.BuiltinOwnerActorID,
+		SeriesID: reminderID, RecurrenceType: "none", RecurrenceInterval: 1,
+		RecurrenceTimezone: "UTC", OccurrenceNumber: 1,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.DB.Create(&reminder).Error; err != nil {
