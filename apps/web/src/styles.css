@@ -2653,16 +2653,25 @@ kbd {
 .content-calendar-month { min-width: 120px; text-align: center; font-size: 14px; }
 .content-calendar-list { display: grid; gap: 10px; max-width: 880px; }
 .content-calendar-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.content-calendar-card-open { width: 100%; border: 0; padding: 0; background: transparent; color: inherit; display: flex; align-items: center; justify-content: space-between; gap: 18px; text-align: left; cursor: pointer; }
+.content-calendar-card-open:hover h2 { color: var(--accent); }
 .content-calendar-card-main { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .content-calendar-card h2 { margin: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .content-calendar-card p { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .content-calendar-card-meta { display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
 .content-calendar-card-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.content-calendar-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.content-calendar-edit-wide { grid-column: 1 / -1; }
+.content-calendar-schedule-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
+.content-calendar-schedule-row .button { margin-bottom: 18px; }
 
 @media (max-width: 900px) {
   .roadmap-grid { grid-template-columns: 1fr; }
   .content-calendar-card { align-items: flex-start; flex-direction: column; }
+  .content-calendar-card-open { align-items: flex-start; flex-direction: column; }
   .content-calendar-card-meta { flex-wrap: wrap; }
+  .content-calendar-edit-grid, .content-calendar-schedule-row { grid-template-columns: 1fr; }
+  .content-calendar-schedule-row .button { margin-bottom: 16px; }
 }
 
 .project-card {

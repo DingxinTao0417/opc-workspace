@@ -135,6 +135,9 @@ import type {
 	ContentItemListResult,
 	ContentItemStatus,
 	CreateContentItemInput,
+	UpdateContentItemInput,
+	ScheduleContentItemInput,
+	PublishContentItemInput,
   ProjectAttachment,
   ProjectAttachmentDownload,
   ProjectAttachmentListParams,
@@ -6637,6 +6640,21 @@ export async function getContentItems(input: ContentItemListParams = {}, signal?
 
 export async function createContentItem(input: CreateContentItemInput): Promise<ContentItem> {
   const payload = await apiRequest<unknown>("/api/v1/content-items", { method: "POST", body: JSON.stringify({ title: input.title, platform: input.platform, status: input.status, scheduled_at: input.scheduledAt, scheduled_timezone: input.scheduledTimezone, project_id: input.projectId, notes: input.notes, external_link: input.externalLink }) });
+  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+}
+
+export async function updateContentItem(id: string, input: UpdateContentItemInput): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}`, { method: "PATCH", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ ...(input.title === undefined ? {} : { title: input.title }), ...(input.platform === undefined ? {} : { platform: input.platform }), ...(input.status === undefined ? {} : { status: input.status }), ...(input.projectId === undefined ? {} : { project_id: input.projectId }), ...(input.notes === undefined ? {} : { notes: input.notes }), ...(input.externalLink === undefined ? {} : { external_link: input.externalLink }) }) });
+  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+}
+
+export async function scheduleContentItem(id: string, input: ScheduleContentItemInput): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/schedule`, { method: "PUT", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ scheduled_at: input.scheduledAt, scheduled_timezone: input.scheduledTimezone }) });
+  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+}
+
+export async function publishContentItem(id: string, input: PublishContentItemInput): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/publish-confirmation`, { method: "POST", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ published_at: input.publishedAt, external_link: input.externalLink }) });
   return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
 }
 

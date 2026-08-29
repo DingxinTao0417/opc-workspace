@@ -114,6 +114,9 @@ import {
 	restoreRoadmapMilestone,
 	getContentItems,
 	createContentItem,
+	updateContentItem,
+	scheduleContentItem,
+	publishContentItem,
   pauseFocusSession,
   previewAutomationRule,
   createInboxItem,
@@ -172,6 +175,9 @@ import type {
 	ClientListParams,
 	ContentItemListParams,
 	CreateContentItemInput,
+	UpdateContentItemInput,
+	ScheduleContentItemInput,
+	PublishContentItemInput,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
   CreateClientActorLinkInput,
@@ -3427,6 +3433,31 @@ export function useCreateContentItem() {
     mutationFn: (input: CreateContentItemInput) => createContentItem(input),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: contentItemQueryKey }); },
   });
+}
+
+function useContentItemMutation<T>(mutationFn: (input: T) => Promise<unknown>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: contentItemQueryKey }); },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+      }
+    },
+  });
+}
+
+export function useUpdateContentItem() {
+  return useContentItemMutation(({ id, input }: { id: string; input: UpdateContentItemInput }) => updateContentItem(id, input));
+}
+
+export function useScheduleContentItem() {
+  return useContentItemMutation(({ id, input }: { id: string; input: ScheduleContentItemInput }) => scheduleContentItem(id, input));
+}
+
+export function usePublishContentItem() {
+  return useContentItemMutation(({ id, input }: { id: string; input: PublishContentItemInput }) => publishContentItem(id, input));
 }
 
 export function useCreateRoadmapMilestone() {

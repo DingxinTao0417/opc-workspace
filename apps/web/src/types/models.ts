@@ -1129,6 +1129,28 @@ export interface CreateContentItemInput {
   externalLink?: string | null;
 }
 
+export interface UpdateContentItemInput {
+  title?: string;
+  platform?: string;
+  status?: Exclude<ContentItemStatus, "published">;
+  projectId?: string | null;
+  notes?: string | null;
+  externalLink?: string | null;
+  expectedVersion: number;
+}
+
+export interface ScheduleContentItemInput {
+  scheduledAt: string | null;
+  scheduledTimezone: string | null;
+  expectedVersion: number;
+}
+
+export interface PublishContentItemInput {
+  publishedAt?: string;
+  externalLink?: string | null;
+  expectedVersion: number;
+}
+
 export interface Client {
   id: string;
   name: string;
