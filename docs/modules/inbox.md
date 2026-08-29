@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v29。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -139,7 +139,7 @@
 - 白名单分别映射为 `database:startup`、`database:migration` 和 `sidecar:startup`。同一种 kind 在 journal 未消费前只保留最早一条，文件最多 16 条、64 KiB，使用同目录临时文件和原子替换；非普通文件、未知字段、非法 UUID/时间/类型、重复记录或超限文件会隔离为 `.startup-incidents-invalid-<uuid>.json`，不会作为事件读取。
 - 下一次成功打开并迁移数据库后、Router ready 前补偿投影。payload 仍只有 `component / operation / failure_code / occurred_at / message`；`occurred_at` 使用原始失败时间。全部投影成功后删除 journal；投影或删除失败会保留/重现日志供后续重试。
 - journal 中的稳定 incident ID 同时进入 `source_event_key`。即使数据库提交成功而 journal 删除结果不确定，重放也先按 event key 查询，用户已经 resolve/dismiss 的同一失败不会被重新创建。新的启动失败在旧 journal 已消费后获得新 ID，遵循活动 incident 去重规则。
-- `OPC_LOG_DIR`/`--logs` 是独立受控诊断目录，默认使用数据库同级 `logs/`，不得与 Artifact/backup root 重叠。Sidecar 与 Tauri 壳分别写入 5 MiB/3 归档脱敏日志，设置可打开目录；诊断包 v1 只导出系统维护错误码级汇总，明确不含原始日志。桌面恢复页仍待开发。
+- `OPC_LOG_DIR`/`--logs` 是独立受控诊断目录，默认使用数据库同级 `logs/`，不得与 Artifact/backup root 重叠。Sidecar 与 Tauri 壳分别写入 5 MiB/3 归档脱敏日志，设置和全局启动故障恢复页 v1 均可无路径打开目录；诊断包 v1 只导出系统维护错误码级汇总，明确不含原始日志。数据库打开前备份选择/实时恢复进度仍待开发。
 
 ### 已交付：T-11E 第八项——Project 完成节点
 
@@ -343,7 +343,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 | 发票     | 当前没有财务来源                                                                                 | v0.4 临期/逾期及开票节点生成本地待办             |
 | Actor    | owner 执行拆分/强制解决；owner/person 可成为初始负责人；system 执行自动结清/重开                 | Agent Actor 仍延后                               |
 | 今日     | 已展示待处理/跟进/阻塞/待验收实时计数并支持风险筛选深链                                          | 随 T-11E 来源投影自然纳入更多业务事件            |
-| 系统维护 | 备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间已安全投影；相关事项可打开数据与备份，无路径手动容量检查也已交付 | 物理卷身份/同卷去重和桌面恢复页仍待 |
+| 系统维护 | 备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间已安全投影；相关事项可打开数据与备份，无路径手动容量检查和全局启动故障恢复页 v1 也已交付 | 物理卷身份/同卷去重和数据库打开前恢复进度仍待 |
 | Agent    | 未实现                                                                                           | v0.2 只通过受控 Adapter/Run 产生待验收或失败事件 |
 
 完整协作图参见[整体功能架构](../functional-architecture.md)。

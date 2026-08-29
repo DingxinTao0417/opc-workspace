@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.5](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.6](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -32,6 +32,7 @@
 - 解析 stdout ready JSON，拒绝非 loopback、端口 0、带凭据或带额外路径的地址。
 - Tauri 原生健康探测与前端 sidecar_status 连接握手。
 - Sidecar 状态当前为 starting、ready、error，并可返回 app/API/schema 版本。
+- React 根节点的桌面服务恢复闸门：starting/状态检查时不渲染业务页，ready 后放行并持续观察，error/读取失败时显示不含原始 message 的全局恢复页；支持手动重查、打开日志目录和调用既有安全重启。浏览器开发模式直接放行。
 - 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited 或提前唤醒优雅等待，仍由 shutdown 完成等待与兜底终止。
 - 恢复计划挂起后，设置页可调用 `restart_application`：桌面壳先走同一安全关闭路径并等待受管 Sidecar 的真实退出确认，再请求 Tauri 重启应用；若 Sidecar 不由桌面管理或退出不能确认，则取消应用重启并返回可见错误。
 - Tauri capability 当前仅开放 core:default；前端不能任意调用 shell。
@@ -39,9 +40,9 @@
 
 尚未实现：
 
-- Sidecar 异常退出后的自动重启、退避、手动恢复和孤儿进程治理。
-- 前端健康查询结果没有全局服务状态、启动失败恢复页或诊断操作。
-- `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar 脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、复制基础脱敏摘要、下载诊断包 v1并打开自身日志目录。诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。Tauri 壳自身日志尚未实现。
+- Sidecar 异常退出后的自动重启、退避、原进程内重新拉起和孤儿进程治理；当前手动恢复采用受控应用重启，不在错误状态下直接生成第二个 Sidecar。
+- 数据库打开前的备份选择、恢复实时进度与安全回滚交互；当前全局恢复页 v1 只消费白名单状态/版本并提供重查、日志和重启。
+- `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
 - 系统托盘、原生通知、OS 全局快捷键、开机启动和业务文件对话框。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
 - Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
@@ -54,7 +55,7 @@
 - 建立明确桌面状态机：初始化目录、启动 Sidecar、ready 握手、健康检查、兼容校验、可用或恢复。
 - 检查桌面应用、Sidecar、API 和 schema 版本兼容，阻止错误组合进入写入模式。
 - 启动超时、ready 格式错误、健康失败或迁移失败时显示专用恢复页。
-- 恢复页支持重试启动、打开脱敏日志、查看版本、检查数据目录和从备份恢复。
+- 恢复页 v1 已支持状态重查、打开脱敏日志、查看白名单版本和受控应用重启；检查数据目录、选择备份与显示实时恢复进度仍待实现。
 - Sidecar 运行中意外退出时进行有上限的自动重启和退避；反复失败后停止自动重启并要求用户处理。
 - 启动新 Sidecar 前确认旧子进程和监听端口已经清理，避免双写数据库。
 
@@ -228,8 +229,8 @@
 
 ### v0.1-A：Sidecar 可靠性
 
-- 扩展桌面状态机、状态事件和前端全局服务状态。
-- 实现启动失败恢复页、手动重试和有上限退避。
+- 已扩展前端全局服务状态：桌面 starting/error 闸门、ready 持续观察和浏览器降级。
+- 已实现启动失败恢复页 v1 与受控重启重试；原进程内重拉起和有上限自动退避仍待实现。
 - 完成孤儿进程、旧令牌失效、重复启动和数据库锁处理。
 - 补 Tauri 与真实 Sidecar 进程集成测试。
 
@@ -278,7 +279,8 @@
 - [x] 设置运行诊断可通过无参数 Tauri command 打开自身 `appLogDir`；浏览器模式不伪造路径。
 - [x] Tauri 壳白名单 JSONL 生命周期日志、5 MiB/3 归档、非普通目标拒绝与 stderr 降级。
 - [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
-- [ ] 全局服务恢复页。
+- [x] 全局服务恢复页 v1：starting/error 拦截业务页，ready 自动放行；状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
+- [ ] 数据库打开前备份选择/实时恢复进度，以及原进程内有上限重拉起。
 - [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。

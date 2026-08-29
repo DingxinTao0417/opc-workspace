@@ -5085,6 +5085,85 @@ kbd {
   line-height: 1.6;
 }
 
+.service-recovery-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 20%, var(--accent-bg), transparent 34%),
+    var(--bg);
+}
+
+.service-recovery-card {
+  width: min(560px, 100%);
+  padding: 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.service-recovery-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 16px;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger-text) 10%, var(--panel-2));
+  color: var(--danger-text);
+}
+
+.service-recovery-starting .service-recovery-icon {
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.service-recovery-card h1 {
+  margin: 4px 0 8px;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.service-recovery-card > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.service-recovery-card .service-recovery-facts {
+  margin-top: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.service-recovery-card .service-recovery-action-error {
+  margin-top: 12px;
+  color: var(--danger-text);
+}
+
+.service-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.service-recovery-card small {
+  display: block;
+  margin-top: 16px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
 .settings-inline-warning {
   color: var(--danger-text);
 }

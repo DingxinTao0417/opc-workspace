@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v29（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item。三个受控逻辑位置的无路径手动容量检查也已交付；数据库打开前恢复页、物理卷身份、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item。三个受控逻辑位置的无路径手动容量检查与全局启动故障恢复页 v1 也已交付；数据库打开前备份选择/实时恢复进度、物理卷身份、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.5](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.6](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -318,7 +318,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 ### 仍未实现
 
 - [x] 健康启动后的 pending/applied/failed/invalid 恢复结果诊断、脱敏计数和设置页重启门禁恢复。
-- [ ] 数据库打开前的实时恢复进度页与桌面恢复界面。
+- [x] 全局启动故障恢复页 v1：桌面 starting/error 闸门、状态重查、打开脱敏日志和安全重启；不展示原始错误。
+- [ ] 数据库打开前的备份选择与实时恢复进度。
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
 - [x] 白名单诊断包 v1，不包含业务正文或原始日志。
