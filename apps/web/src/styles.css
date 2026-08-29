@@ -3519,6 +3519,13 @@ kbd {
   margin: -3px 0 10px;
 }
 
+.client-followup-inactive-note {
+  margin: -4px 0 10px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .client-followup-filters label {
   display: inline-flex;
   align-items: center;

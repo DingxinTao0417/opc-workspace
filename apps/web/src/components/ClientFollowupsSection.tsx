@@ -26,6 +26,7 @@ import type {
   ClientFollowup,
   ClientFollowupPriority,
   ClientFollowupStatus,
+  ClientStatus,
 } from "../types/models";
 import {
   formatDateTimeLocalInTimeZone,
@@ -316,7 +317,14 @@ function PlanFields({
   );
 }
 
-export function ClientFollowupsSection({ clientId }: { clientId: string }) {
+export function ClientFollowupsSection({
+  clientId,
+  clientStatus = "active",
+}: {
+  clientId: string;
+  clientStatus?: ClientStatus;
+}) {
+  const canPlan = clientStatus !== "inactive";
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<
     ClientFollowupStatus | "overdue" | ""
@@ -482,7 +490,8 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
             result: value,
             nextStep: nextStep.trim() || null,
             completedAt: completion.toISOString(),
-            nextFollowup: scheduleNext ? planInput(nextPlanDraft) : null,
+            nextFollowup:
+              canPlan && scheduleNext ? planInput(nextPlanDraft) : null,
             expectedVersion: followup.version,
           },
         },
@@ -556,22 +565,29 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
             计划、提醒与历史均保存在本机，不会发送邮件、短信或其他外部消息。
           </p>
         </div>
-        <button
-          className="button button-primary"
-          disabled={pending || actorsQuery.isPending || actors.length === 0}
-          onClick={openNew}
-          title={
-            actorsQuery.isError
-              ? "无法读取负责人，请先重试。"
-              : actors.length === 0
-                ? "请先保留 active owner 或 person。"
-                : undefined
-          }
-          type="button"
-        >
-          <Plus size={14} /> 安排回访
-        </button>
+        {canPlan ? (
+          <button
+            className="button button-primary"
+            disabled={pending || actorsQuery.isPending || actors.length === 0}
+            onClick={openNew}
+            title={
+              actorsQuery.isError
+                ? "无法读取负责人，请先重试。"
+                : actors.length === 0
+                  ? "请先保留 active owner 或 person。"
+                  : undefined
+            }
+            type="button"
+          >
+            <Plus size={14} /> 安排回访
+          </button>
+        ) : null}
       </div>
+      {!canPlan ? (
+        <p className="client-followup-inactive-note">
+          客户已停用。既有计划仍可完成、跳过或取消；恢复客户状态后才能安排、编辑或重排。
+        </p>
+      ) : null}
       <div className="client-followup-filters">
         <label>
           <span>显示</span>
@@ -707,21 +723,23 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                   value={nextStep}
                 />
               </label>
-              <div className="client-followup-field-wide client-followup-next-toggle">
-                <button
-                  aria-pressed={scheduleNext}
-                  className="button button-secondary"
-                  disabled={pending}
-                  onClick={() => setScheduleNext((current) => !current)}
-                  type="button"
-                >
-                  同时安排下一次本地回访
-                </button>
-                <small>
-                  保存时将与本次完成记录在同一事务提交，不发送外部消息。
-                </small>
-              </div>
-              {scheduleNext ? (
+              {canPlan ? (
+                <div className="client-followup-field-wide client-followup-next-toggle">
+                  <button
+                    aria-pressed={scheduleNext}
+                    className="button button-secondary"
+                    disabled={pending}
+                    onClick={() => setScheduleNext((current) => !current)}
+                    type="button"
+                  >
+                    同时安排下一次本地回访
+                  </button>
+                  <small>
+                    保存时将与本次完成记录在同一事务提交，不发送外部消息。
+                  </small>
+                </div>
+              ) : null}
+              {canPlan && scheduleNext ? (
                 <div className="client-followup-field-wide client-followup-next-plan">
                   <strong>下一次回访计划</strong>
                   <PlanFields
@@ -800,7 +818,7 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
       {query.isSuccess && items.length === 0 ? (
         <EmptyState
           action={
-            actors.length > 0 ? (
+            canPlan && actors.length > 0 ? (
               <button
                 className="button button-primary"
                 onClick={openNew}
@@ -860,15 +878,17 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                 </div>
                 {followup.status === "planned" ? (
                   <div className="client-followup-actions">
-                    <button
-                      aria-label={`编辑回访 ${followup.purpose}`}
-                      className="icon-button"
-                      disabled={pending}
-                      onClick={() => openEdit(followup)}
-                      type="button"
-                    >
-                      <Pencil size={13} />
-                    </button>
+                    {canPlan ? (
+                      <button
+                        aria-label={`编辑回访 ${followup.purpose}`}
+                        className="icon-button"
+                        disabled={pending}
+                        onClick={() => openEdit(followup)}
+                        type="button"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    ) : null}
                     <button
                       className="button button-secondary"
                       disabled={pending}
@@ -877,14 +897,16 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                     >
                       完成
                     </button>
-                    <button
-                      className="button button-secondary"
-                      disabled={pending}
-                      onClick={() => openAction("reschedule", followup)}
-                      type="button"
-                    >
-                      重排
-                    </button>
+                    {canPlan ? (
+                      <button
+                        className="button button-secondary"
+                        disabled={pending}
+                        onClick={() => openAction("reschedule", followup)}
+                        type="button"
+                      >
+                        重排
+                      </button>
+                    ) : null}
                     <button
                       className="button button-quiet"
                       disabled={pending}

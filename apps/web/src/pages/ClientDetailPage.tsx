@@ -328,7 +328,10 @@ export function ClientDetailPage() {
 
       <ClientActivitiesSection clientId={client.id} />
 
-      <ClientFollowupsSection clientId={client.id} />
+      <ClientFollowupsSection
+        clientId={client.id}
+        clientStatus={client.status}
+      />
 
       <ClientAttachmentsSection
         clientId={client.id}

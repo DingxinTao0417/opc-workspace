@@ -228,4 +228,23 @@ describe("ClientFollowupsSection", () => {
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
+
+  it("keeps an inactive client followup closable without exposing new plan actions", () => {
+    render(
+      <ClientFollowupsSection clientId="client-1" clientStatus="inactive" />,
+    );
+
+    expect(screen.getByText(/客户已停用/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "安排回访" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: `编辑回访 ${followup.purpose}` }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "重排" })).toBeNull();
+    expect(screen.getByRole("button", { name: "完成" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(
+      screen.queryByRole("button", { name: "同时安排下一次本地回访" }),
+    ).toBeNull();
+  });
 });
