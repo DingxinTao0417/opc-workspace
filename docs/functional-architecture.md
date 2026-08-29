@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.75
+> 文档版本：2.76
 > 日期：2026-08-29
-> 依据：[PRD v9.64](opc-workspace-PRD.md)
+> 依据：[PRD v9.65](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v38
 
-> 2.75 说明：路线图 PATCH 跨年/跨季度移动时由 Sidecar 在同一事务把 `manual_order` 追加到目标季度尾部，避免源季度序号污染目标季度；多季度拖拽界面仍待。
+> 2.76 说明：路线图新增年度 Q1–Q4 时间线；跨季度拖拽/键盘移动通过版本化 PATCH 把目标日期设为季度末，Sidecar 原子追加到目标季度尾部，失败刷新服务端事实。
 
 ## 1. 目的
 
@@ -134,7 +134,7 @@
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                                 | 原生窗口、受管 Sidecar generation/重启预算/父管道与 shutdown、权限、运行日志和发布                                                                                                        | 可运行、可恢复、可诊断的本地应用环境                                                                                                                             |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                             | 财务与发票业务事实                                                                                                                                                                        | 本地提醒、Inbox Item、客户聚合                                                                                                                                   |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                                 | 本地回访计划、终态结果、完成时原子安排下一次计划、客户详情管理、Today 待办和 Inbox→客户详情入口                                                                                           | Inbox 到期项；不自动创建客户活动或外部通信                                                                                                                       |
-| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除及完整同季度安全排序；日期/跨季度拖拽与本地事件待后续                           | 当前无 Inbox 事件；后续临期/达成投影                                                                                                                             |
+| [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除、同季度安全排序和年度跨季度移动；精确日期拖拽与本地事件待后续                  | 当前无 Inbox 事件；后续临期/达成投影                                                                                                                             |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、准备 Task 关系、本地发布确认；CC2–CC5-B 已交付                                                                                                     | 准备 Task（读写已交付）；当前版本审核/发布时间到期事实投影到 Inbox（已交付）                                                                                     |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                                    | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                     |
 | [知识库](modules/knowledge-base.md)        | 本地文件                                                                                                                | 导入、FTS 索引、来源定位和删除                                                                                                                                                            | 搜索结果、可选 AI 上下文                                                                                                                                         |

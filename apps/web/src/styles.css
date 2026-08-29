@@ -2597,6 +2597,53 @@ kbd {
   grid-template-columns: 1fr;
 }
 
+.roadmap-year-panel {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.roadmap-quarter-block {
+  padding: 16px;
+}
+
+.roadmap-quarter-block + .roadmap-quarter-block {
+  border-top: 1px solid var(--border);
+}
+
+.roadmap-quarter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.roadmap-quarter-heading span,
+.roadmap-quarter-empty {
+  color: var(--text-muted);
+}
+
+.roadmap-quarter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.roadmap-quarter-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--empty-border);
+  border-radius: 8px;
+  background: var(--empty-bg);
+  font-size: 12px;
+  text-align: center;
+}
+
 .roadmap-section-heading {
   grid-column: 1 / -1;
   display: flex;
@@ -3087,7 +3134,8 @@ kbd {
 }
 
 @media (max-width: 900px) {
-  .roadmap-grid {
+  .roadmap-grid,
+  .roadmap-quarter-grid {
     grid-template-columns: 1fr;
   }
   .roadmap-reorder-bar {

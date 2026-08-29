@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v38。v9.64 已补齐路线图 PATCH 跨季度时追加到目标季度尾部的事务排序规则；不调用外部发布平台。其余历史版本说明保持不变。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v38。v9.65 已交付路线图年度 Q1–Q4 时间线和安全跨季度拖拽/键盘移动；不调用外部发布平台。其余历史版本说明保持不变。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.64）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.65）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -39,15 +39,15 @@
 
 ## 后续业务与规划模块
 
-| 模块             | 当前状态                                                                          | 目标版本 | 文档                                               |
-| ---------------- | --------------------------------------------------------------------------------- | -------- | -------------------------------------------------- |
-| 收入、支出与发票 | 页面骨架 / 数据表预留                                                             | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成  | v0.4     | [client-followups.md](modules/client-followups.md) |
-| 路线图           | R2/R3 完成，R4 同季度完整集合拖拽/键盘排序已交付；日期/跨季度拖拽与本地事件待开发 | v0.3     | [roadmap.md](modules/roadmap.md)                   |
-| 内容日历         | CC1–CC5-B 与 CC6-A 分页聚合已交付；审核/发布到期可幂等进入 Inbox，不自动外发      | v0.3     | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 首个纵向切片完成                                                                  | v0.2     | [automation.md](modules/automation.md)             |
-| 本地知识库       | 未开始                                                                            | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
-| AI 助手          | 未开始                                                                            | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
+| 模块             | 当前状态                                                                         | 目标版本 | 文档                                               |
+| ---------------- | -------------------------------------------------------------------------------- | -------- | -------------------------------------------------- |
+| 收入、支出与发票 | 页面骨架 / 数据表预留                                                            | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成 | v0.4     | [client-followups.md](modules/client-followups.md) |
+| 路线图           | R2/R3 完成，R4 同季度排序和年度跨季度移动已交付；精确日期拖拽与本地事件待开发    | v0.3     | [roadmap.md](modules/roadmap.md)                   |
+| 内容日历         | CC1–CC5-B 与 CC6-A 分页聚合已交付；审核/发布到期可幂等进入 Inbox，不自动外发     | v0.3     | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化       | 首个纵向切片完成                                                                 | v0.2     | [automation.md](modules/automation.md)             |
+| 本地知识库       | 未开始                                                                           | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
+| AI 助手          | 未开始                                                                           | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
 

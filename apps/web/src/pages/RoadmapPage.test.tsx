@@ -15,6 +15,7 @@ const hooks = vi.hoisted(() => ({
   projects: vi.fn(),
   detail: vi.fn(),
   update: vi.fn(),
+  updateReset: vi.fn(),
   remove: vi.fn(),
   reorder: vi.fn(),
   reorderReset: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     isError: false,
     mutate: hooks.update,
+    reset: hooks.updateReset,
   }),
   useDeleteRoadmapMilestone: () => ({
     isPending: false,
@@ -110,6 +112,7 @@ describe("RoadmapPage", () => {
 
   beforeEach(() => {
     hooks.update.mockReset();
+    hooks.updateReset.mockReset();
     hooks.remove.mockReset();
     hooks.reorder.mockReset();
     hooks.reorderReset.mockReset();
@@ -406,6 +409,107 @@ describe("RoadmapPage", () => {
     expect(button).toHaveAttribute(
       "title",
       "当前季度超过 100 个里程碑，暂不支持完整批量排序。",
+    );
+    fireEvent.change(screen.getByLabelText("展示范围"), {
+      target: { value: "year" },
+    });
+    const quarterButton = screen.getByRole("button", { name: "调整季度" });
+    expect(quarterButton).toBeDisabled();
+    expect(quarterButton).toHaveAttribute(
+      "title",
+      "当前年度超过 100 个里程碑，暂不支持跨季度拖拽。",
+    );
+  });
+
+  it("loads an annual timeline and moves with the keyboard alternative", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone, { ...secondMilestone, quarter: 4 as const }],
+          meta: { page: input.page, pageSize: input.pageSize, total: 2 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText("展示范围"), {
+      target: { value: "year" },
+    });
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ pageSize: 100, quarter: undefined }),
+    );
+    expect(screen.getByText("Q4 · 2026")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "调整季度" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "移到下一季度：路线图 API" }),
+    );
+
+    expect(hooks.update).toHaveBeenCalledWith(
+      {
+        id: milestone.id,
+        input: {
+          year: 2026,
+          quarter: 4,
+          targetDate: "2026-12-31",
+          expectedVersion: milestone.version,
+        },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it("moves a dragged annual milestone to the dropped quarter", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone, { ...secondMilestone, quarter: 4 as const }],
+          meta: { page: input.page, pageSize: input.pageSize, total: 2 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText("展示范围"), {
+      target: { value: "year" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "调整季度" }));
+    const movingCard = screen.getByText("路线图 API").closest("article");
+    const destination = screen.getByText("Q4 · 2026").closest("section");
+    expect(movingCard).toBeTruthy();
+    expect(destination).toBeTruthy();
+    fireEvent.dragStart(movingCard!);
+    fireEvent.dragOver(destination!);
+    fireEvent.drop(destination!);
+
+    expect(hooks.update).toHaveBeenCalledWith(
+      {
+        id: milestone.id,
+        input: {
+          year: 2026,
+          quarter: 4,
+          targetDate: "2026-12-31",
+          expectedVersion: milestone.version,
+        },
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
     );
   });
 });

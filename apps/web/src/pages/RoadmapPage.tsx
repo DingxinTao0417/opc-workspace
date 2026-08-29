@@ -72,6 +72,7 @@ function RoadmapMilestoneCard({
   onEdit,
   onOpen,
   ordering = false,
+  quarterMoving = false,
   orderIndex = 0,
   orderTotal = 0,
   dragging = false,
@@ -79,12 +80,14 @@ function RoadmapMilestoneCard({
   onDragEnd,
   onDrop,
   onMove,
+  moveDisabled = false,
 }: {
   milestone: RoadmapMilestone;
   onDelete: (milestone: RoadmapMilestone) => void;
   onEdit: (milestone: RoadmapMilestone) => void;
   onOpen: (milestone: RoadmapMilestone) => void;
   ordering?: boolean;
+  quarterMoving?: boolean;
   orderIndex?: number;
   orderTotal?: number;
   dragging?: boolean;
@@ -92,30 +95,33 @@ function RoadmapMilestoneCard({
   onDragEnd?: () => void;
   onDrop?: () => void;
   onMove?: (direction: -1 | 1) => void;
+  moveDisabled?: boolean;
 }) {
   const archive = useArchiveRoadmapMilestone();
   const restore = useRestoreRoadmapMilestone();
   const busy = archive.isPending || restore.isPending;
   const error = archive.error ?? restore.error;
+  const movable = ordering || quarterMoving;
+  const dragEnabled = movable && !moveDisabled;
 
   return (
     <article
-      className={`roadmap-card${ordering ? " is-ordering" : ""}${dragging ? " is-dragging" : ""}`}
-      draggable={ordering}
-      onDragEnd={ordering ? onDragEnd : undefined}
+      className={`roadmap-card${movable ? " is-ordering" : ""}${dragging ? " is-dragging" : ""}`}
+      draggable={dragEnabled}
+      onDragEnd={dragEnabled ? onDragEnd : undefined}
       onDragOver={
-        ordering
+        dragEnabled
           ? (event) => {
               event.preventDefault();
             }
           : undefined
       }
-      onDragStart={ordering ? onDragStart : undefined}
-      onDrop={ordering ? onDrop : undefined}
+      onDragStart={dragEnabled ? onDragStart : undefined}
+      onDrop={dragEnabled ? onDrop : undefined}
     >
       <div className="roadmap-card-heading">
         <div>
-          {ordering ? (
+          {movable ? (
             <span aria-hidden="true" className="roadmap-drag-handle">
               <GripVertical size={16} />
             </span>
@@ -169,7 +175,31 @@ function RoadmapMilestoneCard({
         <p className="form-field-error">操作未完成，请刷新后重试。</p>
       ) : null}
       <footer className="roadmap-card-actions">
-        {ordering ? (
+        {quarterMoving ? (
+          <div className="roadmap-reorder-controls">
+            <span aria-live="polite">当前季度 Q{milestone.quarter}</span>
+            <button
+              aria-label={`移到上一季度：${milestone.title}`}
+              className="button button-secondary"
+              disabled={moveDisabled || milestone.quarter === 1}
+              onClick={() => onMove?.(-1)}
+              type="button"
+            >
+              <ArrowUp size={14} />
+              上一季度
+            </button>
+            <button
+              aria-label={`移到下一季度：${milestone.title}`}
+              className="button button-secondary"
+              disabled={moveDisabled || milestone.quarter === 4}
+              onClick={() => onMove?.(1)}
+              type="button"
+            >
+              <ArrowDown size={14} />
+              下一季度
+            </button>
+          </div>
+        ) : ordering ? (
           <div className="roadmap-reorder-controls">
             <span aria-live="polite">
               当前位置 {orderIndex + 1} / {orderTotal}
@@ -697,20 +727,23 @@ export function RoadmapPage() {
   const [status, setStatus] = useState<RoadmapMilestoneStatus | "">("");
   const [projectId, setProjectId] = useState("");
   const [page, setPage] = useState(1);
+  const [viewMode, setViewMode] = useState<"quarter" | "year">("quarter");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [quarterMoving, setQuarterMoving] = useState(false);
   const [reorderInitialized, setReorderInitialized] = useState(false);
   const [draftOrder, setDraftOrder] = useState<RoadmapMilestone[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const reorder = useReorderRoadmapMilestones();
+  const periodMove = useUpdateRoadmapMilestone();
   const query = useRoadmapMilestonesQuery({
     page: reordering ? 1 : page,
-    pageSize: reordering ? 100 : 20,
+    pageSize: reordering || viewMode === "year" ? 100 : 20,
     year,
-    quarter,
+    quarter: viewMode === "quarter" ? quarter : undefined,
     status: status || undefined,
     projectId: projectId || undefined,
     includeArchived: status === "archived",
@@ -739,6 +772,17 @@ export function RoadmapPage() {
         ? "当前季度超过 100 个里程碑，暂不支持完整批量排序。"
         : total < 2
           ? "至少需要两个里程碑才能调整顺序。"
+          : query.isFetching || !query.isSuccess
+            ? "路线图仍在读取，请稍候。"
+            : null;
+  const quarterMoveDisabledReason = status
+    ? "请先切换到未归档的全部状态。"
+    : projectId
+      ? "请先清除 Project 筛选。"
+      : total > 100
+        ? "当前年度超过 100 个里程碑，暂不支持跨季度拖拽。"
+        : total < 1
+          ? "当前年度没有可移动的里程碑。"
           : query.isFetching || !query.isSuccess
             ? "路线图仍在读取，请稍候。"
             : null;
@@ -804,33 +848,72 @@ export function RoadmapPage() {
       },
     );
   };
+  const moveToQuarter = (milestone: RoadmapMilestone, nextQuarter: number) => {
+    if (
+      periodMove.isPending ||
+      nextQuarter < 1 ||
+      nextQuarter > 4 ||
+      nextQuarter === milestone.quarter
+    )
+      return;
+    periodMove.reset();
+    periodMove.mutate(
+      {
+        id: milestone.id,
+        input: {
+          year,
+          quarter: nextQuarter as 1 | 2 | 3 | 4,
+          targetDate: targetDateFor(year, nextQuarter),
+          expectedVersion: milestone.version,
+        },
+      },
+      { onError: () => void query.refetch() },
+    );
+  };
 
   return (
     <div className="page">
       <PageHeader
         actions={
           <div className="roadmap-header-actions">
-            {!reordering ? (
-              <button
-                className="button button-secondary"
-                disabled={Boolean(reorderDisabledReason)}
-                onClick={() => {
-                  setPage(1);
-                  setReordering(true);
-                  setReorderInitialized(false);
-                  setDraftOrder([]);
-                  reorder.reset();
-                }}
-                title={reorderDisabledReason ?? "调整本季度里程碑顺序"}
-                type="button"
-              >
-                <GripVertical size={15} />
-                调整顺序
-              </button>
+            {!reordering && !quarterMoving ? (
+              viewMode === "quarter" ? (
+                <button
+                  className="button button-secondary"
+                  disabled={Boolean(reorderDisabledReason)}
+                  onClick={() => {
+                    setPage(1);
+                    setReordering(true);
+                    setReorderInitialized(false);
+                    setDraftOrder([]);
+                    reorder.reset();
+                  }}
+                  title={reorderDisabledReason ?? "调整本季度里程碑顺序"}
+                  type="button"
+                >
+                  <GripVertical size={15} />
+                  调整顺序
+                </button>
+              ) : (
+                <button
+                  className="button button-secondary"
+                  disabled={Boolean(quarterMoveDisabledReason)}
+                  onClick={() => {
+                    setQuarterMoving(true);
+                    setDraggedId(null);
+                    periodMove.reset();
+                  }}
+                  title={quarterMoveDisabledReason ?? "调整里程碑所属季度"}
+                  type="button"
+                >
+                  <GripVertical size={15} />
+                  调整季度
+                </button>
+              )
             ) : null}
             <button
               className="button button-primary"
-              disabled={reordering}
+              disabled={reordering || quarterMoving}
               onClick={() => setCreating(true)}
               type="button"
             >
@@ -852,9 +935,25 @@ export function RoadmapPage() {
       />
       <div className="toolbar roadmap-toolbar">
         <label className="toolbar-select">
+          <span className="sr-only">展示范围</span>
+          <select
+            disabled={reordering || quarterMoving}
+            onChange={(event) => {
+              setViewMode(event.target.value as "quarter" | "year");
+              setPage(1);
+              setQuarterMoving(false);
+              setDraggedId(null);
+            }}
+            value={viewMode}
+          >
+            <option value="quarter">季度视图</option>
+            <option value="year">年度视图</option>
+          </select>
+        </label>
+        <label className="toolbar-select">
           <span className="sr-only">年份</span>
           <select
-            disabled={reordering}
+            disabled={reordering || quarterMoving}
             onChange={(event) => {
               setYear(Number(event.target.value));
               setPage(1);
@@ -871,7 +970,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">季度</span>
           <select
-            disabled={reordering}
+            disabled={reordering || quarterMoving}
             onChange={(event) => {
               setQuarter(Number(event.target.value) as 1 | 2 | 3 | 4);
               setPage(1);
@@ -888,7 +987,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">状态</span>
           <select
-            disabled={reordering}
+            disabled={reordering || quarterMoving}
             onChange={(event) => {
               setStatus(event.target.value as RoadmapMilestoneStatus | "");
               setPage(1);
@@ -904,7 +1003,7 @@ export function RoadmapPage() {
         </label>
         <ProjectSelect
           ariaLabel="关联项目筛选"
-          disabled={reordering}
+          disabled={reordering || quarterMoving}
           emptyLabel="全部项目"
           includeArchived
           onChange={(value) => {
@@ -915,6 +1014,37 @@ export function RoadmapPage() {
           variant="toolbar"
         />
       </div>
+      {quarterMoving ? (
+        <section className="roadmap-reorder-bar" aria-label="季度移动工具">
+          <div>
+            <strong>调整所属季度</strong>
+            <span>
+              把卡片拖到
+              Q1–Q4，或使用上一季度/下一季度按钮；移动会把目标日期设为目标季度末。
+            </span>
+            {periodMove.isError ? (
+              <span className="form-field-error" role="alert">
+                移动失败，卡片仍保留在原季度；数据可能已变化，请重试。
+              </span>
+            ) : null}
+          </div>
+          <div className="roadmap-reorder-actions">
+            <button
+              className="button button-secondary"
+              disabled={periodMove.isPending}
+              onClick={() => {
+                setQuarterMoving(false);
+                setDraggedId(null);
+                periodMove.reset();
+              }}
+              type="button"
+            >
+              <X size={14} />
+              完成
+            </button>
+          </div>
+        </section>
+      ) : null}
       {reordering ? (
         <section className="roadmap-reorder-bar" aria-label="路线图排序工具">
           <div>
@@ -979,51 +1109,126 @@ export function RoadmapPage() {
             </button>
           }
           message="里程碑会关联真实项目与任务，不会创建演示数据。"
-          title={`${year} 年 Q${quarter} 暂无里程碑`}
+          title={
+            viewMode === "year"
+              ? `${year} 年暂无里程碑`
+              : `${year} 年 Q${quarter} 暂无里程碑`
+          }
         />
       ) : null}
       {visibleMilestones.length > 0 ? (
         <>
-          <section
-            className={`roadmap-grid${reordering ? " is-reordering" : ""}`}
-            aria-label={`${year} 年 Q${quarter} 路线图`}
-          >
-            <header className="roadmap-section-heading">
-              <Map size={17} />
-              <div>
-                <strong>
-                  {year} 年 · Q{quarter}
-                </strong>
-                <span>按目标日期和手动排序展示</span>
-              </div>
-            </header>
-            {visibleMilestones.map((milestone, index) => (
-              <RoadmapMilestoneCard
-                dragging={draggedId === milestone.id}
-                key={milestone.id}
-                milestone={milestone}
-                onDelete={setDeleting}
-                onDragEnd={() => setDraggedId(null)}
-                onDragStart={() => setDraggedId(milestone.id)}
-                onDrop={() => {
-                  if (!draggedId || draggedId === milestone.id) {
+          {viewMode === "year" ? (
+            <section
+              aria-label={`${year} 年路线图`}
+              className="roadmap-year-panel"
+            >
+              {([1, 2, 3, 4] as const).map((itemQuarter) => {
+                const quarterMilestones = visibleMilestones.filter(
+                  (milestone) => milestone.quarter === itemQuarter,
+                );
+                return (
+                  <section
+                    className="roadmap-quarter-block"
+                    key={itemQuarter}
+                    onDragOver={
+                      quarterMoving
+                        ? (event) => event.preventDefault()
+                        : undefined
+                    }
+                    onDrop={
+                      quarterMoving
+                        ? () => {
+                            const moving = visibleMilestones.find(
+                              (milestone) => milestone.id === draggedId,
+                            );
+                            if (moving) moveToQuarter(moving, itemQuarter);
+                            setDraggedId(null);
+                          }
+                        : undefined
+                    }
+                  >
+                    <header className="roadmap-quarter-heading">
+                      <strong>
+                        Q{itemQuarter} · {year}
+                      </strong>
+                      <span>{quarterMilestones.length} 个里程碑</span>
+                    </header>
+                    <div className="roadmap-quarter-grid">
+                      {quarterMilestones.length === 0 ? (
+                        <p className="roadmap-quarter-empty">
+                          {quarterMoving
+                            ? `拖到这里，目标日期将设为 Q${itemQuarter} 季度末。`
+                            : "本季度暂无里程碑。"}
+                        </p>
+                      ) : null}
+                      {quarterMilestones.map((milestone) => (
+                        <RoadmapMilestoneCard
+                          dragging={draggedId === milestone.id}
+                          key={milestone.id}
+                          milestone={milestone}
+                          moveDisabled={periodMove.isPending}
+                          onDelete={setDeleting}
+                          onDragEnd={() => setDraggedId(null)}
+                          onDragStart={() => setDraggedId(milestone.id)}
+                          onEdit={setEditing}
+                          onMove={(direction) =>
+                            moveToQuarter(
+                              milestone,
+                              milestone.quarter + direction,
+                            )
+                          }
+                          onOpen={(value) => setDetailId(value.id)}
+                          quarterMoving={quarterMoving}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </section>
+          ) : (
+            <section
+              className={`roadmap-grid${reordering ? " is-reordering" : ""}`}
+              aria-label={`${year} 年 Q${quarter} 路线图`}
+            >
+              <header className="roadmap-section-heading">
+                <Map size={17} />
+                <div>
+                  <strong>
+                    {year} 年 · Q{quarter}
+                  </strong>
+                  <span>按目标日期和手动排序展示</span>
+                </div>
+              </header>
+              {visibleMilestones.map((milestone, index) => (
+                <RoadmapMilestoneCard
+                  dragging={draggedId === milestone.id}
+                  key={milestone.id}
+                  milestone={milestone}
+                  onDelete={setDeleting}
+                  onDragEnd={() => setDraggedId(null)}
+                  onDragStart={() => setDraggedId(milestone.id)}
+                  onDrop={() => {
+                    if (!draggedId || draggedId === milestone.id) {
+                      setDraggedId(null);
+                      return;
+                    }
+                    moveDraftItem(draggedId, index);
                     setDraggedId(null);
-                    return;
+                  }}
+                  onEdit={setEditing}
+                  onMove={(direction) =>
+                    moveDraftItem(milestone.id, index + direction)
                   }
-                  moveDraftItem(draggedId, index);
-                  setDraggedId(null);
-                }}
-                onEdit={setEditing}
-                onMove={(direction) =>
-                  moveDraftItem(milestone.id, index + direction)
-                }
-                onOpen={(item) => setDetailId(item.id)}
-                ordering={reordering}
-                orderIndex={index}
-                orderTotal={visibleMilestones.length}
-              />
-            ))}
-          </section>
+                  onOpen={(item) => setDetailId(item.id)}
+                  ordering={reordering}
+                  orderIndex={index}
+                  orderTotal={visibleMilestones.length}
+                />
+              ))}
+            </section>
+          )}
           {!reordering && totalPages > 1 ? (
             <nav aria-label="路线图分页" className="pagination">
               <button
