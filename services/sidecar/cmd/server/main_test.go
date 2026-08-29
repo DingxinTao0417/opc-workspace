@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -11,23 +13,101 @@ import (
 
 	"github.com/opc-workspace/opc-sidecar/internal/api"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/runlease"
 )
 
 func TestWatchStdinForShutdown(t *testing.T) {
-	shutdown := watchStdinForShutdown(strings.NewReader("ignored\nshutdown\n"), log.New(io.Discard, "", 0))
-	select {
-	case <-shutdown:
-	case <-time.After(time.Second):
-		t.Fatal("shutdown control message was not observed")
+	for _, exitOnEOF := range []bool{false, true} {
+		t.Run(fmt.Sprintf("exit_on_eof_%t", exitOnEOF), func(t *testing.T) {
+			shutdown := watchStdinForShutdown(strings.NewReader("ignored\nshutdown\n"), log.New(io.Discard, "", 0), exitOnEOF)
+			select {
+			case <-shutdown:
+			case <-time.After(time.Second):
+				t.Fatal("shutdown control message was not observed")
+			}
+		})
 	}
 }
 
 func TestWatchStdinIgnoresEOF(t *testing.T) {
-	shutdown := watchStdinForShutdown(strings.NewReader(""), log.New(io.Discard, "", 0))
+	shutdown := watchStdinForShutdown(strings.NewReader(""), log.New(io.Discard, "", 0), false)
 	select {
 	case <-shutdown:
 		t.Fatal("EOF must not request shutdown")
 	case <-time.After(10 * time.Millisecond):
+	}
+}
+
+func TestWatchStdinRequestsShutdownOnEOFWhenEnabled(t *testing.T) {
+	shutdown := watchStdinForShutdown(strings.NewReader(""), log.New(io.Discard, "", 0), true)
+	select {
+	case <-shutdown:
+	case <-time.After(time.Second):
+		t.Fatal("EOF did not request shutdown when enabled")
+	}
+}
+
+func TestWatchStdinDoesNotTreatScannerErrorAsEOF(t *testing.T) {
+	logWrites := make(chan string, 1)
+	shutdown := watchStdinForShutdown(
+		errorReader{err: errors.New("read failed")},
+		log.New(channelWriter{writes: logWrites}, "", 0),
+		true,
+	)
+
+	select {
+	case entry := <-logWrites:
+		if !strings.Contains(entry, "stdin control channel failed: read failed") {
+			t.Fatalf("log entry = %q, want scanner error", entry)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scanner error was not logged")
+	}
+	select {
+	case <-shutdown:
+		t.Fatal("scanner error must not request shutdown")
+	default:
+	}
+}
+
+type errorReader struct {
+	err error
+}
+
+func (reader errorReader) Read([]byte) (int, error) {
+	return 0, reader.err
+}
+
+type channelWriter struct {
+	writes chan<- string
+}
+
+func (writer channelWriter) Write(value []byte) (int, error) {
+	writer.writes <- string(value)
+	return len(value), nil
+}
+
+func TestRunRejectsHeldDatabaseLeaseBeforeDatabaseOpen(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "workspace.db")
+	lease, err := runlease.Acquire(databasePath)
+	if err != nil {
+		t.Fatalf("acquire fixture run lease: %v", err)
+	}
+	t.Cleanup(func() { _ = lease.Close() })
+
+	code := run([]string{
+		"--dev",
+		"--db", databasePath,
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--backups", filepath.Join(root, "backups"),
+		"--logs", filepath.Join(root, "logs"),
+	})
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1", code)
+	}
+	if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("database was touched before lease conflict returned: Stat error = %v", err)
 	}
 }
 

@@ -309,6 +309,7 @@ async function resolveRuntimeConnection(): Promise<RuntimeConnection> {
 
   const { invoke } = await import("@tauri-apps/api/core");
   const readyStates = new Set(["ready", "running", "healthy", "ok"]);
+  const waitableStates = new Set(["starting", "restarting"]);
   const maxAttempts = 50;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -360,7 +361,7 @@ async function resolveRuntimeConnection(): Promise<RuntimeConnection> {
       };
     }
 
-    if (state && state !== "starting") {
+    if (state && !waitableStates.has(state)) {
       throw new ApiError(`本地 Sidecar 当前状态：${state}`, {
         code: "SIDECAR_UNAVAILABLE",
       });

@@ -21,15 +21,16 @@ var defaultOrigins = []string{
 }
 
 type Config struct {
-	DatabasePath   string
-	ArtifactDir    string
-	BackupDir      string
-	LogDir         string
-	Port           int
-	SessionToken   string
-	AllowedOrigins []string
-	DevMode        bool
-	Seed           bool
+	DatabasePath     string
+	ArtifactDir      string
+	BackupDir        string
+	LogDir           string
+	Port             int
+	SessionToken     string
+	AllowedOrigins   []string
+	DevMode          bool
+	Seed             bool
+	ExitOnStdinClose bool
 }
 
 type getenvFunc func(string) string
@@ -51,6 +52,10 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	dev, err := envBool(getenv("OPC_DEV"), false)
 	if err != nil {
 		return Config{}, fmt.Errorf("OPC_DEV: %w", err)
+	}
+	exitOnStdinClose, err := envBool(getenv("OPC_EXIT_ON_STDIN_CLOSE"), false)
+	if err != nil {
+		return Config{}, fmt.Errorf("OPC_EXIT_ON_STDIN_CLOSE: %w", err)
 	}
 
 	originsDefault := strings.TrimSpace(getenv("OPC_ALLOWED_ORIGINS"))
@@ -168,15 +173,16 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	}
 
 	return Config{
-		DatabasePath:   path,
-		ArtifactDir:    artifacts,
-		BackupDir:      backups,
-		LogDir:         logs,
-		Port:           *portFlag,
-		SessionToken:   token,
-		AllowedOrigins: origins,
-		DevMode:        *devFlag,
-		Seed:           *seedFlag,
+		DatabasePath:     path,
+		ArtifactDir:      artifacts,
+		BackupDir:        backups,
+		LogDir:           logs,
+		Port:             *portFlag,
+		SessionToken:     token,
+		AllowedOrigins:   origins,
+		DevMode:          *devFlag,
+		Seed:             *seedFlag,
+		ExitOnStdinClose: exitOnStdinClose,
 	}, nil
 }
 

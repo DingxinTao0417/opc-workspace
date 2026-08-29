@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.18](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.19](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -16,8 +16,8 @@
 - [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；原生桌面反馈延后）
 - [设置](settings.md)（SQLite 偏好、草稿预览、受控工作区头像、Actor、数据、脱敏运行诊断/诊断包与关于入口）
 - [命令面板与搜索](command-search.md)（Task/Project/Client/活动 Inbox 统一本地搜索、可刷新详情直达、本地最近使用、运行诊断直达与全局渲染错误恢复已交付；OS 全局快捷键待开发）
-- [数据、受控文件、备份与恢复](data-management.md)（受控文件 store、一致性备份恢复、启动后恢复结果诊断、全局启动故障恢复页 v1、故障 Inbox、桌面安全重启，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；数据库打开前备份选择/实时恢复进度、非空目标/跨 schema 冲突合并仍待开发）
-- [桌面平台与发布](desktop-platform.md)
+- [数据、受控文件、备份与恢复](data-management.md)（受控文件 store、一致性备份恢复、启动后恢复结果诊断、数据库父目录运行锁、全局启动故障恢复页 v1、故障 Inbox、桌面安全重启，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；数据库打开前备份选择/实时恢复进度、非空目标/跨 schema 冲突合并仍待开发）
+- [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界自动重启、父管道 EOF 退出、前端连接/查询世代清理和并发安全 shutdown 已交付；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包待验收）
 
 ## v0.2 本地编排
 
@@ -27,6 +27,8 @@
 任务看板已交付读取、筛选、分页、选择、详情入口及跨列受控生命周期交互；人工验收仍必须在任务详情完成，详见 [任务管理](tasks.md)。
 
 v0.1 的 Project Artifact→Inbox→Task Go 金链使用 owner/person + manual owner reviewer；Web 表单另覆盖 person 的本地责任提示与提交载荷。全链不调用 AI/LLM，也不创建 Agent Run。自动化已覆盖事实链；真实浏览器/WebView、窄屏、焦点和大数据量仍待专项验收。
+
+v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重启两次，当前 generation 连续 Ready 30 秒后重置预算；外部模式、显式 shutdown 或事件流关闭但没有 `Terminated` 不自动重拉。数据库父目录固定 `.opc-sidecar-run.lock` 只阻止 hard-hung orphan 再次打开同库，当前没有 Job Object、进程组、孙进程治理或自动回收。
 
 ## v0.3 规划增强
 

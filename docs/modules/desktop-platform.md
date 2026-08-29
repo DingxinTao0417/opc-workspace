@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v30/v31 分别扩展 Task Submission 与 Client Activity 来源，同样不改变该桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29），本轮无 migration。schema v12–v31 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.19](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -26,27 +26,29 @@
 - single-instance 插件；再次启动时显示、取消最小化并聚焦主窗口。
 - 生产配置通过 externalBin 打包 opc-sidecar，开发可通过 OPC_SIDECAR_URL 连接外部 Sidecar。
 - Tauri 获取 appDataDir 和 appLogDir，创建数据库、附件、Artifact、发票、备份和配置目录。
-- 每次启动生成随机会话令牌，以 127.0.0.1:0 启动 Sidecar。
+- 内置 Sidecar 每个 generation 都生成新的随机会话令牌，并以 `127.0.0.1:0` 重新请求 OS 分配动态端口；端口值允许被 OS 复用。
 - Tauri 将 `appDataDir/opc-workspace.db` 作为 `OPC_DB_PATH`，将 `appDataDir/artifacts/` 作为 `OPC_ARTIFACT_DIR` 传给 Sidecar；Sidecar 默认从数据库父目录解析已由 Tauri 创建的 `appDataDir/backups/`。生产路径不出现在命令行，也不写入持久前端配置。
-- Sidecar 在监听前校验 Artifact root marker 的 `format_version / database_id / store_id`，用不可变数据库 ID 与一次性 `artifact_store_id` 做双向绑定，获取并持有进程级独占锁，再依据 Artifact 事实和 immutable deletion tombstone 协调 `.staging/`、`objects/`、`.trash/`、`.quarantine/`；数据库换 root、root 换数据库、错 marker 或任一步失败都会阻止 ready。同一 root 已由另一 Sidecar 使用时第二进程启动失败，避免双进程文件协调。
+- Go Sidecar 在检查 pending restore、执行迁移或打开 SQLite 前，先在数据库父目录对固定 `.opc-sidecar-run.lock` 获取非阻塞 OS 独占运行锁；冲突立即失败且不接触数据库。锁文件退出后可保留，所有权只由 OS lock 表示。
+- Sidecar 随后校验 Artifact root marker 的 `format_version / database_id / store_id`，用不可变数据库 ID 与一次性 `artifact_store_id` 做双向绑定，获取并持有独立的 Artifact root 进程锁，再依据 Artifact 事实和 immutable deletion tombstone 协调 `.staging/`、`objects/`、`.trash/`、`.quarantine/`；数据库运行锁和 Artifact root 锁分工不同，均不能省略。
 - 解析 stdout ready JSON，拒绝非 loopback、端口 0、带凭据或带额外路径的地址。
 - Tauri 原生健康探测与前端 sidecar_status 连接握手。
-- Sidecar 状态当前为 starting、ready、error，并可返回 app/API/schema 版本。
-- React 根节点的桌面服务恢复闸门：starting/状态检查时不渲染业务页，ready 后放行并持续观察，error/读取失败时显示不含原始 message 的全局恢复页；支持手动重查、打开日志目录和调用既有安全重启。浏览器开发模式直接放行。
-- 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited 或提前唤醒优雅等待，仍由 shutdown 完成等待与兜底终止。
-- 恢复计划挂起后，设置页可调用 `restart_application`：桌面壳先走同一安全关闭路径并等待受管 Sidecar 的真实退出确认，再请求 Tauri 重启应用；若 Sidecar 不由桌面管理或退出不能确认，则取消应用重启并返回可见错误。
+- `sidecar_status` 当前只使用 `starting / restarting / ready / error`，为受管内置 Sidecar 返回 `generation`，并可返回 app/API/schema 版本。
+- 已启动 generation 只有真实 `Terminated` 才触发下一代，自动恢复最多 2 次，退避固定为 500 ms、2 s；当前 generation 连续 Ready 30 秒后重置预算。外部模式、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；内置二进制定位/child spawn 失败可在同一预算内重试。
+- React 根节点的桌面服务恢复闸门：`starting / restarting` 时不渲染业务页，ready 后放行并持续观察，error/读取失败时显示不含原始 message 的全局恢复页。从 ready 进入非 ready 会清除运行期连接、取消并清空 TanStack Query；ready generation 变化也会覆盖漏过中间 `restarting` 的轮询。浏览器开发模式直接放行。
+- 应用退出时向精确子进程写入 shutdown，最多等待 7 秒，超时后终止；Sidecar 优雅关闭 HTTP、checkpoint WAL 并关闭数据库。并发 shutdown 调用共享同一次 stop，后续调用等待第一次完成；若 ready 等待恰在 shutdown 已取走 child handle 后超时，握手任务不会伪造 exited。Tauri 还为内置模式注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父控制管道 EOF 触发同样的 Go 优雅退出；外部/开发默认 false。
+- 恢复计划挂起后，设置页可调用 `restart_application`：若受管 child 存在，只有真实 `Terminated` 的 code 0 且无 signal 才允许 Tauri 重启应用；内置启动失败尚未创建 child 时允许继续，延迟到达的干净退出确认后可再次请求。外部 Sidecar、非零退出、signal 或未确认退出都会拒绝。
 - Tauri capability 当前仅开放 core:default；前端不能任意调用 shell。
 - manual Task 文件产出通过 WebView 文件选择与鉴权 multipart 上传进入 Sidecar 受控目录；前端不能指定服务端 `relative_path`，下载也只能经过鉴权 content API。
 
-尚未实现：
+尚未实现或仍待真实验收：
 
-- Sidecar 异常退出后的自动重启、退避、原进程内重新拉起和孤儿进程治理；当前手动恢复采用受控应用重启，不在错误状态下直接生成第二个 Sidecar。
+- 真实 Tauri/Sidecar 父进程崩溃、进程树、Windows/macOS/Linux 和安装包生命周期验收；当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
 - 数据库打开前的备份选择、恢复实时进度与安全回滚交互；当前全局恢复页 v1 只消费白名单状态/版本并提供重查、日志和重启。
 - `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
 - 系统托盘、原生通知、OS 全局快捷键、开机启动和业务文件对话框。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
 - Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
-- 当前主机上的 Rust 单元测试与源码检查不能替代真实 Sidecar 生命周期、安装包或三平台支持；当前环境缺少 MSVC `link.exe`，完整 Tauri 链接仍受环境限制。
+- 当前主机上的 Rust 格式与静态单元测试不能替代真实 Sidecar 生命周期、安装包或三平台支持；当前环境缺少 MSVC `link.exe` 和 Windows SDK，`cargo check` / `cargo test` 的链接阶段受阻。
 
 ## 目标功能
 
@@ -56,15 +58,15 @@
 - 检查桌面应用、Sidecar、API 和 schema 版本兼容，阻止错误组合进入写入模式。
 - 启动超时、ready 格式错误、健康失败或迁移失败时显示专用恢复页。
 - 恢复页 v1 已支持状态重查、打开脱敏日志、查看白名单版本和受控应用重启；检查数据目录、选择备份与显示实时恢复进度仍待实现。
-- Sidecar 运行中意外退出时进行有上限的自动重启和退避；反复失败后停止自动重启并要求用户处理。
-- 启动新 Sidecar 前确认旧子进程和监听端口已经清理，避免双写数据库。
+- 已实现内置 Sidecar 的两次有界自动重启、固定退避和 30 秒稳定预算重置；重试耗尽后进入 error 并要求用户处理。
+- 新 generation 只在旧代真实 `Terminated` 或 child 尚未创建的 spawn failure 后启动；数据库运行锁进一步阻止未知旧进程与新进程同时接触数据库。
 
 ### 退出与孤儿治理
 
 - 区分关闭窗口、最小化到托盘和真正退出。
 - 真正退出先停止接受新业务操作，等待短事务，并让可取消的长任务进入 cancelled/interrupted 后再优雅关闭 Sidecar。若数据恢复已进入不可取消的 applying/restarting 阶段，桌面必须阻止普通退出，等待恢复协调器完成或回滚。
-- 维护精确子进程句柄和本次启动标识，不使用宽泛进程名终止其他实例。
-- 父进程异常退出后，下次启动识别并处理遗留锁、Run 和进程状态。
+- 维护精确子进程句柄和 generation，不使用宽泛进程名终止其他实例；并发 shutdown 共享一次 stop。
+- 父进程异常退出时，Go 受管模式可由父控制管道 EOF 优雅结束；若进程 hard-hung，下一次启动只会由数据库运行锁拒绝接触同库，当前不会识别、终止或回收孤儿/孙进程。
 - Agent 子进程由本地 Agent 模块管理，但最终退出清理纳入桌面生命周期。
 
 ### 系统托盘
@@ -128,19 +130,19 @@
 ### 正常启动
 
 1. Tauri 获取单实例锁并初始化 appDataDir / appLogDir，包括 `artifacts/` 目录。
-2. 生成启动期随机令牌并以端口 0 启动内置 Sidecar。
-3. Tauri 注入数据库和 Artifact root；Sidecar 打开数据库、执行安全迁移、读取数据库身份、校验/创建绑定 marker、获取 Artifact root 独占锁并协调受控 store，全部成功后才输出 ready。
+2. 为本 generation 生成新令牌并以端口 0 启动内置 Sidecar，同时注入 `OPC_EXIT_ON_STDIN_CLOSE=true`。
+3. Sidecar 先取得数据库父目录 `.opc-sidecar-run.lock`，再检查 pending restore、执行安全迁移并打开数据库；之后读取数据库身份、校验/创建绑定 marker、获取 Artifact root 独占锁并协调受控 store，全部成功后才输出 ready。
 4. Tauri 校验 loopback 地址并携带令牌调用 /health。
 5. 版本与 schema 兼容后，WebView 取得当前进程内连接信息并加载业务页面。
 6. 核心功能从首次启动起可离线使用。
 
 ### Sidecar 启动或运行失败
 
-1. 桌面状态进入 error，停止业务写入。
-2. 若属于瞬时运行失败，按有上限退避尝试一次或少量自动重启。
-3. 仍失败则显示恢复页，不在后台无限重启。
+1. 初次启动失败或已启动 generation 的真实 `Terminated` 使桌面进入 `restarting`，停止业务写入并清除旧连接/查询。
+2. 内置模式分别等待 500 ms、2 s 重试，最多两次；外部模式、显式 shutdown 或没有 `Terminated` 的事件流关闭不自动重试。
+3. 两次仍未 Ready 则进入 error 并显示恢复页，不在后台无限重启；当前 generation 连续 Ready 30 秒才恢复下一轮完整预算。
 4. 用户可手动重试、打开日志、检查版本或进入备份恢复。
-5. 恢复成功后生成新的会话令牌并重新建立前端连接。
+5. 恢复成功后以前端可识别的新 generation、新会话令牌和重新申请的动态端口建立连接；即使轮询漏过 `restarting`，generation 变化也会触发一次清理与业务树重挂。
 
 ### 关闭窗口与退出
 
@@ -148,7 +150,7 @@
 2. 用户从托盘或菜单选择“退出”。
 3. 应用冻结新长任务，等待写事务并通知专注/Agent 模块处理运行态。
 4. 若数据恢复处于 applying/restarting，显示不可退出的维护状态，待完成或回滚；其他可取消任务按其协议结束。
-5. Tauri 请求 Sidecar 优雅关闭；超时后只终止精确子进程。
+5. Tauri 请求 Sidecar 优雅关闭；并发调用共享一次 stop，超时后只终止精确 child generation。父管道 EOF 也会让受管 Go Sidecar 进入优雅关闭。
 6. 数据库 checkpoint 完成，进程退出且无残留。若操作系统强制终止恢复阶段，下次启动必须依据恢复 journal 完成或回滚，不能直接打开不确定数据库。
 
 ### 安装签名离线更新
@@ -164,9 +166,10 @@
 
 ### 当前与目标状态
 
-当前 sidecar_status 支持：
+当前 `sidecar_status` 支持以下四个 phase；受管内置模式同时返回 generation，外部模式为 null：
 
 - starting：本地服务正在启动或等待健康。
+- restarting：内置 Sidecar 已安排有界自动恢复，业务连接不可用。
 - ready：连接信息和版本可用。
 - error：启动、握手、健康或运行失败。
 
@@ -190,8 +193,8 @@
 
 当前 command：
 
-- sidecar_status：返回当前状态、运行期 API 地址、会话令牌和版本。
-- restart_application：无业务参数；只在受管 Sidecar 真实退出后请求重启整个桌面应用，用于应用挂起的恢复计划。浏览器开发模式或外部 Sidecar 会被明确拒绝。
+- sidecar_status：返回当前 phase、generation、运行期 API 地址、会话令牌和版本。
+- restart_application：无业务参数；受管 child 存在时只接受 code 0 且无 signal 的真实退出，尚未创建 child 的内置启动失败可继续，延迟干净退出后可重试。浏览器开发模式、外部 Sidecar、非零/signal/未确认退出都会拒绝。
 
 规划 command 或事件职责：
 
@@ -208,11 +211,11 @@
 
 ### 会话与日志
 
-- 会话令牌每次 Sidecar 启动重新生成，只存在于进程内。
+- 会话令牌每个 generation 重新生成；动态端口每代通过端口 `0` 重新申请，端口值允许被 OS 复用。两者都只存在于进程内。
 - 基础地址只能是 http://127.0.0.1:非零端口。
 - 浏览器请求要求允许的 Origin 和 Bearer Token。
 - WebView 每次请求生成 UUID v4；Sidecar 将规范 UUID 写入 `X-Request-ID` 响应头、统一错误体和脱敏访问日志，前端网络/超时错误也保留本次生成值。Tauri 生命周期日志保持独立白名单事件。
-- Sidecar 重启使旧令牌失效，前端清除缓存连接后重新获取。
+- Sidecar 离开 ready 时前端立即清除缓存连接并取消/清空 TanStack Query；新 generation ready 后重新获取。ready generation 变化还会补偿漏过中间状态的轮询。
 - 数据库路径和 Artifact root 由桌面层在每次启动时注入；WebView 不持有内部 `objects/<artifact-id>` 路径，也不能绕过 Sidecar 读取或删除文件。Sidecar HTTP read/write timeout 为 180 秒；Task 文件上传和下载采用 120 秒客户端端到端超时，普通小型 JSON API 继续使用较短超时。
 
 ## 与其他模块协作
@@ -229,10 +232,10 @@
 
 ### v0.1-A：Sidecar 可靠性
 
-- 已扩展前端全局服务状态：桌面 starting/error 闸门、ready 持续观察和浏览器降级。
-- 已实现启动失败恢复页 v1 与受控重启重试；原进程内重拉起和有上限自动退避仍待实现。
-- 完成孤儿进程、旧令牌失效、重复启动和数据库锁处理。
-- 补 Tauri 与真实 Sidecar 进程集成测试。
+- 已扩展前端全局服务状态：桌面 `starting/restarting/ready/error + generation`、非 ready 连接/Query 清理、generation 补偿和浏览器降级。
+- 已实现启动失败恢复页 v1、内置 Sidecar 两次有界自动重启、500 ms/2 s 退避、连续 Ready 30 秒预算重置，以及每代新 token/动态端口申请。
+- 已实现数据库父目录运行锁、父管道 EOF 优雅退出、安全应用重启门禁和并发 shutdown 共享 stop；孤儿/进程树治理仍待实现。
+- 补真实 Tauri 与 Sidecar 父崩溃、进程树、三平台和安装包集成测试。
 
 ### v0.1-B：日志与维护
 
@@ -266,25 +269,28 @@
 - [x] ready 地址为非 loopback、端口 0、带凭据或路径时被拒绝。
 - [x] Tauri 创建 Artifact root 并通过 `OPC_ARTIFACT_DIR` 传给 Sidecar；开发脚本使用独立开发 root。
 - [x] Sidecar 在 ready 前验证数据库绑定 marker/目录、获取 root 进程级独占锁并协调 staging/objects/trash/quarantine；错库或第二 Sidecar 共用 root 时启动失败，文件读写只经过受控 API。
-- [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确子进程句柄；ready 超时与 shutdown 竞态不会伪造 exited。
-- [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，并且只有真实退出确认后才重启应用。
+- [x] 数据库父目录固定 `.opc-sidecar-run.lock` 在 pending restore、迁移和 DB open 前取得 OS 独占锁；冲突立即失败且不触碰数据库。
+- [x] 内置 Sidecar 最多按 500 ms、2 s 自动重启两次，当前 generation 连续 Ready 30 秒重置预算；只有真实 `Terminated` 才为已启动代际重拉，外部/shutdown/无 Terminated 流关闭均不触发。
+- [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确 child generation；并发调用共享一次 stop，ready 超时竞态不会伪造 exited，父管道 EOF 由 `OPC_EXIT_ON_STDIN_CLOSE=true` 触发 Go 优雅关闭。
+- [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，受管 child 只接受 code 0/no signal，未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试。
+- [x] Web 全量 79 个文件 / 524 项、Go `go test ./... -count=1` 与 `go vet ./...` 均通过；Rust 格式通过，新增单元测试源码已完成 P0/P1=0 的静态复核，但受工具链限制未执行 Rust 测试。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收
 
-- [ ] Sidecar 异常退出后的有上限重启、手动恢复与孤儿治理。
+- [ ] 真实 Tauri/Sidecar 父进程崩溃、进程树、hard-hung orphan 与孙进程治理；当前运行锁只阻止第二个进程接触同库，不自动回收。
 - [x] 启动前白名单 incident journal、稳定 ID 重放、损坏隔离及健康启动补偿。
 - [x] 脱敏诊断包 v1（不含原始日志）。
 - [x] Go Sidecar 脱敏日志落盘/轮转与 stderr 降级。
 - [x] 设置运行诊断可通过无参数 Tauri command 打开自身 `appLogDir`；浏览器模式不伪造路径。
 - [x] Tauri 壳白名单 JSONL 生命周期日志、5 MiB/3 归档、非普通目标拒绝与 stderr 降级。
 - [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
-- [x] 全局服务恢复页 v1：starting/error 拦截业务页，ready 自动放行；状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
-- [ ] 数据库打开前备份选择/实时恢复进度，以及原进程内有上限重拉起。
+- [x] 全局服务恢复页 v1：starting/restarting/error 拦截业务页，ready 自动放行；generation、查询清理、状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
+- [ ] 数据库打开前备份选择与实时恢复进度。
 - [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。
-- [ ] 当前主机补齐 MSVC `link.exe` 后的完整 `cargo test` / Tauri 链接与安装包检查。
+- [ ] 当前主机补齐 MSVC `link.exe` 与 Windows SDK 后的 `cargo check` / `cargo test`、Tauri 链接与安装包检查。
 
 ## 相关代码/PRD链接
 

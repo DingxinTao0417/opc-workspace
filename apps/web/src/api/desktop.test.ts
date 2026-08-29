@@ -38,6 +38,7 @@ describe("runtime diagnostics", () => {
     await expect(getRuntimeDiagnostics()).resolves.toEqual({
       environment: "browser",
       phase: "external",
+      generation: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -47,6 +48,7 @@ describe("runtime diagnostics", () => {
   it("returns only sanitized desktop lifecycle and version facts", async () => {
     const invoke = vi.fn(async () => ({
       phase: "ready",
+      generation: 7,
       baseUrl: "http://127.0.0.1:49152",
       sessionToken: "must-not-leak",
       message: "C:\\private\\path",
@@ -58,6 +60,7 @@ describe("runtime diagnostics", () => {
     await expect(getRuntimeDiagnostics(invoke)).resolves.toEqual({
       environment: "desktop",
       phase: "ready",
+      generation: 7,
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "28",
@@ -65,9 +68,34 @@ describe("runtime diagnostics", () => {
     expect(invoke).toHaveBeenCalledWith("sidecar_status");
   });
 
+  it.each([null, 0, 8])(
+    "accepts a restarting lifecycle with generation %s",
+    async (generation) => {
+      await expect(
+        getRuntimeDiagnostics(async () => ({
+          phase: "restarting",
+          generation,
+        })),
+      ).resolves.toMatchObject({
+        environment: "desktop",
+        phase: "restarting",
+        generation,
+      });
+    },
+  );
+
+  it.each([undefined, -1, 1.5, Number.NaN, "1"])(
+    "rejects malformed desktop generation %s",
+    async (generation) => {
+      await expect(
+        getRuntimeDiagnostics(async () => ({ phase: "ready", generation })),
+      ).rejects.toThrow("Invalid desktop runtime generation");
+    },
+  );
+
   it("rejects malformed desktop lifecycle data", async () => {
     await expect(
-      getRuntimeDiagnostics(async () => ({ phase: "unknown" })),
+      getRuntimeDiagnostics(async () => ({ phase: "unknown", generation: 1 })),
     ).rejects.toThrow("Invalid desktop runtime phase");
   });
 });

@@ -21,6 +21,18 @@ import { useUiStore } from "../store/ui";
 import { SettingsModal } from "./SettingsModal";
 import { applyTheme, ThemeController } from "./ThemeController";
 
+const desktopApi = vi.hoisted(() => ({
+  getRuntimeDiagnostics: vi.fn(),
+}));
+
+vi.mock("../api/desktop", async (importActual) => {
+  const actual = await importActual<typeof import("../api/desktop")>();
+  return {
+    ...actual,
+    getRuntimeDiagnostics: desktopApi.getRuntimeDiagnostics,
+  };
+});
+
 function LocationProbe() {
   const location = useLocation();
   return <output data-testid="current-location">{location.pathname}</output>;
@@ -140,6 +152,15 @@ function renderSettings() {
 
 describe("SettingsModal", () => {
   beforeEach(() => {
+    desktopApi.getRuntimeDiagnostics.mockReset();
+    desktopApi.getRuntimeDiagnostics.mockResolvedValue({
+      environment: "browser",
+      phase: "external",
+      generation: null,
+      appVersion: null,
+      apiVersion: null,
+      schemaVersion: null,
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
@@ -497,6 +518,23 @@ describe("SettingsModal", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "生成诊断包" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
+  it("labels a restarting desktop lifecycle in Chinese", async () => {
+    desktopApi.getRuntimeDiagnostics.mockResolvedValue({
+      environment: "desktop",
+      phase: "restarting",
+      generation: 2,
+      appVersion: "0.1.0",
+      apiVersion: "v1",
+      schemaVersion: "16",
+    });
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "运行诊断" }));
+
+    expect(await screen.findByText("重启中")).toBeVisible();
+    expect(screen.getByText("Tauri 桌面")).toBeVisible();
   });
 
   it("shows a retryable About error when the local service is unavailable", async () => {

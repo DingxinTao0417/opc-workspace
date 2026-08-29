@@ -6,8 +6,8 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 
 ## 当前完成范围
 
-- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 Go Sidecar 生命周期基础；恢复计划挂起后可从设置页确认安全关闭受管 Sidecar 并重启桌面应用
-- 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
+- Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 generation-aware Go Sidecar 生命周期；恢复计划挂起后可从设置页安全关闭受管 Sidecar 并重启桌面应用，受管 child 必须以 code 0 且无 signal 退出；内置 Sidecar 尚未创建 child 的启动失败仍允许重启应用，延迟到达的干净退出确认后可再次请求
+- 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
 - SQLite schema v31、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束
@@ -23,6 +23,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 项目活动时间线：创建、资料编辑、七种生命周期转换与永久删除同事务追加不可变事件；详情稳定分页展示 owner、时间、状态或资料字段变化，创建幂等重放不重复事件；complete/reopen 还会把事件发生当下的关联客户投影为只读本地活动，后续改绑不搬迁历史
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看带 `manual/child_rollup` 来源的 Submission/Artifact 历史；系统汇总仍必须由 owner 验收后才能完成
 - 受控文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`avatars/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。Task/Client/Project 文件继续位于 `objects/`，工作区头像位于 `avatars/`；提交事务报错只清除数据库可证明无引用的文件，模糊 COMMIT 留给 reconcile
+- Sidecar 在处理 pending restore、迁移或打开 SQLite 前，先对数据库父目录固定 `.opc-sidecar-run.lock` 获取非阻塞 OS 独占运行锁；冲突立即失败且不接触数据库。该锁与 Artifact root 锁分工不同：前者保护数据库/恢复入口，后者保护受控文件协调
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
 - 客户责任关联纵切：客户详情可选择已有 active person，或原子新建 person 后显式关联；每个客户只允许一个 active contact，解除必须填写原因并保留不可变历史，关联变化传播 Client 聚合版本
 - 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。仅手动 `POST /api/v1/backups` 在维护写锁和备份互斥锁内、幂等重放判断后、任何 staging 或 `VACUUM INTO` 前执行容量准入：以 `max(PRAGMA page_count × page_size, 当前数据库文件大小)`、经安全解析且实际普通文件大小与登记值一致的全部 active 受控文件、marker 和 manifest 上界之和为载荷，再增加 20% 且至少 64 MiB 余量，并只探测 backup root；可用空间恰好等于需求时允许继续。空间不足返回 `507 BACKUP_SPACE_INSUFFICIENT`，容量无法确认返回 `503 BACKUP_CAPACITY_UNAVAILABLE`，两者均不创建 staging/新包、不改业务数据，也不投影通用 `backup:create` 故障事项。该门禁不适用于导入、恢复安排或破坏性迁移创建的内部自动回滚包。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并创建同规格自动回滚包；备份失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
@@ -39,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Project Artifact→Inbox→Task 的 Go 金链使用 owner/person + manual owner reviewer，Web 表单也覆盖 person 本地责任提示与提交载荷。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 / schema v31 不变且本轮无 migration。真实浏览器/WebView 的完整人工深链、键盘/焦点、窄屏和 1,000/10,000 条 Project/Task/Inbox 性能仍待专项验收，不能由组件或 Go 测试替代；其他客户外部来源/回访/财务、数据库打开前恢复进度、系统快捷键及三平台安装包也仍属后续。[PRD v9.18](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；内置 Sidecar 的 generation-aware 有界自动重启、数据库父目录运行锁、父管道 EOF 退出和前端连接世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；app v0.1.0 / API v1 / schema v31 不变且本轮无 migration。T-02 仍是部分完成：真实 Tauri/Sidecar 父进程崩溃、进程树、三平台和安装包尚未验收，也没有 OS Job Object、进程组或孙进程治理；hard-hung orphan 当前只会被运行锁阻止再次打开同库，不会自动回收。[PRD v9.19](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -61,7 +62,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.18）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.19）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -101,7 +102,7 @@ pnpm dev
 pnpm dev:web
 ```
 
-开发数据库固定保存到 `.local/dev-data/opc-workspace.db`，开发 Artifact、手动备份和启动故障 journal 分别保存到 `.local/dev-data/artifacts/`、`.local/dev-data/backups/`、`.local/dev-data/logs/`，并与正式数据完全隔离。统一开发脚本默认不写入 demo 数据；从旧版本升级时，迁移只会清理先前 demo seed 使用的固定记录。开发令牌只用于本机联调，不得用于生产构建。
+开发数据库固定保存到 `.local/dev-data/opc-workspace.db`；Sidecar 运行时还会在同级创建并保留 `.local/dev-data/.opc-sidecar-run.lock`，所有权只由 OS 锁表示。开发 Artifact、手动备份和启动故障 journal 分别保存到 `.local/dev-data/artifacts/`、`.local/dev-data/backups/`、`.local/dev-data/logs/`，并与正式数据完全隔离。统一开发脚本默认不写入 demo 数据；从旧版本升级时，迁移只会清理先前 demo seed 使用的固定记录。开发令牌只用于本机联调，不得用于生产构建。
 
 ## 检查与测试
 
@@ -149,6 +150,7 @@ pnpm build
 
 ```text
 appDataDir/
+  .opc-sidecar-run.lock     # 数据库父目录固定运行锁文件；所有权由 OS 独占锁表示
   opc-workspace.db
   attachments/
   artifacts/
@@ -178,6 +180,9 @@ appLogDir/
 - Sidecar 仅监听 `127.0.0.1`；开发默认固定端口，桌面生产运行使用端口 `0` 获取随机空闲端口。
 - 生产请求（包括 `/health`）必须携带 `Authorization: Bearer <session-token>`。
 - Tauri 通过环境变量把数据库路径、日志目录、端口和令牌交给 Sidecar，令牌不出现在命令行。
+- 桌面 `sidecar_status` 当前只使用 `starting / restarting / ready / error`，并为受管内置 Sidecar 返回 `generation`；每代生成新令牌并重新请求动态端口。非 ready 状态会清除前端运行期连接与 TanStack Query 缓存，`generation` 变化还能覆盖前端漏过中间 `restarting` 轮询的情况。
+- Tauri 启动内置 Sidecar 时固定注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父控制管道 EOF 会触发 Go 的 HTTP drain、WAL checkpoint 和数据库关闭；外部/开发模式默认 `false`，普通 stdin EOF 不会使服务自行退出。
+- Sidecar 在 pending restore、迁移和数据库打开前获取数据库父目录 `.opc-sidecar-run.lock` 的 OS 独占锁；锁冲突立即失败且不触碰数据库。
 - Sidecar 通过 `OPC_LOG_DIR` 或 `--logs` 使用独立诊断目录；开发默认使用数据库同级 `logs/`。该目录不得与受控 Artifact 或备份根重叠。
 - Tauri 通过 `OPC_ARTIFACT_DIR` 把 `appDataDir/artifacts/` 交给 Sidecar；开发脚本等价地使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 默认把数据库同级 `backups/` 用作本地备份根；也可由桌面层通过 `OPC_BACKUP_DIR` 或命令行 `--backups` 指定，且不得与 Artifact root 重叠。
@@ -344,4 +349,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.18](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、Inbox/Reminder/Task 编排和 Project Artifact→Inbox→Task 人工闭环；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、窄屏、焦点和大数据量专项，以及后续客户/财务/桌面能力仍未完成。
+[PRD v9.19](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、数据安全、Inbox/Reminder/Task 编排、Project Artifact→Inbox→Task 人工闭环和内置 Sidecar 有界自动恢复；明确无 AI/LLM/Agent Runtime。真实浏览器/WebView、真实父崩溃/进程树、三平台安装包与后续客户/财务/桌面能力仍未完成。

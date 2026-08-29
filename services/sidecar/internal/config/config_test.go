@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,39 @@ func TestParseAllowsDynamicPortAndDevDatabase(t *testing.T) {
 	}
 	if cfg.LogDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "logs") {
 		t.Fatalf("LogDir = %q, want database sibling logs", cfg.LogDir)
+	}
+	if cfg.ExitOnStdinClose {
+		t.Fatal("ExitOnStdinClose = true, want false by default")
+	}
+}
+
+func TestParseReadsExitOnStdinCloseEnvironment(t *testing.T) {
+	cfg, err := Parse([]string{"--dev"}, func(key string) string {
+		if key == "OPC_EXIT_ON_STDIN_CLOSE" {
+			return "true"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if !cfg.ExitOnStdinClose {
+		t.Fatal("ExitOnStdinClose = false, want true")
+	}
+}
+
+func TestParseRejectsInvalidExitOnStdinCloseEnvironment(t *testing.T) {
+	_, err := Parse([]string{"--dev"}, func(key string) string {
+		if key == "OPC_EXIT_ON_STDIN_CLOSE" {
+			return "enabled"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatal("expected invalid OPC_EXIT_ON_STDIN_CLOSE error")
+	}
+	if !strings.Contains(err.Error(), "OPC_EXIT_ON_STDIN_CLOSE: must be a boolean") {
+		t.Fatalf("Parse() error = %q, want strict boolean error", err)
 	}
 }
 

@@ -27,6 +27,10 @@ const HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(400);
 const READY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(90);
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(7);
 const FORCED_TERMINATION_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_RESTART_ATTEMPTS: usize = 2;
+const RESTART_BACKOFFS: [Duration; MAX_RESTART_ATTEMPTS] =
+    [Duration::from_millis(500), Duration::from_secs(2)];
+const RESTART_STABILITY_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -38,10 +42,15 @@ pub struct SidecarRuntimeStatus {
     pub app_version: Option<String>,
     pub api_version: Option<String>,
     pub schema_version: Option<String>,
+    pub generation: Option<u64>,
 }
 
 impl SidecarRuntimeStatus {
-    fn starting(base_url: Option<String>, session_token: Option<String>) -> Self {
+    fn starting(
+        base_url: Option<String>,
+        session_token: Option<String>,
+        generation: Option<u64>,
+    ) -> Self {
         Self {
             phase: SidecarPhase::Starting,
             base_url,
@@ -50,6 +59,7 @@ impl SidecarRuntimeStatus {
             app_version: None,
             api_version: None,
             schema_version: None,
+            generation,
         }
     }
 }
@@ -58,6 +68,7 @@ impl SidecarRuntimeStatus {
 #[serde(rename_all = "snake_case")]
 pub enum SidecarPhase {
     Starting,
+    Restarting,
     Ready,
     Error,
 }
@@ -77,11 +88,42 @@ impl SidecarChildControl for CommandChild {
     }
 }
 
+struct ManagedChild {
+    generation: u64,
+    control: Box<dyn SidecarChildControl>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ChildExit {
+    generation: u64,
+    code: Option<i32>,
+    signal: Option<i32>,
+}
+
+impl ChildExit {
+    fn is_clean(self) -> bool {
+        self.code == Some(0) && self.signal.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RestartReservation {
+    ticket: u64,
+    attempt: usize,
+    delay: Duration,
+}
+
 #[derive(Default)]
 struct ManagedChildState {
-    child: Option<Box<dyn SidecarChildControl>>,
+    child: Option<ManagedChild>,
+    active_generation: Option<u64>,
+    next_generation: u64,
+    managed: bool,
     shutting_down: bool,
-    termination_requested: bool,
+    shutdown_generation: Option<u64>,
+    restart_attempts: usize,
+    next_restart_ticket: u64,
+    scheduled_restart: Option<u64>,
 }
 
 enum ChildKillOutcome {
@@ -91,10 +133,16 @@ enum ChildKillOutcome {
     Failed(String),
 }
 
+enum ShutdownStart {
+    Owner(Option<u64>),
+    Waiter,
+}
+
 struct SidecarManagerInner {
     runtime: RwLock<SidecarRuntimeStatus>,
     child: Mutex<ManagedChildState>,
-    exited: (Mutex<bool>, Condvar),
+    exited: (Mutex<Option<ChildExit>>, Condvar),
+    shutdown_complete: (Mutex<bool>, Condvar),
     logger: RwLock<Option<DesktopLogger>>,
 }
 
@@ -107,9 +155,10 @@ impl SidecarManager {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(SidecarManagerInner {
-                runtime: RwLock::new(SidecarRuntimeStatus::starting(None, None)),
+                runtime: RwLock::new(SidecarRuntimeStatus::starting(None, None, None)),
                 child: Mutex::new(ManagedChildState::default()),
-                exited: (Mutex::new(false), Condvar::new()),
+                exited: (Mutex::new(None), Condvar::new()),
+                shutdown_complete: (Mutex::new(false), Condvar::new()),
                 logger: RwLock::new(None),
             }),
         }
@@ -152,14 +201,73 @@ impl SidecarManager {
         update(&mut runtime);
     }
 
-    fn set_starting(&self, base_url: Option<String>, session_token: Option<String>) {
+    fn configure_bundled(&self) {
+        self.inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .managed = true;
+    }
+
+    fn set_starting(
+        &self,
+        base_url: Option<String>,
+        session_token: Option<String>,
+        generation: Option<u64>,
+    ) {
         self.log_event(DesktopEvent::SidecarStarting);
         self.update(|runtime| {
-            *runtime = SidecarRuntimeStatus::starting(base_url, session_token);
+            *runtime = SidecarRuntimeStatus::starting(base_url, session_token, generation);
         });
     }
 
-    fn set_ready(&self, ready: &ReadyLine, session_token: Option<String>) {
+    fn set_starting_if_current(&self, generation: u64, session_token: String) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) || state.shutting_down {
+            return false;
+        }
+        self.log_event(DesktopEvent::SidecarStarting);
+        self.update(|runtime| {
+            *runtime = SidecarRuntimeStatus::starting(None, Some(session_token), Some(generation));
+        });
+        true
+    }
+
+    fn set_restarting(&self, reservation: RestartReservation) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.scheduled_restart != Some(reservation.ticket) || state.shutting_down {
+            return false;
+        }
+        self.log_event(DesktopEvent::SidecarRestartScheduled);
+        self.update(|runtime| {
+            runtime.phase = SidecarPhase::Restarting;
+            runtime.base_url = None;
+            runtime.session_token = None;
+            runtime.message = Some(format!(
+                "本地服务意外退出，正在进行第 {}/{} 次自动恢复",
+                reservation.attempt, MAX_RESTART_ATTEMPTS
+            ));
+        });
+        true
+    }
+
+    fn set_ready(&self, generation: u64, ready: &ReadyLine, session_token: Option<String>) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) || state.shutting_down {
+            return false;
+        }
         self.log_event(DesktopEvent::SidecarReady);
         self.update(|runtime| {
             runtime.phase = SidecarPhase::Ready;
@@ -169,7 +277,9 @@ impl SidecarManager {
             runtime.app_version = ready.app_version.clone();
             runtime.api_version = ready.api_version.clone();
             runtime.schema_version = ready.schema_version.clone();
+            runtime.generation = Some(generation);
         });
+        true
     }
 
     fn set_external_ready(&self, base_url: String, session_token: Option<String>) {
@@ -179,6 +289,7 @@ impl SidecarManager {
             runtime.base_url = Some(base_url);
             runtime.session_token = session_token;
             runtime.message = None;
+            runtime.generation = None;
         });
     }
 
@@ -186,8 +297,48 @@ impl SidecarManager {
         self.log_event(DesktopEvent::SidecarError);
         self.update(|runtime| {
             runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
             runtime.message = Some(message.into());
         });
+    }
+
+    fn set_error_unless_shutting_down(&self, message: impl Into<String>) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.shutting_down {
+            return false;
+        }
+        self.log_event(DesktopEvent::SidecarError);
+        self.update(|runtime| {
+            runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
+            runtime.message = Some(message.into());
+        });
+        true
+    }
+
+    fn set_error_if_current(&self, generation: u64, message: impl Into<String>) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) || state.shutting_down {
+            return false;
+        }
+        self.log_event(DesktopEvent::SidecarError);
+        self.update(|runtime| {
+            runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
+            runtime.message = Some(message.into());
+        });
+        true
     }
 
     fn append_error(&self, message: impl Into<String>) {
@@ -196,6 +347,8 @@ impl SidecarManager {
         self.update(|runtime| {
             let existing = runtime.message.take();
             runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
             runtime.message = Some(match existing {
                 Some(existing) if !existing.is_empty() => format!("{existing}；{message}"),
                 _ => message,
@@ -203,10 +356,34 @@ impl SidecarManager {
         });
     }
 
+    fn append_error_if_current(&self, generation: u64, message: impl Into<String>) -> bool {
+        let state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) || state.shutting_down {
+            return false;
+        }
+        self.log_event(DesktopEvent::SidecarError);
+        let message = message.into();
+        self.update(|runtime| {
+            let existing = runtime.message.take();
+            runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
+            runtime.message = Some(match existing {
+                Some(existing) if !existing.is_empty() => format!("{existing}；{message}"),
+                _ => message,
+            });
+        });
+        true
+    }
+
     fn spawn_and_register_child<T>(
         &self,
         spawn: impl FnOnce() -> Result<(T, Box<dyn SidecarChildControl>), String>,
-    ) -> Result<Option<T>, String> {
+    ) -> Result<Option<(T, u64)>, String> {
         let mut state = self
             .inner
             .child
@@ -215,52 +392,83 @@ impl SidecarManager {
         if state.shutting_down {
             return Ok(None);
         }
+        if state.child.is_some() || state.active_generation.is_some() {
+            return Err("上一代 Sidecar 尚未确认退出，已拒绝启动新进程".to_owned());
+        }
         let (events, child) = spawn()?;
-        let (exited, _) = &self.inner.exited;
-        *exited
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
-        state.child = Some(child);
-        state.termination_requested = false;
-        Ok(Some(events))
+        let generation = state.next_generation.saturating_add(1);
+        state.next_generation = generation;
+        state.active_generation = Some(generation);
+        state.child = Some(ManagedChild {
+            generation,
+            control: child,
+        });
+        Ok(Some((events, generation)))
     }
 
-    fn mark_exited(&self) {
-        {
-            let mut state = self
-                .inner
-                .child
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            state.child = None;
-            state.termination_requested = false;
+    fn mark_exited(&self, generation: u64, code: Option<i32>, signal: Option<i32>) -> bool {
+        let mut state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation) {
+            return false;
         }
         let (exited, changed) = &self.inner.exited;
         let mut exited = exited
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *exited = true;
+        *exited = Some(ChildExit {
+            generation,
+            code,
+            signal,
+        });
+        if !state.shutting_down {
+            self.log_event(DesktopEvent::SidecarError);
+            self.update(|runtime| {
+                runtime.base_url = None;
+                runtime.session_token = None;
+                if runtime.phase != SidecarPhase::Error {
+                    runtime.phase = SidecarPhase::Error;
+                    runtime.message = Some(format!(
+                        "Sidecar 已退出（code={code:?}, signal={signal:?}）"
+                    ));
+                }
+            });
+        }
+        state.child = None;
+        state.active_generation = None;
         changed.notify_all();
+        true
     }
 
-    fn wait_for_exit(&self, timeout: Duration) -> bool {
+    fn wait_for_exit(&self, generation: u64, timeout: Duration) -> Option<ChildExit> {
         let (exited, changed) = &self.inner.exited;
         let exited = exited
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if *exited {
-            return true;
+        if exited.is_some_and(|outcome| outcome.generation == generation) {
+            return *exited;
         }
-        match changed.wait_timeout_while(exited, timeout, |exited| !*exited) {
-            Ok((exited, _)) => *exited,
+        match changed.wait_timeout_while(exited, timeout, |exited| {
+            !exited.is_some_and(|outcome| outcome.generation == generation)
+        }) {
+            Ok((exited, _)) => exited
+                .as_ref()
+                .filter(|outcome| outcome.generation == generation)
+                .copied(),
             Err(poisoned) => {
                 let (exited, _) = poisoned.into_inner();
-                *exited
+                exited
+                    .as_ref()
+                    .filter(|outcome| outcome.generation == generation)
+                    .copied()
             }
         }
     }
 
-    fn request_child_kill(&self) -> ChildKillOutcome {
+    fn request_child_kill(&self, generation: u64) -> ChildKillOutcome {
         let child = {
             let mut state = self
                 .inner
@@ -270,11 +478,17 @@ impl SidecarManager {
             if state.shutting_down {
                 return ChildKillOutcome::ShutdownOwnsChild;
             }
-            let child = state.child.take();
-            if child.is_some() {
-                state.termination_requested = true;
+            if state.active_generation != Some(generation) {
+                return ChildKillOutcome::Missing;
             }
-            child
+            match state.child.take() {
+                Some(child) if child.generation == generation => Some(child.control),
+                Some(child) => {
+                    state.child = Some(child);
+                    None
+                }
+                None => None,
+            }
         };
         let Some(child) = child else {
             return ChildKillOutcome::Missing;
@@ -285,6 +499,75 @@ impl SidecarManager {
         }
     }
 
+    fn reserve_restart(&self) -> Result<Option<RestartReservation>, ()> {
+        let mut state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.managed
+            || state.shutting_down
+            || state.active_generation.is_some()
+            || state.child.is_some()
+            || state.scheduled_restart.is_some()
+        {
+            return Ok(None);
+        }
+        if state.restart_attempts >= MAX_RESTART_ATTEMPTS {
+            return Err(());
+        }
+        state.restart_attempts += 1;
+        state.next_restart_ticket = state.next_restart_ticket.saturating_add(1);
+        let reservation = RestartReservation {
+            ticket: state.next_restart_ticket,
+            attempt: state.restart_attempts,
+            delay: RESTART_BACKOFFS[state.restart_attempts - 1],
+        };
+        state.scheduled_restart = Some(reservation.ticket);
+        Ok(Some(reservation))
+    }
+
+    fn claim_restart(&self, ticket: u64) -> bool {
+        let mut state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.scheduled_restart != Some(ticket)
+            || state.shutting_down
+            || state.active_generation.is_some()
+            || state.child.is_some()
+        {
+            return false;
+        }
+        state.scheduled_restart = None;
+        true
+    }
+
+    fn reset_restart_budget_if_stable(&self, generation: u64) -> bool {
+        let mut state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.active_generation != Some(generation)
+            || state.shutting_down
+            || state.child.is_none()
+        {
+            return false;
+        }
+        let runtime = self
+            .inner
+            .runtime
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if runtime.phase != SidecarPhase::Ready || runtime.generation != Some(generation) {
+            return false;
+        }
+        state.restart_attempts = 0;
+        true
+    }
+
     pub fn shutdown(&self) {
         self.log_event(DesktopEvent::SidecarShutdownStarted);
         self.shutdown_with_timeouts(GRACEFUL_SHUTDOWN_TIMEOUT, FORCED_TERMINATION_TIMEOUT);
@@ -292,42 +575,149 @@ impl SidecarManager {
     }
 
     pub fn shutdown_for_restart(&self) -> Result<(), String> {
-        let has_managed_child = self
-            .inner
-            .child
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .child
-            .is_some();
-        if !has_managed_child {
+        let (managed, shutting_down, previous_generation, shutdown_complete) = {
+            let state = self
+                .inner
+                .child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let complete = if state.shutting_down {
+                *self
+                    .inner
+                    .shutdown_complete
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            } else {
+                false
+            };
+            (
+                state.managed,
+                state.shutting_down,
+                state.shutdown_generation,
+                complete,
+            )
+        };
+        if !managed {
             return Err("当前 Sidecar 不由桌面应用管理，请手动重启开发服务".to_owned());
         }
-        self.shutdown();
-        if self.wait_for_exit(Duration::ZERO) {
-            return Ok(());
+        if shutting_down {
+            if !shutdown_complete {
+                return Err("应用正在退出，已取消重复的重启请求".to_owned());
+            }
+            return self.validate_restart_shutdown(previous_generation);
         }
-        Err(self
-            .status()
-            .message
-            .unwrap_or_else(|| "Sidecar 未确认安全退出，已取消应用重启".to_owned()))
+        let generation = match self.begin_shutdown() {
+            ShutdownStart::Owner(generation) => generation,
+            ShutdownStart::Waiter => {
+                return Err("应用正在退出，已取消重复的重启请求".to_owned());
+            }
+        };
+        self.log_event(DesktopEvent::SidecarShutdownStarted);
+        self.perform_shutdown(
+            generation,
+            GRACEFUL_SHUTDOWN_TIMEOUT,
+            FORCED_TERMINATION_TIMEOUT,
+        );
+        self.finish_shutdown();
+        self.log_event(DesktopEvent::SidecarShutdownFinished);
+
+        self.validate_restart_shutdown(generation)
+    }
+
+    fn validate_restart_shutdown(&self, generation: Option<u64>) -> Result<(), String> {
+        let Some(generation) = generation else {
+            return Ok(());
+        };
+        match self.wait_for_exit(generation, Duration::ZERO) {
+            Some(outcome) if outcome.is_clean() => Ok(()),
+            Some(outcome) => Err(format!(
+                "Sidecar 未安全完成关闭（code={:?}, signal={:?}），已取消应用重启",
+                outcome.code, outcome.signal
+            )),
+            None => Err(self
+                .status()
+                .message
+                .unwrap_or_else(|| "Sidecar 未确认安全退出，已取消应用重启".to_owned())),
+        }
     }
 
     fn shutdown_with_timeouts(&self, graceful_timeout: Duration, forced_timeout: Duration) {
-        let (child, termination_requested) = {
+        match self.begin_shutdown() {
+            ShutdownStart::Owner(generation) => {
+                self.perform_shutdown(generation, graceful_timeout, forced_timeout);
+                self.finish_shutdown();
+            }
+            ShutdownStart::Waiter => self.wait_for_shutdown_complete(),
+        }
+    }
+
+    fn begin_shutdown(&self) -> ShutdownStart {
+        let mut state = self
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.shutting_down {
+            return ShutdownStart::Waiter;
+        }
+        state.shutting_down = true;
+        state.scheduled_restart = None;
+        let generation = state.active_generation;
+        state.shutdown_generation = generation;
+        self.update(|runtime| {
+            runtime.phase = SidecarPhase::Error;
+            runtime.base_url = None;
+            runtime.session_token = None;
+            runtime.message = Some("本地服务正在安全关闭".to_owned());
+        });
+        *self
+            .inner
+            .shutdown_complete
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = false;
+        ShutdownStart::Owner(generation)
+    }
+
+    fn finish_shutdown(&self) {
+        let (complete, changed) = &self.inner.shutdown_complete;
+        *complete
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        changed.notify_all();
+    }
+
+    fn perform_shutdown(
+        &self,
+        generation: Option<u64>,
+        graceful_timeout: Duration,
+        forced_timeout: Duration,
+    ) {
+        let child = {
             let mut state = self
                 .inner
                 .child
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if state.shutting_down {
-                return;
+            match (state.child.take(), generation) {
+                (Some(child), Some(generation)) if child.generation == generation => {
+                    Some(child.control)
+                }
+                (Some(child), _) => {
+                    state.child = Some(child);
+                    None
+                }
+                (None, _) => None,
             }
-            state.shutting_down = true;
-            (state.child.take(), state.termination_requested)
         };
 
-        if child.is_none() && termination_requested {
-            if !self.wait_for_exit(forced_timeout) {
+        let Some(generation) = generation else {
+            return;
+        };
+
+        if child.is_none() {
+            if self.wait_for_exit(generation, forced_timeout).is_none() {
                 self.append_error(format!(
                     "应用关闭时在 {} 毫秒内仍未收到 Sidecar 的真实退出确认",
                     forced_timeout.as_millis()
@@ -339,7 +729,7 @@ impl SidecarManager {
         if let Some(mut child) = child {
             let stop_context = match child.write(b"shutdown\n") {
                 Ok(()) => {
-                    if self.wait_for_exit(graceful_timeout) {
+                    if self.wait_for_exit(generation, graceful_timeout).is_some() {
                         return;
                     }
                     "Sidecar 未在优雅关闭期限内退出".to_owned()
@@ -347,13 +737,13 @@ impl SidecarManager {
                 Err(error) => {
                     let message = format!("无法向 Sidecar 写入关闭请求：{error}");
                     self.set_error(message.clone());
-                    if self.wait_for_exit(Duration::ZERO) {
+                    if self.wait_for_exit(generation, Duration::ZERO).is_some() {
                         return;
                     }
                     message
                 }
             };
-            if self.wait_for_exit(Duration::ZERO) {
+            if self.wait_for_exit(generation, Duration::ZERO).is_some() {
                 return;
             }
             match child.kill() {
@@ -361,7 +751,7 @@ impl SidecarManager {
                     self.set_error(format!(
                         "{stop_context}；已发送强制终止请求，正在等待真实退出确认"
                     ));
-                    if !self.wait_for_exit(forced_timeout) {
+                    if self.wait_for_exit(generation, forced_timeout).is_none() {
                         self.append_error(format!(
                             "在 {} 毫秒内未收到 Sidecar 的真实退出确认",
                             forced_timeout.as_millis()
@@ -373,6 +763,21 @@ impl SidecarManager {
                 }
             }
         }
+    }
+
+    fn wait_for_shutdown_complete(&self) {
+        let (complete, changed) = &self.inner.shutdown_complete;
+        let complete = complete
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *complete {
+            return;
+        }
+        drop(
+            changed
+                .wait_while(complete, |complete| !*complete)
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        );
     }
 
     fn is_shutting_down(&self) -> bool {
@@ -425,9 +830,8 @@ pub fn initialize_sidecar(app: &AppHandle, manager: SidecarManager) {
             initialize_external_sidecar(raw_url, manager);
         }
         _ => {
-            if let Err(error) = spawn_bundled_sidecar(app, manager.clone()) {
-                manager.set_error(error);
-            }
+            manager.configure_bundled();
+            launch_bundled_sidecar(app.clone(), manager);
         }
     }
 }
@@ -444,12 +848,52 @@ fn initialize_external_sidecar(raw_url: String, manager: SidecarManager) {
         .ok()
         .filter(|value| !value.is_empty());
 
-    manager.set_starting(Some(base_url.clone()), token.clone());
+    manager.set_starting(Some(base_url.clone()), token.clone(), None);
     tauri::async_runtime::spawn(async move {
         match verify_health(&base_url, token.as_deref()).await {
             Ok(()) => manager.set_external_ready(base_url, token),
             Err(error) => manager.set_error(format!("开发 Sidecar 健康检查失败：{error}")),
         }
+    });
+}
+
+fn launch_bundled_sidecar(app: AppHandle, manager: SidecarManager) {
+    if let Err(error) = spawn_bundled_sidecar(&app, manager.clone()) {
+        if manager.set_error_unless_shutting_down(error) {
+            schedule_bundled_restart(app, manager);
+        }
+    }
+}
+
+fn schedule_bundled_restart(app: AppHandle, manager: SidecarManager) {
+    match manager.reserve_restart() {
+        Ok(Some(reservation)) => {
+            if !manager.set_restarting(reservation) {
+                return;
+            }
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(reservation.delay).await;
+                if manager.claim_restart(reservation.ticket) {
+                    launch_bundled_sidecar(app, manager);
+                }
+            });
+        }
+        Ok(None) => {}
+        Err(()) => {
+            if manager.set_error_unless_shutting_down(format!(
+                "本地服务连续恢复 {} 次仍未就绪，已停止自动重试",
+                MAX_RESTART_ATTEMPTS
+            )) {
+                manager.log_event(DesktopEvent::SidecarRestartExhausted);
+            }
+        }
+    }
+}
+
+fn schedule_restart_budget_reset(manager: SidecarManager, generation: u64) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(RESTART_STABILITY_WINDOW).await;
+        manager.reset_restart_budget_if_stable(generation);
     });
 }
 
@@ -468,7 +912,6 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
     let database_path = app_data_dir.join("opc-workspace.db");
     let artifact_dir = app_data_dir.join("artifacts");
     let token = generate_session_token();
-    manager.set_starting(None, Some(token.clone()));
 
     let command = app
         .shell()
@@ -480,12 +923,13 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
         .env("OPC_DB_PATH", &database_path)
         .env("OPC_ARTIFACT_DIR", &artifact_dir)
         .env("OPC_LOG_DIR", &app_log_dir)
+        .env("OPC_EXIT_ON_STDIN_CLOSE", "true")
         .env(
             "OPC_ALLOWED_ORIGINS",
             "http://tauri.localhost,https://tauri.localhost,tauri://localhost",
         );
 
-    let Some(mut events) = manager.spawn_and_register_child(|| {
+    let Some((mut events, generation)) = manager.spawn_and_register_child(|| {
         command
             .spawn()
             .map(|(events, child)| {
@@ -497,6 +941,8 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
     else {
         return Ok(());
     };
+    manager.set_starting_if_current(generation, token.clone());
+    let watcher_app = app.clone();
 
     tauri::async_runtime::spawn(async move {
         let mut reached_ready = false;
@@ -509,10 +955,13 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
                 match tokio::time::timeout_at(deadline, events.recv()).await {
                     Ok(event) => event,
                     Err(_) => {
-                        manager.append_error(format!(
-                            "在强制停止期限 {} 毫秒内未收到 Sidecar 的真实退出确认",
-                            FORCED_TERMINATION_TIMEOUT.as_millis()
-                        ));
+                        manager.append_error_if_current(
+                            generation,
+                            format!(
+                                "在强制停止期限 {} 毫秒内未收到 Sidecar 的真实退出确认",
+                                FORCED_TERMINATION_TIMEOUT.as_millis()
+                            ),
+                        );
                         // The bounded confirmation wait is over, but retain the
                         // receiver so a late real Terminated event can still be
                         // observed and wake a concurrent shutdown waiter.
@@ -532,7 +981,7 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
                 {
                     Ok(event) => event,
                     Err(error) => {
-                        if handle_ready_handshake_timeout(&manager, error) {
+                        if handle_ready_handshake_timeout(&manager, generation, error) {
                             forced_termination_deadline =
                                 Some(tokio::time::Instant::now() + FORCED_TERMINATION_TIMEOUT);
                         }
@@ -555,10 +1004,15 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
                         Ok(ready) => {
                             reached_ready = true;
                             match verify_health(&ready.base_url, Some(&token)).await {
-                                Ok(()) => manager.set_ready(&ready, Some(token.clone())),
+                                Ok(()) => {
+                                    if manager.set_ready(generation, &ready, Some(token.clone())) {
+                                        schedule_restart_budget_reset(manager.clone(), generation);
+                                    }
+                                }
                                 Err(error) => {
                                     if begin_forced_stop(
                                         &manager,
+                                        generation,
                                         format!("Sidecar 健康检查失败：{error}"),
                                     ) {
                                         forced_termination_deadline = Some(
@@ -573,6 +1027,7 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
                         Err(error) => {
                             if begin_forced_stop(
                                 &manager,
+                                generation,
                                 format!("Sidecar ready 握手无效：{error}"),
                             ) {
                                 forced_termination_deadline =
@@ -585,20 +1040,18 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
                 CommandEvent::Error(error)
                     if !manager.is_shutting_down() && !stopping_after_error =>
                 {
-                    if begin_forced_stop(&manager, format!("Sidecar 进程错误：{error}")) {
+                    if begin_forced_stop(&manager, generation, format!("Sidecar 进程错误：{error}"))
+                    {
                         forced_termination_deadline =
                             Some(tokio::time::Instant::now() + FORCED_TERMINATION_TIMEOUT);
                     }
                     stopping_after_error = true;
                 }
                 CommandEvent::Terminated(payload) => {
-                    manager.mark_exited();
-                    if !manager.is_shutting_down() && manager.status().phase != SidecarPhase::Error
+                    if manager.mark_exited(generation, payload.code, payload.signal)
+                        && !manager.is_shutting_down()
                     {
-                        manager.set_error(format!(
-                            "Sidecar 已退出（code={:?}, signal={:?}）",
-                            payload.code, payload.signal
-                        ));
+                        schedule_bundled_restart(watcher_app.clone(), manager.clone());
                     }
                     break;
                 }
@@ -607,7 +1060,7 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
         }
 
         if stream_closed_without_termination {
-            manager.append_error("Sidecar 事件流已关闭，未收到真实退出确认");
+            manager.append_error_if_current(generation, "Sidecar 事件流已关闭，未收到真实退出确认");
         }
     });
 
@@ -633,23 +1086,36 @@ fn ready_handshake_timeout_message(timeout: Duration) -> String {
     format!("Sidecar ready 握手在 {timeout_label}内未完成")
 }
 
-fn handle_ready_handshake_timeout(manager: &SidecarManager, error: String) -> bool {
-    begin_forced_stop(manager, error)
+fn handle_ready_handshake_timeout(
+    manager: &SidecarManager,
+    generation: u64,
+    error: String,
+) -> bool {
+    begin_forced_stop(manager, generation, error)
 }
 
-fn begin_forced_stop(manager: &SidecarManager, error: String) -> bool {
-    match manager.request_child_kill() {
+fn begin_forced_stop(manager: &SidecarManager, generation: u64, error: String) -> bool {
+    match manager.request_child_kill(generation) {
         ChildKillOutcome::ShutdownOwnsChild => false,
         ChildKillOutcome::Requested => {
-            manager.set_error(format!("{error}；已发送终止请求，正在等待真实退出确认"));
+            manager.set_error_if_current(
+                generation,
+                format!("{error}；已发送终止请求，正在等待真实退出确认"),
+            );
             true
         }
         ChildKillOutcome::Missing => {
-            manager.set_error(format!("{error}；没有可用的子进程句柄，无法发送终止请求"));
+            manager.set_error_if_current(
+                generation,
+                format!("{error}；没有可用的子进程句柄，无法发送终止请求"),
+            );
             true
         }
         ChildKillOutcome::Failed(kill_error) => {
-            manager.set_error(format!("{error}；终止 Sidecar 失败：{kill_error}"));
+            manager.set_error_if_current(
+                generation,
+                format!("{error}；终止 Sidecar 失败：{kill_error}"),
+            );
             true
         }
     }
@@ -820,8 +1286,9 @@ mod tests {
     };
 
     use super::{
-        SidecarChildControl, SidecarManager, SidecarPhase, SidecarRuntimeStatus,
-        handle_ready_handshake_timeout, parse_ready_line, receive_before_ready_deadline,
+        MAX_RESTART_ATTEMPTS, RESTART_BACKOFFS, SidecarChildControl, SidecarManager, SidecarPhase,
+        SidecarRuntimeStatus, handle_ready_handshake_timeout, parse_ready_line,
+        receive_before_ready_deadline,
     };
 
     #[derive(Default)]
@@ -865,7 +1332,8 @@ mod tests {
         manager: &SidecarManager,
         write_error: Option<&'static str>,
         kill_error: Option<&'static str>,
-    ) -> Arc<Mutex<FakeChildState>> {
+    ) -> (Arc<Mutex<FakeChildState>>, u64) {
+        manager.configure_bundled();
         let state = Arc::new(Mutex::new(FakeChildState::default()));
         let registered = manager
             .spawn_and_register_child(|| {
@@ -877,12 +1345,12 @@ mod tests {
                 Ok(((), child))
             })
             .expect("fake child registration should succeed");
-        assert!(registered.is_some());
-        state
+        let (_, generation) = registered.expect("fake child should be registered");
+        (state, generation)
     }
 
     fn wait_until(mut predicate: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(1);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while !predicate() && Instant::now() < deadline {
             thread::yield_now();
         }
@@ -941,6 +1409,7 @@ mod tests {
             app_version: Some("0.1.0".to_owned()),
             api_version: Some("v1".to_owned()),
             schema_version: Some("1".to_owned()),
+            generation: Some(7),
         };
 
         let json = serde_json::to_value(status).expect("status should serialize");
@@ -948,6 +1417,7 @@ mod tests {
         assert_eq!(json["baseUrl"], "http://127.0.0.1:9876");
         assert_eq!(json["sessionToken"], "token");
         assert_eq!(json["schemaVersion"], "1");
+        assert_eq!(json["generation"], 7);
     }
 
     #[test]
@@ -958,6 +1428,7 @@ mod tests {
         manager.set_starting(
             Some("http://127.0.0.1:9876".to_owned()),
             Some("token".to_owned()),
+            None,
         );
         manager.set_external_ready("http://127.0.0.1:9876".to_owned(), Some("token".to_owned()));
         let ready = manager.status();
@@ -968,11 +1439,14 @@ mod tests {
         let error = manager.status();
         assert_eq!(error.phase, SidecarPhase::Error);
         assert_eq!(error.message.as_deref(), Some("sidecar stopped"));
+        assert!(error.base_url.is_none());
+        assert!(error.session_token.is_none());
     }
 
     #[test]
     fn living_silent_sidecar_hits_ready_handshake_timeout() {
         let manager = SidecarManager::new();
+        let (child_state, generation) = install_fake_child(&manager, None, None);
         let timeout = Duration::from_millis(20);
 
         let timed_out = tauri::async_runtime::block_on(async {
@@ -982,7 +1456,7 @@ mod tests {
 
         let error = timed_out.expect_err("an open but silent event stream must time out");
         assert!(error.contains("20 毫秒"));
-        assert!(handle_ready_handshake_timeout(&manager, error));
+        assert!(handle_ready_handshake_timeout(&manager, generation, error));
 
         let status = manager.status();
         assert_eq!(status.phase, SidecarPhase::Error);
@@ -991,10 +1465,10 @@ mod tests {
                 .message
                 .as_deref()
                 .is_some_and(|message| message.contains("ready 握手")
-                    && message.contains("无法发送终止请求")
+                    && message.contains("正在等待真实退出确认")
                     && !message.contains("已终止"))
         );
-        assert!(!manager.wait_for_exit(Duration::ZERO));
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
         assert!(
             manager
                 .inner
@@ -1004,16 +1478,22 @@ mod tests {
                 .child
                 .is_none()
         );
+        assert_eq!(
+            child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .kill_calls,
+            1
+        );
     }
 
     #[test]
     fn ready_timeout_keeps_receiver_alive_while_shutdown_owns_child() {
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, None, None);
+        let (child_state, generation) = install_fake_child(&manager, None, None);
         let shutdown_manager = manager.clone();
         let shutdown = thread::spawn(move || {
-            shutdown_manager
-                .shutdown_with_timeouts(Duration::from_millis(200), Duration::from_millis(50));
+            shutdown_manager.shutdown_with_timeouts(Duration::from_secs(5), Duration::from_secs(1));
         });
 
         wait_until(|| {
@@ -1026,26 +1506,36 @@ mod tests {
 
         assert!(!handle_ready_handshake_timeout(
             &manager,
+            generation,
             "timeout during shutdown".to_owned(),
         ));
-        assert_eq!(manager.status().phase, SidecarPhase::Starting);
-        assert!(!manager.wait_for_exit(Duration::ZERO));
+        assert_eq!(manager.status().phase, SidecarPhase::Error);
+        assert_eq!(
+            manager.status().message.as_deref(),
+            Some("本地服务正在安全关闭")
+        );
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
 
         // Simulate the receiver continuing to drain and observing Terminated.
-        manager.mark_exited();
+        assert!(manager.mark_exited(generation, Some(0), None));
         shutdown.join().expect("shutdown thread should finish");
         let state = child_state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(state.writes, vec![b"shutdown\n".to_vec()]);
         assert_eq!(state.kill_calls, 0);
-        assert!(manager.wait_for_exit(Duration::ZERO));
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_some());
     }
 
     #[test]
     fn shutdown_before_spawn_prevents_child_creation() {
         let manager = SidecarManager::new();
         manager.shutdown_with_timeouts(Duration::ZERO, Duration::ZERO);
+        assert!(!manager.set_error_unless_shutting_down("late launch failure"));
+        assert_eq!(
+            manager.status().message.as_deref(),
+            Some("本地服务正在安全关闭")
+        );
         let spawn_called = Arc::new(Mutex::new(false));
         let spawn_called_in_closure = spawn_called.clone();
 
@@ -1072,7 +1562,6 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         assert!(state.child.is_none());
         assert!(state.shutting_down);
-        assert!(!state.termination_requested);
     }
 
     #[test]
@@ -1132,9 +1621,10 @@ mod tests {
     #[test]
     fn shutdown_waits_when_ready_timeout_already_owns_forced_stop() {
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, None, None);
+        let (child_state, generation) = install_fake_child(&manager, None, None);
         assert!(handle_ready_handshake_timeout(
             &manager,
+            generation,
             "ready timeout".to_owned(),
         ));
         assert_eq!(
@@ -1148,28 +1638,28 @@ mod tests {
         let (finished_tx, finished_rx) = mpsc::channel();
         let shutdown_manager = manager.clone();
         let shutdown = thread::spawn(move || {
-            shutdown_manager.shutdown_with_timeouts(Duration::ZERO, Duration::from_millis(200));
+            shutdown_manager.shutdown_with_timeouts(Duration::ZERO, Duration::from_secs(5));
             finished_tx
                 .send(())
                 .expect("shutdown completion signal should send");
         });
 
         assert!(finished_rx.recv_timeout(Duration::from_millis(20)).is_err());
-        manager.mark_exited();
+        assert!(manager.mark_exited(generation, Some(0), None));
         finished_rx
-            .recv_timeout(Duration::from_millis(200))
+            .recv_timeout(Duration::from_secs(5))
             .expect("shutdown should finish after a real termination event");
         shutdown.join().expect("shutdown thread should finish");
-        assert!(manager.wait_for_exit(Duration::ZERO));
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_some());
     }
 
     #[test]
     fn shutdown_reports_write_failure_and_waits_for_kill_confirmation() {
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, Some("broken pipe"), None);
+        let (child_state, generation) = install_fake_child(&manager, Some("broken pipe"), None);
         let shutdown_manager = manager.clone();
         let shutdown = thread::spawn(move || {
-            shutdown_manager.shutdown_with_timeouts(Duration::ZERO, Duration::from_millis(200));
+            shutdown_manager.shutdown_with_timeouts(Duration::ZERO, Duration::from_secs(5));
         });
 
         wait_until(|| {
@@ -1179,8 +1669,8 @@ mod tests {
                 .kill_calls
                 == 1
         });
-        assert!(!manager.wait_for_exit(Duration::ZERO));
-        manager.mark_exited();
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
+        assert!(manager.mark_exited(generation, Some(0), None));
         shutdown.join().expect("shutdown thread should finish");
 
         let message = manager.status().message.unwrap_or_default();
@@ -1192,7 +1682,8 @@ mod tests {
     #[test]
     fn shutdown_reports_kill_failure_without_faking_exit() {
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, Some("broken pipe"), Some("access denied"));
+        let (child_state, generation) =
+            install_fake_child(&manager, Some("broken pipe"), Some("access denied"));
 
         manager.shutdown_with_timeouts(Duration::ZERO, Duration::ZERO);
 
@@ -1204,13 +1695,13 @@ mod tests {
         let message = manager.status().message.unwrap_or_default();
         assert!(message.contains("broken pipe"));
         assert!(message.contains("强制终止 Sidecar 失败：access denied"));
-        assert!(!manager.wait_for_exit(Duration::ZERO));
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
     }
 
     #[test]
     fn shutdown_reports_missing_confirmation_after_successful_kill() {
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, None, None);
+        let (child_state, generation) = install_fake_child(&manager, None, None);
 
         manager.shutdown_with_timeouts(Duration::ZERO, Duration::from_millis(10));
 
@@ -1222,11 +1713,11 @@ mod tests {
         let message = manager.status().message.unwrap_or_default();
         assert!(message.contains("已发送强制终止请求"));
         assert!(message.contains("未收到 Sidecar 的真实退出确认"));
-        assert!(!manager.wait_for_exit(Duration::ZERO));
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
     }
 
     #[test]
-    fn restart_shutdown_requires_a_managed_child_and_waits_for_real_exit() {
+    fn restart_shutdown_requires_managed_mode_and_waits_for_clean_exit() {
         let external = SidecarManager::new();
         let error = external
             .shutdown_for_restart()
@@ -1235,7 +1726,7 @@ mod tests {
         assert!(!external.is_shutting_down());
 
         let manager = SidecarManager::new();
-        let child_state = install_fake_child(&manager, None, None);
+        let (child_state, generation) = install_fake_child(&manager, None, None);
         let restart_manager = manager.clone();
         let restart = thread::spawn(move || restart_manager.shutdown_for_restart());
         wait_until(|| {
@@ -1246,11 +1737,263 @@ mod tests {
                 .is_empty()
         });
         assert!(!restart.is_finished());
-        manager.mark_exited();
+        assert!(manager.mark_exited(generation, Some(0), None));
         restart
             .join()
             .expect("restart shutdown thread should finish")
             .expect("confirmed graceful exit should permit restart");
+        let state = child_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.writes, vec![b"shutdown\n".to_vec()]);
+        assert_eq!(state.kill_calls, 0);
+    }
+
+    #[test]
+    fn managed_restart_is_allowed_when_no_child_was_started() {
+        let manager = SidecarManager::new();
+        manager.configure_bundled();
+
+        manager
+            .shutdown_for_restart()
+            .expect("a bundled launch failure has no live child to stop");
+    }
+
+    #[test]
+    fn restart_rejects_a_nonzero_graceful_exit() {
+        let manager = SidecarManager::new();
+        let (child_state, generation) = install_fake_child(&manager, None, None);
+        let restart_manager = manager.clone();
+        let restart = thread::spawn(move || restart_manager.shutdown_for_restart());
+        wait_until(|| {
+            !child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .writes
+                .is_empty()
+        });
+
+        assert!(manager.mark_exited(generation, Some(1), None));
+        let error = restart
+            .join()
+            .expect("restart shutdown thread should finish")
+            .expect_err("a failed WAL checkpoint must block application restart");
+        assert!(error.contains("code=Some(1)"));
+        assert!(error.contains("取消应用重启"));
+    }
+
+    #[test]
+    fn restart_budget_is_bounded_and_uses_deterministic_backoff() {
+        let manager = SidecarManager::new();
+        manager.configure_bundled();
+
+        for attempt in 1..=MAX_RESTART_ATTEMPTS {
+            let reservation = manager
+                .reserve_restart()
+                .expect("budget should remain")
+                .expect("one retry should be reserved");
+            assert_eq!(reservation.attempt, attempt);
+            assert_eq!(reservation.delay, RESTART_BACKOFFS[attempt - 1]);
+            assert!(
+                manager
+                    .reserve_restart()
+                    .expect("scheduled retry")
+                    .is_none()
+            );
+            assert!(manager.claim_restart(reservation.ticket));
+        }
+
+        assert!(manager.reserve_restart().is_err());
+    }
+
+    #[test]
+    fn stable_generation_resets_the_restart_budget_without_reviving_old_generations() {
+        let manager = SidecarManager::new();
+        manager.configure_bundled();
+        let reservation = manager
+            .reserve_restart()
+            .expect("budget should remain")
+            .expect("retry should be reserved");
+        assert!(manager.claim_restart(reservation.ticket));
+        let (_, generation) = install_fake_child(&manager, None, None);
+
+        assert!(!manager.reset_restart_budget_if_stable(generation));
+        manager.update(|runtime| {
+            runtime.phase = SidecarPhase::Ready;
+            runtime.generation = Some(generation);
+        });
+        assert!(manager.reset_restart_budget_if_stable(generation));
+        assert_eq!(
+            manager
+                .reserve_restart()
+                .expect("an active generation cannot reserve a retry"),
+            None
+        );
+        assert!(manager.mark_exited(generation, Some(1), None));
+        let fresh = manager
+            .reserve_restart()
+            .expect("stable runtime should restore the retry budget")
+            .expect("a new crash can reserve the first retry again");
+        assert_eq!(fresh.attempt, 1);
+        assert!(!manager.reset_restart_budget_if_stable(generation));
+    }
+
+    #[test]
+    fn shutdown_cancels_a_pending_restart() {
+        let manager = SidecarManager::new();
+        manager.configure_bundled();
+        let reservation = manager
+            .reserve_restart()
+            .expect("budget should remain")
+            .expect("retry should be reserved");
+        assert!(manager.set_restarting(reservation));
+
+        manager.shutdown_with_timeouts(Duration::ZERO, Duration::ZERO);
+
+        assert!(!manager.claim_restart(reservation.ticket));
+        assert!(manager.is_shutting_down());
+    }
+
+    #[test]
+    fn manual_restart_waits_for_a_claimed_retry_to_finish_registration() {
+        let manager = SidecarManager::new();
+        manager.configure_bundled();
+        let reservation = manager
+            .reserve_restart()
+            .expect("budget should remain")
+            .expect("retry should be reserved");
+        assert!(manager.claim_restart(reservation.ticket));
+
+        let child_state = Arc::new(Mutex::new(FakeChildState::default()));
+        let (spawn_entered_tx, spawn_entered_rx) = mpsc::channel();
+        let (release_spawn_tx, release_spawn_rx) = mpsc::channel();
+        let (generation_tx, generation_rx) = mpsc::channel();
+        let spawn_manager = manager.clone();
+        let spawn_child_state = child_state.clone();
+        let spawn = thread::spawn(move || {
+            let registered = spawn_manager
+                .spawn_and_register_child(|| {
+                    spawn_entered_tx.send(()).expect("signal spawn entry");
+                    release_spawn_rx.recv().expect("release spawn");
+                    let child: Box<dyn SidecarChildControl> = Box::new(FakeChild {
+                        state: spawn_child_state,
+                        write_error: None,
+                        kill_error: None,
+                    });
+                    Ok(((), child))
+                })
+                .expect("claimed retry spawn should succeed")
+                .expect("claimed retry should register a child");
+            generation_tx
+                .send(registered.1)
+                .expect("publish registered generation");
+        });
+        spawn_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("spawn closure should hold the child lock");
+
+        let (restart_started_tx, restart_started_rx) = mpsc::channel();
+        let (restart_done_tx, restart_done_rx) = mpsc::channel();
+        let restart_manager = manager.clone();
+        let restart = thread::spawn(move || {
+            restart_started_tx.send(()).expect("signal restart entry");
+            restart_done_tx
+                .send(restart_manager.shutdown_for_restart())
+                .expect("publish restart result");
+        });
+        restart_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("manual restart should start");
+        assert!(restart_done_rx.try_recv().is_err());
+
+        release_spawn_tx.send(()).expect("complete claimed spawn");
+        let generation = generation_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("registered generation should be available");
+        wait_until(|| {
+            !child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .writes
+                .is_empty()
+        });
+        assert!(manager.mark_exited(generation, Some(0), None));
+        restart_done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("manual restart should finish after the registered child exits")
+            .expect("clean registered child exit should allow application restart");
+        spawn.join().expect("spawn thread should finish");
+        restart.join().expect("restart thread should finish");
+
+        let state = child_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.writes, vec![b"shutdown\n".to_vec()]);
+        assert_eq!(state.kill_calls, 0);
+    }
+
+    #[test]
+    fn a_late_clean_exit_allows_retrying_the_application_restart() {
+        let manager = SidecarManager::new();
+        let (_, generation) = install_fake_child(&manager, None, None);
+
+        manager.shutdown_with_timeouts(Duration::ZERO, Duration::ZERO);
+        let first_error = manager
+            .shutdown_for_restart()
+            .expect_err("unconfirmed exit must still block application restart");
+        assert!(first_error.contains("真实退出确认"));
+
+        assert!(manager.mark_exited(generation, Some(0), None));
+        manager
+            .shutdown_for_restart()
+            .expect("a later clean Terminated event should unlock manual recovery");
+    }
+
+    #[test]
+    fn stale_generation_exit_cannot_clear_the_current_child() {
+        let manager = SidecarManager::new();
+        let (_, first_generation) = install_fake_child(&manager, None, None);
+        assert!(manager.mark_exited(first_generation, Some(1), None));
+        let (_, second_generation) = install_fake_child(&manager, None, None);
+        assert!(second_generation > first_generation);
+
+        assert!(!manager.mark_exited(first_generation, Some(0), None));
+        let state = manager
+            .inner
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.active_generation, Some(second_generation));
+        assert_eq!(
+            state.child.as_ref().map(|child| child.generation),
+            Some(second_generation)
+        );
+    }
+
+    #[test]
+    fn concurrent_shutdown_callers_share_one_stop_operation() {
+        let manager = SidecarManager::new();
+        let (child_state, generation) = install_fake_child(&manager, None, None);
+        let first_manager = manager.clone();
+        let first = thread::spawn(move || {
+            first_manager.shutdown_with_timeouts(Duration::from_secs(5), Duration::from_secs(1));
+        });
+        wait_until(|| {
+            !child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .writes
+                .is_empty()
+        });
+        let second_manager = manager.clone();
+        let second = thread::spawn(move || {
+            second_manager.shutdown_with_timeouts(Duration::from_secs(5), Duration::from_secs(1));
+        });
+
+        assert!(manager.mark_exited(generation, Some(0), None));
+        first.join().expect("shutdown owner should finish");
+        second.join().expect("shutdown waiter should finish");
+
         let state = child_state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());

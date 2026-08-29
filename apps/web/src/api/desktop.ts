@@ -2,7 +2,8 @@ type InvokeCommand = (command: string) => Promise<unknown>;
 
 export interface RuntimeDiagnostics {
   environment: "browser" | "desktop";
-  phase: "external" | "starting" | "ready" | "error";
+  phase: "external" | "starting" | "restarting" | "ready" | "error";
+  generation: number | null;
   appVersion: string | null;
   apiVersion: string | null;
   schemaVersion: string | null;
@@ -41,6 +42,14 @@ function optionalVersion(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function runtimeGeneration(value: unknown): number | null {
+  if (value === null) return null;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  throw new Error("Invalid desktop runtime generation");
+}
+
 export async function getRuntimeDiagnostics(
   invokeCommand?: InvokeCommand,
 ): Promise<RuntimeDiagnostics> {
@@ -48,6 +57,7 @@ export async function getRuntimeDiagnostics(
     return {
       environment: "browser",
       phase: "external",
+      generation: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -62,13 +72,19 @@ export async function getRuntimeDiagnostics(
   }
   const record = value as Record<string, unknown>;
   const phase = record.phase;
-  if (phase !== "starting" && phase !== "ready" && phase !== "error") {
+  if (
+    phase !== "starting" &&
+    phase !== "restarting" &&
+    phase !== "ready" &&
+    phase !== "error"
+  ) {
     throw new Error("Invalid desktop runtime phase");
   }
 
   return {
     environment: "desktop",
     phase,
+    generation: runtimeGeneration(record.generation),
     appVersion: optionalVersion(record.appVersion),
     apiVersion: optionalVersion(record.apiVersion),
     schemaVersion: optionalVersion(record.schemaVersion),

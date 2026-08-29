@@ -1074,9 +1074,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           ? "就绪"
           : runtimeDiagnostics.phase === "starting"
             ? "启动中"
-            : runtimeDiagnostics.phase === "error"
-              ? "异常"
-              : "外部开发进程";
+            : runtimeDiagnostics.phase === "restarting"
+              ? "重启中"
+              : runtimeDiagnostics.phase === "error"
+                ? "异常"
+                : "外部开发进程";
       const compatibilityLabel =
         runtimeDiagnostics.environment === "browser"
           ? "由 HTTP 健康检查确认"

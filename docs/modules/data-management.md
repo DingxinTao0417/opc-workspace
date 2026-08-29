@@ -324,7 +324,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 ### 仍未实现
 
 - [x] 健康启动后的 pending/applied/failed/invalid 恢复结果诊断、脱敏计数和设置页重启门禁恢复。
-- [x] 全局启动故障恢复页 v1：桌面 starting/error 闸门、状态重查、打开脱敏日志和安全重启；不展示原始错误。
+- [x] 全局启动故障恢复页 v1：桌面 starting/restarting/error 闸门、generation、非 ready 查询清理、状态重查、打开脱敏日志和安全重启；不展示原始错误。
 - [ ] 数据库打开前的备份选择与实时恢复进度。
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
 - [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。

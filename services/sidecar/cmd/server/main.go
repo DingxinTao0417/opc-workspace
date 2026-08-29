@@ -21,6 +21,7 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/config"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/operationlog"
+	"github.com/opc-workspace/opc-sidecar/internal/runlease"
 )
 
 var (
@@ -65,6 +66,22 @@ func run(args []string) int {
 			}
 		}()
 	}
+	runLease, err := runlease.Acquire(cfg.DatabasePath)
+	if err != nil {
+		if errors.Is(err, runlease.ErrAlreadyHeld) {
+			logger.Printf("database run lease unavailable: %v", err)
+			return 1
+		}
+		logger.Printf("database initialization failed before opening database: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseStartup, logger)
+		return 1
+	}
+	defer func() {
+		if err := runLease.Close(); err != nil {
+			logger.Printf("database run lease close failed: %v", err)
+		}
+	}()
+
 	latestSchema, err := database.LatestSchemaVersion()
 	if err != nil {
 		logger.Printf("read embedded schema version failed: %v", err)
@@ -223,7 +240,7 @@ func run(args []string) int {
 
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
-	stdinShutdown := watchStdinForShutdown(os.Stdin, logger)
+	stdinShutdown := watchStdinForShutdown(os.Stdin, logger, cfg.ExitOnStdinClose)
 
 	select {
 	case <-signalContext.Done():
@@ -255,7 +272,7 @@ func recordStartupFailure(logDir string, kind api.StartupIncidentKind, logger *l
 	}
 }
 
-func watchStdinForShutdown(input io.Reader, logger *log.Logger) <-chan struct{} {
+func watchStdinForShutdown(input io.Reader, logger *log.Logger, exitOnEOF bool) <-chan struct{} {
 	shutdown := make(chan struct{}, 1)
 	go func() {
 		scanner := bufio.NewScanner(input)
@@ -268,6 +285,10 @@ func watchStdinForShutdown(input io.Reader, logger *log.Logger) <-chan struct{} 
 		}
 		if err := scanner.Err(); err != nil {
 			logger.Printf("stdin control channel failed: %v", err)
+			return
+		}
+		if exitOnEOF {
+			shutdown <- struct{}{}
 		}
 	}()
 	return shutdown
