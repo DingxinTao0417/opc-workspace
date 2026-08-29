@@ -232,7 +232,7 @@ Artifact 聚合沿用该 Project 数值 `ETag`，`meta.project_version` 与其�
 1. **项目事实与 API（已实现）**：当前 schema v35 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31–v35 不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（当前纵切已实现）**：Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用有界分页 ProjectSelect，生产路径不再串行拉全项目；`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通，Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；真实浏览器与大数据量性能仍待专项验证。
-4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、Project/Task 客户筛选已共用每页 20 条、250 ms 服务端搜索和稳定分页的 ClientSelect；当前选择保留、inactive 可见可选、取消信号、加载/空/错误重试/更多提示和 combobox 键盘语义已接通。双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件和显式 contact 关联也已交付；真实浏览器/窄屏/大数据量专项以及邮件/日历等其他来源、回访和财务仍待验收或实现。
+4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、Project/Task 客户筛选已共用每页 20 条、250 ms 服务端搜索和稳定分页的 ClientSelect；当前选择保留、inactive 可见可选、取消信号、加载/空/错误重试/更多提示和 combobox 键盘语义已接通。双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件、显式 contact 关联，以及独立的本地回访计划/Inbox/Today 闭环均已交付；真实浏览器/窄屏/大数据量专项以及邮件/日历等其他来源和财务仍待验收或实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。

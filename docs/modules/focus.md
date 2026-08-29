@@ -63,13 +63,13 @@
 - Project 详情在任务区之后独立加载 7 天、30 天和本月报告，展示 completed-only 总时长、distinct Session 完成数、当前/区间最长连续天数及每日趋势。
 - 同一区块另以每页 6 条稳定分页展示 completed/cancelled/interrupted 终态历史；取消/中断仅显示审计“记录时长”，不进入报告或 Task 工时。
 - 报告与历史各自提供加载、空、错误、重试和分页状态，任一失败不阻塞 Project 主详情或另一卡；总页数回缩时前端收敛到有效页，归档 Project 保持只读可查。
-- 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型，本身不新增迁移；当前 schema v30/v31 的新增仅涉及 Task Submission 与 Client Activity 来源，不改变该 Focus 读模型。
+- 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型，本身不新增迁移；当前 schema v30–v35 的新增分别涉及 Task Submission、Client Activity、Reminder、Automation、Agent Adapter 与 Client Followup，不改变该 Focus 读模型。
 
-### 尚未实现：D2b 其余能力与后续增强
+### 尚未实现：原生反馈与后续增强
 
 - 原生本地通知、托盘控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。
 - 长休息策略、白噪音和网站屏蔽。
-- 完整 SQLite `app_settings`；Focus 参数和本地休息/轮次协调仍保存在当前 WebView。
+- Focus 参数已保存于版本化 SQLite `app_settings`；长休息和更高级的本地编排策略仍未实现。
 
 ## 当前用户流程
 
