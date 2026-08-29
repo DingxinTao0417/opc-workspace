@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.44
+> **一人公司操作系统** · PRD v9.45
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> **v9.44 更新说明**：客户回访的全部/待回访/已逾期列表每 15 秒刷新一次 Sidecar 当前时钟与到期事实；仅查看 completed/skipped/cancelled 的终态历史不轮询。无新 migration、无外发消息、无 AI/LLM。app v0.1.0 / API v1 / schema v35 不变。
+> **v9.45 更新说明**：客户详情在本窗口表单打开期间若重新读取到 `inactive` 状态，会立刻关闭新增、编辑或重排草稿并移除下一次回访选项；Sidecar 的写入门禁继续作为最终保护。无新 migration、无外发消息、无 AI/LLM。app v0.1.0 / API v1 / schema v35 不变。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 

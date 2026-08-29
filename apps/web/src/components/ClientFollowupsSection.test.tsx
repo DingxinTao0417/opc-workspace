@@ -278,4 +278,18 @@ describe("ClientFollowupsSection", () => {
       screen.queryByRole("button", { name: "同时安排下一次本地回访" }),
     ).toBeNull();
   });
+
+  it("closes stale plan editors when another window inactivates the client", () => {
+    const view = render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "安排回访" }));
+    expect(screen.getByText("安排本地回访")).toBeTruthy();
+
+    view.rerender(
+      <ClientFollowupsSection clientId="client-1" clientStatus="inactive" />,
+    );
+
+    expect(screen.queryByText("安排本地回访")).toBeNull();
+    expect(screen.getByText(/客户已停用/)).toBeTruthy();
+  });
 });

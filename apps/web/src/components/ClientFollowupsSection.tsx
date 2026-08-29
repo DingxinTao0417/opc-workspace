@@ -402,6 +402,13 @@ export function ClientFollowupsSection({
     }
   }, [actors, editing, planDraft.assignedActorId]);
 
+  useEffect(() => {
+    if (canPlan) return;
+    setScheduleNext(false);
+    if (editing) setEditing(null);
+    if (action?.kind === "reschedule") setAction(null);
+  }, [action?.kind, canPlan, editing]);
+
   const resetFeedback = () => {
     setLocalError(null);
     createMutation.reset();
@@ -413,18 +420,21 @@ export function ClientFollowupsSection({
   };
   const refreshAfterConflict = () => void query.refetch();
   const openNew = () => {
+    if (!canPlan) return;
     resetFeedback();
     setAction(null);
     setPlanDraft(emptyPlanDraft(actors[0]?.id ?? ""));
     setEditing("new");
   };
   const openEdit = (followup: ClientFollowup) => {
+    if (!canPlan) return;
     resetFeedback();
     setAction(null);
     setPlanDraft(planDraftFromFollowup(followup));
     setEditing(followup);
   };
   const openAction = (kind: FollowupAction, followup: ClientFollowup) => {
+    if (!canPlan && kind === "reschedule") return;
     resetFeedback();
     setEditing(null);
     setAction({ kind, followup });
@@ -445,6 +455,9 @@ export function ClientFollowupsSection({
     setLocalError(null);
   };
   const submitPlan = () => {
+    if (!canPlan) {
+      return setLocalError("该客户已停用；请先恢复客户状态再安排或编辑回访。");
+    }
     const error = planError(planDraft);
     if (error) return setLocalError(error);
     resetFeedback();
@@ -476,6 +489,9 @@ export function ClientFollowupsSection({
   const submitAction = () => {
     if (!action) return;
     const { followup, kind } = action;
+    if (!canPlan && kind === "reschedule") {
+      return setLocalError("该客户已停用；请先恢复客户状态再重新安排回访。");
+    }
     if (kind === "complete") {
       const value = result.trim();
       const completion = new Date(completedAt);

@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.64
+> 文档版本：2.65
 > 日期：2026-08-29
-> 依据：[PRD v9.44](opc-workspace-PRD.md)
+> 依据：[PRD v9.45](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.64 说明：包含 planned Client Followup 的客户详情列表以 15 秒频率刷新，重新读取 Sidecar `server_now`、到期投影和终态事实；终态专属历史不轮询。逾期筛选、inactive 客户收口、Actor 责任门禁、IANA/DST 墙上时间解释和 Today/Inbox 只读深链边界不变。
+> 2.65 说明：客户详情读取到 Client 从其他窗口转为 inactive 后，会关闭其本地新增、编辑、重排草稿并移除完成时续排选项；Sidecar 继续拒绝任何残余计划类写入。planned 列表的 15 秒刷新、逾期筛选、Actor 责任门禁、IANA/DST 墙上时间解释和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 
