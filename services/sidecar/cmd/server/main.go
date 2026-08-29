@@ -56,11 +56,13 @@ func run(args []string) int {
 	latestSchema, err := database.LatestSchemaVersion()
 	if err != nil {
 		logger.Printf("read embedded schema version failed: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 	restoreResult, err := api.ApplyPendingRestore(cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, latestSchema)
 	if err != nil {
 		logger.Printf("pending restore failed safely before database startup: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 	if restoreResult.Applied {
@@ -77,6 +79,7 @@ func run(args []string) int {
 	store, migrationGate, err := database.OpenBeforeDestructiveMigrations(cfg.DatabasePath)
 	if err != nil {
 		logger.Printf("database initialization failed: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseStartup, logger)
 		return 1
 	}
 	if migrationGate != nil {
@@ -95,6 +98,7 @@ func run(args []string) int {
 				migrationGate.CurrentVersion,
 				backupErr,
 			)
+			recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseMigration, logger)
 			return 1
 		}
 		logger.Printf(
@@ -105,11 +109,13 @@ func run(args []string) int {
 		)
 		if err := store.Close(); err != nil {
 			logger.Printf("close database before destructive migration failed: %v", err)
+			recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseMigration, logger)
 			return 1
 		}
 		store, err = database.Open(cfg.DatabasePath)
 		if err != nil {
 			logger.Printf("database migration failed after verified rollback backup %s: %v", backupID, err)
+			recordStartupFailure(cfg.LogDir, api.StartupIncidentDatabaseMigration, logger)
 			return 1
 		}
 	}
@@ -122,8 +128,12 @@ func run(args []string) int {
 	if cfg.Seed {
 		if err := database.SeedDevelopmentData(store.DB); err != nil {
 			logger.Printf("development seed failed: %v", err)
+			recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 			return 1
 		}
+	}
+	if err := api.ReplayStartupIncidents(store.DB, cfg.LogDir, logger); err != nil {
+		logger.Printf("startup incident replay deferred: %v", err)
 	}
 
 	router, err := api.NewRouter(store.DB, api.Options{
@@ -140,6 +150,7 @@ func run(args []string) int {
 	})
 	if err != nil {
 		logger.Printf("router initialization failed: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 	defer func() {
@@ -151,6 +162,7 @@ func run(args []string) int {
 	listener, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Port)))
 	if err != nil {
 		logger.Printf("listen failed: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 
@@ -158,6 +170,7 @@ func run(args []string) int {
 	if !ok {
 		_ = listener.Close()
 		logger.Printf("unexpected listener address: %s", listener.Addr())
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 
@@ -190,6 +203,7 @@ func run(args []string) int {
 	if err := json.NewEncoder(os.Stdout).Encode(ready); err != nil {
 		logger.Printf("ready event failed: %v", err)
 		shutdownServer(httpServer, logger)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
 
@@ -219,6 +233,12 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func recordStartupFailure(logDir string, kind api.StartupIncidentKind, logger *log.Logger) {
+	if err := api.RecordStartupIncident(logDir, kind, time.Now()); err != nil && logger != nil {
+		logger.Printf("record safe startup incident failed: %v", err)
+	}
 }
 
 func watchStdinForShutdown(input io.Reader, logger *log.Logger) <-chan struct{} {

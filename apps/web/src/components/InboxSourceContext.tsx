@@ -43,9 +43,17 @@ interface TaskDueSourceSnapshot {
 }
 
 interface SystemMaintenanceSourceSnapshot {
-  component: "backup";
-  operation: "create" | "verify";
-  failureCode: "backup_create_failed" | "backup_verify_failed";
+  component: "backup" | "database" | "sidecar";
+  operation:
+    "create" | "verify" | "drill" | "restore" | "startup" | "migration";
+  failureCode:
+    | "backup_create_failed"
+    | "backup_verify_failed"
+    | "backup_drill_failed"
+    | "backup_restore_failed"
+    | "database_startup_failed"
+    | "database_migration_failed"
+    | "sidecar_startup_failed";
   occurredAt: string;
   message: string;
 }
@@ -170,21 +178,23 @@ function systemMaintenanceSnapshot(
   const failureCode = payload.failure_code;
   const occurredAt = stringValue(payload, "occurred_at");
   const message = stringValue(payload, "message");
-  if (component !== "backup") return null;
-  if (operation !== "create" && operation !== "verify") return null;
-  if (
-    (operation === "create" && failureCode !== "backup_create_failed") ||
-    (operation === "verify" && failureCode !== "backup_verify_failed") ||
-    !occurredAt ||
-    !message
-  ) {
-    return null;
-  }
+  const definitions = {
+    "backup:create": "backup_create_failed",
+    "backup:verify": "backup_verify_failed",
+    "backup:drill": "backup_drill_failed",
+    "backup:restore": "backup_restore_failed",
+    "database:startup": "database_startup_failed",
+    "database:migration": "database_migration_failed",
+    "sidecar:startup": "sidecar_startup_failed",
+  } as const;
+  const key = `${String(component)}:${String(operation)}`;
+  const expectedFailureCode = definitions[key as keyof typeof definitions];
+  if (!expectedFailureCode || failureCode !== expectedFailureCode) return null;
+  if (!occurredAt || !message) return null;
   return {
-    component,
-    operation,
-    failureCode:
-      operation === "verify" ? "backup_verify_failed" : "backup_create_failed",
+    component: component as SystemMaintenanceSourceSnapshot["component"],
+    operation: operation as SystemMaintenanceSourceSnapshot["operation"],
+    failureCode: expectedFailureCode,
     occurredAt,
     message,
   };
@@ -208,6 +218,19 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
   const maintenanceSource = systemMaintenanceSnapshot(item);
   if (maintenanceSource) {
+    const maintenanceLabels = {
+      "backup:create": ["本地备份创建失败", "本地备份", "创建"],
+      "backup:verify": ["本地备份校验失败", "本地备份", "校验"],
+      "backup:drill": ["本地备份恢复演练失败", "本地备份", "恢复演练"],
+      "backup:restore": ["本地备份恢复安排失败", "本地备份", "恢复安排"],
+      "database:startup": ["本地数据库启动失败", "本地数据库", "启动"],
+      "database:migration": ["本地数据库迁移失败", "本地数据库", "迁移"],
+      "sidecar:startup": ["本地服务启动失败", "本地服务", "启动"],
+    } as const;
+    const [summaryLabel, componentLabel, operationLabel] =
+      maintenanceLabels[
+        `${maintenanceSource.component}:${maintenanceSource.operation}` as keyof typeof maintenanceLabels
+      ];
     return (
       <section aria-label="来源上下文" className="inbox-source-context">
         <div className="inbox-source-context-heading">
@@ -216,23 +239,17 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </span>
           <div>
             <strong>系统维护</strong>
-            <small>
-              {maintenanceSource.operation === "verify"
-                ? "本地备份校验失败"
-                : "本地备份创建失败"}
-            </small>
+            <small>{summaryLabel}</small>
           </div>
         </div>
         <dl>
           <div>
             <dt>组件</dt>
-            <dd>本地备份</dd>
+            <dd>{componentLabel}</dd>
           </div>
           <div>
             <dt>操作</dt>
-            <dd>
-              {maintenanceSource.operation === "verify" ? "校验" : "创建"}
-            </dd>
+            <dd>{operationLabel}</dd>
           </div>
           <div>
             <dt>发生时间</dt>
@@ -243,13 +260,15 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>{maintenanceSource.message}</dd>
           </div>
         </dl>
-        <button
-          className="button button-secondary"
-          onClick={() => openDataSettings(true, "data")}
-          type="button"
-        >
-          打开数据与备份
-        </button>
+        {maintenanceSource.component !== "sidecar" ? (
+          <button
+            className="button button-secondary"
+            onClick={() => openDataSettings(true, "data")}
+            type="button"
+          >
+            打开数据与备份
+          </button>
+        ) : null}
       </section>
     );
   }

@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件与 Workspace Avatar，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v7.1](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v7.2](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -36,7 +36,7 @@
 - schema v21 以加法迁移新增 `project_notes`、稳定时间线索引、不可变身份/删除历史和 Project 聚合版本传播。v20→v21 不改写既有 Project 事实，也不创建笔记/demo 数据。
 - schema v22 以加法迁移新增 `project_attachments`、`project_attachment_deletion_tombstones`、跨 Task/Client/Project object ID 唯一保护和 Project 版本传播。v21→v22 不改写既有事实，也不创建附件/demo 数据。
 - schema v27 以加法迁移新增 `workspace_avatars` 与不可变 `workspace_avatar_deletion_tombstones`，固定 `avatars/<uuid>.<ext>`、单 active 头像、2 MiB 上限、完整性状态、设置引用存在性和跨四领域文件 ID 唯一保护。v26→v27 不创建头像、不改写既有设置或业务事实。
-- 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
+- 开发数据库、Artifact、备份和启动故障 journal 位于 `.local/dev-data/`；桌面正式业务数据位于 Tauri `appDataDir`、journal 位于 `appLogDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、avatars、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
 - 文件上传流式计算 MIME、size、SHA-256，先写 staging，再无覆盖提升到 `objects/` 或 `avatars/`；数据库只保存受控相对路径。marker、文件数据、对象提升、移动/删除与关键目录项做耐久同步。
@@ -49,7 +49,7 @@
 - 备份先写同一 backup root 下的 `.staging-<uuid>`，manifest 记录 app/commit/API/schema、创建与校验时间、可选说明、数据库/marker/Artifact 相对路径及 size/SHA-256；`quick_check`、`foreign_key_check`、schema、身份、active Artifact 元数据、文件全集和总量均通过后才原子重命名为 `backups/<backup-id>/`。
 - 创建支持可选 `Idempotency-Key`；Sidecar 只在备份 manifest 保存 key 的 SHA-256 与规范请求摘要。模糊响应可安全重放同一包，不同说明复用同一 key 返回冲突。
 - 创建失败仍返回 `BACKUP_CREATE_FAILED`，现有数据不变；Sidecar 随后尽力投影 `source_entity_type=system_maintenance`、`source_entity_id=backup:create` 的 Inbox Item。payload 只含 `component=backup`、`operation=create`、`failure_code=backup_create_failed`、`occurred_at` 和固定用户提示，不保存 Go error、本机路径、备份 note、Token 或请求正文。同一活动 incident 去重，resolve/dismiss 后再失败可开新条目。投影失败只记内部日志，不改变备份错误。
-- 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。恢复演练的操作性失败或已验证包在隔离演练中不可安全打开时投影 `backup:drill`；恢复安排的 pending 检查、工作区身份读取、回滚点创建或计划发布失败投影 `backup:restore`。payload 均只含固定安全字段。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox；请求错误、包不存在、工作区不匹配和已有恢复计划也不投影。迁移失败、Sidecar 启动前失败、数据库不可写和完整诊断包仍未实现。
+- 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。恢复演练的操作性失败或已验证包在隔离演练中不可安全打开时投影 `backup:drill`；恢复安排的 pending 检查、工作区身份读取、回滚点创建或计划发布失败投影 `backup:restore`。payload 均只含固定安全字段。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox；请求错误、包不存在、工作区不匹配和已有恢复计划也不投影。恢复在下一次启动实际应用失败时先写 `sidecar:startup` 安全 journal，下一次健康启动再补偿投影。运行期数据库不可写和完整诊断包仍未实现。
 - `GET /api/v1/backups` 只读取已发布 UUID 包并展示上次校验记录；损坏清单以 invalid 项显示。`POST /api/v1/backups/:id/verify` 重新逐字节校验完整包并刷新 `verified_at`，篡改、缺失、额外文件、路径或数据库事实不一致均拒绝。
 - `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker、objects 与 avatars 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证全部 active 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
@@ -62,7 +62,7 @@
 
 - 导入预览/执行、包含 Artifact 文件正文的外部包；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 迁移失败、Sidecar 启动前失败、数据库不可写或完整诊断包的 Inbox 投影；
+- 运行期数据库不可写、磁盘空间或完整诊断包的 Inbox 投影；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
 ## 当前应用数据布局
@@ -92,7 +92,9 @@ appDataDir/
   config/                      # 预留；当前部分设置仍在前端 localStorage
 
 appLogDir/
-  opc-workspace.log            # 日志落盘管线尚未完成
+  startup-incidents-v1.json   # 启动前安全故障 journal；补偿后删除
+  .startup-incidents-invalid-*.json # 损坏 journal 隔离
+  opc-workspace.log           # 完整日志落盘管线尚未完成
 ```
 
 开发环境等价使用：
@@ -109,6 +111,8 @@ appLogDir/
     .trash/
     .quarantine/
   backups/                     # 与正式备份完全隔离
+  logs/
+    startup-incidents-v1.json # 仅故障未补偿时存在
 ```
 
 Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 共享 `artifacts/` 根、marker、lease、staging、quarantine 和备份协议。前三类文件位于 `objects/<uuid>`，头像位于 `avatars/<uuid>.<ext>`；schema v27 保证四领域 ID 唯一。桌面壳创建的顶层 `attachments/` 仍是未使用的历史预留。`.trash/` 服务聚合附件删除补偿；头像替换/移除以同事务 tombstone + 成功后清理处理，中断残留由启动协调验证后清理或隔离。
@@ -254,7 +258,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
 - [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除和业务 JSON 导出；备份失败 Inbox Item 也可打开同一模块。未来再接路径选择、导入和作业诊断。
-- [收件箱](inbox.md)：备份创建、校验、恢复演练与恢复安排失败尽力投影 `system_maintenance` Inbox Item；只记录固定安全字段，不把备份成功或可解释的请求/包状态写成业务事件。`BACKUP_INVALID` 不投影。迁移/启动等其他系统故障来源仍待开发。
+- [收件箱](inbox.md)：备份四类操作失败直接尽力投影；数据库启动/迁移和 Sidecar 启动失败先写安全 journal、下一次健康启动补偿为 `system_maintenance` Inbox Item。两条链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误或路径写成业务事件。`BACKUP_INVALID` 不投影。运行期数据库不可写等来源仍待开发。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
 
@@ -295,7 +299,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 - [ ] 启动恢复进度页和 applied 清理警告诊断。
 - [x] 破坏性迁移前自动备份：已有工作区在首个显式 destructive 迁移前创建并验证回滚包；失败不执行破坏性 SQL，新库跳过。
-- [ ] 迁移失败、Sidecar 启动前失败、数据库不可写或完整诊断包投影。
+- [x] 数据库启动/迁移与 Sidecar 启动失败的安全 journal、稳定重放和 Inbox 补偿。
+- [ ] 运行期数据库不可写、磁盘空间或完整诊断包投影。
 - [ ] 数据导入、含文件导出包、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接

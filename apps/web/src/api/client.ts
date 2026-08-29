@@ -2266,6 +2266,57 @@ const inboxActions = new Set<InboxItemAction>([
   "reopen",
 ]);
 
+const systemMaintenanceDefinitions = {
+  "backup:create": {
+    component: "backup",
+    operation: "create",
+    failureCode: "backup_create_failed",
+    message:
+      "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+  },
+  "backup:verify": {
+    component: "backup",
+    operation: "verify",
+    failureCode: "backup_verify_failed",
+    message:
+      "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。",
+  },
+  "backup:drill": {
+    component: "backup",
+    operation: "drill",
+    failureCode: "backup_drill_failed",
+    message:
+      "无法在隔离环境中完成本地备份恢复演练。现有工作区数据没有被修改。请检查备份状态后重试。",
+  },
+  "backup:restore": {
+    component: "backup",
+    operation: "restore",
+    failureCode: "backup_restore_failed",
+    message:
+      "无法安全安排本地备份恢复。现有工作区数据没有被修改。请检查本地存储后重试。",
+  },
+  "database:startup": {
+    component: "database",
+    operation: "startup",
+    failureCode: "database_startup_failed",
+    message:
+      "上次启动未能安全打开本地数据库。工作区没有进入就绪状态；请检查本地存储和应用日志。",
+  },
+  "database:migration": {
+    component: "database",
+    operation: "migration",
+    failureCode: "database_migration_failed",
+    message:
+      "上次启动未能完成受保护的数据库迁移。已有数据未被新版本继续使用；请检查回滚备份和应用日志。",
+  },
+  "sidecar:startup": {
+    component: "sidecar",
+    operation: "startup",
+    failureCode: "sidecar_startup_failed",
+    message: "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。",
+  },
+} as const;
+
 export function normalizeInboxItem(value: unknown): InboxItem {
   if (!isRecord(value)) return invalidResponse("收件箱条目响应格式无效");
   const id = stringField(value, "id");
@@ -2329,44 +2380,31 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
-  const backupCreateMessage =
-    "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。";
-  const backupVerifyMessage =
-    "无法完成已发布备份的完整性校验。现有工作区数据没有被修改。请稍后重试。";
-  const validBackupCreateMaintenance =
-    sourceEntityType === "system_maintenance" &&
-    sourceEntityId === "backup:create" &&
-    dueAt === null &&
-    sourceDeletedAt === null &&
-    isRecord(rawPayload) &&
-    Object.keys(rawPayload).length === 5 &&
-    rawPayload.component === "backup" &&
-    rawPayload.operation === "create" &&
-    rawPayload.failure_code === "backup_create_failed" &&
-    typeof rawPayload.occurred_at === "string" &&
-    rawPayload.occurred_at.length > 0 &&
-    rawPayload.message === backupCreateMessage &&
-    typeof sourceEventKey === "string" &&
-    sourceEventKey.startsWith("system:backup:create:") &&
-    sourceEventKey.slice("system:backup:create:".length).length > 0;
-  const validBackupVerifyMaintenance =
-    sourceEntityType === "system_maintenance" &&
-    sourceEntityId === "backup:verify" &&
-    dueAt === null &&
-    sourceDeletedAt === null &&
-    isRecord(rawPayload) &&
-    Object.keys(rawPayload).length === 5 &&
-    rawPayload.component === "backup" &&
-    rawPayload.operation === "verify" &&
-    rawPayload.failure_code === "backup_verify_failed" &&
-    typeof rawPayload.occurred_at === "string" &&
-    rawPayload.occurred_at.length > 0 &&
-    rawPayload.message === backupVerifyMessage &&
-    typeof sourceEventKey === "string" &&
-    sourceEventKey.startsWith("system:backup:verify:") &&
-    sourceEventKey.slice("system:backup:verify:".length).length > 0;
+  const maintenanceDefinition =
+    typeof sourceEntityId === "string"
+      ? systemMaintenanceDefinitions[
+          sourceEntityId as keyof typeof systemMaintenanceDefinitions
+        ]
+      : undefined;
   const validSystemMaintenanceEvent =
-    validBackupCreateMaintenance || validBackupVerifyMaintenance;
+    sourceEntityType === "system_maintenance" &&
+    !!sourceEntityId &&
+    !!maintenanceDefinition &&
+    dueAt === null &&
+    sourceDeletedAt === null &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.component === maintenanceDefinition.component &&
+    rawPayload.operation === maintenanceDefinition.operation &&
+    rawPayload.failure_code === maintenanceDefinition.failureCode &&
+    typeof rawPayload.occurred_at === "string" &&
+    rawPayload.occurred_at.length > 0 &&
+    rawPayload.message === maintenanceDefinition.message &&
+    typeof sourceEventKey === "string" &&
+    sourceEventKey.startsWith(`system:${sourceEntityId}:`) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      sourceEventKey.slice(`system:${sourceEntityId}:`.length),
+    );
   if (
     !id ||
     !title ||

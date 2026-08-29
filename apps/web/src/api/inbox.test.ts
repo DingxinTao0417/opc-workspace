@@ -412,6 +412,84 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it.each([
+    {
+      source: "backup:drill",
+      component: "backup",
+      operation: "drill",
+      failureCode: "backup_drill_failed",
+      message:
+        "无法在隔离环境中完成本地备份恢复演练。现有工作区数据没有被修改。请检查备份状态后重试。",
+    },
+    {
+      source: "backup:restore",
+      component: "backup",
+      operation: "restore",
+      failureCode: "backup_restore_failed",
+      message:
+        "无法安全安排本地备份恢复。现有工作区数据没有被修改。请检查本地存储后重试。",
+    },
+    {
+      source: "database:startup",
+      component: "database",
+      operation: "startup",
+      failureCode: "database_startup_failed",
+      message:
+        "上次启动未能安全打开本地数据库。工作区没有进入就绪状态；请检查本地存储和应用日志。",
+    },
+    {
+      source: "database:migration",
+      component: "database",
+      operation: "migration",
+      failureCode: "database_migration_failed",
+      message:
+        "上次启动未能完成受保护的数据库迁移。已有数据未被新版本继续使用；请检查回滚备份和应用日志。",
+    },
+    {
+      source: "sidecar:startup",
+      component: "sidecar",
+      operation: "startup",
+      failureCode: "sidecar_startup_failed",
+      message: "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。",
+    },
+  ])("strictly validates $source maintenance snapshots", (definition) => {
+    const projected = inboxPayload({
+      kind: "event",
+      title: "系统维护需要处理",
+      summary: definition.message,
+      source_entity_type: "system_maintenance",
+      source_entity_id: definition.source,
+      source_event_key: `system:${definition.source}:018f0000-0000-7000-8000-000000000820`,
+      priority: "P1",
+      due_at: null,
+      payload_json: {
+        component: definition.component,
+        operation: definition.operation,
+        failure_code: definition.failureCode,
+        occurred_at: "2026-08-28T12:00:00.000000000Z",
+        message: definition.message,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      sourceEntityType: "system_maintenance",
+      sourceEntityId: definition.source,
+      payloadJson: {
+        component: definition.component,
+        operation: definition.operation,
+        failure_code: definition.failureCode,
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          failure_code: "unexpected_failure",
+        },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("serializes view, filters, paging, and snapshot metadata", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

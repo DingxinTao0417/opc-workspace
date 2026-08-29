@@ -24,6 +24,7 @@ type Config struct {
 	DatabasePath   string
 	ArtifactDir    string
 	BackupDir      string
+	LogDir         string
 	Port           int
 	SessionToken   string
 	AllowedOrigins []string
@@ -65,6 +66,8 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	artifactDir := fs.String("artifacts", artifactDefault, "controlled Task Artifact directory")
 	backupDefault := strings.TrimSpace(getenv("OPC_BACKUP_DIR"))
 	backupDir := fs.String("backups", backupDefault, "local verified backup package directory")
+	logDefault := strings.TrimSpace(getenv("OPC_LOG_DIR"))
+	logDir := fs.String("logs", logDefault, "local diagnostic directory")
 	portFlag := fs.Int("port", port, "loopback port; 0 selects a free port")
 	devFlag := fs.Bool("dev", dev, "enable explicit development-only relaxations")
 	seedFlag := fs.Bool("seed", seed, "seed idempotent development data (requires --dev)")
@@ -132,6 +135,24 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 		return Config{}, errors.New("backup directory and artifact directory must not overlap")
 	}
 
+	logs := strings.TrimSpace(*logDir)
+	if logs == "" {
+		if path == ":memory:" {
+			return Config{}, errors.New("log directory is required with an in-memory database")
+		}
+		logs = filepath.Join(filepath.Dir(path), "logs")
+	}
+	logs, err = filepath.Abs(logs)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve log directory: %w", err)
+	}
+	if path != ":memory:" && strings.EqualFold(filepath.Clean(logs), filepath.Clean(path)) {
+		return Config{}, errors.New("log directory must not be the database file")
+	}
+	if pathsOverlap(logs, artifacts) || pathsOverlap(logs, backups) {
+		return Config{}, errors.New("log directory must not overlap artifact or backup directories")
+	}
+
 	host := strings.TrimSpace(getenv("OPC_HOST"))
 	if host != "" && host != "127.0.0.1" {
 		return Config{}, errors.New("OPC_HOST must be 127.0.0.1; the Sidecar never binds to a public interface")
@@ -150,6 +171,7 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 		DatabasePath:   path,
 		ArtifactDir:    artifacts,
 		BackupDir:      backups,
+		LogDir:         logs,
 		Port:           *portFlag,
 		SessionToken:   token,
 		AllowedOrigins: origins,

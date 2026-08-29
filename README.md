@@ -33,7 +33,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控头像、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；备份创建、校验、恢复演练和恢复安排的操作性失败均会投影安全的系统维护 Inbox Item。Focus 高级分析/原生反馈、客户外部来源/回访/财务、迁移/启动等其他系统故障来源、重复提醒、恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v7.1](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、计划/筛选/保存视图、Project 笔记/附件/产出聚合/活动时间线、Client 本地事实、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控头像、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移和 Sidecar 启动失败均会投影安全的系统维护 Inbox Item。Focus 高级分析/原生反馈、客户外部来源/回访/财务、重复提醒、完整日志/恢复诊断、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v7.2](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -55,7 +55,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v7.1）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v7.2）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -95,7 +95,7 @@ pnpm dev
 pnpm dev:web
 ```
 
-开发数据库固定保存到 `.local/dev-data/opc-workspace.db`，开发 Artifact 固定保存到 `.local/dev-data/artifacts/`，手动备份保存到 `.local/dev-data/backups/`，并与正式数据完全隔离。统一开发脚本默认不写入 demo 数据；从旧版本升级时，迁移只会清理先前 demo seed 使用的固定记录。开发令牌只用于本机联调，不得用于生产构建。
+开发数据库固定保存到 `.local/dev-data/opc-workspace.db`，开发 Artifact、手动备份和启动故障 journal 分别保存到 `.local/dev-data/artifacts/`、`.local/dev-data/backups/`、`.local/dev-data/logs/`，并与正式数据完全隔离。统一开发脚本默认不写入 demo 数据；从旧版本升级时，迁移只会清理先前 demo seed 使用的固定记录。开发令牌只用于本机联调，不得用于生产构建。
 
 ## 检查与测试
 
@@ -159,7 +159,9 @@ appDataDir/
   config/
 
 appLogDir/
-  opc-workspace.log          # 日志落盘管线后续接入
+  startup-incidents-v1.json # 启动前安全故障 journal；成功补偿后删除
+  .startup-incidents-invalid-*.json # 损坏 journal 隔离；不自动读取
+  opc-workspace.log          # 完整日志落盘管线仍待接入
 ```
 
 具体物理路径由操作系统和应用标识 `com.opcworkspace.desktop` 决定，业务代码不硬编码该路径。升级应用程序文件不会覆盖这里的数据。
@@ -169,6 +171,7 @@ appLogDir/
 - Sidecar 仅监听 `127.0.0.1`；开发默认固定端口，桌面生产运行使用端口 `0` 获取随机空闲端口。
 - 生产请求（包括 `/health`）必须携带 `Authorization: Bearer <session-token>`。
 - Tauri 通过环境变量把数据库路径、日志目录、端口和令牌交给 Sidecar，令牌不出现在命令行。
+- Sidecar 通过 `OPC_LOG_DIR` 或 `--logs` 使用独立诊断目录；开发默认使用数据库同级 `logs/`。该目录不得与受控 Artifact 或备份根重叠。
 - Tauri 通过 `OPC_ARTIFACT_DIR` 把 `appDataDir/artifacts/` 交给 Sidecar；开发脚本等价地使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 默认把数据库同级 `backups/` 用作本地备份根；也可由桌面层通过 `OPC_BACKUP_DIR` 或命令行 `--backups` 指定，且不得与 Artifact root 重叠。
 - 业务接口统一位于 `/api/v1`；错误格式为 `{ "code", "message", "request_id" }`。
@@ -325,4 +328,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v7.1](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控工作区头像、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验/恢复演练/恢复安排失败的系统维护来源投影；明确未交付 Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、迁移/启动等其他系统故障来源、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。
+[PRD v7.2](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project/Client 本地纵切、Focus Core 与日期范围回顾、Today、统一本地搜索、设置与受控工作区头像、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败的系统维护来源投影；明确未交付 Focus 高级分析/原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、完整日志/恢复页、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。

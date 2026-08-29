@@ -51,12 +51,35 @@ var (
 		title:       "本地备份恢复需要处理",
 		message:     "无法安全安排本地备份恢复。现有工作区数据没有被修改。请检查本地存储后重试。",
 	}
+	databaseStartupMaintenanceIncident = systemMaintenanceIncident{
+		component:   "database",
+		operation:   "startup",
+		failureCode: "database_startup_failed",
+		title:       "本地数据库启动需要处理",
+		message:     "上次启动未能安全打开本地数据库。工作区没有进入就绪状态；请检查本地存储和应用日志。",
+	}
+	databaseMigrationMaintenanceIncident = systemMaintenanceIncident{
+		component:   "database",
+		operation:   "migration",
+		failureCode: "database_migration_failed",
+		title:       "本地数据库迁移需要处理",
+		message:     "上次启动未能完成受保护的数据库迁移。已有数据未被新版本继续使用；请检查回滚备份和应用日志。",
+	}
+	sidecarStartupMaintenanceIncident = systemMaintenanceIncident{
+		component:   "sidecar",
+		operation:   "startup",
+		failureCode: "sidecar_startup_failed",
+		title:       "本地服务启动需要处理",
+		message:     "上次本地服务启动未能进入就绪状态。请检查应用日志后重新启动。",
+	}
 )
 
 func allowedSystemMaintenanceIncident(incident systemMaintenanceIncident) bool {
 	switch incident {
 	case backupCreateMaintenanceIncident, backupVerifyMaintenanceIncident,
-		backupDrillMaintenanceIncident, backupRestoreMaintenanceIncident:
+		backupDrillMaintenanceIncident, backupRestoreMaintenanceIncident,
+		databaseStartupMaintenanceIncident, databaseMigrationMaintenanceIncident,
+		sidecarStartupMaintenanceIncident:
 		return true
 	default:
 		return false
@@ -77,12 +100,26 @@ func systemMaintenanceEventKey(sourceID, incidentID string) string {
 // implementation details. Resolving or dismissing the Inbox Item closes the
 // incident; a later failure then opens a new one.
 func (a *API) projectSystemMaintenanceFailure(incident systemMaintenanceIncident, requestID string) error {
+	return a.projectSystemMaintenanceFailureAt(incident, requestID, formatInboxTimestamp(a.options.Now()), uuid.NewString())
+}
+
+func (a *API) projectSystemMaintenanceFailureAt(
+	incident systemMaintenanceIncident,
+	requestID, occurredAt, incidentID string,
+) error {
 	if !allowedSystemMaintenanceIncident(incident) {
 		return errors.New("unsupported system maintenance incident")
 	}
 	sourceID := systemMaintenanceSourceID(incident.component, incident.operation)
-	now := formatInboxTimestamp(a.options.Now())
+	eventKey := systemMaintenanceEventKey(sourceID, incidentID)
 	return a.db.Transaction(func(tx *gorm.DB) error {
+		var replayed int64
+		if err := tx.Model(&models.InboxItem{}).Where("source_event_key = ?", eventKey).Count(&replayed).Error; err != nil {
+			return err
+		}
+		if replayed > 0 {
+			return nil
+		}
 		var existing models.InboxItem
 		err := tx.Where(
 			"source_entity_type = ? AND source_entity_id = ? AND status IN ('open', 'tracking') AND source_deleted_at IS NULL",
@@ -98,7 +135,7 @@ func (a *API) projectSystemMaintenanceFailure(incident systemMaintenanceIncident
 
 		payloadJSON, err := json.Marshal(map[string]any{
 			"component": incident.component, "operation": incident.operation,
-			"failure_code": incident.failureCode, "occurred_at": now, "message": incident.message,
+			"failure_code": incident.failureCode, "occurred_at": occurredAt, "message": incident.message,
 		})
 		if err != nil {
 			return err
@@ -108,17 +145,15 @@ func (a *API) projectSystemMaintenanceFailure(incident systemMaintenanceIncident
 			SourceEntityType: systemMaintenanceInboxSourceType,
 			SourceEntityID:   &sourceID,
 			Priority:         "P1", Status: "open", ResolutionPolicy: "manual",
-			PayloadJSON: string(payloadJSON), Version: 1, CreatedAt: now, UpdatedAt: now,
+			PayloadJSON: string(payloadJSON), Version: 1, CreatedAt: occurredAt, UpdatedAt: occurredAt,
 		}
-		incidentID := uuid.NewString()
-		eventKey := systemMaintenanceEventKey(sourceID, incidentID)
 		item.SourceEventKey = &eventKey
 		if err := tx.Create(&item).Error; err != nil {
 			return fmt.Errorf("create system maintenance Inbox Item: %w", err)
 		}
 		return recordInboxWorkflowEventAs(
 			tx, item.ID, "source_projected", models.BuiltinSystemActorID,
-			nil, inboxItemEventState(item, ""), requestID, now,
+			nil, inboxItemEventState(item, ""), requestID, occurredAt,
 		)
 	})
 }
