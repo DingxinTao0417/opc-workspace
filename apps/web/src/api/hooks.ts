@@ -109,6 +109,7 @@ import {
   getProjectNotes,
   getProjects,
   getRoadmapMilestones,
+  getRoadmapMilestone,
   createRoadmapMilestone,
   updateRoadmapMilestone,
   archiveRoadmapMilestone,
@@ -3382,6 +3383,8 @@ export function useDeleteTag() {
 
 export const projectQueryKey = ["projects"] as const;
 export const roadmapMilestoneQueryKey = ["roadmap", "milestones"] as const;
+export const roadmapMilestoneDetailQueryKey = (id: string) =>
+  [...roadmapMilestoneQueryKey, "detail", id] as const;
 export const contentItemQueryKey = ["content-items"] as const;
 export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
@@ -3419,6 +3422,17 @@ export function useRoadmapMilestonesQuery(
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useRoadmapMilestoneQuery(id: string | null) {
+  return useQuery({
+    queryKey: roadmapMilestoneDetailQueryKey(id ?? "idle"),
+    queryFn: ({ signal }) => getRoadmapMilestone(id!, signal),
+    enabled: Boolean(id),
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 5_000,
   });
 }
 

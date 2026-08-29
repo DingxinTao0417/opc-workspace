@@ -3,6 +3,7 @@ import {
   Archive,
   CalendarDays,
   Edit3,
+  Eye,
   FolderKanban,
   Map,
   Plus,
@@ -24,6 +25,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectSelect } from "../components/ProjectSelect";
+import { RoadmapMilestoneDetailModal } from "../components/RoadmapMilestoneDetailModal";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
 
 const statusLabels: Record<RoadmapMilestoneStatus, string> = {
@@ -62,10 +64,12 @@ function RoadmapMilestoneCard({
   milestone,
   onDelete,
   onEdit,
+  onOpen,
 }: {
   milestone: RoadmapMilestone;
   onDelete: (milestone: RoadmapMilestone) => void;
   onEdit: (milestone: RoadmapMilestone) => void;
+  onOpen: (milestone: RoadmapMilestone) => void;
 }) {
   const archive = useArchiveRoadmapMilestone();
   const restore = useRestoreRoadmapMilestone();
@@ -129,6 +133,14 @@ function RoadmapMilestoneCard({
           <>
             <button
               className="button button-secondary"
+              onClick={() => onOpen(milestone)}
+              type="button"
+            >
+              <Eye size={14} />
+              查看详情
+            </button>
+            <button
+              className="button button-secondary"
               disabled={busy}
               onClick={() =>
                 restore.mutate({
@@ -153,6 +165,14 @@ function RoadmapMilestoneCard({
           </>
         ) : (
           <>
+            <button
+              className="button button-secondary"
+              onClick={() => onOpen(milestone)}
+              type="button"
+            >
+              <Eye size={14} />
+              查看详情
+            </button>
             <button
               className="button button-secondary"
               disabled={busy}
@@ -614,6 +634,7 @@ export function RoadmapPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const query = useRoadmapMilestonesQuery({
     page,
     pageSize: 20,
@@ -767,6 +788,7 @@ export function RoadmapPage() {
                 milestone={milestone}
                 onDelete={setDeleting}
                 onEdit={setEditing}
+                onOpen={(item) => setDetailId(item.id)}
               />
             ))}
           </section>
@@ -819,6 +841,14 @@ export function RoadmapPage() {
           onClose={() => setDeleting(null)}
         />
       ) : null}
+      <RoadmapMilestoneDetailModal
+        milestoneId={detailId}
+        onClose={() => setDetailId(null)}
+        onEdit={(milestone) => {
+          setDetailId(null);
+          setEditing(milestone);
+        }}
+      />
     </div>
   );
 }

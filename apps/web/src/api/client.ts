@@ -6690,6 +6690,19 @@ export async function getRoadmapMilestones(
   return normalizeRoadmapMilestoneListResult(payload, input);
 }
 
+export async function getRoadmapMilestone(
+  id: string,
+  signal?: AbortSignal,
+): Promise<RoadmapMilestone> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/roadmap/milestones/${encodeURIComponent(id)}`,
+    { signal },
+  );
+  return normalizeRoadmapMilestone(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
+}
+
 export async function getContentItems(
   input: ContentItemListParams = {},
   signal?: AbortSignal,

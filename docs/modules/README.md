@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.61](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.62](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -32,7 +32,7 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 
 ## v0.3 规划增强
 
-- [路线图](roadmap.md)（R2 数据/API 与 R3 基础事实交互已交付：季度/Project 筛选、稳定分页、新建/编辑、Project 跳转、归档恢复与保护性删除；详情、拖拽与本地事件待开发）
+- [路线图](roadmap.md)（R2 数据/API 与 R3 基础界面已完成：季度/Project 筛选、稳定分页、新建/编辑/详情、Project 跳转、归档恢复与保护性删除；拖拽与本地事件待开发）
 - [内容日历](content-calendar.md)（CC1–CC5-B 与 CC6-A 已交付：月格自动分页聚合、任务协同、版本化审核/发布到期 Inbox 与来源终结/删除协调）
 
 高级备份计划与导入映射属于数据管理模块的 v0.3 阶段，详见 [数据、备份与恢复](data-management.md)。

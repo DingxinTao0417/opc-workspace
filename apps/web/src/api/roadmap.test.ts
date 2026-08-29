@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deleteRoadmapMilestone,
+  getRoadmapMilestone,
   resetRuntimeConnection,
   updateRoadmapMilestone,
 } from "./client";
@@ -42,6 +43,25 @@ afterEach(() => {
 });
 
 describe("roadmap API contract", () => {
+  it("loads and normalizes one milestone detail", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: milestonePayload() }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getRoadmapMilestone("milestone-1")).resolves.toMatchObject({
+      id: "milestone-1",
+      title: "路线图交互收口",
+      status: "achieved",
+      version: 5,
+      taskSummary: { total: 0, progressPercent: 0 },
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/roadmap/milestones/milestone-1",
+    );
+  });
+
   it("serializes editable facts with optimistic concurrency", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

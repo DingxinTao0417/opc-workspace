@@ -2725,6 +2725,89 @@ kbd {
   font-size: 13px;
   line-height: 1.55;
 }
+.roadmap-detail {
+  display: grid;
+  gap: 18px;
+}
+.roadmap-detail-heading,
+.roadmap-detail-heading > div,
+.roadmap-detail-progress-heading {
+  display: flex;
+  align-items: center;
+}
+.roadmap-detail-heading {
+  justify-content: space-between;
+  gap: 14px;
+}
+.roadmap-detail-heading > div {
+  min-width: 0;
+  gap: 10px;
+}
+.roadmap-detail-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+.roadmap-detail-description,
+.roadmap-detail-projects > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.roadmap-detail-progress {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.roadmap-detail-progress-heading {
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.roadmap-detail-progress p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.roadmap-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--border-subtle);
+}
+.roadmap-detail-facts > div {
+  padding: 11px 12px;
+  background: var(--panel);
+}
+.roadmap-detail-facts dt {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.roadmap-detail-facts dd {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.roadmap-detail-projects {
+  display: grid;
+  gap: 9px;
+}
+.roadmap-detail-projects h3 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
 
 .content-calendar-toolbar {
   align-items: center;
@@ -7552,6 +7635,15 @@ kbd {
 }
 
 @media (max-width: 600px) {
+  .roadmap-detail-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .roadmap-detail-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .roadmap-edit-period {
     grid-template-columns: minmax(0, 1fr);
   }

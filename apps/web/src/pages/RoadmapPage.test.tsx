@@ -13,12 +13,14 @@ import { RoadmapPage } from "./RoadmapPage";
 const hooks = vi.hoisted(() => ({
   milestones: vi.fn(),
   projects: vi.fn(),
+  detail: vi.fn(),
   update: vi.fn(),
   remove: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
   useRoadmapMilestonesQuery: hooks.milestones,
+  useRoadmapMilestoneQuery: hooks.detail,
   useProjectsQuery: hooks.projects,
   useCreateRoadmapMilestone: () => ({
     isPending: false,
@@ -91,6 +93,12 @@ describe("RoadmapPage", () => {
   beforeEach(() => {
     hooks.update.mockReset();
     hooks.remove.mockReset();
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id ? milestone : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
     hooks.milestones.mockReturnValue({
       data: { items: [milestone], meta: { page: 1, pageSize: 50, total: 1 } },
       isError: false,
@@ -149,6 +157,24 @@ describe("RoadmapPage", () => {
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
+  });
+
+  it("loads real detail facts and edits from the latest detail version", () => {
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "查看详情" }));
+    expect(hooks.detail).toHaveBeenLastCalledWith(milestone.id);
+    expect(screen.getByText("关联任务进度")).toBeTruthy();
+    expect(screen.getByText("2 已完成 · 1 进行中 · 4 总计")).toBeTruthy();
+    expect(screen.getByText("数据版本")).toBeTruthy();
+    expect(screen.getByText("v1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑里程碑" }));
+    expect(screen.getByRole("heading", { name: "编辑里程碑" })).toBeTruthy();
   });
 
   it("requires a second action before deleting an archived milestone", () => {
