@@ -5,17 +5,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientFollowup, ClientInput } from "../types/models";
 import {
   clientQueryKey,
+  INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxQueryKey,
   projectQueryKey,
   useClientOptionsQuery,
   useCompleteClientFollowup,
   useCreateClient,
+  useClientFollowupsQuery,
   useUpdateClient,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   completeFollowup: vi.fn(),
   create: vi.fn(),
+  listFollowups: vi.fn(),
   list: vi.fn(),
   update: vi.fn(),
 }));
@@ -26,6 +29,7 @@ vi.mock("./client", async () => {
     ...actual,
     createClient: calls.create,
     completeClientFollowup: calls.completeFollowup,
+    getClientFollowups: calls.listFollowups,
     getClients: calls.list,
     updateClient: calls.update,
   };
@@ -93,9 +97,68 @@ function createQueryClient() {
   });
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
 
 describe("client hooks", () => {
+  it("refreshes followup lists containing planned facts at the Sidecar scheduler cadence", async () => {
+    vi.useFakeTimers();
+    calls.listFollowups.mockResolvedValue({
+      items: [],
+      meta: {
+        page: 1,
+        pageSize: 6,
+        total: 0,
+        serverNow: "2026-08-29T12:00:00Z",
+      },
+    });
+    const queryClient = createQueryClient();
+    renderHook(() => useClientFollowupsQuery(client.id), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+    expect(calls.listFollowups).toHaveBeenCalledTimes(1);
+    await act(
+      async () =>
+        void (await vi.advanceTimersByTimeAsync(
+          INBOX_LIST_REFRESH_INTERVAL_MS,
+        )),
+    );
+    expect(calls.listFollowups).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll a terminal-only followup history", async () => {
+    vi.useFakeTimers();
+    calls.listFollowups.mockResolvedValue({
+      items: [],
+      meta: {
+        page: 1,
+        pageSize: 6,
+        total: 0,
+        serverNow: "2026-08-29T12:00:00Z",
+      },
+    });
+    const queryClient = createQueryClient();
+    renderHook(
+      () => useClientFollowupsQuery(client.id, { status: "completed" }),
+      {
+        wrapper: wrapperFor(queryClient),
+      },
+    );
+
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+    await act(
+      async () =>
+        void (await vi.advanceTimersByTimeAsync(
+          INBOX_LIST_REFRESH_INTERVAL_MS,
+        )),
+    );
+    expect(calls.listFollowups).toHaveBeenCalledTimes(1);
+  });
+
   it("requests one searchable client option page and forwards cancellation", async () => {
     calls.list.mockResolvedValue({
       items: [client],

@@ -650,12 +650,17 @@ export function useClientFollowupsQuery(
   clientId: string | null,
   input: ClientFollowupListParams = {},
 ) {
+  const includesPlannedFollowups = !input.status || input.status === "planned";
   return useQuery({
     queryKey: [...clientFollowupQueryKey(clientId ?? "missing"), "list", input],
     queryFn: () => getClientFollowups(clientId!, input),
     enabled: Boolean(clientId),
     placeholderData: keepPreviousData,
     retry: 1,
+    staleTime: 10_000,
+    refetchInterval: includesPlannedFollowups
+      ? INBOX_LIST_REFRESH_INTERVAL_MS
+      : false,
   });
 }
 
