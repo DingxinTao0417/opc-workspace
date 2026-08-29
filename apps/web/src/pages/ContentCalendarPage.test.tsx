@@ -31,7 +31,7 @@ describe("ContentCalendarPage", () => {
     render(<MemoryRouter><ContentCalendarPage /></MemoryRouter>);
     expect(screen.getByText("发布产品更新")).toBeTruthy();
     expect(screen.getByText("微信公众号")).toBeTruthy();
-    expect(screen.getByText("1/2 项准备任务")).toBeTruthy();
+    expect(screen.getByText(/1\/2 项准备任务/)).toBeTruthy();
     expect(screen.queryByText("发布到平台")).toBeNull();
   });
 
@@ -46,5 +46,11 @@ describe("ContentCalendarPage", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "选择准备任务" }), { target: { value: "task-2" } });
     fireEvent.click(screen.getByRole("button", { name: "关联" }));
     expect(hooks.link).toHaveBeenCalledWith(expect.objectContaining({ id: "content-1", taskId: "task-2", isRequired: true, expectedVersion: 1 }), expect.anything());
+  });
+
+  it("moves an editable item to a visible adjacent-month day with its current version", () => {
+    render(<MemoryRouter><ContentCalendarPage /></MemoryRouter>);
+    fireEvent.drop(screen.getByRole("gridcell", { name: "2026-09-05，0 条内容" }), { dataTransfer: { getData: () => "content-1" } });
+    expect(hooks.schedule).toHaveBeenCalledWith(expect.objectContaining({ id: "content-1", input: expect.objectContaining({ scheduledAt: "2026-09-05T01:00:00.000Z", scheduledTimezone: "Asia/Shanghai", expectedVersion: 1 }) }));
   });
 });
