@@ -164,7 +164,7 @@ describe("ClientDetailPage", () => {
     );
     expect(screen.getByText(/v0.4 交付财务事实后可用/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "记录活动" })).toBeEnabled();
-    expect(screen.getByText(/不推测邮件、浏览或回复行为/)).toBeTruthy();
+    expect(screen.getByText(/不代表客户回访或其他外部通信/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "添加附件" })).toBeEnabled();
     expect(screen.getByRole("heading", { name: "本地联系人" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();

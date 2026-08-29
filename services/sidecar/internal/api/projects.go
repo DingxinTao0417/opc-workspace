@@ -590,7 +590,7 @@ func (a *API) transitionProject(c *gin.Context) {
 			"complete": "project_completed", "reopen": "project_reopened",
 			"archive": "project_archived", "restore": "project_restored",
 		}[input.Action]
-		if err := recordProjectWorkflowEvent(
+		eventID, err := recordProjectWorkflowEventWithID(
 			tx,
 			id,
 			action,
@@ -598,8 +598,14 @@ func (a *API) transitionProject(c *gin.Context) {
 			projectEventState(row.Project),
 			requestIDFromContext(c),
 			updatedAt,
-		); err != nil {
+		)
+		if err != nil {
 			return err
+		}
+		if input.Action == "complete" || input.Action == "reopen" {
+			if err := projectClientActivity(tx, row.Project, input.Action, eventID, updatedAt); err != nil {
+				return err
+			}
 		}
 		if input.Action == "complete" {
 			if err := projectProjectCompletionInboxItem(
@@ -735,6 +741,21 @@ func recordProjectWorkflowEvent(
 	requestID,
 	createdAt string,
 ) error {
+	_, err := recordProjectWorkflowEventWithID(
+		tx, projectIDValue, action, previous, current, requestID, createdAt,
+	)
+	return err
+}
+
+func recordProjectWorkflowEventWithID(
+	tx *gorm.DB,
+	projectIDValue,
+	action string,
+	previous,
+	current map[string]any,
+	requestID,
+	createdAt string,
+) (string, error) {
 	encode := func(value map[string]any) (*string, error) {
 		if value == nil {
 			return nil, nil
@@ -748,11 +769,11 @@ func recordProjectWorkflowEvent(
 	}
 	previousJSON, err := encode(previous)
 	if err != nil {
-		return fmt.Errorf("encode previous project workflow state: %w", err)
+		return "", fmt.Errorf("encode previous project workflow state: %w", err)
 	}
 	currentJSON, err := encode(current)
 	if err != nil {
-		return fmt.Errorf("encode current project workflow state: %w", err)
+		return "", fmt.Errorf("encode current project workflow state: %w", err)
 	}
 	actorID := models.BuiltinOwnerActorID
 	commandSequence := 1
@@ -765,7 +786,36 @@ func recordProjectWorkflowEvent(
 		event.RequestID = &requestID
 	}
 	if err := tx.Create(&event).Error; err != nil {
-		return fmt.Errorf("record project workflow event: %w", err)
+		return "", fmt.Errorf("record project workflow event: %w", err)
+	}
+	return event.ID, nil
+}
+
+func projectClientActivity(tx *gorm.DB, project models.Project, action, eventID, occurredAt string) error {
+	if project.ClientID == nil {
+		return nil
+	}
+
+	title := ""
+	switch action {
+	case "complete":
+		title = fmt.Sprintf("项目「%s」已完成", project.Name)
+	case "reopen":
+		title = fmt.Sprintf("项目「%s」已重新打开", project.Name)
+	default:
+		return fmt.Errorf("unsupported Project client activity action %q", action)
+	}
+
+	sourceType := "project_workflow_event"
+	sourceID := eventID
+	activity := models.ClientActivity{
+		ID: uuid.NewString(), ClientID: *project.ClientID, Kind: "system_reference",
+		Title: title, OccurredAt: occurredAt, CreatedByActorID: models.BuiltinSystemActorID,
+		SourceType: &sourceType, SourceID: &sourceID, Version: 1,
+		CreatedAt: occurredAt, UpdatedAt: occurredAt,
+	}
+	if err := tx.Create(&activity).Error; err != nil {
+		return fmt.Errorf("project Client activity projection: %w", err)
 	}
 	return nil
 }

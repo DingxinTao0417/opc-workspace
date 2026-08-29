@@ -652,7 +652,11 @@ const clientSelectColumns = `
 	clients.created_at,
 	clients.updated_at,
 	(SELECT COUNT(*) FROM projects WHERE projects.client_id = clients.id) AS project_count,
-	(SELECT MAX(occurred_at) FROM client_activities WHERE client_id = clients.id AND deleted_at IS NULL) AS latest_activity_at
+	(SELECT client_activities.occurred_at
+	 FROM client_activities
+	 WHERE client_activities.client_id = clients.id AND client_activities.deleted_at IS NULL
+	 ORDER BY ` + clientActivityOccurredAtUTCKeyExpression + ` DESC, client_activities.id ASC
+	 LIMIT 1) AS latest_activity_at
 `
 
 func loadClientRow(db *gorm.DB, id string) (clientRow, error) {

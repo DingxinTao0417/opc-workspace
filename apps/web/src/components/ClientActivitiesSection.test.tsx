@@ -143,4 +143,44 @@ describe("ClientActivitiesSection", () => {
       expect.objectContaining({ includeDeleted: true, page: 1 }),
     );
   });
+
+  it("renders project workflow facts as human-readable system-only activity", () => {
+    const workflowEventId = "8b04aa98-f190-4cc4-b91f-5b883289f98a";
+    state.items = [
+      {
+        ...activity,
+        id: "activity-project-completed",
+        kind: "system_reference",
+        title: "项目「网站重构」已完成",
+        body: null,
+        sourceType: "project_workflow_event",
+        sourceId: workflowEventId,
+      },
+    ];
+
+    render(<ClientActivitiesSection clientId="client-1" />);
+
+    expect(
+      screen.getByText(
+        "汇总手工记录的笔记与会议，以及系统记录的项目状态事实；这些内容不代表客户回访或其他外部通信。",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("项目「网站重构」已完成")).toBeVisible();
+    expect(screen.getByText("项目生命周期")).toBeVisible();
+    expect(screen.getByText("来源：项目状态变更 · 系统只读")).toBeVisible();
+    expect(screen.queryByText(workflowEventId)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("project_workflow_event"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "编辑活动 项目「网站重构」已完成",
+      }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "删除活动 项目「网站重构」已完成",
+      }),
+    ).not.toBeInTheDocument();
+  });
 });

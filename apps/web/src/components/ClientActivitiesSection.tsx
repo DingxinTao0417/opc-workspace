@@ -243,7 +243,9 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
       <div className="project-detail-heading">
         <div>
           <h2>本地活动</h2>
-          <p>仅记录你手工填写的笔记与会议，不推测邮件、浏览或回复行为。</p>
+          <p>
+            汇总手工记录的笔记与会议，以及系统记录的项目状态事实；这些内容不代表客户回访或其他外部通信。
+          </p>
         </div>
         <button
           className="button button-primary"
@@ -383,7 +385,7 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
           message={
             includeDeleted
               ? "当前客户没有任何活动历史。"
-              : "添加沟通笔记或会议记录后，最近动态和时间线会从真实本地事实更新。"
+              : "手工记录活动或关联项目状态发生变化后，时间线会显示对应的本地事实。"
           }
           title="暂无本地活动"
         />
@@ -394,6 +396,8 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
           {items.map((activity) => {
             const deleted = activity.deletedAt !== null;
             const system = activity.kind === "system_reference";
+            const projectWorkflowEvent =
+              system && activity.sourceType === "project_workflow_event";
             const Icon =
               activity.kind === "meeting"
                 ? UsersRound
@@ -414,9 +418,11 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
                     <span>
                       {activity.kind === "meeting"
                         ? "会议记录"
-                        : system
-                          ? "系统引用"
-                          : "沟通笔记"}
+                        : projectWorkflowEvent
+                          ? "项目生命周期"
+                          : system
+                            ? "系统引用"
+                            : "沟通笔记"}
                     </span>
                   </div>
                   {deleted ? (
@@ -427,9 +433,13 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
                         : ""}
                     </p>
                   ) : system ? (
-                    <p>
-                      引用 {activity.sourceType} · {activity.sourceId}
-                    </p>
+                    projectWorkflowEvent ? (
+                      <p>来源：项目状态变更 · 系统只读</p>
+                    ) : (
+                      <p>
+                        引用 {activity.sourceType} · {activity.sourceId}
+                      </p>
+                    )
                   ) : (
                     <p>{activity.body}</p>
                   )}

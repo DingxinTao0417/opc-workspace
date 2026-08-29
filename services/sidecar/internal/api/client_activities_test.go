@@ -149,6 +149,106 @@ func TestClientActivityCreateListUpdateAndSoftDelete(t *testing.T) {
 	}
 }
 
+func TestClientActivityTimelineUsesUTCNanosecondOrderAcrossPages(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Chronological Activity Client"}`, nil)
+	createdAt := "2026-08-29T11:00:00Z"
+	rows := []struct {
+		id         string
+		title      string
+		occurredAt string
+	}{
+		{
+			id:         "018f0000-0000-7000-8000-000000000002",
+			title:      "half second padded",
+			occurredAt: "2026-08-29T12:34:00.500000000Z",
+		},
+		{
+			id:         "018f0000-0000-7000-8000-000000000003",
+			title:      "half second offset",
+			occurredAt: "2026-08-29T13:34:00.5+01:00",
+		},
+		{
+			id:         "018f0000-0000-7000-8000-000000000004",
+			title:      "whole second UTC",
+			occurredAt: "2026-08-29T12:34:00Z",
+		},
+		{
+			id:         "018f0000-0000-7000-8000-000000000005",
+			title:      "whole second offset",
+			occurredAt: "2026-08-29T13:34:00+01:00",
+		},
+	}
+	for _, row := range rows {
+		if err := store.DB.Exec(`
+			INSERT INTO client_activities(
+				id, client_id, kind, title, body, occurred_at, created_by_actor_id,
+				version, created_at, updated_at
+			) VALUES (?, ?, 'note', ?, 'body', ?, ?, 1, ?, ?)
+		`, row.id, client.ID, row.title, row.occurredAt, models.BuiltinOwnerActorID, createdAt, createdAt).Error; err != nil {
+			t.Fatalf("seed client activity %q: %v", row.title, err)
+		}
+	}
+
+	type listEnvelope struct {
+		Data []clientActivityResponse `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+		} `json:"meta"`
+	}
+	readPage := func(page int) listEnvelope {
+		t.Helper()
+		response := performRequest(
+			router,
+			http.MethodGet,
+			fmt.Sprintf("/api/v1/clients/%s/activities?page=%d&page_size=2", client.ID, page),
+			nil,
+			nil,
+		)
+		if response.Code != http.StatusOK {
+			t.Fatalf("list activity page %d = %d: %s", page, response.Code, response.Body.String())
+		}
+		var envelope listEnvelope
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode activity page %d: %v", page, err)
+		}
+		if envelope.Meta.Page != page || envelope.Meta.PageSize != 2 || envelope.Meta.Total != 4 {
+			t.Fatalf("activity page %d meta = %#v", page, envelope.Meta)
+		}
+		return envelope
+	}
+
+	firstPage := readPage(1)
+	secondPage := readPage(2)
+	wantIDs := []string{rows[0].id, rows[1].id, rows[2].id, rows[3].id}
+	gotIDs := []string{
+		firstPage.Data[0].ID,
+		firstPage.Data[1].ID,
+		secondPage.Data[0].ID,
+		secondPage.Data[1].ID,
+	}
+	for index, wantID := range wantIDs {
+		if gotIDs[index] != wantID {
+			t.Fatalf("chronological activity ID at %d = %s, want %s; all=%v", index, gotIDs[index], wantID, gotIDs)
+		}
+	}
+	repeatedFirstPage := readPage(1)
+	if repeatedFirstPage.Data[0].ID != wantIDs[0] || repeatedFirstPage.Data[1].ID != wantIDs[1] {
+		t.Fatalf("repeated first page changed order: %#v", repeatedFirstPage.Data)
+	}
+
+	detail := performRequest(router, http.MethodGet, "/api/v1/clients/"+client.ID, nil, nil)
+	if detail.Code != http.StatusOK {
+		t.Fatalf("get client = %d: %s", detail.Code, detail.Body.String())
+	}
+	clientAfterActivities := decodeClientResponse(t, detail.Body.Bytes())
+	if clientAfterActivities.LatestActivityAt == nil || *clientAfterActivities.LatestActivityAt != "2026-08-29T12:34:00.5Z" {
+		t.Fatalf("latest_activity_at = %v, want chronological half-second timestamp", clientAfterActivities.LatestActivityAt)
+	}
+}
+
 func TestClientActivityValidationAndReadOnlySystemReference(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Validation Client"}`, nil)

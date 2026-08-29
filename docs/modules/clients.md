@@ -1,8 +1,8 @@
 # 客户管理模块
 
-> 实现状态截止：2026-08-28（依据当前实现）
+> 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v30。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v29 的其他扩展不改变 Client 契约，schema v30 只增加 `task_submissions.origin` 与父任务推进规则，同样不改变 Client 表或 API 契约。v0.1 的资料 CRUD、Project 客户关联、人工备注/会议时间线、客户附件和本地联系人关联已交付，模块仍为**部分完成**；外部活动来源、回访和财务聚合尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v31。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束。v0.1 的资料 CRUD、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付，模块仍为**部分完成**；邮件/日历等其他来源、回访和财务聚合尚未交付。
 
 ## 定位与边界
 
@@ -12,12 +12,12 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - person Actor 不登录、不接收远程消息、不获得客户数据访问权；Client 与 Actor 保持不同语义。
 - `project_count` 从 Project 实时派生，不写回 `clients`。
 - 客户累计收入未来只从 `confirmed` Financial Entry 聚合；paid Invoice 只用于关联与对账，不在客户表维护第二份金额。
-- 客户最近动态只从未删除 `client_activities.occurred_at` 派生；没有活动时显示“暂无本地活动”。当前只允许人工记录备注或会议，不伪造邮件打开、回复或提案下载。
+- 客户最近动态只从未删除 `client_activities.occurred_at` 派生；没有活动时显示“暂无本地活动”。人工可记录备注或会议，关联 Project 的完成/重新打开命令可投影本地系统事实；两者都不伪造邮件打开、回复、客户回访或提案下载。
 - v0.1 不自动发送邮件、短信、发票或其他外部消息。
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的客户资料事实层、列表、基础详情、Project 客户关联、本地活动时间线、受控附件和 person 显式关联。
+当前状态为**部分完成**，已经具备可运行的客户资料事实层、列表、基础详情、Project 客户关联、人工与项目状态本地活动时间线、受控附件和 person 显式关联。
 
 ### 已实现：数据与 Sidecar
 
@@ -32,8 +32,9 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - Project 插入、删除或 `client_id` 改绑会原子递增受影响 Client 的 `version` 与 `updated_at`，避免用户基于旧 `project_count` 编辑或永久删除。
 - 保留既有反向传播：Client 名称改变或永久删除会递增关联 Project 的聚合版本，使 Project 的 `client_name` 快照失效。
 - 永久删除使用 `DELETE /api/v1/clients/:id?confirm=true`，只允许 `inactive` Client，并再次校验最新 `If-Match`。Project 是可选关联，删除后由外键 `ON DELETE SET NULL` 保留项目并返回 `detached_projects`；Invoice 是强引用，存在时返回 `409 CLIENT_HAS_INVOICES`，客户、Project 关联和双方版本均不改变。
-- schema v18 新增 `client_activities`。人工 `note / meeting` 要求正文和明确发生时间，由服务端固定记录当前 owner；未来来源预留 `system_reference`，当前公开创建 API 不允许客户端伪造。
-- 活动列表默认只返回未删除记录，按 `occurred_at DESC, id ASC` 稳定分页，可按 kind 筛选并显式包含删除历史；活动详情、修改和确认软删除均为版本化 API。
+- schema v18 新增 `client_activities`。人工 `note / meeting` 要求正文和明确发生时间，由服务端固定记录当前 owner；`system_reference` 只供服务端受控来源使用，公开创建 API 不允许客户端伪造。
+- schema v31 为 `source_type=project_workflow_event` 的系统活动建立 `(source_type, source_id)` 部分唯一索引。Project complete/reopen 在同一事务用对应 Workflow Event ID 创建系统活动；无关联 Client 时不创建，迁移/启动不回填旧事件。
+- 活动列表默认只返回未删除记录，先把 RFC 3339 时区偏移归一到 UTC，再以固定 9 位小数时间键按 `occurred_at DESC, id ASC` 稳定分页；混合纳秒精度或等价 offset 不会颠倒同秒记录。`latest_activity_at` 复用同一排序键，可按 kind 筛选并显式包含删除历史；活动详情、修改和确认软删除均为版本化 API。
 - 活动新增、修改或软删除由数据库 trigger 原子递增 Client 聚合 `version`；删除活动保留标题、记录人、发生时间、删除人/原因和时间，响应不再返回人工正文。已删除活动以及 system reference 均不可编辑。
 - schema v19 新增 `client_attachments` 与不可变 `client_attachment_deletion_tombstones`。每个附件固定属于一个 Client，可选关联该 Client 的一条未删除 Activity；文件事实、记录人和创建时间不可改，删除只写成组软删除事实。
 - 客户附件和 Task file Artifact 共用已经绑定数据库身份的受控 Artifact store，但拥有独立业务表和 API。schema trigger 阻止两张表产生相同 object UUID，物理路径仍只保存为 `objects/<uuid>`。
@@ -50,14 +51,14 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - 列表覆盖加载 skeleton、首次空状态、筛选无结果、错误和重试。累计收入固定显示“v0.4 后可用”，最近动态显示真实 `latest_activity_at`，无记录时显示“暂无本地活动”。
 - 新建/编辑表单覆盖名称、联系人、邮箱、电话、备注和状态；空白可选值提交为 `null`，保存中禁止关闭和重复提交。
 - 编辑发生版本冲突时刷新最新 Client 版本，但保留用户未提交草稿并要求重新确认。
-- `/clients/:id` 展示基础资料、真实关联项目列表及分页、状态调整、危险区、本地活动时间线、客户附件和“本地联系人”。用户可选择已有 active person，或以联系人名称为默认值原子新建并关联；解除必须填写原因，历史按需展开。界面明确提示这不会创建账号、发送消息或授予访问权；回访和发票/收入仍标为后续版本。
+- `/clients/:id` 展示基础资料、真实关联项目列表及分页、状态调整、危险区、本地活动时间线、客户附件和“本地联系人”。时间线区分可编辑人工记录与只读 Project 生命周期事实，并隐藏内部 Workflow Event ID。用户可选择已有 active person，或以联系人名称为默认值原子新建并关联；解除必须填写原因，历史按需展开。界面明确提示这不会创建账号、发送消息或授予访问权；回访和发票/收入仍标为后续版本。
 - 停用或恢复只更新 Client 状态，不解除 Project。永久删除前必须先停用并二次确认，界面展示将解除的项目数；成功后回到客户列表并显示实际解除数量。
 - Project 新建/编辑表单已接真实客户选择器，可关联、改绑或选择“不关联客户”；选项拉全分页结果并标注 inactive Client。客户选项加载失败时可重试，编辑已有 Project 时保留当前关联，不会静默提交 `null`。
 - 项目列表已支持按 Client 筛选；Client 创建、编辑、删除和 Project 关联变化会刷新相关 Client/Project 查询缓存。
 
 ### 已知缺口
 
-- 当前活动只覆盖人工备注和会议；尚无邮件、回访或其他业务来源写入 `system_reference` 的投影器。附件可选关联活动，但不会自动生成或伪造 Activity。
+- Project complete/reopen 已成为第一类 `system_reference` 来源；邮件、日历、回访和其他外部业务来源仍无投影器。附件可选关联活动，但不会自动生成或伪造 Activity。
 - 没有客户标签、去重合并、批量操作或导入导出。
 - 当前仅支持一个 `contact` 角色，不支持多联系人、角色自定义、客户门户或远程协作。
 - 没有发票详情、累计收入或 Financial Entry 聚合；这些能力归入 v0.4。
@@ -87,6 +88,13 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 2. 创建请求可带 `Idempotency-Key`；成功后活动与 Client 版本在同一事务更新，列表“最近动态”和详情时间线刷新。
 3. 编辑活动时提交活动自身 `version` 对应的 `If-Match`。并发冲突不会盲目覆盖，界面重新读取时间线并要求用户再次确认。
 4. 删除要求 `confirm=true`、最新 `If-Match` 和 1–1,000 字符原因。记录转为不可变删除历史，正文不再通过 API 返回；默认时间线隐藏删除历史，用户可显式打开审计视图。
+
+### 查看 Project 生命周期系统活动
+
+1. owner 对有关联 Client 的 Project 执行 complete 或 reopen；Project 状态、不可变 Workflow Event、Client 系统活动以及 complete 的既有 Inbox 投影在同一事务提交或整体回滚。
+2. 系统活动固定使用事件发生当下的 `client_id`、Project 名称和事件时间，`source_id` 为该 Workflow Event ID；Project 后续改绑或解除 Client 不搬迁旧活动。
+3. 无关联 Client 时不创建活动；迁移与启动也不扫描旧 Project Event。每个事件最多一条来源记录，重试旧版本不会生成孤立或重复活动。
+4. 客户时间线显示“项目生命周期 / 项目状态变更 / 系统只读”，不展示内部来源 ID，也不提供编辑或删除入口；这只表示本地项目状态事实，不代表客户回访或对外通信。
 
 ### 建立客户并关联项目
 
@@ -142,7 +150,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 
 ### Client Activity 数据与列表契约
 
-`client_activities` 保存 `id / client_id / kind / title / body / occurred_at / created_by_actor_id / source_type / source_id / version / deleted_* / created_at / updated_at`。人工活动仅允许 `note / meeting`，正文必填 1–10,000 字符、标题 1–200 字符，发生时间必须是 RFC 3339 且不得超过服务端当前时间 5 分钟。来源字段只供 `system_reference` 使用，身份、来源和创建时间不可改；软删除后三元删除事实完整且整行终态不可变。
+`client_activities` 保存 `id / client_id / kind / title / body / occurred_at / created_by_actor_id / source_type / source_id / version / deleted_* / created_at / updated_at`。人工活动仅允许 `note / meeting`，正文必填 1–10,000 字符、标题 1–200 字符，发生时间必须是 RFC 3339 且不得超过服务端当前时间 5 分钟。来源字段只供 `system_reference` 使用，身份、来源和创建时间不可改；软删除后三元删除事实完整且整行终态不可变。Project 投影固定为 `source_type=project_workflow_event`、`source_id=<workflow_event.id>`、system Actor、空 body；标题保存事件时 Project 名称与“已完成/已重新打开”事实。schema v31 的部分唯一索引保证一个 Project Workflow Event 最多产生一条此类活动。
 
 活动列表 `page` 默认 1，`page_size` 默认 20、最大 100；`kind` 可筛选三种持久类型，`include_deleted` 只接受 `true / false`，默认 false；结果按发生时间倒序和 ID 正序稳定分页，meta 同时返回 `client_version`。
 
@@ -217,7 +225,7 @@ Client contact link/unlink         → Client version +1
 Client DELETE                     → link history cascade；person Actor 保留
 ```
 
-当前本地活动以独立 `client_activities` 聚合提供时间线，不复用 Task `workflow_events`。`system_reference` 只保留受约束数据边界，当前没有来源投影器；不得把外部互动写成已交付事实。
+当前本地活动以独立 `client_activities` 聚合提供时间线，不把 Project `workflow_events` 当作 Client 查询模型。schema v31 只用事件 ID 作为 Project complete/reopen 系统活动的稳定来源身份；Activity 保留事件当时的 Client 与标题快照，改绑不重分类。不得把这一投影描述成客户互动，也不得把未接入的外部来源写成已交付事实。
 
 ## 与其他模块协作
 
@@ -237,15 +245,15 @@ Client DELETE                     → link history cascade；person Actor 保留
 
 1. **v0.1 客户事实层（已实现）**：schema v10、Go model、CRUD、校验、分页/搜索/状态筛选、快照幂等、乐观锁、项目数聚合和删除约束。
 2. **v0.1 前端纵切（已实现基础范围）**：列表、新建/编辑、基础详情、关联项目、Project 客户选择/筛选、加载/空/错误/重试与冲突草稿保留。
-3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；外部来源投影仍待实现，不接线上行为。
+3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、Project complete/reopen 只读系统活动、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；邮件/日历/回访等其他来源仍待实现，不接线上行为。
 4. **v0.1 Actor 显式关联（已实现）**：已有 person / 原子新建二选一、单 active contact、聚合乐观锁、幂等重放、带原因解除、不可变历史和本地责任语义提示。
 5. **v0.4 业务增强（待实现）**：回访计划、本地提醒、发票和财务聚合；第一版仍不自动对外发送。
 
 ## 验证与验收边界
 
-当前自动化测试覆盖 schema v9→v10、v17→v18、v18→v19 与 v19→v20 数据保留、索引/约束/trigger/外键、Client CRUD/校验、分页/搜索/状态/排序、活动创建幂等、列表/详情/版本化编辑/软删除/删除历史/system reference 只读、附件严格上传/幂等/分页/下载完整性/软删/聚合硬删/崩溃恢复、已有/新建 person 关联、单 active contact、幂等/并发、带原因解除、Actor 停用保护与 Client 删除边界、聚合版本与最近活动传播、Project 关联传播、内部备份恢复与 Invoice 删除冲突。Web 侧覆盖 Client、Activity、Attachment、Actor Link API 规范化，附件上传预览/删除原因/历史、联系人关联/解除/历史，以及客户列表/详情和 Project 客户选择/筛选。
+当前自动化测试覆盖 schema v9→v10、v17→v18、v18→v19、v19→v20 与 v30→v31 数据保留、索引/约束/trigger/外键、Client CRUD/校验、分页/搜索/状态/排序、活动创建幂等、混合精度/offset 同秒时间顺序、跨页稳定性与真实最近动态、列表/详情/版本化编辑/软删除/删除历史/system reference 只读、Project complete/reopen 原子投影、无 Client、来源唯一、Event/Activity/Inbox 故障全回滚、Client 版本传播与改绑历史、附件严格上传/幂等/分页/下载完整性/软删/聚合硬删/崩溃恢复、已有/新建 person 关联、单 active contact、幂等/并发、带原因解除、Actor 停用保护与 Client 删除边界、聚合版本与最近活动传播、Project 关联传播、内部备份恢复与 Invoice 删除冲突。Web 侧覆盖 Client、Activity、Attachment、Actor Link API 规范化，项目状态系统活动的人类可读只读展示与缓存失效，以及客户列表/详情和 Project 客户选择/筛选。
 
-以下仍不能据此宣称完成：真实浏览器键盘/焦点/窄屏验收、大数据量分页性能、Activity 外部来源投影、多联系人/自定义关系、回访、财务或任何线上互动。
+以下仍不能据此宣称完成：真实浏览器键盘/焦点/窄屏验收、大数据量分页性能、邮件/日历等其他 Activity 来源、多联系人/自定义关系、回访、财务或任何线上互动。
 
 ## 相关代码/PRD 链接
 

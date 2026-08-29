@@ -20,6 +20,27 @@ import (
 
 const maxClientActivityFutureSkew = 5 * time.Minute
 
+// clientActivityOccurredAtUTCKeyExpression keeps the nanosecond-preserving,
+// fixed-width ordering used by task due dates while normalizing RFC 3339 zone
+// offsets to UTC. SQLite's date functions only retain millisecond fractions,
+// so the fractional digits must be padded from the original text separately.
+const clientActivityOccurredAtUTCKeyExpression = `(strftime('%Y-%m-%dT%H:%M:%S', client_activities.occurred_at) || '.' || substr(
+	(CASE
+		WHEN substr(client_activities.occurred_at, 20, 1) = '.'
+		THEN substr(
+			client_activities.occurred_at,
+			21,
+			length(client_activities.occurred_at) - CASE
+				WHEN substr(client_activities.occurred_at, -1, 1) = 'Z' THEN 21
+				ELSE 26
+			END
+		)
+		ELSE ''
+	END) || '000000000',
+	1,
+	9
+))`
+
 var validClientActivityKinds = map[string]struct{}{
 	"note": {}, "meeting": {}, "system_reference": {},
 }
@@ -124,7 +145,7 @@ func (a *API) listClientActivities(c *gin.Context) {
 			Select(clientActivitySelectColumns).
 			Joins("JOIN actors created_by ON created_by.id = client_activities.created_by_actor_id").
 			Joins("JOIN clients ON clients.id = client_activities.client_id").
-			Order("client_activities.occurred_at DESC").
+			Order(clientActivityOccurredAtUTCKeyExpression + " DESC").
 			Order("client_activities.id ASC").
 			Offset((page - 1) * pageSize).
 			Limit(pageSize).

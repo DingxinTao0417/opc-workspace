@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v30（2026-08-29）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v30 只增加 `task_submissions.origin` 与父任务推进规则，同样不改变该桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）。schema v12–v29 的业务事实均不改变 Tauri 桌面生命周期契约；schema v30/v31 分别扩展 Task Submission 与 Client Activity 来源，同样不改变该桌面生命周期契约；schema v27 的 `artifacts/avatars/` 复用既有 Artifact root 接线。桌面基座、共享受控文件运行目录接线和 Sidecar Focus/Reminder 生命周期已实现；完整异常恢复、原生通知、系统集成和发布闭环未完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.14](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v30。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 只增加 `task_submissions.origin` 与父任务推进规则，不改变 Project 表或 API 契约。项目级 Focus 读取复用既有 Task/Session 关系，不改写 Project/Focus 表，也不新增迁移。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束。项目级 Focus 读取复用既有 Task/Session 关系，不改写 Project/Focus 表，也不新增迁移。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内任务搜索/状态/优先级/类型/标签/排期筛选及服务端分页、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、显式 follow-up、Task 阻塞、Task 临期、Project 完成节点→Inbox，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史已实现，模块仍为**部分完成**；内嵌 Assignment/Submission、财务和其他真实里程碑尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内任务搜索/状态/优先级/类型/标签/排期筛选及服务端分页、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up、Task 阻塞、Task 临期、Project 完成节点→Inbox，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史已实现，模块仍为**部分完成**；内嵌 Assignment/Submission、财务和其他真实里程碑尚未交付。
 
 ## 定位与边界
 
@@ -22,7 +22,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已实现
 
-- SQLite schema v30 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`；v23–v25 新增显式 follow-up Artifact、Task 阻塞与 Task 临期→Inbox；v28 新增 Project 完成周期来源、不可变快照和删除协调；v29 增加版本化存储阈值设置；v30 只增加 `task_submissions.origin` 与父任务推进规则，不改变 Project 表契约。项目级 Focus 读取没有新增结构，不改写已发布迁移或创建 demo 数据。
+- SQLite schema v31 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`；v23–v25 新增显式 follow-up Artifact、Task 阻塞与 Task 临期→Inbox；v28 新增 Project 完成周期来源、不可变快照和删除协调；v29 增加版本化存储阈值设置；v30 增加 `task_submissions.origin` 与父任务推进规则；v31 只给 Project Workflow Event→Client 系统活动来源增加部分唯一索引，不改变 Project 表契约或创建历史活动。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
 - 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
@@ -38,6 +38,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 新建任务和任务详情已接项目选择器；任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
 - 归档项目拒绝新建任务关联或把其他任务改入，返回 `409 PROJECT_ARCHIVED`；既有关联任务仍可编辑且保持原关联。归档转换进行中时，详情页的新建任务入口会禁用。
 - 项目创建、资料编辑、`start/pause/resume/complete/reopen/archive/restore` 和永久删除会在同一数据库事务追加 `project_*` Workflow Event，记录内置 owner、请求 ID、时间及前后项目快照；事件写入失败时整个项目命令回滚，创建幂等重放不会重复追加事件。
+- complete/reopen 若事件发生时 Project 有 `client_id`，会在同一事务以对应 Workflow Event ID 向该 Client 写入一条只读 `system_reference`；无 Client 不投影，任一 Client Activity 或既有完成 Inbox 投影失败都会回滚 Project 状态与事件。
 - `GET /api/v1/projects/:id/events` 按 `created_at / command_seq / id` 稳定倒序分页，返回当前 Project `ETag` 和 `meta.project_version`。项目详情默认读取首批记录，展示状态变化或资料变更字段，并提供独立加载、空、错误重试和“加载更早”状态。
 - 项目详情支持人工笔记的幂等创建、稳定分页、版本化编辑、带原因软删除及删除历史查看；记录人固定为本地 owner。每次创建、编辑或软删除都由数据库 trigger 原子递增 Project 聚合版本，归档项目只读。
 - 项目详情支持受控附件上传、稳定分页、按需下载、完整性状态、带原因软删除和删除历史；上传强制 metadata-first 严格 multipart，文件非空且最多 50 MiB，完整请求最多 100 MiB。创建/删除使用 Project `If-Match` 与可选幂等键，归档项目只读。
@@ -86,6 +87,13 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 2. 每条记录显示行为、发生时间和 owner，并在生命周期变化时显示前后状态，在资料编辑时只列出发生变化的字段名称，不直接展开完整快照。
 3. 超过一页时可按稳定倒序加载更早记录；读取失败只影响时间线区，可独立重试，不阻断任务、状态和资料操作。
 
+### 让关联客户看到项目状态事实
+
+1. Project complete/reopen 先完成状态门禁并生成不可变 Project Workflow Event；若当时存在 `client_id`，Sidecar 在同一事务创建 Client 系统活动。
+2. 活动标题保存事件时 Project 名称和“已完成/已重新打开”，来源身份固定为 Workflow Event ID，创建者为内置 system，body 为空；一个事件最多一条。
+3. Project 后续改绑或解除 Client 不搬迁已经发生的活动；新的 reopen/complete 只投影到各自事件发生时的关联 Client。迁移和启动不回填历史 Project Event。
+4. Client 时间线隐藏内部 event ID，并明确标为项目生命周期系统只读；该事实不代表客户回访、邮件或任何外部通知。
+
 ### 记录项目笔记
 
 1. 非归档项目可填写 1–200 字符标题、1–10,000 字符正文和不晚于当前容差的 RFC 3339 发生时间；同一次失败重试复用 `Idempotency-Key`。
@@ -127,12 +135,12 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v30 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存受控附件事实。附件新增/软删除通过 trigger 递增 Project 聚合版本，删除墓碑在父项目删除后仍保留；v23–v29 不改变这些 Project 表字段，v30 也只涉及 `task_submissions.origin` 与父任务推进，不改变这些字段。
+- 当前 schema v31 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存受控附件事实。附件新增/软删除通过 trigger 递增 Project 聚合版本，删除墓碑在父项目删除后仍保留；v30/v31 分别只扩展 Task Submission 和 Client Activity 来源契约，不改变这些 Project 字段。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
 - 项目级 Focus 报告和历史同样不是 Project 表字段：服务端只读 JOIN `focus_sessions`、`focus_session_intervals`、`tasks` 和现有标签关系，不增加 schema migration，也不复制 Project 快照。
-- 项目事件保存在通用 `workflow_events`，`aggregate_type='project'`、`aggregate_id=Project.id`；action 为 `project_created/project_updated/project_started/project_paused/project_resumed/project_completed/project_reopened/project_archived/project_restored/project_deleted`。事件追加后受既有数据库 trigger 保护，不能更新或删除。
+- 项目事件保存在通用 `workflow_events`，`aggregate_type='project'`、`aggregate_id=Project.id`；action 为 `project_created/project_updated/project_started/project_paused/project_resumed/project_completed/project_reopened/project_archived/project_restored/project_deleted`。事件追加后受既有数据库 trigger 保护，不能更新或删除。complete/reopen 的 Client 系统活动只引用事件 ID 作为稳定来源，不复制或替代 Project 当前状态。
 
 ### 当前 API
 
@@ -205,7 +213,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 | 模块      | 当前与后续协作方式                                                                                                                                                                                                           |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 任务      | 当前已支持项目选择、项目名展示、项目任务树/平铺列表、项目内搜索/状态/优先级/类型/标签/排期筛选与服务端分页、Task 父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；内嵌 D2 写控件不在 Project 复制。 |
-| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取、人工活动时间线、受控附件和 person 显式关联；外部活动来源仍待实现。                                |
+| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取、人工活动时间线、Project complete/reopen 只读系统活动、受控附件和 person 显式关联；其他外部来源仍待实现。 |
 | 收件箱    | 显式 follow-up Task Artifact、Task 阻塞/临期和 Project 完成节点已投影；完成事项携带不可变 Project 名称、时间、版本和未结任务数快照，并可直达项目。                                                                           |
 | Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                                               |
 | 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目详情通过可选 `project_id` 按 Task 当前归属读取 completed-only 报告和终态历史，不复制 Session 或 Project 事实。        |
@@ -216,10 +224,10 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v30 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期与 Project 完成 Inbox 来源协调；v30 只增加 `task_submissions.origin` 与父任务推进规则，不改变上述 Project 表契约。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v31 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31 只扩展 Client Activity 来源唯一约束，不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（当前纵切已实现）**：项目选择、串行分页拉全项目选项、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；大数据量性能仍待专项验证。
-4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。
+4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件和显式 contact 关联已接通；邮件/日历等其他来源、回访和财务仍待实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
@@ -238,6 +246,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 任务/发票/客户聚合事实变化会使旧项目版本失效；归档项目不能接受新的任务关联，既有关联任务编辑不被误拒绝。
 - 列表和详情具备加载、空、错误和重试状态。
 - 项目创建、资料修改、状态流转和删除各追加一次不可变事件；事件失败回滚项目写入，创建幂等重放不重复事件。
+- 有 Client 的 complete/reopen 各产生一条来源唯一的只读 Client Activity；无 Client、旧版本或失败事务不产生孤立活动，改绑不移动历史，Client 聚合版本和最近动态随成功投影更新。
 - 笔记创建可幂等重放且不重复写入；编辑与删除使用笔记版本，软删除隐藏正文并保留原因；归档项目拒绝笔记写入。
 - 笔记新增、编辑和删除分别只递增一次 Project 聚合版本；旧 Project 并发视图因此失效。
 - 项目产出只返回所属 Task Artifact，稳定分页、默认排除删除项、显式历史可见，且不泄漏正文；来源 Task/Submission 与 Project 聚合版本保持一致。
@@ -252,7 +261,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 完整模块仍待验收
 
-- Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；外部活动来源、回访与财务不属于已交付客户纵切。
+- Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；除 Project 状态外的其他活动来源、回访与财务不属于已交付客户纵切。
 - 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。项目选项超过 100 条仍通过串行分页避免截断；大数据量性能仍待验收。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
 - 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出、Task 阻塞、Task 临期与 Project 完成投影另覆盖稳定事件键、重复完成周期、事务一致性、来源上下文、活动删除阻止、归档后来源删除协调与快照保留。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。

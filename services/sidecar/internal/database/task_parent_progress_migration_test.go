@@ -34,8 +34,8 @@ func TestTaskParentProgressMigrationAddsSubmissionOriginWithoutDestructiveGate(t
 		t.Fatalf("apply non-destructive v30 migration: %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 30 {
-		t.Fatalf("v29 to v30 migration store=%d gate=%#v", store.SchemaVersion, gate)
+	if gate != nil || store.SchemaVersion != 31 {
+		t.Fatalf("v29 to latest migration store=%d gate=%#v", store.SchemaVersion, gate)
 	}
 
 	var legacyOrigin string

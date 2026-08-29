@@ -10,15 +10,15 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产 Sidecar 动态端口握手、启动期随机会话令牌、健康检查、退出 drain/checkpoint 与兜底清理；shutdown 已持有子进程时，ready 超时不会伪造 exited 状态或抢走清理职责
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v30、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总
+- SQLite schema v31、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
-- 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联，以及人工备注/会议活动的幂等创建、稳定分页、版本化编辑与带原因软删除已接真实 API
+- 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联、人工备注/会议活动，以及关联 Project 完成/重新打开时生成的只读系统活动已接真实 API
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
-- 项目活动时间线：创建、资料编辑、七种生命周期转换与永久删除同事务追加不可变事件；详情稳定分页展示 owner、时间、状态或资料字段变化，创建幂等重放不重复事件
+- 项目活动时间线：创建、资料编辑、七种生命周期转换与永久删除同事务追加不可变事件；详情稳定分页展示 owner、时间、状态或资料字段变化，创建幂等重放不重复事件；complete/reopen 还会把事件发生当下的关联客户投影为只读本地活动，后续改绑不搬迁历史
 - T-18D D2 产出验收纵切：新建任务和符合条件的任务编辑可选择 `review_policy = manual`；任务详情支持摘要及文本、链接、结构化 JSON、文件混合提交，owner 接受或要求返工，并分页查看带 `manual/child_rollup` 来源的 Submission/Artifact 历史；系统汇总仍必须由 owner 验收后才能完成
 - 受控文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`avatars/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。Task/Client/Project 文件继续位于 `objects/`，工作区头像位于 `avatars/`；提交事务报错只清除数据库可证明无引用的文件，模糊 COMMIT 留给 reconcile
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
@@ -37,7 +37,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.14](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；Project complete/reopen 已能向事件发生当下的关联 Client 投影只读系统活动，但邮件、日历、客户回访等外部来源仍未接入。备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、其他客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.15](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.14）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.15）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -328,7 +328,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v30；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key，v30 非破坏性增加 `task_submissions.origin`、保留既有提交为 manual 并约束 system child_rollup；迁移和启动不扫描补写历史父任务，也不创建 demo 数据。后续从 `031_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v31；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v22 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置/保存视图及 Project 扩展；v23–v26 增加来源保护，v27 新增受控 Workspace Avatar，v28 新增 Project 完成节点 Inbox 来源、稳定周期键和父项目删除协调，v29 在受保护回滚点后扩展 `app_settings` 的 `storage` key，v30 非破坏性增加 `task_submissions.origin`、保留既有提交为 manual 并约束 system child_rollup，v31 为 Project Workflow Event→Client system reference 建立来源唯一约束；两项投影都不在迁移或启动时回填历史，也不创建 demo 数据。后续从 `032_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -338,4 +338,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.14](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、父任务有门禁自动待验收、六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查、项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史，以及 Today 逾期/未来 24 小时临期快捷筛选；明确未交付 Focus 原生反馈、内容日历、客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.15](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、父任务有门禁自动待验收、六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、Project complete/reopen→Client 只读系统活动、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查、项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史，以及 Today 逾期/未来 24 小时临期快捷筛选；明确未交付 Focus 原生反馈、内容日历、其他客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

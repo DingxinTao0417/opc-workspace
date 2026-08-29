@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v30（2026-08-29）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、仅手动 `POST /api/v1/backups` 的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但手动备份容量准入拒绝不投影通用 `backup:create` incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查与全局启动故障恢复页 v1 也已交付；数据库打开前备份选择/实时恢复进度、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.14](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -172,7 +172,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v30：
+当前 schema v31：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -181,7 +181,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实；schema v30 以非破坏性迁移给 `task_submissions` 增加 `origin=manual/child_rollup`，既有行默认 manual，并用 trigger 约束系统汇总的 Actor、inferred 状态、来源不可变及零 Artifact。均不创建附件/demo 数据。后续迁移从 `031_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实；schema v30 以非破坏性迁移给 `task_submissions` 增加 `origin=manual/child_rollup`；schema v31 以非破坏性部分唯一索引约束 `project_workflow_event` Client Activity 来源。均不创建附件/demo 数据，也不回填历史父任务或 Project 活动。后续迁移从 `032_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -201,7 +201,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `031_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。schema v30 不声明 destructive，也不在迁移或启动时扫描/补写历史父任务；父任务自动协调只由迁移后的相关写命令触发。
+新增 schema 只能从 `032_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。schema v30/v31 都不声明 destructive，也不在迁移或启动时扫描/补写历史父任务或 Project 活动；两类协调只由迁移后的相关写命令触发。
 
 ## v0.1 备份/恢复目标与当前进度
 
@@ -237,7 +237,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v30 的完整固定表/列清单与标量行；`task_submissions.origin` 也属于严格列契约，旧 schema v29 包不会伪装为同 schema 导入。`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor，任何已有业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v31 的完整固定表/列清单与标量行；`task_submissions.origin` 属于严格列契约，Client Activity 来源唯一索引也在导入事务中生效，旧 schema 包不会伪装为同 schema 导入。`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor，任何已有业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
 
 正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标 UUID/冲突映射仍待独立设计。
 
@@ -319,6 +319,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] schema v28 嵌入迁移、v27→v28 Project 完成来源、不可变快照和父删除协调已由迁移与 API 测试覆盖。
 - [x] schema v29 破坏性迁移闸门、v28 设置事实保留、`storage` key、Actor/key/硬删除/头像引用 guards 重建，以及 1–100 GiB 阈值 API/扫描/UI 已由定向测试覆盖。
 - [x] schema v30 非破坏性迁移、v29 Submission 数据保留并默认 manual、origin/system/inferred/Artifact 约束、失败回滚和外键检查已由定向迁移测试覆盖；迁移/启动不回填历史父任务。
+- [x] schema v31 非破坏性迁移保留 v30 数据，只为 Project Workflow Event→Client system reference 增加来源唯一约束；迁移/启动不回填历史 Project 活动。
 
 ### 仍未实现
 
@@ -350,6 +351,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [schema v26 系统维护 Inbox 投影迁移](../../services/sidecar/internal/database/migrations/026_system_maintenance_inbox_projection.sql)
 - [schema v29 存储设置迁移](../../services/sidecar/internal/database/migrations/029_storage_settings.sql)
 - [schema v30 父任务推进迁移](../../services/sidecar/internal/database/migrations/030_task_parent_progress.sql)
+- [schema v31 Project→Client 活动来源迁移](../../services/sidecar/internal/database/migrations/031_client_project_activity_projection.sql)
 - [schema v27 工作区头像迁移](../../services/sidecar/internal/database/migrations/027_workspace_avatar.sql)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)

@@ -3294,6 +3294,13 @@ export function useTransitionProject() {
     onSuccess: async (project) => {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      }
     },
   });
 }
