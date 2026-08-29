@@ -181,41 +181,41 @@
 
 ### app_settings
 
-| 字段                | 用途                                                       |
-| ------------------- | ---------------------------------------------------------- |
+| 字段                | 用途                                                           |
+| ------------------- | -------------------------------------------------------------- |
 | key                 | 模块化稳定 key：workspace、general、appearance、focus、storage |
-| value_json          | 经服务端 schema 清洗的非敏感值                             |
-| schema_version      | 当前固定为 1；未知版本不能被旧 Sidecar 覆盖                |
-| version             | 乐观并发版本                                               |
-| updated_by_actor_id | 修改者；交互设置通常为 owner                               |
-| updated_at          | UTC 更新时间                                               |
+| value_json          | 经服务端 schema 清洗的非敏感值                                 |
+| schema_version      | 当前固定为 1；未知版本不能被旧 Sidecar 覆盖                    |
+| version             | 乐观并发版本                                                   |
+| updated_by_actor_id | 修改者；交互设置通常为 owner                                   |
+| updated_at          | UTC 更新时间                                                   |
 
 设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行；schema v29 只扩展允许的 storage key，不写默认行。缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
 
 ### API
 
-| 方法与路径                          | 用途                                                                                                            |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| GET /api/v1/settings                | **已实现**：按稳定顺序返回五个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                        |
-| PATCH /api/v1/settings              | **已实现**：原子更新 1–5 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
-| GET /api/v1/diagnostics/storage     | **已实现**：按物理卷去重后手动检查三个固定逻辑位置，返回已保存阈值、容量、状态与 `shared_volume`；不返回卷 ID、路径、盘符或探测错误 |
-| POST /api/v1/settings/avatar        | **已实现**：严格 multipart replace/remove；头像文件与全部设置更新共同成功或失败，通用 PATCH 不可改头像引用      |
-| GET /api/v1/settings/avatar/content | **已实现**：鉴权读取当前头像，复验 MIME/size/SHA-256，缺失或篡改拒绝输出                                        |
-| GET / POST /api/v1/actors           | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
-| GET / PATCH /api/v1/actors/:id      | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
-| GET / POST /api/v1/backups          | **已实现**：列出本地包；手动创建在双锁内先重放幂等结果，否则按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。空间不足返回 507，容量无法确认返回 503，拒绝无副作用且不投影 generic incident；通过后才完整创建并校验 SQLite+Artifact 备份 |
-| POST /api/v1/backups/:id/verify     | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                                |
-| POST /api/v1/backups/:id/drill      | **已实现**：在隔离临时根复制并打开/迁移数据库、声明 Artifact store、逐文件验证后清理，不改当前数据              |
-| POST /api/v1/backups/:id/restore    | **已实现**：要求 `confirm=true`，重验目标、创建当前状态回滚包并挂起；下次 Sidecar 启动前原子替换和最终复验      |
-| DELETE /api/v1/backups/:id          | **已实现**：要求查询参数 `confirm=true`，原子移入隐藏删除态后永久清理；损坏包可删，不安全文件系统项拒绝         |
-| GET /api/v1/exports/business-data   | **已实现**：下载 format v1 单事务业务白名单快照；文件仅元数据，排除凭据、绝对路径和运行维护表                   |
-| GET /api/v1/exports/business-package | **已实现**：下载 format v1 含文件 ZIP；manifest/业务 JSON/活动受控文件完整生成并逐项校验，失败不返回部分包       |
-| POST /api/v1/imports/business-data/preview | **已实现**：strict 预检同 schema 无文件 JSON，返回表/总行数与空目标门禁                                   |
-| POST /api/v1/imports/business-data    | **已实现**：固定确认头、导入前回滚备份和维护写锁内原子应用                                                   |
-| POST /api/v1/imports/business-package/preview | **已实现**：strict 预检含文件 ZIP 的 manifest、业务 JSON、文件全集/哈希和空目标门禁                          |
-| POST /api/v1/imports/business-package | **已实现**：独立确认头、回滚备份、文件无覆盖发布、DB 提交前正文复验与失败补偿                                |
-| GET /api/v1/backups/restore-diagnostics | **已实现**：读取脱敏 pending/applied/failed/invalid 状态；设置页恢复重启门禁并支持重新检查                         |
-| GET /health                         | 提供真实 app、commit、API 和 schema 版本                                                                        |
+| 方法与路径                                    | 用途                                                                                                                                                                                                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET /api/v1/settings                          | **已实现**：按稳定顺序返回五个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                                                                                                                                                                                 |
+| PATCH /api/v1/settings                        | **已实现**：原子更新 1–5 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                                                                                                                                                                           |
+| GET /api/v1/diagnostics/storage               | **已实现**：按物理卷去重后手动检查三个固定逻辑位置，返回已保存阈值、容量、状态与 `shared_volume`；不返回卷 ID、路径、盘符或探测错误                                                                                                                                      |
+| POST /api/v1/settings/avatar                  | **已实现**：严格 multipart replace/remove；头像文件与全部设置更新共同成功或失败，通用 PATCH 不可改头像引用                                                                                                                                                               |
+| GET /api/v1/settings/avatar/content           | **已实现**：鉴权读取当前头像，复验 MIME/size/SHA-256，缺失或篡改拒绝输出                                                                                                                                                                                                 |
+| GET / POST /api/v1/actors                     | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                                                                                                                                                                           |
+| GET / PATCH /api/v1/actors/:id                | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用                                                                                                                                                          |
+| GET / POST /api/v1/backups                    | **已实现**：列出本地包；手动创建在双锁内先重放幂等结果，否则按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。空间不足返回 507，容量无法确认返回 503，拒绝无副作用且不投影 generic incident；通过后才完整创建并校验 SQLite+Artifact 备份 |
+| POST /api/v1/backups/:id/verify               | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                                                                                                                                                                                         |
+| POST /api/v1/backups/:id/drill                | **已实现**：在隔离临时根复制并打开/迁移数据库、声明 Artifact store、逐文件验证后清理，不改当前数据                                                                                                                                                                       |
+| POST /api/v1/backups/:id/restore              | **已实现**：要求 `confirm=true`，重验目标、创建当前状态回滚包并挂起；下次 Sidecar 启动前原子替换和最终复验                                                                                                                                                               |
+| DELETE /api/v1/backups/:id                    | **已实现**：要求查询参数 `confirm=true`，原子移入隐藏删除态后永久清理；损坏包可删，不安全文件系统项拒绝                                                                                                                                                                  |
+| GET /api/v1/exports/business-data             | **已实现**：下载 format v1 单事务业务白名单快照；文件仅元数据，排除凭据、绝对路径和运行维护表                                                                                                                                                                            |
+| GET /api/v1/exports/business-package          | **已实现**：下载 format v1 含文件 ZIP；manifest/业务 JSON/活动受控文件完整生成并逐项校验，失败不返回部分包                                                                                                                                                               |
+| POST /api/v1/imports/business-data/preview    | **已实现**：strict 预检同 schema 无文件 JSON，返回表/总行数与空目标门禁                                                                                                                                                                                                  |
+| POST /api/v1/imports/business-data            | **已实现**：固定确认头、导入前回滚备份和维护写锁内原子应用                                                                                                                                                                                                               |
+| POST /api/v1/imports/business-package/preview | **已实现**：strict 预检含文件 ZIP 的 manifest、业务 JSON、文件全集/哈希和空目标门禁                                                                                                                                                                                      |
+| POST /api/v1/imports/business-package         | **已实现**：独立确认头、回滚备份、文件无覆盖发布、DB 提交前正文复验与失败补偿                                                                                                                                                                                            |
+| GET /api/v1/backups/restore-diagnostics       | **已实现**：读取脱敏 pending/applied/failed/invalid 状态；设置页恢复重启门禁并支持重新检查                                                                                                                                                                               |
+| GET /health                                   | 提供真实 app、commit、API 和 schema 版本                                                                                                                                                                                                                                 |
 
 备份、隔离恢复演练和实际恢复由数据管理 API 提供，设置页只通过 Query/Mutation 展示服务端返回事实，不建立第二份备份状态。恢复计划成功后，设置页调用桌面 `restart_application` command；该命令不接受业务参数，也不绕过 Sidecar 的 pending 恢复协议。浏览器开发模式明确降级为手动重启，Agent Adapter 继续由本地 Agent 模块负责。
 

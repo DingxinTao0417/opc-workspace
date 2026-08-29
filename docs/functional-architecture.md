@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.42
+> 文档版本：2.43
 > 日期：2026-08-29
-> 依据：[PRD v9.19](opc-workspace-PRD.md)
+> 依据：[PRD v9.20](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v31
 
-> 2.42 说明：内置 Sidecar 生命周期改为 generation-aware 有界恢复：已启动 generation 只有收到真实 `Terminated` 才按 500 ms、2 s 最多重拉两次，当前 generation 连续 Ready 30 秒后重置预算；每代生成新令牌并重新请求动态端口，前端在非 ready 或 generation 改变时清除运行期连接与 TanStack Query。Go 受管模式以 `OPC_EXIT_ON_STDIN_CLOSE=true` 响应父管道 EOF，并在 pending restore、迁移和 SQLite open 前获取数据库父目录固定 OS 独占运行锁。T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收；app/API/schema 不变且无迁移。
+> 2.43 说明：根级质量门禁拆为两个明确层次。`pnpm check:source` 不依赖 Rust 链接器，统一执行 Prettier、Go/Rust 格式、文档本地链接与机器路径检查、Web 类型/全量测试/生产构建，以及 Go 无缓存测试/vet/Sidecar 构建；`pnpm check` 在其后追加 Tauri `cargo check` 与 Rust 测试。当前 Windows 主机的源码门禁通过，完整桌面链接仍受缺少 MSVC `link.exe` 和 Windows SDK 限制。app/API/schema 不变且无迁移。
 
 ## 1. 目的
 
@@ -59,6 +59,7 @@
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
 - SQLite 当前为 schema v31：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`；schema v30 非破坏性增加 `task_submissions.origin` 并约束 system child_rollup；schema v31 为 Project Workflow Event→Client system reference 增加来源唯一约束。v30/v31 都不在迁移或启动时回填历史业务事实，也不创建 demo 数据。
+- 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
 - 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。仅手动 `POST /api/v1/backups` 在维护写锁与备份互斥锁内先完成幂等重放查找，再于任何 staging/`VACUUM INTO` 前按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；精确等于需求允许继续。空间不足/容量无法确认分别返回 507/503，拒绝无 staging、新包、业务变化或 generic `backup:create` incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
@@ -502,5 +503,6 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 - Project→Inbox→Task 的自动化金链不等于全部人工端到端浏览器验收；真实浏览器/WebView 的深链返回、弹层焦点、窄屏及 1,000/10,000 条项目/任务和 Inbox 长列表性能仍须专项完成。
 - 受管 Sidecar 状态只使用 `starting / restarting / ready / error` 并携带 generation；有界重启、30 秒预算重置、每代新 token/动态端口申请、非 ready 查询清理、真实 `Terminated` 门禁、父管道 EOF、数据库运行锁、安全应用重启和并发 shutdown 共享 stop 均已编写测试并完成源码静态复核；本机仍未执行 Rust 测试。
 - 上述自动化证据不等于真实 Tauri/Sidecar 父进程崩溃、OS 进程树、三平台或安装包验收；当前没有 Job Object、进程组或孙进程治理，hard-hung orphan 只会被数据库运行锁阻止，不会被自动回收。
+- 根 `pnpm check:source` 必须覆盖格式、文档、Web 类型/测试/构建与 Go 无缓存测试/vet/Sidecar 构建；根 `pnpm check` 必须在此基础上继续执行 Rust/Tauri 检查和 Rust 测试。任一层失败都不得以较窄的定向命令替代为“完整门禁通过”。
 - 加载、成功、空、错误、重试、禁用和不可用状态均有真实 UI。
 - 页面、API、数据迁移和验收测试同时交付后，模块才可从“骨架/部分完成”升级。

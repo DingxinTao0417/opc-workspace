@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.19
+> **一人公司操作系统** · PRD v9.20
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v31
 
-> **v9.19 更新说明**：交付内置 Sidecar 的 generation-aware 有界自动恢复。已启动 generation 只有真实 `Terminated` 才按 500 ms、2 s 最多重拉两次，当前 generation 连续 Ready 30 秒后重置预算；外部模式、显式 shutdown、事件流关闭但无 `Terminated` 不自动重拉。每代生成新 token 并通过端口 `0` 重新请求动态 port（端口值允许被 OS 复用），React 在非 ready 时清除运行期连接与 TanStack Query，generation 改变补偿漏过的 `restarting`。Tauri 为内置模式注入 `OPC_EXIT_ON_STDIN_CLOSE=true`，父管道 EOF 触发 Go 优雅退出；外部/开发默认 false。Sidecar 在 pending restore、迁移、SQLite open 前取得数据库父目录固定 `.opc-sidecar-run.lock` OS 独占锁，冲突立即失败且不接触数据库。安全应用重启要求受管 child code 0 且无 signal；尚未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试；并发 shutdown 共享一次 stop。T-02 仍部分完成：真实父崩溃/进程树、三平台与安装包未验收，没有 Job Object、进程组或孙进程治理，hard-hung orphan 只被运行锁挡住而不会自动回收。app v0.1.0 / API v1 / SQLite schema v31 不变，无 migration。
+> **v9.20 更新说明**：完成 T-20 根级质量门禁脚本。`pnpm check:source` 作为不依赖 Rust 链接器的源码门禁，统一执行 Prettier、全部 Go/Rust 格式检查、Markdown 本地链接/机器工作区路径/冲突标记检查、Web 类型检查/全量测试/生产构建，以及 Go 无缓存测试/vet/Sidecar 构建；`pnpm check` 在其后继续执行 Tauri `cargo check` 和 Rust 测试。`pnpm test` 也补齐 Web 与 Rust 测试，Go 默认禁用测试缓存。当前 Windows 主机源码门禁通过；缺少 MSVC `link.exe` 与 Windows SDK，故完整桌面链接、Rust 测试、安装包与三平台验收仍未通过。app v0.1.0 / API v1 / SQLite schema v31 不变，无 migration。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -1827,7 +1827,7 @@ pnpm dev
 | T-12 专注设置与全局计时              | Core+D1+D2a+Project+D2b 分析完成 | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1/D2b：终态历史分页、7/30 天/本月/最多 93 天自定义本地日趋势、Streak、项目/当前标签分布、DST 安全小时分布/最佳时段与周几×小时二维热力图；D2a/Project：Task 详情按需记录与 Project 详情 7/30 天/月度分析及终态历史已交付；通知/托盘/DND 延后                                                                                                                                                                                     |
 | T-13 命令面板与基础反馈              | 核心搜索、诊断与恢复反馈完成     | WebView 快捷键、已交付页面命令、Task/Project/Client/活动 Inbox 统一本地搜索、稳定详情路由、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护、加载/错误/重试/空状态、非敏感最近使用/404 资源清理、脱敏运行诊断/诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、打开日志目录、WebView→Sidecar request ID、全局渲染错误恢复与全局启动故障恢复页 v1；OS 全局快捷键和数据库打开前恢复进度待后续                                                                                                                                                      |
 | T-14 设置持久化                      | 核心闭环完成                     | schema v16 四模块严格设置 + schema v27 受控头像；原子 PATCH/multipart、乐观锁、Query committed、即时预览/取消、旧 Data URL 迁移和备份恢复已交付；空工作区同 schema 业务 JSON/含文件 ZIP 导入已交付，非空目标/跨 schema 冲突合并待开发                                                                                                                                                                                                                                                                                                           |
-| T-20 测试、构建与桌面验收            | 部分完成                         | Web/Go 自动测试与构建已接入；桌面完整编译和安装包验收受环境限制                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T-20 测试、构建与桌面验收            | 质量门禁完成，桌面验收部分完成   | 根级源码门禁已覆盖格式、文档、Web 类型/测试/构建、Go 无缓存测试/vet/Sidecar 构建；完整门禁再覆盖 Rust/Tauri。桌面完整链接、安装包与三平台验收受环境限制                                                                                                                                                                                                                                                                                                                                                                                         |
 | T-15 AI 助手                         | 未开始                           | 已登记本地模型 Adapter、只读上下文、安全存储和质量闸门，尚无代码                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | T-16 本地知识库                      | 未开始                           | 已登记导入、FTS 检索、引用与删除要求，尚无数据结构或页面                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | T-17 客户回访                        | 未开始                           | 已登记回访计划、到期提醒、结果记录和后续开发顺序，属于 v0.4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -2041,22 +2041,18 @@ pnpm dev
 
 #### 10.4.20 T-20 测试、构建与桌面验收
 
-- **开发流程**：定向测试通过后，依次运行格式检查、TypeScript、前端测试、Go 测试、Web 生产构建、Rust 格式/元数据和可行的 `cargo check`。正式构建先生成目标 triple Sidecar，再构建 Web 和 Tauri。
+- **开发流程**：实现期间先运行最窄的定向测试；提交前运行 `pnpm check:source`，在平台原生工具链完整时必须运行 `pnpm check`。正式构建先生成目标 triple Sidecar，再构建 Web 和 Tauri。源码门禁不能替代真实桌面链接、安装包和三平台验收。
 - **命令**：
 
 ```powershell
-pnpm format:check
-pnpm typecheck
-pnpm --filter @opc/web test
-pnpm test:go
-pnpm build:web
-pnpm check:tauri
+pnpm check:source
+pnpm check
 
 pnpm build:sidecar
 pnpm build:desktop
 ```
 
-- **当前实现方法**：前端使用 Vitest + Testing Library；Go 使用包级单元/集成测试和内存 SQLite；Rust 测试覆盖 ready 握手及运行状态。`build-sidecar.mjs` 注入应用版本、去除调试路径和符号，并按 Rust target triple 输出 Tauri `externalBin`。
+- **当前实现方法**：前端使用 Vitest + Testing Library；Go 使用包级单元/集成测试和内存 SQLite；Rust 测试覆盖 ready 握手及运行状态。根脚本以 `check:web / check:go / check:rust / check:docs` 提供可单独诊断的层次，`check:source` 组合所有不依赖原生链接的检查，`check` 再组合 Rust/Tauri 链接层。`gofmt.mjs` 递归检查或写入全部 Sidecar Go 文件；`check-docs.mjs` 检查根 README 与 `docs/**/*.md` 的本地链接、合并冲突标记和机器特定工作区路径。`build-sidecar.mjs` 注入应用版本、去除调试路径和符号，并按 Rust target triple 输出 Tauri `externalBin`。
 - **环境边界**：当前 Windows 主机可完成 Go 全量/vet、Rust 格式与测试源码静态复核，但缺少 MSVC `link.exe` 和 Windows SDK，因此 `cargo check` / `cargo test` 在依赖构建脚本链接阶段受阻。当前结果不能作为桌面完整编译、安装包或跨平台验收证据。
 
 ### 10.5 当前验证矩阵
@@ -2080,13 +2076,14 @@ pnpm build:desktop
 | Web 生产构建                       | 通过         | `pnpm build:web` 的 TypeScript 与 Vite 构建通过；当前主入口 minified 约 817 kB、gzip 约 222 kB，仍有非阻断的 500 kB chunk 警告，后续按页面拆包                                                                                                           |
 | 前端格式                           | 通过         | Web 范围 Prettier format check 通过                                                                                                                                                                                                                      |
 | Go 全量测试与静态检查              | 通过         | `go test ./... -count=1` 与 `go vet ./...` 均通过；不虚构未统计的用例总数                                                                                                                                                                                |
-| 文档链接/过期措辞/diff             | 通过         | 本次 v9.19 文档更新后 Prettier 与 `git diff --check` 通过                                                                                                                                                                                                |
+| 统一源码质量门禁                   | 通过         | `pnpm check:source` 已通过：Prettier、158 个 Go 文件和 Rust 格式、25 个 Markdown 文件/本地链接、Web 类型/测试/构建、Go 无缓存测试/vet 与当前平台 Sidecar 构建均纳入同一命令                                                                              |
+| 文档链接/机器路径/冲突标记         | 通过         | `pnpm check:docs` 检查根 README 与 `docs/**/*.md` 共 25 个文件；本次 v9.20 文档更新后另执行 Prettier 与 `git diff --check`                                                                                                                               |
 | Rust 格式与源码复核                | 部分通过     | `cargo fmt --check` 通过；generation、重启预算/退避、稳定重置、真实退出门禁、安全应用重启和并发 shutdown 的新增单元测试源码经独立静态复核 P0/P1=0，但当前主机未执行 Rust 测试                                                                            |
 | Rust / Tauri 链接                  | 环境受限     | 当前主机缺少 MSVC `link.exe` 和 Windows SDK；`cargo check` / `cargo test` 在链接阶段受阻，不能声明完整桌面链接通过                                                                                                                                       |
 | 浏览器渲染 / 窄屏视觉              | 本次未验收   | 本轮未执行真实浏览器/WebView 人工深链、键盘与焦点、Portal 窄屏浮层及 1,000/10,000 条 Project/Task/Inbox 性能验收                                                                                                                                         |
 | 桌面安装包与三平台验收             | 未执行       | 安装包、签名/公证、干净系统、性能和三平台矩阵仍未完成                                                                                                                                                                                                    |
 
-根 `pnpm check` 当前只执行 TypeScript、Go 测试、Web 构建和 `cargo check`，没有覆盖前端测试、Rust 单元测试或格式检查；在修正聚合脚本前不得把单次 `pnpm check` 视为完整质量门禁。
+根 `pnpm check` 现在严格组合 `check:source` 与 `check:rust`，覆盖格式、文档、Web 类型/测试/构建、Go 无缓存测试/vet/Sidecar 构建、Tauri `cargo check` 和 Rust 测试。当前主机可把 `pnpm check:source` 作为链接器无关的完整源码门禁；由于缺少 MSVC 链接环境，不能把它表述为完整 `pnpm check`、桌面构建或安装包验收通过。
 
 ### 10.6 已知限制与下一步顺序
 
@@ -2456,3 +2453,4 @@ pnpm build:desktop
 | v9.17    | 2026-08-29 | 交付任务相关五入口共用的服务端分页搜索 ProjectSelect：新建、详情编辑、项目筛选、批量移动及 Inbox 拆分固定每页 20 条，以 250 ms 防抖隔离关键词/页码/归档模式并传递 AbortSignal；按 ID 去重，以详情/当前页/名称快照保留跨页、失败和归档当前选择，只有显式清除才输出空值。移除 `getAllProjects`；Project 列表所有排序追加 `projects.id ASC`，Count 与 Scan 共用同一只读事务。组件与接线测试覆盖状态/客户上下文、加载/等待/空/错误/更多结果及完整键盘语义。真实浏览器、窄屏和 1,000/10,000 条性能待验收。API v1/app v0.1.0/schema v31 不变，无 migration。                                                                                                                                                                                                                                                                                                                               |
 | v9.18    | 2026-08-29 | 交付 Project Artifact→Inbox→Task 人工闭环：Artifact 列表返回 nullable follow-up 的 Inbox ID/version/status/policy/source deletion 与实时 required progress，响应继续使用 Project 数值 ETag 且 `meta.project_version` 保持 Project-only，Inbox 写版本由 `followup.inbox_item_version` 独立表达；项目产出上移到任务后，展示四种跟进状态及阻塞/待验收/取消并深链 Inbox；split 继承可信来源 Project 且可清除/改选，新增完成条件/person 本地责任提示，关系行打开共享 Task；命令面板与 Modal 共用叠层、滚动锁、最上层 Escape 和延迟焦点恢复；成功 Inbox mutation 失效来源 Project，split 另失效 Task/Today/Project。Go 金链覆盖 owner/person + manual owner reviewer、complete、submit/waiting_review、accept 和 automatic resolved/100%，前端另覆盖 person 本地责任提示与提交载荷。app v0.1.0/API v1/schema v31 不变，无 migration、无 AI/LLM/Agent；真实浏览器、窄屏和大数据量仍待验收。 |
 | v9.19    | 2026-08-29 | 交付 bundled Sidecar generation-aware 有界恢复：真实 Terminated 后按 500 ms/2 s 最多重启两次，当前代连续 Ready 30 秒重置预算；每代生成新 token 并重新请求动态 port，非 ready 清连接/TanStack Query，generation 变化补偿遗漏 restarting。受管 Go 通过 `OPC_EXIT_ON_STDIN_CLOSE=true` 响应父管道 EOF；DB 父目录固定运行锁在 restore/migration/open 前阻止第二进程触碰数据库；安全应用重启要求 child code 0/no signal，并发 shutdown 共享 stop。T-02 仍部分完成，真实父崩溃/进程树/三平台/安装包及 orphan/孙进程治理未验收或未实现。app v0.1.0/API v1/schema v31 不变，无 migration。                                                                                                                                                                                                                                                                                                   |
+| v9.20    | 2026-08-29 | 完成 T-20 根级质量门禁：`check:source` 统一 Prettier、全部 Go/Rust 格式、25 个 Markdown 文件与本地链接/机器路径/冲突标记、Web 类型/79 文件 524 项测试/生产构建、Go 无缓存测试/vet 和 Sidecar 构建；`check` 再执行 Tauri cargo check 与 Rust 测试，根 test 补齐 Web/Rust，Go 测试禁用缓存。当前 Windows 主机源码门禁通过，MSVC link.exe/Windows SDK 缺失仍阻断 Rust 链接、安装包和三平台验收。app v0.1.0/API v1/schema v31 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                                                                       |

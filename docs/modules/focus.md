@@ -168,18 +168,18 @@ stop 的分钟增量为 `floor(exact_seconds / 60) - applied_minutes`，因此�
 
 ## API、并发与幂等
 
-| 方法与路径                                | 当前行为                                                                                               |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `GET /api/v1/focus-sessions/active`       | 返回唯一未结束 Session 或 `session: null`，以及服务端时间基准；active 查询同时刷新心跳但不递增 version |
-| `POST /api/v1/focus-sessions`             | 创建并开始 Session；`task_id` 可空，`planned_seconds` 为 300–7200；支持创建快照幂等                    |
-| `POST /api/v1/focus-sessions/:id/pause`   | 要求 Session `If-Match`；关闭 active interval 并进入 paused                                            |
-| `POST /api/v1/focus-sessions/:id/resume`  | 要求 `If-Match`；从 paused 创建新 interval 并进入 active                                               |
-| `POST /api/v1/focus-sessions/:id/recover` | 要求 `If-Match`；body action 为三种恢复动作之一                                                        |
-| `POST /api/v1/focus-sessions/:id/stop`    | 要求 `If-Match`；支持幂等快照，完成 Session 并原子累计 Task 工时                                       |
-| `POST /api/v1/focus-sessions/:id/cancel`  | 要求 `If-Match`；支持幂等快照，取消且不累计 Task 工时                                                  |
+| 方法与路径                                | 当前行为                                                                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/focus-sessions/active`       | 返回唯一未结束 Session 或 `session: null`，以及服务端时间基准；active 查询同时刷新心跳但不递增 version                 |
+| `POST /api/v1/focus-sessions`             | 创建并开始 Session；`task_id` 可空，`planned_seconds` 为 300–7200；支持创建快照幂等                                    |
+| `POST /api/v1/focus-sessions/:id/pause`   | 要求 Session `If-Match`；关闭 active interval 并进入 paused                                                            |
+| `POST /api/v1/focus-sessions/:id/resume`  | 要求 `If-Match`；从 paused 创建新 interval 并进入 active                                                               |
+| `POST /api/v1/focus-sessions/:id/recover` | 要求 `If-Match`；body action 为三种恢复动作之一                                                                        |
+| `POST /api/v1/focus-sessions/:id/stop`    | 要求 `If-Match`；支持幂等快照，完成 Session 并原子累计 Task 工时                                                       |
+| `POST /api/v1/focus-sessions/:id/cancel`  | 要求 `If-Match`；支持幂等快照，取消且不累计 Task 工时                                                                  |
 | `GET /api/v1/focus-sessions`              | 终态历史；支持 `task_id/status/page/page_size` 及可选 canonical UUID `project_id`，按 `ended_at DESC, id ASC` 稳定分页 |
-| `GET /api/v1/stats/focus`                 | 1–93 个当地日的 completed-only 报告；支持显式 IANA 时区和可选 canonical UUID `project_id`              |
-| `GET /api/v1/stats/today?date=&timezone=` | `timezone` 接受 IANA 名称；按当地日边界聚合 completed interval overlap                                 |
+| `GET /api/v1/stats/focus`                 | 1–93 个当地日的 completed-only 报告；支持显式 IANA 时区和可选 canonical UUID `project_id`                              |
+| `GET /api/v1/stats/today?date=&timezone=` | `timezone` 接受 IANA 名称；按当地日边界聚合 completed interval overlap                                                 |
 
 所有 Session 响应使用：
 

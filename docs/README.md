@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。v9.19 交付内置 Sidecar 的 generation-aware 有界自动恢复：异常代际最多按 500 ms、2 s 重启两次，当前代连续 Ready 30 秒后恢复预算；每代生成新令牌并重新请求动态端口，React 在非 ready 或 generation 变化时清除旧连接和 TanStack Query。Go 受管模式还通过 `OPC_EXIT_ON_STDIN_CLOSE=true` 响应父管道 EOF，并在 pending restore、迁移、SQLite open 前取得数据库父目录固定运行锁。无 migration，app/API/schema 不变。T-02 仍部分完成：真实父崩溃/进程树、三平台和安装包尚未验收，hard-hung orphan 只被锁挡住而不会自动回收。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。v9.20 完成 T-20 根级质量门禁：`pnpm check:source` 统一覆盖格式、文档、Web 类型/测试/构建及 Go 无缓存测试/vet/Sidecar 构建，`pnpm check` 再增加 Rust/Tauri 链接检查与 Rust 测试。无 migration，app/API/schema 不变。当前 Windows 主机缺少 MSVC `link.exe` 和 Windows SDK，因此源码门禁可通过，但完整桌面链接、安装包和三平台验收仍受限。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.19）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.20）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
