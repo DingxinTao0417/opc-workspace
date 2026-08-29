@@ -1,9 +1,9 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.67
+> 文档版本：2.68
 > 日期：2026-08-29
-> 依据：[PRD v9.50](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v36
+> 依据：[PRD v9.51](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v37
 
 > 2.67 说明：路线图 R3 已将 `/roadmap` 接到本地 R2 API，显示真实季度/状态查询、关联项目深链与派生进度，并支持新建、归档恢复和加载/空/错误状态；编辑、拖拽与 Inbox/Reminder 投影仍未实现。2.66 的 Sidecar 数据/API 边界不变。
 
@@ -58,7 +58,7 @@
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema v36：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v31 增加来源 guards、受控头像、存储设置、父任务 rollup 与 Project→Client Activity；schema v32 为 Reminder 追加系列、重复规则、时区和 occurrence；schema v33 新增空的 Automation Rule/Run 表与约束；schema v34 新增空的代码所有 Agent Adapter 清单/诊断表；schema v35 新增 Client Followup 计划/终态事实；schema v36 新增空的路线图里程碑及项目关联。v30–v36 都不创建 demo 数据；Sidecar 只幂等登记默认禁用的 Automation 预设，Agent Adapter 必须由用户显式登记。
+- SQLite 当前为 schema v37：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v31 增加来源 guards、受控头像、存储设置、父任务 rollup 与 Project→Client Activity；schema v32 为 Reminder 追加系列、重复规则、时区和 occurrence；schema v33 新增空的 Automation Rule/Run 表与约束；schema v34 新增空的代码所有 Agent Adapter 清单/诊断表；schema v35 新增 Client Followup 计划/终态事实；schema v36 新增空的路线图里程碑及项目关联；schema v37 新增空的内容条目及准备任务关联。v30–v37 都不创建 demo 数据；Sidecar 只幂等登记默认禁用的 Automation 预设，Agent Adapter 必须由用户显式登记。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
 - 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。手工 `POST /api/v1/backups` 在幂等重放未命中后，迁移/导入/恢复内部链在各自不可逆边界前，统一按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；恢复另把目标包 pending 副本与 plan 上界加入同一次需求。精确等于需求允许继续；空间不足/容量无法确认分别以 507/503 或启动失败安全拒绝。拒绝无备份 staging、新回滚包、业务变化或 generic incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排通过容量准入后创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除。数据库打开前则由 Sidecar stdout 的固定阶段码经 Tauri 映射为恢复页进度，二者不复用 API 或泄露恢复包身份。

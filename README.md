@@ -10,7 +10,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期、复制脱敏摘要并下载白名单诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v36、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束，v32–v33 交付重复 Reminder 与受限预设自动化，v34 新增空的 Agent Adapter 诊断事实，v35 新增客户回访计划/终态安全数据契约，v36 新增路线图里程碑及项目关联的数据契约
+- SQLite schema v37、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v22 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置/保存视图及项目笔记/附件事实，v23–v26 追加来源投影约束，v27 交付受控工作区头像，v28 交付 Project 完成节点→Inbox 与删除协调，v29 交付版本化存储阈值设置，v30 为 Submission 增加来源并约束父任务系统汇总，v31 为 Project 生命周期→Client 活动来源增加唯一约束，v32–v33 交付重复 Reminder 与受限预设自动化，v34 新增空的 Agent Adapter 诊断事实，v35 新增客户回访计划/终态安全数据契约，v36 新增路线图里程碑及项目关联的数据契约，v37 新增内容条目及准备任务关联的数据契约
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
@@ -40,7 +40,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已交付代码所有 Adapter 登记与安全诊断，但 Runner/Run 尚未实现，平台隔离未验证前执行保持关闭。客户回访 C2–C5 已完成本地计划/终态、完成时原子下一次计划、到期 Inbox 投影、客户详情命令、Today 待办和 Inbox→客户详情入口；C6 已补齐跨浏览器时区和 DST 墙上时间转换、详情时间线状态/负责人/服务端逾期筛选、待回访责任的人员停用保护及停用客户的收口边界（既有计划可终态处理，不能续写新计划）。路线图 R2 已完成季度里程碑 CRUD、Project 关联、派生 Task 完成度、筛选、乐观锁、归档恢复、单事务重排及业务导入导出；R3 首个页面已接入季度浏览、新建、Project 跳转、归档恢复和完整反馈状态，编辑、拖拽和本地提醒仍待。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动阶段进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v36。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.50](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly 本地重复系列。v0.2 首个受限预设自动化纵切也已接通：Project 完成 Inbox、daily/weekly Reminder、设置预览/保存/启停、运行历史/重试、IANA/DST、离线折叠与导入导出可用，发票/Agent 预设保持 unavailable。本地 Agent 已交付代码所有 Adapter 登记与安全诊断，但 Runner/Run 尚未实现，平台隔离未验证前执行保持关闭。客户回访 C2–C5 已完成本地计划/终态、完成时原子下一次计划、到期 Inbox 投影、客户详情命令、Today 待办和 Inbox→客户详情入口；C6 已补齐跨浏览器时区和 DST 墙上时间转换、详情时间线状态/负责人/服务端逾期筛选、待回访责任的人员停用保护及停用客户的收口边界（既有计划可终态处理，不能续写新计划）。路线图 R2 已完成季度里程碑 CRUD、Project 关联、派生 Task 完成度、筛选、乐观锁、归档恢复、单事务重排及业务导入导出；R3 首个页面已接入季度浏览、新建、Project 跳转、归档恢复和完整反馈状态，编辑、拖拽和本地提醒仍待。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动阶段进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v37。T-02 仍部分完成：真实父进程崩溃、进程树、三平台和安装包尚未验收。[PRD v9.51](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -354,7 +354,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v36；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v31 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件及来源 guards；v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；v33 新增空的 Automation Rule/Run 表及稳定身份、事件/计划形状、去重、重试和不可变约束。迁移不创建 demo 数据或 Automation Run；五个默认禁用预设由 Sidecar 幂等登记。schema v34 新增空的代码所有 Agent Adapter 清单/诊断表且迁移不登记 Adapter；schema v35 新增无 demo 的 Client Followup 计划/终态数据契约；schema v36 新增无 demo 的 Roadmap Milestone/Project 关联数据契约；后续从 `037_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v37；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v31 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件及来源 guards；v32 为 Reminder 增加 daily/weekly 系列与 occurrence 约束；v33 新增空的 Automation Rule/Run 表及稳定身份、事件/计划形状、去重、重试和不可变约束。迁移不创建 demo 数据或 Automation Run；五个默认禁用预设由 Sidecar 幂等登记。schema v34 新增空的代码所有 Agent Adapter 清单/诊断表且迁移不登记 Adapter；schema v35 新增无 demo 的 Client Followup 计划/终态数据契约；schema v36 新增无 demo 的 Roadmap Milestone/Project 关联数据契约；schema v37 新增无 demo 的 Content Item/Task 关联和计划时区数据契约；后续从 `038_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`

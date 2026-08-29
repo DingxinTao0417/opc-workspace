@@ -30,6 +30,8 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "client_actor_links", OrderBy: "client_id, linked_at, id"},
 	{Name: "client_followups", OrderBy: "client_id, scheduled_at, id"},
 	{Name: "projects", OrderBy: "id"},
+	{Name: "content_items", OrderBy: "scheduled_at, manual_order, id"},
+	{Name: "content_item_tasks", OrderBy: "content_item_id, task_id"},
 	{Name: "roadmap_milestones", OrderBy: "year, quarter, manual_order, target_date, id"},
 	{Name: "roadmap_milestone_projects", OrderBy: "milestone_id, project_id"},
 	{Name: "project_notes", OrderBy: "project_id, occurred_at, id"},

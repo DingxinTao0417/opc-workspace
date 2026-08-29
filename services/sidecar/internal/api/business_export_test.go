@@ -80,6 +80,20 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 		t.Fatal(err)
 	}
 	task, _ := setupManualReviewTask(t, router)
+	if err := store.DB.Exec(`
+		INSERT INTO content_items(
+			id, title, platform, status, scheduled_at, scheduled_timezone, project_id,
+			manual_order, version, created_at, updated_at
+		) VALUES (
+			'018f0000-0000-7000-8000-000000001710', 'Exported content item', 'blog',
+			'scheduled', '2026-09-01T08:00:00Z', 'UTC', '018f0000-0000-7000-8000-000000001706',
+			10, 1, '2026-08-28T08:00:00Z', '2026-08-28T08:00:00Z'
+		);
+		INSERT INTO content_item_tasks(content_item_id, task_id, is_required, linked_at)
+		VALUES ('018f0000-0000-7000-8000-000000001710', ?, 1, '2026-08-28T08:00:00Z')
+	`, task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	uploaded := performMultipartRequest(
 		router,
 		"/api/v1/tasks/"+task.ID+"/submit-output",
@@ -184,6 +198,12 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if notes := tables["project_notes"]; len(notes.Rows) != 1 {
 		t.Fatalf("Project notes were not exported: %#v", notes)
+	}
+	if items := tables["content_items"]; len(items.Rows) != 1 {
+		t.Fatalf("Content item was not exported: %#v", items)
+	}
+	if links := tables["content_item_tasks"]; len(links.Rows) != 1 {
+		t.Fatalf("Content item task link was not exported: %#v", links)
 	}
 	if milestones := tables["roadmap_milestones"]; len(milestones.Rows) != 1 {
 		t.Fatalf("Roadmap milestone was not exported: %#v", milestones)
