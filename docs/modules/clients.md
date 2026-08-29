@@ -238,15 +238,15 @@ Client DELETE                     → link history cascade；person Actor 保留
 
 ## 与其他模块协作
 
-| 模块      | 当前协作方式                                                                                                    |
-| --------- | --------------------------------------------------------------------------------------------------------------- |
-| 项目      | 已实现 Project 可选关联、改绑、解除和列表筛选；Client 详情显式包含归档项目，从 Project 派生完整数量与分页列表。 |
-| 任务      | 客户相关工作仍应通过 Project 或未来 Inbox 落为 Task；Client 本身不拥有执行状态。                                |
-| Actor     | 联系人不会自动成为 person；owner 可显式关联已有 active person 或原子新建并关联。active 关联会阻止 person 停用。 |
-| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，来源上下文只深链回客户详情。    |
-| 发票/财务 | Invoice 强引用删除约束已生效；业务 API、发票详情和收入聚合仍属 v0.4。                                           |
-| 数据管理  | 客户附件复用受控 store；内部备份/演练/恢复包含 active objects，业务 JSON 仅导出元数据，不含文件正文。           |
-| 今日      | 尚未显示客户回访；已存在的客户活动只在客户列表/详情展示，不自动生成 Today 工作项。                              |
+| 模块      | 当前协作方式                                                                                                                                          |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 项目      | 已实现 Project 可选关联、改绑、解除和列表筛选；Client 详情显式包含归档项目，从 Project 派生完整数量与分页列表。                                       |
+| 任务      | 客户相关工作仍应通过 Project 或未来 Inbox 落为 Task；Client 本身不拥有执行状态。                                                                      |
+| Actor     | 联系人不会自动成为 person；owner 可显式关联已有 active person 或原子新建并关联。active 关联会阻止 person 停用。                                       |
+| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，来源上下文只深链回客户详情。                                          |
+| 发票/财务 | Invoice 强引用删除约束已生效；业务 API、发票详情和收入聚合仍属 v0.4。                                                                                 |
+| 数据管理  | 客户附件复用受控 store；内部备份/演练/恢复包含 active objects，业务 JSON 仅导出元数据，不含文件正文。                                                 |
+| 今日      | Today 通过受限 Client Followup 来源读取前五项真实到期回访及准确总数，并只深链客户详情；普通客户活动仍只在客户列表/详情展示，不自动生成 Today 工作项。 |
 
 总体依赖见[整体功能架构](../functional-architecture.md)。
 
@@ -254,7 +254,7 @@ Client DELETE                     → link history cascade；person Actor 保留
 
 1. **v0.1 客户事实层（已实现）**：schema v10、Go model、CRUD、校验、分页/搜索/状态筛选、快照幂等、乐观锁、项目数聚合和删除约束。
 2. **v0.1 前端纵切（已实现基础范围）**：列表、新建/编辑、基础详情、关联项目，以及覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选的共享 ClientSelect 已交付。选择器具备每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留、inactive 可见可选、加载/空/错误重试/更多提示和 combobox 键盘语义；真实浏览器/窄屏/大数据量专项仍待验收。
-3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、Project complete/reopen 只读系统活动、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；邮件/日历/回访等其他来源仍待实现，不接线上行为。
+3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、Project complete/reopen 只读系统活动、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；邮件/日历等其他外部来源仍待实现，不接线上行为。Client Followup 使用独立计划/终态与 Inbox 投影，不伪造成 Client Activity。
 4. **v0.1 Actor 显式关联（已实现）**：已有 person / 原子新建二选一、单 active contact、聚合乐观锁、幂等重放、带原因解除、不可变历史和本地责任语义提示。
 5. **v0.4 回访前置纵切（部分完成）**：本地回访计划/终态、API、到期 Inbox 投影、客户详情管理、Today 待办和 Inbox→客户详情入口已交付；发票和财务聚合仍待。第一版仍不自动对外发送。
 
@@ -262,7 +262,7 @@ Client DELETE                     → link history cascade；person Actor 保留
 
 当前自动化测试覆盖 schema v9→v10、v17→v18、v18→v19、v19→v20 与 v30→v31 数据保留、索引/约束/trigger/外键、Client CRUD/校验、分页/搜索/状态/排序、活动创建幂等、混合精度/offset 同秒时间顺序、跨页稳定性与真实最近动态、列表/详情/版本化编辑/软删除/删除历史/system reference 只读、Project complete/reopen 原子投影、无 Client、来源唯一、Event/Activity/Inbox 故障全回滚、Client 版本传播与改绑历史、附件严格上传/幂等/分页/下载完整性/软删/聚合硬删/崩溃恢复、已有/新建 person 关联、单 active contact、幂等/并发、带原因解除、Actor 停用保护与 Client 删除边界、聚合版本与最近活动传播、Project 关联传播、回访计划/终态/到期 Inbox 投影与 Invoice 删除冲突。Web 侧覆盖 Client、Activity、Attachment、Actor Link 和 Followup API 规范化/命令序列，回访创建与完成表单校验，以及项目状态系统活动的人类可读只读展示与缓存失效、ClientSelect 的分页搜索、查询键切换与卸载取消、跨页与失败选中保留、inactive、反馈状态、上一页/下一页、combobox 键盘交互和 Project/Task 三个消费入口；不记录或编造测试总数。
 
-以下仍不能据此宣称完成：ClientSelect 真实浏览器键盘/焦点/窄屏验收、1,000/10,000 条客户大数据量分页与搜索性能、邮件/日历等其他 Activity 来源、多联系人/自定义关系、回访的 Today/Inbox 反向流程、财务或任何线上互动。
+以下仍不能据此宣称完成：ClientSelect 真实浏览器键盘/焦点/窄屏验收、1,000/10,000 条客户大数据量分页与搜索性能、邮件/日历等其他 Activity 来源、多联系人/自定义关系、回访 Today/Inbox 深链的真实浏览器验收、财务或任何线上互动。
 
 ## 相关代码/PRD 链接
 

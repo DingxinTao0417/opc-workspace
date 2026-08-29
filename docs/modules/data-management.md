@@ -278,7 +278,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
 - [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；手动创建容量准入失败时展示可操作提示并保留 note 草稿，导入/恢复内部回滚容量失败时展示对应的安全退出提示，实际备份创建失败 Inbox Item 可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
 - [收件箱](inbox.md)：备份四类操作的实际操作性失败直接尽力投影；手动 `POST /backups` 的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不投影 generic `backup:create` incident。数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败和低空间先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误、路径或精确容量写成业务事件。`BACKUP_INVALID` 不投影。
-- [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
+- [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；schema v35 的 Client Followup 计划/终态同样已进入业务 JSON 与含文件 ZIP 的显式表白名单，导入仍只允许当前 schema 的空目标。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
 
 ## 验收状态
