@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）。Focus 结构仍由 schema v11 引入；schema v12–v29 不改 Focus 表契约，schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，schema v35 新增 Client Followup，同样不改 Focus 表或 API 契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付；原生桌面反馈仍属后续。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29）。Focus 结构仍由 schema v11 引入；后续迁移不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付。通用桌面托盘已接显示/隐藏/退出源码，但不读取 Focus 状态；专注控制、原生通知和勿扰仍属后续。
 
 ## 定位与边界
 
@@ -67,7 +67,7 @@
 
 ### 尚未实现：原生反馈与后续增强
 
-- 原生本地通知、托盘控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。
+- 原生本地通知、托盘专注状态/控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。通用托盘仅显示/隐藏窗口和退出，不改变 Session。
 - 长休息策略、白噪音和网站屏蔽。
 - Focus 参数已保存于版本化 SQLite `app_settings`；长休息和更高级的本地编排策略仍未实现。
 
@@ -231,7 +231,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Project 详情另以可选 `project_id` 按 Task 当前归属读取报告和终态历史，Session 不复制 Project 状态或历史归属。
 - [设置](settings.md)：committed 参数用于新 Session 与自动下一轮；draft/preview 不改写活动 Session。
 - [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，并可让“专注设置”直达 focus 模块；从命令结果直接绑定任务仍未交付。
-- [桌面平台](desktop-platform.md)：原生通知、托盘和系统勿扰仍待实现。
+- [桌面平台](desktop-platform.md)：通用托盘最小源码闭环已接；Focus 状态/动作、原生通知和系统勿扰仍待实现。
 - [数据管理](data-management.md)：备份/恢复必须同时覆盖 Session、interval、Task Focus 余数账本、Task 工时和事件。
 
 ## 分阶段实施状态

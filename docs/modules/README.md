@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.76](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.77](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -13,11 +13,11 @@
 - [收件箱工作编排](inbox.md)（人工受理、关系/Reminder、来源投影、拆分/自动解决及客户回访来源上下文已交付；split 继承但可清除/改选可信来源 Project，写入独立完成条件并明确 person 本地责任，关系行打开共享 Task；成功 mutation 失效来源 Project，split 另失效 Task/Today/Project。required 仍是显式独立关系事实；Agent 待开发）
 - [本地提醒](reminders.md)（T-11A3 一次性与每日/每周/工作日/每月本地 Reminder、启动补偿、跨 DST/月末递推和到期 Inbox 投影已交付；法定节假日/自定义规则与原生/远程通知待开发）
 - [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
-- [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；原生桌面反馈延后）
+- [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；通用托盘不改变 Focus，专注状态/动作与原生通知延后）
 - [设置](settings.md)（SQLite 偏好、草稿预览、受控工作区头像、Actor、数据、脱敏运行诊断/诊断包与关于入口）
 - [命令面板与搜索](command-search.md)（Task/Project/Client/活动 Inbox 统一本地搜索、可刷新详情直达、本地最近使用、运行诊断直达、全局渲染错误恢复及命令面板/新建任务 OS 快捷键已交付）
 - [数据、受控文件、备份与恢复](data-management.md)（受控文件 store、一致性备份恢复、启动后恢复结果诊断、数据库父目录运行锁、数据库打开前白名单恢复进度、全局启动故障恢复页 v1、故障 Inbox、桌面安全重启，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；启动前备份选择、非空目标/跨 schema 冲突合并仍待开发）
-- [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界自动重启、父管道 EOF 退出、前端连接/查询世代清理和并发安全 shutdown 已交付；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包待验收）
+- [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界恢复、父管道 EOF、前端世代清理、并发 shutdown 和托盘最小源码闭环已交付；T-02 仍部分完成，托盘原生链接、真实父崩溃/进程树、三平台与安装包待验收）
 
 ## v0.2 本地编排
 

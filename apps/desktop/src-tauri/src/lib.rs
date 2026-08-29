@@ -1,8 +1,10 @@
 mod desktop_log;
+mod desktop_tray;
 mod global_shortcuts;
 mod sidecar;
 
 use desktop_log::{DesktopEvent, DesktopLogger};
+use desktop_tray::{DesktopTrayState, hide_main_window_to_tray, install_desktop_tray};
 use global_shortcuts::{
     DesktopShortcutRegistry, desktop_shortcut_status, handle_global_shortcut,
     register_global_shortcuts,
@@ -32,6 +34,7 @@ pub fn run() {
         )
         .plugin(tauri_plugin_shell::init())
         .manage(sidecar)
+        .manage(DesktopTrayState::default())
         .manage(DesktopShortcutRegistry::default())
         .invoke_handler(tauri::generate_handler![
             sidecar_status,
@@ -47,6 +50,7 @@ pub fn run() {
                 .unwrap_or_else(|_| DesktopLogger::stderr_only());
             logger.event(DesktopEvent::AppSetupStarted);
             setup_sidecar.attach_logger(logger.clone());
+            install_desktop_tray(app);
             register_global_shortcuts(app.handle());
             initialize_sidecar(app.handle(), setup_sidecar.clone());
             logger.event(DesktopEvent::AppSetupCompleted);
@@ -56,6 +60,16 @@ pub fn run() {
         .expect("failed to build opc-workspace desktop application");
 
     app.run(|app_handle, event| {
+        if let tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::CloseRequested { api, .. },
+            ..
+        } = &event
+        {
+            if label == "main" && hide_main_window_to_tray(app_handle) {
+                api.prevent_close();
+            }
+        }
         if matches!(
             event,
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit

@@ -23,6 +23,11 @@ pub enum DesktopEvent {
     SidecarShutdownFinished,
     ApplicationRestartRequested,
     ApplicationExitRequested,
+    TrayReady,
+    TrayUnavailable,
+    MainWindowHiddenToTray,
+    MainWindowShownFromTray,
+    TrayExitRequested,
 }
 
 impl DesktopEvent {
@@ -39,6 +44,11 @@ impl DesktopEvent {
             Self::SidecarShutdownFinished => "sidecar_shutdown_finished",
             Self::ApplicationRestartRequested => "application_restart_requested",
             Self::ApplicationExitRequested => "application_exit_requested",
+            Self::TrayReady => "tray_ready",
+            Self::TrayUnavailable => "tray_unavailable",
+            Self::MainWindowHiddenToTray => "main_window_hidden_to_tray",
+            Self::MainWindowShownFromTray => "main_window_shown_from_tray",
+            Self::TrayExitRequested => "tray_exit_requested",
         }
     }
 }
@@ -218,6 +228,7 @@ mod tests {
         logger.event(DesktopEvent::AppSetupStarted);
         logger.event(DesktopEvent::SidecarStarting);
         logger.event(DesktopEvent::SidecarReady);
+        logger.event(DesktopEvent::TrayReady);
         logger.event(DesktopEvent::ApplicationExitRequested);
 
         let current = fs::read_to_string(dir.join(DESKTOP_LOG_NAME)).unwrap();
@@ -225,6 +236,7 @@ mod tests {
         let joined = format!("{archived}{current}");
         assert!(joined.contains("\"component\":\"desktop\""));
         assert!(joined.contains("sidecar_ready"));
+        assert!(joined.contains("tray_ready"));
         assert!(!joined.contains("token"));
         assert!(!joined.contains(dir.to_string_lossy().as_ref()));
 
