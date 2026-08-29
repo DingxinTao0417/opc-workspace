@@ -86,3 +86,58 @@ func TestClientFollowupRejectsUnavailableAssigneeAndInvalidTimezone(t *testing.T
 		t.Fatalf("unavailable assignee = %d: %s", unavailable.Code, unavailable.Body.String())
 	}
 }
+
+func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Followup Transition Client"}`, nil)
+	create := func(purpose string) clientFollowupResponse {
+		recorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-01T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"`+purpose+`"}`), nil)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("create transition followup = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		return decodeClientFollowupResponse(t, recorder.Body.Bytes())
+	}
+
+	completed := create("completed")
+	completeRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+completed.ID+"/complete", []byte(`{"result":"confirmed","next_step":"send summary"}`), map[string]string{"If-Match": `"1"`})
+	if completeRecorder.Code != http.StatusOK || completeRecorder.Header().Get("ETag") != `"2"` {
+		t.Fatalf("complete followup = %d: %s", completeRecorder.Code, completeRecorder.Body.String())
+	}
+	completedResult := decodeClientFollowupResponse(t, completeRecorder.Body.Bytes())
+	if completedResult.Status != "completed" || completedResult.Result == nil || *completedResult.Result != "confirmed" || completedResult.CompletedAt == nil || completedResult.NextStep == nil || *completedResult.NextStep != "send summary" {
+		t.Fatalf("completed followup = %#v", completedResult)
+	}
+	terminalEdit := performRequest(router, http.MethodPatch, "/api/v1/client-followups/"+completed.ID, []byte(`{"channel":"email"}`), map[string]string{"If-Match": `"2"`})
+	if terminalEdit.Code != http.StatusConflict || responseErrorCode(t, terminalEdit.Body.Bytes()) != "CLIENT_FOLLOWUP_FINAL" {
+		t.Fatalf("terminal followup edit = %d: %s", terminalEdit.Code, terminalEdit.Body.String())
+	}
+
+	skipped := create("skipped")
+	skipRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+skipped.ID+"/skip", []byte(`{"reason":"client asked to wait"}`), map[string]string{"If-Match": `"1"`})
+	if skipRecorder.Code != http.StatusOK || decodeClientFollowupResponse(t, skipRecorder.Body.Bytes()).Status != "skipped" {
+		t.Fatalf("skip followup = %d: %s", skipRecorder.Code, skipRecorder.Body.String())
+	}
+
+	rescheduled := create("reschedule")
+	rescheduleRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+rescheduled.ID+"/reschedule", []byte(`{"scheduled_at":"2026-09-03T10:00:00+08:00","timezone":"Asia/Shanghai","assigned_actor_id":"00000000-0000-5000-8000-000000000001","channel":"meeting","purpose":"next meeting","priority":"low","reason":"time changed"}`), map[string]string{"If-Match": `"1"`})
+	var rescheduleEnvelope struct {
+		Data struct {
+			Previous clientFollowupResponse `json:"previous"`
+			Next     clientFollowupResponse `json:"next"`
+		} `json:"data"`
+	}
+	if rescheduleRecorder.Code != http.StatusOK || json.Unmarshal(rescheduleRecorder.Body.Bytes(), &rescheduleEnvelope) != nil || rescheduleEnvelope.Data.Previous.Status != "cancelled" || rescheduleEnvelope.Data.Next.Status != "planned" || rescheduleEnvelope.Data.Next.RescheduledFromID == nil || *rescheduleEnvelope.Data.Next.RescheduledFromID != rescheduled.ID || rescheduleEnvelope.Data.Next.ScheduledAt != "2026-09-03T02:00:00Z" {
+		t.Fatalf("reschedule followup = %d: %s", rescheduleRecorder.Code, rescheduleRecorder.Body.String())
+	}
+
+	cancelled := create("cancelled")
+	withoutConfirm := performRequest(router, http.MethodDelete, "/api/v1/client-followups/"+cancelled.ID, []byte(`{"reason":"no longer needed"}`), map[string]string{"If-Match": `"1"`})
+	if withoutConfirm.Code != http.StatusUnprocessableEntity || responseErrorCode(t, withoutConfirm.Body.Bytes()) != "CONFIRMATION_REQUIRED" {
+		t.Fatalf("unconfirmed cancellation = %d: %s", withoutConfirm.Code, withoutConfirm.Body.String())
+	}
+	cancelRecorder := performRequest(router, http.MethodDelete, "/api/v1/client-followups/"+cancelled.ID+"?confirm=true", []byte(`{"reason":"no longer needed"}`), map[string]string{"If-Match": `"1"`})
+	if cancelRecorder.Code != http.StatusOK || decodeClientFollowupResponse(t, cancelRecorder.Body.Bytes()).Status != "cancelled" {
+		t.Fatalf("cancel followup = %d: %s", cancelRecorder.Code, cancelRecorder.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND action IN ('client_followup_completed', 'client_followup_skipped', 'client_followup_rescheduled', 'client_followup_reschedule_created', 'client_followup_cancelled')", 5)
+}

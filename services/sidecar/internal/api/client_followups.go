@@ -42,6 +42,29 @@ type updateClientFollowupRequest struct {
 	Priority        nullableStringPatch `json:"priority"`
 }
 
+type completeClientFollowupRequest struct {
+	Result      string  `json:"result"`
+	NextStep    *string `json:"next_step"`
+	CompletedAt *string `json:"completed_at"`
+}
+
+type skipClientFollowupRequest struct {
+	Reason string `json:"reason"`
+}
+type cancelClientFollowupRequest struct {
+	Reason string `json:"reason"`
+}
+type rescheduleClientFollowupRequest struct {
+	ScheduledAt     string  `json:"scheduled_at"`
+	Timezone        string  `json:"timezone"`
+	AssignedActorID string  `json:"assigned_actor_id"`
+	Channel         string  `json:"channel"`
+	Purpose         string  `json:"purpose"`
+	Notes           *string `json:"notes"`
+	Priority        string  `json:"priority"`
+	Reason          string  `json:"reason"`
+}
+
 type clientFollowupResponse struct {
 	ID                string  `json:"id"`
 	ClientID          string  `json:"client_id"`
@@ -344,6 +367,232 @@ func (a *API) updateClientFollowup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
+func (a *API) completeClientFollowup(c *gin.Context) {
+	id, ok := clientFollowupID(c)
+	if !ok {
+		return
+	}
+	expected, ok := projectIfMatch(c)
+	if !ok {
+		return
+	}
+	var input completeClientFollowupRequest
+	if err := decodeJSON(c, &input); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
+		return
+	}
+	result, err := cleanClientFollowupText(input.Result, "result", 4000, true, false)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	nextStep, err := cleanClientFollowupOptionalText(input.NextStep, "next_step", 4000, true)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	completedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
+	if input.CompletedAt != nil {
+		completedAt, err = cleanClientFollowupTimestamp(*input.CompletedAt)
+		if err != nil {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+			return
+		}
+	}
+	response, err := a.transitionClientFollowup(c, id, expected, "client_followup_completed", map[string]any{"status": "completed", "completed_at": completedAt, "result": result, "next_step": nextStep})
+	if err != nil {
+		a.writeClientFollowupTransitionError(c, err)
+		return
+	}
+	setProjectETag(c, response.Version)
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func (a *API) skipClientFollowup(c *gin.Context) {
+	id, ok := clientFollowupID(c)
+	if !ok {
+		return
+	}
+	expected, ok := projectIfMatch(c)
+	if !ok {
+		return
+	}
+	var input skipClientFollowupRequest
+	if err := decodeJSON(c, &input); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
+		return
+	}
+	reason, err := cleanClientFollowupText(input.Reason, "reason", 1000, true, false)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	response, err := a.transitionClientFollowup(c, id, expected, "client_followup_skipped", map[string]any{"status": "skipped", "skipped_at": a.options.Now().UTC().Format(time.RFC3339Nano), "skip_reason": reason})
+	if err != nil {
+		a.writeClientFollowupTransitionError(c, err)
+		return
+	}
+	setProjectETag(c, response.Version)
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func (a *API) cancelClientFollowup(c *gin.Context) {
+	id, ok := clientFollowupID(c)
+	if !ok {
+		return
+	}
+	expected, ok := projectIfMatch(c)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(c.Query("confirm")) != "true" {
+		writeError(c, http.StatusUnprocessableEntity, "CONFIRMATION_REQUIRED", "Client followup cancellation requires confirm=true")
+		return
+	}
+	var input cancelClientFollowupRequest
+	if err := decodeJSON(c, &input); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
+		return
+	}
+	reason, err := cleanClientFollowupText(input.Reason, "reason", 1000, true, false)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	response, err := a.transitionClientFollowup(c, id, expected, "client_followup_cancelled", map[string]any{"status": "cancelled", "cancelled_at": a.options.Now().UTC().Format(time.RFC3339Nano), "cancel_reason": reason})
+	if err != nil {
+		a.writeClientFollowupTransitionError(c, err)
+		return
+	}
+	setProjectETag(c, response.Version)
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func (a *API) rescheduleClientFollowup(c *gin.Context) {
+	id, ok := clientFollowupID(c)
+	if !ok {
+		return
+	}
+	expected, ok := projectIfMatch(c)
+	if !ok {
+		return
+	}
+	var input rescheduleClientFollowupRequest
+	if err := decodeJSON(c, &input); err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
+		return
+	}
+	next, err := a.clientFollowupFromRescheduleRequest(input)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	reason, err := cleanClientFollowupText(input.Reason, "reason", 1000, true, false)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		return
+	}
+	var oldResponse, nextResponse clientFollowupResponse
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var current models.ClientFollowup
+		if err := tx.First(&current, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
+			}
+			return err
+		}
+		if current.Version != expected {
+			return clientFollowupVersionConflict()
+		}
+		if current.Status != "planned" {
+			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
+		}
+		if err := ensureClientFollowupReferences(tx, current.ClientID, next.AssignedActorID); err != nil {
+			return err
+		}
+		previousRow, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		result := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(map[string]any{"status": "cancelled", "cancelled_at": now, "cancel_reason": reason, "updated_at": now, "version": gorm.Expr("version + 1")})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return clientFollowupVersionConflict()
+		}
+		next.ClientID, next.RescheduledFromID, next.CreatedAt, next.UpdatedAt = current.ClientID, &id, now, now
+		if err := tx.Create(&next).Error; err != nil {
+			return fmt.Errorf("create rescheduled client followup: %w", err)
+		}
+		oldRow, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		nextRow, err := loadClientFollowupRow(tx, next.ID)
+		if err != nil {
+			return err
+		}
+		oldResponse, nextResponse = clientFollowupResponseFromRow(oldRow), clientFollowupResponseFromRow(nextRow)
+		if err := recordClientFollowupWorkflowEvent(tx, id, "client_followup_rescheduled", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(oldResponse), requestIDFromContext(c), now); err != nil {
+			return err
+		}
+		return recordClientFollowupWorkflowEvent(tx, next.ID, "client_followup_reschedule_created", nil, clientFollowupEventState(nextResponse), requestIDFromContext(c), now)
+	})
+	if err != nil {
+		a.writeClientFollowupTransitionError(c, err)
+		return
+	}
+	setProjectETag(c, oldResponse.Version)
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"previous": oldResponse, "next": nextResponse}})
+}
+
+func (a *API) transitionClientFollowup(c *gin.Context, id string, expected int64, action string, updates map[string]any) (clientFollowupResponse, error) {
+	var response clientFollowupResponse
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var current models.ClientFollowup
+		if err := tx.First(&current, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
+			}
+			return err
+		}
+		if current.Version != expected {
+			return clientFollowupVersionConflict()
+		}
+		if current.Status != "planned" {
+			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
+		}
+		previousRow, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		updates["updated_at"], updates["version"] = a.options.Now().UTC().Format(time.RFC3339Nano), gorm.Expr("version + 1")
+		result := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return clientFollowupVersionConflict()
+		}
+		row, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		response = clientFollowupResponseFromRow(row)
+		return recordClientFollowupWorkflowEvent(tx, id, action, clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(response), requestIDFromContext(c), response.UpdatedAt)
+	})
+	return response, err
+}
+
+func (a *API) writeClientFollowupTransitionError(c *gin.Context, err error) {
+	if writeProjectRequestError(c, err) {
+		return
+	}
+	writeDatabaseError(c)
+}
+
 func (a *API) clientFollowupFromCreateRequest(input createClientFollowupRequest) (models.ClientFollowup, error) {
 	clientID, err := canonicalUUID(input.ClientID, "client_id")
 	if err != nil {
@@ -382,6 +631,41 @@ func (a *API) clientFollowupFromCreateRequest(input createClientFollowupRequest)
 	}
 	now := a.options.Now().UTC()
 	return models.ClientFollowup{ID: uuid.NewString(), ClientID: clientID, AssignedActorID: actorID, ScheduledAt: scheduledAt, Timezone: timezone, Channel: channel, Purpose: purpose, Notes: notes, Status: "planned", Priority: priority, Version: 1, CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano)}, nil
+}
+
+func (a *API) clientFollowupFromRescheduleRequest(input rescheduleClientFollowupRequest) (models.ClientFollowup, error) {
+	actorID, err := canonicalUUID(input.AssignedActorID, "assigned_actor_id")
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	scheduledAt, err := cleanClientFollowupTimestamp(input.ScheduledAt)
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	timezone, err := cleanClientFollowupTimezone(input.Timezone)
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	channel, err := cleanClientFollowupText(input.Channel, "channel", 80, false, false)
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	purpose, err := cleanClientFollowupText(input.Purpose, "purpose", 500, false, false)
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	notes, err := cleanClientFollowupOptionalText(input.Notes, "notes", 4000, true)
+	if err != nil {
+		return models.ClientFollowup{}, err
+	}
+	priority := strings.TrimSpace(input.Priority)
+	if priority == "" {
+		priority = "normal"
+	}
+	if _, valid := validClientFollowupPriorities[priority]; !valid {
+		return models.ClientFollowup{}, errors.New("priority must be low, normal, or high")
+	}
+	return models.ClientFollowup{ID: uuid.NewString(), AssignedActorID: actorID, ScheduledAt: scheduledAt, Timezone: timezone, Channel: channel, Purpose: purpose, Notes: notes, Status: "planned", Priority: priority, Version: 1}, nil
 }
 
 func clientFollowupUpdates(input updateClientFollowupRequest) (map[string]any, error) {

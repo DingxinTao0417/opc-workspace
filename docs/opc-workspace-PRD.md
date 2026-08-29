@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.29
+> **一人公司操作系统** · PRD v9.30
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> **v9.29 更新说明**：交付 T-17/C3 客户回访计划 API。`GET/POST /client-followups`、详情、`PATCH` 与客户纵向列表已遵循分页、显式筛选、创建幂等、`If-Match` 乐观锁和不可变 Workflow Event；active owner/person 负责人和 IANA 时区在 API 与 SQLite 双层验证。终态执行、重排、提醒、时间线、Today 与 Inbox 投影仍待。app v0.1.0 / API v1 / schema v35 不变。
+> **v9.30 更新说明**：交付 T-17/C4 回访执行 API。计划可完成、跳过、确认取消或原子重排；每个终态受 `If-Match` 门禁，保留结果或原因，重排会将旧计划取消并创建带来源的新计划，两个聚合均写不可变 Workflow Event。提醒、时间线、Today 与 Inbox 投影仍待。app v0.1.0 / API v1 / schema v35 不变。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -2500,3 +2500,4 @@ pnpm build:desktop
 | v9.27    | 2026-08-29 | 交付 T-13 原生全局快捷键：Tauri 尝试注册命令面板/新建任务的 `⌘/Ctrl+Shift+K/N`，触发时显示/聚焦主窗口并向 WebView 发送固定 action；注册失败仅暴露 `registered/unavailable`，继续保留应用内快捷键。设置运行诊断读取白名单状态，前端拒绝未知 action 或状态；自定义、专注、页面切换和真实三平台验收仍待。app v0.1.0/API v1/schema v34 不变，无 migration。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | v9.28    | 2026-08-29 | 交付客户回访 C2 数据契约：schema v35 新增空的 `client_followups`，计划/完成/跳过/取消字段组合、active owner/person 负责人、版本步进、终态不可重开和客户历史保护均由 SQLite 约束；写入会刷新客户聚合版本，业务 JSON/ZIP 导入导出显式包含该表。回访 CRUD、执行、提醒、今日/收件箱及详情 UI 尚未交付。app v0.1.0/API v1 不变，SQLite 升至 schema v35。 |
 | v9.29    | 2026-08-29 | 交付客户回访 C3 计划 API：全局/客户纵向分页列表支持 client、负责人和状态筛选；创建采用 Idempotency-Key，详情/编辑采用 ETag/If-Match，计划字段、IANA 时区和 active owner/person 负责人受 API 与 SQLite 双层门禁。创建、编辑同事务追加不可变 Workflow Event，回放不重复写入。完成、跳过、取消、重排、提醒与界面仍待。app v0.1.0/API v1/schema v35 不变，无 migration。 |
+| v9.30    | 2026-08-29 | 交付客户回访 C4 执行闭环 API：`complete` 必填结果，`skip`/确认 `DELETE` 必填原因，全部使用 ETag/If-Match 且终态不可重开；`reschedule` 同事务取消旧计划、创建带 `rescheduled_from_id` 的新计划，并为两个聚合追加不可变事件。提醒、客户时间线、Today/Inbox 和页面仍待。app v0.1.0/API v1/schema v35 不变，无 migration。 |
