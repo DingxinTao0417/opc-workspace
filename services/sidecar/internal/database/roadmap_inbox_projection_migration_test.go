@@ -16,8 +16,8 @@ func TestRoadmapInboxProjectionMigrationGuardsVersionedSources(t *testing.T) {
 		t.Fatalf("upgrade v38 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 39 {
-		t.Fatalf("SchemaVersion = %d, want 39", store.SchemaVersion)
+	if store.SchemaVersion != 40 {
+		t.Fatalf("SchemaVersion = %d, want 40", store.SchemaVersion)
 	}
 	const milestoneID = "018f0000-0000-7000-8000-000000003911"
 	const inboxID = "018f0000-0000-7000-8000-000000003912"

@@ -1800,7 +1800,7 @@ export interface InboxEventListResult {
 
 export type ReminderStatus = "scheduled" | "fired" | "cancelled";
 export type ReminderAction = "edit" | "cancel";
-export type ReminderRecurrenceType = "none" | "daily" | "weekly";
+export type ReminderRecurrenceType = "none" | "daily" | "weekly" | "monthly";
 export type ReminderSort =
   | "title"
   | "status"
@@ -1831,6 +1831,7 @@ export interface Reminder {
   recurrenceInterval: number;
   recurrenceTimezone: string;
   occurrenceNumber: number;
+  recurrenceAnchorDay: number;
   firedAt: string | null;
   inboxItemId: string | null;
   cancelledByActorId: string | null;

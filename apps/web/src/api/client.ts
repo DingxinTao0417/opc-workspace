@@ -3107,7 +3107,12 @@ function asReminderStatus(value: unknown): ReminderStatus {
 }
 
 function asReminderRecurrenceType(value: unknown): ReminderRecurrenceType {
-  if (value === "none" || value === "daily" || value === "weekly") {
+  if (
+    value === "none" ||
+    value === "daily" ||
+    value === "weekly" ||
+    value === "monthly"
+  ) {
     return value;
   }
   return invalidResponse("提醒重复规则响应无效");
@@ -3150,6 +3155,11 @@ export function normalizeReminder(value: unknown): Reminder {
     "occurrence_number",
     "occurrenceNumber",
   );
+  const recurrenceAnchorDay = fieldValue(
+    value,
+    "recurrence_anchor_day",
+    "recurrenceAnchorDay",
+  );
   const createdAt = stringField(value, "created_at", "createdAt");
   const updatedAt = stringField(value, "updated_at", "updatedAt");
   const rawActions = fieldValue(value, "available_actions", "availableActions");
@@ -3189,8 +3199,15 @@ export function normalizeReminder(value: unknown): Reminder {
     !recurrenceTimezone ||
     !Number.isInteger(occurrenceNumber) ||
     Number(occurrenceNumber) < 1 ||
+    !Number.isInteger(recurrenceAnchorDay) ||
+    Number(recurrenceAnchorDay) < 1 ||
+    Number(recurrenceAnchorDay) > 31 ||
     (recurrenceType === "none" &&
-      (recurrenceInterval !== 1 || recurrenceTimezone !== "UTC")) ||
+      (recurrenceInterval !== 1 ||
+        recurrenceTimezone !== "UTC" ||
+        recurrenceAnchorDay !== 1)) ||
+    ((recurrenceType === "daily" || recurrenceType === "weekly") &&
+      recurrenceAnchorDay !== 1) ||
     !createdAt ||
     !updatedAt ||
     (sourceEntityType !== "manual" && sourceEntityType !== "automation") ||
@@ -3249,6 +3266,7 @@ export function normalizeReminder(value: unknown): Reminder {
     recurrenceInterval: Number(recurrenceInterval),
     recurrenceTimezone,
     occurrenceNumber: Number(occurrenceNumber),
+    recurrenceAnchorDay: Number(recurrenceAnchorDay),
     firedAt,
     inboxItemId,
     cancelledByActorId,

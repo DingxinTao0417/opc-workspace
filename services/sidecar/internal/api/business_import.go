@@ -510,7 +510,7 @@ func tableHasInvalidReminderRecurrence(table businessExportTable) bool {
 	for index, column := range table.Columns {
 		indexes[column] = index
 	}
-	required := []string{"series_id", "recurrence_type", "recurrence_interval", "recurrence_timezone", "occurrence_number"}
+	required := []string{"series_id", "recurrence_type", "recurrence_interval", "recurrence_timezone", "occurrence_number", "recurrence_anchor_day"}
 	for _, column := range required {
 		if _, ok := indexes[column]; !ok {
 			return len(table.Rows) != 0
@@ -522,9 +522,10 @@ func tableHasInvalidReminderRecurrence(table businessExportTable) bool {
 		timezone, timezoneOK := row[indexes["recurrence_timezone"]].(string)
 		interval, intervalOK := businessImportInt64(row[indexes["recurrence_interval"]])
 		occurrence, occurrenceOK := businessImportInt64(row[indexes["occurrence_number"]])
+		anchorDay, anchorOK := businessImportInt64(row[indexes["recurrence_anchor_day"]])
 		if !seriesOK || strings.TrimSpace(seriesID) == "" || !typeOK || !timezoneOK ||
-			!intervalOK || interval > 365 || !occurrenceOK || occurrence < 1 ||
-			validateReminderRecurrence(recurrenceType, int(interval), timezone) != nil {
+			!intervalOK || interval > 365 || !occurrenceOK || occurrence < 1 || !anchorOK ||
+			validateReminderRecurrence(recurrenceType, int(interval), timezone, int(anchorDay)) != nil {
 			return true
 		}
 	}

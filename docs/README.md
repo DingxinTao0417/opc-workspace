@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v39。v9.69 已交付路线图跨年度连续移动与键盘替代；不调用外部服务。其余历史版本说明保持不变。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v40。v9.70 已交付每月本地 Reminder、当地日锚点与短月夹取；不调用外部服务。其余历史版本说明保持不变。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.69）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.70）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -16,16 +16,16 @@
 
 ## 核心模块
 
-| 模块           | 当前状态                                                                                                                         | 目标版本                  | 文档                                 |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------ |
-| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理、截止风险快捷筛选及客户回访待办已交付）                                               | v0.1                      | [today.md](modules/today.md)         |
-| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、共享服务端 Client/Project 选择、计划组拖拽、受控跨列看板与父任务自动待验收已交付）       | v0.1                      | [tasks.md](modules/tasks.md)         |
-| 项目管理       | 部分完成（含 Artifact nullable follow-up/实时 required 进度、四种跟进状态、Inbox 深链、任务/Focus/Client 活动协作）              | v0.1                      | [projects.md](modules/projects.md)   |
-| 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动/附件/person、回访 API/到期 Inbox 投影及详情管理已交付）           | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
-| 收件箱工作编排 | 部分完成（人工闭环含来源 Project 继承/清除、完成条件、person 本地责任、共享 Task 详情、缓存失效与 automatic resolved/100% 金链） | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
-| 本地提醒       | 一次性及 daily/weekly Reminder、启动补偿与到期 Inbox 投影已完成                                                                  | v0.1；每月/原生通知后续   | [reminders.md](modules/reminders.md) |
-| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                        | v0.1                      | [actors.md](modules/actors.md)       |
-| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                         | v0.1                      | [focus.md](modules/focus.md)         |
+| 模块           | 当前状态                                                                                                                         | 目标版本                    | 文档                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------ |
+| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理、截止风险快捷筛选及客户回访待办已交付）                                               | v0.1                        | [today.md](modules/today.md)         |
+| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、共享服务端 Client/Project 选择、计划组拖拽、受控跨列看板与父任务自动待验收已交付）       | v0.1                        | [tasks.md](modules/tasks.md)         |
+| 项目管理       | 部分完成（含 Artifact nullable follow-up/实时 required 进度、四种跟进状态、Inbox 深链、任务/Focus/Client 活动协作）              | v0.1                        | [projects.md](modules/projects.md)   |
+| 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动/附件/person、回访 API/到期 Inbox 投影及详情管理已交付）           | v0.1；回访/财务 v0.4        | [clients.md](modules/clients.md)     |
+| 收件箱工作编排 | 部分完成（人工闭环含来源 Project 继承/清除、完成条件、person 本地责任、共享 Task 详情、缓存失效与 automatic resolved/100% 金链） | 人工闭环 v0.1；Agent v0.2   | [inbox.md](modules/inbox.md)         |
+| 本地提醒       | 一次性及 daily/weekly/monthly Reminder、启动补偿与到期 Inbox 投影已完成                                                          | v0.1；复杂规则/原生通知后续 | [reminders.md](modules/reminders.md) |
+| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                        | v0.1                        | [actors.md](modules/actors.md)       |
+| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                         | v0.1                        | [focus.md](modules/focus.md)         |
 
 ## 平台与共享能力
 

@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v35。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；schema v34 的 Adapter 诊断不创建 Inbox；schema v35 的到期 Client Followup 会创建本地来源并只深链客户详情；重复 Reminder 继续为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v40。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性及 daily/weekly/monthly Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。schema v33 的受限 Project 完成预设可追加一条本地“检查开票”Inbox Item；schema v35 的到期 Client Followup 会创建本地来源并只深链客户详情；schema v40 的 monthly 仍为每个 occurrence 生成独立 Inbox 来源，不改 Inbox 表或解决契约；v0.1 不启用 AI、LLM 或 Agent Runtime。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.47](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.70](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md) · [预设自动化](automation.md)
 
 ## 定位与边界
 
@@ -32,7 +32,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性及 daily/weekly Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数及已登记来源投影均已接真实 SQLite/API/UI。拆分面板使用共享 ProjectSelect，并从可信来源快照默认带入 Project，仍允许逐项清除/改选；独立完成条件、person 本地责任提示和共享 Task 详情已接通。Project Artifact 读模型显示 nullable follow-up/实时 required 进度，成功 Inbox mutation 通过 Project/Task/Today Query 失效刷新相关表面。物理卷同卷去重和无路径手动容量检查已交付；卷级趋势、Agent 与 AI 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性及 daily/weekly/monthly Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数及已登记来源投影均已接真实 SQLite/API/UI。拆分面板使用共享 ProjectSelect，并从可信来源快照默认带入 Project，仍允许逐项清除/改选；独立完成条件、person 本地责任提示和共享 Task 详情已接通。Project Artifact 读模型显示 nullable follow-up/实时 required 进度，成功 Inbox mutation 通过 Project/Task/Today Query 失效刷新相关表面。物理卷同卷去重和无路径手动容量检查已交付；卷级趋势、Agent 与 AI 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -64,13 +64,13 @@
 - 关系 POST/PATCH/DELETE 使用 Inbox `ETag / If-Match` 和可选 `Idempotency-Key`，业务事实、Inbox 状态/version 与 `task_linked / task_requirement_changed / task_unlinked` 事件同事务提交。关系命令不递增 Task version。
 - 任一活动 Inbox 关系会使 Task 硬删除返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`。带原因软解除后 Task 可以删除；历史行的实时 `task_id` 置空，但 `task_ref_id / task_title_snapshot` 与事件继续保留。
 
-### 已交付：T-11A3 一次性与 daily/weekly 本地 Reminder
+### 已交付：T-11A3 一次性与 daily/weekly/monthly 本地 Reminder
 
 - schema v14 新增独立 `reminders` 调度事实；公开 API 提供创建、分页/搜索/状态查询、详情、scheduled 编辑和带原因取消。
 - Sidecar ready 前先补扫到期项，运行中每 15 秒扫描最多 100 条；以 `reminder:<id>:due` 为稳定事件键在同一事务中生成或复用一个 Reminder Inbox Item、记录 system 事件并把 Reminder 标记为 fired。
 - Inbox Item 使用 `kind/source_entity_type=reminder`、指向 Reminder ID、继承标题/摘要/优先级/触发时间，并保持 `resolution_policy=manual`。用户随后在普通 Inbox 流程中阅读、稍后、解决、忽略或关联 Task，不反向修改 fired Reminder。
-- schema v32 为每条 Reminder 增加系列、daily/weekly、IANA 时区和 occurrence 序号；到期事务在 fired/Inbox 事实之外创建唯一下一 occurrence。跨 DST 保持当地钟点，离线跨过多个周期只补当前一条，重复扫描/重启不重复；取消当前 scheduled occurrence 停止系列。
-- Reminder 管理器从 Inbox 页打开，提供待提醒/已触发/已取消模块、搜索、分页、新建、编辑/改期、重复规则、带原因取消和触发后跳转 Inbox。每月/自定义规则、系统原生通知和其他业务来源投影仍未交付。
+- schema v32 为每条 Reminder 增加系列、daily/weekly、IANA 时区和 occurrence 序号；schema v40 增加 monthly 与当地日锚点。到期事务在 fired/Inbox 事实之外创建唯一下一 occurrence；跨 DST 保持当地钟点，按月短月落到月末且后续恢复锚点，离线跨过多个周期只补当前一条，重复扫描/重启不重复；取消当前 scheduled occurrence 停止系列。
+- Reminder 管理器从 Inbox 页打开，提供待提醒/已触发/已取消模块、搜索、分页、新建、编辑/改期、每日/每周/每月重复规则、带原因取消和触发后跳转 Inbox。工作日/自定义规则、系统原生通知和其他业务来源投影仍未交付。
 
 ### 已交付：T-11C 拆分、分派与自动结清
 
@@ -181,7 +181,7 @@
 
 ### 明确未交付
 
-- 每月/自定义 Reminder、系统原生通知，以及 Task/Project/Client 等自由业务来源自动创建 Reminder；当前只有两个固定日历自动化预设；
+- 工作日/自定义 Reminder、系统原生通知，以及 Task/Project/Client 等自由业务来源自动创建 Reminder；当前只有两个固定日历自动化预设；
 - Project 完成以外的独立里程碑、Client/Invoice，以及其他尚未接入的系统故障来源投影；“检查开票”仅为本地人工提示，不是 Invoice 领域实现；
 - 卷级容量历史趋势；
 - 已交付来源以外的多态删除协调、Inbox Item 硬删除；
@@ -372,7 +372,7 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 2. **T-11A1 手工 Inbox Item 数据契约（已完成）**：schema v12、约束、索引和迁移保留测试。
 3. **T-11B 人工受理与分诊（已完成）**：真实列表/详情/编辑、已读/快照式全部已读、稍后/恢复、解决/忽略/重开及事件 UI/API。
 4. **T-11A2 Task 关系事实（已完成）**：schema v13、活动/历史关系、实时进度、已有 Task 关联、required 修改、带原因软解除、状态联动、事件，以及关联 Task 硬删除互锁和历史快照。多态来源删除协调不属于 A2。
-5. **T-11A3 Reminder 事实（已完成）**：schema v14 一次性事实 + schema v32 daily/weekly 系列、创建/查询/编辑/取消、启动补偿、15 秒扫描、IANA/DST 推进、稳定事件键与幂等 Inbox/下一 occurrence 投影。
+5. **T-11A3 Reminder 事实（已完成）**：schema v14 一次性事实 + schema v32 daily/weekly 系列 + schema v40 monthly/当地日锚点，创建/查询/编辑/取消、启动补偿、15 秒扫描、IANA/DST/月末推进、稳定事件键与幂等 Inbox/下一 occurrence 投影。
 6. **T-11C 拆分与分派（已完成人工闭环）**：原子多任务/父子拆分、可信来源 Project 继承/清除/改选、独立完成条件、owner/person Assignment 与本地责任提示、manual owner reviewer、共享 Task 详情、统一 reconciliation、自动解决/重开和 force-resolve。
 7. **T-11F 运营计数（已完成）**：实时统计 API、risk 列表筛选、Sidebar 徽标和 Today 风险卡。
 8. **T-11E v0.1 来源投影（部分完成）**：显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期，以及备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已完成；物理卷同卷去重和无路径手动容量检查已在设置页交付，后续按真实业务模块继续来源投影并独立评审卷级趋势。

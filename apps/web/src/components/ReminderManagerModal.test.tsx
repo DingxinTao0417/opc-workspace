@@ -33,6 +33,7 @@ const scheduled: Reminder = {
   recurrenceInterval: 1,
   recurrenceTimezone: "UTC",
   occurrenceNumber: 1,
+  recurrenceAnchorDay: 1,
   firedAt: null,
   inboxItemId: null,
   cancelledByActorId: null,
@@ -170,6 +171,31 @@ describe("ReminderManagerModal", () => {
       recurrenceTimezone: expect.any(String),
     });
     expect(mocks.create.mock.calls[0][0].recurrenceTimezone).not.toBe("Local");
+  });
+
+  it("creates a monthly reminder and explains short-month clamping", async () => {
+    render(<ReminderManagerModal onClose={vi.fn()} open />);
+    fireEvent.click(screen.getByRole("button", { name: "新建提醒" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "每月月底核账" },
+    });
+    fireEvent.change(screen.getByLabelText("提醒时间"), {
+      target: { value: "2099-01-31T10:30" },
+    });
+    fireEvent.change(screen.getByLabelText("重复规则"), {
+      target: { value: "monthly" },
+    });
+
+    expect(screen.getByText(/短月自动落在月末/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "创建提醒" }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({
+      title: "每月月底核账",
+      recurrenceType: "monthly",
+      recurrenceInterval: 1,
+      recurrenceTimezone: expect.any(String),
+    });
   });
 
   it("requires and submits an auditable cancellation reason", async () => {

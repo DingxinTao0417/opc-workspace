@@ -34,6 +34,7 @@ function reminderPayload(overrides: Record<string, unknown> = {}) {
     recurrence_interval: 1,
     recurrence_timezone: "UTC",
     occurrence_number: 1,
+    recurrence_anchor_day: 1,
     fired_at: null,
     inbox_item_id: null,
     cancelled_by_actor_id: null,
@@ -89,6 +90,18 @@ describe("Reminder API contract", () => {
     ).toThrow();
     expect(() =>
       normalizeReminder(reminderPayload({ available_actions: ["delete"] })),
+    ).toThrow();
+    expect(
+      normalizeReminder(
+        reminderPayload({
+          recurrence_type: "monthly",
+          recurrence_timezone: "America/Los_Angeles",
+          recurrence_anchor_day: 31,
+        }),
+      ),
+    ).toMatchObject({ recurrenceType: "monthly", recurrenceAnchorDay: 31 });
+    expect(() =>
+      normalizeReminder(reminderPayload({ recurrence_anchor_day: 31 })),
     ).toThrow();
   });
 

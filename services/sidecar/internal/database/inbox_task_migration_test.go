@@ -59,8 +59,8 @@ func TestInboxTaskMigrationUpgradesV12WithoutChangingExistingFacts(t *testing.T)
 		t.Fatalf("upgrade v12 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 39 {
-		t.Fatalf("SchemaVersion = %d, want 39", store.SchemaVersion)
+	if store.SchemaVersion != 40 {
+		t.Fatalf("SchemaVersion = %d, want 40", store.SchemaVersion)
 	}
 	var preservedInbox models.InboxItem
 	if err := store.DB.First(&preservedInbox, "id = ?", inboxID).Error; err != nil {

@@ -27,7 +27,7 @@ func TestReminderAPICreatesAndEditsRecurringSchedule(t *testing.T) {
 	}
 	if first.Data.SeriesID != first.Data.ID || first.Data.RecurrenceType != "daily" ||
 		first.Data.RecurrenceInterval != 2 || first.Data.RecurrenceTimezone != "Asia/Shanghai" ||
-		first.Data.OccurrenceNumber != 1 {
+		first.Data.OccurrenceNumber != 1 || first.Data.RecurrenceAnchorDay != 1 {
 		t.Fatalf("created recurrence facts = %#v", first.Data)
 	}
 
@@ -51,6 +51,67 @@ func TestReminderAPICreatesAndEditsRecurringSchedule(t *testing.T) {
 		"recurrence_type":"daily","recurrence_interval":0,"recurrence_timezone":"private/not-a-zone"
 	}`), nil)
 	assertAPIError(t, invalid, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
+}
+
+func TestReminderAPIMonthlyScheduleDerivesLocalAnchorDay(t *testing.T) {
+	router := newTestAPI(t)
+	created := performRequest(router, http.MethodPost, "/api/v1/reminders", []byte(`{
+		"title":"月末结账提醒","trigger_at":"2099-01-31T09:00:00-08:00",
+		"recurrence_type":"monthly","recurrence_interval":1,"recurrence_timezone":"America/Los_Angeles"
+	}`), nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create monthly Reminder = %d: %s", created.Code, created.Body.String())
+	}
+	var first reminderEnvelope
+	if err := json.Unmarshal(created.Body.Bytes(), &first); err != nil {
+		t.Fatalf("decode monthly create: %v", err)
+	}
+	if first.Data.RecurrenceType != "monthly" || first.Data.RecurrenceInterval != 1 ||
+		first.Data.RecurrenceTimezone != "America/Los_Angeles" || first.Data.RecurrenceAnchorDay != 31 {
+		t.Fatalf("monthly recurrence facts = %#v", first.Data)
+	}
+
+	updated := performRequest(router, http.MethodPatch, "/api/v1/reminders/"+first.Data.ID, []byte(`{
+		"trigger_at":"2099-04-30T09:00:00-07:00"
+	}`), map[string]string{"If-Match": `"1"`})
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update monthly anchor = %d: %s", updated.Code, updated.Body.String())
+	}
+	var changed reminderEnvelope
+	if err := json.Unmarshal(updated.Body.Bytes(), &changed); err != nil {
+		t.Fatalf("decode monthly update: %v", err)
+	}
+	if changed.Data.RecurrenceAnchorDay != 30 || changed.Data.Version != 2 {
+		t.Fatalf("updated monthly anchor = %#v", changed.Data)
+	}
+
+	invalid := performRequest(router, http.MethodPost, "/api/v1/reminders", []byte(`{
+		"title":"无效每月提醒","trigger_at":"2099-01-31T09:00:00Z",
+		"recurrence_type":"monthly","recurrence_interval":1,"recurrence_timezone":"Local"
+	}`), nil)
+	assertAPIError(t, invalid, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
+}
+
+func TestMonthlyReminderOccurrenceClampsShortMonthAndReturnsToAnchor(t *testing.T) {
+	reminder := models.Reminder{
+		TriggerAt: "2026-01-31T17:00:00Z", RecurrenceType: "monthly",
+		RecurrenceInterval: 1, RecurrenceTimezone: "America/Los_Angeles",
+		RecurrenceAnchorDay: 31,
+	}
+	february, advances, err := nextReminderOccurrence(reminder, time.Date(2026, 1, 31, 18, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("next February occurrence: %v", err)
+	}
+	if got := formatInboxTimestamp(february.UTC()); got != "2026-02-28T17:00:00.000000000Z" || advances != 1 {
+		t.Fatalf("February occurrence = %s advances=%d", got, advances)
+	}
+	march, advances, err := nextReminderOccurrence(reminder, time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("next March occurrence: %v", err)
+	}
+	if got := formatInboxTimestamp(march.UTC()); got != "2026-03-31T16:00:00.000000000Z" || advances != 2 {
+		t.Fatalf("March occurrence = %s advances=%d", got, advances)
+	}
 }
 
 func TestRecurringReminderProjectionPreservesWallClockAndSkipsOfflineBacklog(t *testing.T) {

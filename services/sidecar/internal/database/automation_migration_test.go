@@ -18,8 +18,8 @@ func TestAutomationMigrationUpgradesV32AndCreatesNoBusinessRuns(t *testing.T) {
 		t.Fatalf("upgrade v32 automation database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 39 {
-		t.Fatalf("SchemaVersion = %d, want 39", store.SchemaVersion)
+	if store.SchemaVersion != 40 {
+		t.Fatalf("SchemaVersion = %d, want 40", store.SchemaVersion)
 	}
 	for _, table := range []string{"automation_rules", "automation_runs"} {
 		var count int64

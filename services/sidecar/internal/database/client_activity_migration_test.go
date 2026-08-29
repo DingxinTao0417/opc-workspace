@@ -28,8 +28,8 @@ func TestClientActivitiesMigrationUpgradesV17WithoutInventingFacts(t *testing.T)
 		t.Fatalf("upgrade v17 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 39 {
-		t.Fatalf("SchemaVersion = %d, want 39", store.SchemaVersion)
+	if store.SchemaVersion != 40 {
+		t.Fatalf("SchemaVersion = %d, want 40", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM client_activities"); got != 0 {
 		t.Fatalf("migration invented %d client activities", got)

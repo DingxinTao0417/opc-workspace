@@ -48,6 +48,7 @@ function reminder(
     recurrenceInterval: 1,
     recurrenceTimezone: "UTC",
     occurrenceNumber: 1,
+    recurrenceAnchorDay: 1,
     firedAt: status === "fired" ? "2099-08-30T01:00:01Z" : null,
     inboxItemId:
       status === "fired" ? "018f0000-0000-7000-8000-000000001502" : null,
