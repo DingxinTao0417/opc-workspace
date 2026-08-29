@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isDesktopRuntime, requestApplicationRestart } from "./desktop";
+import {
+  getRuntimeDiagnostics,
+  isDesktopRuntime,
+  requestApplicationRestart,
+} from "./desktop";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -13,5 +17,44 @@ describe("desktop application restart", () => {
     const invoke = vi.fn(async () => undefined);
     await expect(requestApplicationRestart(invoke)).resolves.toBe(true);
     expect(invoke).toHaveBeenCalledWith("restart_application");
+  });
+});
+
+describe("runtime diagnostics", () => {
+  it("identifies browser development without inventing desktop facts", async () => {
+    await expect(getRuntimeDiagnostics()).resolves.toEqual({
+      environment: "browser",
+      phase: "external",
+      appVersion: null,
+      apiVersion: null,
+      schemaVersion: null,
+    });
+  });
+
+  it("returns only sanitized desktop lifecycle and version facts", async () => {
+    const invoke = vi.fn(async () => ({
+      phase: "ready",
+      baseUrl: "http://127.0.0.1:49152",
+      sessionToken: "must-not-leak",
+      message: "C:\\private\\path",
+      appVersion: "0.1.0",
+      apiVersion: "v1",
+      schemaVersion: "28",
+    }));
+
+    await expect(getRuntimeDiagnostics(invoke)).resolves.toEqual({
+      environment: "desktop",
+      phase: "ready",
+      appVersion: "0.1.0",
+      apiVersion: "v1",
+      schemaVersion: "28",
+    });
+    expect(invoke).toHaveBeenCalledWith("sidecar_status");
+  });
+
+  it("rejects malformed desktop lifecycle data", async () => {
+    await expect(
+      getRuntimeDiagnostics(async () => ({ phase: "unknown" })),
+    ).rejects.toThrow("Invalid desktop runtime phase");
   });
 });

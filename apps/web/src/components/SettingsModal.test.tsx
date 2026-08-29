@@ -461,6 +461,24 @@ describe("SettingsModal", () => {
     ).toBeVisible();
   });
 
+  it("shows sanitized runtime diagnostics in browser development mode", async () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "运行诊断" }));
+
+    expect(await screen.findByText("浏览器开发模式")).toBeVisible();
+    expect(screen.getByText("外部开发进程")).toBeVisible();
+    expect(screen.getByText("健康检查通过")).toBeVisible();
+    expect(screen.getByText("由 HTTP 健康检查确认")).toBeVisible();
+    expect(screen.getByText("v0.1.0 · v1")).toBeVisible();
+    expect(
+      screen.getByText(
+        "摘要不会包含会话令牌、监听地址、本地路径、底层错误或业务数据。完整日志与诊断包仍未实现。",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
   it("shows a retryable About error when the local service is unavailable", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("network down");

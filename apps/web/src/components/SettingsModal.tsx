@@ -1,6 +1,8 @@
 import {
+  Activity,
   AlertCircle,
   CheckCircle2,
+  Copy,
   DatabaseBackup,
   Focus,
   ImagePlus,
@@ -22,6 +24,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError, getAppSetting } from "../api/client";
+import { getRuntimeDiagnostics, type RuntimeDiagnostics } from "../api/desktop";
 import {
   useAppSettingsQuery,
   useCommitAppSettingsWithAvatar,
@@ -68,6 +71,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "focus", label: "专注", icon: Focus },
   { id: "actors", label: "人员与责任", icon: UsersRound },
   { id: "data", label: "数据与备份", icon: DatabaseBackup },
+  { id: "diagnostics", label: "运行诊断", icon: Activity },
   { id: "about", label: "关于", icon: Info },
 ];
 
@@ -250,11 +254,47 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   >("unchanged");
   const avatarPreviewUrl = useRef<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [runtimeDiagnostics, setRuntimeDiagnostics] =
+    useState<RuntimeDiagnostics | null>(null);
+  const [runtimeDiagnosticsError, setRuntimeDiagnosticsError] = useState(false);
+  const [runtimeDiagnosticsPending, setRuntimeDiagnosticsPending] =
+    useState(false);
+  const [runtimeDiagnosticsSequence, setRuntimeDiagnosticsSequence] =
+    useState(0);
+  const [diagnosticCopyState, setDiagnosticCopyState] = useState<
+    "idle" | "copied" | "error"
+  >("idle");
   const settingsQuery = useAppSettingsQuery(open);
   const settingsMutation = useUpdateAppSettings();
   const avatarMutation = useCommitAppSettingsWithAvatar();
   const saving = settingsMutation.isPending || avatarMutation.isPending;
-  const healthQuery = useHealthQuery(open && activeModule === "about");
+  const healthQuery = useHealthQuery(
+    open && (activeModule === "about" || activeModule === "diagnostics"),
+  );
+
+  useEffect(() => {
+    if (!open || activeModule !== "diagnostics") return;
+    let cancelled = false;
+    setRuntimeDiagnosticsPending(true);
+    setRuntimeDiagnosticsError(false);
+    setDiagnosticCopyState("idle");
+    void getRuntimeDiagnostics()
+      .then((result) => {
+        if (!cancelled) setRuntimeDiagnostics(result);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRuntimeDiagnostics(null);
+          setRuntimeDiagnosticsError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRuntimeDiagnosticsPending(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeModule, open, runtimeDiagnosticsSequence]);
 
   useEffect(() => {
     if (!open) return;
@@ -322,6 +362,34 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     const nextProfile = { ...profileDraft, [key]: value };
     setProfileDraft(nextProfile);
     previewSettings(focusDraft, generalDraft, nextProfile, themeDraft);
+  };
+
+  const refreshDiagnostics = () => {
+    setRuntimeDiagnosticsSequence((value) => value + 1);
+    void healthQuery.refetch();
+  };
+
+  const copyDiagnosticSummary = async () => {
+    if (!healthQuery.data || !runtimeDiagnostics) return;
+    const health = healthQuery.data;
+    const summary = [
+      "opc-workspace 运行诊断",
+      `environment=${runtimeDiagnostics.environment}`,
+      `sidecar_phase=${runtimeDiagnostics.phase}`,
+      `app_version=${health.app.version}`,
+      `app_commit=${health.app.commit}`,
+      `api_version=${health.api.version}`,
+      `schema_version=${health.schema.version}`,
+      `health=${health.status}`,
+    ].join("\n");
+    try {
+      if (!navigator.clipboard?.writeText)
+        throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(summary);
+      setDiagnosticCopyState("copied");
+    } catch {
+      setDiagnosticCopyState("error");
+    }
   };
 
   const changeAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -753,6 +821,191 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       return <BackupSettings />;
     }
 
+    if (activeModule === "diagnostics") {
+      if (
+        healthQuery.isPending ||
+        runtimeDiagnosticsPending ||
+        (!runtimeDiagnostics && !runtimeDiagnosticsError)
+      ) {
+        return (
+          <>
+            <header className="settings-content-header">
+              <h3>运行诊断</h3>
+              <p>核对桌面壳、本地 API 与数据库版本事实。</p>
+            </header>
+            <div aria-live="polite" className="settings-state" role="status">
+              <LoaderCircle className="animate-spin" size={16} />
+              正在检查本地运行环境…
+            </div>
+          </>
+        );
+      }
+
+      if ((healthQuery.isError && !healthQuery.data) || !runtimeDiagnostics) {
+        return (
+          <>
+            <header className="settings-content-header">
+              <h3>运行诊断</h3>
+              <p>核对桌面壳、本地 API 与数据库版本事实。</p>
+            </header>
+            <div className="settings-state settings-state-error" role="alert">
+              <AlertCircle size={16} />
+              <div>
+                <strong>运行诊断未完成</strong>
+                <span>
+                  {healthQuery.isError && !healthQuery.data
+                    ? formatHealthError(healthQuery.error)
+                    : "无法读取桌面生命周期状态；未展示底层错误或本地路径。"}
+                </span>
+              </div>
+              <button
+                className="button button-secondary"
+                onClick={refreshDiagnostics}
+                type="button"
+              >
+                <RefreshCw size={14} />
+                重试
+              </button>
+            </div>
+          </>
+        );
+      }
+
+      const health = healthQuery.data!;
+      const desktopVersionComplete =
+        runtimeDiagnostics.environment === "desktop" &&
+        runtimeDiagnostics.appVersion !== null &&
+        runtimeDiagnostics.apiVersion !== null &&
+        runtimeDiagnostics.schemaVersion !== null;
+      const versionsMatch =
+        desktopVersionComplete &&
+        runtimeDiagnostics.appVersion === health.app.version &&
+        runtimeDiagnostics.apiVersion === health.api.version &&
+        runtimeDiagnostics.schemaVersion === String(health.schema.version);
+      const phaseLabel =
+        runtimeDiagnostics.phase === "ready"
+          ? "就绪"
+          : runtimeDiagnostics.phase === "starting"
+            ? "启动中"
+            : runtimeDiagnostics.phase === "error"
+              ? "异常"
+              : "外部开发进程";
+      const compatibilityLabel =
+        runtimeDiagnostics.environment === "browser"
+          ? "由 HTTP 健康检查确认"
+          : versionsMatch
+            ? "桌面握手与 API 一致"
+            : desktopVersionComplete
+              ? "桌面握手与 API 不一致"
+              : "桌面握手版本不完整";
+
+      return (
+        <>
+          <header className="settings-content-header">
+            <h3>运行诊断</h3>
+            <p>只展示可安全分享的版本和状态，不读取业务正文。</p>
+          </header>
+          <div className="settings-about">
+            <div className="settings-about-row">
+              <span>运行环境</span>
+              <strong>
+                {runtimeDiagnostics.environment === "desktop"
+                  ? "Tauri 桌面"
+                  : "浏览器开发模式"}
+              </strong>
+            </div>
+            <div className="settings-about-row">
+              <span>Sidecar 生命周期</span>
+              <strong
+                className="settings-health-state"
+                data-status={
+                  runtimeDiagnostics.phase === "ready" ||
+                  runtimeDiagnostics.phase === "external"
+                    ? "ok"
+                    : runtimeDiagnostics.phase
+                }
+              >
+                {runtimeDiagnostics.phase === "ready" ||
+                runtimeDiagnostics.phase === "external" ? (
+                  <CheckCircle2 size={13} />
+                ) : (
+                  <AlertCircle size={13} />
+                )}
+                {phaseLabel}
+              </strong>
+            </div>
+            <div className="settings-about-row">
+              <span>本地 API</span>
+              <strong>
+                {health.status === "ok" ? "健康检查通过" : health.status}
+              </strong>
+            </div>
+            <div className="settings-about-row">
+              <span>版本兼容</span>
+              <strong>{compatibilityLabel}</strong>
+            </div>
+            <div className="settings-about-row">
+              <span>应用 / API</span>
+              <strong>
+                {displayVersion(health.app.version)} · {health.api.version}
+              </strong>
+            </div>
+            <div className="settings-about-row">
+              <span>数据库 schema</span>
+              <strong>v{health.schema.version}</strong>
+            </div>
+          </div>
+          {healthQuery.isError ? (
+            <p
+              className="settings-inline-note settings-inline-warning"
+              role="alert"
+            >
+              最近一次 HTTP 检查失败，当前展示上一次成功结果：
+              {formatHealthError(healthQuery.error)}
+            </p>
+          ) : null}
+          <div className="settings-about-actions settings-diagnostic-actions">
+            <span aria-live="polite" className="settings-diagnostic-feedback">
+              {diagnosticCopyState === "copied"
+                ? "脱敏摘要已复制"
+                : diagnosticCopyState === "error"
+                  ? "浏览器未允许复制，请稍后重试"
+                  : ""}
+            </span>
+            <button
+              className="button button-secondary"
+              onClick={() => void copyDiagnosticSummary()}
+              type="button"
+            >
+              <Copy size={14} />
+              复制脱敏摘要
+            </button>
+            <button
+              className="button button-secondary"
+              disabled={healthQuery.isFetching || runtimeDiagnosticsPending}
+              onClick={refreshDiagnostics}
+              type="button"
+            >
+              <RefreshCw
+                className={
+                  healthQuery.isFetching || runtimeDiagnosticsPending
+                    ? "animate-spin"
+                    : undefined
+                }
+                size={14}
+              />
+              {healthQuery.isFetching || runtimeDiagnosticsPending
+                ? "检查中…"
+                : "重新检查"}
+            </button>
+          </div>
+          <p className="settings-inline-note">
+            摘要不会包含会话令牌、监听地址、本地路径、底层错误或业务数据。完整日志与诊断包仍未实现。
+          </p>
+        </>
+      );
+    }
+
     if (healthQuery.isPending) {
       return (
         <>
@@ -885,6 +1138,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       footer={
         activeModule === "actors" ||
         activeModule === "data" ||
+        activeModule === "diagnostics" ||
         activeModule === "about" ? (
           <>
             {activeModule === "actors" ? (

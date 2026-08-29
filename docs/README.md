@@ -6,7 +6,7 @@
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v7.5）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v7.6）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -33,7 +33,7 @@
 | -------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
 | 本地 Agent Runtime         | 未开始                                                                                                     | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                                                   | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
-| 命令面板与搜索             | 核心本地搜索、详情直达与本地最近使用完成；健康诊断/OS 快捷键待后续                                         | v0.1                | [command-search.md](modules/command-search.md)     |
+| 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用和脱敏运行诊断完成；OS 快捷键待后续                                    | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、手动备份完整闭环、创建失败 Inbox 投影及基础业务 JSON 导出已交付；导入/含文件包待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
 | 桌面平台与发布             | 基座部分完成                                                                                               | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 

@@ -1,7 +1,14 @@
 import { create } from "zustand";
 
 export type SettingsModule =
-  "profile" | "general" | "appearance" | "focus" | "actors" | "data" | "about";
+  | "profile"
+  | "general"
+  | "appearance"
+  | "focus"
+  | "actors"
+  | "data"
+  | "diagnostics"
+  | "about";
 
 interface UiState {
   commandPaletteOpen: boolean;

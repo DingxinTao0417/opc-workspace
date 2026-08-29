@@ -67,6 +67,7 @@ const settingsCommands: {
   { id: "settings-focus", label: "专注设置", module: "focus" },
   { id: "settings-actors", label: "人员与责任设置", module: "actors" },
   { id: "settings-data", label: "数据与备份", module: "data" },
+  { id: "settings-diagnostics", label: "运行诊断", module: "diagnostics" },
   { id: "settings-about", label: "关于", module: "about" },
 ];
 
