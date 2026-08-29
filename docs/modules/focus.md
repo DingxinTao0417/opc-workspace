@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）。Focus 结构仍由 schema v11 引入；schema v12–v29 不改 Focus 表契约，schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，同样不改 Focus 表或 API 契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付；原生桌面反馈仍属后续。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）。Focus 结构仍由 schema v11 引入；schema v12–v29 不改 Focus 表契约，schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，schema v35 新增 Client Followup，同样不改 Focus 表或 API 契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付；原生桌面反馈仍属后续。
 
 ## 定位与边界
 

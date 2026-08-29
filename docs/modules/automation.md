@@ -1,6 +1,6 @@
 # 自动化模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）。首个 v0.2 纵向切片已交付可审计的预设本地规则；本地 Agent 只完成 Adapter 登记/安全诊断，Agent failure 事件源与 Runner、发票和自由规则仍未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）。首个 v0.2 纵向切片已交付可审计的预设本地规则；schema v35 的 Client Followup 不改变自动化表或规则事实。本地 Agent 只完成 Adapter 登记/安全诊断，Agent failure 事件源与 Runner、发票和自由规则仍未交付。
 
 ## 定位与边界
 

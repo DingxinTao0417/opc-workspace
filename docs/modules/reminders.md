@@ -1,10 +1,10 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v33 的预设自动化可创建来源为 automation 的一次性 Reminder，schema v34 仅新增 Agent Adapter 诊断事实，均不改变 Reminder 表。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v33 的预设自动化可创建来源为 automation 的一次性 Reminder，schema v34 仅新增 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划事实，均不改变 Reminder 表。
 >
 > 版本边界：T-11A3 一次性本地 Reminder 及每日/每周重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”已能按 IANA 时区创建本地一次性 Reminder。每月/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.28](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.44](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 

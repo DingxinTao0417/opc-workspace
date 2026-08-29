@@ -23,7 +23,7 @@
 | 项目管理       | 部分完成（含 Artifact nullable follow-up/实时 required 进度、四种跟进状态、Inbox 深链、任务/Focus/Client 活动协作）              | v0.1                      | [projects.md](modules/projects.md)   |
 | 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动/附件/person、回访 API/到期 Inbox 投影及详情管理已交付）           | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
 | 收件箱工作编排 | 部分完成（人工闭环含来源 Project 继承/清除、完成条件、person 本地责任、共享 Task 详情、缓存失效与 automatic resolved/100% 金链） | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
-| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                                                                 | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
+| 本地提醒       | 一次性及 daily/weekly Reminder、启动补偿与到期 Inbox 投影已完成                                                                  | v0.1；每月/原生通知后续   | [reminders.md](modules/reminders.md) |
 | Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                        | v0.1                      | [actors.md](modules/actors.md)       |
 | 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                         | v0.1                      | [focus.md](modules/focus.md)         |
 
