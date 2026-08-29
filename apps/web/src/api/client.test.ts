@@ -23,7 +23,7 @@ import {
   executeTaskLifecycleCommand,
   getAllActors,
   getActors,
-  getAllProjects,
+  getProjects,
   getAllTasks,
   getBackups,
   getHealth,
@@ -1280,25 +1280,18 @@ describe("normalizeProject", () => {
 });
 
 describe("paged option loaders", () => {
-  it("loads every task and project page instead of truncating at 100", async () => {
+  it("loads every task page instead of truncating at 100", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://local.test");
       const page = Number(url.searchParams.get("page"));
-      const isProject = url.pathname.endsWith("/projects");
       const count = page === 1 ? 100 : 1;
       const data = Array.from({ length: count }, (_, index) =>
-        isProject
-          ? {
-              id: `project-${(page - 1) * 100 + index + 1}`,
-              name: `项目 ${index + 1}`,
-              status: "planning",
-            }
-          : taskPayload({
-              id: `task-${(page - 1) * 100 + index + 1}`,
-              title: `任务 ${index + 1}`,
-              status: "todo",
-              priority: "P2",
-            }),
+        taskPayload({
+          id: `task-${(page - 1) * 100 + index + 1}`,
+          title: `任务 ${index + 1}`,
+          status: "todo",
+          priority: "P2",
+        }),
       );
       return new Response(
         JSON.stringify({
@@ -1310,11 +1303,84 @@ describe("paged option loaders", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getAllProjects({ sort: "name" })).resolves.toHaveLength(101);
     await expect(
       getAllTasks({ projectId: "018f0000-0000-7000-8000-000000000001" }),
     ).resolves.toHaveLength(101);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requests only one bounded searchable project page", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          data: [{ id: "project-1", name: "品牌官网", status: "planning" }],
+          meta: { page: 2, page_size: 20, total: 25 },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getProjects({
+        page: 2,
+        pageSize: 20,
+        query: "  品牌  ",
+        includeArchived: true,
+        sort: "name",
+      }),
+    ).resolves.toMatchObject({
+      items: [{ id: "project-1", name: "品牌官网" }],
+      meta: { page: 2, pageSize: 20, total: 25 },
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [input, init] = fetchMock.mock.calls[0];
+    const url = new URL(String(input), "http://local.test");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "2",
+      page_size: "20",
+      q: "品牌",
+      include_archived: "true",
+      sort: "name",
+    });
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("forwards project request cancellation to the fetch signal", async () => {
+    const upstreamController = new AbortController();
+    const observed: { signal?: AbortSignal } = {};
+    let markFetchStarted: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          observed.signal = init?.signal ?? undefined;
+          markFetchStarted?.();
+          observed.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = getProjects(
+      { page: 1, pageSize: 20, sort: "name" },
+      upstreamController.signal,
+    );
+    await fetchStarted;
+
+    const fetchSignal = observed.signal;
+    expect(fetchSignal).toBeDefined();
+    if (!fetchSignal) throw new Error("fetch did not receive an AbortSignal");
+    expect(fetchSignal).not.toBe(upstreamController.signal);
+    expect(fetchSignal.aborted).toBe(false);
+    upstreamController.abort();
+    expect(fetchSignal.aborted).toBe(true);
+    await expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 

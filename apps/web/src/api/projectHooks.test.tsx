@@ -8,14 +8,20 @@ import {
   clientQueryKey,
   projectDetailQueryKey,
   projectQueryKey,
+  useProjectOptionsQuery,
   useTransitionProject,
 } from "./hooks";
 
 const transitionProjectMock = vi.hoisted(() => vi.fn());
+const getProjectsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
-  return { ...actual, transitionProject: transitionProjectMock };
+  return {
+    ...actual,
+    getProjects: getProjectsMock,
+    transitionProject: transitionProjectMock,
+  };
 });
 
 const completedProject: Project = {
@@ -112,5 +118,60 @@ describe("useTransitionProject", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
     });
+  });
+});
+
+describe("useProjectOptionsQuery", () => {
+  it("requests one normalized project page including the archive mode", async () => {
+    getProjectsMock.mockResolvedValue({
+      items: [completedProject],
+      meta: { page: 2, pageSize: 20, total: 21 },
+    });
+    const { result } = renderHook(
+      () => useProjectOptionsQuery("  网站  ", 2, true, true),
+      { wrapper: wrapperFor(createQueryClient()) },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getProjectsMock).toHaveBeenCalledOnce();
+    expect(getProjectsMock).toHaveBeenCalledWith(
+      {
+        page: 2,
+        pageSize: 20,
+        query: "网站",
+        sort: "name",
+        includeArchived: true,
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("aborts an obsolete project page when the search key changes or unmounts", async () => {
+    const signals: AbortSignal[] = [];
+    getProjectsMock.mockImplementation(
+      (_input: unknown, signal?: AbortSignal) => {
+        if (signal) signals.push(signal);
+        return new Promise(() => undefined);
+      },
+    );
+    const queryClient = createQueryClient();
+    const { rerender, unmount } = renderHook(
+      ({ search }) => useProjectOptionsQuery(search, 1, true),
+      {
+        initialProps: { search: "网站" },
+        wrapper: wrapperFor(queryClient),
+      },
+    );
+
+    await waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0].aborted).toBe(false);
+
+    rerender({ search: "小程序" });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+
+    unmount();
+    await waitFor(() => expect(signals[1].aborted).toBe(true));
   });
 });

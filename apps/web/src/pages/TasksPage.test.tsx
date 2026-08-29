@@ -90,6 +90,29 @@ vi.mock("../components/ClientSelect", () => ({
   ),
 }));
 
+vi.mock("../components/ProjectSelect", () => ({
+  ProjectSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="project-1">品牌官网改版</option>
+    </select>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useTaskPageQuery: (input: TaskListParams, enabled = true) => {
     mocks.taskQueries.push(input);
@@ -108,11 +131,6 @@ vi.mock("../api/hooks", () => ({
       refetch: vi.fn(),
     };
   },
-  useProjectOptionsQuery: () => ({
-    data: [{ id: "project-1", name: "品牌官网改版" }],
-    isError: false,
-    isPending: false,
-  }),
   useTaskSavedViewsQuery: () => ({
     data: mocks.savedViews,
     isError: false,
@@ -246,11 +264,15 @@ describe("TasksPage", () => {
     fireEvent.change(screen.getByLabelText("客户"), {
       target: { value: "client-1" },
     });
+    fireEvent.change(screen.getByLabelText("项目"), {
+      target: { value: "project-1" },
+    });
 
     expect(lastPageQuery()).toEqual(
       expect.objectContaining({
         status: "todo",
         clientId: "client-1",
+        projectId: "project-1",
         rootOnly: false,
       }),
     );
@@ -262,6 +284,7 @@ describe("TasksPage", () => {
         page: 2,
         status: "todo",
         clientId: "client-1",
+        projectId: "project-1",
       }),
     );
   });
@@ -386,6 +409,30 @@ describe("TasksPage", () => {
         action: "set_project",
         items: [{ id: task.id, expectedVersion: task.version }],
         projectId: null,
+      },
+      expect.objectContaining({
+        onError: expect.any(Function),
+        onSuccess: expect.any(Function),
+      }),
+    );
+  });
+
+  it("uses the shared project selector for an atomic batch move", () => {
+    render(<TasksPage />);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    fireEvent.change(screen.getByLabelText("批量目标项目"), {
+      target: { value: "project-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+
+    expect(mocks.batch).toHaveBeenCalledWith(
+      {
+        action: "set_project",
+        items: [{ id: task.id, expectedVersion: task.version }],
+        projectId: "project-1",
       },
       expect.objectContaining({
         onError: expect.any(Function),
@@ -568,6 +615,7 @@ describe("TasksPage", () => {
       target: { value: "view-1" },
     });
 
+    expect(screen.getByLabelText("项目")).toHaveValue("project-1");
     expect(lastPageQuery()).toEqual(
       expect.objectContaining({
         page: 1,

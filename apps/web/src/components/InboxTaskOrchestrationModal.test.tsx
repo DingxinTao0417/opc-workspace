@@ -41,7 +41,6 @@ const item: InboxItem = {
 
 const mocks = vi.hoisted(() => ({
   actors: vi.fn(),
-  projects: vi.fn(),
   split: {
     error: null as unknown,
     isPending: false,
@@ -50,9 +49,34 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("./ProjectSelect", () => ({
+  ProjectSelect: ({
+    ariaLabel,
+    disabled,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    disabled?: boolean;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="project-1">官网发布</option>
+    </select>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useAssignmentActorOptionsQuery: mocks.actors,
-  useProjectOptionsQuery: mocks.projects,
   useSplitInboxItem: () => mocks.split,
 }));
 
@@ -80,12 +104,6 @@ describe("InboxTaskOrchestrationModal", () => {
           version: 1,
         },
       ],
-      isError: false,
-      isPending: false,
-      refetch: vi.fn(),
-    });
-    mocks.projects.mockReturnValue({
-      data: [{ id: "project-1", name: "官网发布" }],
       isError: false,
       isPending: false,
       refetch: vi.fn(),
@@ -123,8 +141,9 @@ describe("InboxTaskOrchestrationModal", () => {
     fireEvent.change(assignees[1], { target: { value: "person-1" } });
     const parents = screen.getAllByLabelText("父任务");
     fireEvent.change(parents[1], { target: { value: "task-1" } });
-    const projects = screen.getAllByLabelText("项目");
-    fireEvent.change(projects[1], { target: { value: "project-1" } });
+    fireEvent.change(screen.getByLabelText("第 2 个任务项目"), {
+      target: { value: "project-1" },
+    });
     const reviews = screen.getAllByLabelText("验收");
     fireEvent.change(reviews[1], { target: { value: "manual" } });
 

@@ -1,13 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import {
-  useCreateTask,
-  useProjectOptionsQuery,
-  useTaskOptionsQuery,
-} from "../api/hooks";
+import { useCreateTask, useTaskOptionsQuery } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
 import type { TaskKind, TaskPriority, TaskReviewPolicy } from "../types/models";
 import { Modal } from "./Modal";
+import { ProjectSelect } from "./ProjectSelect";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -48,7 +45,6 @@ export function NewTaskModal() {
   const [reviewPolicy, setReviewPolicy] = useState<TaskReviewPolicy>("none");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const projectsQuery = useProjectOptionsQuery(open);
   const tasksQuery = useTaskOptionsQuery(open);
 
   useEffect(() => {
@@ -169,39 +165,16 @@ export function NewTaskModal() {
           />
         </label>
         <div className="form-grid">
-          <label className="form-field">
+          <div className="form-field">
             <span>项目</span>
-            <select
-              disabled={projectsQuery.isPending || projectsQuery.isError}
-              onChange={(event) => setProjectId(event.target.value)}
+            <ProjectSelect
+              ariaLabel="项目"
+              emptyLabel="未归项目"
+              onChange={setProjectId}
               value={projectId}
-            >
-              <option value="">
-                {projectsQuery.isPending
-                  ? "正在读取项目…"
-                  : projectsQuery.isError
-                    ? "项目暂不可用"
-                    : "未归项目"}
-              </option>
-              {(projectsQuery.data ?? []).map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            {projectsQuery.isError ? (
-              <span className="form-field-error" role="alert">
-                项目列表读取失败。
-                <button
-                  className="form-inline-action"
-                  onClick={() => void projectsQuery.refetch()}
-                  type="button"
-                >
-                  重新读取
-                </button>
-              </span>
-            ) : null}
-          </label>
+              variant="form"
+            />
+          </div>
           <label className="form-field">
             <span>父任务</span>
             <select

@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
 import {
   useAssignmentActorOptionsQuery,
-  useProjectOptionsQuery,
   useSplitInboxItem,
 } from "../api/hooks";
 import type {
@@ -15,6 +14,7 @@ import type {
   TaskReviewPolicy,
 } from "../types/models";
 import { Modal } from "./Modal";
+import { ProjectSelect } from "./ProjectSelect";
 
 type DraftTask = Omit<InboxSplitTaskInput, "key"> & { localId: number };
 
@@ -78,7 +78,6 @@ export function InboxTaskOrchestrationModal({
   onCreated?: () => Promise<unknown> | unknown;
 }) {
   const actorsQuery = useAssignmentActorOptionsQuery(open);
-  const projectsQuery = useProjectOptionsQuery(open);
   const mutation = useSplitInboxItem();
   const [policy, setPolicy] = useState<InboxResolutionPolicy>(
     "all_required_tasks_done",
@@ -360,25 +359,21 @@ export function InboxTaskOrchestrationModal({
                       ))}
                     </select>
                   </label>
-                  <label className="form-field">
+                  <div className="form-field">
                     <span>项目</span>
-                    <select
-                      disabled={mutation.isPending || projectsQuery.isPending}
-                      onChange={(event) =>
+                    <ProjectSelect
+                      ariaLabel={`第 ${index + 1} 个任务项目`}
+                      disabled={mutation.isPending}
+                      emptyLabel="未归项目"
+                      onChange={(value) =>
                         updateTask(task.localId, {
-                          projectId: event.target.value || null,
+                          projectId: value || null,
                         })
                       }
                       value={task.projectId ?? ""}
-                    >
-                      <option value="">未归项目</option>
-                      {(projectsQuery.data ?? []).map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                      variant="form"
+                    />
+                  </div>
                   <label className="form-field">
                     <span>类型</span>
                     <select

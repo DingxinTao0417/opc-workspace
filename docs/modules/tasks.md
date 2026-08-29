@@ -1,10 +1,10 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 给 Submission 增加来源并交付父任务自动发起验收；schema v31 只约束 Project→Client Activity 来源，不改变 Task 表、API 或既有 manual 提交。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 给 Submission 增加来源并交付父任务自动发起验收；schema v31 只约束 Project→Client Activity 来源，不改变 Task 表、API 或既有 manual 提交。v9.17 的 ProjectSelect 复用既有 Project API，不改变 app/API/schema 版本，也不新增迁移。
 >
-> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox，以及有门禁的父任务自动发起验收已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
+> 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、共享服务端 Project 选择、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox，以及有门禁的父任务自动发起验收已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.16](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.17](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -24,7 +24,7 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 
 ## 已实现状态
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。客户条件使用与 Project 表单/筛选共享的 `ClientSelect`：每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留、inactive 可见可选和完整反馈，不再串行拉取全部 Client。列表 API 另提供仅供实时截止风险入口使用的 `due_state=overdue|due_soon`；Today 以该条件读取完整分页结果。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。客户条件使用与 Project 表单/筛选共享的 `ClientSelect`。Project 关联使用 Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用的 `ProjectSelect`：两个选择器都固定每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留和完整反馈，不再串行拉取全部 Client 或 Project。列表 API 另提供仅供实时截止风险入口使用的 `due_state=overdue|due_soon`；Today 以该条件读取完整分页结果。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 只允许 active owner/person，reviewer 只允许 active owner。
@@ -48,7 +48,7 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 
 `task_saved_views` 独立保存筛选定义，不把视图塞入固定四模块 `app_settings`，也不复制任务结果。名称 1–80 字符、大小写不敏感唯一；定义 JSON 最大 16 KiB、`schema_version = 1`、`version >= 1`，当前每个工作区最多 20 个。定义只包含搜索、状态、优先级、类型、项目、客户、标签、精确/范围计划日期、截止范围和排序；不保存页码、当前选择、展开状态或查询结果。
 
-API 提供列表、新建、`If-Match` 更新和带 `confirm=true` 的删除。服务端按与 Task 列表一致的枚举、UUID、日期、范围和排序白名单规范化；计划精确值与计划范围互斥。保存视图引用的 Project、Client 或 Tag 删除后不级联删除视图，应用时按当前事实自然返回空或剩余结果，避免用历史快照伪造现存关系。
+API 提供列表、新建、`If-Match` 更新和带 `confirm=true` 的删除。服务端按与 Task 列表一致的枚举、UUID、日期、范围和排序白名单规范化；计划精确值与计划范围互斥。保存视图引用的 Project、Client 或 Tag 删除后不级联删除视图，应用时按当前事实自然返回空或剩余结果，避免用历史快照伪造现存关系。Project 候选继续消费 `GET /api/v1/projects`：默认排除归档项，所有排序追加 `id ASC`，列表总数与当页数据在同一只读事务读取；这只是既有 API v1 的稳定性收口。
 
 ### Task
 
@@ -278,6 +278,8 @@ schema v9 为数据库创建单例 `workspace_identity`：`database_id` 永久�
 - 筛选面板可保存当前完整条件、选择并立即应用视图、以当前条件更新所选视图，或二次确认删除；保存视图在 SQLite 中跨重启保留。创建达到 20 个上限、同名、网络错误和版本冲突都有明确反馈。
 - 应用视图会原子替换搜索、状态、优先级、类型、项目、客户、标签、日期和排序并回到第一页，不恢复旧页码或任务选择；更新/删除携带当前视图版本，冲突时刷新列表且不自动覆盖。
 - 客户筛选复用共享 ClientSelect，而不是预先拉全 Client options。控件每页请求 20 条，输入经 250 ms 防抖后发送 `q`，支持稳定上一页/下一页、取消旧请求、跨页/失败保留当前选择、inactive 可见可选，以及加载、空、错误重试、更多结果提示和 combobox 键盘语义。服务端仍沿 Task 的 Project 当前 `client_id` 过滤；Task 不保存客户副本。客户与项目、标签、状态及日期等条件取 AND，并完整保留到后续分页和保存视图应用。
+- Project 选择复用共享 ProjectSelect，而不是预先拉全 Project options。Task 新建/编辑、Tasks 项目筛选、批量 `set_project` 的目标和 Inbox 拆分中的每个任务都使用同一组件；每页请求 20 条，输入经 250 ms 防抖后发送 `q`，`q / page / includeArchived` 进入 Query key，旧列表和选中详情请求可取消，候选按 ID 去重。默认候选不列归档项目；详情查询或调用方名称 fallback 使跨页、失败、保存视图及既有归档关联仍保留当前选择。只有用户点击可聚焦的清除按钮才提交空筛选或 `project_id=null`，搜索、翻页和错误不得隐式解除关联。
+- ProjectSelect 显示项目状态与客户上下文，并覆盖输入等待、首批加载、无项目、无匹配、错误重试、更多结果和前后翻页；combobox/listbox 使用方向键、Home/End、Enter、Escape、Tab 和 PageUp/PageDown，输入法合成期间不解释快捷键。Task 项目筛选改变后回到第一页，继续与客户、标签、状态和日期条件取 AND；批量目标只改变用户选中的 Task，不把当前列表页冒充完整选择集。
 - 计划日期支持精确值或起止范围二选一，截止日期支持独立起止范围；设置任一计划范围端点会清空精确值，设置精确值会清空计划范围。
 - `due_state=overdue|due_soon` 按单次请求捕获的 Sidecar UTC 时刻派生，并固定排除 done/cancelled；逾期为 `< now`，临期为 `[now, now+24h]`。它与按 UTC 日期片段过滤的 `due_from/due_to` 语义不同且不可同时提交；显式状态只允许 `active`。比较和 `due_date` 排序使用固定宽度 UTC 纳秒键，避免亚毫秒精度丢失与 RFC3339 整秒/小数秒文本排序误差。
 - `due_state` 当前只服务 Today 的动态风险快捷视图，不纳入 schema v17 保存视图。保存视图继续表示用户明确选择的静态任务页条件，不能静默保存或恢复会随服务端时钟自动变化的结果集。
@@ -344,6 +346,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
 - Today 截止风险客户端序列化、Sidecar 固定时钟边界/终态排除/冲突拒绝、稳定分页，以及同一时钟下逾期/临期列表 `meta.total` 与 Today 统计严格一致。
 - 任务页 ClientSelect 的首批/搜索/上一页与下一页有界分页、查询键切换与卸载取消、跨页和失败选中保留、inactive、加载/空/错误重试/更多结果反馈、combobox 键盘交互及页面接线；客户端 `client_id` 序列化、保存视图恢复、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤继续覆盖。
+- ProjectSelect 的 250 ms 搜索、首批/前后页有界请求、`q / page / includeArchived` Query key、实际取消、按 ID 去重、当前归档/失败 fallback、显式清除、加载/空/错误/更多结果和 combobox 键盘交互已有组件与 hook 级覆盖；Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分均有接线验证。Go 定向测试覆盖 Project 同名排序以 `id ASC` 收口、所有排序字段和既有过滤契约；代码审查确认 `COUNT` 与 `SCAN` 共用请求上下文内的只读事务。模块文档不单独维护易过期的全仓测试总数。
 - schema v16→v17 事实保留、保存视图 JSON/名称/schema 约束、API 规范化/并发/确认删除，以及前端应用/创建/更新/删除交互。
 - schema v22→v23 不发明 Inbox 数据；follow-up Artifact 提交/幂等重放/事务回滚、来源上下文、活动删除阻止、归档后 Artifact/Task 删除协调和来源快照保留。
 - schema v23→v24 不回填既有 blocked Task；每次 block 的稳定来源、幂等重放、重复阻塞、前端来源上下文、活动删除阻止及终态后 Task 删除协调和快照保留。
@@ -353,7 +356,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - 创建、改绑、解除父级、删除、单条与批量生命周期、review accept、policy 和 Assignment 变更均在事务内协调；批量去重且返回最终版本，Inbox 显式 required 关系保持独立。
 - 前端 origin/取消计数兼容规范化、“子任务汇总”/门禁/时间线文案、列表与详情的非取消进度展示；typecheck 与定向组件测试覆盖。
 
-已知环境边界：当前自动协调只由迁移后的相关写命令触发，没有全库启动回填；accepted 父任务被系统重开时不会恢复已经结束的 Assignment，需要 owner 重新分派后才能继续人工流转。祖先协调使用 visited 集合防止循环，并沿完整有效祖先链传播。ClientSelect 尚未完成真实浏览器键盘/焦点、窄屏和 1,000/10,000 条客户数据性能专项；组件测试不能替代这些证据。Windows 桌面 Rust 原生测试在未安装 MSVC linker 的主机仍可能无法执行，这不影响已通过的 Go 定向测试和前端 typecheck，但不能据此宣称完整跨平台桌面验收。
+已知环境边界：当前自动协调只由迁移后的相关写命令触发，没有全库启动回填；accepted 父任务被系统重开时不会恢复已经结束的 Assignment，需要 owner 重新分派后才能继续人工流转。祖先协调使用 visited 集合防止循环，并沿完整有效祖先链传播。ClientSelect 与 ProjectSelect 均尚未完成真实浏览器键盘/焦点、窄屏和 1,000/10,000 条数据性能专项；组件测试不能替代这些证据，Project 的包含式 `LIKE` 搜索也不能仅凭有界分页推断大数据量响应性能。Windows 桌面 Rust 原生测试在未安装 MSVC linker 的主机仍可能无法执行，这不影响已通过的 Go 定向测试和前端 typecheck，但不能据此宣称完整跨平台桌面验收。
 
 仍属后续：其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact、Task 阻塞与 Task 临期来源已经交付。
 
@@ -383,6 +386,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - [任务看板生命周期确认](../../apps/web/src/components/TaskBoardTransitionModal.tsx)
 - [任务保存视图控件](../../apps/web/src/components/TaskSavedViewsControl.tsx)
 - [共享 Client 选择器](../../apps/web/src/components/ClientSelect.tsx)
+- [共享 Project 选择器](../../apps/web/src/components/ProjectSelect.tsx)
 - [任务列表页测试](../../apps/web/src/pages/TasksPage.test.tsx)
 - [前端 Artifact 卡片](../../apps/web/src/components/TaskArtifactCard.tsx)
 - [Go D2 测试](../../services/sidecar/internal/api/task_outputs_test.go)

@@ -5796,6 +5796,7 @@ export async function deleteTag(
 
 export async function getProjects(
   input: ProjectListParams = {},
+  signal?: AbortSignal,
 ): Promise<ProjectListResult> {
   const params = new URLSearchParams({
     page: String(input.page ?? 1),
@@ -5806,7 +5807,9 @@ export async function getProjects(
   if (input.clientId) params.set("client_id", input.clientId);
   if (input.includeArchived) params.set("include_archived", "true");
   if (input.sort) params.set("sort", input.sort);
-  const payload = await apiRequest<unknown>(`/api/v1/projects?${params}`);
+  const payload = await apiRequest<unknown>(`/api/v1/projects?${params}`, {
+    signal,
+  });
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
     throw new ApiError("项目列表响应格式无效", {
       code: "INVALID_RESPONSE",
@@ -5823,27 +5826,13 @@ export async function getProjects(
   };
 }
 
-export async function getAllProjects(
-  input: Omit<ProjectListParams, "page" | "pageSize"> = {},
-): Promise<Project[]> {
-  const projects: Project[] = [];
-  const pageSize = 100;
-  let page = 1;
-  let total = Number.POSITIVE_INFINITY;
-
-  while (projects.length < total) {
-    const result = await getProjects({ ...input, page, pageSize });
-    projects.push(...result.items);
-    total = result.meta.total;
-    if (result.items.length === 0) break;
-    page += 1;
-  }
-  return projects;
-}
-
-export async function getProject(id: string): Promise<Project> {
+export async function getProject(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Project> {
   const payload = await apiRequest<unknown>(
     `/api/v1/projects/${encodeURIComponent(id)}`,
+    { signal },
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeProject(body);

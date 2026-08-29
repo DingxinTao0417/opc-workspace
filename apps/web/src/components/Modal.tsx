@@ -42,6 +42,12 @@ export function Modal({
       '[tabindex]:not([tabindex="-1"])',
     ].join(",");
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        (event.isComposing || event.keyCode === 229)
+      ) {
+        return;
+      }
       if (event.key === "Escape" && dismissible) {
         onCloseRef.current();
         return;

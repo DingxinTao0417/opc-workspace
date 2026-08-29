@@ -5,18 +5,35 @@ import { NewTaskModal } from "./NewTaskModal";
 
 const createTask = vi.hoisted(() => vi.fn());
 
+vi.mock("./ProjectSelect", () => ({
+  ProjectSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="project-1">品牌官网改版</option>
+    </select>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useCreateTask: () => ({
     error: null,
     isPending: false,
     mutate: createTask,
     reset: vi.fn(),
-  }),
-  useProjectOptionsQuery: () => ({
-    data: [{ id: "project-1", name: "品牌官网改版" }],
-    isError: false,
-    isPending: false,
-    refetch: vi.fn(),
   }),
   useTaskOptionsQuery: () => ({
     data: [],
@@ -56,6 +73,13 @@ describe("NewTaskModal", () => {
     render(<NewTaskModal />);
 
     expect(screen.getByLabelText("项目")).toHaveValue("project-1");
+    fireEvent.change(screen.getByLabelText("项目"), {
+      target: { value: "" },
+    });
+    expect(screen.getByLabelText("项目")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("项目"), {
+      target: { value: "project-1" },
+    });
     fireEvent.change(screen.getByLabelText("任务名称"), {
       target: { value: "确认交付范围" },
     });

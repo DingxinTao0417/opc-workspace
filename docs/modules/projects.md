@@ -2,9 +2,9 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v31。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束。项目级 Focus 读取复用既有 Task/Session 关系，不改写 Project/Focus 表，也不新增迁移。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v31。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v28 新增 Project 完成节点→Inbox 与父项目删除协调；schema v30 增加 `task_submissions.origin` 与父任务推进规则；schema v31 为 Project complete/reopen→Client 只读系统活动建立来源唯一约束。项目级 Focus 读取复用既有 Task/Session 关系；v9.17 的 ProjectSelect 复用并收口既有 Project 列表读契约，不改写 Project/Focus 表，也不新增迁移。
 >
-> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内任务搜索/状态/优先级/类型/标签/排期筛选及服务端分页、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up、Task 阻塞、Task 临期、Project 完成节点→Inbox，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史已实现，模块仍为**部分完成**；内嵌 Assignment/Submission、财务和其他真实里程碑尚未交付。
+> 版本边界：项目资料、基础生命周期、任务聚合与树/平铺视图、项目内任务搜索/状态/优先级/类型/标签/排期筛选及服务端分页、Client 客户关联、供 Task 新建/编辑、筛选、批量和 Inbox 拆分使用的共享 Project 选择读模型、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、Project complete/reopen→Client 系统活动、显式 follow-up、Task 阻塞、Task 临期、Project 完成节点→Inbox，以及项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史已实现，模块仍为**部分完成**；内嵌 Assignment/Submission、财务和其他真实里程碑尚未交付。
 
 ## 定位与边界
 
@@ -25,7 +25,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - SQLite schema v31 为当前基线：v3–v20 保留既有 Project 生命周期、聚合版本和不可变 Workflow Event；v21 以加法迁移新增 `project_notes`；v22 新增 `project_attachments`；v23–v25 新增显式 follow-up Artifact、Task 阻塞与 Task 临期→Inbox；v28 新增 Project 完成周期来源、不可变快照和删除协调；v29 增加版本化存储阈值设置；v30 增加 `task_submissions.origin` 与父任务推进规则；v31 只给 Project Workflow Event→Client 系统活动来源增加部分唯一索引，不改变 Project 表契约或创建历史活动。
 - Go Project model、路由、输入校验和集成测试已经存在。
 - 项目 API 支持创建、列表、详情、非生命周期字段编辑，以及受约束的永久删除。
-- 列表 API 支持分页、名称/描述搜索、状态和客户筛选、白名单排序；未指定状态时默认排除归档项目。
+- 列表 API 支持分页、名称/描述搜索、状态和客户筛选、`include_archived` 与白名单排序；未指定状态时默认排除归档项目。默认排序及每个显式排序都追加 `id ASC`，同名项目跨页仍有确定顺序；总数统计和当页读取在同一只读事务完成，避免 `meta.total` 与结果页来自不同快照。
 - 创建接口接受可选 `Idempotency-Key`：服务端对规范化请求计算 SHA-256，并保存首次响应快照；同键同请求即使资源后来已编辑或删除也重放首次响应，同键不同请求返回 `409 IDEMPOTENCY_CONFLICT`，旧版无快照记录则拒绝不安全重放。
 - 编辑、状态流转和永久删除必须携带 `If-Match`；资源响应返回 `ETag`，旧版本写入返回 `409 VERSION_CONFLICT`。归档项目资料必须先恢复再编辑，否则 PATCH 返回 `409 PROJECT_ARCHIVED`。版本不仅覆盖项目资料和状态，也覆盖任务关联/状态/`actual_minutes`、发票关联/增删、客户名称/删除等会改变聚合响应或删除确认范围的事实。
 - 状态只能通过 `start / pause / resume / complete / reopen / archive / restore` 命令流转。完成仍有未完成任务的项目需要显式确认，且不会修改任何任务状态。
@@ -35,7 +35,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目页使用真实 API 展示卡片、服务端搜索、状态筛选和每页 12 条分页，并覆盖加载、空、错误和重试状态。
 - 项目详情任务浏览器直接按 Project 条件调用 Task 服务端分页，每页 20 项；无条件时默认读取根任务并复用 `parent_task_id` 查询按需展开任意深度子任务，也可切换平铺列表。标题/描述、状态、优先级、类型、单标签及已/未排期可组合筛选；条件激活时使用平铺结果并显示父任务上下文，避免把局部命中冒充完整树，清除后恢复任务树。详情同时支持资料编辑、从项目内新建并预选项目的任务、派生进度/工时、状态操作、归档恢复，以及带二次确认的永久删除；版本冲突会刷新详情事实。
 - 项目新建/编辑与项目列表客户筛选共用 `ClientSelect`：每页从真实 Client API 读取 20 条，输入经 250 ms 防抖后执行服务端搜索，支持稳定上一页/下一页并向请求传递取消信号，不再串行拉取全部 Client。跨页或失败时保留当前选择，inactive Client 保持可见可选；用户仍可显式点击“清除客户”解除关联。普通项目列表默认排除归档项，Client 详情为读取完整关联历史显式使用 `include_archived=true`。
-- 新建任务和任务详情已接项目选择器；任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
+- Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用 `ProjectSelect`；组件固定每页 20 条、250 ms 防抖搜索，并以 `q / page / includeArchived` 隔离 Query key、传递取消信号、按 ID 去重。任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
 - 归档项目拒绝新建任务关联或把其他任务改入，返回 `409 PROJECT_ARCHIVED`；既有关联任务仍可编辑且保持原关联。归档转换进行中时，详情页的新建任务入口会禁用。
 - 项目创建、资料编辑、`start/pause/resume/complete/reopen/archive/restore` 和永久删除会在同一数据库事务追加 `project_*` Workflow Event，记录内置 owner、请求 ID、时间及前后项目快照；事件写入失败时整个项目命令回滚，创建幂等重放不会重复追加事件。
 - complete/reopen 若事件发生时 Project 有 `client_id`，会在同一事务以对应 Workflow Event ID 向该 Client 写入一条只读 `system_reference`；无 Client 不投影，任一 Client Activity 或既有完成 Inbox 投影失败都会回滚 Project 状态与事件。
@@ -52,7 +52,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已知缺口
 
-- 项目详情任务区已改为每页 20 条的服务端分页，并提供树/平铺切换、标题/描述搜索、状态/优先级/类型/单标签/排期状态筛选和结果计数；子任务展开按每页 100 条读取并显示独立分页控件。ClientSelect 已消除客户选项的全量串行请求，但任务表单的 Project 选项仍按每页 100 条串行拉取全部结果以避免静默截断，这是另一项独立缺口。ClientSelect 的真实浏览器/窄屏/1,000 或 10,000 条客户性能、项目任务大数据量实际响应性能和内嵌 Assignment/Submission 控件仍待验证；Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载。
+- 项目详情任务区已改为每页 20 条的服务端分页，并提供树/平铺切换、标题/描述搜索、状态/优先级/类型/单标签/排期状态筛选和结果计数；子任务展开按每页 100 条读取并显示独立分页控件。ClientSelect 与 ProjectSelect 都已消除对应候选项的全量串行请求，生产代码不再保留 `getAllProjects`。ProjectSelect 默认不列归档候选，但选中详情或名称 fallback 会保留 Task 当前已归档项目；搜索、翻页或读取失败不会自动解除关联，只有显式清除才提交 `null`。两个选择器的真实浏览器/窄屏/1,000 或 10,000 条数据性能、项目任务大数据量实际响应性能和内嵌 Assignment/Submission 控件仍待验证；Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载。
 - 项目工时继续对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目详情报告直接读取 completed Session 的闭合正时长 interval，终态历史读取 Session 审计事实；两者都不成为第二份可写工时。
 - 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
 - schema v23–v25 已接显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox；schema v28 把 Project `complete` 作为明确本地完成节点同事务投影到 Inbox。独立验收、开票等尚无真实 Project 状态，不提前伪造来源。
@@ -226,7 +226,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 1. **项目事实与 API（已实现）**：当前 schema v31 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31 只扩展 Client Activity 来源唯一约束，不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
-3. **任务与工时协作（当前纵切已实现）**：项目选择、串行分页拉全项目选项、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；大数据量性能仍待专项验证。
+3. **任务与工时协作（当前纵切已实现）**：Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用有界分页 ProjectSelect，生产路径不再串行拉全项目；`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通，Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；真实浏览器与大数据量性能仍待专项验证。
 4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、Project/Task 客户筛选已共用每页 20 条、250 ms 服务端搜索和稳定分页的 ClientSelect；当前选择保留、inactive 可见可选、取消信号、加载/空/错误重试/更多提示和 combobox 键盘语义已接通。双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件和显式 contact 关联也已交付；真实浏览器/窄屏/大数据量专项以及邮件/日历等其他来源、回访和财务仍待验收或实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
@@ -246,6 +246,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 任务/发票/客户聚合事实变化会使旧项目版本失效；归档项目不能接受新的任务关联，既有关联任务编辑不被误拒绝。
 - 列表和详情具备加载、空、错误和重试状态。
 - Project 新建/编辑和项目列表筛选共用 ClientSelect；首批及后续页请求有界，250 ms 搜索走服务端，旧请求可取消，跨页/错误不清除当前选择，inactive 客户可见可选，加载、空、错误重试、更多提示和 combobox 键盘语义均有自动化覆盖。
+- Task 新建/编辑、Tasks 项目筛选、批量目标和 Inbox 拆分共用 ProjectSelect；每页 20 条、250 ms 服务端搜索、`q / page / includeArchived` Query key、AbortSignal、ID 去重、显式清除、选中详情/名称 fallback、加载/空/错误重试/更多提示和 combobox 键盘语义均有实现与自动化证据。默认候选排除归档项目，当前归档选择仍可见；同名排序追加 `id ASC`，列表 `COUNT` 与当页 `SCAN` 共用只读事务。
 - 项目创建、资料修改、状态流转和删除各追加一次不可变事件；事件失败回滚项目写入，创建幂等重放不重复事件。
 - 有 Client 的 complete/reopen 各产生一条来源唯一的只读 Client Activity；无 Client、旧版本或失败事务不产生孤立活动，改绑不移动历史，Client 聚合版本和最近动态随成功投影更新。
 - 笔记创建可幂等重放且不重复写入；编辑与删除使用笔记版本，软删除隐藏正文并保留原因；归档项目拒绝笔记写入。
@@ -263,7 +264,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 ### 完整模块仍待验收
 
 - ClientSelect 的全量串行拉取已消除，但 1,000/10,000 条客户下的真实响应、输入和翻页性能，以及真实浏览器键盘/焦点/窄屏交互仍需专项验收；除 Project 状态外的其他活动来源、回访与财务不属于已交付客户纵切。
-- 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。Task 表单的 Project 选项超过 100 条仍通过串行分页避免截断；该 Project 选项与项目任务大数据量性能仍待验收。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
+- 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。ProjectSelect 同样只读取当前 20 条候选，但真实浏览器键盘/焦点/窄屏及 1,000/10,000 条项目下的搜索和翻页性能仍未专项验收；有界网络与 DOM 不能替代真实性能数据。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
 - 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出、Task 阻塞、Task 临期与 Project 完成投影另覆盖稳定事件键、重复完成周期、事务一致性、来源上下文、活动删除阻止、归档后来源删除协调与快照保留。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
@@ -286,6 +287,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [focus_history.go](../../services/sidecar/internal/api/focus_history.go)
 - [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
 - [ClientSelect.tsx](../../apps/web/src/components/ClientSelect.tsx)
+- [ProjectSelect.tsx](../../apps/web/src/components/ProjectSelect.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [项目 API](../../services/sidecar/internal/api/projects.go)
 - [项目 API 测试](../../services/sidecar/internal/api/projects_test.go)

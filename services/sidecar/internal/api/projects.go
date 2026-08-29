@@ -167,59 +167,74 @@ func (a *API) listProjects(c *gin.Context) {
 		return
 	}
 
-	query := a.db.WithContext(c.Request.Context()).Table("projects")
 	includeArchived, err := optionalBooleanQuery(c, "include_archived")
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
 		return
 	}
 	status := strings.TrimSpace(c.Query("status"))
-	if status == "" {
-		if !includeArchived {
-			query = query.Where("projects.status <> ?", "archived")
-		}
-	} else {
+	if status != "" {
 		if _, valid := validProjectStatuses[status]; !valid {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
 			return
 		}
-		query = query.Where("projects.status = ?", status)
 	}
-	if clientID := strings.TrimSpace(c.Query("client_id")); clientID != "" {
-		parsedClientID, err := uuid.Parse(clientID)
+	clientID := ""
+	if rawClientID := strings.TrimSpace(c.Query("client_id")); rawClientID != "" {
+		parsedClientID, err := uuid.Parse(rawClientID)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "client_id filter must be a UUID")
 			return
 		}
-		query = query.Where("projects.client_id = ?", parsedClientID.String())
+		clientID = parsedClientID.String()
 	}
-	if search := strings.TrimSpace(c.Query("q")); search != "" {
+	search := strings.TrimSpace(c.Query("q"))
+	if search != "" {
 		if utf8.RuneCountInString(search) > 200 {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "q cannot exceed 200 characters")
 			return
 		}
-		like := "%" + escapeLike(search) + "%"
-		query = query.Where("(projects.name LIKE ? ESCAPE '\\' OR projects.description LIKE ? ESCAPE '\\')", like, like)
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		writeDatabaseError(c)
-		return
-	}
-	ordered, validSort := applyProjectSort(query, c.Query("sort"))
-	if !validSort {
+	var rows []projectRow
+	invalidSort := false
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		query := tx.Table("projects")
+		if status == "" {
+			if !includeArchived {
+				query = query.Where("projects.status <> ?", "archived")
+			}
+		} else {
+			query = query.Where("projects.status = ?", status)
+		}
+		if clientID != "" {
+			query = query.Where("projects.client_id = ?", clientID)
+		}
+		if search != "" {
+			like := "%" + escapeLike(search) + "%"
+			query = query.Where("(projects.name LIKE ? ESCAPE '\\' OR projects.description LIKE ? ESCAPE '\\')", like, like)
+		}
+		if err := query.Count(&total).Error; err != nil {
+			return err
+		}
+		ordered, valid := applyProjectSort(query, c.Query("sort"))
+		if !valid {
+			invalidSort = true
+			return errors.New("invalid project sort")
+		}
+		return ordered.
+			Select(projectSelectColumns).
+			Joins("LEFT JOIN clients ON clients.id = projects.client_id").
+			Offset((page - 1) * pageSize).
+			Limit(pageSize).
+			Scan(&rows).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if invalidSort {
 		writeError(c, http.StatusBadRequest, "INVALID_SORT", "sort contains an unsupported field")
 		return
 	}
-
-	var rows []projectRow
-	if err := ordered.
-		Select(projectSelectColumns).
-		Joins("LEFT JOIN clients ON clients.id = projects.client_id").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Scan(&rows).Error; err != nil {
+	if err != nil {
 		writeDatabaseError(c)
 		return
 	}
@@ -1153,7 +1168,8 @@ func applyProjectSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 			Order("CASE projects.status WHEN 'in_progress' THEN 0 WHEN 'planning' THEN 1 WHEN 'paused' THEN 2 WHEN 'completed' THEN 3 ELSE 4 END ASC").
 			Order("CASE WHEN projects.due_date IS NULL THEN 1 ELSE 0 END ASC").
 			Order("projects.due_date ASC").
-			Order("projects.updated_at DESC"), true
+			Order("projects.updated_at DESC").
+			Order("projects.id ASC"), true
 	}
 	allowed := map[string]string{
 		"name": "projects.name", "status": "projects.status", "start_date": "projects.start_date",
@@ -1173,7 +1189,7 @@ func applyProjectSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 		}
 		query = query.Order(column + " " + direction)
 	}
-	return query, true
+	return query.Order("projects.id ASC"), true
 }
 
 const projectSelectColumns = `

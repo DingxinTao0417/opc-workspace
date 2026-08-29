@@ -53,7 +53,6 @@ import {
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
-  getAllProjects,
   getAllTags,
   getAllTasks,
   getBackups,
@@ -2988,7 +2987,7 @@ export function useProjectsQuery(
 ) {
   return useQuery({
     queryKey: [...projectQueryKey, "list", input],
-    queryFn: () => getProjects(input),
+    queryFn: ({ signal }) => getProjects(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
@@ -2997,10 +2996,32 @@ export function useProjectsQuery(
   });
 }
 
-export function useProjectOptionsQuery(enabled = true) {
+export function useProjectOptionsQuery(
+  search = "",
+  page = 1,
+  enabled = true,
+  includeArchived = false,
+) {
+  const normalizedSearch = search.trim();
   return useQuery({
-    queryKey: [...projectQueryKey, "options"],
-    queryFn: () => getAllProjects({ sort: "name" }),
+    queryKey: [
+      ...projectQueryKey,
+      "options",
+      normalizedSearch,
+      page,
+      includeArchived,
+    ],
+    queryFn: ({ signal }) =>
+      getProjects(
+        {
+          page,
+          pageSize: 20,
+          query: normalizedSearch || undefined,
+          sort: "name",
+          includeArchived,
+        },
+        signal,
+      ),
     enabled,
     retry: 2,
     retryDelay: 500,
@@ -3011,7 +3032,7 @@ export function useProjectOptionsQuery(enabled = true) {
 export function useProjectQuery(id: string | null) {
   return useQuery({
     queryKey: projectDetailQueryKey(id ?? "missing"),
-    queryFn: () => getProject(id!),
+    queryFn: ({ signal }) => getProject(id!, signal),
     enabled: Boolean(id),
     retry: 1,
   });

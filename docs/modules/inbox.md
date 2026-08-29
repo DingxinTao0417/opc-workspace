@@ -1,10 +1,10 @@
 # 收件箱与本地工作编排模块
 
-> 实现状态截止：2026-08-28（依据当前代码与测试）
+> 实现状态截止：2026-08-29（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v31。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源已交付；schema v30 的父任务自动验收与 schema v31 的 Project→Client 活动都不新增 Inbox 字段或隐式关系，其他系统故障来源和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v31。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动和运行期数据库操作失败来源已交付；T-11C 拆分中的 Project 字段已复用 v9.17 共享 ProjectSelect。该读路径和 schema v30 的父任务自动验收、schema v31 的 Project→Client 活动都不新增 Inbox 字段、API 版本、迁移或隐式关系，其他系统故障来源和 Agent 仍属于后续阶段。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.17](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -31,7 +31,7 @@
 
 ## 当前实现状态
 
-当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间来源投影均已接真实 SQLite/API/UI。物理卷同卷去重和无路径手动容量检查已在“数据与备份”交付；卷级趋势和 Agent 尚未交付。
+当前模块为**部分完成**：手工受理分诊、已有 Task 关系、一次性 Reminder、批量拆分分派、自动结清/重开和例外强制解决、T-11F 运营计数，以及 follow-up Task Artifact、Task 阻塞、Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间来源投影均已接真实 SQLite/API/UI。拆分面板的每个任务使用共享 ProjectSelect 按需搜索和翻页，不再为打开面板串行拉取全部 Project。物理卷同卷去重和无路径手动容量检查已在“数据与备份”交付；卷级趋势和 Agent 尚未交付。
 
 ### 已交付：T-11A1 手工 Inbox Item 事实
 
@@ -74,6 +74,7 @@
 - schema v15 的 `015_inbox_task_orchestration.sql` 为自动完成规则增加查询索引和数据库保护：自动解决必须至少有一个活动必需 Task，且全部处于 `done`；不改写既有业务数据或创建 demo 记录。
 - `POST /api/v1/inbox-items/:id/split` 在一个 SQLite 事务内创建 1–20 个 Task、父子关系、标签、`created` Inbox 关系、初始 owner/person Assignment、manual review 的 owner reviewer，以及 Task/Inbox 审计事件。任一字段、引用或写入失败时全部回滚。
 - 拆分面板支持任务名称、说明、类型、优先级、项目、完成条件、父任务、必需标记、负责人和验收策略；父任务只能引用本批次中更早的任务，避免环和悬空引用。
+- 每个拆分 Task 的项目字段复用共享 `ProjectSelect`：打开单个选择器时每页读取 20 条，输入经 250 ms 防抖后走 Project 服务端搜索，`q / page / includeArchived` 隔离 Query key，旧请求可取消，候选按 ID 去重。默认不列归档项目；当前选中项通过详情或名称 fallback 跨页/失败保留，只有显式清除才把该草稿的 `project_id` 设为 null。加载、空、错误重试、更多结果与 combobox 键盘语义由同一组件提供。
 - `all_required_tasks_done` 策略由统一 reconciliation 维护：至少一个活动必需 Task 且全部 `done` 时由 system Actor 自动解决；自动解决后，任一必需 Task 因重开、返工等离开 `done` 会自动恢复为 `tracking`。
 - Task 生命周期命令、产出提交/验收，以及 Inbox 关系的新增、required 修改、解除和拆分都会调用同一 reconciliation；进度仍实时来自 Task，不复制第二份状态。
 - schema v30 父任务协调仍会在父 Task 状态变化后调用这条既有 reconciliation，但只影响已显式关联且 active/required 的 Task：父子 Task 关系本身不等于 Inbox 关系，父任务的直属子任务也不会被 Inbox 自动纳入 required 集合。
@@ -227,7 +228,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ### 拆分、分派与自动结清
 
-1. 用户在活动 Inbox Item 详情选择“拆分并分派”，填写有序 Task 草稿。每项可引用本批次更早的父任务，并选择 owner/person 负责人、项目、验收策略和是否必需。
+1. 用户在活动 Inbox Item 详情选择“拆分并分派”，填写有序 Task 草稿。每项可引用本批次更早的父任务，并选择 owner/person 负责人、项目、验收策略和是否必需；项目候选按需服务端搜索和翻页，搜索或读取失败不会清空已选项目。
 2. 前端提交 Inbox 当前版本和稳定幂等键。Sidecar 先完整校验，再在一个事务内创建 Task、标签、层级、Assignment、reviewer、`created` 关系与审计；失败时不保留部分数据。
 3. 提交可保留 `manual`，也可切换 `all_required_tasks_done`。自动策略必须至少有一个必需 Task；所有活动必需 Task 完成后 system 自动解决条目。
 4. 必需 Task 处于 `todo / in_progress / blocked / waiting_review / cancelled` 时均不自动解决。自动解决后若必需 Task 通过 reopen、返工或其他受控命令离开 `done`，条目自动回到 `tracking`。
@@ -382,13 +383,14 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 ### 完整人工编排仍需验收
 
 - [x] T-11C 批量拆分、Assignment 和审计在一个事务中完成，失败不遗留部分事实。
+- [x] T-11C 项目字段复用共享 ProjectSelect；每次只读 20 条候选，250 ms 搜索、请求取消、ID 去重、选中保留、显式清除和反馈/键盘交互均有自动化接线证据，生产路径不再串行拉全 Project。
 - [x] 进度完全从活动必需 Task 派生，零必需任务不自动解决。
 - [x] 非 done Task 不误触发自动解决；自动完成后依赖失效会重开，手工/强制解决不会误重开。
 - [x] schema v30 父任务自动验收不创建 Inbox 关系、不继承或改写 `is_required`；只有显式 active required 关系参与 Inbox 自动解决/重开。
 - [x] Reminder 与 Task 临期跨扫描/重启、follow-up Artifact 跨提交重放、同一次 Task block 幂等重放，以及同一备份/数据库/Sidecar 系统维护 source id 的活动 incident 均只生成一条 Inbox Item；启动/运行期 journal 模糊清理重放不重复。Task 改期、重复阻塞和归档后再失败按各自稳定事实生成独立来源。`BACKUP_INVALID` 不创建系统维护 incident。
 - [x] 关系软解除、重新关联和关联 Task 删除后历史可解释。
 - [x] Task Artifact/Task 阻塞/Task 临期多态来源删除会先限制活动项，归档后原子标记来源删除并保留快照；系统维护来源禁止 `source_deleted_at`。其他未来来源仍需逐项实现。
-- [x] Sidebar/Today 计数与 risk 深链已接真实统计；真实浏览器键盘/焦点、长列表和窄屏视觉仍需专项验收。
+- [x] Sidebar/Today 计数与 risk 深链已接真实统计；ProjectSelect 的真实浏览器键盘/焦点、窄屏和 1,000/10,000 条项目性能，以及 Inbox 长列表和窄屏视觉仍需专项验收。
 - [ ] v0.2 Agent 成功只进入 `waiting_review`，只有 owner 可接受，重试保留全部 Run 与 Artifact。
 
 ## 相关代码/PRD 链接
@@ -423,3 +425,5 @@ schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既�
 - [Inbox–Task 关系 UI](../../apps/web/src/components/InboxItemTasksSection.tsx)
 - [Inbox 时间线](../../apps/web/src/components/InboxItemEventsSection.tsx)
 - [Inbox 来源上下文](../../apps/web/src/components/InboxSourceContext.tsx)
+- [Inbox 拆分任务表单](../../apps/web/src/components/InboxTaskOrchestrationModal.tsx)
+- [共享 Project 选择器](../../apps/web/src/components/ProjectSelect.tsx)

@@ -2215,6 +2215,31 @@ kbd {
   color: var(--text-muted);
 }
 
+.client-select__selected-status[data-status="planning"] {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+}
+
+.client-select__selected-status[data-status="in_progress"] {
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.client-select__selected-status[data-status="paused"] {
+  background: color-mix(in srgb, var(--orange) 11%, transparent);
+  color: var(--orange);
+}
+
+.client-select__selected-status[data-status="completed"] {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green-light);
+}
+
+.client-select__selected-status[data-status="archived"] {
+  background: var(--panel-hover);
+  color: var(--text-muted);
+}
+
 .client-select__clear {
   display: grid;
   width: 20px;

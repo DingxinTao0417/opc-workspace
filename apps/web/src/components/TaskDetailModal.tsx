@@ -4,7 +4,6 @@ import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useDeleteTask,
-  useProjectOptionsQuery,
   useTaskOptionsQuery,
   useTaskQuery,
   useUpdateTask,
@@ -19,6 +18,7 @@ import type {
 } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
+import { ProjectSelect } from "./ProjectSelect";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskEventsSection } from "./TaskEventsSection";
 import { TaskFocusHistorySection } from "./TaskFocusHistorySection";
@@ -130,7 +130,6 @@ export function TaskDetailModal() {
     total: number | null;
   }>({ loading: true, error: false, total: null });
   const task = query.data;
-  const projectsQuery = useProjectOptionsQuery(Boolean(taskId));
   const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
   const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
   const busy = taskWriteBusy || assignmentBusy || workflowBusy || outputBusy;
@@ -634,48 +633,19 @@ export function TaskDetailModal() {
           </div>
 
           <div className="form-grid">
-            <label className="form-field">
+            <div className="form-field">
               <span>项目</span>
-              <select
-                disabled={projectsQuery.isPending || projectsQuery.isError}
-                onChange={(event) => setProjectId(event.target.value)}
+              <ProjectSelect
+                ariaLabel="项目"
+                emptyLabel="未归项目"
+                onChange={setProjectId}
+                selectedName={
+                  projectId === task.projectId ? task.projectName : undefined
+                }
                 value={projectId}
-              >
-                <option value="">
-                  {projectsQuery.isPending
-                    ? "正在读取项目…"
-                    : projectsQuery.isError
-                      ? "项目暂不可用"
-                      : "未归项目"}
-                </option>
-                {task.projectId &&
-                !(projectsQuery.data ?? []).some(
-                  (project) => project.id === task.projectId,
-                ) ? (
-                  <option value={task.projectId}>
-                    {task.projectName ??
-                      `已归档项目 ${task.projectId.slice(0, 8)}…`}
-                  </option>
-                ) : null}
-                {(projectsQuery.data ?? []).map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              {projectsQuery.isError ? (
-                <span className="form-field-error" role="alert">
-                  项目列表读取失败。
-                  <button
-                    className="form-inline-action"
-                    onClick={() => void projectsQuery.refetch()}
-                    type="button"
-                  >
-                    重新读取
-                  </button>
-                </span>
-              ) : null}
-            </label>
+                variant="form"
+              />
+            </div>
             <label className="form-field">
               <span>父任务</span>
               <select

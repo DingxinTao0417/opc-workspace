@@ -14,6 +14,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
+- Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用 `ProjectSelect`：每页只读 20 条，输入经 250 ms 防抖后使用既有 Project API 做服务端搜索，`q / page / includeArchived` 隔离 Query key，并向请求传递取消信号。候选按 ID 去重，显式清除才提交未归项目；选中详情或名称 fallback 使跨页、失败和当前已归档项目仍可见，默认候选不列其他归档项目。生产路径已移除串行拉取全部 Project 的 `getAllProjects`
 - 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联、人工备注/会议活动，以及关联 Project 完成/重新打开时生成的只读系统活动已接真实 API。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选：每页读取 20 条、250 ms 服务端搜索、稳定分页和取消信号，跨页或加载失败时保留当前选择，inactive 客户保持可见可选，并提供加载、空、错误重试、更多提示和 combobox 键盘语义；真实浏览器、窄屏及 1,000/10,000 条数据性能仍待专项验收
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
@@ -37,7 +38,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；Project 表单客户选择与 Project/Task 客户筛选已改为共享服务端搜索和稳定分页，不再串行拉全 Client；Project complete/reopen 已能向事件发生当下的关联 Client 投影只读系统活动，但邮件、日历、客户回访等外部来源仍未接入。备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。ClientSelect 的真实浏览器键盘/焦点、窄屏和 1,000/10,000 条数据性能，以及 Focus 原生反馈、其他客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续验收或实现。[PRD v9.16](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；Project 表单客户选择与 Project/Task 客户筛选已改为共享服务端搜索和稳定分页，不再串行拉全 Client，Task 新建/编辑、Tasks 项目筛选/批量目标及 Inbox 拆分也不再串行拉全 Project。Project complete/reopen 已能向事件发生当下的关联 Client 投影只读系统活动，但邮件、日历、客户回访等外部来源仍未接入。备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。ClientSelect 与 ProjectSelect 的真实浏览器键盘/焦点、窄屏和 1,000/10,000 条数据性能，以及 Focus 原生反馈、其他客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续验收或实现。[PRD v9.17](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +60,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.16）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.17）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -308,6 +309,8 @@ Submission/Artifact 列表默认每页 50、最大 100，并返回 Task `ETag` �
 
 任务资料、Task output/review/Artifact 删除及 Assignment 命令均使用 Task 版本拒绝旧写入；可重试命令可携带稳定 `Idempotency-Key`，同键同请求重放首次响应，同键不同请求返回冲突。前端遇到版本冲突会刷新最新 Task，同时保留摘要、文本、链接、结构化 JSON 与浏览器 `File` 对象草稿，要求用户再次明确提交。事件查询默认每页 50、最大 100，返回 Task `ETag`、`meta.task_version` 和按时间/命令顺序倒序的追加式事件。Assignment 没有 DELETE 路由。批量任务和计划组排序在请求体中携带每项 `expected_version` 并整批校验。项目修改、状态流转和硬删除也必须携带 `If-Match`；任务/发票/客户聚合事实变化会递增项目版本。永久删除只允许已归档项目，并会按外键策略解除任务和发票关联而不删除这些业务记录。归档项目资料必须先恢复再编辑，也不接受新的任务关联；其既有关联任务仍可编辑。项目列表默认排除归档项；只有需要读取完整关联历史的页面才显式传 `include_archived=true`。
 
+Project 列表默认每页 50、最大 100，支持名称/描述 `q`、状态、客户、`include_archived` 和白名单排序；默认候选排除归档项目。所有排序追加 `id ASC`，同名项目也具有确定分页顺序；每次列表请求在同一只读事务内完成总数统计与当页读取，避免 `meta.total` 和结果页来自不同读快照。共享 `ProjectSelect` 固定每页 20 条、250 ms 服务端搜索，并把 `q / page / includeArchived` 纳入 Query key、向列表和选中详情请求传递取消信号。当前选中项可由详情或调用方名称补齐，加载失败不会自动清空；Task 详情中的既有归档关联继续可见但默认不能作为新的候选。
+
 Client 列表默认每页 50、最大 100，支持 `q`、`status` 和白名单 `sort`，所有排序追加 `id ASC`；响应实时返回 `project_count` 和未删除活动派生的 nullable `latest_activity_at`。名称和可选联系人、邮箱、电话、备注由服务端 trim、限长并校验，可选空白保存为 `null`，状态只接受 `active / lead / inactive`。创建可使用 `Idempotency-Key` 重放首次 `201` 快照；创建、详情和更新返回 Client `ETag`，PATCH/DELETE 必须携带 `If-Match`。永久删除还要求 `confirm=true` 且 Client 已停用；Invoice 强引用返回可解释冲突且不改变事实，Project 可选外键置空并返回 `detached_projects`。Project 关联变化会使 Client 聚合版本失效，Client 名称变化继续使关联 Project 版本失效。
 
 Client Activity 列表默认每页 20、最大 100，按 `occurred_at DESC, id ASC` 稳定分页，默认隐藏软删除记录，可按 kind 筛选并用 `include_deleted=true` 查看审计历史。公开创建只接受人工 `note / meeting`，标题、正文与 RFC 3339 发生时间由服务端校验，可使用 `Idempotency-Key`；PATCH/DELETE 使用活动 `If-Match`，删除还要求 `confirm=true` 和原因。活动新增、修改或软删除会在同一事务递增 Client 聚合版本；删除响应不返回人工正文，删除记录和预留的 `system_reference` 均只读。
@@ -338,4 +341,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.16](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、父任务有门禁自动待验收、六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、Project 表单与 Project/Task 筛选共用的服务端搜索 Client 选择器、Project complete/reopen→Client 只读系统活动、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查、项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史，以及 Today 逾期/未来 24 小时临期快捷筛选；明确未完成 ClientSelect 真实浏览器/窄屏/大数据量专项，也未交付 Focus 原生反馈、内容日历、其他客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.17](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、父任务有门禁自动待验收、六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、Project 表单与 Project/Task 筛选共用的服务端搜索 Client 选择器、Task 新建/编辑、Tasks 项目筛选/批量目标与 Inbox 拆分共用的服务端搜索 Project 选择器、Project complete/reopen→Client 只读系统活动、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查、项目详情 7 天/30 天/本月 Focus 分析与终态 Session 历史，以及 Today 逾期/未来 24 小时临期快捷筛选；明确未完成 ClientSelect/ProjectSelect 真实浏览器、窄屏与大数据量专项，也未交付 Focus 原生反馈、内容日历、其他客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

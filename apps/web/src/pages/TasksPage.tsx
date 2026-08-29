@@ -15,7 +15,6 @@ import { ApiError } from "../api/client";
 import {
   useBatchUpdateTasks,
   useMoveTaskWithinPlan,
-  useProjectOptionsQuery,
   useReorderTaskWithinPlanStatus,
   useResetTaskOrder,
   useTagOptionsQuery,
@@ -24,6 +23,7 @@ import {
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { ClientSelect } from "../components/ClientSelect";
 import { PageHeader } from "../components/PageHeader";
+import { ProjectSelect } from "../components/ProjectSelect";
 import { TagManagerModal } from "../components/TagManagerModal";
 import { TaskBoard } from "../components/TaskBoard";
 import {
@@ -231,7 +231,6 @@ export function TasksPage() {
     },
     filtersValid,
   );
-  const projectsQuery = useProjectOptionsQuery(true);
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
   const moveMutation = useMoveTaskWithinPlan();
@@ -617,24 +616,19 @@ export function TasksPage() {
               <option value="reminder">提醒</option>
             </select>
           </label>
-          <label>
+          <div className="task-filter-field">
             <span>项目</span>
-            <select
-              disabled={projectsQuery.isPending || projectsQuery.isError}
-              onChange={(event) => {
-                setProjectId(event.target.value);
+            <ProjectSelect
+              ariaLabel="项目"
+              emptyLabel="全部项目"
+              onChange={(value) => {
+                setProjectId(value);
                 setPage(1);
               }}
               value={projectId}
-            >
-              <option value="">全部项目</option>
-              {(projectsQuery.data ?? []).map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              variant="filter"
+            />
+          </div>
           <div className="task-filter-field">
             <span>客户</span>
             <ClientSelect
@@ -834,18 +828,13 @@ export function TasksPage() {
             </optgroup>
           </select>
           {batchAction === "set_project" ? (
-            <select
-              aria-label="批量目标项目"
-              onChange={(event) => setBatchProjectId(event.target.value)}
+            <ProjectSelect
+              ariaLabel="批量目标项目"
+              emptyLabel="未归项目"
+              onChange={setBatchProjectId}
               value={batchProjectId}
-            >
-              <option value="">未归项目</option>
-              {(projectsQuery.data ?? []).map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+              variant="toolbar"
+            />
           ) : null}
           {batchAction === "set_planned_date" ? (
             <input

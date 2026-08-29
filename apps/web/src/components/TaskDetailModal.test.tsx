@@ -32,7 +32,8 @@ const apiMocks = vi.hoisted(() => ({
   reviewTaskSubmission: vi.fn(),
   deleteTaskArtifact: vi.fn(),
   downloadTaskArtifact: vi.fn(),
-  getAllProjects: vi.fn(),
+  getProject: vi.fn(),
+  getProjects: vi.fn(),
   getAllTags: vi.fn(),
   getAllTasks: vi.fn(),
 }));
@@ -122,7 +123,10 @@ describe("TaskDetailModal", () => {
         updatedAt: "2026-08-27T00:00:00Z",
       },
     ]);
-    apiMocks.getAllProjects.mockResolvedValue([]);
+    apiMocks.getProjects.mockResolvedValue({
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     apiMocks.getAllTags.mockResolvedValue([]);
     apiMocks.getAllTasks.mockResolvedValue([]);
     apiMocks.getTaskEvents.mockResolvedValue({
@@ -143,9 +147,26 @@ describe("TaskDetailModal", () => {
   });
 
   it("loads and saves editable task fields", async () => {
+    const selectableProject = {
+      id: "project-1",
+      name: "品牌官网改版",
+      status: "planning",
+      clientName: null,
+    };
+    apiMocks.getProjects.mockResolvedValue({
+      items: [selectableProject],
+      meta: { page: 1, pageSize: 20, total: 1 },
+    });
+    apiMocks.getProject.mockResolvedValue(selectableProject);
     renderModal();
 
     const title = await screen.findByLabelText("任务名称");
+    fireEvent.focus(screen.getByLabelText("项目"));
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "品牌官网改版，规划中，未关联客户",
+      }),
+    );
     fireEvent.change(title, { target: { value: "整理最终项目简报" } });
     fireEvent.change(screen.getByLabelText("描述"), {
       target: { value: "核对范围与交付时间" },
@@ -172,6 +193,7 @@ describe("TaskDetailModal", () => {
           title: "整理最终项目简报",
           description: "核对范围与交付时间",
           priority: "P1",
+          projectId: "project-1",
           reviewPolicy: "manual",
           plannedDate: "2026-08-30",
           estimatedMinutes: 90,
@@ -179,6 +201,28 @@ describe("TaskDetailModal", () => {
       ),
     );
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
+  });
+
+  it("keeps an archived project fallback visible and unchanged when options fail", async () => {
+    const archivedProjectId = "project-archived";
+    apiMocks.getTask.mockResolvedValue({
+      ...task,
+      projectId: archivedProjectId,
+      projectName: "已归档网站项目",
+    });
+    apiMocks.getProject.mockRejectedValue(new Error("project unavailable"));
+
+    renderModal();
+
+    expect(await screen.findByLabelText("项目")).toHaveValue("已归档网站项目");
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() =>
+      expect(apiMocks.updateTask).toHaveBeenCalledWith(
+        task.id,
+        expect.objectContaining({ projectId: archivedProjectId }),
+      ),
+    );
   });
 
   it("hydrates and closes a refreshable task detail route", async () => {

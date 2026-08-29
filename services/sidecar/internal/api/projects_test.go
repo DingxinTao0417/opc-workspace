@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,6 +69,18 @@ func decodeProjectResponse(t *testing.T, body []byte) projectResponse {
 		t.Fatalf("decode project response: %v", err)
 	}
 	return envelope.Data
+}
+
+func decodeProjectList(t *testing.T, body []byte) ([]projectResponse, pageMeta) {
+	t.Helper()
+	var envelope struct {
+		Data []projectResponse `json:"data"`
+		Meta pageMeta          `json:"meta"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode project list: %v", err)
+	}
+	return envelope.Data, envelope.Meta
 }
 
 func responseErrorCode(t *testing.T, body []byte) string {
@@ -253,6 +266,120 @@ func TestProjectCreateListDetailAndTaskProjectName(t *testing.T) {
 	)
 	if allClientProjects.Code != http.StatusOK || !strings.Contains(allClientProjects.Body.String(), created.ID) {
 		t.Fatalf("complete client project list misses archived project: %d %s", allClientProjects.Code, allClientProjects.Body.String())
+	}
+}
+
+func TestProjectListUsesStableTieBreakerAcrossPagesAndPreservesFilters(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	clientID := uuid.NewString()
+	otherClientID := uuid.NewString()
+	insertTestClient(t, store, clientID, "Stable client")
+	insertTestClient(t, store, otherClientID, "Other client")
+
+	fixedTimestamp := "2026-08-29T00:00:00Z"
+	lowerProjectID := "00000000-0000-4000-8000-000000000001"
+	higherProjectID := "ffffffff-ffff-4fff-8fff-fffffffffff2"
+	for _, project := range []models.Project{
+		{
+			ID: higherProjectID, Name: "StableProject", Description: "", ClientID: &clientID,
+			Status: "planning", Version: 1, CreatedAt: fixedTimestamp, UpdatedAt: fixedTimestamp,
+		},
+		{
+			ID: lowerProjectID, Name: "StableProject", Description: "", ClientID: &clientID,
+			Status: "planning", Version: 1, CreatedAt: fixedTimestamp, UpdatedAt: fixedTimestamp,
+		},
+	} {
+		if err := store.DB.Create(&project).Error; err != nil {
+			t.Fatalf("insert stable project %s: %v", project.ID, err)
+		}
+	}
+	archived := createProjectForTest(t, router, fmt.Sprintf(`{"name":"StableProject","client_id":%q}`, clientID), nil)
+	transitionProjectForTest(t, router, archived.ID, archived.Version, `{"action":"archive"}`)
+	createProjectForTest(t, router, fmt.Sprintf(`{"name":"StableProject","client_id":%q}`, otherClientID), nil)
+	createProjectForTest(t, router, fmt.Sprintf(`{"name":"DifferentProject","client_id":%q}`, clientID), nil)
+
+	expectedIDs := []string{lowerProjectID, higherProjectID}
+	sortValues := []string{
+		"",
+		"name", "-name",
+		"status", "-status",
+		"start_date", "-start_date",
+		"due_date", "-due_date",
+		"amount_minor", "-amount_minor",
+		"created_at", "-created_at",
+		"updated_at", "-updated_at",
+		"name,-updated_at",
+	}
+	for _, sortValue := range sortValues {
+		t.Run("sort="+sortValue, func(t *testing.T) {
+			readPage := func(page int) ([]projectResponse, pageMeta) {
+				t.Helper()
+				path := fmt.Sprintf(
+					"/api/v1/projects?q=StableProject&status=planning&client_id=%s&page=%d&page_size=1",
+					clientID, page,
+				)
+				if sortValue != "" {
+					path += "&sort=" + url.QueryEscape(sortValue)
+				}
+				recorder := performRequest(router, http.MethodGet, path, nil, nil)
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("list page %d status = %d: %s", page, recorder.Code, recorder.Body.String())
+				}
+				items, meta := decodeProjectList(t, recorder.Body.Bytes())
+				if len(items) != 1 || meta.Page != page || meta.PageSize != 1 || meta.Total != 2 {
+					t.Fatalf("list page %d = items %#v meta %#v", page, items, meta)
+				}
+				return items, meta
+			}
+
+			firstPage, _ := readPage(1)
+			secondPage, _ := readPage(2)
+			repeatedFirstPage, _ := readPage(1)
+			repeatedSecondPage, _ := readPage(2)
+			actualIDs := []string{firstPage[0].ID, secondPage[0].ID}
+			if actualIDs[0] != expectedIDs[0] || actualIDs[1] != expectedIDs[1] {
+				t.Fatalf("stable project ids = %v, want %v", actualIDs, expectedIDs)
+			}
+			if repeatedFirstPage[0].ID != firstPage[0].ID || repeatedSecondPage[0].ID != secondPage[0].ID {
+				t.Fatalf(
+					"repeated pages changed from %s/%s to %s/%s",
+					firstPage[0].ID, secondPage[0].ID, repeatedFirstPage[0].ID, repeatedSecondPage[0].ID,
+				)
+			}
+		})
+	}
+
+	defaultRecorder := performRequest(
+		router,
+		http.MethodGet,
+		"/api/v1/projects?q=StableProject&client_id="+clientID+"&page_size=100&sort=name",
+		nil,
+		nil,
+	)
+	defaultItems, defaultMeta := decodeProjectList(t, defaultRecorder.Body.Bytes())
+	if defaultRecorder.Code != http.StatusOK || defaultMeta.Total != 2 || len(defaultItems) != 2 {
+		t.Fatalf("default archive filter = %d items %#v meta %#v", defaultRecorder.Code, defaultItems, defaultMeta)
+	}
+
+	allRecorder := performRequest(
+		router,
+		http.MethodGet,
+		"/api/v1/projects?q=StableProject&client_id="+clientID+"&include_archived=true&page_size=100&sort=name",
+		nil,
+		nil,
+	)
+	allItems, allMeta := decodeProjectList(t, allRecorder.Body.Bytes())
+	if allRecorder.Code != http.StatusOK || allMeta.Total != 3 || len(allItems) != 3 {
+		t.Fatalf("include archived filter = %d items %#v meta %#v", allRecorder.Code, allItems, allMeta)
+	}
+	foundArchived := false
+	for _, project := range allItems {
+		if project.ID == archived.ID && project.Status == "archived" {
+			foundArchived = true
+		}
+	}
+	if !foundArchived {
+		t.Fatalf("include archived list misses %s: %#v", archived.ID, allItems)
 	}
 }
 
