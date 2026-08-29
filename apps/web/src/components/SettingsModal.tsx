@@ -24,10 +24,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError, getAppSetting } from "../api/client";
 import {
   useAppSettingsQuery,
+  useCommitAppSettingsWithAvatar,
   useHealthQuery,
   useUpdateAppSettings,
 } from "../api/hooks";
-import { committedSettingsFromServer } from "../settings/bootstrap";
+import {
+  committedSettingsFromServer,
+  workspaceAvatarUrlFromServer,
+} from "../settings/bootstrap";
 import {
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
@@ -240,9 +244,16 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   );
   const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarOperation, setAvatarOperation] = useState<
+    "unchanged" | "replace" | "remove"
+  >("unchanged");
+  const avatarPreviewUrl = useRef<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const settingsQuery = useAppSettingsQuery(open);
   const settingsMutation = useUpdateAppSettings();
+  const avatarMutation = useCommitAppSettingsWithAvatar();
+  const saving = settingsMutation.isPending || avatarMutation.isPending;
   const healthQuery = useHealthQuery(open && activeModule === "about");
 
   useEffect(() => {
@@ -256,11 +267,23 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setProfileDraft(getProfileSettings());
     setThemeDraft(currentTheme);
     setAvatarError(null);
+    setAvatarFile(null);
+    setAvatarOperation("unchanged");
     setSaveError(null);
     settingsMutation.reset();
+    avatarMutation.reset();
     beginPreview();
 
-    return cancelPreview;
+    return () => {
+      if (
+        avatarPreviewUrl.current &&
+        typeof URL.revokeObjectURL === "function"
+      ) {
+        URL.revokeObjectURL(avatarPreviewUrl.current);
+      }
+      avatarPreviewUrl.current = null;
+      cancelPreview();
+    };
   }, [beginPreview, cancelPreview, open, requestedModule]);
 
   const previewSettings = (
@@ -316,8 +339,22 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
 
     try {
-      const avatarDataUrl = await readFileAsDataUrl(file);
+      if (
+        avatarPreviewUrl.current &&
+        typeof URL.revokeObjectURL === "function"
+      ) {
+        URL.revokeObjectURL(avatarPreviewUrl.current);
+      }
+      const avatarDataUrl =
+        typeof URL.createObjectURL === "function"
+          ? URL.createObjectURL(file)
+          : await readFileAsDataUrl(file);
+      avatarPreviewUrl.current = avatarDataUrl.startsWith("blob:")
+        ? avatarDataUrl
+        : null;
       setAvatarError(null);
+      setAvatarFile(file);
+      setAvatarOperation("replace");
       updateProfileDraft("avatarDataUrl", avatarDataUrl);
     } catch {
       setAvatarError("头像读取失败，请重新选择图片。");
@@ -325,7 +362,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   };
 
   const close = () => {
-    if (settingsMutation.isPending) return;
+    if (saving) return;
     cancelPreview();
     navigate(initialLocation.current);
     setOpen(false);
@@ -337,11 +374,22 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   };
 
   const restoreDefaults = () => {
+    if (avatarPreviewUrl.current && typeof URL.revokeObjectURL === "function") {
+      URL.revokeObjectURL(avatarPreviewUrl.current);
+    }
+    avatarPreviewUrl.current = null;
     setFocusDraft(DEFAULT_FOCUS_SETTINGS);
     setGeneralDraft(DEFAULT_GENERAL_SETTINGS);
     setProfileDraft(DEFAULT_PROFILE_SETTINGS);
     setThemeDraft(DEFAULT_THEME);
     setAvatarError(null);
+    setAvatarFile(null);
+    setAvatarOperation(
+      settingsQuery.data &&
+        getAppSetting(settingsQuery.data, "workspace").value.avatarRef
+        ? "remove"
+        : "unchanged",
+    );
     setSaveError(null);
     previewSettings(
       DEFAULT_FOCUS_SETTINGS,
@@ -353,7 +401,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   };
 
   const save = async () => {
-    if (!settingsQuery.data || settingsMutation.isPending) return;
+    if (!settingsQuery.data || saving) return;
     const previousFocus = getFocusSettings();
     const nextFocus = sanitizeFocusSettings(focusDraft);
     const nextGeneral = sanitizeGeneralSettings(generalDraft);
@@ -370,7 +418,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       displayName: nextProfile.displayName,
       avatarRef: currentWorkspace.value.avatarRef,
     };
-    if (!sameValue(nextWorkspace, currentWorkspace.value)) {
+    if (
+      avatarOperation !== "unchanged" ||
+      !sameValue(nextWorkspace, currentWorkspace.value)
+    ) {
       updates.push({
         key: "workspace",
         expectedVersion: currentWorkspace.version,
@@ -401,12 +452,30 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
     try {
       const saved =
-        updates.length > 0
-          ? await settingsMutation.mutateAsync(updates)
-          : settingsQuery.data;
-      replaceCommitted(
-        committedSettingsFromServer(saved, nextProfile.avatarDataUrl),
-      );
+        avatarOperation !== "unchanged"
+          ? await avatarMutation.mutateAsync({
+              operation: avatarOperation,
+              updates,
+              file:
+                avatarOperation === "replace"
+                  ? (avatarFile ?? undefined)
+                  : undefined,
+            })
+          : updates.length > 0
+            ? await settingsMutation.mutateAsync(updates)
+            : settingsQuery.data;
+      let committedAvatarUrl = nextProfile.avatarDataUrl;
+      if (avatarOperation !== "unchanged") {
+        try {
+          committedAvatarUrl = await workspaceAvatarUrlFromServer(saved);
+        } catch {
+          // The settings transaction is already committed. A transient content
+          // read failure must not invite a stale multipart retry; the next app
+          // bootstrap will load the authoritative controlled file again.
+          committedAvatarUrl = null;
+        }
+      }
+      replaceCommitted(committedSettingsFromServer(saved, committedAvatarUrl));
       onSettingsSaved?.(nextFocus, previousFocus);
       setOpen(false);
     } catch (error) {
@@ -454,7 +523,22 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                     className="button button-quiet"
                     disabled={!profileDraft.avatarDataUrl}
                     onClick={() => {
+                      if (
+                        avatarPreviewUrl.current &&
+                        typeof URL.revokeObjectURL === "function"
+                      ) {
+                        URL.revokeObjectURL(avatarPreviewUrl.current);
+                      }
+                      avatarPreviewUrl.current = null;
                       setAvatarError(null);
+                      setAvatarFile(null);
+                      setAvatarOperation(
+                        settingsQuery.data &&
+                          getAppSetting(settingsQuery.data, "workspace").value
+                            .avatarRef
+                          ? "remove"
+                          : "unchanged",
+                      );
                       updateProfileDraft("avatarDataUrl", null);
                     }}
                     type="button"
@@ -810,7 +894,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             ) : null}
             <button
               className="button button-secondary"
-              disabled={settingsMutation.isPending}
+              disabled={saving}
               onClick={close}
               type="button"
             >
@@ -821,7 +905,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           <>
             <button
               className="button button-quiet settings-reset"
-              disabled={settingsMutation.isPending}
+              disabled={saving}
               onClick={restoreDefaults}
               type="button"
             >
@@ -830,7 +914,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </button>
             <button
               className="button button-secondary"
-              disabled={settingsMutation.isPending}
+              disabled={saving}
               onClick={close}
               type="button"
             >
@@ -839,14 +923,12 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             <button
               className="button button-primary"
               disabled={
-                settingsMutation.isPending ||
-                settingsQuery.isFetching ||
-                !settingsQuery.data
+                saving || settingsQuery.isFetching || !settingsQuery.data
               }
               onClick={() => void save()}
               type="button"
             >
-              {settingsMutation.isPending ? (
+              {saving ? (
                 <>
                   <LoaderCircle className="animate-spin" size={14} />
                   保存中…
@@ -864,9 +946,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       width="760px"
     >
       <fieldset
-        aria-busy={settingsMutation.isPending}
+        aria-busy={saving}
         className="settings-layout"
-        disabled={settingsMutation.isPending}
+        disabled={saving}
       >
         <nav aria-label="设置模块" className="settings-module-nav">
           {modules.map(({ id, label, icon: Icon }) => (

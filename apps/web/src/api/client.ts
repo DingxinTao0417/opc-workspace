@@ -182,6 +182,7 @@ const ARTIFACT_TRANSFER_TIMEOUT_MS = 120_000;
 const BACKUP_OPERATION_TIMEOUT_MS = 180_000;
 const MAX_JSON_REQUEST_BYTES = 1_024 * 1_024;
 const MAX_ARTIFACT_FILE_BYTES = 50 * 1_024 * 1_024;
+const MAX_WORKSPACE_AVATAR_BYTES = 2 * 1_024 * 1_024;
 const MAX_MULTIPART_REQUEST_BYTES = 100 * 1_024 * 1_024;
 // Browsers choose the multipart boundary and encode per-part headers after the
 // FormData has been built. Reserve enough space for that envelope so a request
@@ -3350,6 +3351,83 @@ export async function updateAppSettings(
         updates: updates.map(serializeAppSettingUpdate),
       }),
     }),
+  );
+}
+
+export async function commitAppSettingsWithAvatar(
+  operation: "replace" | "remove",
+  updates: AppSettingUpdate[],
+  file?: File,
+): Promise<AppSettingsResult> {
+  if (!updates.some((update) => update.key === "workspace")) {
+    throw new ApiError("头像变更必须同时提交工作区设置", {
+      code: "VALIDATION_ERROR",
+      status: 422,
+    });
+  }
+  if (operation === "replace") {
+    if (!file || file.size < 1) {
+      throw new ApiError("请选择头像图片", {
+        code: "VALIDATION_ERROR",
+        status: 422,
+      });
+    }
+    if (file.size > MAX_WORKSPACE_AVATAR_BYTES) {
+      throw new ApiError("头像图片不能超过 2 MB", {
+        code: "AVATAR_FILE_TOO_LARGE",
+        status: 413,
+      });
+    }
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      throw new ApiError("请选择 PNG、JPG 或 WebP 图片", {
+        code: "VALIDATION_ERROR",
+        status: 422,
+      });
+    }
+  } else if (file) {
+    throw new ApiError("移除头像时不能附带文件", {
+      code: "VALIDATION_ERROR",
+      status: 422,
+    });
+  }
+  const form = new FormData();
+  form.append(
+    "manifest",
+    JSON.stringify({
+      operation,
+      updates: updates.map(serializeAppSettingUpdate),
+    }),
+  );
+  if (file) form.append("file", file, file.name || "workspace-avatar");
+  return normalizeAppSettingsResponse(
+    await apiRequest<unknown>(
+      "/api/v1/settings/avatar",
+      { method: "POST", body: form },
+      ARTIFACT_TRANSFER_TIMEOUT_MS,
+    ),
+  );
+}
+
+export async function getWorkspaceAvatarBlob(): Promise<Blob> {
+  return apiFetch(
+    "/api/v1/settings/avatar/content",
+    async (response) => {
+      const contentType = response.headers.get("Content-Type")?.split(";")[0];
+      if (
+        !contentType ||
+        !["image/png", "image/jpeg", "image/webp"].includes(contentType)
+      ) {
+        return invalidResponse("头像响应格式无效");
+      }
+      const blob = await response.blob();
+      if (blob.size < 1 || blob.size > MAX_WORKSPACE_AVATAR_BYTES) {
+        return invalidResponse("头像响应大小无效");
+      }
+      return blob;
+    },
+    undefined,
+    "image/png,image/jpeg,image/webp",
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
   );
 }
 

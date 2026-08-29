@@ -189,6 +189,7 @@ func (s *backupStore) publishPendingRestore(sourcePath string, manifest backupMa
 	}
 	for _, directory := range []string{
 		filepath.Join(packagePath, "artifacts", "objects"),
+		filepath.Join(packagePath, "artifacts", "avatars"),
 		filepath.Join(packagePath, "artifacts"),
 		filepath.Join(packagePath, "database"), packagePath, stagingPath,
 	} {
@@ -209,6 +210,7 @@ func copyBackupPackage(sourcePath, destinationPath string, manifest backupManife
 		filepath.Join(destinationPath, "database"),
 		filepath.Join(destinationPath, "artifacts"),
 		filepath.Join(destinationPath, "artifacts", "objects"),
+		filepath.Join(destinationPath, "artifacts", "avatars"),
 	} {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			return err
@@ -386,6 +388,9 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 		objects:     filepath.Join(absoluteArtifacts, "objects"),
 		objectsNew:  filepath.Join(absoluteArtifacts, ".restore-new-objects-"+plan.OperationID),
 		objectsOld:  filepath.Join(absoluteArtifacts, ".restore-old-objects-"+plan.OperationID),
+		avatars:     filepath.Join(absoluteArtifacts, "avatars"),
+		avatarsNew:  filepath.Join(absoluteArtifacts, ".restore-new-avatars-"+plan.OperationID),
+		avatarsOld:  filepath.Join(absoluteArtifacts, ".restore-old-avatars-"+plan.OperationID),
 	}
 	if err := prepareRestoreSwap(paths, packagePath, manifest, maxSchema); err != nil {
 		return StartupRestoreResult{}, err
@@ -423,16 +428,18 @@ func ApplyPendingRestore(backupRoot, databasePath, artifactRoot string, maxSchem
 type restoreSwapPaths struct {
 	database, databaseNew, databaseOld string
 	objects, objectsNew, objectsOld    string
+	avatars, avatarsNew, avatarsOld    string
 }
 
 func prepareRestoreSwap(paths restoreSwapPaths, packagePath string, manifest backupManifest, maxSchema int) error {
-	if exists(paths.databaseOld) || exists(paths.objectsOld) {
+	if exists(paths.databaseOld) || exists(paths.objectsOld) || exists(paths.avatarsOld) {
 		return nil
 	}
 	for _, path := range []string{paths.databaseNew, paths.databaseNew + "-wal", paths.databaseNew + "-shm"} {
 		_ = os.Remove(path)
 	}
 	_ = os.RemoveAll(paths.objectsNew)
+	_ = os.RemoveAll(paths.avatarsNew)
 	if _, err := copyVerifiedBackupFile(
 		filepath.Join(packagePath, filepath.FromSlash(manifest.Database.Path)),
 		paths.databaseNew, manifest.Database.SizeBytes, manifest.Database.SHA256,
@@ -461,15 +468,28 @@ func prepareRestoreSwap(paths restoreSwapPaths, packagePath string, manifest bac
 	if err := os.Mkdir(paths.objectsNew, 0o700); err != nil {
 		return err
 	}
+	if err := os.Mkdir(paths.avatarsNew, 0o700); err != nil {
+		return err
+	}
 	for _, artifact := range manifest.Artifacts {
+		relative := strings.TrimPrefix(artifact.Path, "artifacts/")
+		destination := filepath.Join(filepath.Dir(paths.objectsNew), filepath.FromSlash(relative))
+		if strings.HasPrefix(relative, "objects/") {
+			destination = filepath.Join(paths.objectsNew, strings.TrimPrefix(relative, "objects/"))
+		} else if strings.HasPrefix(relative, "avatars/") {
+			destination = filepath.Join(paths.avatarsNew, strings.TrimPrefix(relative, "avatars/"))
+		}
 		if _, err := copyVerifiedBackupFile(
 			filepath.Join(packagePath, filepath.FromSlash(artifact.Path)),
-			filepath.Join(paths.objectsNew, artifact.ID), artifact.SizeBytes, artifact.SHA256,
+			destination, artifact.SizeBytes, artifact.SHA256,
 		); err != nil {
 			return err
 		}
 	}
 	if err := syncArtifactDirectory(paths.objectsNew); err != nil {
+		return err
+	}
+	if err := syncArtifactDirectory(paths.avatarsNew); err != nil {
 		return err
 	}
 	return syncArtifactDirectory(filepath.Dir(paths.databaseNew))
@@ -528,7 +548,35 @@ func applyRestoreSwap(paths restoreSwapPaths) error {
 	if err := syncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
 		return err
 	}
+	if err := swapRestoreDirectory(paths.avatars, paths.avatarsNew, paths.avatarsOld, "workspace avatars"); err != nil {
+		return err
+	}
 	return syncArtifactDirectory(filepath.Dir(paths.database))
+}
+
+func swapRestoreDirectory(live, prepared, previous, label string) error {
+	if !exists(previous) {
+		if !exists(live) || !exists(prepared) {
+			return fmt.Errorf("restore %s swap inputs are incomplete", label)
+		}
+		if err := os.Rename(live, previous); err != nil {
+			return err
+		}
+		if err := syncArtifactDirectory(filepath.Dir(live)); err != nil {
+			return err
+		}
+	}
+	if !exists(live) {
+		if !exists(prepared) {
+			return fmt.Errorf("prepared restore %s are missing", label)
+		}
+		if err := os.Rename(prepared, live); err != nil {
+			return err
+		}
+	} else if exists(prepared) {
+		return fmt.Errorf("restore %s swap is ambiguous", label)
+	}
+	return syncArtifactDirectory(filepath.Dir(live))
 }
 
 func verifyLiveRestore(databasePath, artifactRoot string, manifest backupManifest, maxSchema int) error {
@@ -566,10 +614,10 @@ func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion,
 	}
 	expected := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if row.RelativePath != "objects/"+row.ID {
+		if !validControlledFileRelativePath(row.ID, row.RelativePath, schemaVersion) {
 			return errors.New("restored Artifact storage facts are invalid")
 		}
-		path, err := artifacts.resolveObject(row.RelativePath)
+		path, err := artifacts.resolveControlledFile(row.RelativePath)
 		if err != nil {
 			return err
 		}
@@ -577,18 +625,24 @@ func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion,
 		if err != nil || !matched {
 			return errors.New("restored Artifact object failed integrity verification")
 		}
-		expected[row.ID] = struct{}{}
+		expected[row.RelativePath] = struct{}{}
 	}
-	entries, err := os.ReadDir(artifacts.objectsDir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			return errors.New("restored Artifact root contains a non-regular object")
+	return verifyControlledFileDirectories(artifacts, expected)
+}
+
+func verifyControlledFileDirectories(artifacts *artifactStore, expected map[string]struct{}) error {
+	for prefix, directory := range map[string]string{"objects": artifacts.objectsDir, "avatars": artifacts.avatarsDir} {
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			return err
 		}
-		if _, ok := expected[entry.Name()]; !ok {
-			return errors.New("restored Artifact root contains an unexpected object")
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+				return errors.New("restored controlled file root contains a non-regular file")
+			}
+			if _, ok := expected[prefix+"/"+entry.Name()]; !ok {
+				return errors.New("restored controlled file root contains an unexpected file")
+			}
 		}
 	}
 	return nil
@@ -604,6 +658,14 @@ func rollbackRestoreSwap(paths restoreSwapPaths) error {
 			result = errors.Join(result, err)
 		}
 	}
+	if exists(paths.avatarsOld) {
+		if exists(paths.avatars) {
+			result = errors.Join(result, os.RemoveAll(paths.avatars))
+		}
+		if err := os.Rename(paths.avatarsOld, paths.avatars); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if !exists(paths.databaseOld + suffix) {
 			continue
@@ -615,6 +677,7 @@ func rollbackRestoreSwap(paths restoreSwapPaths) error {
 	}
 	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.database)))
 	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.objects)))
+	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.avatars)))
 	return result
 }
 
@@ -625,7 +688,7 @@ func cleanupSuccessfulRestore(paths restoreSwapPaths, appliedPath, backupRoot st
 			result = errors.Join(result, err)
 		}
 	}
-	for _, path := range []string{paths.objectsOld, paths.objectsNew} {
+	for _, path := range []string{paths.objectsOld, paths.objectsNew, paths.avatarsOld, paths.avatarsNew} {
 		if err := os.RemoveAll(path); err != nil {
 			result = errors.Join(result, err)
 		}
@@ -634,6 +697,9 @@ func cleanupSuccessfulRestore(paths restoreSwapPaths, appliedPath, backupRoot st
 		result = errors.Join(result, err)
 	}
 	if err := syncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
+		result = errors.Join(result, err)
+	}
+	if err := syncArtifactDirectory(filepath.Dir(paths.avatars)); err != nil {
 		result = errors.Join(result, err)
 	}
 	if result != nil {

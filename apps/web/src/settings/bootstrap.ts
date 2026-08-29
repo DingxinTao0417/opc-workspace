@@ -1,7 +1,9 @@
 import {
   ApiError,
+  commitAppSettingsWithAvatar,
   getAppSetting,
   getAppSettings,
+  getWorkspaceAvatarBlob,
   updateAppSettings,
 } from "../api/client";
 import type { AppSettingsResult, AppSettingUpdate } from "../types/models";
@@ -32,6 +34,59 @@ export function committedSettingsFromServer(
     theme: getAppSetting(settings, "appearance").value.theme,
     focus: getAppSetting(settings, "focus").value,
   };
+}
+
+export async function workspaceAvatarUrlFromServer(
+  settings: AppSettingsResult,
+): Promise<string | null> {
+  if (!getAppSetting(settings, "workspace").value.avatarRef) return null;
+  try {
+    const blob = await getWorkspaceAvatarBlob();
+    if (typeof URL.createObjectURL === "function") {
+      return URL.createObjectURL(blob);
+    }
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () =>
+        typeof reader.result === "string"
+          ? resolve(reader.result)
+          : reject(new Error("头像读取失败")),
+      );
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      ["AVATAR_NOT_FOUND", "AVATAR_MISSING", "AVATAR_INVALID"].includes(
+        error.code,
+      )
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function dataUrlToAvatarFile(dataUrl: string): File {
+  const match =
+    /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/i.exec(dataUrl);
+  if (!match) {
+    throw new ApiError("旧头像格式无效，请重新选择头像", {
+      code: "VALIDATION_ERROR",
+      status: 422,
+    });
+  }
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const extension =
+    match[1].toLowerCase() === "image/jpeg" ? "jpg" : match[1].split("/")[1];
+  return new File([bytes], `workspace-avatar.${extension}`, {
+    type: match[1].toLowerCase(),
+  });
 }
 
 export function legacySettingUpdates(
@@ -93,28 +148,44 @@ export async function bootstrapAppSettings(): Promise<SettingsBootstrapResult> {
   const localAvatar = readLocalAvatarSnapshot();
   const updates = legacySettingUpdates(initial, legacy);
   let settings = initial;
-  if (updates.length > 0) {
+  const workspace = getAppSetting(initial, "workspace");
+  const legacyAvatar = localAvatar.exists
+    ? localAvatar.avatarDataUrl
+    : legacy.profile.avatarDataUrl;
+  const migrateAvatar =
+    workspace.value.avatarRef === null && legacyAvatar !== null;
+  if (migrateAvatar && !updates.some((update) => update.key === "workspace")) {
+    updates.unshift({
+      key: "workspace",
+      expectedVersion: workspace.version,
+      value: workspace.value,
+    });
+  }
+  if (updates.length > 0 || migrateAvatar) {
     try {
-      settings = await updateAppSettings(updates);
+      settings = migrateAvatar
+        ? await commitAppSettingsWithAvatar(
+            "replace",
+            updates,
+            dataUrlToAvatarFile(legacyAvatar),
+          )
+        : await updateAppSettings(updates);
     } catch (error) {
       if (!canVerifyAmbiguousMigration(error)) throw error;
       const latest = await getAppSettings();
       if (
-        !updates.every((update) => getAppSetting(latest, update.key).stored)
+        !updates.every((update) => getAppSetting(latest, update.key).stored) ||
+        (migrateAvatar && !getAppSetting(latest, "workspace").value.avatarRef)
       ) {
         throw error;
       }
       settings = latest;
     }
   }
+  const avatarUrl = await workspaceAvatarUrlFromServer(settings);
   return {
     settings,
-    committed: committedSettingsFromServer(
-      settings,
-      localAvatar.exists
-        ? localAvatar.avatarDataUrl
-        : legacy.profile.avatarDataUrl,
-    ),
+    committed: committedSettingsFromServer(settings, avatarUrl),
     legacyExists: legacy.exists,
     migratedKeys: updates.map((update) => update.key),
   };

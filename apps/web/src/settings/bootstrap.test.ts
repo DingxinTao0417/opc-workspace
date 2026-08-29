@@ -185,14 +185,14 @@ describe("settings bootstrap", () => {
         }),
       )
       .mockImplementationOnce(async (_url: string, init: RequestInit) => {
-        const body = JSON.parse(String(init.body));
-        expect(body.updates.map((item: { key: string }) => item.key)).toEqual([
-          "workspace",
-          "general",
-          "appearance",
-          "focus",
-        ]);
-        expect(body.updates[0].value).toEqual({
+        const manifest = JSON.parse(
+          String((init.body as FormData).get("manifest")),
+        );
+        expect(manifest.operation).toBe("replace");
+        expect(
+          manifest.updates.map((item: { key: string }) => item.key),
+        ).toEqual(["workspace", "general", "appearance", "focus"]);
+        expect(manifest.updates[0].value).toEqual({
           display_name: "Legacy Workspace",
           avatar_ref: null,
         });
@@ -204,7 +204,7 @@ describe("settings bootstrap", () => {
         ]);
         migrated.data.items[0].value = {
           display_name: "Legacy Workspace",
-          avatar_ref: null,
+          avatar_ref: "avatars/018f0000-0000-4000-8000-000000000222.png",
         };
         migrated.data.items[1].value = {
           default_route: "projects",
@@ -223,7 +223,12 @@ describe("settings bootstrap", () => {
         return new Response(JSON.stringify(migrated), {
           headers: { "Content-Type": "application/json" },
         });
-      });
+      })
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          headers: { "Content-Type": "image/png" },
+        }),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await bootstrapAppSettings();
@@ -237,9 +242,11 @@ describe("settings bootstrap", () => {
     ]);
     expect(result.committed.profile).toEqual({
       displayName: "Legacy Workspace",
-      avatarDataUrl: "data:image/png;base64,AA==",
+      avatarDataUrl: expect.stringMatching(
+        /^(?:blob:|data:image\/png;base64,)/,
+      ),
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not resurrect a legacy avatar after the new local snapshot cleared it", async () => {

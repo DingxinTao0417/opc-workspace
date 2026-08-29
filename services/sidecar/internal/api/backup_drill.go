@@ -83,8 +83,11 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	databasePath := filepath.Join(temporaryRoot, "opc-workspace.db")
 	artifactRoot := filepath.Join(temporaryRoot, "artifacts")
 	objectRoot := filepath.Join(artifactRoot, "objects")
-	if err := os.MkdirAll(objectRoot, 0o700); err != nil {
-		return backupRestoreDrillResult{}, fmt.Errorf("create restore drill layout: %w", err)
+	avatarRoot := filepath.Join(artifactRoot, "avatars")
+	for _, directory := range []string{objectRoot, avatarRoot} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return backupRestoreDrillResult{}, fmt.Errorf("create restore drill layout: %w", err)
+		}
 	}
 	if _, err := copyVerifiedBackupFile(
 		filepath.Join(packagePath, filepath.FromSlash(manifest.Database.Path)),
@@ -103,9 +106,10 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 		return backupRestoreDrillResult{}, fmt.Errorf("copy restore drill marker: %w", err)
 	}
 	for _, artifact := range manifest.Artifacts {
+		relative := strings.TrimPrefix(artifact.Path, "artifacts/")
 		if _, err := copyVerifiedBackupFile(
 			filepath.Join(packagePath, filepath.FromSlash(artifact.Path)),
-			filepath.Join(objectRoot, artifact.ID),
+			filepath.Join(artifactRoot, filepath.FromSlash(relative)),
 			artifact.SizeBytes,
 			artifact.SHA256,
 		); err != nil {
@@ -145,12 +149,12 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	if len(rows) != manifest.ArtifactCount {
 		return backupRestoreDrillResult{}, errors.New("restore drill active Artifact count does not match backup")
 	}
-	expectedObjects := make(map[string]struct{}, len(rows))
+	expectedFiles := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if row.RelativePath != "objects/"+row.ID {
+		if !validControlledFileRelativePath(row.ID, row.RelativePath, store.SchemaVersion) {
 			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s has invalid storage facts", row.ID)
 		}
-		objectPath, err := artifacts.resolveObject(row.RelativePath)
+		objectPath, err := artifacts.resolveControlledFile(row.RelativePath)
 		if err != nil {
 			return backupRestoreDrillResult{}, err
 		}
@@ -158,19 +162,10 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 		if err != nil || !matches {
 			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s failed integrity verification", row.ID)
 		}
-		expectedObjects[row.ID] = struct{}{}
+		expectedFiles[row.RelativePath] = struct{}{}
 	}
-	entries, err := os.ReadDir(objectRoot)
-	if err != nil {
+	if err := verifyControlledFileDirectories(artifacts, expectedFiles); err != nil {
 		return backupRestoreDrillResult{}, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
-			return backupRestoreDrillResult{}, errors.New("restore drill contains a non-regular Artifact object")
-		}
-		if _, ok := expectedObjects[entry.Name()]; !ok {
-			return backupRestoreDrillResult{}, errors.New("restore drill contains an unexpected Artifact object")
-		}
 	}
 
 	return backupRestoreDrillResult{

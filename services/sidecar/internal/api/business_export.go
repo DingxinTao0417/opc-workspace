@@ -46,6 +46,7 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "inbox_item_tasks", OrderBy: "inbox_item_id, task_id"},
 	{Name: "reminders", OrderBy: "id"},
 	{Name: "app_settings", OrderBy: "key"},
+	{Name: "workspace_avatars", OrderBy: "created_at, id"},
 	{Name: "task_saved_views", OrderBy: "id"},
 }
 
@@ -56,6 +57,7 @@ var businessExportExcludedTables = []string{
 	"artifact_deletion_tombstones",
 	"client_attachment_deletion_tombstones",
 	"project_attachment_deletion_tombstones",
+	"workspace_avatar_deletion_tombstones",
 	"task_focus_totals",
 }
 
@@ -146,6 +148,10 @@ func (a *API) buildBusinessExport(c *gin.Context, exportedAt time.Time) (busines
 				UNION ALL
 				SELECT size_bytes
 				FROM project_attachments
+				WHERE deleted_at IS NULL
+				UNION ALL
+				SELECT size_bytes
+				FROM workspace_avatars
 				WHERE deleted_at IS NULL
 			)
 		`).Row().Scan(&result.ArtifactFiles.ActiveCount, &result.ArtifactFiles.ActiveBytes); err != nil {

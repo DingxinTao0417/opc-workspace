@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v26（2026-08-28）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v27（2026-08-28）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件与 Workspace Avatar，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v7.0](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -35,10 +35,11 @@
 - schema v20 以加法迁移新增 `client_actor_links`、单 active contact、active person/owner 写入约束、不可变解除历史和 Client 版本传播。v19→v20 不把 `contact_name` 推断成 Actor，不改写既有事实或创建 demo 数据。
 - schema v21 以加法迁移新增 `project_notes`、稳定时间线索引、不可变身份/删除历史和 Project 聚合版本传播。v20→v21 不改写既有 Project 事实，也不创建笔记/demo 数据。
 - schema v22 以加法迁移新增 `project_attachments`、`project_attachment_deletion_tombstones`、跨 Task/Client/Project object ID 唯一保护和 Project 版本传播。v21→v22 不改写既有事实，也不创建附件/demo 数据。
+- schema v27 以加法迁移新增 `workspace_avatars` 与不可变 `workspace_avatar_deletion_tombstones`，固定 `avatars/<uuid>.<ext>`、单 active 头像、2 MiB 上限、完整性状态、设置引用存在性和跨四领域文件 ID 唯一保护。v26→v27 不创建头像、不改写既有设置或业务事实。
 - 开发数据库与 Artifact 位于 `.local/dev-data/`；桌面正式数据位于 Tauri `appDataDir`，互不复用。
 - Tauri 创建 `appDataDir/artifacts/`，通过 `OPC_ARTIFACT_DIR` 交给 Sidecar；开发脚本使用 `--artifacts .local/dev-data/artifacts`。
-- Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
-- 文件上传流式计算 MIME、size、SHA-256，先写 staging，再无覆盖提升到 objects；数据库只保存 `objects/<artifact-id>` 相对路径。marker、文件数据、对象提升、移动/删除与关键目录项做耐久同步。
+- Sidecar 声明并校验 Artifact root，管理含 `format_version / database_id / store_id` 的 JSON marker、进程级独占锁、staging、objects、avatars、trash 与 quarantine；拒绝卷根、符号链接/reparse point、非空无 marker、marker 不规范，或数据库 ID / store ID 任一不匹配的目录。同一 root 已被另一个 Sidecar 持有时拒绝启动。
+- 文件上传流式计算 MIME、size、SHA-256，先写 staging，再无覆盖提升到 `objects/` 或 `avatars/`；数据库只保存受控相对路径。marker、文件数据、对象提升、移动/删除与关键目录项做耐久同步。
 - 启动时清理普通 staging 残留、协调中断的已知 trash move，并用 tombstone 区分授权删除与未知候选。active trash 恢复前必须匹配数据库 size/SHA-256；错配移入 quarantine 并记录 mismatch。无引用且没有可验证删除授权的受控 UUID object/trash 候选同样只进 quarantine，不自动永久删除，也不递归跟随异常目录或链接。
 - Task Artifact/Client Attachment 软删除及其父聚合硬删除都使用 trash 做文件/数据库补偿：事务失败逆序恢复，提交后清除临时 trash 文件；物理 object 已缺失时仍允许确认软删或聚合硬删，软删同时记录 missing 完整性事实。
 - 下载前重新验证 size 与 SHA-256；missing/mismatch 状态写回数据库并拒绝输出内容。
@@ -50,11 +51,11 @@
 - 创建失败仍返回 `BACKUP_CREATE_FAILED`，现有数据不变；Sidecar 随后尽力投影 `source_entity_type=system_maintenance`、`source_entity_id=backup:create` 的 Inbox Item。payload 只含 `component=backup`、`operation=create`、`failure_code=backup_create_failed`、`occurred_at` 和固定用户提示，不保存 Go error、本机路径、备份 note、Token 或请求正文。同一活动 incident 去重，resolve/dismiss 后再失败可开新条目。投影失败只记内部日志，不改变备份错误。
 - 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。payload 只含 `operation=verify`、`failure_code=backup_verify_failed` 及对应固定提示。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox。这不是迁移失败、Sidecar 启动前失败、数据库不可写、恢复/演练失败或完整诊断包。
 - `GET /api/v1/backups` 只读取已发布 UUID 包并展示上次校验记录；损坏清单以 invalid 项显示。`POST /api/v1/backups/:id/verify` 重新逐字节校验完整包并刷新 `verified_at`，篡改、缺失、额外文件、路径或数据库事实不一致均拒绝。
-- `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker 与 objects 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证 active Task/Client/Project 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
+- `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker、objects 与 avatars 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证全部 active 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
 - `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
-- 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）与 objects 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
+- 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects/avatars，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）、objects 与 avatars 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
-- `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。白名单包含 `project_notes`、`project_attachments`、`client_activities`、`client_attachments` 和 `client_actor_links` 的业务/历史元数据；表、列和行顺序稳定。Task/Client/Project 文件元数据保留，正文不嵌入并以全部 active 受控文件数量/字节摘要声明。schema migrations、workspace identity、幂等响应、三类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
+- `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。`workspace_avatars` 元数据与其他业务/历史表进入导出，文件正文不嵌入；摘要统计全部 active Task/Client/Project/Avatar 受控文件。schema migrations、workspace identity、幂等响应、四类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - 设置“数据与备份”提供业务 JSON 下载，以及备份说明、创建、加载/空/错误状态、摘要、显式重新校验、恢复演练、二次确认恢复和永久删除；安排恢复成功后，桌面模式提供一键安全重启，浏览器开发模式明确提示手动停止并重启外部服务。长操作使用 180 秒客户端窗口。当前没有导入或含文件导出按钮，避免以无行为控件暗示能力。备份创建失败 Inbox Item 的详情可打开同一设置模块。
 
 ### 仍未实现
@@ -77,6 +78,7 @@ appDataDir/
     .opc-artifact-store.lock   # 进程级独占 lease 文件
     .staging/                   # 上传暂存；启动清理普通孤儿文件
     objects/                    # UUID 文件对象
+	avatars/                    # 工作区头像：<uuid>.<png|jpg|webp>
     .trash/                     # 删除事务补偿区；非用户回收站
     .quarantine/                # 无引用候选隔离区；不自动永久删除
   invoices/                    # 预留；PDF 业务尚未实现
@@ -86,6 +88,7 @@ appDataDir/
       database/opc-workspace.db
       artifacts/.opc-artifact-store-v1
       artifacts/objects/<controlled-file-id>
+	  artifacts/avatars/<avatar-id>.<ext>
   config/                      # 预留；当前部分设置仍在前端 localStorage
 
 appLogDir/
@@ -102,12 +105,13 @@ appLogDir/
     .opc-artifact-store.lock
     .staging/
     objects/
+	avatars/
     .trash/
     .quarantine/
   backups/                     # 与正式备份完全隔离
 ```
 
-Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议，分别由 `task_artifacts` 和 `client_attachments` 持有业务元数据；schema v19 保证跨表 object UUID 唯一。桌面壳创建的顶层 `attachments/` 仍是未使用的历史预留，不是客户附件事实来源。`.trash/` 是提交前后短暂补偿目录，不是可由用户浏览或恢复的长期回收站；`.quarantine/` 保留无法安全自动归属的受控候选，当前没有用户级查看或清理入口。
+Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 共享 `artifacts/` 根、marker、lease、staging、quarantine 和备份协议。前三类文件位于 `objects/<uuid>`，头像位于 `avatars/<uuid>.<ext>`；schema v27 保证四领域 ID 唯一。桌面壳创建的顶层 `attachments/` 仍是未使用的历史预留。`.trash/` 服务聚合附件删除补偿；头像替换/移除以同事务 tombstone + 成功后清理处理，中断残留由启动协调验证后清理或隔离。
 
 ## Artifact 一致性契约
 
@@ -116,7 +120,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 1. Artifact root 不能为空、不能等于数据库文件、不能是文件系统卷根。
 2. schema v9 的不可变 `workspace_identity.database_id` 是数据库身份；`artifact_store_id` 初始为空且只能绑定一次。未绑定数据库首次声明空 root 时写入 `.opc-artifact-store-v1`，其规范 JSON 包含 `format_version`、数据库 ID 与新 `store_id`，随后把同一 store ID 写回数据库。
 3. 后续启动必须同时匹配 marker 格式、版本、数据库 ID 和已绑定 store ID；已绑定数据库不能改用另一空 root，已有 root 也不能由另一数据库接管。
-4. root、objects、staging、trash 必须是实际目录，不能穿越 symlink/reparse point。
+4. root、objects、avatars、staging、trash 必须是实际目录，不能穿越 symlink/reparse point。
 5. 协调或读写前通过 `.opc-artifact-store.lock` 获取非阻塞进程级独占锁，并持有到 router 关闭；第二个 Sidecar 不能共用同一 root。
 
 ### 上传
@@ -129,11 +133,12 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 
 ### 读取与完整性
 
-- `relative_path` 固定为 `objects/<artifact-id>`（小写 UUID），API 从不返回该内部路径。
+- Task/Client/Project `relative_path` 固定为 `objects/<id>`；头像固定为 `avatars/<id>.<png|jpg|webp>`。API 不暴露机器绝对路径，workspace 设置只返回受控相对引用。
 - Task Artifact 的 `integrity_status` 为 `unverified / verified / missing / mismatch`；Client Attachment 创建即有 hash，状态为 `verified / missing / mismatch`。
 - 文件创建时已计算完整性并标记 verified；每次下载仍重新比较实际 size 和 SHA-256。
 - 缺失返回 410 并标记 missing；大小/哈希不符返回 409 并标记 mismatch；任何情况都不输出部分或可疑内容。
 - 成功下载强制 attachment、`nosniff`、`no-store` 和 SHA-256 ETag。
+- 头像内容端点使用 image MIME、private/no-cache 与 SHA-256 ETag，不接受任意 ID 或路径；只读取当前 workspace active 引用。
 
 ### 软删除与聚合硬删除
 
@@ -148,14 +153,15 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 
 - `.staging/`：只删除普通文件；意外目录或链接留给人工诊断。
 - `.trash/`：仍需存在的 active Artifact 先用数据库 size/SHA-256 校验 trash；匹配时才恢复或清理确定的重复项，错配项进入 `.quarantine/` 并标记 mismatch。已无 Artifact 时，只有与 immutable tombstone 校验一致的授权删除候选可清理，其余候选进入 quarantine。
-- `objects/`：只检查文件名可解析为小写 UUID 的普通文件；没有 active Task Artifact 或 Client Attachment 引用时移入 `.quarantine/`。非 UUID 文件、目录或链接不递归清理。
+- `objects/`：只检查文件名可解析为小写 UUID 的普通文件；没有 active Task Artifact、Client Attachment 或 Project Attachment 引用时移入 `.quarantine/`。非 UUID 文件、目录或链接不递归清理。
+- `avatars/`：active 文件复验 size/SHA-256 并更新 verified/missing/mismatch；已删除且与 tombstone 匹配的残留可清理，未知或错配候选只移入 quarantine。
 - `.quarantine/`：保存无法安全归属的受控候选；启动协调不会自动永久删除，后续诊断/清理能力必须另设显式确认。
 
 这套协调降低中断后的悬挂文件风险，但不是备份、版本历史或用户级恢复功能。
 
 ## SQLite 迁移契约
 
-当前 schema v26：
+当前 schema v27：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -164,7 +170,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment、完整性状态、不可变删除墓碑、object ID 唯一保护和 Project 版本传播；schema v23–v25 依次增加 Task Artifact、Task 阻塞和 Task 临期 Inbox 来源身份与删除协调；schema v26 增加系统维护来源身份、活动 incident 唯一索引、不可变快照和禁止来源删除标记。均不改写既有事实或创建附件/demo 数据。后续迁移从 `027_*` 继续。
+- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加四类 Inbox 来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards。均不改写既有事实或创建附件/demo 数据。后续迁移从 `028_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -193,12 +199,12 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 当前已实现的手动备份同时包含：
 
 - SQLite 一致性快照，而不是仅复制可能仍有 WAL 的主文件；
-- 所有 active Task file Artifact 与 Client Attachment objects；
+- 所有 active Task/Client/Project objects 与 Workspace Avatar；
 - manifest 与每个文件的 size/SHA-256；
 - app/API/schema/export format 版本；
 - 创建时间、平台与可选说明。
 
-当前通过进程内维护写锁冻结普通 API、Focus heartbeat 和 Reminder 扫描，再依次完成 SQLite 快照与全部受控文件复制，避免数据库引用与 objects 跨时点不一致。只读 health 仍可响应；备份列表/校验由独立备份文件锁串行化。manifest format v1 为兼容旧包继续使用 `artifacts / artifact_count / artifact_bytes` 字段名：schema v19–v21 代表 Task/Client 两类 active 受控文件的合集，schema v22 起代表 Task/Client/Project 三类合集；schema ≤18 校验仍只查询当时存在的 Task Artifact 表。未来 Invoice 文件也必须纳入同一一致性边界。
+当前通过进程内维护写锁冻结普通 API、Focus heartbeat 和 Reminder 扫描，再依次完成 SQLite 快照与全部受控文件复制。manifest format v1 为兼容旧包继续使用 `artifacts / artifact_count / artifact_bytes` 字段名：schema v19–v21 代表 Task/Client，schema v22–v26 代表 Task/Client/Project，schema v27 起再包含 Workspace Avatar。旧 schema 包没有 avatars 目录时，恢复准备会创建空目录并按迁移后的数据库事实验证。
 
 ### 验证与恢复
 
@@ -208,11 +214,11 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 2. **已实现**：用当前数据库入口打开并迁移临时副本，运行 `quick_check`/`foreign_key_check` 与最终 schema 兼容检查。
 3. **已实现**：声明隔离 Artifact store，校验每个 active Task Artifact/Client Attachment 都有对应 object、size/hash 匹配且没有额外对象或路径越界；关闭句柄后清理临时根。
 4. **已实现**：二次确认后取得维护写锁，重复演练目标，并完整备份当前正式数据作为自动回滚点；发布 pending 后冻结普通 API 与后台写入。
-5. **已实现**：下一次 Sidecar 启动在正式资源打开前，用同父目录 new/old 路径替换数据库、WAL/SHM 和完整 objects；任一步或最终验证失败都恢复旧资源并隔离失败计划。
+5. **已实现**：下一次 Sidecar 启动在正式资源打开前，用同父目录 new/old 路径替换数据库、WAL/SHM、完整 objects 和 avatars；任一步或最终验证失败都恢复旧资源并隔离失败计划。
 6. **已实现**：设置页仅在恢复计划成功挂起后显示“立即安全重启”。Tauri `restart_application` 只接受桌面管理的 Sidecar，发送优雅 shutdown、等待真实退出并在超时后只终止精确子进程；退出无法确认时取消重启并返回错误。外部开发 Sidecar 不由桌面壳终止。
 7. **已实现**：下一次启动完成最终 schema、identity、数据库一致性与 Artifact 全集验证后，将 pending 原子推进为 applied 提交点，再清理旧副本；清理警告不会重复应用已成功恢复的数据。
 
-恢复绝不能直接覆盖正在打开的 SQLite 文件或部分覆盖 `objects/`。
+恢复绝不能直接覆盖正在打开的 SQLite 文件，也不能只交换 `objects/` 而遗漏 `avatars/`。
 
 ### 导出/导入
 
@@ -268,7 +274,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - [x] schema v20 嵌入迁移、v19→v20 业务事实保留、空关系表、单 active contact、active person/owner、解除历史不可变、Client 版本传播和 Actor 停用保护已由迁移测试覆盖。
 - [x] schema v21 嵌入迁移、v20→v21 业务事实保留、空项目笔记表、身份/删除历史不可变、Project 版本传播与级联删除已由迁移测试覆盖。
 - [x] schema v22 嵌入迁移、v21→v22 业务事实保留、空项目附件表、object ID 唯一、完整性/删除历史不可变、Project 版本传播与级联删除已由迁移测试覆盖。
-- [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/trash/quarantine 与 symlink/reparse 防护。
+- [x] 数据库绑定 JSON marker、进程级独占锁、受控相对路径、staging/objects/avatars/trash/quarantine 与 symlink/reparse 防护。
 - [x] JSON/manifest/文件/总请求大小、SHA-256、180 秒服务端与 120 秒客户端传输边界、下载重新校验和 missing/mismatch 拒绝。
 - [x] 关键文件/目录项耐久同步与未知受控候选隔离而非自动永久删除。
 - [x] Task Artifact、Client Attachment、Project Attachment 软删除及 Task/Client/Project 硬删除的文件/数据库补偿。
@@ -276,13 +282,14 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - [x] 创建同时包含 SQLite `VACUUM INTO` 一致性快照、身份 marker 和全部 active Task file Artifact/Client Attachment 的同卷 staging 包，并在校验后原子发布。
 - [x] manifest 记录版本、身份、相对路径、size/SHA-256 与总量；临时数据库执行 quick/foreign-key/schema/identity/active Artifact 交叉校验，并拒绝缺失、篡改、额外文件和路径漂移。
 - [x] 创建幂等重放、列表、显式重新校验，以及设置页加载/空/错误/成功状态已有 API、客户端和组件测试。
-- [x] 恢复演练再次校验源包，在唯一临时数据根复制、打开/迁移数据库、声明 Artifact store、复验全部 active Task/Client/Project 受控文件并清理临时数据；源备份和当前数据保持不变。
+- [x] 恢复演练再次校验源包，在唯一临时数据根复制、打开/迁移数据库、声明 Artifact store、复验全部 active Task/Client/Project/Avatar 受控文件并清理临时数据；源备份和当前数据保持不变。
 - [x] 恢复安排再次演练目标并创建完整自动回滚包，发布后冻结业务写入；同目标请求可安全重放，不同 pending 目标被拒绝。
-- [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。
+- [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects/avatars，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。
 - [x] 备份永久删除要求明确确认，支持有效/损坏 UUID 包，原子移入可续删隐藏态后清理和同步；拒绝 symlink/reparse、非普通文件及 pending 恢复期间删除。
 - [x] 基础业务 JSON 在单事务内按显式白名单、稳定表/列/行结构生成；包含文件元数据但不含正文，排除令牌、绝对路径及运行维护表，失败不返回部分包。
 - [x] 恢复挂起后桌面设置页可调用 `restart_application`；只在受管 Sidecar 真实退出后重启应用，浏览器/外部 Sidecar 明确降级为手动重启。
 - [x] schema v26 嵌入迁移、v25→v26 既有 Inbox 事实保留、系统维护来源身份/活动 incident 去重/禁止来源删除，以及备份创建失败与校验失败尽力投影安全 Inbox Item 已由迁移与 API 测试覆盖。`BACKUP_INVALID` 不投影校验 incident。
+- [x] schema v27 嵌入迁移、v26→v27 设置事实保留、空头像表、单 active/墓碑/引用/跨领域 ID guards 已覆盖；头像上传、读取、替换/移除、启动协调、业务 JSON、备份/演练/恢复集成测试已通过。
 
 ### 仍未实现
 
@@ -303,6 +310,7 @@ Task file Artifact 与 Client Attachment 共享 `artifacts/` 受控对象协议�
 - [schema v21 Project Note 迁移](../../services/sidecar/internal/database/migrations/021_project_notes.sql)
 - [schema v22 Project Attachment 迁移](../../services/sidecar/internal/database/migrations/022_project_attachments.sql)
 - [schema v26 系统维护 Inbox 投影迁移](../../services/sidecar/internal/database/migrations/026_system_maintenance_inbox_projection.sql)
+- [schema v27 工作区头像迁移](../../services/sidecar/internal/database/migrations/027_workspace_avatar.sql)
 - [schema v11 Focus 迁移](../../services/sidecar/internal/database/migrations/011_focus_sessions.sql)
 - [schema v12 Inbox 迁移](../../services/sidecar/internal/database/migrations/012_inbox_items.sql)
 - [schema v13 Inbox–Task 关系迁移](../../services/sidecar/internal/database/migrations/013_inbox_item_tasks.sql)

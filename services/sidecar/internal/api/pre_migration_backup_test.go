@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -40,7 +41,8 @@ func TestCreatePreMigrationBackupPublishesVerifiedRollbackPackage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("verify pre-migration package: %v", err)
 	}
-	if verified.SchemaVersion != store.SchemaVersion || verified.ArtifactCount != 1 || !strings.Contains(verified.Note, "schema v26 → v27") {
+	expectedNote := fmt.Sprintf("schema v%d → v%d", store.SchemaVersion, targetSchema)
+	if verified.SchemaVersion != store.SchemaVersion || verified.ArtifactCount != 1 || !strings.Contains(verified.Note, expectedNote) {
 		t.Fatalf("pre-migration manifest = %#v", verified)
 	}
 }

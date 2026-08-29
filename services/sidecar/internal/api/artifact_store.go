@@ -21,6 +21,7 @@ import (
 )
 
 const maxArtifactFileBytes int64 = 50 << 20
+const maxWorkspaceAvatarBytes int64 = 2 << 20
 
 const (
 	artifactStoreMarkerName    = ".opc-artifact-store-v1"
@@ -36,6 +37,7 @@ var (
 type artifactStore struct {
 	root          string
 	objectsDir    string
+	avatarsDir    string
 	stagingDir    string
 	trashDir      string
 	quarantineDir string
@@ -120,6 +122,7 @@ func newArtifactStore(root, databaseID, boundStoreID string) (*artifactStore, er
 	store := &artifactStore{
 		root:          absolute,
 		objectsDir:    filepath.Join(absolute, "objects"),
+		avatarsDir:    filepath.Join(absolute, "avatars"),
 		stagingDir:    filepath.Join(absolute, ".staging"),
 		trashDir:      filepath.Join(absolute, ".trash"),
 		quarantineDir: filepath.Join(absolute, ".quarantine"),
@@ -132,7 +135,7 @@ func newArtifactStore(root, databaseID, boundStoreID string) (*artifactStore, er
 			_ = store.close()
 		}
 	}()
-	for _, directory := range []string{store.objectsDir, store.stagingDir, store.trashDir, store.quarantineDir} {
+	for _, directory := range []string{store.objectsDir, store.avatarsDir, store.stagingDir, store.trashDir, store.quarantineDir} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create Artifact storage directory: %w", err)
 		}
@@ -411,7 +414,108 @@ func (s *artifactStore) reconcile(db *gorm.DB) error {
 	if err := s.reconcileTrash(db); err != nil {
 		return err
 	}
-	return s.reconcileObjects(db)
+	if err := s.reconcileObjects(db); err != nil {
+		return err
+	}
+	return s.reconcileWorkspaceAvatars(db)
+}
+
+func (s *artifactStore) reconcileWorkspaceAvatars(db *gorm.DB) error {
+	// Older focused tests and maintenance helpers may construct an object-only
+	// store. Production stores always declare avatarsDir in newArtifactStore.
+	if strings.TrimSpace(s.avatarsDir) == "" {
+		return nil
+	}
+	if err := requireSafeDirectory(s.avatarsDir); err != nil {
+		return err
+	}
+	var rows []workspaceAvatarRow
+	if err := db.Find(&rows).Error; err != nil {
+		return err
+	}
+	byPath := make(map[string]workspaceAvatarRow, len(rows))
+	for _, row := range rows {
+		byPath[row.RelativePath] = row
+	}
+	entries, err := os.ReadDir(s.avatarsDir)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		relative := filepath.ToSlash(filepath.Join("avatars", entry.Name()))
+		row, found := byPath[relative]
+		path := filepath.Join(s.avatarsDir, entry.Name())
+		if !found {
+			if err := s.quarantineFile(path, entry.Name()); err != nil {
+				return err
+			}
+			continue
+		}
+		seen[relative] = struct{}{}
+		matches, matchErr := artifactFileMatches(path, row.SizeBytes, row.SHA256)
+		if row.DeletedAt != nil {
+			var tombstoneCount int64
+			if err := db.Table("workspace_avatar_deletion_tombstones").Where(
+				"avatar_id = ? AND relative_path = ? AND size_bytes = ? AND sha256 = ?",
+				row.ID, row.RelativePath, row.SizeBytes, row.SHA256,
+			).Count(&tombstoneCount).Error; err != nil {
+				return err
+			}
+			if matchErr == nil && matches && tombstoneCount == 1 {
+				if err := removeArtifactFileDurably(path); err != nil {
+					return err
+				}
+			} else if err := s.quarantineFile(path, entry.Name()); err != nil {
+				return err
+			}
+			continue
+		}
+		status := "verified"
+		if matchErr != nil || !matches {
+			status = "mismatch"
+		}
+		if row.IntegrityStatus != status {
+			if err := updateWorkspaceAvatarIntegrity(db, row.ID, status); err != nil {
+				return err
+			}
+		}
+	}
+	for _, row := range rows {
+		if row.DeletedAt != nil {
+			continue
+		}
+		if _, ok := seen[row.RelativePath]; ok {
+			continue
+		}
+		if row.IntegrityStatus != "missing" {
+			if err := updateWorkspaceAvatarIntegrity(db, row.ID, "missing"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func updateWorkspaceAvatarIntegrity(db *gorm.DB, id, status string) error {
+	result := db.Table("workspace_avatars").Where("id = ? AND deleted_at IS NULL", id).Updates(map[string]any{
+		"integrity_status":     status,
+		"integrity_checked_at": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("workspace avatar row is no longer active")
+	}
+	return nil
 }
 
 func (s *artifactStore) reconcileQuarantine(db *gorm.DB) error {
@@ -834,6 +938,27 @@ func (s *artifactStore) stageMultipartFile(file io.Reader, artifactID string) (s
 	return s.stageMultipartFileWithLimit(file, artifactID, maxArtifactFileBytes)
 }
 
+func (s *artifactStore) stageWorkspaceAvatar(file io.Reader, avatarID string) (stagedArtifactFile, string, error) {
+	staged, err := s.stageMultipartFileWithLimit(file, avatarID, maxWorkspaceAvatarBytes)
+	if err != nil {
+		return stagedArtifactFile{}, "", err
+	}
+	extension := ""
+	switch staged.mimeType {
+	case "image/png":
+		extension = "png"
+	case "image/jpeg":
+		extension = "jpg"
+	case "image/webp":
+		extension = "webp"
+	default:
+		s.discardStagedFile(staged)
+		return stagedArtifactFile{}, "", errors.New("workspace avatar must be PNG, JPEG, or WebP")
+	}
+	staged.relativePath = filepath.ToSlash(filepath.Join("avatars", avatarID+"."+extension))
+	return staged, extension, nil
+}
+
 func (s *artifactStore) stageMultipartFileWithLimit(file io.Reader, artifactID string, maxBytes int64) (stagedArtifactFile, error) {
 	if _, err := uuid.Parse(artifactID); err != nil {
 		return stagedArtifactFile{}, errors.New("invalid server Artifact id")
@@ -915,17 +1040,29 @@ func (s *artifactStore) stageMultipartFileWithLimit(file io.Reader, artifactID s
 }
 
 func (s *artifactStore) commitStagedFile(staged stagedArtifactFile) error {
+	destination, err := s.resolveObject(staged.relativePath)
+	if err != nil {
+		return err
+	}
+	return s.commitStagedFileAt(staged, destination, s.objectsDir)
+}
+
+func (s *artifactStore) commitStagedWorkspaceAvatar(staged stagedArtifactFile) error {
+	destination, err := s.resolveWorkspaceAvatar(staged.relativePath)
+	if err != nil {
+		return err
+	}
+	return s.commitStagedFileAt(staged, destination, s.avatarsDir)
+}
+
+func (s *artifactStore) commitStagedFileAt(staged stagedArtifactFile, destination, destinationDir string) error {
 	if err := requireSafeDirectory(s.root); err != nil {
 		return err
 	}
 	if err := requireSafeDirectory(s.stagingDir); err != nil {
 		return err
 	}
-	if err := requireSafeDirectory(s.objectsDir); err != nil {
-		return err
-	}
-	destination, err := s.resolveObject(staged.relativePath)
-	if err != nil {
+	if err := requireSafeDirectory(destinationDir); err != nil {
 		return err
 	}
 	stagedInfo, err := os.Lstat(staged.stagingPath)
@@ -946,20 +1083,41 @@ func (s *artifactStore) commitStagedFile(staged stagedArtifactFile) error {
 	if err := os.Link(staged.stagingPath, destination); err != nil {
 		return fmt.Errorf("commit staged Artifact: %w", err)
 	}
-	if err := syncArtifactDirectory(s.objectsDir); err != nil {
+	if filepath.Dir(destination) != destinationDir {
+		return errors.New("controlled file destination leaves its directory")
+	}
+	if err := syncArtifactDirectory(destinationDir); err != nil {
 		_ = os.Remove(destination)
-		_ = syncArtifactDirectory(s.objectsDir)
+		_ = syncArtifactDirectory(destinationDir)
 		return fmt.Errorf("sync committed Artifact directory: %w", err)
 	}
 	if err := os.Remove(staged.stagingPath); err != nil {
 		_ = os.Remove(destination)
-		_ = syncArtifactDirectory(s.objectsDir)
+		_ = syncArtifactDirectory(destinationDir)
 		return fmt.Errorf("remove committed Artifact staging name: %w", err)
 	}
 	// The object name is already durable. If this best-effort staging sync fails,
 	// a crash can at most leave a duplicate staging name for startup cleanup.
 	_ = syncArtifactDirectory(s.stagingDir)
 	return nil
+}
+
+func (s *artifactStore) removeWorkspaceAvatar(relative string) error {
+	path, err := s.resolveWorkspaceAvatar(relative)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("workspace avatar is not a regular file")
+	}
+	return removeArtifactFileDurably(path)
 }
 
 func (s *artifactStore) discardStagedFile(staged stagedArtifactFile) {
@@ -1021,6 +1179,71 @@ func (s *artifactStore) resolveObject(relative string) (string, error) {
 		return "", errors.New("Artifact path leaves the controlled root")
 	}
 	return candidate, nil
+}
+
+func (s *artifactStore) resolveWorkspaceAvatar(relative string) (string, error) {
+	normalized := filepath.FromSlash(strings.TrimSpace(relative))
+	if filepath.IsAbs(normalized) || filepath.Clean(normalized) != normalized {
+		return "", errors.New("invalid workspace avatar relative path")
+	}
+	parts := strings.Split(filepath.ToSlash(normalized), "/")
+	if len(parts) != 2 || parts[0] != "avatars" {
+		return "", errors.New("invalid workspace avatar relative path")
+	}
+	base := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(parts[1], ".png"), ".jpg"), ".webp")
+	extension := strings.TrimPrefix(parts[1], base+".")
+	if extension != "png" && extension != "jpg" && extension != "webp" {
+		return "", errors.New("invalid workspace avatar extension")
+	}
+	if parsed, err := uuid.Parse(base); err != nil || parsed.String() != base {
+		return "", errors.New("invalid workspace avatar object name")
+	}
+	candidate := filepath.Join(s.root, normalized)
+	rel, err := filepath.Rel(s.root, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("workspace avatar path leaves the controlled root")
+	}
+	return candidate, nil
+}
+
+func (s *artifactStore) resolveControlledFile(relative string) (string, error) {
+	if strings.HasPrefix(relative, "objects/") {
+		return s.resolveObject(relative)
+	}
+	if strings.HasPrefix(relative, "avatars/") {
+		return s.resolveWorkspaceAvatar(relative)
+	}
+	return "", errors.New("unsupported controlled file path")
+}
+
+func (s *artifactStore) openWorkspaceAvatar(relative string) (*os.File, os.FileInfo, error) {
+	if err := requireSafeDirectory(s.avatarsDir); err != nil {
+		return nil, nil, err
+	}
+	path, err := s.resolveWorkspaceAvatar(relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, errors.New("workspace avatar is not a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, errors.New("workspace avatar changed while opening")
+	}
+	return file, opened, nil
 }
 
 func (s *artifactStore) openObject(relative string) (*os.File, os.FileInfo, error) {

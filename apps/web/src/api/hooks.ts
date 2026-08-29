@@ -65,6 +65,7 @@ import {
   getFocusSessions,
   getHealth,
   getAppSettings,
+  commitAppSettingsWithAvatar,
   getInboxItem,
   getInboxItemEvents,
   getInboxItemTasks,
@@ -301,6 +302,29 @@ export function useUpdateAppSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (updates: AppSettingUpdate[]) => updateAppSettings(updates),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(settingsQueryKey, settings);
+    },
+    onError: async (error) => {
+      if (
+        error instanceof ApiError &&
+        error.code === "SETTINGS_VERSION_CONFLICT"
+      ) {
+        await queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+      }
+    },
+  });
+}
+
+export function useCommitAppSettingsWithAvatar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      operation: "replace" | "remove";
+      updates: AppSettingUpdate[];
+      file?: File;
+    }) =>
+      commitAppSettingsWithAvatar(input.operation, input.updates, input.file),
     onSuccess: (settings) => {
       queryClient.setQueryData(settingsQueryKey, settings);
     },

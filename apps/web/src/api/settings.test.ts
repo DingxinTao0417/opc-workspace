@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  commitAppSettingsWithAvatar,
   getAppSetting,
   getAppSettings,
+  getWorkspaceAvatarBlob,
   normalizeAppSettingsResponse,
   updateAppSettings,
 } from "./client";
@@ -195,5 +197,54 @@ describe("settings API", () => {
       ]),
     ).resolves.toMatchObject({ schemaVersion: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("commits and reads a controlled workspace avatar", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/content")) {
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBeInstanceOf(FormData);
+      const form = init?.body as FormData;
+      const manifest = JSON.parse(String(form.get("manifest")));
+      expect(manifest).toEqual({
+        operation: "replace",
+        updates: [
+          {
+            key: "workspace",
+            expected_version: 0,
+            value: { display_name: "Workspace", avatar_ref: null },
+          },
+        ],
+      });
+      expect(form.get("file")).toBeInstanceOf(File);
+      return new Response(JSON.stringify(validPayload()), {
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "avatar.png", {
+      type: "image/png",
+    });
+    await expect(
+      commitAppSettingsWithAvatar(
+        "replace",
+        [
+          {
+            key: "workspace",
+            expectedVersion: 0,
+            value: { displayName: "Workspace", avatarRef: null },
+          },
+        ],
+        file,
+      ),
+    ).resolves.toMatchObject({ schemaVersion: 1 });
+    await expect(getWorkspaceAvatarBlob()).resolves.toMatchObject({
+      type: "image/png",
+      size: 4,
+    });
   });
 });

@@ -100,6 +100,20 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if projectAttachment.Code != http.StatusCreated {
 		t.Fatalf("create project attachment export fixture = %d: %s", projectAttachment.Code, projectAttachment.Body.String())
 	}
+	if err := store.DB.Exec(`
+		INSERT INTO workspace_avatars(
+			id, relative_path, extension, mime_type, size_bytes, sha256,
+			integrity_status, integrity_checked_at, created_at
+		) VALUES (
+			'018f0000-0000-7000-8000-000000001708',
+			'avatars/018f0000-0000-7000-8000-000000001708.png',
+			'png', 'image/png', 4,
+			'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+			'verified', '2026-08-28T08:04:00Z', '2026-08-28T08:04:00Z'
+		)
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	response := performRequest(router, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
 	if response.Code != http.StatusOK {
@@ -118,8 +132,8 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	if exported.FormatVersion != 1 || exported.Source.SchemaVersion != store.SchemaVersion || exported.Source.APIVersion != Version {
 		t.Fatalf("export metadata = %#v", exported)
 	}
-	if exported.ArtifactFiles.Included || exported.ArtifactFiles.ActiveCount != 3 ||
-		exported.ArtifactFiles.ActiveBytes != int64(len("file bytes stay outside JSON")+len(clientAttachmentBody)+len(projectAttachmentBody)) ||
+	if exported.ArtifactFiles.Included || exported.ArtifactFiles.ActiveCount != 4 ||
+		exported.ArtifactFiles.ActiveBytes != int64(len("file bytes stay outside JSON")+len(clientAttachmentBody)+len(projectAttachmentBody)+4) ||
 		len(exported.Tables) != len(businessExportTables) {
 		t.Fatalf("export scope = %#v tables=%d", exported.ArtifactFiles, len(exported.Tables))
 	}
@@ -158,6 +172,9 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 	if notes := tables["project_notes"]; len(notes.Rows) != 1 {
 		t.Fatalf("Project notes were not exported: %#v", notes)
+	}
+	if avatars := tables["workspace_avatars"]; len(avatars.Rows) != 1 {
+		t.Fatalf("Workspace avatar metadata was not exported: %#v", avatars)
 	}
 	for _, excluded := range businessExportExcludedTables {
 		if _, leaked := tables[excluded]; leaked {

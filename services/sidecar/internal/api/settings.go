@@ -101,6 +101,13 @@ func (a *API) updateSettings(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
+	if err := requireUnchangedAvatarRef(a.db.WithContext(c.Request.Context()), prepared); err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
 	nowText := a.options.Now().UTC().Format(time.RFC3339Nano)
 	requestID := requestIDFromContext(c)
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
@@ -124,6 +131,26 @@ func (a *API) updateSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func requireUnchangedAvatarRef(db *gorm.DB, prepared []preparedSettingUpdate) error {
+	for _, update := range prepared {
+		if update.key != "workspace" {
+			continue
+		}
+		current, err := loadWorkspaceSettingValue(db)
+		if err != nil {
+			return err
+		}
+		var next workspaceSettingValue
+		if err := json.Unmarshal([]byte(update.valueJSON), &next); err != nil {
+			return err
+		}
+		if !sameOptionalString(current.AvatarRef, next.AvatarRef) {
+			return newProjectRequestError(http.StatusUnprocessableEntity, "AVATAR_WRITE_REQUIRES_MULTIPART", "avatar_ref can only be changed through the controlled avatar endpoint")
+		}
+	}
+	return nil
 }
 
 func prepareSettingUpdates(input []settingUpdateRequest) ([]preparedSettingUpdate, error) {

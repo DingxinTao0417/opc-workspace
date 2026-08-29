@@ -110,6 +110,8 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		t.Fatalf("upload backup project attachment = %d: %s", projectAttachmentRecorder.Code, projectAttachmentRecorder.Body.String())
 	}
 	projectAttachmentID := decodeProjectAttachmentResponse(t, projectAttachmentRecorder.Body.Bytes()).ID
+	_, avatarRef := replaceWorkspaceAvatarForTest(t, router, 0, nil, testPNGAvatar)
+	avatarName := strings.TrimPrefix(avatarRef, "avatars/")
 
 	headers := map[string]string{"Idempotency-Key": "manual-backup-1"}
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"提交前检查点"}`), headers)
@@ -117,7 +119,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		t.Fatalf("create backup = %d: %s", created.Code, created.Body.String())
 	}
 	summary := decodeBackupSummary(t, created.Body.Bytes())
-	if summary.VerificationStatus != "verified" || summary.SchemaVersion != store.SchemaVersion || summary.ArtifactCount != 3 || summary.ArtifactBytes != int64(len("backup artifact body")+len(clientAttachmentBody)+len(projectAttachmentBody)) || summary.VerifiedAt == "" {
+	if summary.VerificationStatus != "verified" || summary.SchemaVersion != store.SchemaVersion || summary.ArtifactCount != 4 || summary.ArtifactBytes != int64(len("backup artifact body")+len(clientAttachmentBody)+len(projectAttachmentBody)+len(testPNGAvatar)) || summary.VerifiedAt == "" {
 		t.Fatalf("backup summary = %#v", summary)
 	}
 	packagePath := filepath.Join(backupDir, summary.ID)
@@ -128,6 +130,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 		filepath.Join(packagePath, "artifacts", "objects", artifactID),
 		filepath.Join(packagePath, "artifacts", "objects", clientAttachmentID),
 		filepath.Join(packagePath, "artifacts", "objects", projectAttachmentID),
+		filepath.Join(packagePath, "artifacts", "avatars", avatarName),
 	} {
 		if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("backup file %s missing or invalid: info=%v err=%v", path, info, err)
@@ -197,7 +200,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	if drillEnvelope.Data.BackupID != summary.ID ||
 		drillEnvelope.Data.SourceSchema != store.SchemaVersion ||
 		drillEnvelope.Data.ResultSchema != store.SchemaVersion ||
-		drillEnvelope.Data.ArtifactCount != 3 ||
+		drillEnvelope.Data.ArtifactCount != 4 ||
 		!drillEnvelope.Data.TemporaryDataClean {
 		t.Fatalf("restore drill result = %#v", drillEnvelope.Data)
 	}
@@ -490,11 +493,17 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("upload restore project attachment = %d: %s", projectAttachmentRecorder.Code, projectAttachmentRecorder.Body.String())
 	}
 	projectAttachmentID := decodeProjectAttachmentResponse(t, projectAttachmentRecorder.Body.Bytes()).ID
+	_, restoredAvatarRef := replaceWorkspaceAvatarForTest(t, router.Engine, 0, nil, testPNGAvatar)
 	created := performRequest(router, http.MethodPost, "/api/v1/backups", []byte(`{"note":"restore target"}`), nil)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create restore target = %d: %s", created.Code, created.Body.String())
 	}
 	target := decodeBackupSummary(t, created.Body.Bytes())
+	replacementAvatar := append(append([]byte(nil), testPNGAvatar...), 9)
+	_, lateAvatarRef := replaceWorkspaceAvatarForTest(t, router.Engine, 1, &restoredAvatarRef, replacementAvatar)
+	if lateAvatarRef == restoredAvatarRef {
+		t.Fatal("late avatar did not replace restore target avatar")
+	}
 	lateTask := createTaskForTaskFacts(t, router.Engine, `{"title":"must be rolled back"}`)
 
 	scheduled := performRequest(router, http.MethodPost, "/api/v1/backups/"+target.ID+"/restore", []byte(`{"confirm":true}`), nil)
@@ -539,7 +548,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		t.Fatalf("close database before restore: %v", err)
 	}
 
-	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 26)
+	result, err := ApplyPendingRestore(backupDir, databasePath, artifactDir, 27)
 	if err != nil {
 		t.Fatalf("ApplyPendingRestore() error = %v", err)
 	}
@@ -584,6 +593,13 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	if projectContent.Code != http.StatusOK || projectContent.Body.String() != "restored project attachment body" {
 		t.Fatalf("restored project attachment = %d: %q", projectContent.Code, projectContent.Body.String())
 	}
+	avatarContent := performRequest(restoredRouter, http.MethodGet, "/api/v1/settings/avatar/content", nil, nil)
+	if avatarContent.Code != http.StatusOK || string(avatarContent.Body.Bytes()) != string(testPNGAvatar) {
+		t.Fatalf("restored workspace avatar = %d: %x", avatarContent.Code, avatarContent.Body.Bytes())
+	}
+	if _, err := os.Lstat(filepath.Join(artifactDir, filepath.FromSlash(lateAvatarRef))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("late avatar survived target restore: %v", err)
+	}
 
 	rollbackDatabase := filepath.Join(backupDir, result.RollbackBackupID, "database", "opc-workspace.db")
 	rollback, err := gorm.Open(glebarezsqlite.Open("file:"+filepath.ToSlash(rollbackDatabase)+"?mode=ro&immutable=1"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
@@ -603,6 +619,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 		filepath.Join(filepath.Dir(databasePath), ".opc-restore-new-*.db"),
 		filepath.Join(filepath.Dir(databasePath), ".opc-restore-old-*.db"),
 		filepath.Join(artifactDir, ".restore-*-objects-*"),
+		filepath.Join(artifactDir, ".restore-*-avatars-*"),
 	} {
 		matches, _ := filepath.Glob(pattern)
 		if len(matches) != 0 {
@@ -622,6 +639,8 @@ func TestRollbackRestoreSwapRecoversPartiallyMovedSQLiteSidecars(t *testing.T) {
 		databaseOld: filepath.Join(root, ".opc-restore-old-test.db"),
 		objects:     filepath.Join(artifactRoot, "objects"),
 		objectsOld:  filepath.Join(artifactRoot, ".restore-old-objects-test"),
+		avatars:     filepath.Join(artifactRoot, "avatars"),
+		avatarsOld:  filepath.Join(artifactRoot, ".restore-old-avatars-test"),
 	}
 	if err := os.WriteFile(paths.database+"-wal", []byte("partial-new"), 0o600); err != nil {
 		t.Fatal(err)

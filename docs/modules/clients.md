@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-28（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v26。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v26 的项目与 Inbox 来源扩展不改变 Client 契约。v0.1 的资料 CRUD、Project 客户关联、人工备注/会议时间线、客户附件和本地联系人关联已交付，模块仍为**部分完成**；外部活动来源、回访和财务聚合尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v27。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v27 的其他扩展不改变 Client 契约。v0.1 的资料 CRUD、Project 客户关联、人工备注/会议时间线、客户附件和本地联系人关联已交付，模块仍为**部分完成**；外部活动来源、回访和财务聚合尚未交付。
 
 ## 定位与边界
 

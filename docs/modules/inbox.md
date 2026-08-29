@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-28（依据当前代码与测试）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v26。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护来源已交付；其他系统故障来源和 Agent 仍属于后续阶段。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v27。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及 T-11E follow-up Task Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护来源已交付；schema v27 不改变 Inbox 契约，其他系统故障来源和 Agent 仍属于后续阶段。
 
 导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v6.9](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
@@ -208,7 +208,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 
 ## 数据/API/状态与事件
 
-### `inbox_items`（schema v12，在当前 schema v26 延续）
+### `inbox_items`（schema v12，在当前 schema v27 延续）
 
 | 字段                                | 当前约束 / 说明                                                                                                 |
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |

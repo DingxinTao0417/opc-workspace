@@ -2,8 +2,8 @@
 
 > 文档版本：2.18
 > 日期：2026-08-28
-> 依据：[PRD v6.9](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v26
+> 依据：[PRD v7.0](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v27
 
 ## 1. 目的
 
@@ -51,9 +51,9 @@
 - Tauri 已具备基础窗口、单实例、数据目录和 Sidecar 启停基座。
 - React 已具备三栏框架、今日/任务/项目/客户能力、Project 可编辑人工笔记、所属 Task Artifact 产出聚合与追加式活动时间线、客户本地活动时间线、受控附件与 person 显式关联、手工 Inbox 三视图/详情/分诊时间线与已有 Task 活动/历史关系管理，以及共享持久化 Session 驱动的 FocusPage、RightOverview、ticker 和恢复弹窗；任务页已接服务端分页/搜索/筛选、Task→Project→Client 客户筛选、计划/截止日期范围、非法区间查询门禁、SQLite 保存视图、根任务树、标签、批量、按钮排序和精确计划组同状态拖拽，Today 已接四组共享同日/跨日期拖拽、空精确日期/未排期落点、版本化任意日期安排、策略安全的开始/完成/开始专注快捷操作，以及直达共享编辑和版本化确认删除，Project 已接 Client 选择/筛选和独立产出/笔记/审计反馈状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
-- SQLite 当前为 schema v26：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 为 follow-up Task Artifact、Task 阻塞、Task 临期和备份创建/校验失败的系统维护增加 Inbox 来源身份、索引、不可变与删除/incident 协调 guards，不回填历史事实或创建 demo 数据。
-- 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active 受控文件、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁，在执行破坏性 SQL 前创建同规格自动回滚包，失败则拒绝迁移和 ready。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前交换数据库和完整 objects，失败回滚、成功以 applied 提交点防止重复执行。设置页只发起/展示数据管理 API，不复制备份事实。
-- 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；`project_notes` 与其他业务历史进入导出，Task Artifact 与 Client Attachment 只保留数据库元数据和 active 文件摘要，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
+- SQLite 当前为 schema v27：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加四类 Inbox 来源 guards；schema v27 新增受控工作区头像、不可变删除墓碑、单 active、设置引用存在性和跨 Task/Client/Project/Avatar 文件 ID 唯一保护，不回填历史事实或创建 demo 数据。
+- 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
+- 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -62,7 +62,7 @@
 - Client 列表/详情/创建/编辑/停用/恢复/确认硬删除已接真实 API；创建支持首次响应快照幂等，PATCH/DELETE 使用聚合 `ETag`，项目数从 Project 实时派生，最近动态从未删除 Activity 派生。人工 note/meeting 支持幂等创建、稳定分页、活动版本化编辑和带原因软删除；Client Attachment 支持严格 multipart 上传、稳定分页、完整性下载、软删历史和聚合删除文件补偿；Client contact 支持已有/原子新建 person 二选一、单 active 关系、带原因解除和不可变历史。相关变化都会使旧 Client 版本失效。Project 客户关联变化使旧 Client 版本失效，Client 名称变化继续使旧 Project 版本失效；Invoice 强引用阻止删除，Project 可选关联按外键置空。
 - schema v7 以固定 UUID 初始化唯一 owner 与 system，按历史任务完成状态幂等回填 owner Assignment 和 `migration_assignment_backfill` 事件；数据库保护内置主体、活动分派与引用历史。
 - 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。“关于”按需读取 `/health`，严格校验后展示运行事实，失败保留明确错误与重试入口。
-- 设置事实层已接 schema v16 与 `GET/PATCH /api/v1/settings`：固定 workspace/general/appearance/focus 四个非敏感模块，缺失行由 GET 返回未存储默认值，PATCH 以模块版本原子保存并追加不含设置值的审计事件。前端启动门禁严格读取并将 Query 快照作为 committed，保存仅发送变化模块；历史 localStorage 只原子回填未存储模块并在验证后清理。头像仍为独立本地兼容值，受控文件导入待实现。
+- 设置事实层已接 schema v16 与 `GET/PATCH /api/v1/settings`，schema v27 再接 `POST /settings/avatar` 与鉴权 content：头像选择只写 preview，保存时受控文件 replace/remove 与变化设置原子提交，取消恢复 committed。历史 localStorage Data URL 仅在服务端无头像时一次性导入，已存在服务端引用始终优先；验证后清理本地内容。
 - 任务详情已接 Assignment API/UI：可查询当前 assignee/reviewer 与结束历史，完成首次分派、改派和结束；命令使用 Task `If-Match`/`version`、可选幂等快照和事务化 Workflow Event。完成 Task 会结束活动 Assignment，重新打开不会恢复旧记录。
 - Task 已扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态，并通过 `start / block / unblock / complete / cancel / reopen` 六个显式命令改变生命周期；新建只能进入 `todo`，旧通用状态端点返回 410。开始要求活动负责人，阻塞/取消要求原因，解除阻塞由服务端恢复来源状态，完成/取消会原子结束活动 Assignment，重新打开不会恢复旧分派。
 - 任务详情已提供按需加载的通用 Task Workflow Event 时间线；生命周期、Assignment 和迁移事件按时间与 `command_seq` 倒序展示，事件记录受数据库不可修改/删除保护。
@@ -70,7 +70,7 @@
 - 人工 Project Note 是独立可编辑业务事实：创建、编辑和带原因软删除分别递增笔记版本及 Project 聚合版本；归档项目只读，删除历史不可再改写。它不写入或覆盖不可变 Workflow Event，Project 硬删除时随聚合级联删除。
 - `review_policy = manual` 已在 Task 新建和受限编辑中开放；策略只可在 todo 且没有任何 Submission 历史时改变。manual Task 具备活动 assignee 与 owner reviewer 后，可提交摘要以及 text/link/structured/file Artifact，进入 waiting_review，由 owner 接受或要求返工。
 - schema v9 和 UI 已交付 Submission/Artifact 历史、受控文件 store、安全下载、完整性状态、确认软删除、Task 聚合硬删除补偿，以及提交/审核/撤回/删除时间线。不可变 Artifact deletion tombstone 与删除事实同事务写入并在 Task 聚合删除后保留，供启动恢复判定授权删除。producer 来自活动 assignee，submitter/recorder/reviewer/withdrawer/deleter 为内置 owner。
-- Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/.trash/.quarantine`。数据库换 root、root 换数据库或第二 Sidecar 指向同一 root 时均启动失败；Task Artifact 与 Client Attachment 共享受控 object 协议并由 schema v19 阻止 ID 冲突，无引用的受控 object/trash 候选进入 quarantine 而非自动永久删除。文件内容不经过任意路径 API，数据库只保存 `objects/<uuid>`，下载前复验 size 和 SHA-256。
+- Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
 - 当前仍未实现 Focus 高级分析/原生反馈、Client 外部活动来源/回访/财务、其他系统故障来源、重复提醒、Agent Runtime、数据导入和含文件外部导出包，因此完整工作编排仍是部分完成。显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期和备份创建/校验失败已投影到 Inbox；迁移失败、Sidecar 启动前失败和数据库不可写仍未投影。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。

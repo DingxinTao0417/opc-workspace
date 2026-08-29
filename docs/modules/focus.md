@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v26（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v26 不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）与 D2b 的本地日期范围回顾已经交付；高级分布和原生桌面反馈仍属后续。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v27（2026-08-28）。Focus 结构仍由 schema v11 引入；schema v12–v27 不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）与 D2b 的本地日期范围回顾已经交付；高级分布和原生桌面反馈仍属后续。
 
 ## 定位与边界
 

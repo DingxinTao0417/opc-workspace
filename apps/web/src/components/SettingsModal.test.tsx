@@ -133,18 +133,39 @@ describe("SettingsModal", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string, init?: RequestInit) =>
-        Promise.resolve(
-          new Response(
-            JSON.stringify(
-              url.includes("/api/v1/settings")
-                ? savedSettingsPayload(init)
-                : healthPayload,
-            ),
-            { headers: { "Content-Type": "application/json" } },
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith("/api/v1/settings/avatar/content")) {
+          return new Response(new Uint8Array([137, 80, 78, 71]), {
+            headers: { "Content-Type": "image/png" },
+          });
+        }
+        if (url.endsWith("/api/v1/settings/avatar")) {
+          const manifest = JSON.parse(
+            String((init?.body as FormData).get("manifest")),
+          ) as { updates: { key: string; value: Record<string, unknown> }[] };
+          const payload = settingsPayload();
+          for (const update of manifest.updates) {
+            const item = payload.data.items.find(
+              (candidate: { key: string }) => candidate.key === update.key,
+            )!;
+            item.value = update.value as never;
+            item.version += 1;
+          }
+          payload.data.items[0].value.avatar_ref =
+            "avatars/018f0000-0000-4000-8000-000000000111.png";
+          return new Response(JSON.stringify(payload), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify(
+            url.includes("/api/v1/settings")
+              ? savedSettingsPayload(init)
+              : healthPayload,
           ),
-        ),
-      ),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }),
     );
     useSettingsStore.setState({
       ...DEFAULT_FOCUS_SETTINGS,
@@ -334,7 +355,7 @@ describe("SettingsModal", () => {
     expect(useSettingsStore.getState().preview).toBeNull();
   });
 
-  it("keeps a local avatar compatibility value when explicitly saved", async () => {
+  it("persists an uploaded avatar through the controlled endpoint", async () => {
     renderSettings();
 
     fireEvent.click(screen.getByRole("button", { name: "个人资料" }));
@@ -354,12 +375,26 @@ describe("SettingsModal", () => {
 
     await waitFor(() =>
       expect(useSettingsStore.getState().avatarDataUrl).toMatch(
-        /^data:image\/png;base64,/,
+        /^(?:blob:|data:image\/png;base64,)/,
       ),
     );
     expect(
       vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "PATCH"),
     ).toBe(false);
+    const avatarCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) =>
+        String(url).endsWith("/api/v1/settings/avatar"),
+      );
+    expect(avatarCall?.[1]?.method).toBe("POST");
+    const manifest = JSON.parse(
+      String((avatarCall?.[1]?.body as FormData).get("manifest")),
+    );
+    expect(manifest.operation).toBe("replace");
+    expect(manifest.updates[0]).toMatchObject({
+      key: "workspace",
+      expected_version: 1,
+    });
   });
 
   it("keeps the preview and committed facts separate after a save failure", async () => {

@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-28（依据当前实现）
 >
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v26。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v26 的系统维护来源不改写 Project 表。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v27。schema v21 新增项目笔记，schema v22 新增受控项目附件，schema v23–v25 依次新增显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox 来源投影和删除协调；schema v26–v27 不改写 Project 表。
 >
 > 版本边界：项目资料、基础生命周期、任务聚合、Client 客户关联、项目笔记、项目附件、所属 Task Artifact 聚合、活动时间线、显式 follow-up、Task 阻塞和 Task 临期→Inbox 已实现，模块仍为**部分完成**；项目自身节点来源、任务树和高级分析尚未交付。
 
@@ -115,7 +115,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 当前数据
 
-- 当前 schema v26 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存 `id, project_id, name, relative_path, mime_type, size_bytes, sha256, recorded_by_actor_id, integrity_status, integrity_checked_at, deleted_at, deleted_by_actor_id, delete_reason, created_at`。附件新增/软删除通过 trigger 递增 Project 聚合版本，`project_attachment_deletion_tombstones` 在父项目删除后仍保留授权删除事实；v23–v26 不改变这些 Project 表字段。
+- 当前 schema v27 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存受控附件事实。附件新增/软删除通过 trigger 递增 Project 聚合版本，删除墓碑在父项目删除后仍保留；v23–v27 不改变这些 Project 表字段。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -201,7 +201,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v26 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞与 Task 临期 Inbox 来源协调；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v27 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞与 Task 临期 Inbox 来源协调；Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（部分实现）**：项目选择、串行分页拉全项目选项与项目任务、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。任务页已有分页/筛选/标签/父子层级，但项目详情尚未复用这些交互；大数据量性能和项目级 Focus 历史仍待实现。
 4. **客户协作（基础范围、人工活动/附件/person 关联已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、Client 人工活动时间线、受控附件和显式 contact 关联已接通；外部来源、回访和财务仍待实现。

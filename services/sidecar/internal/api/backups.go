@@ -343,7 +343,8 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 	databaseDir := filepath.Join(stagingPath, "database")
 	artifactDir := filepath.Join(stagingPath, "artifacts")
 	objectDir := filepath.Join(artifactDir, "objects")
-	for _, directory := range []string{databaseDir, artifactDir, objectDir} {
+	avatarDir := filepath.Join(artifactDir, "avatars")
+	for _, directory := range []string{databaseDir, artifactDir, objectDir, avatarDir} {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			return backupSummary{}, fmt.Errorf("create backup package layout: %w", err)
 		}
@@ -404,15 +405,14 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 	artifacts := make([]backupManifestArtifact, 0, len(rows))
 	var artifactBytes int64
 	for _, row := range rows {
-		expectedRelative := "objects/" + row.ID
-		if row.RelativePath != expectedRelative {
+		if !validControlledFileRelativePath(row.ID, row.RelativePath, options.SchemaVersion) {
 			return backupSummary{}, fmt.Errorf("active controlled file %s has an invalid path", row.ID)
 		}
-		source, err := s.artifacts.resolveObject(row.RelativePath)
+		source, err := s.artifacts.resolveControlledFile(row.RelativePath)
 		if err != nil {
 			return backupSummary{}, fmt.Errorf("resolve active Artifact %s: %w", row.ID, err)
 		}
-		relative := "artifacts/objects/" + row.ID
+		relative := "artifacts/" + row.RelativePath
 		copied, err := copyVerifiedBackupFile(source, filepath.Join(stagingPath, filepath.FromSlash(relative)), row.SizeBytes, row.SHA256)
 		if err != nil {
 			return backupSummary{}, fmt.Errorf("copy active Artifact %s: %w", row.ID, err)
@@ -441,7 +441,7 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 	if err := writeBackupManifest(stagingPath, manifest); err != nil {
 		return backupSummary{}, err
 	}
-	for _, directory := range []string{objectDir, artifactDir, databaseDir, stagingPath} {
+	for _, directory := range []string{objectDir, avatarDir, artifactDir, databaseDir, stagingPath} {
 		if err := syncArtifactDirectory(directory); err != nil {
 			return backupSummary{}, fmt.Errorf("sync backup package: %w", err)
 		}
@@ -584,7 +584,10 @@ func validateBackupManifest(manifest backupManifest, expectedID string, maxSchem
 			return errors.New("backup Artifact ids are duplicated")
 		}
 		seen[artifact.ID] = struct{}{}
-		if err := validateBackupFile(artifact.backupManifestFile, "artifacts/objects/"+artifact.ID); err != nil {
+		if !validBackupControlledFilePath(artifact.ID, artifact.Path, manifest.SchemaVersion) {
+			return errors.New("backup controlled file path is invalid")
+		}
+		if err := validateBackupFile(artifact.backupManifestFile, artifact.Path); err != nil {
 			return err
 		}
 		artifactBytes += artifact.SizeBytes
@@ -653,7 +656,7 @@ func verifyBackupDatabase(path string, manifest backupManifest) error {
 		if err := sqlDB.QueryRow(lookupQuery, artifact.ID).Scan(&relativePath, &size, &hash); err != nil {
 			return fmt.Errorf("read backup Artifact %s: %w", artifact.ID, err)
 		}
-		if relativePath != "objects/"+artifact.ID || size != artifact.SizeBytes || hash != artifact.SHA256 {
+		if !validControlledFileRelativePath(artifact.ID, relativePath, manifest.SchemaVersion) || artifact.Path != "artifacts/"+relativePath || size != artifact.SizeBytes || hash != artifact.SHA256 {
 			return fmt.Errorf("backup Artifact %s metadata does not match database", artifact.ID)
 		}
 	}
@@ -680,6 +683,14 @@ func listActiveControlledFiles(db *gorm.DB, schemaVersion int) ([]controlledFile
 			UNION ALL
 			SELECT id, relative_path, size_bytes, sha256
 			FROM project_attachments
+			WHERE deleted_at IS NULL
+		`
+	}
+	if schemaVersion >= 27 {
+		query += `
+			UNION ALL
+			SELECT id, relative_path, size_bytes, sha256
+			FROM workspace_avatars
 			WHERE deleted_at IS NULL
 		`
 	}
@@ -712,8 +723,31 @@ func controlledFileVerificationQueries(schemaVersion int) (string, string) {
 		FROM project_attachments
 		WHERE deleted_at IS NULL
 	`
+	if schemaVersion >= 27 {
+		union += `
+			UNION ALL
+			SELECT id, relative_path, size_bytes, sha256
+			FROM workspace_avatars
+			WHERE deleted_at IS NULL
+		`
+	}
 	return "SELECT COUNT(*) FROM (" + union + ")",
 		"SELECT relative_path, size_bytes, sha256 FROM (" + union + ") WHERE id = ?"
+}
+
+func validControlledFileRelativePath(id, relative string, schemaVersion int) bool {
+	if relative == "objects/"+id {
+		return true
+	}
+	if schemaVersion < 27 || !strings.HasPrefix(relative, "avatars/"+id+".") {
+		return false
+	}
+	extension := strings.TrimPrefix(relative, "avatars/"+id+".")
+	return extension == "png" || extension == "jpg" || extension == "webp"
+}
+
+func validBackupControlledFilePath(id, path string, schemaVersion int) bool {
+	return strings.HasPrefix(path, "artifacts/") && validControlledFileRelativePath(id, strings.TrimPrefix(path, "artifacts/"), schemaVersion)
 }
 
 func readBackupManifest(packagePath string) (backupManifest, error) {
@@ -887,7 +921,7 @@ func rejectUnexpectedBackupFiles(packagePath string, expected map[string]struct{
 		relative = filepath.ToSlash(relative)
 		if entry.IsDir() {
 			switch relative {
-			case "database", "artifacts", "artifacts/objects":
+			case "database", "artifacts", "artifacts/objects", "artifacts/avatars":
 				return nil
 			default:
 				return fmt.Errorf("backup package contains unexpected directory %s", relative)

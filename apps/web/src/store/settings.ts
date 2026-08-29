@@ -218,7 +218,8 @@ export function sanitizeProfileSettings(
       ? null
       : typeof avatarDataUrl === "string" &&
           avatarDataUrl.length <= 2_900_000 &&
-          /^data:image\/(?:png|jpeg|webp);base64,/i.test(avatarDataUrl)
+          (/^data:image\/(?:png|jpeg|webp);base64,/i.test(avatarDataUrl) ||
+            avatarDataUrl.startsWith("blob:"))
         ? avatarDataUrl
         : fallback.avatarDataUrl;
 
@@ -244,13 +245,23 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => sanitizeProfileSettings(settings, state)),
       setTheme: (theme) => set({ theme: sanitizeAppearanceTheme(theme) }),
       replaceCommitted: (settings) =>
-        set((state) => ({
-          ...sanitizeFocusSettings(settings.focus, state),
-          ...sanitizeGeneralSettings(settings.general, state),
-          ...sanitizeProfileSettings(settings.profile, state),
-          theme: sanitizeAppearanceTheme(settings.theme, state.theme),
-          preview: null,
-        })),
+        set((state) => {
+          const nextProfile = sanitizeProfileSettings(settings.profile, state);
+          if (
+            state.avatarDataUrl?.startsWith("blob:") &&
+            state.avatarDataUrl !== nextProfile.avatarDataUrl &&
+            typeof URL.revokeObjectURL === "function"
+          ) {
+            URL.revokeObjectURL(state.avatarDataUrl);
+          }
+          return {
+            ...sanitizeFocusSettings(settings.focus, state),
+            ...sanitizeGeneralSettings(settings.general, state),
+            ...nextProfile,
+            theme: sanitizeAppearanceTheme(settings.theme, state.theme),
+            preview: null,
+          };
+        }),
       beginPreview: () =>
         set((state) => ({
           preview: {
@@ -306,9 +317,10 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: LOCAL_SETTINGS_STORAGE_KEY,
       storage: createJSONStorage(getSettingsStorage),
-      partialize: (state) => ({
-        avatarDataUrl: state.avatarDataUrl,
-      }),
+      // Runtime avatar display URLs are backed by authenticated Blob responses
+      // and must never be persisted. The old key remains readable only for the
+      // one-time controlled-file migration below.
+      partialize: () => ({}),
       merge: (persistedState, currentState) => {
         const persisted =
           typeof persistedState === "object" && persistedState !== null
@@ -365,6 +377,17 @@ export function readLocalAvatarSnapshot(
     };
   } catch {
     return fallback;
+  }
+}
+
+export function clearLocalAvatarSnapshot(
+  storage: Storage = getSettingsStorage(),
+): void {
+  try {
+    storage.removeItem(LOCAL_SETTINGS_STORAGE_KEY);
+  } catch {
+    // A verified server avatar remains authoritative even when stale browser
+    // compatibility storage cannot be removed.
   }
 }
 

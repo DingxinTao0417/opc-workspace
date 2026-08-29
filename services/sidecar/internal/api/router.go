@@ -163,6 +163,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.DELETE("/backups/:id", service.deleteBackup)
 		v1.GET("/settings", service.listSettings)
 		v1.PATCH("/settings", service.updateSettings)
+		v1.POST("/settings/avatar", service.commitSettingsWithAvatar)
+		v1.GET("/settings/avatar/content", service.getWorkspaceAvatarContent)
 		v1.GET("/actors", service.listActors)
 		v1.POST("/actors", service.createActor)
 		v1.GET("/actors/:id", service.getActor)

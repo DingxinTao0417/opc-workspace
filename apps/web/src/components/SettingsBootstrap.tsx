@@ -3,7 +3,11 @@ import { useLayoutEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import { settingsQueryKey } from "../api/hooks";
 import { bootstrapAppSettings } from "../settings/bootstrap";
-import { clearLegacySettings, useSettingsStore } from "../store/settings";
+import {
+  clearLegacySettings,
+  clearLocalAvatarSnapshot,
+  useSettingsStore,
+} from "../store/settings";
 import { ErrorState, LoadingState } from "./feedback";
 
 function settingsBootstrapError(error: unknown): string {
@@ -29,6 +33,7 @@ export function SettingsBootstrap({ children }: { children: ReactNode }) {
     replaceCommitted(query.data.committed);
     queryClient.setQueryData(settingsQueryKey, query.data.settings);
     if (query.data.legacyExists) clearLegacySettings();
+    clearLocalAvatarSnapshot();
     setAppliedAt(query.dataUpdatedAt);
   }, [
     appliedAt,
