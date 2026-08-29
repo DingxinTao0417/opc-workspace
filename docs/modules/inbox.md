@@ -4,7 +4,7 @@
 >
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v31。T-11A1/B 手工受理分诊、T-11A2 已有 Task 关系、T-11A3 一次性 Reminder、T-11C 批量拆分/分派/自动结清，以及已登记来源投影均已交付。v9.18 补齐可信来源 Project 继承/逐项清除或改选、独立完成条件、person 本地责任提示、活动/可用历史关系打开共享 Task，以及来源 Project/Task/Today 缓存失效；Project Artifact 同时只读返回 nullable follow-up/实时 required 进度。该纵切不新增 Inbox 字段、API 版本或 migration；v0.1 不启用 AI、LLM 或 Agent Runtime。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.20](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.21](../opc-workspace-PRD.md) · [任务](tasks.md) · [Actor 与分派](actors.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

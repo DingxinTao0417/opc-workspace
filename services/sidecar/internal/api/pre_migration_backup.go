@@ -35,6 +35,9 @@ func CreatePreMigrationBackup(db *gorm.DB, options Options, targetSchema int) (s
 		return "", errors.Join(err, artifacts.close())
 	}
 	note := fmt.Sprintf("自动迁移前备份：schema v%d → v%d", options.SchemaVersion, targetSchema)
+	if err := backups.requireCreateCapacity(db, options, 0); err != nil {
+		return "", errors.Join(fmt.Errorf("verify pre-migration backup capacity: %w", err), artifacts.close())
+	}
 	summary, err := backups.create(db, options, note, "", sha256Hex([]byte(note)))
 	if err != nil {
 		return "", errors.Join(fmt.Errorf("create verified pre-migration backup: %w", err), artifacts.close())

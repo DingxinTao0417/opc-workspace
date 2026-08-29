@@ -144,6 +144,21 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		writeError(c, http.StatusConflict, "BACKUP_NOT_RESTORABLE", "The backup could not be opened safely in an isolated temporary data root")
 		return
 	}
+	pendingPayloadBytes, err := pendingRestoreCapacityPayload(manifest)
+	if err != nil {
+		writeError(c, http.StatusServiceUnavailable, "RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE", "Restore storage capacity could not be confirmed; no restore was scheduled")
+		return
+	}
+	if err := a.backupStore.requireCreateCapacity(
+		a.db.WithContext(c.Request.Context()), a.options, pendingPayloadBytes,
+	); err != nil {
+		if errors.Is(err, errBackupSpaceInsufficient) {
+			writeError(c, http.StatusInsufficientStorage, "RESTORE_ROLLBACK_SPACE_INSUFFICIENT", "There is not enough storage space to create a rollback backup and stage the restore; no restore was scheduled")
+			return
+		}
+		writeError(c, http.StatusServiceUnavailable, "RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE", "Restore storage capacity could not be confirmed; no restore was scheduled")
+		return
+	}
 
 	rollbackNote := "恢复 " + id[:8] + " 前自动回滚点"
 	rollback, err := a.backupStore.create(
@@ -172,6 +187,21 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"data": scheduledRestoreResult{
 		BackupID: id, RollbackBackupID: rollback.ID, RequestedAt: requestedAt, RestartRequired: true,
 	}})
+}
+
+func pendingRestoreCapacityPayload(manifest backupManifest) (uint64, error) {
+	if manifest.TotalBytes < 0 {
+		return 0, errBackupCapacityUnavailable
+	}
+	payload := uint64(manifest.TotalBytes)
+	var ok bool
+	for _, size := range []uint64{maxBackupManifest, maxRestorePlanBytes} {
+		payload, ok = checkedBackupCapacityAdd(payload, size)
+		if !ok {
+			return 0, errBackupCapacityUnavailable
+		}
+	}
+	return payload, nil
 }
 
 func (s *backupStore) publishPendingRestore(sourcePath string, manifest backupManifest, plan pendingRestorePlan, maxSchema int) error {

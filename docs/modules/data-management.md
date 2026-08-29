@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v31（2026-08-29）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、仅手动 `POST /api/v1/backups` 的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但手动备份容量准入拒绝不投影通用 `backup:create` incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查与全局启动故障恢复页 v1 也已交付；数据库打开前备份选择/实时恢复进度、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查与全局启动故障恢复页 v1 也已交付；数据库打开前备份选择/实时恢复进度、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.15](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.21](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -48,20 +48,20 @@
 - SQLite 通过同一连接执行 `VACUUM INTO` 得到包含 WAL 已提交事实的一致性快照；所有 active Task file Artifact 与 Client Attachment 按数据库记录统一排序复制并同时校验 size/SHA-256，marker 必须匹配不可变 `database_id / artifact_store_id`。
 - 备份先写同一 backup root 下的 `.staging-<uuid>`，manifest 记录 app/commit/API/schema、创建与校验时间、可选说明、数据库/marker/Artifact 相对路径及 size/SHA-256；`quick_check`、`foreign_key_check`、schema、身份、active Artifact 元数据、文件全集和总量均通过后才原子重命名为 `backups/<backup-id>/`。
 - 创建支持可选 `Idempotency-Key`；Sidecar 只在备份 manifest 保存 key 的 SHA-256 与规范请求摘要。模糊响应可安全重放同一包，不同说明复用同一 key 返回冲突。
-- 仅手动 `POST /api/v1/backups` 在维护写锁与备份互斥锁内、完成同键同请求的幂等重放查找后、创建任何 staging 或执行 `VACUUM INTO` 前估算容量。SQLite 部分取 `PRAGMA page_count × page_size` 与当前数据库普通文件大小的较大值；每个 active Task/Client/Project/Avatar 受控文件先安全解析并以 Lstat/open 复核为同一普通文件，实际大小必须与数据库登记值一致，再加实际 marker 大小和 1 MiB manifest 上界；总载荷增加向上取整的 20% 余量，且余量最低为 64 MiB。复制链最多读取登记大小 + 1 字节，避免复核后增长导致无界写入。加法、乘法、PRAGMA、数据库/marker 元数据或 active 文件列表无法安全确认时一律拒绝。
+- 手工 `POST /api/v1/backups` 在完成同键同请求的幂等重放查找后，破坏性迁移、JSON/含文件 ZIP 导入和恢复安排则在各自预检通过后，均于创建任何备份 staging 或执行 `VACUUM INTO` 前调用同一容量准入。SQLite 部分取 `PRAGMA page_count × page_size` 与当前数据库普通文件大小的较大值；每个 active Task/Client/Project/Avatar 受控文件先安全解析并以 Lstat/open 复核为同一普通文件，实际大小必须与数据库登记值一致，再加实际 marker 大小和每个包 1 MiB manifest 上界；总载荷增加向上取整的 20% 余量，且余量最低为 64 MiB。恢复安排还把已完整验证目标包的 payload、第二份 manifest 上界及 16 KiB pending plan 上界并入同一次需求，确保可同时容纳当前工作区回滚包和 pending 目标副本。复制链最多读取登记大小 + 1 字节，避免复核后增长导致无界写入。加法、乘法、PRAGMA、数据库/marker 元数据或 active 文件列表无法安全确认时一律拒绝。
 - 门禁只对 backup root 调用容量探测，不探测或返回数据库/Artifact 路径。可用空间小于需求时返回 HTTP 507 `BACKUP_SPACE_INSUFFICIENT`，恰好等于需求允许继续；探测失败、总量为零或可用量大于总量时返回 HTTP 503 `BACKUP_CAPACITY_UNAVAILABLE`。两类响应和 Inbox 都不包含路径、盘符、精确容量、备份说明或底层错误；拒绝不会创建 staging/新包、不会改变业务数据或写入通用 `backup:create` incident。
-- 该准入门禁不包裹 `backupStore.create` 的内部调用，因此当前导入前、恢复安排前和破坏性迁移前的自动回滚包不能被描述为已经应用同一门禁；它们继续遵守各自既有失败闭锁和完整校验协议。
+- 内部自动回滚容量拒绝沿用同一无副作用边界：破坏性迁移在 destructive SQL 前返回带 sentinel 的启动错误并释放 Artifact lease；JSON/ZIP 导入返回 507 `IMPORT_BACKUP_SPACE_INSUFFICIENT` 或 503 `IMPORT_BACKUP_CAPACITY_UNAVAILABLE`；恢复返回 507 `RESTORE_ROLLBACK_SPACE_INSUFFICIENT` 或 503 `RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE`。响应不泄露路径、精确容量、探测错误或业务正文，不创建回滚包、不改变业务事实，也不投影 generic `backup:create` / `backup:restore` incident。已存在的 pending restore 同目标重放仍在容量探测前返回原安排。
 - 通过容量门禁后实际创建失败仍返回 `BACKUP_CREATE_FAILED`，现有数据不变；Sidecar 随后尽力投影 `source_entity_type=system_maintenance`、`source_entity_id=backup:create` 的 Inbox Item。payload 只含 `component=backup`、`operation=create`、`failure_code=backup_create_failed`、`occurred_at` 和固定用户提示，不保存 Go error、本机路径、备份 note、Token 或请求正文。同一活动 incident 去重，resolve/dismiss 后再失败可开新条目。投影失败只记内部日志，不改变备份错误。
 - 校验操作失败仍返回 `BACKUP_VERIFY_FAILED`，并尽力投影 `source_entity_id=backup:verify`。恢复演练的操作性失败或已验证包在隔离演练中不可安全打开时投影 `backup:drill`；恢复安排的 pending 检查、工作区身份读取、回滚点创建或计划发布失败投影 `backup:restore`。payload 均只含固定安全字段。包损坏/篡改返回 `BACKUP_INVALID`，不投影 Inbox；请求错误、包不存在、工作区不匹配和已有恢复计划也不投影。恢复在下一次启动实际应用失败时先写 `sidecar:startup` 安全 journal，下一次健康启动再补偿投影。版本化 API、health、Focus 心跳与到期扫描的数据库故障投影为 `database:runtime`；数据库不可写时写入同一安全 journal，健康启动再补偿。诊断包 v1 已提供错误码级系统维护汇总。
 - `GET /api/v1/backups` 只读取已发布 UUID 包并展示上次校验记录；损坏清单以 invalid 项显示。`POST /api/v1/backups/:id/verify` 重新逐字节校验完整包并刷新 `verified_at`，篡改、缺失、额外文件、路径或数据库事实不一致均拒绝。
 - `POST /api/v1/backups/:id/drill` 在再次完整校验源包后，将数据库、marker、objects 与 avatars 复制到 backup root 内的唯一临时数据根；使用当前迁移器打开副本，执行最终 quick/foreign-key/schema/identity 校验，声明临时 Artifact store 并逐个验证全部 active 受控文件。成功或失败都关闭临时句柄并清理临时根，源备份和当前数据均不修改。
-- `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标、为当前数据创建完整自动回滚包，再原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
+- `POST /api/v1/backups/:id/restore` 要求 `{ "confirm": true }`。Sidecar 在维护写锁内再次演练目标，按“当前数据回滚包 + 目标 pending 副本”合并执行容量准入，通过后才为当前数据创建完整自动回滚包并原子发布私有 pending package/plan；随后普通 v1 请求、Focus heartbeat 和 Reminder 扫描停止写入，同目标重放返回原安排，不同目标冲突。
 - 下一次 Sidecar 启动会在打开正式 SQLite 与 Artifact lease 前验证目标包和回滚包，在同父目录准备并迁移数据库副本及完整 objects/avatars，逐步交换 live/old/new 路径并复验最终数据库、身份和文件全集。失败时恢复旧数据库（含 WAL/SHM）、objects 与 avatars 并隔离计划；成功复验后先把 pending 原子推进为 applied 提交点，再清理旧副本，避免清理中断导致重复应用。
 - GET /api/v1/backups/restore-diagnostics 在健康启动后只读汇总当前 pending、本次进程已应用恢复、applied 清理残留、failed 隔离和不规范记录。响应只含规范备份 ID、请求时间、状态与计数；本机路径、原始 cleanup warning 和底层错误不会进入 API。失败/无效记录不会被自动删除，applied 残留不会导致恢复重复执行。
 - `DELETE /api/v1/backups/:id?confirm=true` 永久删除一个 canonical UUID 包，不要求包仍能通过完整校验，因此损坏包也可清理。删除前递归拒绝 symlink/reparse 和非普通文件，再把精确包原子重命名为 `.deleting-<id>`、同步 backup root 后清理；中断后同一请求从隐藏路径续删。pending 恢复期间该路由与普通 API 一样被冻结。
 - `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。`workspace_avatars` 元数据与其他业务/历史表进入导出，文件正文不嵌入；摘要统计全部 active Task/Client/Project/Avatar 受控文件。schema migrations、workspace identity、幂等响应、四类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - `GET /api/v1/exports/business-package` 在维护写锁内先完整生成临时 ZIP，再开始响应。根目录固定为 `manifest.json` 与 `business-data.json`，活动受控文件按 `files/objects/<uuid>` 或 `files/avatars/<uuid>.<ext>` 写入；manifest format v1 记录 source、业务 JSON 和每个文件的相对路径、size/SHA-256、文件数与未压缩字节总量。复制时重新读取并校验每个 regular file，任一缺失、size/hash 漂移或不安全路径都整体失败并清理临时包。ZIP 不包含 SQLite、workspace identity、store marker、会话令牌、机器绝对路径或运行维护表。
-- `POST /api/v1/imports/business-package/preview` 把上传 ZIP 写入 backup root 私有临时文件并严格校验：最大 2 GiB、最多 10,000 个受控文件，拒绝重复/额外/目录/symlink/反斜杠/绝对或穿越路径；manifest、业务 JSON、source、表列行、文件全集、size/SHA-256 和数据库文件元数据必须一致。`POST /api/v1/imports/business-package` 要求固定确认头、当前 schema、无活动 Focus 和空目标；应用前创建已校验回滚备份，随后按现有 store 规则 staging、无覆盖发布文件，并在数据库事务提交前复验磁盘正文。DB 失败会补偿本次发布文件。
+- `POST /api/v1/imports/business-package/preview` 把上传 ZIP 写入 backup root 私有临时文件并严格校验：最大 2 GiB、最多 10,000 个受控文件，拒绝重复/额外/目录/symlink/反斜杠/绝对或穿越路径；manifest、业务 JSON、source、表列行、文件全集、size/SHA-256 和数据库文件元数据必须一致。`POST /api/v1/imports/business-package` 要求固定确认头、当前 schema、无活动 Focus 和空目标；再次预检后先执行自动回滚容量准入并创建已校验回滚备份，随后按现有 store 规则 staging、无覆盖发布文件，并在数据库事务提交前复验磁盘正文。DB 失败会补偿本次发布文件。
 - 设置“数据与备份”提供业务 JSON 与含文件 ZIP 的下载和安全导入，以及备份说明、创建、加载/空/错误状态、摘要、重新校验、恢复演练、二次确认恢复和永久删除。手动创建遇到空间不足时提示清理备份位置或旧备份，容量无法确认时提示刷新容量状态并确认本地存储可用；失败保留尚未成功提交的 note 草稿，不显示成功，也不自动重试。导入先显示 schema/总行数/空目标阻断；ZIP 额外显示文件数与字节数，确认后才应用。长操作使用 180 秒客户端窗口。实际备份创建失败 Inbox Item 的详情可打开同一设置模块；容量准入拒绝不会生成该事项。
 
 ### 仍未实现
@@ -276,7 +276,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
-- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；手动创建容量准入失败时展示可操作提示并保留 note 草稿，实际备份创建失败 Inbox Item 可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
+- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；手动创建容量准入失败时展示可操作提示并保留 note 草稿，导入/恢复内部回滚容量失败时展示对应的安全退出提示，实际备份创建失败 Inbox Item 可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
 - [收件箱](inbox.md)：备份四类操作的实际操作性失败直接尽力投影；手动 `POST /backups` 的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不投影 generic `backup:create` incident。数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败和低空间先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误、路径或精确容量写成业务事件。`BACKUP_INVALID` 不投影。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；回访仍待开发。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
@@ -306,6 +306,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] manifest 记录版本、身份、相对路径、size/SHA-256 与总量；临时数据库执行 quick/foreign-key/schema/identity/active Artifact 交叉校验，并拒绝缺失、篡改、额外文件和路径漂移。
 - [x] 创建幂等重放、列表、显式重新校验，以及设置页加载/空/错误/成功状态已有 API、客户端和组件测试。
 - [x] 手动创建容量准入在双锁内、幂等重放后、任何 staging/`VACUUM INTO` 前执行；覆盖 SQLite/数据库文件上界、active 文件、marker/manifest、20% 且最低 64 MiB 余量、精确边界放行、单 backup root 探测、507/503、安全响应、无 staging/新包/业务变化/Inbox incident，以及重放绕过探测。设置组件覆盖两错误码、note 草稿保留、不伪造成功、不自动重试和其他错误 request ID 回归。
+- [x] 迁移、JSON/含文件 ZIP 导入及恢复安排的内部自动回滚包复用同一容量准入；恢复还合计 pending 目标副本、第二份 manifest 与 plan 上界。拒绝发生在备份 staging/`VACUUM INTO` 和业务变化前，不留下回滚包、pending 计划、受控文件或 generic incident，并以专用脱敏错误提示安全退出。
 - [x] 恢复演练再次校验源包，在唯一临时数据根复制、打开/迁移数据库、声明 Artifact store、复验全部 active Task/Client/Project/Avatar 受控文件并清理临时数据；源备份和当前数据保持不变。
 - [x] 恢复安排再次演练目标并创建完整自动回滚包，发布后冻结业务写入；同目标请求可安全重放，不同 pending 目标被拒绝。
 - [x] 下一次 Sidecar 启动在打开 live 资源前准备和迁移副本，交换 SQLite/WAL/SHM 与完整 objects/avatars，最终验证失败恢复旧资源，成功以 applied 提交点防止重复应用。

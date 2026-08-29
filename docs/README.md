@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。v9.20 完成 T-20 根级质量门禁：`pnpm check:source` 统一覆盖格式、文档、Web 类型/测试/构建及 Go 无缓存测试/vet/Sidecar 构建，`pnpm check` 再增加 Rust/Tauri 链接检查与 Rust 测试。无 migration，app/API/schema 不变。当前 Windows 主机缺少 MSVC `link.exe` 和 Windows SDK，因此源码门禁可通过，但完整桌面链接、安装包和三平台验收仍受限。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。v9.21 把既有备份容量准入扩展到破坏性迁移、恢复安排及 JSON/含文件 ZIP 导入前的内部自动回滚包；恢复安排按回滚包与 pending 目标副本合计预留空间。拒绝发生在 staging/`VACUUM INTO` 和业务变化之前，只探测 backup root，API 返回脱敏 507/503。无 migration，app/API/schema 不变。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.20）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.21）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。

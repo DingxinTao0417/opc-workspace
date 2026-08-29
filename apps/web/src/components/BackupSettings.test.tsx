@@ -35,13 +35,16 @@ const mocks = vi.hoisted(() => ({
   verify: vi.fn(),
   drill: vi.fn(),
   restore: vi.fn(),
+  restoreError: null as Error | null,
   deleteBackup: vi.fn(),
   exportData: vi.fn(),
   exportPackage: vi.fn(),
   previewImport: vi.fn(),
   applyImport: vi.fn(),
+  applyImportError: null as Error | null,
   previewPackageImport: vi.fn(),
   applyPackageImport: vi.fn(),
+  applyPackageImportError: null as Error | null,
   restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
@@ -119,7 +122,7 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.restore,
     reset: mocks.reset,
     isPending: false,
-    error: null,
+    error: mocks.restoreError,
   }),
   useDeleteBackup: () => ({
     mutate: mocks.deleteBackup,
@@ -158,7 +161,7 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.applyImport,
     reset: mocks.reset,
     isPending: false,
-    error: null,
+    error: mocks.applyImportError,
   }),
   usePreviewBusinessPackageImport: () => ({
     mutate: mocks.previewPackageImport,
@@ -181,7 +184,7 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.applyPackageImport,
     reset: mocks.reset,
     isPending: false,
-    error: null,
+    error: mocks.applyPackageImportError,
   }),
 }));
 
@@ -204,6 +207,9 @@ describe("BackupSettings", () => {
     });
     mocks.create.mockClear();
     mocks.createError = null;
+    mocks.restoreError = null;
+    mocks.applyImportError = null;
+    mocks.applyPackageImportError = null;
     mocks.verify.mockClear();
     mocks.drill.mockClear();
     mocks.restore.mockClear();
@@ -352,6 +358,52 @@ describe("BackupSettings", () => {
       expect(mocks.create).toHaveBeenCalledOnce();
     },
   );
+
+  it.each([
+    {
+      source: "restore",
+      code: "RESTORE_ROLLBACK_SPACE_INSUFFICIENT",
+      status: 507,
+      message:
+        "备份位置空间不足，无法同时创建当前数据回滚点并暂存恢复包；恢复没有被安排。",
+    },
+    {
+      source: "restore",
+      code: "RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE",
+      status: 503,
+      message:
+        "暂时无法确认恢复所需容量，请刷新容量状态并确认本地存储可用后重试。",
+    },
+    {
+      source: "import",
+      code: "IMPORT_BACKUP_SPACE_INSUFFICIENT",
+      status: 507,
+      message: "备份位置空间不足，无法创建导入前回滚备份；现有数据没有改变。",
+    },
+    {
+      source: "package",
+      code: "IMPORT_BACKUP_CAPACITY_UNAVAILABLE",
+      status: 503,
+      message:
+        "暂时无法确认导入前回滚备份容量；现有数据没有改变，请检查本地存储后重试。",
+    },
+  ])("shows actionable $code feedback", ({ source, code, status, message }) => {
+    const error = new ApiError("private storage detail", {
+      code,
+      status,
+      requestId: "request-automatic-rollback-capacity",
+    });
+    if (source === "restore") mocks.restoreError = error;
+    if (source === "import") mocks.applyImportError = error;
+    if (source === "package") mocks.applyPackageImportError = error;
+
+    render(<BackupSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(
+      "private storage detail",
+    );
+  });
 
   it("keeps the existing request ID feedback for other backup errors", () => {
     mocks.createError = new ApiError("服务端返回未知备份错误", {

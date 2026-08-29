@@ -243,7 +243,7 @@ func (a *API) createBackup(c *gin.Context) {
 			return
 		}
 	}
-	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options); err != nil {
+	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
 		if errors.Is(err, errBackupSpaceInsufficient) {
 			writeError(c, http.StatusInsufficientStorage, "BACKUP_SPACE_INSUFFICIENT", "There is not enough storage space to create a verified local backup")
 			return
@@ -321,8 +321,10 @@ var (
 	errBackupSpaceInsufficient   = errors.New("backup space insufficient")
 )
 
-func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options) error {
-	required, err := estimateBackupCreateCapacity(db, s.databasePath, s.artifacts, options.SchemaVersion)
+func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options, additionalPayloadBytes uint64) error {
+	required, err := estimateBackupCreateCapacityWithAdditional(
+		db, s.databasePath, s.artifacts, options.SchemaVersion, additionalPayloadBytes,
+	)
 	if err != nil {
 		return errBackupCapacityUnavailable
 	}
@@ -341,6 +343,16 @@ func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options) error 
 }
 
 func estimateBackupCreateCapacity(db *gorm.DB, databasePath string, artifacts *artifactStore, schemaVersion int) (uint64, error) {
+	return estimateBackupCreateCapacityWithAdditional(db, databasePath, artifacts, schemaVersion, 0)
+}
+
+func estimateBackupCreateCapacityWithAdditional(
+	db *gorm.DB,
+	databasePath string,
+	artifacts *artifactStore,
+	schemaVersion int,
+	additionalPayloadBytes uint64,
+) (uint64, error) {
 	if artifacts == nil {
 		return 0, errBackupCapacityUnavailable
 	}
@@ -391,7 +403,7 @@ func estimateBackupCreateCapacity(db *gorm.DB, databasePath string, artifacts *a
 	if err != nil {
 		return 0, errBackupCapacityUnavailable
 	}
-	return backupCapacityRequirement(databaseBytes, artifactBytes, markerBytes)
+	return backupCapacityRequirementWithAdditional(databaseBytes, artifactBytes, markerBytes, additionalPayloadBytes)
 }
 
 func verifiedRegularFileSize(path string) (uint64, error) {
@@ -412,9 +424,13 @@ func verifiedRegularFileSize(path string) (uint64, error) {
 }
 
 func backupCapacityRequirement(databaseBytes, artifactBytes, markerBytes uint64) (uint64, error) {
+	return backupCapacityRequirementWithAdditional(databaseBytes, artifactBytes, markerBytes, 0)
+}
+
+func backupCapacityRequirementWithAdditional(databaseBytes, artifactBytes, markerBytes, additionalPayloadBytes uint64) (uint64, error) {
 	payloadBytes := uint64(0)
 	var ok bool
-	for _, size := range []uint64{databaseBytes, artifactBytes, markerBytes, maxBackupManifest} {
+	for _, size := range []uint64{databaseBytes, artifactBytes, markerBytes, maxBackupManifest, additionalPayloadBytes} {
 		payloadBytes, ok = checkedBackupCapacityAdd(payloadBytes, size)
 		if !ok {
 			return 0, errBackupCapacityUnavailable

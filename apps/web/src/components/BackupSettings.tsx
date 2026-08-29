@@ -78,6 +78,12 @@ function backupErrorText(error: unknown): string {
     if (error.code === "RESTORE_ROLLBACK_BACKUP_FAILED") {
       return "无法为当前数据创建自动回滚点，恢复没有被安排。";
     }
+    if (error.code === "RESTORE_ROLLBACK_SPACE_INSUFFICIENT") {
+      return "备份位置空间不足，无法同时创建当前数据回滚点并暂存恢复包；恢复没有被安排。";
+    }
+    if (error.code === "RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE") {
+      return "暂时无法确认恢复所需容量，请刷新容量状态并确认本地存储可用后重试。";
+    }
     if (error.code === "RESTORE_SCHEDULE_FAILED") {
       return "无法安全挂起恢复，当前数据没有改变。";
     }
@@ -150,6 +156,12 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "IMPORT_BACKUP_FAILED") {
       return "无法创建导入前回滚备份，现有数据没有改变。";
+    }
+    if (error.code === "IMPORT_BACKUP_SPACE_INSUFFICIENT") {
+      return "备份位置空间不足，无法创建导入前回滚备份；现有数据没有改变。";
+    }
+    if (error.code === "IMPORT_BACKUP_CAPACITY_UNAVAILABLE") {
+      return "暂时无法确认导入前回滚备份容量；现有数据没有改变，请检查本地存储后重试。";
     }
     if (error.code === "IMPORT_APPLY_FAILED") {
       return "导入数据未通过完整性校验，整批内容已回滚。";

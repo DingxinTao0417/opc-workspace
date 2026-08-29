@@ -107,6 +107,10 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
 		return
 	}
+	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
+		writeImportRollbackCapacityError(c, err)
+		return
+	}
 
 	note := "自动含文件导入前回滚备份"
 	backup, err := a.backupStore.create(

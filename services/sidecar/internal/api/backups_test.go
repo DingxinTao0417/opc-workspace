@@ -237,6 +237,16 @@ func TestBackupCapacityRequirementIncludesOverheadsAndRejectsOverflow(t *testing
 	if _, err := backupCapacityRequirement(^uint64(0), 1, 1); !errors.Is(err, errBackupCapacityUnavailable) {
 		t.Fatalf("overflow requirement error=%v, want capacity unavailable", err)
 	}
+	additionalPayload := uint64(10 * backupCapacityMinimumReserve)
+	combinedPayload := uint64(10+20+30+maxBackupManifest) + additionalPayload
+	combinedWant := combinedPayload + (combinedPayload+backupCapacitySafetyDivisor-1)/backupCapacitySafetyDivisor
+	combinedRequired, err := backupCapacityRequirementWithAdditional(10, 20, 30, additionalPayload)
+	if err != nil || combinedRequired != combinedWant {
+		t.Fatalf("combined backup capacity requirement=%d err=%v, want %d", combinedRequired, err, combinedWant)
+	}
+	if _, err := backupCapacityRequirementWithAdditional(1, 1, 1, ^uint64(0)); !errors.Is(err, errBackupCapacityUnavailable) {
+		t.Fatalf("additional payload overflow error=%v, want capacity unavailable", err)
+	}
 	if _, ok := checkedBackupCapacityMultiply(^uint64(0), 2); ok {
 		t.Fatal("overflowing SQLite allocation multiplication was accepted")
 	}

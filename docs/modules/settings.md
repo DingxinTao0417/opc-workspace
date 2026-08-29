@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v31。schema v30/v31 分别扩展 Task Submission 与 Client Activity 来源，不改变 `app_settings` 表或设置 API 契约。设置持久化、受控头像、Focus 解耦、1–100 GiB 低空间阈值、Actor、备份闭环、仅手动一致性备份的低空间准入、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录和全局启动故障恢复页 v1 已交付。非空目标/跨 schema 高级导入和数据库打开前备份选择/实时恢复进度仍是后续范围。
+> 文档状态：部分实现；当前 schema v31。schema v30/v31 分别扩展 Task Submission 与 Client Activity 来源，不改变 `app_settings` 表或设置 API 契约。设置持久化、受控头像、Focus 解耦、1–100 GiB 低空间阈值、Actor、备份闭环、手工及内部自动回滚包的低空间准入、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录和全局启动故障恢复页 v1 已交付。非空目标/跨 schema 高级导入和数据库打开前备份选择/实时恢复进度仍是后续范围。
 
 ## 定位与边界
 
@@ -25,7 +25,7 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
-- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手动创建在写入 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留备份说明草稿，不伪造成功或自动重试。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前自动创建已校验回滚备份，这些内部回滚包当前不经过手动 `POST /backups` 的容量门禁。
+- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手工创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留未提交输入，不伪造成功或自动重试。恢复需求同时覆盖当前回滚点和 pending 目标副本。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前通过容量准入并自动创建已校验回滚备份。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取五个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
@@ -166,7 +166,7 @@
 11. owner 可对任意有效或 invalid 包点击“删除备份”并二次确认；Sidecar 先把精确 UUID 包移入隐藏删除态再永久清理，删除不改变当前数据。
 12. owner 可点击“下载 JSON”；Sidecar 在单事务内生成 format v1 业务表白名单快照，浏览器或 WebView 以服务端安全文件名保存。页面明确提示文件正文未包含，完整恢复仍使用已校验备份。
 13. owner 可点击“下载含文件 ZIP”；Sidecar 在维护写锁内生成 manifest、同格式业务 JSON 和全部活动受控文件，逐项复验 size/SHA-256，完成后才下载。
-14. owner 可选择业务 JSON 或含文件 ZIP；页面先上传预检并展示 schema/总行数，ZIP 额外展示文件数与字节数。只有当前 schema、终态 Focus 和空目标才可确认；Sidecar 再次预检、创建已校验回滚包后原子应用，ZIP 还会无覆盖发布文件并在数据库提交前复验正文；导入前回滚包不经过手动 HTTP 容量门禁。
+14. owner 可选择业务 JSON 或含文件 ZIP；页面先上传预检并展示 schema/总行数，ZIP 额外展示文件数与字节数。只有当前 schema、终态 Focus 和空目标才可确认；Sidecar 再次预检，通过只探测 backup root 的回滚包容量准入后创建已校验回滚包并原子应用，ZIP 还会无覆盖发布文件并在数据库提交前复验正文。容量不足或无法确认时页面显示专用提示且保留当前选择，业务事实不变。
 15. 页面读取启动恢复诊断；待重启计划即使关闭再打开设置也继续冻结备份写操作。已恢复、清理残留、失败隔离和无效记录只显示安全状态/计数，不显示路径或底层错误，也不提供未经确认的自动清理。
 
 ### 数据恢复
@@ -206,14 +206,14 @@
 | GET / POST /api/v1/backups                    | **已实现**：列出本地包；手动创建在双锁内先重放幂等结果，否则按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。空间不足返回 507，容量无法确认返回 503，拒绝无副作用且不投影 generic incident；通过后才完整创建并校验 SQLite+Artifact 备份 |
 | POST /api/v1/backups/:id/verify               | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                                                                                                                                                                                         |
 | POST /api/v1/backups/:id/drill                | **已实现**：在隔离临时根复制并打开/迁移数据库、声明 Artifact store、逐文件验证后清理，不改当前数据                                                                                                                                                                       |
-| POST /api/v1/backups/:id/restore              | **已实现**：要求 `confirm=true`，重验目标、创建当前状态回滚包并挂起；下次 Sidecar 启动前原子替换和最终复验                                                                                                                                                               |
+| POST /api/v1/backups/:id/restore              | **已实现**：要求 `confirm=true`，重验目标，按回滚包+pending 目标副本执行容量准入后创建回滚包并挂起；空间不足/无法确认返回脱敏 507/503，下次 Sidecar 启动前原子替换和最终复验                                                                                             |
 | DELETE /api/v1/backups/:id                    | **已实现**：要求查询参数 `confirm=true`，原子移入隐藏删除态后永久清理；损坏包可删，不安全文件系统项拒绝                                                                                                                                                                  |
 | GET /api/v1/exports/business-data             | **已实现**：下载 format v1 单事务业务白名单快照；文件仅元数据，排除凭据、绝对路径和运行维护表                                                                                                                                                                            |
 | GET /api/v1/exports/business-package          | **已实现**：下载 format v1 含文件 ZIP；manifest/业务 JSON/活动受控文件完整生成并逐项校验，失败不返回部分包                                                                                                                                                               |
 | POST /api/v1/imports/business-data/preview    | **已实现**：strict 预检同 schema 无文件 JSON，返回表/总行数与空目标门禁                                                                                                                                                                                                  |
-| POST /api/v1/imports/business-data            | **已实现**：固定确认头、导入前回滚备份和维护写锁内原子应用                                                                                                                                                                                                               |
+| POST /api/v1/imports/business-data            | **已实现**：固定确认头、维护写锁内先执行回滚包容量准入，再创建回滚备份并原子应用；容量拒绝不改业务事实                                                                                                                                                                   |
 | POST /api/v1/imports/business-package/preview | **已实现**：strict 预检含文件 ZIP 的 manifest、业务 JSON、文件全集/哈希和空目标门禁                                                                                                                                                                                      |
-| POST /api/v1/imports/business-package         | **已实现**：独立确认头、回滚备份、文件无覆盖发布、DB 提交前正文复验与失败补偿                                                                                                                                                                                            |
+| POST /api/v1/imports/business-package         | **已实现**：独立确认头、回滚包容量准入、回滚备份、文件无覆盖发布、DB 提交前正文复验与失败补偿                                                                                                                                                                            |
 | GET /api/v1/backups/restore-diagnostics       | **已实现**：读取脱敏 pending/applied/failed/invalid 状态；设置页恢复重启门禁并支持重新检查                                                                                                                                                                               |
 | GET /health                                   | 提供真实 app、commit、API 和 schema 版本                                                                                                                                                                                                                                 |
 
@@ -227,7 +227,7 @@
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
-当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。备份创建/校验事实当前只写备份 manifest，不进入 Task/Project `workflow_events`；手动容量准入拒绝也不创建通用备份故障 Inbox/Event。未来诊断事件需单独设计。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何事件。
+当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。备份创建/校验事实当前只写备份 manifest，不进入 Task/Project `workflow_events`；手工及导入/恢复自动回滚包的容量准入拒绝也不创建通用备份故障 Inbox/Event。未来诊断事件需单独设计。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何事件。
 
 ## 与其他模块协作
 

@@ -82,6 +82,10 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
 		return
 	}
+	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
+		writeImportRollbackCapacityError(c, err)
+		return
+	}
 
 	note := "自动导入前回滚备份"
 	backup, err := a.backupStore.create(
@@ -99,6 +103,14 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": businessImportResult{ImportedRows: preview.TotalRows, BackupID: backup.ID}})
+}
+
+func writeImportRollbackCapacityError(c *gin.Context, err error) {
+	if errors.Is(err, errBackupSpaceInsufficient) {
+		writeError(c, http.StatusInsufficientStorage, "IMPORT_BACKUP_SPACE_INSUFFICIENT", "There is not enough storage space to create the required rollback backup; business data was not changed")
+		return
+	}
+	writeError(c, http.StatusServiceUnavailable, "IMPORT_BACKUP_CAPACITY_UNAVAILABLE", "Rollback backup storage capacity could not be confirmed; business data was not changed")
 }
 
 func decodeBusinessImport(c *gin.Context) (businessExportPackage, error) {

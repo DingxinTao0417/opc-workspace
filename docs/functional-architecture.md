@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.43
+> 文档版本：2.44
 > 日期：2026-08-29
-> 依据：[PRD v9.20](opc-workspace-PRD.md)
+> 依据：[PRD v9.21](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v31
 
-> 2.43 说明：根级质量门禁拆为两个明确层次。`pnpm check:source` 不依赖 Rust 链接器，统一执行 Prettier、Go/Rust 格式、文档本地链接与机器路径检查、Web 类型/全量测试/生产构建，以及 Go 无缓存测试/vet/Sidecar 构建；`pnpm check` 在其后追加 Tauri `cargo check` 与 Rust 测试。当前 Windows 主机的源码门禁通过，完整桌面链接仍受缺少 MSVC `link.exe` 和 Windows SDK 限制。app/API/schema 不变且无迁移。
+> 2.44 说明：统一备份容量准入现已覆盖手工创建与全部当前内部自动回滚包。破坏性迁移、业务 JSON/含文件 ZIP 导入和恢复安排都在任何备份 staging/`VACUUM INTO` 与业务变化前只探测 backup root；恢复安排把当前工作区回滚包、目标 pending 副本及其 manifest/plan 上界合并计算 20% 且最低 64 MiB 余量。HTTP 操作以脱敏 507/503 拒绝且不投影通用备份故障，迁移则在破坏性边界前安全终止启动。app/API/schema 不变且无迁移。
 
 ## 1. 目的
 
@@ -60,11 +60,11 @@
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
 - SQLite 当前为 schema v31：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`；schema v30 非破坏性增加 `task_submissions.origin` 并约束 system child_rollup；schema v31 为 Project Workflow Event→Client system reference 增加来源唯一约束。v30/v31 都不在迁移或启动时回填历史业务事实，也不创建 demo 数据。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
-- 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。仅手动 `POST /api/v1/backups` 在维护写锁与备份互斥锁内先完成幂等重放查找，再于任何 staging/`VACUUM INTO` 前按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；精确等于需求允许继续。空间不足/容量无法确认分别返回 507/503，拒绝无 staging、新包、业务变化或 generic `backup:create` incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
+- 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。手工 `POST /api/v1/backups` 在幂等重放未命中后，迁移/导入/恢复内部链在各自不可逆边界前，统一按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；恢复另把目标包 pending 副本与 plan 上界加入同一次需求。精确等于需求允许继续；空间不足/容量无法确认分别以 507/503 或启动失败安全拒绝。拒绝无备份 staging、新回滚包、业务变化或 generic incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排通过容量准入后创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 含文件业务 ZIP 导出在维护写锁内完整生成后才响应：`manifest.json` 记录 source、业务 JSON 及全部 active 受控文件的安全相对路径、size/SHA-256，`files/` 携带正文；复制时任一文件漂移都会整体失败并清理 staging。该包排除 SQLite、identity、store marker 和运行维护事实。
-- 业务 JSON 与含文件 ZIP 导入均先 strict 预检同 schema/固定表列/标量行/终态 Focus 和空目标；ZIP 额外校验 manifest、文件全集、安全路径、size/SHA-256 与数据库元数据。正式应用前创建已校验回滚备份；JSON 在单事务中写入，ZIP 先无覆盖发布文件，再于 DB 提交前复验磁盘正文，失败补偿本次文件。导入前回滚包与恢复/迁移自动回滚包均走内部创建链，当前不经过手动 `POST /backups` 的容量准入。非空目标和跨 schema 包继续拒绝。
+- 业务 JSON 与含文件 ZIP 导入均先 strict 预检同 schema/固定表列/标量行/终态 Focus 和空目标；ZIP 额外校验 manifest、文件全集、安全路径、size/SHA-256 与数据库文件元数据。正式应用在维护写锁与备份互斥锁中再次预检后，先通过共享容量准入并创建已校验回滚备份；JSON 在单事务中写入，ZIP 先无覆盖发布文件，再于 DB 提交前复验磁盘正文，失败补偿本次文件。空间不足和容量无法确认分别返回导入专用脱敏 507/503，且不创建回滚包或改变业务事实。非空目标和跨 schema 包继续拒绝。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -130,7 +130,7 @@
 | [专注](modules/focus.md)                   | 当前 Task 与查询时当前 Project/Tag 关系                                                                       | 活动 Session、有效工时、终态历史和 completed-only 周期读模型                                                                                                               | Task actual_minutes、今日/统计数据，以及 Task/Project 详情只读历史与分析                                                                 |
 | [设置](modules/settings.md)                | schema v16 设置 API/Query committed、Actor API、`/health`、Tauri 状态与数据维护 API                           | 本地偏好、person、诊断、手动备份容量反馈与草稿保留、备份闭环、业务 JSON 安全导入导出、含文件 ZIP 导出和全局启动故障恢复页 v1；高级导入与数据库打开前恢复进度待实现         | 布局、主题、Focus 默认值、Actor、版本、诊断、备份/导入导出和桌面行为                                                                     |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                                       | 参数化统一本地查找、确定性相关排序、非敏感有上限最近使用与快捷操作入口                                                                                                     | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                                                                     |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                             | 已实现受控文件一致性、仅手动创建的容量准入、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划                       | 当前文件安全、已校验备份、恢复状态、准入反馈、失败 Inbox 与便携导入导出                                                                  |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                             | 已实现受控文件一致性、手工及内部自动回滚包容量准入、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划               | 当前文件安全、已校验备份、恢复状态、准入反馈、失败 Inbox 与便携导入导出                                                                  |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                       | 原生窗口、受管 Sidecar generation/重启预算/父管道与 shutdown、权限、运行日志和发布                                                                                         | 可运行、可恢复、可诊断的本地应用环境                                                                                                     |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                   | 财务与发票业务事实                                                                                                                                                         | 本地提醒、Inbox Item、客户聚合                                                                                                           |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划与结果                                                                                                                                                         | Inbox 到期项、客户活动                                                                                                                   |
@@ -404,7 +404,7 @@ Sidecar ready 前 + 每 5 分钟
 
 ### 8.1 事件来源
 
-- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含手动容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
+- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含可解释容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
 - v0.2：Agent Runner 追加 Workflow Event，内置自动化投影器以统一 source_event_key 作为 Agent 失败/验收 Inbox Item 的唯一生产者；其他预设自动化也复用同一去重框架。
 - v0.3：路线图里程碑、内容审核与发布时间。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
@@ -418,7 +418,7 @@ Sidecar ready 前 + 每 5 分钟
 - 同 key/endpoint 不同请求摘要返回 `409 IDEMPOTENCY_CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
-当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；系统维护来源使用 `system:<component>:<operation>:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；除手动容量准入拒绝外，已登记的备份操作性失败直接尽力投影，启动前或运行期数据库不可写失败用稳定 journal 延迟投影，均不改变原错误。`BACKUP_SPACE_INSUFFICIENT`、`BACKUP_CAPACITY_UNAVAILABLE`、`BACKUP_INVALID` 与其他可解释业务结果不投影。手动备份幂等重放还在容量探测之前返回，避免因当前容量状态改变而破坏首次成功响应。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和新故障按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
+当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；系统维护来源使用 `system:<component>:<operation>:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；除容量准入拒绝外，已登记的备份操作性失败直接尽力投影，启动前或运行期数据库不可写失败用稳定 journal 延迟投影，均不改变原错误。手工 `BACKUP_*`、导入 `IMPORT_BACKUP_*`、恢复 `RESTORE_ROLLBACK_*` 容量错误、`BACKUP_INVALID` 与其他可解释业务结果不投影。手工备份幂等重放还在容量探测之前返回，避免因当前容量状态改变而破坏首次成功响应。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和新故障按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
 
 父任务自动协调追加 system Actor 的 `task_parent_review_requested / task_parent_review_withdrawn / task_parent_reopened` Workflow Event；请求/撤回关联对应 child_rollup Submission，重开保留既有 accepted 批次历史。它不是可重扫来源投影：协调发生在原业务写事务中，生命周期幂等重放不得重复创建 Submission 或 Event。
 
@@ -484,7 +484,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 ## 12. 跨模块验收基线
 
-- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、直属子任务驱动的系统待验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作性失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/可配置低空间来源投影、手动备份容量准入、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；容量准入拒绝不伪造故障 Inbox，Client 外部活动来源和原生通知仍待交付。
+- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、直属子任务驱动的系统待验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作性失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/可配置低空间来源投影、手工与内部自动回滚包容量准入、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；容量准入拒绝不伪造故障 Inbox，Client 外部活动来源和原生通知仍待交付。
 - 每个业务状态有且只有一个事实源。
 - 跨模块写操作具备事务、幂等和冲突检测。
 - 任何来源事件重扫和重启后不重复创建工作。
