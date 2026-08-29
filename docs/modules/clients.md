@@ -170,30 +170,30 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 
 ### 当前 API
 
-| 方法      | 路径                                                   | 当前行为                                                                                                               |
-| --------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| GET       | `/api/v1/clients`                                      | 分页、关键词、状态筛选和稳定白名单排序；返回 `project_count`                                                           |
-| POST      | `/api/v1/clients`                                      | 创建 Client，默认 active；可选 `Idempotency-Key` 保存规范请求与首次响应快照；返回 `201` 和 `ETag`                      |
-| GET       | `/api/v1/clients/:id`                                  | 返回完整基本资料、`project_count` 与 `ETag`                                                                            |
-| PATCH     | `/api/v1/clients/:id`                                  | 部分更新资料或状态；可选字段可显式 `null`；强制 `If-Match`，成功递增版本                                               |
-| DELETE    | `/api/v1/clients/:id?confirm=true`                     | 强制 `If-Match`；只允许 inactive；Invoice 强引用阻止删除，Project 外键置空并返回 `deleted_id / detached_projects`      |
-| GET       | `/api/v1/projects?client_id=:id&include_archived=true` | 查询 Client 的完整关联项目历史；普通项目列表仍默认排除归档项，项目新建/编辑支持关联、改绑或解除 Client                 |
-| GET/POST  | `/api/v1/clients/:id/activities`                       | 稳定分页读取活动；POST 只创建人工 note/meeting，可用 `Idempotency-Key` 安全重放                                        |
-| GET/PATCH | `/api/v1/client-activities/:id`                        | 读取单条（包括删除历史）；PATCH 强制活动 `If-Match`，只允许修改未删除人工活动                                          |
-| DELETE    | `/api/v1/client-activities/:id?confirm=true`           | 强制活动 `If-Match` 和删除原因，执行可审计软删除；system reference 与已删除记录只读                                    |
-| GET/POST  | `/api/v1/clients/:id/attachments`                      | 分页读取附件或严格 multipart 上传；上传强制 Client `If-Match`，可选幂等键                                              |
-| GET       | `/api/v1/client-attachments/:id`                       | 读取附件元数据和 Client `ETag`，包括显式查询到的删除历史                                                               |
-| GET       | `/api/v1/client-attachments/:id/content`               | 对 active 受控文件执行 size/SHA-256 校验后下载；删除、缺失或错配时拒绝正文                                             |
-| DELETE    | `/api/v1/client-attachments/:id?confirm=true`          | 强制 Client `If-Match`、确认、原因，可选幂等键；执行 tombstone + trash + 软删除补偿                                    |
-| GET/POST  | `/api/v1/clients/:id/actor-links`                      | 分页读取 active/历史关联；POST 强制 Client `If-Match`，已有 person 与原子新建 person 二选一，可选幂等键                |
-| DELETE    | `/api/v1/client-actor-links/:id?confirm=true`          | 强制所属 Client `If-Match`、确认、原因和可选幂等键；写入不可变解除历史                                                 |
-| GET       | `/api/v1/clients/:id/followups`                        | 分页读取该客户回访，支持状态/负责人筛选，按计划时间稳定排序；客户详情已提供全部/四种持久状态的筛选入口，切换回到第一页 |
-| POST      | `/api/v1/client-followups`                             | 创建本地计划；可选 `Idempotency-Key`，负责人仅限 active owner/person                                                   |
-| PATCH     | `/api/v1/client-followups/:id`                         | 仅 planned 可编辑，强制回访 `If-Match`                                                                                 |
-| POST      | `/api/v1/client-followups/:id/complete`                | 结果必填，强制回访 `If-Match`，进入 completed                                                                          |
-| POST      | `/api/v1/client-followups/:id/skip`                    | 原因必填，强制回访 `If-Match`，进入 skipped                                                                            |
-| DELETE    | `/api/v1/client-followups/:id?confirm=true`            | 原因与确认必填，强制回访 `If-Match`，进入 cancelled                                                                    |
-| POST      | `/api/v1/client-followups/:id/reschedule`              | 同事务取消旧计划并创建带来源的新计划，强制回访 `If-Match`                                                              |
+| 方法      | 路径                                                   | 当前行为                                                                                                                                      |
+| --------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET       | `/api/v1/clients`                                      | 分页、关键词、状态筛选和稳定白名单排序；返回 `project_count`                                                                                  |
+| POST      | `/api/v1/clients`                                      | 创建 Client，默认 active；可选 `Idempotency-Key` 保存规范请求与首次响应快照；返回 `201` 和 `ETag`                                             |
+| GET       | `/api/v1/clients/:id`                                  | 返回完整基本资料、`project_count` 与 `ETag`                                                                                                   |
+| PATCH     | `/api/v1/clients/:id`                                  | 部分更新资料或状态；可选字段可显式 `null`；强制 `If-Match`，成功递增版本                                                                      |
+| DELETE    | `/api/v1/clients/:id?confirm=true`                     | 强制 `If-Match`；只允许 inactive；Invoice 强引用阻止删除，Project 外键置空并返回 `deleted_id / detached_projects`                             |
+| GET       | `/api/v1/projects?client_id=:id&include_archived=true` | 查询 Client 的完整关联项目历史；普通项目列表仍默认排除归档项，项目新建/编辑支持关联、改绑或解除 Client                                        |
+| GET/POST  | `/api/v1/clients/:id/activities`                       | 稳定分页读取活动；POST 只创建人工 note/meeting，可用 `Idempotency-Key` 安全重放                                                               |
+| GET/PATCH | `/api/v1/client-activities/:id`                        | 读取单条（包括删除历史）；PATCH 强制活动 `If-Match`，只允许修改未删除人工活动                                                                 |
+| DELETE    | `/api/v1/client-activities/:id?confirm=true`           | 强制活动 `If-Match` 和删除原因，执行可审计软删除；system reference 与已删除记录只读                                                           |
+| GET/POST  | `/api/v1/clients/:id/attachments`                      | 分页读取附件或严格 multipart 上传；上传强制 Client `If-Match`，可选幂等键                                                                     |
+| GET       | `/api/v1/client-attachments/:id`                       | 读取附件元数据和 Client `ETag`，包括显式查询到的删除历史                                                                                      |
+| GET       | `/api/v1/client-attachments/:id/content`               | 对 active 受控文件执行 size/SHA-256 校验后下载；删除、缺失或错配时拒绝正文                                                                    |
+| DELETE    | `/api/v1/client-attachments/:id?confirm=true`          | 强制 Client `If-Match`、确认、原因，可选幂等键；执行 tombstone + trash + 软删除补偿                                                           |
+| GET/POST  | `/api/v1/clients/:id/actor-links`                      | 分页读取 active/历史关联；POST 强制 Client `If-Match`，已有 person 与原子新建 person 二选一，可选幂等键                                       |
+| DELETE    | `/api/v1/client-actor-links/:id?confirm=true`          | 强制所属 Client `If-Match`、确认、原因和可选幂等键；写入不可变解除历史                                                                        |
+| GET       | `/api/v1/clients/:id/followups`                        | 分页读取该客户回访，支持状态/负责人筛选，按计划时间稳定排序；客户详情已提供全部/四种持久状态和 active owner/person 的筛选入口，切换回到第一页 |
+| POST      | `/api/v1/client-followups`                             | 创建本地计划；可选 `Idempotency-Key`，负责人仅限 active owner/person                                                                          |
+| PATCH     | `/api/v1/client-followups/:id`                         | 仅 planned 可编辑，强制回访 `If-Match`                                                                                                        |
+| POST      | `/api/v1/client-followups/:id/complete`                | 结果必填，强制回访 `If-Match`，进入 completed                                                                                                 |
+| POST      | `/api/v1/client-followups/:id/skip`                    | 原因必填，强制回访 `If-Match`，进入 skipped                                                                                                   |
+| DELETE    | `/api/v1/client-followups/:id?confirm=true`            | 原因与确认必填，强制回访 `If-Match`，进入 cancelled                                                                                           |
+| POST      | `/api/v1/client-followups/:id/reschedule`              | 同事务取消旧计划并创建带来源的新计划，强制回访 `If-Match`                                                                                     |
 
 ### 当前错误与并发语义
 

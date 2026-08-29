@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.57
+> 文档版本：2.58
 > 日期：2026-08-29
-> 依据：[PRD v9.37](opc-workspace-PRD.md)
+> 依据：[PRD v9.38](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.57 说明：客户详情的回访时间线提供全部、待回访、已完成、已跳过和已取消筛选；它仅把 `status` 传给既有分页读取契约，并在切换时回到第一页，不创建第二套状态或命令入口。既有 IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
+> 2.58 说明：客户详情的回访时间线可组合状态和 active owner/person 负责人筛选；它仅把 `status` / `assigned_actor_id` 传给既有分页读取契约，并在任一筛选切换时回到第一页，不创建第二套状态或命令入口。既有 IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 

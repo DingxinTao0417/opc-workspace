@@ -313,13 +313,15 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
   const [statusFilter, setStatusFilter] = useState<ClientFollowupStatus | "">(
     "",
   );
+  const [assignedActorFilter, setAssignedActorFilter] = useState("");
   const queryInput = useMemo(
     () => ({
       page,
       pageSize: 6,
       ...(statusFilter ? { status: statusFilter } : {}),
+      ...(assignedActorFilter ? { assignedActorId: assignedActorFilter } : {}),
     }),
-    [page, statusFilter],
+    [assignedActorFilter, page, statusFilter],
   );
   const query = useClientFollowupsQuery(clientId, queryInput);
   const actorsQuery = useClientFollowupActorOptionsQuery(true);
@@ -574,6 +576,26 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
             {Object.entries(statusLabel).map(([status, label]) => (
               <option key={status} value={status}>
                 {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>负责人</span>
+          <select
+            aria-label="回访负责人筛选"
+            disabled={query.isPending || actorsQuery.isPending}
+            onChange={(event) => {
+              setAssignedActorFilter(event.target.value);
+              setPage(1);
+            }}
+            value={assignedActorFilter}
+          >
+            <option value="">全部负责人</option>
+            {actors.map((actor) => (
+              <option key={actor.id} value={actor.id}>
+                {actor.displayName}（
+                {actor.type === "owner" ? "owner" : "person"}）
               </option>
             ))}
           </select>

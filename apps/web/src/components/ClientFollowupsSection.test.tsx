@@ -142,6 +142,20 @@ describe("ClientFollowupsSection", () => {
     expect(screen.getByText("已完成 1 条")).toBeTruthy();
   });
 
+  it("filters the client timeline by its active local assignee", () => {
+    render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.change(screen.getByLabelText("回访负责人筛选"), {
+      target: { value: actor.id },
+    });
+
+    expect(state.query).toHaveBeenLastCalledWith("client-1", {
+      assignedActorId: actor.id,
+      page: 1,
+      pageSize: 6,
+    });
+  });
+
   it("requires a result before issuing a versioned completion command", () => {
     render(<ClientFollowupsSection clientId="client-1" />);
 
