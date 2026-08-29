@@ -198,6 +198,31 @@ describe("ReminderManagerModal", () => {
     });
   });
 
+  it("creates a weekday reminder and explains the Monday-to-Friday rule", async () => {
+    render(<ReminderManagerModal onClose={vi.fn()} open />);
+    fireEvent.click(screen.getByRole("button", { name: "新建提醒" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "工作日晨会" },
+    });
+    fireEvent.change(screen.getByLabelText("提醒时间"), {
+      target: { value: "2099-01-05T09:00" },
+    });
+    fireEvent.change(screen.getByLabelText("重复规则"), {
+      target: { value: "weekdays" },
+    });
+
+    expect(screen.getByText(/周一至周五/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "创建提醒" }));
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
+    expect(mocks.create.mock.calls[0][0]).toMatchObject({
+      title: "工作日晨会",
+      recurrenceType: "weekdays",
+      recurrenceInterval: 1,
+      recurrenceTimezone: expect.any(String),
+    });
+  });
+
   it("requires and submits an auditable cancellation reason", async () => {
     render(<ReminderManagerModal onClose={vi.fn()} open />);
     fireEvent.click(screen.getByRole("button", { name: /复查本地备份/ }));

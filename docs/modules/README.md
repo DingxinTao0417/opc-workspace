@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.71](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.72](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -11,7 +11,7 @@
 - [项目管理](projects.md)（基础纵切、任务浏览器、共享选择器、笔记/附件、Task Artifact 聚合及 nullable follow-up/实时 required 进度、产出区四种跟进状态与 Inbox 深链、活动时间线、来源投影、Client 系统活动及项目 Focus 已交付；财务与里程碑增强待开发）
 - [客户管理](clients.md)（基础资料 CRUD、共享分页搜索选择器、Project 关联、人工活动时间线、Project 生命周期只读系统活动、受控附件、person 显式关联、客户回访详情管理及完成时原子下一次计划已交付；真实浏览器/窄屏/大数据量专项及外部来源/财务仍待验收或开发）
 - [收件箱工作编排](inbox.md)（人工受理、关系/Reminder、来源投影、拆分/自动解决及客户回访来源上下文已交付；split 继承但可清除/改选可信来源 Project，写入独立完成条件并明确 person 本地责任，关系行打开共享 Task；成功 mutation 失效来源 Project，split 另失效 Task/Today/Project。required 仍是显式独立关系事实；Agent 待开发）
-- [本地提醒](reminders.md)（T-11A3 一次性与每日/每周/每月本地 Reminder、启动补偿、跨 DST/月末递推和到期 Inbox 投影已交付；工作日/自定义规则与原生/远程通知待开发）
+- [本地提醒](reminders.md)（T-11A3 一次性与每日/每周/工作日/每月本地 Reminder、启动补偿、跨 DST/月末递推和到期 Inbox 投影已交付；法定节假日/自定义规则与原生/远程通知待开发）
 - [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
 - [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；原生桌面反馈延后）
 - [设置](settings.md)（SQLite 偏好、草稿预览、受控工作区头像、Actor、数据、脱敏运行诊断/诊断包与关于入口）

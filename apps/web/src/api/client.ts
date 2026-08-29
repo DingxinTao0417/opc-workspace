@@ -3111,6 +3111,7 @@ function asReminderRecurrenceType(value: unknown): ReminderRecurrenceType {
     value === "none" ||
     value === "daily" ||
     value === "weekly" ||
+    value === "weekdays" ||
     value === "monthly"
   ) {
     return value;
@@ -3206,7 +3207,9 @@ export function normalizeReminder(value: unknown): Reminder {
       (recurrenceInterval !== 1 ||
         recurrenceTimezone !== "UTC" ||
         recurrenceAnchorDay !== 1)) ||
-    ((recurrenceType === "daily" || recurrenceType === "weekly") &&
+    ((recurrenceType === "daily" ||
+      recurrenceType === "weekly" ||
+      recurrenceType === "weekdays") &&
       recurrenceAnchorDay !== 1) ||
     !createdAt ||
     !updatedAt ||

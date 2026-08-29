@@ -46,6 +46,21 @@ func TestReminderAPICreatesAndEditsRecurringSchedule(t *testing.T) {
 		t.Fatalf("updated recurrence facts = %#v", changed.Data)
 	}
 
+	weekday := performRequest(router, http.MethodPost, "/api/v1/reminders", []byte(`{
+		"title":"工作日提醒","trigger_at":"2099-09-01T09:00:00+08:00",
+		"recurrence_type":"weekdays","recurrence_interval":1,"recurrence_timezone":"Asia/Shanghai"
+	}`), nil)
+	if weekday.Code != http.StatusCreated {
+		t.Fatalf("create weekday Reminder = %d: %s", weekday.Code, weekday.Body.String())
+	}
+	var weekdayReminder reminderEnvelope
+	if err := json.Unmarshal(weekday.Body.Bytes(), &weekdayReminder); err != nil {
+		t.Fatalf("decode weekday create: %v", err)
+	}
+	if weekdayReminder.Data.RecurrenceType != "weekdays" || weekdayReminder.Data.RecurrenceAnchorDay != 1 {
+		t.Fatalf("weekday recurrence facts = %#v", weekdayReminder.Data)
+	}
+
 	invalid := performRequest(router, http.MethodPost, "/api/v1/reminders", []byte(`{
 		"title":"无效重复提醒","trigger_at":"2099-08-30T09:00:00Z",
 		"recurrence_type":"daily","recurrence_interval":0,"recurrence_timezone":"private/not-a-zone"
@@ -111,6 +126,28 @@ func TestMonthlyReminderOccurrenceClampsShortMonthAndReturnsToAnchor(t *testing.
 	}
 	if got := formatInboxTimestamp(march.UTC()); got != "2026-03-31T16:00:00.000000000Z" || advances != 2 {
 		t.Fatalf("March occurrence = %s advances=%d", got, advances)
+	}
+}
+
+func TestWeekdayReminderOccurrenceSkipsWeekendAndOfflineBacklog(t *testing.T) {
+	reminder := models.Reminder{
+		TriggerAt: "2026-01-02T17:00:00Z", RecurrenceType: "weekdays",
+		RecurrenceInterval: 1, RecurrenceTimezone: "America/Los_Angeles",
+		RecurrenceAnchorDay: 1,
+	}
+	monday, advances, err := nextReminderOccurrence(reminder, time.Date(2026, 1, 3, 18, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("next weekday after weekend: %v", err)
+	}
+	if got := formatInboxTimestamp(monday.UTC()); got != "2026-01-05T17:00:00.000000000Z" || advances != 1 {
+		t.Fatalf("Monday occurrence = %s advances=%d", got, advances)
+	}
+	thursday, advances, err := nextReminderOccurrence(reminder, time.Date(2026, 1, 7, 18, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("next weekday after backlog: %v", err)
+	}
+	if got := formatInboxTimestamp(thursday.UTC()); got != "2026-01-08T17:00:00.000000000Z" || advances != 4 {
+		t.Fatalf("Thursday occurrence = %s advances=%d", got, advances)
 	}
 }
 

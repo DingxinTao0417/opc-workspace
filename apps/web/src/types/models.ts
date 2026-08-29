@@ -1800,7 +1800,8 @@ export interface InboxEventListResult {
 
 export type ReminderStatus = "scheduled" | "fired" | "cancelled";
 export type ReminderAction = "edit" | "cancel";
-export type ReminderRecurrenceType = "none" | "daily" | "weekly" | "monthly";
+export type ReminderRecurrenceType =
+  "none" | "daily" | "weekly" | "weekdays" | "monthly";
 export type ReminderSort =
   | "title"
   | "status"

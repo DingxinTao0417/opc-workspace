@@ -76,7 +76,9 @@ function recurrenceLabel(reminder: Reminder): string {
       ? "天"
       : reminder.recurrenceType === "weekly"
         ? "周"
-        : "个月";
+        : reminder.recurrenceType === "weekdays"
+          ? "个工作日"
+          : "个月";
   return reminder.recurrenceInterval === 1
     ? `每${unit}`
     : `每 ${reminder.recurrenceInterval} ${unit}`;
@@ -694,6 +696,7 @@ export function ReminderManagerModal({
                         <option value="none">不重复</option>
                         <option value="daily">按天重复</option>
                         <option value="weekly">按周重复</option>
+                        <option value="weekdays">按工作日重复</option>
                         <option value="monthly">按月重复</option>
                       </select>
                     </label>
@@ -727,7 +730,9 @@ export function ReminderManagerModal({
                       按 {draft.recurrenceTimezone} 的当地钟点重复；
                       {draft.recurrenceType === "monthly"
                         ? "按月规则保持首次日期，短月自动落在月末，之后回到原日期。"
-                        : ""}
+                        : draft.recurrenceType === "weekdays"
+                          ? "工作日按周一至周五计算，不识别法定节假日。"
+                          : ""}
                       应用离线期间只补一条已到期事项，下一次会推进到当前时间之后。
                     </p>
                   ) : null}

@@ -103,6 +103,14 @@ describe("Reminder API contract", () => {
     expect(() =>
       normalizeReminder(reminderPayload({ recurrence_anchor_day: 31 })),
     ).toThrow();
+    expect(
+      normalizeReminder(
+        reminderPayload({
+          recurrence_type: "weekdays",
+          recurrence_timezone: "Asia/Shanghai",
+        }),
+      ),
+    ).toMatchObject({ recurrenceType: "weekdays", recurrenceAnchorDay: 1 });
   });
 
   it("serializes filters and validates paging metadata", async () => {

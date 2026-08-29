@@ -582,6 +582,10 @@ func nextReminderOccurrence(reminder models.Reminder, now time.Time) (time.Time,
 	}
 	base := triggerAt.In(location)
 	localNow := now.In(location)
+	if reminder.RecurrenceType == "weekdays" {
+		candidate, advances := nextWeekdayReminderOccurrence(base, localNow, now, reminder.RecurrenceInterval)
+		return candidate, advances, nil
+	}
 	if reminder.RecurrenceType == "monthly" {
 		monthDifference := (localNow.Year()-base.Year())*12 + int(localNow.Month()-base.Month())
 		advances := monthDifference / reminder.RecurrenceInterval
@@ -633,6 +637,43 @@ func nextReminderOccurrence(reminder models.Reminder, now time.Time) (time.Time,
 	return candidate, advances, nil
 }
 
+func nextWeekdayReminderOccurrence(base, localNow, now time.Time, interval int) (time.Time, int) {
+	start := time.Date(base.Year(), base.Month(), base.Day()+1, base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
+	candidate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
+	if candidate.Before(start) {
+		candidate = start
+	} else if !candidate.After(now) {
+		candidate = candidate.AddDate(0, 0, 1)
+	}
+	for candidate.Weekday() == time.Saturday || candidate.Weekday() == time.Sunday {
+		candidate = candidate.AddDate(0, 0, 1)
+	}
+	ordinal := weekdayCountInclusive(start, candidate)
+	targetOrdinal := ((ordinal + interval - 1) / interval) * interval
+	for remaining := targetOrdinal - ordinal; remaining > 0; {
+		candidate = candidate.AddDate(0, 0, 1)
+		if candidate.Weekday() != time.Saturday && candidate.Weekday() != time.Sunday {
+			remaining--
+		}
+	}
+	return candidate, targetOrdinal / interval
+}
+
+func weekdayCountInclusive(start, end time.Time) int {
+	startDate := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	endDate := time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	days := int(endDate.Sub(startDate)/(24*time.Hour)) + 1
+	fullWeeks, remainder := days/7, days%7
+	count := fullWeeks * 5
+	for offset := 0; offset < remainder; offset++ {
+		weekday := time.Weekday((int(start.Weekday()) + offset) % 7)
+		if weekday != time.Saturday && weekday != time.Sunday {
+			count++
+		}
+	}
+	return count
+}
+
 func monthlyReminderOccurrence(base time.Time, monthOffset, anchorDay int) time.Time {
 	first := time.Date(base.Year(), base.Month()+time.Month(monthOffset), 1, base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
 	lastDay := time.Date(first.Year(), first.Month()+1, 0, 0, 0, 0, 0, base.Location()).Day()
@@ -644,8 +685,8 @@ func monthlyReminderOccurrence(base time.Time, monthOffset, anchorDay int) time.
 }
 
 func validateReminderRecurrence(recurrenceType string, interval int, timezone string, anchorDay int) error {
-	if recurrenceType != "none" && recurrenceType != "daily" && recurrenceType != "weekly" && recurrenceType != "monthly" {
-		return errors.New("recurrence_type must be none, daily, weekly, or monthly")
+	if recurrenceType != "none" && recurrenceType != "daily" && recurrenceType != "weekly" && recurrenceType != "weekdays" && recurrenceType != "monthly" {
+		return errors.New("recurrence_type must be none, daily, weekly, weekdays, or monthly")
 	}
 	if interval < 1 || interval > 365 {
 		return errors.New("recurrence_interval must be between 1 and 365")
@@ -657,7 +698,7 @@ func validateReminderRecurrence(recurrenceType string, interval int, timezone st
 		return nil
 	}
 	if recurrenceType != "monthly" && anchorDay != 1 {
-		return errors.New("daily and weekly Reminders require recurrence_anchor_day 1")
+		return errors.New("daily, weekly, and weekdays Reminders require recurrence_anchor_day 1")
 	}
 	if recurrenceType == "monthly" && (anchorDay < 1 || anchorDay > 31) {
 		return errors.New("monthly Reminders require recurrence_anchor_day between 1 and 31")
@@ -790,8 +831,8 @@ func normalizeReminderPatch(input updateReminderRequest, now time.Time) (map[str
 			return nil, errors.New("recurrence_type cannot be null")
 		}
 		value := strings.TrimSpace(*input.RecurrenceType.Value)
-		if value != "none" && value != "daily" && value != "weekly" && value != "monthly" {
-			return nil, errors.New("recurrence_type must be none, daily, weekly, or monthly")
+		if value != "none" && value != "daily" && value != "weekly" && value != "weekdays" && value != "monthly" {
+			return nil, errors.New("recurrence_type must be none, daily, weekly, weekdays, or monthly")
 		}
 		patch["recurrence_type"] = value
 	}
