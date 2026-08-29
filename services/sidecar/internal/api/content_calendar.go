@@ -199,6 +199,10 @@ func (a *API) updateContentItem(c *gin.Context) {
 		if item.Version != expected {
 			return contentItemVersionConflict()
 		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := resolveContentItemInboxSources(tx, id, "content_item_updated", requestIDFromContext(c), now); err != nil {
+			return err
+		}
 		updates, err := contentItemUpdates(item, input)
 		if err != nil {
 			return err
@@ -266,6 +270,10 @@ func (a *API) scheduleContentItem(c *gin.Context) {
 		if item.Status == "archived" || item.Status == "published" {
 			return newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_STATE_INVALID", "Archived or published content cannot be rescheduled")
 		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := resolveContentItemInboxSources(tx, id, "content_item_rescheduled", requestIDFromContext(c), now); err != nil {
+			return err
+		}
 		status := item.Status
 		if scheduledAt != nil {
 			status = "scheduled"
@@ -332,6 +340,10 @@ func (a *API) confirmContentItemPublished(c *gin.Context) {
 		}
 		if item.Status == "archived" || item.Status == "cancelled" {
 			return newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_STATE_INVALID", "Archived or cancelled content cannot be published")
+		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := resolveContentItemInboxSources(tx, id, "content_item_published", requestIDFromContext(c), now); err != nil {
+			return err
 		}
 		updates := map[string]any{"status": "published", "published_at": publishedAt, "updated_at": time.Now().UTC().Format(time.RFC3339Nano), "version": gorm.Expr("version + 1")}
 		if input.ExternalLink.Set {
@@ -407,6 +419,10 @@ func (a *API) linkContentItemTask(c *gin.Context) {
 		if item.Version != expected {
 			return contentItemVersionConflict()
 		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := resolveContentItemInboxSources(tx, id, "content_item_tasks_changed", requestIDFromContext(c), now); err != nil {
+			return err
+		}
 		var count int64
 		if err := tx.Model(&models.Task{}).Where("id = ?", taskID).Count(&count).Error; err != nil {
 			return err
@@ -462,6 +478,10 @@ func (a *API) unlinkContentItemTask(c *gin.Context) {
 		if item.Version != expected {
 			return contentItemVersionConflict()
 		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := resolveContentItemInboxSources(tx, id, "content_item_tasks_changed", requestIDFromContext(c), now); err != nil {
+			return err
+		}
 		result := tx.Where("content_item_id = ? AND task_id = ?", id, taskID).Delete(&models.ContentItemTask{})
 		if result.Error != nil {
 			return result.Error
@@ -514,6 +534,10 @@ func (a *API) deleteContentItem(c *gin.Context) {
 		}
 		if item.Status != "archived" {
 			return newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_NOT_ARCHIVED", "Only archived content items can be permanently deleted")
+		}
+		now := formatInboxTimestamp(a.options.Now().UTC())
+		if err := coordinateContentItemInboxSourceDeletion(tx, id, requestIDFromContext(c), now); err != nil {
+			return err
 		}
 		result := tx.Where("id = ? AND version = ?", id, expected).Delete(&models.ContentItem{})
 		if result.Error != nil {

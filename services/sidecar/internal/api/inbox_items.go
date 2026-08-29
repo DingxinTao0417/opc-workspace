@@ -197,7 +197,7 @@ func (a *API) listInboxItems(c *gin.Context) {
 		return
 	}
 	sourceEntityType := strings.TrimSpace(c.Query("source_entity_type"))
-	if sourceEntityType != "" && sourceEntityType != clientFollowupInboxSourceType {
+	if sourceEntityType != "" && sourceEntityType != clientFollowupInboxSourceType && sourceEntityType != contentItemInboxSourceType {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "source_entity_type filter is invalid")
 		return
 	}

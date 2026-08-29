@@ -12,9 +12,21 @@ const hooks = vi.hoisted(() => ({
 vi.mock("../api/hooks", () => ({
   useRoadmapMilestonesQuery: hooks.milestones,
   useProjectsQuery: hooks.projects,
-  useCreateRoadmapMilestone: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
-  useArchiveRoadmapMilestone: () => ({ isPending: false, error: null, mutate: vi.fn() }),
-  useRestoreRoadmapMilestone: () => ({ isPending: false, error: null, mutate: vi.fn() }),
+  useCreateRoadmapMilestone: () => ({
+    isPending: false,
+    isError: false,
+    mutate: vi.fn(),
+  }),
+  useArchiveRoadmapMilestone: () => ({
+    isPending: false,
+    error: null,
+    mutate: vi.fn(),
+  }),
+  useRestoreRoadmapMilestone: () => ({
+    isPending: false,
+    error: null,
+    mutate: vi.fn(),
+  }),
 }));
 
 const milestone: RoadmapMilestone = {
@@ -53,7 +65,11 @@ describe("RoadmapPage", () => {
   });
 
   it("renders real milestone facts and a project deep link", () => {
-    render(<MemoryRouter><RoadmapPage /></MemoryRouter>);
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
 
     expect(screen.getByText("路线图 API")).toBeTruthy();
     expect(screen.getByText("2/4 项关联任务")).toBeTruthy();

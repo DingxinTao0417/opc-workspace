@@ -124,20 +124,20 @@ import type {
   DeleteClientAttachmentInput,
   DeleteClientActorLinkInput,
   Project,
-	RoadmapMilestone,
-	RoadmapMilestoneListParams,
-	RoadmapMilestoneListResult,
-	RoadmapMilestoneStatus,
-	CreateRoadmapMilestoneInput,
-	UpdateRoadmapMilestoneInput,
-	ContentItem,
-	ContentItemListParams,
-	ContentItemListResult,
-	ContentItemStatus,
-	CreateContentItemInput,
-	UpdateContentItemInput,
-	ScheduleContentItemInput,
-	PublishContentItemInput,
+  RoadmapMilestone,
+  RoadmapMilestoneListParams,
+  RoadmapMilestoneListResult,
+  RoadmapMilestoneStatus,
+  CreateRoadmapMilestoneInput,
+  UpdateRoadmapMilestoneInput,
+  ContentItem,
+  ContentItemListParams,
+  ContentItemListResult,
+  ContentItemStatus,
+  CreateContentItemInput,
+  UpdateContentItemInput,
+  ScheduleContentItemInput,
+  PublishContentItemInput,
   ProjectAttachment,
   ProjectAttachmentDownload,
   ProjectAttachmentListParams,
@@ -943,7 +943,10 @@ const roadmapMilestoneStatuses = new Set<RoadmapMilestoneStatus>([
 ]);
 
 function asRoadmapMilestoneStatus(value: unknown): RoadmapMilestoneStatus {
-  if (typeof value === "string" && roadmapMilestoneStatuses.has(value as RoadmapMilestoneStatus)) {
+  if (
+    typeof value === "string" &&
+    roadmapMilestoneStatuses.has(value as RoadmapMilestoneStatus)
+  ) {
     return value as RoadmapMilestoneStatus;
   }
   return "planned";
@@ -958,14 +961,16 @@ export function normalizeRoadmapMilestone(value: unknown): RoadmapMilestone {
       ? value.taskSummary
       : {};
   const status = asRoadmapMilestoneStatus(value.status);
-  const archivedFromRaw = value.archived_from_status ?? value.archivedFromStatus;
+  const archivedFromRaw =
+    value.archived_from_status ?? value.archivedFromStatus;
   const archivedFromStatus = asRoadmapMilestoneStatus(archivedFromRaw);
   return {
     id: String(value.id ?? ""),
     title: String(value.title ?? "未命名里程碑"),
     description: nullableString(value.description),
     year: numeric(value.year),
-    quarter: Math.min(4, Math.max(1, numeric(value.quarter, 1))) as 1 | 2 | 3 | 4,
+    quarter: Math.min(4, Math.max(1, numeric(value.quarter, 1))) as
+      1 | 2 | 3 | 4,
     targetDate: String(value.target_date ?? value.targetDate ?? ""),
     status,
     manualOrder: numeric(value.manual_order ?? value.manualOrder),
@@ -985,7 +990,9 @@ export function normalizeRoadmapMilestone(value: unknown): RoadmapMilestone {
       total: numeric(rawSummary.total),
       completed: numeric(rawSummary.completed),
       inProgress: numeric(rawSummary.in_progress ?? rawSummary.inProgress),
-      progressPercent: numeric(rawSummary.progress_percent ?? rawSummary.progressPercent),
+      progressPercent: numeric(
+        rawSummary.progress_percent ?? rawSummary.progressPercent,
+      ),
     },
   };
 }
@@ -1009,12 +1016,19 @@ function normalizeRoadmapMilestoneListResult(
 }
 
 const contentItemStatuses = new Set<ContentItemStatus>([
-  "draft", "in_review", "scheduled", "published", "cancelled", "archived",
+  "draft",
+  "in_review",
+  "scheduled",
+  "published",
+  "cancelled",
+  "archived",
 ]);
 
 function asContentItemStatus(value: unknown): ContentItemStatus {
-  return typeof value === "string" && contentItemStatuses.has(value as ContentItemStatus)
-    ? value as ContentItemStatus : "draft";
+  return typeof value === "string" &&
+    contentItemStatuses.has(value as ContentItemStatus)
+    ? (value as ContentItemStatus)
+    : "draft";
 }
 
 export function normalizeContentItem(value: unknown): ContentItem {
@@ -1023,26 +1037,56 @@ export function normalizeContentItem(value: unknown): ContentItem {
   const archived = value.archived_from_status ?? value.archivedFromStatus;
   const archivedStatus = asContentItemStatus(archived);
   return {
-    id: String(value.id ?? ""), title: String(value.title ?? "未命名内容"),
-    platform: String(value.platform ?? "未分类"), status: asContentItemStatus(value.status),
+    id: String(value.id ?? ""),
+    title: String(value.title ?? "未命名内容"),
+    platform: String(value.platform ?? "未分类"),
+    status: asContentItemStatus(value.status),
     scheduledAt: nullableString(value.scheduled_at ?? value.scheduledAt),
-    scheduledTimezone: nullableString(value.scheduled_timezone ?? value.scheduledTimezone),
+    scheduledTimezone: nullableString(
+      value.scheduled_timezone ?? value.scheduledTimezone,
+    ),
     publishedAt: nullableString(value.published_at ?? value.publishedAt),
     projectId: nullableString(value.project_id ?? value.projectId),
-    notes: nullableString(value.notes), externalLink: nullableString(value.external_link ?? value.externalLink),
+    notes: nullableString(value.notes),
+    externalLink: nullableString(value.external_link ?? value.externalLink),
     manualOrder: numeric(value.manual_order ?? value.manualOrder),
-    archivedFromStatus: archived === null || archivedStatus === "archived" ? null : archivedStatus,
-    version: numeric(value.version, 1), createdAt: String(value.created_at ?? value.createdAt ?? ""), updatedAt: String(value.updated_at ?? value.updatedAt ?? ""),
-    tasks: rawTasks.filter(isRecord).map((task) => ({ id: String(task.id ?? ""), title: String(task.title ?? "未命名任务"), status: asTaskStatus(task.status), isRequired: Boolean(task.is_required ?? task.isRequired) })),
-    requiredTaskTotal: numeric(value.required_task_total ?? value.requiredTaskTotal),
-    requiredTaskDone: numeric(value.required_task_done ?? value.requiredTaskDone),
+    archivedFromStatus:
+      archived === null || archivedStatus === "archived"
+        ? null
+        : archivedStatus,
+    version: numeric(value.version, 1),
+    createdAt: String(value.created_at ?? value.createdAt ?? ""),
+    updatedAt: String(value.updated_at ?? value.updatedAt ?? ""),
+    tasks: rawTasks.filter(isRecord).map((task) => ({
+      id: String(task.id ?? ""),
+      title: String(task.title ?? "未命名任务"),
+      status: asTaskStatus(task.status),
+      isRequired: Boolean(task.is_required ?? task.isRequired),
+    })),
+    requiredTaskTotal: numeric(
+      value.required_task_total ?? value.requiredTaskTotal,
+    ),
+    requiredTaskDone: numeric(
+      value.required_task_done ?? value.requiredTaskDone,
+    ),
   };
 }
 
-function normalizeContentItemListResult(value: unknown, input: ContentItemListParams = {}): ContentItemListResult {
-  if (!isRecord(value) || !Array.isArray(value.data)) return invalidResponse("内容日历列表响应格式无效");
+function normalizeContentItemListResult(
+  value: unknown,
+  input: ContentItemListParams = {},
+): ContentItemListResult {
+  if (!isRecord(value) || !Array.isArray(value.data))
+    return invalidResponse("内容日历列表响应格式无效");
   const meta = isRecord(value.meta) ? value.meta : {};
-  return { items: value.data.map(normalizeContentItem), meta: { page: numeric(meta.page, input.page ?? 1), pageSize: numeric(meta.page_size ?? meta.pageSize, input.pageSize ?? 50), total: numeric(meta.total) } };
+  return {
+    items: value.data.map(normalizeContentItem),
+    meta: {
+      page: numeric(meta.page, input.page ?? 1),
+      pageSize: numeric(meta.page_size ?? meta.pageSize, input.pageSize ?? 50),
+      total: numeric(meta.total),
+    },
+  };
 }
 
 export function normalizeProjectWorkflowEvent(
@@ -2836,6 +2880,22 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     new RegExp(`^followup:${sourceEntityId}:due:[1-9]\\d*$`).test(
       sourceEventKey,
     );
+  const validContentItemEvent =
+    sourceEntityType === "content_item" &&
+    !!sourceEntityId &&
+    !!dueAt &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 5 &&
+    rawPayload.content_item_id === sourceEntityId &&
+    (rawPayload.event_type === "review_due" ||
+      rawPayload.event_type === "publish_due") &&
+    Number.isInteger(rawPayload.content_version) &&
+    (rawPayload.content_version as number) >= 1 &&
+    rawPayload.scheduled_at === dueAt &&
+    typeof rawPayload.scheduled_timezone === "string" &&
+    rawPayload.scheduled_timezone.trim().length > 0 &&
+    sourceEventKey ===
+      `content:${sourceEntityId}:${String(rawPayload.event_type)}:${String(rawPayload.content_version)}`;
   const validProjectCompletionEvent =
     sourceEntityType === "project_completion" &&
     !!sourceEntityId &&
@@ -2890,6 +2950,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "task" &&
       sourceEntityType !== "task_due" &&
       sourceEntityType !== "client_followup" &&
+      sourceEntityType !== "content_item" &&
       sourceEntityType !== "project_completion" &&
       sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
@@ -2905,6 +2966,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validTaskBlockedEvent &&
       !validTaskDueEvent &&
       !validClientFollowupEvent &&
+      !validContentItemEvent &&
       !validProjectCompletionEvent &&
       !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
@@ -6627,45 +6689,146 @@ export async function getRoadmapMilestones(
   return normalizeRoadmapMilestoneListResult(payload, input);
 }
 
-export async function getContentItems(input: ContentItemListParams = {}, signal?: AbortSignal): Promise<ContentItemListResult> {
-  const params = new URLSearchParams({ page: String(input.page ?? 1), page_size: String(input.pageSize ?? 50) });
+export async function getContentItems(
+  input: ContentItemListParams = {},
+  signal?: AbortSignal,
+): Promise<ContentItemListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
   if (input.scheduledFrom) params.set("scheduled_from", input.scheduledFrom);
   if (input.scheduledTo) params.set("scheduled_to", input.scheduledTo);
   if (input.platform?.trim()) params.set("platform", input.platform.trim());
   if (input.status) params.set("status", input.status);
   if (input.projectId) params.set("project_id", input.projectId);
   if (input.includeArchived) params.set("include_archived", "true");
-  return normalizeContentItemListResult(await apiRequest<unknown>(`/api/v1/content-items?${params}`, { signal }), input);
+  return normalizeContentItemListResult(
+    await apiRequest<unknown>(`/api/v1/content-items?${params}`, { signal }),
+    input,
+  );
 }
 
-export async function createContentItem(input: CreateContentItemInput): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>("/api/v1/content-items", { method: "POST", body: JSON.stringify({ title: input.title, platform: input.platform, status: input.status, scheduled_at: input.scheduledAt, scheduled_timezone: input.scheduledTimezone, project_id: input.projectId, notes: input.notes, external_link: input.externalLink }) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function createContentItem(
+  input: CreateContentItemInput,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>("/api/v1/content-items", {
+    method: "POST",
+    body: JSON.stringify({
+      title: input.title,
+      platform: input.platform,
+      status: input.status,
+      scheduled_at: input.scheduledAt,
+      scheduled_timezone: input.scheduledTimezone,
+      project_id: input.projectId,
+      notes: input.notes,
+      external_link: input.externalLink,
+    }),
+  });
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
-export async function updateContentItem(id: string, input: UpdateContentItemInput): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}`, { method: "PATCH", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ ...(input.title === undefined ? {} : { title: input.title }), ...(input.platform === undefined ? {} : { platform: input.platform }), ...(input.status === undefined ? {} : { status: input.status }), ...(input.projectId === undefined ? {} : { project_id: input.projectId }), ...(input.notes === undefined ? {} : { notes: input.notes }), ...(input.externalLink === undefined ? {} : { external_link: input.externalLink }) }) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function updateContentItem(
+  id: string,
+  input: UpdateContentItemInput,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.platform === undefined ? {} : { platform: input.platform }),
+        ...(input.status === undefined ? {} : { status: input.status }),
+        ...(input.projectId === undefined
+          ? {}
+          : { project_id: input.projectId }),
+        ...(input.notes === undefined ? {} : { notes: input.notes }),
+        ...(input.externalLink === undefined
+          ? {}
+          : { external_link: input.externalLink }),
+      }),
+    },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
-export async function scheduleContentItem(id: string, input: ScheduleContentItemInput): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/schedule`, { method: "PUT", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ scheduled_at: input.scheduledAt, scheduled_timezone: input.scheduledTimezone }) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function scheduleContentItem(
+  id: string,
+  input: ScheduleContentItemInput,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}/schedule`,
+    {
+      method: "PUT",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        scheduled_at: input.scheduledAt,
+        scheduled_timezone: input.scheduledTimezone,
+      }),
+    },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
-export async function publishContentItem(id: string, input: PublishContentItemInput): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/publish-confirmation`, { method: "POST", headers: expectedVersionHeader(input.expectedVersion), body: JSON.stringify({ published_at: input.publishedAt, external_link: input.externalLink }) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function publishContentItem(
+  id: string,
+  input: PublishContentItemInput,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}/publish-confirmation`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        published_at: input.publishedAt,
+        external_link: input.externalLink,
+      }),
+    },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
-export async function linkContentItemTask(id: string, taskId: string, isRequired: boolean, expectedVersion: number): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/tasks`, { method: "POST", headers: expectedVersionHeader(expectedVersion), body: JSON.stringify({ task_id: taskId, is_required: isRequired }) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function linkContentItemTask(
+  id: string,
+  taskId: string,
+  isRequired: boolean,
+  expectedVersion: number,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}/tasks`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(expectedVersion),
+      body: JSON.stringify({ task_id: taskId, is_required: isRequired }),
+    },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
-export async function unlinkContentItemTask(id: string, taskId: string, expectedVersion: number): Promise<ContentItem> {
-  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE", headers: expectedVersionHeader(expectedVersion) });
-  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+export async function unlinkContentItemTask(
+  id: string,
+  taskId: string,
+  expectedVersion: number,
+): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`,
+    { method: "DELETE", headers: expectedVersionHeader(expectedVersion) },
+  );
+  return normalizeContentItem(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
 }
 
 export async function createRoadmapMilestone(

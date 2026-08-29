@@ -343,6 +343,48 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Content Item due source snapshots and event keys", () => {
+    const contentItemId = "018f0000-0000-7000-8000-000000000823";
+    const dueAt = "2026-08-30T10:00:00Z";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "content_item",
+      source_entity_id: contentItemId,
+      source_event_key: `content:${contentItemId}:publish_due:3`,
+      due_at: dueAt,
+      payload_json: {
+        content_item_id: contentItemId,
+        event_type: "publish_due",
+        content_version: 3,
+        scheduled_at: dueAt,
+        scheduled_timezone: "Asia/Shanghai",
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "content_item",
+      sourceEntityId: contentItemId,
+      dueAt,
+      payloadJson: {
+        event_type: "publish_due",
+        content_version: 3,
+        scheduled_timezone: "Asia/Shanghai",
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `content:${contentItemId}:review_due:3`,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, content_version: 0 },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly validates Project completion source snapshots", () => {
     const projectId = "018f0000-0000-7000-8000-000000000822";
     const projected = inboxPayload({

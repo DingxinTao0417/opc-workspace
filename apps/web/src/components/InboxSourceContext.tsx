@@ -51,6 +51,14 @@ interface ClientFollowupSourceSnapshot {
   channel: string;
 }
 
+interface ContentItemSourceSnapshot {
+  contentItemId: string;
+  eventType: "review_due" | "publish_due";
+  contentVersion: number;
+  scheduledAt: string;
+  scheduledTimezone: string;
+}
+
 interface ProjectCompletionSourceSnapshot {
   projectId: string;
   projectName: string;
@@ -248,6 +256,37 @@ function projectCompletionSnapshot(
   };
 }
 
+function contentItemSnapshot(
+  item: InboxItem,
+): ContentItemSourceSnapshot | null {
+  if (item.sourceEntityType !== "content_item") return null;
+  const payload = item.payloadJson;
+  const contentItemId = stringValue(payload, "content_item_id");
+  const eventType = payload.event_type;
+  const contentVersion = payload.content_version;
+  const scheduledAt = stringValue(payload, "scheduled_at");
+  const scheduledTimezone = stringValue(payload, "scheduled_timezone");
+  if (
+    !contentItemId ||
+    (eventType !== "review_due" && eventType !== "publish_due") ||
+    !Number.isInteger(contentVersion) ||
+    (contentVersion as number) < 1 ||
+    !scheduledAt ||
+    !scheduledTimezone ||
+    contentItemId !== item.sourceEntityId ||
+    scheduledAt !== item.dueAt
+  ) {
+    return null;
+  }
+  return {
+    contentItemId,
+    eventType,
+    contentVersion: contentVersion as number,
+    scheduledAt,
+    scheduledTimezone,
+  };
+}
+
 function systemMaintenanceSnapshot(
   item: InboxItem,
 ): SystemMaintenanceSourceSnapshot | null {
@@ -298,6 +337,51 @@ const storageKindLabels: Record<string, string> = {
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+
+  const contentSource = contentItemSnapshot(item);
+  if (contentSource) {
+    const isReview = contentSource.eventType === "review_due";
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <CalendarClock size={15} />
+          </span>
+          <div>
+            <strong>{isReview ? "内容待审核" : "内容待发布"}</strong>
+            <small>本地内容排期</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源内容已删除；以下排期快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>计划时间</dt>
+            <dd>{localTimestamp(contentSource.scheduledAt)}</dd>
+          </div>
+          <div>
+            <dt>计划时区</dt>
+            <dd>{contentSource.scheduledTimezone}</dd>
+          </div>
+          <div>
+            <dt>内容版本</dt>
+            <dd>v{contentSource.contentVersion}</dd>
+          </div>
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link className="button button-secondary" to="/content-calendar">
+            查看内容日历
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
+      </section>
+    );
+  }
+
   const maintenanceSource = systemMaintenanceSnapshot(item);
   if (maintenanceSource) {
     const maintenanceLabels = {

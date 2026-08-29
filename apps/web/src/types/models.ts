@@ -998,10 +998,7 @@ export interface DeleteProjectResult {
 }
 
 export type RoadmapMilestoneStatus =
-  | "planned"
-  | "active"
-  | "achieved"
-  | "archived";
+  "planned" | "active" | "achieved" | "archived";
 
 export interface RoadmapMilestoneProject {
   id: string;
@@ -1070,12 +1067,7 @@ export interface UpdateRoadmapMilestoneInput {
 }
 
 export type ContentItemStatus =
-  | "draft"
-  | "in_review"
-  | "scheduled"
-  | "published"
-  | "cancelled"
-  | "archived";
+  "draft" | "in_review" | "scheduled" | "published" | "cancelled" | "archived";
 
 export interface ContentItemTask {
   id: string;
@@ -1116,7 +1108,10 @@ export interface ContentItemListParams {
   includeArchived?: boolean;
 }
 
-export interface ContentItemListResult { items: ContentItem[]; meta: PageMeta; }
+export interface ContentItemListResult {
+  items: ContentItem[];
+  meta: PageMeta;
+}
 
 export interface CreateContentItemInput {
   title: string;
@@ -1545,6 +1540,7 @@ export interface InboxItem {
     | "task"
     | "task_due"
     | "client_followup"
+    | "content_item"
     | "project_completion"
     | "system_maintenance";
   sourceEntityId: string | null;

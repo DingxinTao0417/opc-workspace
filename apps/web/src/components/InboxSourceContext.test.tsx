@@ -205,6 +205,50 @@ describe("InboxSourceContext", () => {
     );
   });
 
+  it("shows a Content Item schedule snapshot and removes the live link after deletion", () => {
+    const contentItemId = "018f0000-0000-7000-8000-000000000823";
+    const contentItem: InboxItem = {
+      ...sourceItem,
+      title: "内容待发布：版本更新说明",
+      summary: "平台：Newsletter · 计划时间：2026-08-30T10:00:00Z",
+      sourceEntityType: "content_item",
+      sourceEntityId: contentItemId,
+      sourceEventKey: `content:${contentItemId}:publish_due:3`,
+      dueAt: "2026-08-30T10:00:00Z",
+      payloadJson: {
+        content_item_id: contentItemId,
+        event_type: "publish_due",
+        content_version: 3,
+        scheduled_at: "2026-08-30T10:00:00Z",
+        scheduled_timezone: "Asia/Shanghai",
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={contentItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("内容待发布")).toBeTruthy();
+    expect(screen.getByText("本地内容排期")).toBeTruthy();
+    expect(screen.getByText("Asia/Shanghai")).toBeTruthy();
+    expect(screen.getByText("v3")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看内容日历/ })).toHaveAttribute(
+      "href",
+      "/content-calendar",
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{ ...contentItem, sourceDeletedAt: "2026-08-31T10:00:00Z" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源内容已删除");
+    expect(screen.queryByRole("link", { name: /查看内容日历/ })).toBeNull();
+  });
+
   it("shows a Project completion snapshot and hides its link after deletion", () => {
     const projectId = "018f0000-0000-7000-8000-000000000822";
     const projectItem: InboxItem = {

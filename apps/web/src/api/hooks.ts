@@ -108,17 +108,17 @@ import {
   getProjectEvents,
   getProjectNotes,
   getProjects,
-	getRoadmapMilestones,
-	createRoadmapMilestone,
-	archiveRoadmapMilestone,
-	restoreRoadmapMilestone,
-	getContentItems,
-	createContentItem,
-	updateContentItem,
-	scheduleContentItem,
-	publishContentItem,
-	linkContentItemTask,
-	unlinkContentItemTask,
+  getRoadmapMilestones,
+  createRoadmapMilestone,
+  archiveRoadmapMilestone,
+  restoreRoadmapMilestone,
+  getContentItems,
+  createContentItem,
+  updateContentItem,
+  scheduleContentItem,
+  publishContentItem,
+  linkContentItemTask,
+  unlinkContentItemTask,
   pauseFocusSession,
   previewAutomationRule,
   createInboxItem,
@@ -174,13 +174,13 @@ import type {
   ClientFollowupListParams,
   ClientAttachmentListParams,
   ClientActorLinkListParams,
-	ClientListParams,
-	ContentItemListParams,
-	ContentItem,
-	CreateContentItemInput,
-	UpdateContentItemInput,
-	ScheduleContentItemInput,
-	PublishContentItemInput,
+  ClientListParams,
+  ContentItemListParams,
+  ContentItem,
+  CreateContentItemInput,
+  UpdateContentItemInput,
+  ScheduleContentItemInput,
+  PublishContentItemInput,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
   CreateClientActorLinkInput,
@@ -219,8 +219,8 @@ import type {
   ProjectNoteListParams,
   ProjectListParams,
   ProjectTransitionAction,
-	RoadmapMilestoneListParams,
-	CreateRoadmapMilestoneInput,
+  RoadmapMilestoneListParams,
+  CreateRoadmapMilestoneInput,
   ReminderListParams,
   SearchListParams,
   ReorderTasksInput,
@@ -3434,15 +3434,21 @@ export function useCreateContentItem() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateContentItemInput) => createContentItem(input),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: contentItemQueryKey }); },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+    },
   });
 }
 
-function useContentItemMutation<T>(mutationFn: (input: T) => Promise<ContentItem>) {
+function useContentItemMutation<T>(
+  mutationFn: (input: T) => Promise<ContentItem>,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: contentItemQueryKey }); },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+    },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
@@ -3452,23 +3458,54 @@ function useContentItemMutation<T>(mutationFn: (input: T) => Promise<ContentItem
 }
 
 export function useUpdateContentItem() {
-  return useContentItemMutation(({ id, input }: { id: string; input: UpdateContentItemInput }) => updateContentItem(id, input));
+  return useContentItemMutation(
+    ({ id, input }: { id: string; input: UpdateContentItemInput }) =>
+      updateContentItem(id, input),
+  );
 }
 
 export function useScheduleContentItem() {
-  return useContentItemMutation(({ id, input }: { id: string; input: ScheduleContentItemInput }) => scheduleContentItem(id, input));
+  return useContentItemMutation(
+    ({ id, input }: { id: string; input: ScheduleContentItemInput }) =>
+      scheduleContentItem(id, input),
+  );
 }
 
 export function usePublishContentItem() {
-  return useContentItemMutation(({ id, input }: { id: string; input: PublishContentItemInput }) => publishContentItem(id, input));
+  return useContentItemMutation(
+    ({ id, input }: { id: string; input: PublishContentItemInput }) =>
+      publishContentItem(id, input),
+  );
 }
 
 export function useLinkContentItemTask() {
-  return useContentItemMutation(({ id, taskId, isRequired, expectedVersion }: { id: string; taskId: string; isRequired: boolean; expectedVersion: number }) => linkContentItemTask(id, taskId, isRequired, expectedVersion));
+  return useContentItemMutation(
+    ({
+      id,
+      taskId,
+      isRequired,
+      expectedVersion,
+    }: {
+      id: string;
+      taskId: string;
+      isRequired: boolean;
+      expectedVersion: number;
+    }) => linkContentItemTask(id, taskId, isRequired, expectedVersion),
+  );
 }
 
 export function useUnlinkContentItemTask() {
-  return useContentItemMutation(({ id, taskId, expectedVersion }: { id: string; taskId: string; expectedVersion: number }) => unlinkContentItemTask(id, taskId, expectedVersion));
+  return useContentItemMutation(
+    ({
+      id,
+      taskId,
+      expectedVersion,
+    }: {
+      id: string;
+      taskId: string;
+      expectedVersion: number;
+    }) => unlinkContentItemTask(id, taskId, expectedVersion),
+  );
 }
 
 export function useCreateRoadmapMilestone() {
@@ -3477,7 +3514,9 @@ export function useCreateRoadmapMilestone() {
     mutationFn: (input: CreateRoadmapMilestoneInput) =>
       createRoadmapMilestone(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
     },
   });
 }
@@ -3485,10 +3524,17 @@ export function useCreateRoadmapMilestone() {
 export function useArchiveRoadmapMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: number }) =>
-      archiveRoadmapMilestone(id, expectedVersion),
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => archiveRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
     },
   });
 }
@@ -3496,10 +3542,17 @@ export function useArchiveRoadmapMilestone() {
 export function useRestoreRoadmapMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: number }) =>
-      restoreRoadmapMilestone(id, expectedVersion),
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => restoreRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
     },
   });
 }
