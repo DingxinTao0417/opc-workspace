@@ -2194,7 +2194,8 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
     !Array.isArray(body.days) ||
     !Array.isArray(body.projects) ||
     !Array.isArray(body.hours) ||
-    !Array.isArray(body.heatmap)
+    !Array.isArray(body.heatmap) ||
+    !Array.isArray(body.tags)
   ) {
     return invalidResponse("专注周期统计响应格式无效");
   }
@@ -2276,6 +2277,29 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
     }),
     hours,
     heatmap,
+    tags: body.tags.map((item) => {
+      if (!isRecord(item)) return invalidResponse("专注标签统计响应格式无效");
+      const tagId = nullableString(fieldValue(item, "tag_id", "tagId"));
+      const tagName = nullableString(fieldValue(item, "tag_name", "tagName"));
+      const tagColor = nullableString(
+        fieldValue(item, "tag_color", "tagColor"),
+      );
+      if (
+        (tagId === null) !== (tagName === null) ||
+        (tagId === null) !== (tagColor === null) ||
+        (tagColor !== null && !/^#[0-9A-F]{6}$/.test(tagColor))
+      ) {
+        return invalidResponse("专注标签统计响应格式无效");
+      }
+      return {
+        tagId,
+        tagName,
+        tagColor,
+        sessions: nonNegativeInteger(item.sessions, "标签专注块数"),
+        seconds: nonNegativeInteger(item.seconds, "标签专注秒数"),
+        minutes: nonNegativeInteger(item.minutes, "标签专注分钟数"),
+      };
+    }),
     currentStreakDays: nonNegativeInteger(
       fieldValue(body, "current_streak_days", "currentStreakDays"),
       "当前连续专注天数",

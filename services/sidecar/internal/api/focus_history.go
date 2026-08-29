@@ -48,6 +48,15 @@ type focusPeriodHeatmapCell struct {
 	Minutes  int   `json:"minutes"`
 }
 
+type focusPeriodTag struct {
+	TagID    *string `json:"tag_id"`
+	TagName  *string `json:"tag_name"`
+	TagColor *string `json:"tag_color"`
+	Sessions int     `json:"sessions"`
+	Seconds  int64   `json:"seconds"`
+	Minutes  int     `json:"minutes"`
+}
+
 type focusPeriodStatsResponse struct {
 	DateFrom          string                   `json:"date_from"`
 	DateTo            string                   `json:"date_to"`
@@ -57,12 +66,14 @@ type focusPeriodStatsResponse struct {
 	Projects          []focusPeriodProject     `json:"projects"`
 	Hours             []focusPeriodHour        `json:"hours"`
 	Heatmap           []focusPeriodHeatmapCell `json:"heatmap"`
+	Tags              []focusPeriodTag         `json:"tags"`
 	CurrentStreakDays int                      `json:"current_streak_days"`
 	LongestStreakDays int                      `json:"longest_streak_days"`
 }
 
 type completedFocusInterval struct {
 	SessionID       string  `gorm:"column:session_id"`
+	TaskID          *string `gorm:"column:task_id"`
 	StartedAt       string  `gorm:"column:started_at"`
 	EndedAt         string  `gorm:"column:ended_at"`
 	DurationSeconds int64   `gorm:"column:duration_seconds"`
@@ -186,7 +197,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	rangeEndUTC := localEnd.AddDate(0, 0, 1).UTC()
 	var intervals []completedFocusInterval
 	if err := a.db.WithContext(c.Request.Context()).Raw(`
-		SELECT interval.session_id, interval.started_at, interval.ended_at, interval.duration_seconds,
+		SELECT interval.session_id, session.task_id, interval.started_at, interval.ended_at, interval.duration_seconds,
 		       task.project_id, project.name AS project_name
 		FROM focus_session_intervals AS interval
 		JOIN focus_sessions AS session ON session.id = interval.session_id
@@ -304,6 +315,107 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		}
 		return leftID < rightID
 	})
+	type taskTagRow struct {
+		TaskID string `gorm:"column:task_id"`
+		TagID  string `gorm:"column:tag_id"`
+		Name   string `gorm:"column:name"`
+		Color  string `gorm:"column:color"`
+	}
+	taskIDs := make([]string, 0)
+	seenTaskIDs := make(map[string]struct{})
+	for _, interval := range intervals {
+		if interval.TaskID != nil {
+			if _, exists := seenTaskIDs[*interval.TaskID]; !exists {
+				seenTaskIDs[*interval.TaskID] = struct{}{}
+				taskIDs = append(taskIDs, *interval.TaskID)
+			}
+		}
+	}
+	tagsByTaskID := make(map[string][]taskTagRow)
+	if len(taskIDs) > 0 {
+		var taskTags []taskTagRow
+		if err := a.db.WithContext(c.Request.Context()).Table("task_tags").
+			Select("task_tags.task_id, tags.id AS tag_id, tags.name, tags.color").
+			Joins("JOIN tags ON tags.id = task_tags.tag_id").
+			Where("task_tags.task_id IN ?", taskIDs).
+			Order("LOWER(tags.name) ASC").Order("tags.id ASC").
+			Scan(&taskTags).Error; err != nil {
+			writeDatabaseError(c)
+			return
+		}
+		for _, taskTag := range taskTags {
+			tagsByTaskID[taskTag.TaskID] = append(tagsByTaskID[taskTag.TaskID], taskTag)
+		}
+	}
+	type tagAccumulator struct {
+		tagID    *string
+		tagName  *string
+		tagColor *string
+		sessions map[string]struct{}
+		seconds  int64
+	}
+	tagsByID := make(map[string]*tagAccumulator)
+	for _, interval := range intervals {
+		overlapSeconds, overlapErr := focusIntervalOverlapSeconds(interval, rangeStartUTC, rangeEndUTC)
+		if overlapErr != nil {
+			writeDatabaseError(c)
+			return
+		}
+		if overlapSeconds == 0 {
+			continue
+		}
+		taskTags := []taskTagRow(nil)
+		if interval.TaskID != nil {
+			taskTags = tagsByTaskID[*interval.TaskID]
+		}
+		if len(taskTags) == 0 {
+			taskTags = []taskTagRow{{}}
+		}
+		for _, taskTag := range taskTags {
+			key := taskTag.TagID
+			tag := tagsByID[key]
+			if tag == nil {
+				tag = &tagAccumulator{sessions: make(map[string]struct{})}
+				if key != "" {
+					tagID, tagName, tagColor := taskTag.TagID, taskTag.Name, taskTag.Color
+					tag.tagID, tag.tagName, tag.tagColor = &tagID, &tagName, &tagColor
+				}
+				tagsByID[key] = tag
+			}
+			tag.seconds += overlapSeconds
+			tag.sessions[interval.SessionID] = struct{}{}
+		}
+	}
+	tags := make([]focusPeriodTag, 0, len(tagsByID))
+	for _, tag := range tagsByID {
+		tags = append(tags, focusPeriodTag{
+			TagID: tag.tagID, TagName: tag.tagName, TagColor: tag.tagColor,
+			Sessions: len(tag.sessions), Seconds: tag.seconds, Minutes: int(tag.seconds / 60),
+		})
+	}
+	sort.Slice(tags, func(left, right int) bool {
+		if tags[left].Seconds != tags[right].Seconds {
+			return tags[left].Seconds > tags[right].Seconds
+		}
+		leftName, rightName := "", ""
+		if tags[left].TagName != nil {
+			leftName = *tags[left].TagName
+		}
+		if tags[right].TagName != nil {
+			rightName = *tags[right].TagName
+		}
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		leftID, rightID := "", ""
+		if tags[left].TagID != nil {
+			leftID = *tags[left].TagID
+		}
+		if tags[right].TagID != nil {
+			rightID = *tags[right].TagID
+		}
+		return leftID < rightID
+	})
 	type hourAccumulator struct {
 		sessions map[string]struct{}
 		seconds  int64
@@ -363,7 +475,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": focusPeriodStatsResponse{
 		DateFrom: dateFrom, DateTo: dateTo, Timezone: location.String(),
 		Totals: focusStats{Sessions: len(totalSessions), Seconds: totalSeconds, Minutes: int(totalSeconds / 60)},
-		Days:   days, Projects: projects, Hours: hours, Heatmap: heatmap,
+		Days:   days, Projects: projects, Hours: hours, Heatmap: heatmap, Tags: tags,
 		CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
 	}})
 }

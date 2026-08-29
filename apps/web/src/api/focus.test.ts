@@ -241,6 +241,16 @@ describe("focus API contract", () => {
             seconds: index === 8 ? 3000 : 0,
             minutes: index === 8 ? 50 : 0,
           })),
+          tags: [
+            {
+              tag_id: "tag-1",
+              tag_name: "深度工作",
+              tag_color: "#6C5CE7",
+              sessions: 2,
+              seconds: 3000,
+              minutes: 50,
+            },
+          ],
           current_streak_days: 1,
           longest_streak_days: 2,
         },
@@ -277,6 +287,14 @@ describe("focus API contract", () => {
           sessions: 2,
         }),
       ]),
+      tags: [
+        expect.objectContaining({
+          tagId: "tag-1",
+          tagName: "深度工作",
+          tagColor: "#6C5CE7",
+          minutes: 50,
+        }),
+      ],
     });
   });
 });

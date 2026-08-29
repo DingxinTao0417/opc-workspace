@@ -104,6 +104,20 @@ func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T)
 	if _, err := store.SQL.Exec("UPDATE tasks SET project_id = ? WHERE id = ?", projectID, taskID); err != nil {
 		t.Fatalf("assign Focus report task project: %v", err)
 	}
+	alphaTagID, betaTagID := uuid.NewString(), uuid.NewString()
+	if _, err := store.SQL.Exec(`
+		INSERT INTO tags(id, name, color, created_at) VALUES
+			(?, 'Alpha', '#6C5CE7', '2026-03-01T08:00:00Z'),
+			(?, 'Beta', '#00B894', '2026-03-01T08:00:00Z')
+	`, alphaTagID, betaTagID); err != nil {
+		t.Fatalf("seed Focus report tags: %v", err)
+	}
+	if _, err := store.SQL.Exec(
+		"INSERT INTO task_tags(task_id, tag_id) VALUES (?, ?), (?, ?)",
+		taskID, alphaTagID, taskID, betaTagID,
+	); err != nil {
+		t.Fatalf("assign Focus report tags: %v", err)
+	}
 	firstID := uuid.NewString()
 	secondID := uuid.NewString()
 	cancelledID := uuid.NewString()
@@ -151,6 +165,13 @@ func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T)
 		stats.Heatmap[(6-1)*24+23].Seconds != 600 || stats.Heatmap[(7-1)*24].Seconds != 600 {
 		t.Fatalf("Focus heatmap=%#v", stats.Heatmap)
 	}
+	if len(stats.Tags) != 3 || stats.Tags[0].TagID != nil || stats.Tags[0].Seconds != 1800 ||
+		stats.Tags[1].TagID == nil || *stats.Tags[1].TagID != alphaTagID || stats.Tags[1].TagName == nil ||
+		*stats.Tags[1].TagName != "Alpha" || stats.Tags[1].TagColor == nil || *stats.Tags[1].TagColor != "#6C5CE7" ||
+		stats.Tags[1].Seconds != 1200 || stats.Tags[2].TagID == nil || *stats.Tags[2].TagID != betaTagID ||
+		stats.Tags[2].Seconds != 1200 {
+		t.Fatalf("Focus tag distribution=%#v", stats.Tags)
+	}
 }
 
 func TestFocusPeriodHoursCombineRepeatedDSTHour(t *testing.T) {
@@ -178,6 +199,9 @@ func TestFocusPeriodHoursCombineRepeatedDSTHour(t *testing.T) {
 	if len(envelope.Data.Heatmap) != 7*24 || repeatedCell.Weekday != 7 || repeatedCell.Hour != 1 ||
 		repeatedCell.Seconds != 3600 || repeatedCell.Sessions != 1 {
 		t.Fatalf("repeated local hour heatmap=%#v", envelope.Data.Heatmap)
+	}
+	if len(envelope.Data.Tags) != 1 || envelope.Data.Tags[0].TagID != nil || envelope.Data.Tags[0].Seconds != 3600 {
+		t.Fatalf("untagged repeated-hour distribution=%#v", envelope.Data.Tags)
 	}
 }
 

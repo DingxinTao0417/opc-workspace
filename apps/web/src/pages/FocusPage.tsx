@@ -774,6 +774,47 @@ export function FocusPage() {
                         ))}
                       </div>
                       <div
+                        aria-label="标签专注时间分布"
+                        className="focus-tag-distribution"
+                      >
+                        <div className="focus-tag-distribution-heading">
+                          <strong>标签分布</strong>
+                          <span>多标签任务会分别计入各标签</span>
+                        </div>
+                        {focusReport.data.tags.map((tag) => (
+                          <article key={tag.tagId ?? "untagged"}>
+                            <div>
+                              <strong>
+                                <i
+                                  aria-hidden="true"
+                                  style={{
+                                    background:
+                                      tag.tagColor ?? "var(--text-dim)",
+                                  }}
+                                />
+                                {tag.tagName ?? "未加标签"}
+                              </strong>
+                              <span>
+                                {tag.sessions} 个专注块 · {tag.minutes} 分钟
+                              </span>
+                            </div>
+                            <div className="focus-tag-distribution-track">
+                              <i
+                                style={{
+                                  background: tag.tagColor ?? undefined,
+                                  width: `${Math.max(
+                                    (tag.seconds /
+                                      focusReport.data.totals.seconds) *
+                                      100,
+                                    2,
+                                  )}%`,
+                                }}
+                              />
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      <div
                         aria-label="每日时段专注分布"
                         className="focus-hour-distribution"
                       >

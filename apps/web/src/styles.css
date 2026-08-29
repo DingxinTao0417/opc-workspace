@@ -4121,6 +4121,69 @@ kbd {
   background: linear-gradient(90deg, var(--accent-deep), var(--accent-light));
 }
 
+.focus-tag-distribution {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.focus-tag-distribution-heading,
+.focus-tag-distribution article > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.focus-tag-distribution-heading strong,
+.focus-tag-distribution article strong {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-tag-distribution-heading span,
+.focus-tag-distribution article span {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.focus-tag-distribution article {
+  display: grid;
+  gap: 5px;
+}
+
+.focus-tag-distribution article strong > i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.focus-tag-distribution-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+
+.focus-tag-distribution-track > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-light));
+}
+
 .focus-hour-distribution {
   display: grid;
   gap: 9px;

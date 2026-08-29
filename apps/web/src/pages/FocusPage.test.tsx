@@ -64,6 +64,7 @@ const mocks = vi.hoisted(() => ({
         seconds: 0,
         minutes: 0,
       })),
+      tags: [],
       currentStreakDays: 0,
       longestStreakDays: 0,
     } as FocusReport,
@@ -213,6 +214,24 @@ describe("FocusPage", () => {
         seconds: index === 8 ? 3000 : 0,
         minutes: index === 8 ? 50 : 0,
       })),
+      tags: [
+        {
+          tagId: "tag-1",
+          tagName: "深度工作",
+          tagColor: "#6C5CE7",
+          sessions: 2,
+          seconds: 2700,
+          minutes: 45,
+        },
+        {
+          tagId: null,
+          tagName: null,
+          tagColor: null,
+          sessions: 1,
+          seconds: 1500,
+          minutes: 25,
+        },
+      ],
       currentStreakDays: 2,
       longestStreakDays: 4,
     };
@@ -246,6 +265,9 @@ describe("FocusPage", () => {
     expect(screen.getByText("客户门户")).toBeInTheDocument();
     expect(screen.getByText("未归项目")).toBeInTheDocument();
     expect(screen.getByText("2 个专注块 · 50 分钟")).toBeInTheDocument();
+    expect(screen.getByText("深度工作")).toBeInTheDocument();
+    expect(screen.getByText("未加标签")).toBeInTheDocument();
+    expect(screen.getByText("多标签任务会分别计入各标签")).toBeInTheDocument();
     expect(screen.getByText("最佳 09:00–10:00")).toBeInTheDocument();
     expect(
       screen.getByLabelText("09:00–10:00，50 分钟，2 个专注块"),
