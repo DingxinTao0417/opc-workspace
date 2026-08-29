@@ -678,6 +678,17 @@ func (a *API) deleteProject(c *gin.Context) {
 		if project.Status != "archived" {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
 		}
+		var roadmapMilestoneCount int64
+		if err := tx.Table("roadmap_milestone_projects").Where("project_id = ?", id).Count(&roadmapMilestoneCount).Error; err != nil {
+			return err
+		}
+		if roadmapMilestoneCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"PROJECT_ROADMAP_MILESTONES_EXIST",
+				"Remove the project's roadmap milestone associations before permanently deleting it",
+			)
+		}
 		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		if err := coordinateProjectCompletionInboxSourceDeletion(
 			tx,

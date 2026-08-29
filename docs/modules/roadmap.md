@@ -1,6 +1,6 @@
 # 路线图模块
 
-> 目标版本：v0.3。该模块是本地季度规划和里程碑视图，不属于 v0.1。当前已完成 R2 的数据契约起点（schema v36）；API 和界面仍未交付。
+> 目标版本：v0.3。该模块是本地季度规划和里程碑视图，不属于 v0.1。当前已完成 R2 数据/API（schema v36）；React 界面仍未交付。
 
 ## 定位与边界
 
@@ -14,8 +14,9 @@
 ## 当前实现状态
 
 - `/roadmap` 路由仍只渲染“后续版本”占位页。
-- schema v36 已新增空的 `roadmap_milestones` 与 `roadmap_milestone_projects`：标题、说明、明确年份/季度、同季度目标日期、状态、排序、归档来源、乐观版本及项目关联均受 SQLite 约束；项目删除被关联表外键阻止，删除里程碑会清理其关联。迁移不创建 demo 数据。
-- Go model、API、Query、编辑流程和季度聚合仍未交付。
+- schema v36 的 `roadmap_milestones` 与 `roadmap_milestone_projects` 保存标题、说明、明确年份/季度、同季度目标日期、状态、排序、归档来源、乐观版本及项目关联；项目删除被关联表外键阻止，删除里程碑会清理其关联。迁移不创建 demo 数据。
+- 已交付本地鉴权 API：`GET/POST /api/v1/roadmap/milestones`、`GET/PATCH/DELETE /api/v1/roadmap/milestones/:id`、`PUT /api/v1/roadmap/milestones/reorder`、归档/恢复端点。列表支持 year/quarter/status/project/归档筛选和分页；创建、编辑、项目关联、归档恢复与重排都由 Sidecar 校验，编辑/归档/恢复/删除使用 `If-Match`，重排的每项使用 `expected_version` 并在一个事务提交。响应只从关联 Project/Task 读取项目摘要及任务完成度，不写入第二份进度。
+- 里程碑暂未写入 Workflow Event、Inbox 或 Reminder；拖拽、日期跨季度批量调整、界面和通知仍未交付。
 - 历史路线图视觉原型已移除，后续以当前 React 占位实现、本文和 PRD 为准。
 - 现有项目 API 和完整任务事实层也尚未完成，是本模块的前置依赖。
 
@@ -46,7 +47,7 @@
 - 进度、已完成任务数和风险为查询派生值，不持久化为可独立编辑字段。
 - 纯日期使用 `YYYY-MM-DD` 并按用户本地时区解释；季度由明确的年份与季度字段表示。
 
-### API
+### API（R2 已交付）
 
 - `GET / POST /api/v1/roadmap/milestones`
 - `GET / PATCH / DELETE /api/v1/roadmap/milestones/:id`
@@ -74,7 +75,7 @@
 ## 分阶段实施
 
 1. **R1 前置依赖**：完成项目 CRUD、任务关联和稳定的项目派生进度口径。
-2. **R2 数据/API**：新增里程碑及关联迁移，实现 CRUD、筛选、状态与并发测试。
+2. **R2 数据/API（已完成）**：新增里程碑及关联迁移，实现 CRUD、筛选、状态、项目关联、派生 Task 完成度及并发测试。
 3. **R3 基础界面**：季度分组、新建/编辑、详情、项目跳转和加载/空/错误状态。
 4. **R4 排期交互**：拖拽日期/季度、批量重排、失败回滚和键盘替代操作。
 5. **R5 本地事件**：接入 Inbox、Reminder 和调度补偿，并验证稳定去重。
