@@ -59,6 +59,15 @@ interface ContentItemSourceSnapshot {
   scheduledTimezone: string;
 }
 
+interface RoadmapMilestoneSourceSnapshot {
+  roadmapMilestoneId: string;
+  eventType: "due" | "achieved";
+  milestoneVersion: number;
+  targetDate: string;
+  year: number;
+  quarter: number;
+}
+
 interface ProjectCompletionSourceSnapshot {
   projectId: string;
   projectName: string;
@@ -287,6 +296,41 @@ function contentItemSnapshot(
   };
 }
 
+function roadmapMilestoneSnapshot(
+  item: InboxItem,
+): RoadmapMilestoneSourceSnapshot | null {
+  if (item.sourceEntityType !== "roadmap_milestone") return null;
+  const payload = item.payloadJson;
+  const roadmapMilestoneId = stringValue(payload, "roadmap_milestone_id");
+  const eventType = payload.event_type;
+  const milestoneVersion = payload.milestone_version;
+  const targetDate = stringValue(payload, "target_date");
+  const year = payload.year;
+  const quarter = payload.quarter;
+  if (
+    !roadmapMilestoneId ||
+    roadmapMilestoneId !== item.sourceEntityId ||
+    (eventType !== "due" && eventType !== "achieved") ||
+    !Number.isInteger(milestoneVersion) ||
+    (milestoneVersion as number) < 1 ||
+    !targetDate ||
+    !Number.isInteger(year) ||
+    !Number.isInteger(quarter) ||
+    (quarter as number) < 1 ||
+    (quarter as number) > 4
+  ) {
+    return null;
+  }
+  return {
+    roadmapMilestoneId,
+    eventType,
+    milestoneVersion: milestoneVersion as number,
+    targetDate,
+    year: year as number,
+    quarter: quarter as number,
+  };
+}
+
 function systemMaintenanceSnapshot(
   item: InboxItem,
 ): SystemMaintenanceSourceSnapshot | null {
@@ -337,6 +381,58 @@ const storageKindLabels: Record<string, string> = {
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+
+  const roadmapSource = roadmapMilestoneSnapshot(item);
+  if (roadmapSource) {
+    const achieved = roadmapSource.eventType === "achieved";
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            {achieved ? (
+              <CheckCircle2 size={15} />
+            ) : (
+              <CalendarClock size={15} />
+            )}
+          </span>
+          <div>
+            <strong>
+              {achieved ? "路线图里程碑已达成" : "路线图里程碑到期"}
+            </strong>
+            <small>本地季度规划</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源里程碑已删除；以下计划快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>目标日期</dt>
+            <dd>{roadmapSource.targetDate}</dd>
+          </div>
+          <div>
+            <dt>所属季度</dt>
+            <dd>
+              {roadmapSource.year} Q{roadmapSource.quarter}
+            </dd>
+          </div>
+          <div>
+            <dt>计划版本</dt>
+            <dd>v{roadmapSource.milestoneVersion}</dd>
+          </div>
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link className="button button-secondary" to="/roadmap">
+            查看路线图
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
+      </section>
+    );
+  }
 
   const contentSource = contentItemSnapshot(item);
   if (contentSource) {

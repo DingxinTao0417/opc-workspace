@@ -146,6 +146,10 @@ func (a *API) createRoadmapMilestone(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
+	nowValue := a.options.Now()
+	now := formatInboxTimestamp(nowValue.UTC())
+	milestone.CreatedAt = now
+	milestone.UpdatedAt = now
 	var response roadmapMilestoneResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := requireRoadmapProjects(tx, projectIDs); err != nil {
@@ -160,6 +164,13 @@ func (a *API) createRoadmapMilestone(c *gin.Context) {
 			return err
 		}
 		if err := replaceRoadmapMilestoneProjects(tx, milestone.ID, projectIDs, milestone.CreatedAt); err != nil {
+			return err
+		}
+		if milestone.Status == "achieved" {
+			if err := a.projectRoadmapMilestoneInboxEvent(tx, milestone, "achieved", requestIDFromContext(c), nowValue); err != nil {
+				return err
+			}
+		} else if err := a.projectRoadmapMilestoneInboxEvent(tx, milestone, "due", requestIDFromContext(c), nowValue); err != nil {
 			return err
 		}
 		response, err = loadRoadmapMilestoneResponse(tx, milestone.ID)
@@ -212,6 +223,8 @@ func (a *API) updateRoadmapMilestone(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "At least one editable field is required")
 		return
 	}
+	nowValue := a.options.Now()
+	now := formatInboxTimestamp(nowValue.UTC())
 	var response roadmapMilestoneResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var milestone models.RoadmapMilestone
@@ -246,7 +259,7 @@ func (a *API) updateRoadmapMilestone(c *gin.Context) {
 				return err
 			}
 		}
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		updatedAt := now
 		updates["updated_at"] = updatedAt
 		updates["version"] = gorm.Expr("version + 1")
 		result := tx.Model(&models.RoadmapMilestone{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
@@ -258,6 +271,33 @@ func (a *API) updateRoadmapMilestone(c *gin.Context) {
 		}
 		if replaceProjects {
 			if err := replaceRoadmapMilestoneProjects(tx, id, projectIDs, updatedAt); err != nil {
+				return err
+			}
+		}
+		var updated models.RoadmapMilestone
+		if err := tx.First(&updated, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if milestone.TargetDate != updated.TargetDate {
+			if err := resolveRoadmapMilestoneInboxSources(tx, id, "due", "roadmap_milestone_rescheduled", requestIDFromContext(c), updatedAt); err != nil {
+				return err
+			}
+		}
+		if roadmapMilestoneStatusInvalidatesInboxSource(milestone.Status, updated.Status) {
+			eventType := "due"
+			if milestone.Status == "achieved" {
+				eventType = "achieved"
+			}
+			if err := resolveRoadmapMilestoneInboxSources(tx, id, eventType, "roadmap_milestone_status_changed", requestIDFromContext(c), updatedAt); err != nil {
+				return err
+			}
+		}
+		if milestone.Status != "achieved" && updated.Status == "achieved" {
+			if err := a.projectRoadmapMilestoneInboxEvent(tx, updated, "achieved", requestIDFromContext(c), nowValue); err != nil {
+				return err
+			}
+		} else if (milestone.TargetDate != updated.TargetDate || milestone.Status != updated.Status) && (updated.Status == "planned" || updated.Status == "active") {
+			if err := a.projectRoadmapMilestoneInboxEvent(tx, updated, "due", requestIDFromContext(c), nowValue); err != nil {
 				return err
 			}
 		}
@@ -291,6 +331,8 @@ func (a *API) transitionRoadmapMilestoneArchive(c *gin.Context, archive bool) {
 	if !ok {
 		return
 	}
+	nowValue := a.options.Now()
+	now := formatInboxTimestamp(nowValue.UTC())
 	var response roadmapMilestoneResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var milestone models.RoadmapMilestone
@@ -303,7 +345,7 @@ func (a *API) transitionRoadmapMilestoneArchive(c *gin.Context, archive bool) {
 		if milestone.Version != expectedVersion {
 			return roadmapMilestoneVersionConflict()
 		}
-		updates := map[string]any{"updated_at": time.Now().UTC().Format(time.RFC3339Nano), "version": gorm.Expr("version + 1")}
+		updates := map[string]any{"updated_at": now, "version": gorm.Expr("version + 1")}
 		if archive {
 			if milestone.Status == "archived" {
 				return newProjectRequestError(http.StatusConflict, "ROADMAP_MILESTONE_STATE_INVALID", "Roadmap milestone is already archived")
@@ -323,6 +365,21 @@ func (a *API) transitionRoadmapMilestoneArchive(c *gin.Context, archive bool) {
 		}
 		if result.RowsAffected == 0 {
 			return roadmapMilestoneVersionConflict()
+		}
+		if archive {
+			if err := resolveRoadmapMilestoneInboxSources(tx, id, "", "roadmap_milestone_archived", requestIDFromContext(c), now); err != nil {
+				return err
+			}
+		} else {
+			var restored models.RoadmapMilestone
+			if err := tx.First(&restored, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if restored.Status != "achieved" {
+				if err := a.projectRoadmapMilestoneInboxEvent(tx, restored, "due", requestIDFromContext(c), nowValue); err != nil {
+					return err
+				}
+			}
 		}
 		loaded, err := loadRoadmapMilestoneResponse(tx, id)
 		if err != nil {
@@ -355,6 +412,7 @@ func (a *API) deleteRoadmapMilestone(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "CONFIRMATION_REQUIRED", "Permanent roadmap milestone deletion requires confirm=true")
 		return
 	}
+	now := formatInboxTimestamp(a.options.Now().UTC())
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var milestone models.RoadmapMilestone
 		if err := tx.First(&milestone, "id = ?", id).Error; err != nil {
@@ -368,6 +426,9 @@ func (a *API) deleteRoadmapMilestone(c *gin.Context) {
 		}
 		if milestone.Status != "archived" {
 			return newProjectRequestError(http.StatusConflict, "ROADMAP_MILESTONE_NOT_ARCHIVED", "Only archived roadmap milestones can be permanently deleted")
+		}
+		if err := coordinateRoadmapMilestoneInboxSourceDeletion(tx, id, requestIDFromContext(c), now); err != nil {
+			return err
 		}
 		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.RoadmapMilestone{})
 		if result.Error != nil {
@@ -773,4 +834,13 @@ func setRoadmapMilestoneETag(c *gin.Context, version int64) {
 
 func roadmapMilestoneVersionConflict() error {
 	return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Roadmap milestone has changed; refresh and retry")
+}
+
+func roadmapMilestoneStatusInvalidatesInboxSource(previous, current string) bool {
+	if previous == current {
+		return false
+	}
+	previousActionable := previous == "planned" || previous == "active"
+	currentActionable := current == "planned" || current == "active"
+	return previousActionable != currentActionable || previous == "achieved" || current == "achieved"
 }

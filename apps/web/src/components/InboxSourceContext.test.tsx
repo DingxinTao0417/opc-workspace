@@ -68,6 +68,49 @@ describe("InboxSourceContext", () => {
     );
   });
 
+  it("shows a Roadmap Milestone snapshot and hides its link after deletion", () => {
+    const roadmapItem: InboxItem = {
+      ...sourceItem,
+      title: "里程碑到期：发布本地版本",
+      sourceEntityType: "roadmap_milestone",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000824",
+      sourceEventKey: "roadmap:018f0000-0000-7000-8000-000000000824:due:4",
+      dueAt: "2026-09-30T23:59:59Z",
+      payloadJson: {
+        roadmap_milestone_id: "018f0000-0000-7000-8000-000000000824",
+        event_type: "due",
+        milestone_version: 4,
+        target_date: "2026-09-30",
+        year: 2026,
+        quarter: 3,
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={roadmapItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("路线图里程碑到期")).toBeTruthy();
+    expect(screen.getByText("2026-09-30")).toBeTruthy();
+    expect(screen.getByText("2026 Q3")).toBeTruthy();
+    expect(screen.getByText("v4")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看路线图/ })).toHaveAttribute(
+      "href",
+      "/roadmap",
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{ ...roadmapItem, sourceDeletedAt: "2026-10-01T00:00:00Z" }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源里程碑已删除");
+    expect(screen.queryByRole("link", { name: /查看路线图/ })).toBeNull();
+  });
+
   it("explains a deleted source without dropping its snapshot", () => {
     render(
       <MemoryRouter>

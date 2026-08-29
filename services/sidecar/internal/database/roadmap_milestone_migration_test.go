@@ -17,8 +17,8 @@ func TestRoadmapMilestoneMigrationCreatesQuarterScopedProjectLinks(t *testing.T)
 		t.Fatalf("upgrade v35 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 38 {
-		t.Fatalf("SchemaVersion = %d, want 38", store.SchemaVersion)
+	if store.SchemaVersion != 39 {
+		t.Fatalf("SchemaVersion = %d, want 39", store.SchemaVersion)
 	}
 
 	const projectID = "018f0000-0000-7000-8000-000000003601"

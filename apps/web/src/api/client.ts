@@ -2898,6 +2898,31 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     rawPayload.scheduled_timezone.trim().length > 0 &&
     sourceEventKey ===
       `content:${sourceEntityId}:${String(rawPayload.event_type)}:${String(rawPayload.content_version)}`;
+  const roadmapTargetDate =
+    isRecord(rawPayload) && typeof rawPayload.target_date === "string"
+      ? new Date(`${rawPayload.target_date}T00:00:00Z`)
+      : null;
+  const validRoadmapMilestoneEvent =
+    sourceEntityType === "roadmap_milestone" &&
+    !!sourceEntityId &&
+    !!dueAt &&
+    isRecord(rawPayload) &&
+    Object.keys(rawPayload).length === 6 &&
+    rawPayload.roadmap_milestone_id === sourceEntityId &&
+    (rawPayload.event_type === "due" || rawPayload.event_type === "achieved") &&
+    Number.isInteger(rawPayload.milestone_version) &&
+    (rawPayload.milestone_version as number) >= 1 &&
+    typeof rawPayload.target_date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(rawPayload.target_date) &&
+    roadmapTargetDate !== null &&
+    !Number.isNaN(roadmapTargetDate.getTime()) &&
+    Number.isInteger(rawPayload.year) &&
+    rawPayload.year === roadmapTargetDate.getUTCFullYear() &&
+    Number.isInteger(rawPayload.quarter) &&
+    rawPayload.quarter ===
+      Math.floor(roadmapTargetDate.getUTCMonth() / 3) + 1 &&
+    sourceEventKey ===
+      `roadmap:${sourceEntityId}:${String(rawPayload.event_type)}:${String(rawPayload.milestone_version)}`;
   const validProjectCompletionEvent =
     sourceEntityType === "project_completion" &&
     !!sourceEntityId &&
@@ -2953,6 +2978,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "task_due" &&
       sourceEntityType !== "client_followup" &&
       sourceEntityType !== "content_item" &&
+      sourceEntityType !== "roadmap_milestone" &&
       sourceEntityType !== "project_completion" &&
       sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
@@ -2969,6 +2995,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validTaskDueEvent &&
       !validClientFollowupEvent &&
       !validContentItemEvent &&
+      !validRoadmapMilestoneEvent &&
       !validProjectCompletionEvent &&
       !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&

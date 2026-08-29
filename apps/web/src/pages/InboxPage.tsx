@@ -135,7 +135,8 @@ function InboxRow({
           <BellRing size={15} />
         ) : item.sourceEntityType === "task_due" ? (
           <CalendarClock size={15} />
-        ) : item.sourceEntityType === "content_item" ? (
+        ) : item.sourceEntityType === "content_item" ||
+          item.sourceEntityType === "roadmap_milestone" ? (
           <CalendarClock size={15} />
         ) : item.sourceEntityType === "task" ? (
           <TriangleAlert size={15} />

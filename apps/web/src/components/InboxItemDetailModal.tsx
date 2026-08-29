@@ -351,7 +351,8 @@ export function InboxItemDetailModal({
                 <CalendarClock size={17} />
               ) : item.sourceEntityType === "task_due" ? (
                 <CalendarClock size={17} />
-              ) : item.sourceEntityType === "content_item" ? (
+              ) : item.sourceEntityType === "content_item" ||
+                item.sourceEntityType === "roadmap_milestone" ? (
                 <CalendarClock size={17} />
               ) : item.sourceEntityType === "task" ? (
                 <TriangleAlert size={17} />
@@ -377,17 +378,21 @@ export function InboxItemDetailModal({
                     ? "客户回访到期"
                     : item.sourceEntityType === "task_due"
                       ? "任务临期"
-                      : item.sourceEntityType === "content_item"
-                        ? item.payloadJson.event_type === "review_due"
-                          ? "内容待审核"
-                          : "内容待发布"
-                        : item.sourceEntityType === "task"
-                          ? "任务阻塞"
-                          : item.sourceEntityType === "system_maintenance"
-                            ? "系统维护"
-                            : item.kind === "event"
-                              ? "任务产出跟进"
-                              : "手工录入"}{" "}
+                      : item.sourceEntityType === "roadmap_milestone"
+                        ? item.payloadJson.event_type === "achieved"
+                          ? "里程碑已达成"
+                          : "里程碑到期"
+                        : item.sourceEntityType === "content_item"
+                          ? item.payloadJson.event_type === "review_due"
+                            ? "内容待审核"
+                            : "内容待发布"
+                          : item.sourceEntityType === "task"
+                            ? "任务阻塞"
+                            : item.sourceEntityType === "system_maintenance"
+                              ? "系统维护"
+                              : item.kind === "event"
+                                ? "任务产出跟进"
+                                : "手工录入"}{" "}
                 · 仅保存在本机
               </p>
             </div>

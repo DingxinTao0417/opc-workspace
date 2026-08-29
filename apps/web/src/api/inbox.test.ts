@@ -385,6 +385,47 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Roadmap Milestone source snapshots and event keys", () => {
+    const milestoneId = "018f0000-0000-7000-8000-000000000824";
+    const projected = inboxPayload({
+      kind: "event",
+      source_entity_type: "roadmap_milestone",
+      source_entity_id: milestoneId,
+      source_event_key: `roadmap:${milestoneId}:due:4`,
+      due_at: "2026-09-30T23:59:59Z",
+      payload_json: {
+        roadmap_milestone_id: milestoneId,
+        event_type: "due",
+        milestone_version: 4,
+        target_date: "2026-09-30",
+        year: 2026,
+        quarter: 3,
+      },
+    });
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "roadmap_milestone",
+      sourceEntityId: milestoneId,
+      payloadJson: {
+        event_type: "due",
+        milestone_version: 4,
+        target_date: "2026-09-30",
+      },
+    });
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        source_event_key: `roadmap:${milestoneId}:achieved:4`,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...projected,
+        payload_json: { ...projected.payload_json, quarter: 4 },
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly validates Project completion source snapshots", () => {
     const projectId = "018f0000-0000-7000-8000-000000000822";
     const projected = inboxPayload({

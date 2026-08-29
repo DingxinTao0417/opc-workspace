@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.76
+> 文档版本：2.77
 > 日期：2026-08-29
-> 依据：[PRD v9.65](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v38
+> 依据：[PRD v9.66](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v39
 
-> 2.76 说明：路线图新增年度 Q1–Q4 时间线；跨季度拖拽/键盘移动通过版本化 PATCH 把目标日期设为季度末，Sidecar 原子追加到目标季度尾部，失败刷新服务端事实。
+> 2.77 说明：路线图 R5 接入本地到期/达成 Inbox 来源；纯日期按 Sidecar 本地日历日补扫，状态写入、归档和删除与来源生命周期原子协调，React 展示不可变来源快照。
 
 ## 1. 目的
 
@@ -58,7 +58,7 @@
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema v38：schema v11–v37 交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client、Project 附件、来源 guards、重复 Reminder、受限 Automation、Agent Adapter、Client Followup、Roadmap 与 Content Item 数据契约；schema v38 增加 Content Item→Inbox 的版本化来源、去重和删除协调约束。v30–v38 都不创建业务 demo 数据；Sidecar 只幂等登记默认禁用的 Automation 预设，Agent Adapter 必须由用户显式登记。
+- SQLite 当前为 schema v39：schema v11–v37 交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client、Project 附件、来源 guards、重复 Reminder、受限 Automation、Agent Adapter、Client Followup、Roadmap 与 Content Item 数据契约；schema v38 增加 Content Item→Inbox 来源，schema v39 增加 Roadmap Milestone→Inbox 的本地日期补扫、版本化去重和删除协调约束。v30–v39 都不创建业务 demo 数据；Sidecar 只幂等登记默认禁用的 Automation 预设，Agent Adapter 必须由用户显式登记。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
 - 一致性备份与恢复已形成独立维护纵切：进程级数据库父目录运行锁先覆盖 pending restore、迁移与 SQLite open，进程内普通 API、Focus heartbeat 与 Reminder 扫描再共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。手工 `POST /api/v1/backups` 在幂等重放未命中后，迁移/导入/恢复内部链在各自不可逆边界前，统一按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；恢复另把目标包 pending 副本与 plan 上界加入同一次需求。精确等于需求允许继续；空间不足/容量无法确认分别以 507/503 或启动失败安全拒绝。拒绝无备份 staging、新回滚包、业务变化或 generic incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排通过容量准入后创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除。数据库打开前则由 Sidecar stdout 的固定阶段码经 Tauri 映射为恢复页进度，二者不复用 API 或泄露恢复包身份。
@@ -440,7 +440,7 @@ Sidecar ready 前 + 每 5 分钟
 
 - v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含可解释容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
 - v0.2 当前：Project complete/reopen 已追加 Workflow Event；首个自动化消费者只订阅 `project_completed`。未来 Agent Runner 追加事件后，才启用固定的 Agent 失败预设；Automation Run 自身事件不进入当前消费者。
-- v0.3：路线图里程碑、内容审核与发布时间。
+- v0.3：内容审核/发布时间与路线图里程碑到期/达成已投影为本地 Inbox 事件；精确日期拖拽和原生通知仍待。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
 
 ### 8.2 去重规则
@@ -453,6 +453,8 @@ Sidecar ready 前 + 每 5 分钟
 - 幂等重放不重复写 Workflow Event。
 
 当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；系统维护来源使用 `system:<component>:<operation>:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；除容量准入拒绝外，已登记的备份操作性失败直接尽力投影，启动前或运行期数据库不可写失败用稳定 journal 延迟投影，均不改变原错误。手工 `BACKUP_*`、导入 `IMPORT_BACKUP_*`、恢复 `RESTORE_ROLLBACK_*` 容量错误、`BACKUP_INVALID` 与其他可解释业务结果不投影。手工备份幂等重放还在容量探测之前返回，避免因当前容量状态改变而破坏首次成功响应。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和新故障按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
+
+路线图到期使用 `roadmap:<milestone-id>:due:<milestone-version>`，达成使用 `roadmap:<milestone-id>:achieved:<milestone-version>`；到期扫描同时按里程碑 ID 与纯日期 `target_date` 查询历史来源，所以标题编辑或同季度重排造成的无关版本增长不会再次提醒同一计划日期。改期或状态语义改变会解决活动来源，归档终结来源，删除只在来源终态后标记 `source_deleted_at` 并保留快照。纯日期以 `Options.Now()` 所在位置的本地日历日比较，不能强制解释为 UTC 零点。
 
 父任务自动协调追加 system Actor 的 `task_parent_review_requested / task_parent_review_withdrawn / task_parent_reopened` Workflow Event；请求/撤回关联对应 child_rollup Submission，重开保留既有 accepted 批次历史。它不是可重扫来源投影：协调发生在原业务写事务中，生命周期幂等重放不得重复创建 Submission 或 Event。
 
@@ -481,7 +483,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝，以及 `BACKUP_INVALID` 等可解释结果不投影；UI 保留 note 并提示清理或刷新，启动应用失败转入下一行的 journal 补偿                                                                    |
 | 数据库/Sidecar/存储故障         | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、卷 ID、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、WebView→Sidecar request ID、全局启动故障恢复页 v1、数据库打开前白名单恢复进度、可配置低空间监测、物理卷同卷去重和无路径手动容量检查已交付；卷级趋势仍待实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`。若受管 child 存在，只有 code 0 且无 signal 的真实退出才允许重启应用；内置启动失败未创建 child 时允许继续，延迟到达的干净退出确认后可再次请求。健康启动后只读诊断 API 汇总恢复结果；数据库打开前恢复、验证、收尾及迁移阶段由白名单 stdout 协议显示，不暴露恢复包身份或路径；启动前备份选择仍待实现          |
-| 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞、Task 临期、Project 完成与 Content Item 已实现：open/tracking 来源项阻止来源硬删除；允许删除前原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                                                      |
+| 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞、Task 临期、Project 完成、Content Item 与 Roadmap Milestone 已实现：open/tracking 来源项阻止来源硬删除；允许删除前原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                                  |
 | 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                                                                  |
 | 并发旧写入                      | Sidecar 领域服务                 | Task/Tag 当前事实、父子/标签嵌入、Assignment、生命周期、Submission/Artifact、Project/Client 聚合和 Actor 变化都会使旧 `If-Match` 或 `expected_version` 返回 409；输出前端保留 summary、text、link、structured 与浏览器 File 草稿，Client 编辑前端保留资料草稿，刷新后要求用户再次明确提交，不用旧版本自动重试                                                                                                                                |
 | 受控文件缺失/篡改               | Task/Client/Project + 数据管理   | 保留元数据和审计，标记 missing/mismatch，拒绝下载；缺失不阻断确认软删或父聚合硬删，软删保留 missing 检查事实                                                                                                                                                                                                                                                                                                                                 |

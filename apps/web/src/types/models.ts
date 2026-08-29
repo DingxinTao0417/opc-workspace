@@ -1552,6 +1552,7 @@ export interface InboxItem {
     | "task_due"
     | "client_followup"
     | "content_item"
+    | "roadmap_milestone"
     | "project_completion"
     | "system_maintenance";
   sourceEntityId: string | null;
