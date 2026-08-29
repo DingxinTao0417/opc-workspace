@@ -6,6 +6,8 @@ import { RightOverview } from "./RightOverview";
 const mocks = vi.hoisted(() => ({
   recent: vi.fn(),
   refetch: vi.fn(),
+  roadmap: vi.fn(),
+  roadmapRefetch: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -17,6 +19,7 @@ vi.mock("../api/hooks", () => ({
   usePauseFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
   useResumeFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
   useRecentClientActivitiesQuery: mocks.recent,
+  useRoadmapMilestonesQuery: mocks.roadmap,
 }));
 
 vi.mock("../store/focus", () => ({
@@ -44,7 +47,50 @@ afterEach(() => cleanup());
 beforeEach(() => {
   mocks.refetch.mockReset();
   mocks.recent.mockReset();
+  mocks.recent.mockReturnValue({
+    data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
+    isError: false,
+    isPending: false,
+    refetch: mocks.refetch,
+  });
+  mocks.roadmap.mockReset();
+  mocks.roadmapRefetch.mockReset();
+  mocks.roadmap.mockReturnValue({
+    data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
+    isError: false,
+    isPending: false,
+    refetch: mocks.roadmapRefetch,
+  });
 });
+
+function milestone(
+  id: string,
+  title: string,
+  targetDate: string,
+  status: "planned" | "active",
+) {
+  return {
+    id,
+    title,
+    description: null,
+    year: Number(targetDate.slice(0, 4)),
+    quarter: 4,
+    targetDate,
+    status,
+    manualOrder: 1024,
+    archivedFromStatus: null,
+    version: 1,
+    createdAt: "2026-08-29T09:00:00Z",
+    updatedAt: "2026-08-29T09:00:00Z",
+    projects: [{ id: "project-1", name: "桌面交付", status: "active" }],
+    taskSummary: {
+      total: 4,
+      completed: 2,
+      inProgress: 1,
+      progressPercent: 50,
+    },
+  };
+}
 
 describe("RightOverview recent client activities", () => {
   it("shows real local activity facts and links to the owning client", () => {
@@ -124,5 +170,86 @@ describe("RightOverview recent client activities", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("暂无客户动态")).toBeInTheDocument();
+  });
+});
+
+describe("RightOverview upcoming roadmap milestones", () => {
+  it("merges planned and active facts by target date and shows ownership", () => {
+    mocks.roadmap.mockImplementation(
+      (input: { status: "planned" | "active" }) => ({
+        data: {
+          items:
+            input.status === "planned"
+              ? [milestone("later", "后续节点", "2099-12-20", "planned")]
+              : [milestone("near", "最近节点", "2099-12-10", "active")],
+          meta: { page: 1, pageSize: 3, total: 1 },
+        },
+        isError: false,
+        isPending: false,
+        refetch: mocks.roadmapRefetch,
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+
+    const links = screen.getAllByRole("link", { name: /查看路线图节点/ });
+    expect(links.map((link) => link.textContent)).toEqual([
+      expect.stringContaining("最近节点"),
+      expect.stringContaining("后续节点"),
+    ]);
+    expect(links[0]).toHaveAttribute("href", "/roadmap");
+    expect(screen.getAllByText("桌面交付 · 2/4 任务")).toHaveLength(2);
+    expect(mocks.roadmap).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 3,
+      sort: "target_date",
+      status: "planned",
+    });
+  });
+
+  it("keeps explicit loading, empty, and aggregate retry states", () => {
+    mocks.roadmap.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isPending: false,
+      refetch: mocks.roadmapRefetch,
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "节点读取失败，重试" }));
+    expect(mocks.roadmapRefetch).toHaveBeenCalledTimes(2);
+
+    mocks.roadmap.mockReturnValue({
+      data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
+      isError: false,
+      isPending: false,
+      refetch: mocks.roadmapRefetch,
+    });
+    rerender(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("暂无未完成的路线图节点")).toBeInTheDocument();
+
+    mocks.roadmap.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: true,
+      refetch: mocks.roadmapRefetch,
+    });
+    rerender(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("正在读取路线图节点…")).toBeInTheDocument();
   });
 });

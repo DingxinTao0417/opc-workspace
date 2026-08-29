@@ -869,6 +869,61 @@ kbd {
   font-size: 10px;
 }
 
+.milestone-overview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin-top: 13px;
+}
+
+.milestone-overview-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-md);
+  color: inherit;
+  text-decoration: none;
+}
+
+.milestone-overview-row:hover {
+  background: var(--panel-hover);
+}
+
+.milestone-overview-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.milestone-overview-copy strong,
+.milestone-overview-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.milestone-overview-copy strong {
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.milestone-overview-copy span,
+.milestone-overview-row time {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.milestone-overview-row time {
+  white-space: nowrap;
+}
+
+.milestone-overview-row time.is-overdue {
+  color: var(--danger-text);
+}
+
 .feedback {
   display: flex;
   align-items: center;

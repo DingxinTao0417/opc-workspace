@@ -132,6 +132,10 @@ func TestRoadmapMilestoneRejectsInvalidMutations(t *testing.T) {
 	if invalidFilter.Code != http.StatusBadRequest || responseErrorCode(t, invalidFilter.Body.Bytes()) != "INVALID_FILTER" {
 		t.Fatalf("invalid roadmap filter = %d: %s", invalidFilter.Code, invalidFilter.Body.String())
 	}
+	invalidSort := performRequest(router, http.MethodGet, "/api/v1/roadmap/milestones?sort=created_at", nil, nil)
+	if invalidSort.Code != http.StatusBadRequest || responseErrorCode(t, invalidSort.Body.Bytes()) != "INVALID_FILTER" {
+		t.Fatalf("invalid roadmap sort = %d: %s", invalidSort.Code, invalidSort.Body.String())
+	}
 	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/roadmap/milestones", []byte(`{
 		"title":"Guarded milestone","year":2026,"quarter":1,"target_date":"2026-01-15"
 	}`), nil)
@@ -150,6 +154,29 @@ func TestRoadmapMilestoneRejectsInvalidMutations(t *testing.T) {
 	missingConfirm := performRequest(router, http.MethodDelete, "/api/v1/roadmap/milestones/"+created.ID, nil, map[string]string{"If-Match": `"1"`})
 	if missingConfirm.Code != http.StatusUnprocessableEntity || responseErrorCode(t, missingConfirm.Body.Bytes()) != "CONFIRMATION_REQUIRED" {
 		t.Fatalf("missing roadmap delete confirm = %d: %s", missingConfirm.Code, missingConfirm.Body.String())
+	}
+}
+
+func TestRoadmapMilestoneTargetDateSortIsStableAndPageable(t *testing.T) {
+	router, _ := newProjectTestAPI(t)
+	for _, input := range []string{
+		`{"title":"Latest target","year":2030,"quarter":1,"target_date":"2030-03-30"}`,
+		`{"title":"Earliest target","year":2030,"quarter":1,"target_date":"2030-01-05"}`,
+		`{"title":"Middle target","year":2030,"quarter":1,"target_date":"2030-02-10"}`,
+	} {
+		created := performRequest(router, http.MethodPost, "/api/v1/roadmap/milestones", []byte(input), nil)
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create sortable roadmap milestone = %d: %s", created.Code, created.Body.String())
+		}
+	}
+
+	listed := performRequest(router, http.MethodGet, "/api/v1/roadmap/milestones?status=planned&sort=target_date&page=1&page_size=2", nil, nil)
+	items, meta := decodeRoadmapMilestoneList(t, listed.Body.Bytes())
+	if listed.Code != http.StatusOK || meta.Total != 3 || len(items) != 2 {
+		t.Fatalf("target-date sorted roadmap milestones = %d %#v meta=%#v", listed.Code, items, meta)
+	}
+	if items[0].Title != "Earliest target" || items[1].Title != "Middle target" {
+		t.Fatalf("target-date order = %#v", items)
 	}
 }
 

@@ -2,6 +2,7 @@ import {
   ArrowUpRight,
   CalendarDays,
   FileText,
+  Flag,
   Pause,
   Play,
   RefreshCw,
@@ -12,6 +13,7 @@ import {
   useActiveFocusSessionQuery,
   usePauseFocusSession,
   useRecentClientActivitiesQuery,
+  useRoadmapMilestonesQuery,
   useResumeFocusSession,
 } from "../api/hooks";
 import {
@@ -22,9 +24,35 @@ import {
 } from "../store/focus";
 import { useSettingsStore } from "../store/settings";
 
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function milestoneDateLabel(targetDate: string) {
+  if (targetDate < localDateKey()) return "已逾期";
+  if (targetDate === localDateKey()) return "今天";
+  const [, month, day] = targetDate.split("-");
+  return `${Number(month)}月${Number(day)}日`;
+}
+
 export function RightOverview() {
   const focusQuery = useActiveFocusSessionQuery();
   const recentActivitiesQuery = useRecentClientActivitiesQuery(3);
+  const plannedMilestonesQuery = useRoadmapMilestonesQuery({
+    page: 1,
+    pageSize: 3,
+    sort: "target_date",
+    status: "planned",
+  });
+  const activeMilestonesQuery = useRoadmapMilestonesQuery({
+    page: 1,
+    pageSize: 3,
+    sort: "target_date",
+    status: "active",
+  });
   const pauseFocus = usePauseFocusSession();
   const resumeFocus = useResumeFocusSession();
   const focusMinutes = useSettingsStore(
@@ -57,6 +85,20 @@ export function RightOverview() {
   const paused = session?.status === "paused";
   const recoveryPending = session?.status === "recovery_pending";
   const busy = pauseFocus.isPending || resumeFocus.isPending;
+  const upcomingMilestones = [
+    ...(plannedMilestonesQuery.data?.items ?? []),
+    ...(activeMilestonesQuery.data?.items ?? []),
+  ]
+    .sort(
+      (left, right) =>
+        left.targetDate.localeCompare(right.targetDate) ||
+        left.id.localeCompare(right.id),
+    )
+    .slice(0, 3);
+  const milestonesPending =
+    plannedMilestonesQuery.isPending || activeMilestonesQuery.isPending;
+  const milestonesError =
+    plannedMilestonesQuery.isError || activeMilestonesQuery.isError;
 
   const toggle = () => {
     if (!session) return;
@@ -164,6 +206,83 @@ export function RightOverview() {
                   ? "查看本轮"
                   : "选择任务并开始"}
           </Link>
+        )}
+      </section>
+
+      <section className="overview-card">
+        <div className="card-heading">
+          <span>临近项目节点</span>
+          <Link className="text-link" to="/roadmap">
+            查看全部
+          </Link>
+        </div>
+        {milestonesPending ? (
+          <div className="overview-footnote overview-activity-state">
+            正在读取路线图节点…
+          </div>
+        ) : milestonesError ? (
+          <button
+            className="overview-activity-retry"
+            onClick={() =>
+              void Promise.all([
+                plannedMilestonesQuery.refetch(),
+                activeMilestonesQuery.refetch(),
+              ])
+            }
+            type="button"
+          >
+            <RefreshCw size={12} /> 节点读取失败，重试
+          </button>
+        ) : upcomingMilestones.length === 0 ? (
+          <div className="overview-footnote overview-activity-state">
+            暂无未完成的路线图节点
+          </div>
+        ) : (
+          <div className="milestone-overview-list">
+            {upcomingMilestones.map((milestone) => {
+              const projectLabel =
+                milestone.projects.length === 0
+                  ? "未关联项目"
+                  : `${milestone.projects[0].name}${
+                      milestone.projects.length > 1
+                        ? ` +${milestone.projects.length - 1}`
+                        : ""
+                    }`;
+              const taskLabel =
+                milestone.taskSummary.total === 0
+                  ? "暂无关联任务"
+                  : `${milestone.taskSummary.completed}/${milestone.taskSummary.total} 任务`;
+              return (
+                <Link
+                  aria-label={`查看路线图节点：${milestone.title}`}
+                  className="milestone-overview-row"
+                  key={milestone.id}
+                  to="/roadmap"
+                >
+                  <span
+                    className="activity-icon activity-blue"
+                    aria-hidden="true"
+                  >
+                    <Flag size={13} />
+                  </span>
+                  <span className="milestone-overview-copy">
+                    <strong>{milestone.title}</strong>
+                    <span>
+                      {projectLabel} · {taskLabel}
+                    </span>
+                  </span>
+                  <time
+                    className={
+                      milestone.targetDate < localDateKey() ? "is-overdue" : ""
+                    }
+                    dateTime={milestone.targetDate}
+                  >
+                    {milestoneDateLabel(milestone.targetDate)}
+                  </time>
+                </Link>
+              );
+            })}
+          </div>
         )}
       </section>
 

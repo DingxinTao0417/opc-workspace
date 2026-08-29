@@ -6750,6 +6750,7 @@ export async function getRoadmapMilestones(
   if (input.status) params.set("status", input.status);
   if (input.projectId) params.set("project_id", input.projectId);
   if (input.includeArchived) params.set("include_archived", "true");
+  if (input.sort) params.set("sort", input.sort);
   const payload = await apiRequest<unknown>(
     `/api/v1/roadmap/milestones?${params}`,
     { signal },

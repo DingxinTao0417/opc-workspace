@@ -107,7 +107,7 @@ func (a *API) listRoadmapMilestones(c *gin.Context) {
 	if !ok {
 		return
 	}
-	year, quarter, status, projectID, includeArchived, ok := roadmapMilestoneListFilters(c)
+	year, quarter, status, projectID, sort, includeArchived, ok := roadmapMilestoneListFilters(c)
 	if !ok {
 		return
 	}
@@ -119,9 +119,14 @@ func (a *API) listRoadmapMilestones(c *gin.Context) {
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
-		return query.Order("roadmap_milestones.year ASC").Order("roadmap_milestones.quarter ASC").
-			Order("roadmap_milestones.manual_order ASC").Order("roadmap_milestones.target_date ASC").
-			Order("roadmap_milestones.id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
+		if sort == "target_date" {
+			query = query.Order("roadmap_milestones.target_date ASC").Order("roadmap_milestones.id ASC")
+		} else {
+			query = query.Order("roadmap_milestones.year ASC").Order("roadmap_milestones.quarter ASC").
+				Order("roadmap_milestones.manual_order ASC").Order("roadmap_milestones.target_date ASC").
+				Order("roadmap_milestones.id ASC")
+		}
+		return query.Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
 	}, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		writeDatabaseError(c)
@@ -535,13 +540,13 @@ func (a *API) reorderRoadmapMilestones(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, bool, bool) {
+func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, string, bool, bool) {
 	year := 0
 	if raw := strings.TrimSpace(c.Query("year")); raw != "" {
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 2000 || value > 2100 {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "year filter must be between 2000 and 2100")
-			return 0, 0, "", "", false, false
+			return 0, 0, "", "", "", false, false
 		}
 		year = value
 	}
@@ -550,7 +555,7 @@ func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, bool
 		value, err := strconv.Atoi(raw)
 		if err != nil || value < 1 || value > 4 {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "quarter filter must be between 1 and 4")
-			return 0, 0, "", "", false, false
+			return 0, 0, "", "", "", false, false
 		}
 		quarter = value
 	}
@@ -558,7 +563,7 @@ func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, bool
 	if status != "" {
 		if _, exists := roadmapMilestoneStatuses[status]; !exists {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
-			return 0, 0, "", "", false, false
+			return 0, 0, "", "", "", false, false
 		}
 	}
 	projectID := ""
@@ -566,16 +571,21 @@ func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, bool
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "project_id filter must be a UUID")
-			return 0, 0, "", "", false, false
+			return 0, 0, "", "", "", false, false
 		}
 		projectID = parsed.String()
+	}
+	sort := strings.TrimSpace(c.Query("sort"))
+	if sort != "" && sort != "target_date" {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "sort filter is invalid")
+		return 0, 0, "", "", "", false, false
 	}
 	includeArchived, err := optionalBooleanQuery(c, "include_archived")
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
-		return 0, 0, "", "", false, false
+		return 0, 0, "", "", "", false, false
 	}
-	return year, quarter, status, projectID, includeArchived, true
+	return year, quarter, status, projectID, sort, includeArchived, true
 }
 
 func roadmapMilestoneFilteredQuery(tx *gorm.DB, year, quarter int, status, projectID string, includeArchived bool) *gorm.DB {

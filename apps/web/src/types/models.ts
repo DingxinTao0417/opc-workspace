@@ -1038,6 +1038,7 @@ export interface RoadmapMilestoneListParams {
   status?: RoadmapMilestoneStatus;
   projectId?: string;
   includeArchived?: boolean;
+  sort?: "target_date";
 }
 
 export interface RoadmapMilestoneListResult {

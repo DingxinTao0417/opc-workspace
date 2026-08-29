@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deleteRoadmapMilestone,
   getRoadmapMilestone,
+  getRoadmapMilestones,
   reorderRoadmapMilestones,
   resetRuntimeConnection,
   updateRoadmapMilestone,
@@ -44,6 +45,34 @@ afterEach(() => {
 });
 
 describe("roadmap API contract", () => {
+  it("serializes the target-date list order used by overview reads", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          data: [milestonePayload()],
+          meta: { page: 1, page_size: 3, total: 1 },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getRoadmapMilestones({
+        page: 1,
+        pageSize: 3,
+        sort: "target_date",
+        status: "active",
+      }),
+    ).resolves.toMatchObject({
+      items: [{ id: "milestone-1" }],
+      meta: { page: 1, pageSize: 3, total: 1 },
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.searchParams.get("sort")).toBe("target_date");
+    expect(url.searchParams.get("status")).toBe("active");
+    expect(url.searchParams.get("page_size")).toBe("3");
+  });
+
   it("loads and normalizes one milestone detail", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
