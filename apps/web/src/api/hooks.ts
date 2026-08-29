@@ -53,7 +53,6 @@ import {
   endTaskAssignment,
   executeTaskLifecycleCommand,
   getAllActors,
-  getAllClients,
   getAllProjects,
   getAllTags,
   getAllTasks,
@@ -497,7 +496,7 @@ export const clientDetailQueryKey = (id: string) =>
 export function useClientsQuery(input: ClientListParams = {}, enabled = true) {
   return useQuery({
     queryKey: [...clientQueryKey, "list", input],
-    queryFn: () => getClients(input),
+    queryFn: ({ signal }) => getClients(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
@@ -506,10 +505,20 @@ export function useClientsQuery(input: ClientListParams = {}, enabled = true) {
   });
 }
 
-export function useClientOptionsQuery(enabled = true) {
+export function useClientOptionsQuery(search = "", page = 1, enabled = true) {
+  const normalizedSearch = search.trim();
   return useQuery({
-    queryKey: [...clientQueryKey, "options"],
-    queryFn: () => getAllClients({ sort: "name" }),
+    queryKey: [...clientQueryKey, "options", normalizedSearch, page],
+    queryFn: ({ signal }) =>
+      getClients(
+        {
+          page,
+          pageSize: 20,
+          q: normalizedSearch || undefined,
+          sort: "name",
+        },
+        signal,
+      ),
     enabled,
     retry: 2,
     retryDelay: 500,
@@ -520,7 +529,7 @@ export function useClientOptionsQuery(enabled = true) {
 export function useClientQuery(id: string | null) {
   return useQuery({
     queryKey: clientDetailQueryKey(id ?? "missing"),
-    queryFn: () => getClient(id!),
+    queryFn: ({ signal }) => getClient(id!, signal),
     enabled: Boolean(id),
     retry: 1,
   });

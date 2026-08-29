@@ -6053,6 +6053,7 @@ export async function deleteProject(
 
 export async function getClients(
   input: ClientListParams = {},
+  signal?: AbortSignal,
 ): Promise<ClientListResult> {
   const params = new URLSearchParams({
     page: String(input.page ?? 1),
@@ -6061,7 +6062,9 @@ export async function getClients(
   if (input.q?.trim()) params.set("q", input.q.trim());
   if (input.status) params.set("status", input.status);
   if (input.sort?.trim()) params.set("sort", input.sort.trim());
-  const payload = await apiRequest<unknown>(`/api/v1/clients?${params}`);
+  const payload = await apiRequest<unknown>(`/api/v1/clients?${params}`, {
+    signal,
+  });
   if (
     !isRecord(payload) ||
     !Array.isArray(payload.data) ||
@@ -6082,27 +6085,13 @@ export async function getClients(
   };
 }
 
-export async function getAllClients(
-  input: Omit<ClientListParams, "page" | "pageSize"> = {},
-): Promise<Client[]> {
-  const clients: Client[] = [];
-  const pageSize = 100;
-  let page = 1;
-  let total = Number.POSITIVE_INFINITY;
-
-  while (clients.length < total) {
-    const result = await getClients({ ...input, page, pageSize });
-    clients.push(...result.items);
-    total = result.meta.total;
-    if (result.items.length === 0) break;
-    page += 1;
-  }
-  return clients;
-}
-
-export async function getClient(id: string): Promise<Client> {
+export async function getClient(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Client> {
   const payload = await apiRequest<unknown>(
     `/api/v1/clients/${encodeURIComponent(id)}`,
+    { signal },
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeClient(body);

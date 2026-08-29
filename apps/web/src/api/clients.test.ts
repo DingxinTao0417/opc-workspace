@@ -3,7 +3,6 @@ import {
   ApiError,
   createClient,
   deleteClient,
-  getAllClients,
   getClients,
   getProjects,
   normalizeClient,
@@ -97,28 +96,6 @@ describe("client API contract", () => {
       sort: "-updated_at",
     });
     expect(result.meta).toEqual({ page: 2, pageSize: 20, total: 21 });
-  });
-
-  it("loads every client option page", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const page = Number(
-        new URL(String(input), "http://local").searchParams.get("page"),
-      );
-      const count = page === 1 ? 100 : 1;
-      return jsonResponse({
-        data: Array.from({ length: count }, (_, index) =>
-          clientPayload({
-            id: `client-${(page - 1) * 100 + index + 1}`,
-            name: `客户 ${(page - 1) * 100 + index + 1}`,
-          }),
-        ),
-        meta: { page, page_size: 100, total: 101 },
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(getAllClients({ sort: "name" })).resolves.toHaveLength(101);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("requests archived projects when a client detail needs the full relation", async () => {

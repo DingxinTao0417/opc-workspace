@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v31。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束。v0.1 的资料 CRUD、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付，模块仍为**部分完成**；邮件/日历等其他来源、回访和财务聚合尚未交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v31。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源、回访和财务聚合尚未验收或交付。
 
 ## 定位与边界
 
@@ -17,7 +17,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 
 ## 当前实现状态
 
-当前状态为**部分完成**，已经具备可运行的客户资料事实层、列表、基础详情、Project 客户关联、人工与项目状态本地活动时间线、受控附件和 person 显式关联。
+当前状态为**部分完成**，已经具备可运行的客户资料事实层、列表、基础详情、共享服务端搜索 ClientSelect、Project 客户关联、人工与项目状态本地活动时间线、受控附件和 person 显式关联。
 
 ### 已实现：数据与 Sidecar
 
@@ -53,8 +53,9 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - 编辑发生版本冲突时刷新最新 Client 版本，但保留用户未提交草稿并要求重新确认。
 - `/clients/:id` 展示基础资料、真实关联项目列表及分页、状态调整、危险区、本地活动时间线、客户附件和“本地联系人”。时间线区分可编辑人工记录与只读 Project 生命周期事实，并隐藏内部 Workflow Event ID。用户可选择已有 active person，或以联系人名称为默认值原子新建并关联；解除必须填写原因，历史按需展开。界面明确提示这不会创建账号、发送消息或授予访问权；回访和发票/收入仍标为后续版本。
 - 停用或恢复只更新 Client 状态，不解除 Project。永久删除前必须先停用并二次确认，界面展示将解除的项目数；成功后回到客户列表并显示实际解除数量。
-- Project 新建/编辑表单已接真实客户选择器，可关联、改绑或选择“不关联客户”；选项拉全分页结果并标注 inactive Client。客户选项加载失败时可重试，编辑已有 Project 时保留当前关联，不会静默提交 `null`。
-- 项目列表已支持按 Client 筛选；Client 创建、编辑、删除和 Project 关联变化会刷新相关 Client/Project 查询缓存。
+- 共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 客户筛选和 Tasks 客户筛选。它固定每页请求 20 条，输入经 250 ms 防抖后使用既有 `q` 服务端搜索，支持稳定上一页/下一页并传递取消信号，不再串行拉取全部 Client。
+- 选择器区分加载、初始空、搜索无结果、错误重试和存在更多结果；提供 combobox/listbox 键盘语义。跨页、搜索或加载失败时当前选择仍保留；inactive Client 可见可选。编辑已有 Project 时不会因选项未加载或失败静默提交 `null`，只有用户显式点击“清除客户”才解除关系。
+- 项目列表和任务列表已支持按 Client 筛选；Client 创建、编辑、删除和 Project 关联变化会刷新相关 Client/Project/Task 查询缓存。Task 只提交 `client_id` 查询条件，服务端仍沿 Task→Project→Client 当前关系过滤，不复制客户事实。
 
 ### 已知缺口
 
@@ -63,7 +64,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - 当前仅支持一个 `contact` 角色，不支持多联系人、角色自定义、客户门户或远程协作。
 - 没有发票详情、累计收入或 Financial Entry 聚合；这些能力归入 v0.4。
 - 没有 `client_followups`、提醒、今日或 Inbox 联动；回访归入 v0.4。
-- 仍需真实浏览器完成键盘焦点、窄屏表格和大客户量分页性能验收。
+- 仍需真实浏览器完成 ClientSelect 键盘/焦点、浮层与窄屏表格验收，并以至少 1,000 条、建议 10,000 条客户数据验证首开、搜索和翻页性能；现有组件/接口自动化不能替代该专项证据。
 
 ## 当前用户流程
 
@@ -100,7 +101,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 
 1. owner 在客户列表新建 Client，填写名称、可选联系人资料与状态。
 2. Web 先做即时校验；Sidecar 以服务端规则清洗并持久化，创建默认为 `active`，也可显式选择 `lead / inactive`。
-3. owner 在 Project 新建或编辑表单中选择该 Client，或选择“不关联客户”。
+3. owner 在 Project 新建或编辑表单中打开共享 ClientSelect；控件先读取 20 条，可通过 250 ms 防抖的服务端搜索或“下一页”定位 Client，也可显式点击“清除客户”解除关联。inactive Client 保持可见可选，当前选择不会因翻页或请求失败消失。
 4. Project 外键变化在同一数据库事务中使相关 Client 版本失效；客户详情从 Project 查询真实项目列表和数量。
 
 ### 编辑、停用与恢复
@@ -147,6 +148,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - `sort` 支持逗号分隔和 `-` 降序，白名单为 `name / contact_name / status / project_count / created_at / updated_at`。
 - 默认 `updated_at DESC`；所有排序最后追加 `id ASC`，保证跨分页稳定。
 - 返回 `{ "data": [...], "meta": { "page", "page_size", "total" } }`。
+- Project 新建/编辑与 Project/Task 客户筛选作为列表消费者固定发送 `page_size=20` 并使用名称稳定排序；选择器的查询参数只改变读模型，不新增 Client 表、专用 options API 或持久化缓存。app v0.1.0、API v1 与 schema v31 保持不变，无 migration。
 
 ### Client Activity 数据与列表契约
 
@@ -244,16 +246,16 @@ Client DELETE                     → link history cascade；person Actor 保留
 ## 分阶段实施
 
 1. **v0.1 客户事实层（已实现）**：schema v10、Go model、CRUD、校验、分页/搜索/状态筛选、快照幂等、乐观锁、项目数聚合和删除约束。
-2. **v0.1 前端纵切（已实现基础范围）**：列表、新建/编辑、基础详情、关联项目、Project 客户选择/筛选、加载/空/错误/重试与冲突草稿保留。
+2. **v0.1 前端纵切（已实现基础范围）**：列表、新建/编辑、基础详情、关联项目，以及覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选的共享 ClientSelect 已交付。选择器具备每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留、inactive 可见可选、加载/空/错误重试/更多提示和 combobox 键盘语义；真实浏览器/窄屏/大数据量专项仍待验收。
 3. **v0.1 本地活动与附件（已实现）**：人工备注/会议、Project complete/reopen 只读系统活动、可追溯时间线、受控附件、安全下载、软删除审计和聚合删除补偿已交付；邮件/日历/回访等其他来源仍待实现，不接线上行为。
 4. **v0.1 Actor 显式关联（已实现）**：已有 person / 原子新建二选一、单 active contact、聚合乐观锁、幂等重放、带原因解除、不可变历史和本地责任语义提示。
 5. **v0.4 业务增强（待实现）**：回访计划、本地提醒、发票和财务聚合；第一版仍不自动对外发送。
 
 ## 验证与验收边界
 
-当前自动化测试覆盖 schema v9→v10、v17→v18、v18→v19、v19→v20 与 v30→v31 数据保留、索引/约束/trigger/外键、Client CRUD/校验、分页/搜索/状态/排序、活动创建幂等、混合精度/offset 同秒时间顺序、跨页稳定性与真实最近动态、列表/详情/版本化编辑/软删除/删除历史/system reference 只读、Project complete/reopen 原子投影、无 Client、来源唯一、Event/Activity/Inbox 故障全回滚、Client 版本传播与改绑历史、附件严格上传/幂等/分页/下载完整性/软删/聚合硬删/崩溃恢复、已有/新建 person 关联、单 active contact、幂等/并发、带原因解除、Actor 停用保护与 Client 删除边界、聚合版本与最近活动传播、Project 关联传播、内部备份恢复与 Invoice 删除冲突。Web 侧覆盖 Client、Activity、Attachment、Actor Link API 规范化，项目状态系统活动的人类可读只读展示与缓存失效，以及客户列表/详情和 Project 客户选择/筛选。
+当前自动化测试覆盖 schema v9→v10、v17→v18、v18→v19、v19→v20 与 v30→v31 数据保留、索引/约束/trigger/外键、Client CRUD/校验、分页/搜索/状态/排序、活动创建幂等、混合精度/offset 同秒时间顺序、跨页稳定性与真实最近动态、列表/详情/版本化编辑/软删除/删除历史/system reference 只读、Project complete/reopen 原子投影、无 Client、来源唯一、Event/Activity/Inbox 故障全回滚、Client 版本传播与改绑历史、附件严格上传/幂等/分页/下载完整性/软删/聚合硬删/崩溃恢复、已有/新建 person 关联、单 active contact、幂等/并发、带原因解除、Actor 停用保护与 Client 删除边界、聚合版本与最近活动传播、Project 关联传播、内部备份恢复与 Invoice 删除冲突。Web 侧覆盖 Client、Activity、Attachment、Actor Link API 规范化，项目状态系统活动的人类可读只读展示与缓存失效，以及 ClientSelect 的分页搜索、查询键切换与卸载取消、跨页与失败选中保留、inactive、反馈状态、上一页/下一页、combobox 键盘交互和 Project/Task 三个消费入口；不记录或编造测试总数。
 
-以下仍不能据此宣称完成：真实浏览器键盘/焦点/窄屏验收、大数据量分页性能、邮件/日历等其他 Activity 来源、多联系人/自定义关系、回访、财务或任何线上互动。
+以下仍不能据此宣称完成：ClientSelect 真实浏览器键盘/焦点/窄屏验收、1,000/10,000 条客户大数据量分页与搜索性能、邮件/日历等其他 Activity 来源、多联系人/自定义关系、回访、财务或任何线上互动。
 
 ## 相关代码/PRD 链接
 
@@ -279,3 +281,4 @@ Client DELETE                     → link history cascade；person Actor 保留
 - [Client 表单](../../apps/web/src/components/ClientFormModal.tsx)
 - [Client Activity 时间线](../../apps/web/src/components/ClientActivitiesSection.tsx)
 - [Project 表单](../../apps/web/src/components/ProjectFormModal.tsx)
+- [共享 Client 选择器](../../apps/web/src/components/ClientSelect.tsx)

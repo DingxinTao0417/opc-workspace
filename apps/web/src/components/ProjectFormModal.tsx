@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
-import {
-  useClientOptionsQuery,
-  useCreateProject,
-  useUpdateProject,
-} from "../api/hooks";
-import type { ClientStatus, Project } from "../types/models";
+import { useCreateProject, useUpdateProject } from "../api/hooks";
+import type { Project } from "../types/models";
+import { ClientSelect } from "./ClientSelect";
 import { Modal } from "./Modal";
 
 const projectColors = [
@@ -16,12 +13,6 @@ const projectColors = [
   "#E5484D",
   "#4B93E6",
 ];
-
-const clientStatusLabels: Record<ClientStatus, string> = {
-  active: "活跃",
-  lead: "潜在客户",
-  inactive: "已停用",
-};
 
 function amountToInput(amountMinor: number | null): string {
   if (amountMinor === null) return "";
@@ -67,7 +58,6 @@ export function ProjectFormModal({
 }) {
   const createMutation = useCreateProject();
   const updateMutation = useUpdateProject();
-  const clientsQuery = useClientOptionsQuery(open);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [clientId, setClientId] = useState("");
@@ -223,45 +213,19 @@ export function ProjectFormModal({
         </div>
 
         <div className="form-grid">
-          <label className="form-field">
+          <div className="form-field">
             <span>客户</span>
-            <select
-              aria-label="客户"
-              disabled={clientsQuery.isPending || clientsQuery.isError}
-              onChange={(event) => setClientId(event.target.value)}
+            <ClientSelect
+              ariaLabel="客户"
+              emptyLabel="不关联客户"
+              onChange={setClientId}
+              selectedName={
+                clientId === project?.clientId ? project.clientName : undefined
+              }
               value={clientId}
-            >
-              <option value="">不关联客户</option>
-              {project?.clientId &&
-              !clientsQuery.data?.some(
-                (client) => client.id === project.clientId,
-              ) ? (
-                <option value={project.clientId}>
-                  {project.clientName ?? "当前关联客户"}（当前关联）
-                </option>
-              ) : null}
-              {clientsQuery.data?.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}（{clientStatusLabels[client.status]}）
-                </option>
-              ))}
-            </select>
-            {clientsQuery.isPending ? (
-              <small className="form-field-hint">正在读取本地客户…</small>
-            ) : null}
-            {clientsQuery.isError ? (
-              <span className="form-field-error">
-                客户列表不可用，当前关联不会被清空。
-                <button
-                  className="form-inline-action"
-                  onClick={() => void clientsQuery.refetch()}
-                  type="button"
-                >
-                  重试
-                </button>
-              </span>
-            ) : null}
-          </label>
+              variant="form"
+            />
+          </div>
           <label className="form-field">
             <span>合同金额</span>
             <div className="field-with-suffix">

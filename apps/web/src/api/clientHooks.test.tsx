@@ -6,18 +6,25 @@ import type { Client, ClientInput } from "../types/models";
 import {
   clientQueryKey,
   projectQueryKey,
+  useClientOptionsQuery,
   useCreateClient,
   useUpdateClient,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   create: vi.fn(),
+  list: vi.fn(),
   update: vi.fn(),
 }));
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
-  return { ...actual, createClient: calls.create, updateClient: calls.update };
+  return {
+    ...actual,
+    createClient: calls.create,
+    getClients: calls.list,
+    updateClient: calls.update,
+  };
 });
 
 const input: ClientInput = {
@@ -56,6 +63,56 @@ function createQueryClient() {
 afterEach(() => vi.clearAllMocks());
 
 describe("client hooks", () => {
+  it("requests one searchable client option page and forwards cancellation", async () => {
+    calls.list.mockResolvedValue({
+      items: [client],
+      meta: { page: 1, pageSize: 20, total: 1 },
+    });
+    const { result } = renderHook(
+      () => useClientOptionsQuery("  星河  ", 1, true),
+      { wrapper: wrapperFor(createQueryClient()) },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(calls.list).toHaveBeenCalledOnce();
+    expect(calls.list).toHaveBeenCalledWith(
+      {
+        page: 1,
+        pageSize: 20,
+        q: "星河",
+        sort: "name",
+      },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("aborts an obsolete option request when the query key changes or unmounts", async () => {
+    const signals: AbortSignal[] = [];
+    calls.list.mockImplementation((_input, signal?: AbortSignal) => {
+      if (signal) signals.push(signal);
+      return new Promise(() => undefined);
+    });
+    const queryClient = createQueryClient();
+    const { rerender, unmount } = renderHook(
+      ({ search }) => useClientOptionsQuery(search, 1, true),
+      {
+        initialProps: { search: "星河" },
+        wrapper: wrapperFor(queryClient),
+      },
+    );
+
+    await waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0].aborted).toBe(false);
+
+    rerender({ search: "远山" });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+
+    unmount();
+    await waitFor(() => expect(signals[1].aborted).toBe(true));
+  });
+
   it("reuses one idempotency key for an unchanged failed create retry", async () => {
     calls.create
       .mockRejectedValueOnce(new Error("response lost"))

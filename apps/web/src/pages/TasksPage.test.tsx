@@ -67,6 +67,29 @@ const task: Task = {
   tags: [],
 };
 
+vi.mock("../components/ClientSelect", () => ({
+  ClientSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="client-1">示例客户</option>
+    </select>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useTaskPageQuery: (input: TaskListParams, enabled = true) => {
     mocks.taskQueries.push(input);
@@ -87,26 +110,6 @@ vi.mock("../api/hooks", () => ({
   },
   useProjectOptionsQuery: () => ({
     data: [{ id: "project-1", name: "品牌官网改版" }],
-    isError: false,
-    isPending: false,
-  }),
-  useClientOptionsQuery: () => ({
-    data: [
-      {
-        id: "client-1",
-        name: "示例客户",
-        contactName: null,
-        email: null,
-        phone: null,
-        notes: null,
-        status: "active",
-        version: 1,
-        projectCount: 1,
-        latestActivityAt: null,
-        createdAt: "2026-08-27T08:00:00Z",
-        updatedAt: "2026-08-27T08:00:00Z",
-      },
-    ],
     isError: false,
     isPending: false,
   }),

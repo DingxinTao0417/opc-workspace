@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志、全局启动故障恢复页 v1、Inbox/Reminder/Task 编排及已登记来源投影已接通；任务已支持有门禁的直属子任务汇总并最多自动进入待验收，Project complete/reopen 会把事件发生当下的关联 Client 写为只读系统活动，项目详情已接 7 天/30 天/本月 Focus 分析与终态 Session 历史，Today 已接与服务端时钟一致的逾期/未来 24 小时临期快捷筛选。Focus 原生反馈、其他客户外部来源、数据库打开前备份选择/实时恢复进度、重复/原生通知、本地 Agent、非空目标/跨 schema 冲突合并、回访/财务仍是规划。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v31。Project/Task/Actor、Client、Focus、Today、设置/头像、搜索、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳日志、全局启动故障恢复页 v1、Inbox/Reminder/Task 编排及已登记来源投影已接通；任务已支持有门禁的直属子任务汇总并最多自动进入待验收。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选，使用每页 20 条、250 ms 服务端搜索、稳定分页与取消信号，并在跨页或失败时保留当前选择；Project complete/reopen 会把事件发生当下的关联 Client 写为只读系统活动，项目详情已接 7 天/30 天/本月 Focus 分析与终态 Session 历史，Today 已接与服务端时钟一致的逾期/未来 24 小时临期快捷筛选。ClientSelect 的真实浏览器/窄屏/大数据量专项、Focus 原生反馈、其他客户外部来源、数据库打开前备份选择/实时恢复进度、重复/原生通知、本地 Agent、非空目标/跨 schema 冲突合并、回访/财务仍是规划或待验收。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.15）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.16）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -16,16 +16,16 @@
 
 ## 核心模块
 
-| 模块           | 当前状态                                                                                   | 目标版本                  | 文档                                 |
-| -------------- | ------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------ |
-| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）                       | v0.1                      | [today.md](modules/today.md)         |
-| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、计划组拖拽、受控跨列看板与父任务自动待验收已交付） | v0.1                      | [tasks.md](modules/tasks.md)         |
-| 项目管理       | 部分完成（含项目级 Focus 分析、终态 Session 历史及 Client 生命周期活动投影）                | v0.1                      | [projects.md](modules/projects.md)   |
-| 客户管理       | 部分完成（基础资料、Project 关联、人工活动与 Project 状态系统活动已交付）                   | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
-| 收件箱工作编排 | 部分完成（手工编排、Reminder、follow-up/阻塞/临期和备份失败维护来源已交付）                | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
-| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                           | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
-| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                  | v0.1                      | [actors.md](modules/actors.md)       |
-| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                   | v0.1                      | [focus.md](modules/focus.md)         |
+| 模块           | 当前状态                                                                                                           | 目标版本                  | 文档                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------- | ------------------------------------ |
+| 今日工作台     | 部分完成（T-06A–H 日期编排、执行、行内管理及截止风险快捷筛选已交付）                                               | v0.1                      | [today.md](modules/today.md)         |
+| 任务管理       | 部分完成（事实层、D1/D2、筛选/保存视图、共享服务端 Client 筛选、计划组拖拽、受控跨列看板与父任务自动待验收已交付） | v0.1                      | [tasks.md](modules/tasks.md)         |
+| 项目管理       | 部分完成（含共享服务端 Client 选择/筛选、项目级 Focus 分析、终态 Session 历史及 Client 生命周期活动投影）          | v0.1                      | [projects.md](modules/projects.md)   |
+| 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动与 Project 状态系统活动已交付）                      | v0.1；回访/财务 v0.4      | [clients.md](modules/clients.md)     |
+| 收件箱工作编排 | 部分完成（手工编排、Reminder、follow-up/阻塞/临期和备份失败维护来源已交付）                                        | 人工闭环 v0.1；Agent v0.2 | [inbox.md](modules/inbox.md)         |
+| 本地提醒       | 一次性 Reminder、启动补偿与到期 Inbox 投影已完成                                                                   | v0.1；重复/原生通知后续   | [reminders.md](modules/reminders.md) |
+| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                          | v0.1                      | [actors.md](modules/actors.md)       |
+| 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                           | v0.1                      | [focus.md](modules/focus.md)         |
 
 ## 平台与共享能力
 

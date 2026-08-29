@@ -34,7 +34,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 - 项目响应从关联任务实时派生总数、已完成数、进行中数、剩余数、完成百分比及 `actual_minutes` 合计，并返回客户名、发票数和当前允许操作。六状态上线后仍只有 `done` 计为已完成；cancelled 保留在总数和剩余口径中，项目语义未随 D1 改写。
 - 项目页使用真实 API 展示卡片、服务端搜索、状态筛选和每页 12 条分页，并覆盖加载、空、错误和重试状态。
 - 项目详情任务浏览器直接按 Project 条件调用 Task 服务端分页，每页 20 项；无条件时默认读取根任务并复用 `parent_task_id` 查询按需展开任意深度子任务，也可切换平铺列表。标题/描述、状态、优先级、类型、单标签及已/未排期可组合筛选；条件激活时使用平铺结果并显示父任务上下文，避免把局部命中冒充完整树，清除后恢复任务树。详情同时支持资料编辑、从项目内新建并预选项目的任务、派生进度/工时、状态操作、归档恢复，以及带二次确认的永久删除；版本冲突会刷新详情事实。
-- 项目新建/编辑已接真实 Client 选择器，可关联、改绑或解除客户；项目列表支持按 Client 筛选。普通项目列表默认排除归档项，Client 详情为读取完整关联历史显式使用 `include_archived=true`。
+- 项目新建/编辑与项目列表客户筛选共用 `ClientSelect`：每页从真实 Client API 读取 20 条，输入经 250 ms 防抖后执行服务端搜索，支持稳定上一页/下一页并向请求传递取消信号，不再串行拉取全部 Client。跨页或失败时保留当前选择，inactive Client 保持可见可选；用户仍可显式点击“清除客户”解除关联。普通项目列表默认排除归档项，Client 详情为读取完整关联历史显式使用 `include_archived=true`。
 - 新建任务和任务详情已接项目选择器；任务列表、详情、编辑和状态更新响应关联项目时返回 `project_name`，任务行直接显示项目名称。
 - 归档项目拒绝新建任务关联或把其他任务改入，返回 `409 PROJECT_ARCHIVED`；既有关联任务仍可编辑且保持原关联。归档转换进行中时，详情页的新建任务入口会禁用。
 - 项目创建、资料编辑、`start/pause/resume/complete/reopen/archive/restore` 和永久删除会在同一数据库事务追加 `project_*` Workflow Event，记录内置 owner、请求 ID、时间及前后项目快照；事件写入失败时整个项目命令回滚，创建幂等重放不会重复追加事件。
@@ -52,7 +52,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 已知缺口
 
-- 项目详情任务区已改为每页 20 条的服务端分页，并提供树/平铺切换、标题/描述搜索、状态/优先级/类型/单标签/排期状态筛选和结果计数；子任务展开按每页 100 条读取并显示独立分页控件。任务表单的项目选项仍按每页 100 条串行拉取全部结果以避免静默截断。大数据量实际响应性能和内嵌 Assignment/Submission 控件仍待验证；Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载。
+- 项目详情任务区已改为每页 20 条的服务端分页，并提供树/平铺切换、标题/描述搜索、状态/优先级/类型/单标签/排期状态筛选和结果计数；子任务展开按每页 100 条读取并显示独立分页控件。ClientSelect 已消除客户选项的全量串行请求，但任务表单的 Project 选项仍按每页 100 条串行拉取全部结果以避免静默截断，这是另一项独立缺口。ClientSelect 的真实浏览器/窄屏/1,000 或 10,000 条客户性能、项目任务大数据量实际响应性能和内嵌 Assignment/Submission 控件仍待验证；Task 并发版本、Assignment 与 manual Submission/Artifact 验收继续由共享任务详情承载。
 - 项目工时继续对任务表当前 `actual_minutes` 求和；schema v11 已让 completed Focus Session 通过精确秒数账本向 Task 追加完整分钟，再沿既有聚合触发器刷新项目工时。项目详情报告直接读取 completed Session 的闭合正时长 interval，终态历史读取 Session 审计事实；两者都不成为第二份可写工时。
 - 没有发票明细；当前只返回发票计数，用于解释硬删除影响。项目附件、Task Artifact 产出聚合、人工项目笔记和不可变系统写命令时间线各自维护事实，不互相替代。
 - schema v23–v25 已接显式 follow-up Task Artifact、Task 阻塞与 Task 临期→Inbox；schema v28 把 Project `complete` 作为明确本地完成节点同事务投影到 Inbox。独立验收、开票等尚无真实 Project 状态，不提前伪造来源。
@@ -62,7 +62,7 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 
 ### 创建并启动项目
 
-1. owner 输入名称，可选 Client、日期、金额和颜色；Client 选项从真实分页 API 拉取，也可明确选择“不关联客户”。前端为同一次失败重试复用 `Idempotency-Key`，服务端保存规范化请求摘要和首次 `planning` 项目响应快照。
+1. owner 输入名称，可选 Client、日期、金额和颜色；共享 ClientSelect 每页读取 20 条并以 250 ms 防抖搜索服务端，可稳定上一页/下一页、重试失败请求，也可明确点击“清除客户”。已有选择即使不在当前页、搜索失败或为 inactive 仍保留并可见，只有用户显式清除才提交 `null`。前端为同一次失败重试复用 `Idempotency-Key`，服务端保存规范化请求摘要和首次 `planning` 项目响应快照。
 2. 在项目详情新建任务时，任务弹窗自动预选当前项目；也可在普通任务新建/编辑中选择非归档项目。
 3. owner 执行“开始项目”，服务端校验 `If-Match` 后从 `planning` 进入 `in_progress`。
 4. 项目卡片和详情从任务数据实时计算完成进度与 `actual_minutes` 合计。
@@ -165,8 +165,8 @@ Project 是任务的上层业务组织单位，用于表达一项工作的目标
 | POST   | `/api/v1/projects/:id/transitions`             | 执行 `start/pause/resume/complete/reopen/archive/restore`；缺少 `If-Match` 返回 428，旧版本返回 409                                                                                                               |
 | DELETE | `/api/v1/projects/:id?confirm=true`            | 仅永久删除已归档项目；必须携带 `If-Match`，返回 `deleted_id/detached_tasks/detached_invoices`                                                                                                                     |
 | GET    | `/api/v1/tasks?project_id=:id`                 | 读取项目任务；任务资源读取与编辑/状态响应包含可选 `project_name`；归档项目不接受新的任务关联                                                                                                                      |
-| GET    | `/api/v1/focus-sessions?project_id=:id`        | 按 Task 查询时当前项目归属读取终态 Session，支持既有 `task_id/status/page/page_size`；归档项目可读，canonical UUID 非法返回 400，不存在返回 404；无 Task/Task 已删除/当前无项目不进入结果                              |
-| GET    | `/api/v1/stats/focus?project_id=:id`           | 按既有 `date_from/date_to/timezone` 契约读取项目报告；只聚合 completed Session 的闭合正时长 interval，保留 1–93 当地日、IANA/DST、跨午夜、Streak 与完整零值序列                                                    |
+| GET    | `/api/v1/focus-sessions?project_id=:id`        | 按 Task 查询时当前项目归属读取终态 Session，支持既有 `task_id/status/page/page_size`；归档项目可读，canonical UUID 非法返回 400，不存在返回 404；无 Task/Task 已删除/当前无项目不进入结果                         |
+| GET    | `/api/v1/stats/focus?project_id=:id`           | 按既有 `date_from/date_to/timezone` 契约读取项目报告；只聚合 completed Session 的闭合正时长 interval，保留 1–93 当地日、IANA/DST、跨午夜、Streak 与完整零值序列                                                   |
 
 项目创建和编辑会校验名称 2–100 字符、描述最多 10000 字符、日期格式与先后顺序、非负金额、`#RRGGBB` 颜色和已有客户外键。
 
@@ -191,7 +191,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 客户与项目资料
 
-- Client CRUD、客户选择/改绑/解除和项目列表客户筛选已交付；Client 停用保留关联，永久删除会把 Project 外键置空并使相关聚合版本失效。
+- Client CRUD、共享服务端搜索/分页选择器、客户选择/改绑/解除和项目列表客户筛选已交付；Client 停用保留关联且在选择器中继续可见可选，永久删除会把 Project 外键置空并使相关聚合版本失效。
 - 后续只在真实需求出现时扩展客户标签、项目风险信号或更完整排序交互，不新增可写进度或复制客户活动事实。
 
 ### 任务、产出与后续工作
@@ -210,15 +210,15 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ## 与其他模块协作
 
-| 模块      | 当前与后续协作方式                                                                                                                                                                                                           |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 任务      | 当前已支持项目选择、项目名展示、项目任务树/平铺列表、项目内搜索/状态/优先级/类型/标签/排期筛选与服务端分页、Task 父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；内嵌 D2 写控件不在 Project 复制。 |
-| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、表单选择/改绑/解除、项目列表客户筛选、Client 详情中的完整关联项目读取、人工活动时间线、Project complete/reopen 只读系统活动、受控附件和 person 显式关联；其他外部来源仍待实现。 |
-| 收件箱    | 显式 follow-up Task Artifact、Task 阻塞/临期和 Project 完成节点已投影；完成事项携带不可变 Project 名称、时间、版本和未结任务数快照，并可直达项目。                                                                           |
-| Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                                               |
-| 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目详情通过可选 `project_id` 按 Task 当前归属读取 completed-only 报告和终态历史，不复制 Session 或 Project 事实。        |
-| 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                                                                           |
-| 今日      | 可展示已有任务项目名；项目节点和风险聚合尚未接入。                                                                                                                                                                           |
+| 模块      | 当前与后续协作方式                                                                                                                                                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 任务      | 当前已支持项目选择、项目名展示、项目任务树/平铺列表、项目内搜索/状态/优先级/类型/标签/排期筛选与服务端分页、Task 父子/版本、派生进度/工时、共享任务详情中的 D2 产出与验收，以及项目详情的只读 Artifact 聚合；内嵌 D2 写控件不在 Project 复制。             |
+| 客户      | 已支持 Client CRUD、可选 `client_id`、客户名称聚合、共享服务端搜索/稳定分页的表单选择和项目/任务筛选、改绑/解除、Client 详情中的完整关联项目读取、人工活动时间线、Project complete/reopen 只读系统活动、受控附件和 person 显式关联；其他外部来源仍待实现。 |
+| 收件箱    | 显式 follow-up Task Artifact、Task 阻塞/临期和 Project 完成节点已投影；完成事项携带不可变 Project 名称、时间、版本和未结任务数快照，并可直达项目。                                                                                                         |
+| Actor     | 项目本身不分派；项目内可执行工作必须落为 Task，再通过已交付的任务详情 Assignment API/UI 分派。                                                                                                                                                             |
+| 专注      | 已从 completed Focus Session 经 Task 精确秒数账本取得新增完整分钟，并沿既有 Task 聚合刷新项目工时；项目详情通过可选 `project_id` 按 Task 当前归属读取 completed-only 报告和终态历史，不复制 Session 或 Project 事实。                                      |
+| 发票/财务 | 当前只聚合发票数量用于删除说明；发票详情、收入和成本属于后续版本。                                                                                                                                                                                         |
+| 今日      | 可展示已有任务项目名；项目节点和风险聚合尚未接入。                                                                                                                                                                                                         |
 
 整体协作关系参见[整体功能架构](../functional-architecture.md)。
 
@@ -227,7 +227,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 1. **项目事实与 API（已实现）**：当前 schema v31 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31 只扩展 Client Activity 来源唯一约束，不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（当前纵切已实现）**：项目选择、串行分页拉全项目选项、`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通；Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；大数据量性能仍待专项验证。
-4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、客户筛选、双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件和显式 contact 关联已接通；邮件/日历等其他来源、回访和财务仍待实现。
+4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、Project/Task 客户筛选已共用每页 20 条、250 ms 服务端搜索和稳定分页的 ClientSelect；当前选择保留、inactive 可见可选、取消信号、加载/空/错误重试/更多提示和 combobox 键盘语义已接通。双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件和显式 contact 关联也已交付；真实浏览器/窄屏/大数据量专项以及邮件/日历等其他来源、回访和财务仍待验收或实现。
 5. **项目审计（已实现）**：Project 创建/编辑/全生命周期/删除与追加式 Workflow Event 同事务提交，幂等创建重放不重复写事件；分页 API 和详情时间线覆盖状态变化、资料字段变化、加载/空/错误/重试/更早记录。
 6. **人工笔记（已实现）**：schema v21、幂等创建、稳定分页、严格响应、笔记级乐观锁、带原因软删除、归档只读、Project 版本传播、业务 JSON 导出和详情完整交互。
 7. **受控附件（已实现）**：schema v22、metadata-first multipart、稳定分页、完整性校验、鉴权下载、幂等上传/删除、归档只读、Project 版本传播、软删墓碑、父聚合删除补偿、备份恢复和业务 JSON 元数据导出均已接通。
@@ -245,6 +245,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - 旧 `If-Match` 写入被拒绝；同幂等键不同创建请求被拒绝。
 - 任务/发票/客户聚合事实变化会使旧项目版本失效；归档项目不能接受新的任务关联，既有关联任务编辑不被误拒绝。
 - 列表和详情具备加载、空、错误和重试状态。
+- Project 新建/编辑和项目列表筛选共用 ClientSelect；首批及后续页请求有界，250 ms 搜索走服务端，旧请求可取消，跨页/错误不清除当前选择，inactive 客户可见可选，加载、空、错误重试、更多提示和 combobox 键盘语义均有自动化覆盖。
 - 项目创建、资料修改、状态流转和删除各追加一次不可变事件；事件失败回滚项目写入，创建幂等重放不重复事件。
 - 有 Client 的 complete/reopen 各产生一条来源唯一的只读 Client Activity；无 Client、旧版本或失败事务不产生孤立活动，改绑不移动历史，Client 聚合版本和最近动态随成功投影更新。
 - 笔记创建可幂等重放且不重复写入；编辑与删除使用笔记版本，软删除隐藏正文并保留原因；归档项目拒绝笔记写入。
@@ -261,8 +262,8 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 
 ### 完整模块仍待验收
 
-- Client 大数据量选择器/筛选性能和真实浏览器交互仍需专项验收；除 Project 状态外的其他活动来源、回访与财务不属于已交付客户纵切。
-- 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。项目选项超过 100 条仍通过串行分页避免截断；大数据量性能仍待验收。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
+- ClientSelect 的全量串行拉取已消除，但 1,000/10,000 条客户下的真实响应、输入和翻页性能，以及真实浏览器键盘/焦点/窄屏交互仍需专项验收；除 Project 状态外的其他活动来源、回访与财务不属于已交付客户纵切。
+- 项目任务浏览器不再拉全完整集合，顶层每页 20 项、子任务每页 100 项；树/平铺切换、搜索及状态/优先级/类型/标签/排期筛选和分页已有自动化覆盖。Task 表单的 Project 选项超过 100 条仍通过串行分页避免截断；该 Project 选项与项目任务大数据量性能仍待验收。Focus → Task → Project 的整数分钟传播，以及项目级 Focus 过滤、当前归属重分类、报告/历史 UI 与缓存失效已有自动化覆盖。
 - 项目时间线、产出聚合和项目附件已有自动化覆盖；follow-up 产出、Task 阻塞、Task 临期与 Project 完成投影另覆盖稳定事件键、重复完成周期、事务一致性、来源上下文、活动删除阻止、归档后来源删除协调与快照保留。
 - 真实浏览器中的键盘、焦点、窄屏和返回定位回归。
 
@@ -284,6 +285,7 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [project_attachments.go](../../services/sidecar/internal/api/project_attachments.go)
 - [focus_history.go](../../services/sidecar/internal/api/focus_history.go)
 - [ProjectFormModal.tsx](../../apps/web/src/components/ProjectFormModal.tsx)
+- [ClientSelect.tsx](../../apps/web/src/components/ClientSelect.tsx)
 - [NewTaskModal.tsx](../../apps/web/src/components/NewTaskModal.tsx)
 - [项目 API](../../services/sidecar/internal/api/projects.go)
 - [项目 API 测试](../../services/sidecar/internal/api/projects_test.go)
@@ -298,3 +300,4 @@ archived --restore--> archived_from_status（缺失时回到 planning）
 - [schema v24 Task 阻塞来源迁移](../../services/sidecar/internal/database/migrations/024_task_blocked_inbox_projection.sql)
 - [schema v25 Task 临期来源迁移](../../services/sidecar/internal/database/migrations/025_task_due_inbox_projection.sql)
 - [schema v28 Project 完成来源迁移](../../services/sidecar/internal/database/migrations/028_project_completion_inbox_projection.sql)
+- [schema v31 Project→Client Activity 来源约束](../../services/sidecar/internal/database/migrations/031_client_project_activity_projection.sql)

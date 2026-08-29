@@ -14,7 +14,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   useBatchUpdateTasks,
-  useClientOptionsQuery,
   useMoveTaskWithinPlan,
   useProjectOptionsQuery,
   useReorderTaskWithinPlanStatus,
@@ -23,6 +22,7 @@ import {
   useTaskPageQuery,
 } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
+import { ClientSelect } from "../components/ClientSelect";
 import { PageHeader } from "../components/PageHeader";
 import { TagManagerModal } from "../components/TagManagerModal";
 import { TaskBoard } from "../components/TaskBoard";
@@ -232,7 +232,6 @@ export function TasksPage() {
     filtersValid,
   );
   const projectsQuery = useProjectOptionsQuery(true);
-  const clientsQuery = useClientOptionsQuery(true);
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
   const moveMutation = useMoveTaskWithinPlan();
@@ -636,24 +635,19 @@ export function TasksPage() {
               ))}
             </select>
           </label>
-          <label>
+          <div className="task-filter-field">
             <span>客户</span>
-            <select
-              disabled={clientsQuery.isPending || clientsQuery.isError}
-              onChange={(event) => {
-                setClientId(event.target.value);
+            <ClientSelect
+              ariaLabel="客户"
+              emptyLabel="全部客户"
+              onChange={(value) => {
+                setClientId(value);
                 setPage(1);
               }}
               value={clientId}
-            >
-              <option value="">全部客户</option>
-              {(clientsQuery.data ?? []).map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              variant="filter"
+            />
+          </div>
           <label>
             <span>精确计划日期</span>
             <input

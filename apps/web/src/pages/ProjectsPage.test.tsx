@@ -6,6 +6,29 @@ import { ProjectsPage } from "./ProjectsPage";
 
 const hooks = vi.hoisted(() => ({ projects: vi.fn() }));
 
+vi.mock("../components/ClientSelect", () => ({
+  ClientSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="client-inactive">旧客户（已停用）</option>
+    </select>
+  ),
+}));
+
 const project: Project = {
   id: "project-1",
   name: "品牌官网改版",
@@ -34,18 +57,6 @@ const project: Project = {
 };
 
 vi.mock("../api/hooks", () => ({
-  useClientOptionsQuery: () => ({
-    data: [
-      {
-        id: "client-inactive",
-        name: "旧客户",
-        status: "inactive",
-      },
-    ],
-    isError: false,
-    isPending: false,
-    refetch: vi.fn(),
-  }),
   useProjectsQuery: hooks.projects,
   useCreateProject: () => ({
     error: null,
