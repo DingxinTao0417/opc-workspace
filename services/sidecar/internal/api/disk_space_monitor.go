@@ -22,6 +22,7 @@ type storageCapacityLocation struct {
 	Status         string  `json:"status"`
 	AvailableBytes *uint64 `json:"available_bytes"`
 	TotalBytes     *uint64 `json:"total_bytes"`
+	SharedVolume   bool    `json:"shared_volume"`
 }
 
 type storageCapacityResponse struct {
@@ -53,29 +54,86 @@ func loadLowDiskThresholdBytes(db *gorm.DB) (uint64, error) {
 	return uint64(value.LowSpaceThresholdGiB) * bytesPerGiB, nil
 }
 
-func storageProbePaths(options Options) []string {
-	candidates := []string{options.ArtifactDir, options.BackupDir}
+type storageProbeTarget struct {
+	kind      string
+	path      string
+	groupKey  string
+	shareable bool
+}
+
+type storageProbeResult struct {
+	available uint64
+	total     uint64
+	err       error
+}
+
+func (result storageProbeResult) valid() bool {
+	return result.err == nil && result.total > 0 && result.available <= result.total
+}
+
+func storageProbeTargets(options Options) []storageProbeTarget {
+	databasePath := ""
 	if strings.TrimSpace(options.DatabasePath) != "" {
-		candidates = append(candidates, filepath.Dir(options.DatabasePath))
+		databasePath = filepath.Dir(options.DatabasePath)
 	}
-	paths := make([]string, 0, len(candidates))
-	seen := make(map[string]struct{}, len(candidates))
-	for _, candidate := range candidates {
-		canonical, ok := canonicalStorageProbePath(candidate)
+	targets := []storageProbeTarget{
+		{kind: "database", path: databasePath},
+		{kind: "artifacts", path: options.ArtifactDir},
+		{kind: "backups", path: options.BackupDir},
+	}
+	identityCheck := options.VolumeIdentityCheck
+	if identityCheck == nil {
+		identityCheck = storageVolumeIdentity
+	}
+	for index := range targets {
+		canonical, ok := canonicalStorageProbePath(targets[index].path)
 		if !ok {
+			targets[index].path = ""
 			continue
 		}
-		key := canonical
+		targets[index].path = canonical
+		identity, err := identityCheck(canonical)
+		identity = strings.TrimSpace(identity)
+		if err == nil && identity != "" {
+			if runtime.GOOS == "windows" {
+				identity = strings.ToLower(identity)
+			}
+			targets[index].groupKey = "volume:" + identity
+			targets[index].shareable = true
+			continue
+		}
+		pathKey := canonical
 		if runtime.GOOS == "windows" {
-			key = strings.ToLower(key)
+			pathKey = strings.ToLower(pathKey)
 		}
-		if _, exists := seen[key]; exists {
+		targets[index].groupKey = "path:" + pathKey
+	}
+	return targets
+}
+
+func probeStorageTargets(options Options) ([]storageProbeTarget, map[string]storageProbeResult, map[string]int) {
+	targets := storageProbeTargets(options)
+	checker := options.DiskSpaceCheck
+	if checker == nil {
+		checker = diskFreeBytes
+	}
+	results := make(map[string]storageProbeResult, len(targets))
+	counts := make(map[string]int, len(targets))
+	for _, target := range targets {
+		if target.groupKey == "" {
 			continue
 		}
-		seen[key] = struct{}{}
-		paths = append(paths, canonical)
+		counts[target.groupKey]++
+		if existing, exists := results[target.groupKey]; exists && existing.valid() {
+			continue
+		}
+		available, total, err := checker(target.path)
+		result := storageProbeResult{available: available, total: total, err: err}
+		if existing, exists := results[target.groupKey]; !exists || result.valid() || !existing.valid() {
+			results[target.groupKey] = result
+		}
 	}
-	return paths
+	return targets, results, counts
 }
 
 func canonicalStorageProbePath(candidate string) (string, bool) {
@@ -103,32 +161,20 @@ func (a *API) currentLowDiskThresholdBytes() uint64 {
 
 func (a *API) getStorageCapacity(c *gin.Context) {
 	thresholdBytes := a.currentLowDiskThresholdBytes()
-	checker := a.options.DiskSpaceCheck
-	if checker == nil {
-		checker = diskFreeBytes
-	}
-	databasePath := ""
-	if strings.TrimSpace(a.options.DatabasePath) != "" {
-		databasePath = filepath.Dir(a.options.DatabasePath)
-	}
-	targets := []struct {
-		kind string
-		path string
-	}{
-		{kind: "database", path: databasePath},
-		{kind: "artifacts", path: a.options.ArtifactDir},
-		{kind: "backups", path: a.options.BackupDir},
-	}
+	targets, results, counts := probeStorageTargets(a.options)
 	locations := make([]storageCapacityLocation, 0, len(targets))
 	for _, target := range targets {
-		location := storageCapacityLocation{Kind: target.kind, Status: "unavailable"}
-		if path, ok := canonicalStorageProbePath(target.path); ok {
-			available, total, err := checker(path)
-			if err == nil && total > 0 && available <= total {
+		location := storageCapacityLocation{
+			Kind: target.kind, Status: "unavailable",
+			SharedVolume: target.shareable && counts[target.groupKey] > 1,
+		}
+		if result, ok := results[target.groupKey]; ok {
+			if result.valid() {
+				available, total := result.available, result.total
 				location.AvailableBytes = &available
 				location.TotalBytes = &total
 				location.Status = "healthy"
-				if available < thresholdBytes {
+				if result.available < thresholdBytes {
 					location.Status = "low"
 				}
 			}
@@ -143,19 +189,15 @@ func (a *API) getStorageCapacity(c *gin.Context) {
 
 func (a *API) scanDiskSpace() error {
 	thresholdBytes := a.currentLowDiskThresholdBytes()
-	checker := a.options.DiskSpaceCheck
-	if checker == nil {
-		checker = diskFreeBytes
-	}
+	_, results, _ := probeStorageTargets(a.options)
 	low := false
 	probeFailed := false
-	for _, path := range storageProbePaths(a.options) {
-		available, _, err := checker(path)
-		if err != nil {
+	for _, result := range results {
+		if !result.valid() {
 			probeFailed = true
 			continue
 		}
-		if available < thresholdBytes {
+		if result.available < thresholdBytes {
 			low = true
 		}
 	}

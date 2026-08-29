@@ -72,6 +72,62 @@ func TestDiskSpaceMonitorProjectsOncePerLowSpaceEpisode(t *testing.T) {
 	assertStorageIncidentCount(t, store, 2)
 }
 
+func TestDiskSpaceMonitorProbesDifferentPathsOnOneVolumeOnce(t *testing.T) {
+	root := t.TempDir()
+	store, err := database.Open(filepath.Join(root, "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	checks := 0
+	service := &API{db: store.DB, options: Options{
+		DatabasePath: filepath.Join(root, "workspace.db"),
+		ArtifactDir:  filepath.Join(root, "artifacts"),
+		BackupDir:    filepath.Join(root, "backups"),
+		LogDir:       filepath.Join(root, "logs"), Logger: log.New(io.Discard, "", 0), Now: time.Now,
+		VolumeIdentityCheck: func(string) (string, error) { return "same-private-volume", nil },
+		DiskSpaceCheck: func(string) (uint64, uint64, error) {
+			checks++
+			return 2 << 30, 100 << 30, nil
+		},
+	}}
+	if err := service.scanDiskSpace(); err != nil {
+		t.Fatal(err)
+	}
+	if checks != 1 {
+		t.Fatalf("physical volume probe checks=%d, want 1", checks)
+	}
+	assertStorageIncidentCount(t, store, 0)
+}
+
+func TestStorageVolumeGroupRetriesAnotherLogicalPathAfterProbeFailure(t *testing.T) {
+	root := t.TempDir()
+	checks := 0
+	targets, results, counts := probeStorageTargets(Options{
+		DatabasePath: filepath.Join(root, "workspace.db"),
+		ArtifactDir:  filepath.Join(root, "artifacts"),
+		BackupDir:    filepath.Join(root, "backups"),
+		VolumeIdentityCheck: func(string) (string, error) {
+			return "same-private-volume", nil
+		},
+		DiskSpaceCheck: func(string) (uint64, uint64, error) {
+			checks++
+			if checks == 1 {
+				return 0, 0, errors.New("private mount failure")
+			}
+			return 2 << 30, 100 << 30, nil
+		},
+	})
+	if len(targets) != 3 || len(results) != 1 || checks != 2 {
+		t.Fatalf("group retry targets=%d results=%d checks=%d", len(targets), len(results), checks)
+	}
+	for key, result := range results {
+		if !result.valid() || counts[key] != 3 {
+			t.Fatalf("group retry result=%#v count=%d", result, counts[key])
+		}
+	}
+}
+
 func TestDiskSpaceMonitorFallsBackToSafeJournal(t *testing.T) {
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "workspace.db")
@@ -182,6 +238,7 @@ func TestStorageCapacityEndpointReturnsSafeLogicalLocationStatus(t *testing.T) {
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
 		DatabasePath: databasePath, ArtifactDir: filepath.Join(root, "artifacts"), BackupDir: filepath.Join(root, "backups"),
 		Logger: log.New(io.Discard, "", 0), Now: func() time.Time { return time.Date(2026, 8, 28, 21, 45, 0, 0, time.UTC) },
+		VolumeIdentityCheck: func(path string) (string, error) { return "volume:" + path, nil },
 		DiskSpaceCheck: func(path string) (uint64, uint64, error) {
 			if strings.HasSuffix(path, "backups") {
 				return 0, 0, errors.New("private probe failure")
@@ -214,10 +271,61 @@ func TestStorageCapacityEndpointReturnsSafeLogicalLocationStatus(t *testing.T) {
 		t.Fatalf("storage capacity response=%#v", envelope.Data)
 	}
 	if envelope.Data.Locations[0].Kind != "database" || envelope.Data.Locations[0].Status != "healthy" ||
+		envelope.Data.Locations[0].SharedVolume ||
 		envelope.Data.Locations[1].Kind != "artifacts" || envelope.Data.Locations[1].Status != "low" ||
+		envelope.Data.Locations[1].SharedVolume ||
 		envelope.Data.Locations[2].Kind != "backups" || envelope.Data.Locations[2].Status != "unavailable" ||
+		envelope.Data.Locations[2].SharedVolume ||
 		envelope.Data.Locations[2].AvailableBytes != nil || envelope.Data.Locations[2].TotalBytes != nil {
 		t.Fatalf("storage locations=%#v", envelope.Data.Locations)
+	}
+}
+
+func TestStorageCapacityEndpointMarksSharedVolumeWithoutReturningIdentity(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "workspace.db")
+	store, err := database.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	checks := 0
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		DatabasePath: databasePath, ArtifactDir: filepath.Join(root, "artifacts"), BackupDir: filepath.Join(root, "backups"),
+		Logger: log.New(io.Discard, "", 0), Now: time.Now,
+		VolumeIdentityCheck: func(path string) (string, error) {
+			if strings.HasSuffix(path, "backups") {
+				return "private-volume-b", nil
+			}
+			return "private-volume-a", nil
+		},
+		DiskSpaceCheck: func(string) (uint64, uint64, error) {
+			checks++
+			return 10 << 30, 100 << 30, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+
+	recorder := performRequest(router.Engine, http.MethodGet, "/api/v1/diagnostics/storage", nil, nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("storage diagnostics status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if checks != 2 || strings.Contains(recorder.Body.String(), "private-volume") || strings.Contains(recorder.Body.String(), root) {
+		t.Fatalf("shared-volume response checks=%d body=%s", checks, recorder.Body.String())
+	}
+	var envelope struct {
+		Data storageCapacityResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if !envelope.Data.Locations[0].SharedVolume || !envelope.Data.Locations[1].SharedVolume || envelope.Data.Locations[2].SharedVolume {
+		t.Fatalf("shared volume flags=%#v", envelope.Data.Locations)
 	}
 }
 

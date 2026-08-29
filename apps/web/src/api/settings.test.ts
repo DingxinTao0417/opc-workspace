@@ -95,18 +95,21 @@ describe("settings API", () => {
                     status: "healthy",
                     available_bytes: 10,
                     total_bytes: 20,
+                    shared_volume: true,
                   },
                   {
                     kind: "artifacts",
                     status: "low",
                     available_bytes: 2,
                     total_bytes: 20,
+                    shared_volume: true,
                   },
                   {
                     kind: "backups",
                     status: "unavailable",
                     available_bytes: null,
                     total_bytes: null,
+                    shared_volume: false,
                   },
                 ],
               },
@@ -118,9 +121,24 @@ describe("settings API", () => {
     await expect(getStorageCapacity()).resolves.toMatchObject({
       thresholdGiB: 5,
       locations: [
-        { kind: "database", status: "healthy", availableBytes: 10 },
-        { kind: "artifacts", status: "low", availableBytes: 2 },
-        { kind: "backups", status: "unavailable", availableBytes: null },
+        {
+          kind: "database",
+          status: "healthy",
+          availableBytes: 10,
+          sharedVolume: true,
+        },
+        {
+          kind: "artifacts",
+          status: "low",
+          availableBytes: 2,
+          sharedVolume: true,
+        },
+        {
+          kind: "backups",
+          status: "unavailable",
+          availableBytes: null,
+          sharedVolume: false,
+        },
       ],
     });
   });

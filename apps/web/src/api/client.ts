@@ -5617,8 +5617,10 @@ export async function getStorageCapacity(): Promise<StorageCapacityResult> {
         "status",
         "available_bytes",
         "total_bytes",
+        "shared_volume",
       ]) ||
       location.kind !== kinds[index] ||
+      typeof location.shared_volume !== "boolean" ||
       (location.status !== "healthy" &&
         location.status !== "low" &&
         location.status !== "unavailable")
@@ -5646,6 +5648,7 @@ export async function getStorageCapacity(): Promise<StorageCapacityResult> {
       status,
       availableBytes: unavailable ? null : (location.available_bytes as number),
       totalBytes: unavailable ? null : (location.total_bytes as number),
+      sharedVolume: location.shared_volume,
     };
   });
   return {

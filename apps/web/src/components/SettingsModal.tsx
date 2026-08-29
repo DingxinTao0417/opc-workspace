@@ -971,7 +971,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                         >
                           {location.status === "unavailable"
                             ? "检查不可用"
-                            : `${location.status === "low" ? "空间不足 · " : ""}${formatStorageBytes(location.availableBytes!)} 可用 / ${formatStorageBytes(location.totalBytes!)}`}
+                            : `${location.status === "low" ? "空间不足 · " : ""}${formatStorageBytes(location.availableBytes!)} 可用 / ${formatStorageBytes(location.totalBytes!)}${location.sharedVolume ? " · 与其他位置同卷" : ""}`}
                         </strong>
                       </div>
                     ))}

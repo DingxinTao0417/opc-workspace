@@ -195,7 +195,7 @@
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | GET /api/v1/settings                | **已实现**：按稳定顺序返回五个非敏感模块、默认/存储标记、设置 schema、版本、修改者和时间                        |
 | PATCH /api/v1/settings              | **已实现**：原子更新 1–5 个模块；每项要求完整值和 `expected_version`，返回全部服务端规范化结果                  |
-| GET /api/v1/diagnostics/storage     | **已实现**：手动检查三个固定逻辑位置，返回已保存阈值、容量与状态；不返回路径或探测错误                         |
+| GET /api/v1/diagnostics/storage     | **已实现**：按物理卷去重后手动检查三个固定逻辑位置，返回已保存阈值、容量、状态与 `shared_volume`；不返回卷 ID、路径、盘符或探测错误 |
 | POST /api/v1/settings/avatar        | **已实现**：严格 multipart replace/remove；头像文件与全部设置更新共同成功或失败，通用 PATCH 不可改头像引用      |
 | GET /api/v1/settings/avatar/content | **已实现**：鉴权读取当前头像，复验 MIME/size/SHA-256，缺失或篡改拒绝输出                                        |
 | GET / POST /api/v1/actors           | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |

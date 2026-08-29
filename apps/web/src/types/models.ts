@@ -1697,6 +1697,7 @@ export interface StorageCapacityLocation {
   status: StorageCapacityStatus;
   availableBytes: number | null;
   totalBytes: number | null;
+  sharedVolume: boolean;
 }
 
 export interface StorageCapacityResult {

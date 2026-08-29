@@ -31,6 +31,7 @@ type Options struct {
 	BackupDir              string
 	LogDir                 string
 	DiskSpaceCheck         func(path string) (availableBytes uint64, totalBytes uint64, err error)
+	VolumeIdentityCheck    func(path string) (identity string, err error)
 	DiskSpaceScanInterval  time.Duration
 	Now                    func() time.Time
 	FocusHeartbeatInterval time.Duration

@@ -542,18 +542,21 @@ describe("SettingsModal", () => {
                     status: "healthy",
                     available_bytes: 10 * 1024 ** 3,
                     total_bytes: 100 * 1024 ** 3,
+                    shared_volume: true,
                   },
                   {
                     kind: "artifacts",
                     status: "low",
                     available_bytes: 512 * 1024 ** 2,
                     total_bytes: 100 * 1024 ** 3,
+                    shared_volume: true,
                   },
                   {
                     kind: "backups",
                     status: "unavailable",
                     available_bytes: null,
                     total_bytes: null,
+                    shared_volume: false,
                   },
                 ],
               },
@@ -596,8 +599,12 @@ describe("SettingsModal", () => {
       await screen.findByRole("heading", { name: "数据与备份" }),
     ).toBeVisible();
     expect(await screen.findByText("发布前")).toBeVisible();
-    expect(await screen.findByText("10 GiB 可用 / 100 GiB")).toBeVisible();
-    expect(screen.getByText("空间不足 · 512 MiB 可用 / 100 GiB")).toBeVisible();
+    expect(
+      await screen.findByText("10 GiB 可用 / 100 GiB · 与其他位置同卷"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("空间不足 · 512 MiB 可用 / 100 GiB · 与其他位置同卷"),
+    ).toBeVisible();
     expect(screen.getByText("检查不可用")).toBeVisible();
     expect(screen.getByRole("button", { name: "重新检查容量" })).toBeVisible();
     expect(screen.getByRole("button", { name: "立即备份" })).toBeVisible();
