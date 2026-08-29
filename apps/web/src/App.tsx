@@ -10,6 +10,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { TaskDetailModal } from "./components/TaskDetailModal";
 import { ThemeController } from "./components/ThemeController";
 import { ClientsPage } from "./pages/ClientsPage";
+import { ContentCalendarPage } from "./pages/ContentCalendarPage";
 import { ClientDetailPage } from "./pages/ClientDetailPage";
 import { FocusPage } from "./pages/FocusPage";
 import { InboxPage } from "./pages/InboxPage";
@@ -55,10 +56,7 @@ export default function App() {
             <Route element={<InboxPage />} path="inbox/:inboxItemId" />
             <Route element={<FocusPage />} path="focus" />
             <Route element={<RoadmapPage />} path="roadmap" />
-            <Route
-              element={<LaterPage type="content-calendar" />}
-              path="content-calendar"
-            />
+            <Route element={<ContentCalendarPage />} path="content-calendar" />
             <Route element={<NotFoundPage />} path="*" />
           </Route>
         </Routes>

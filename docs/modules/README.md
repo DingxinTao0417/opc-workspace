@@ -33,7 +33,7 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 ## v0.3 规划增强
 
 - [路线图](roadmap.md)（R2 数据/API 与 R3 首个界面纵切已交付：季度浏览、新建、Project 跳转、归档恢复；编辑、拖拽与本地事件待开发）
-- [内容日历](content-calendar.md)（CC1 数据契约、业务导入导出与 CC2 本地 API 已交付；React 界面待开发）
+- [内容日历](content-calendar.md)（CC1 数据契约、业务导入导出、CC2 本地 API 与 CC3 首个 React 工作区已交付；月格/编辑待开发）
 
 高级备份计划与导入映射属于数据管理模块的 v0.3 阶段，详见 [数据、备份与恢复](data-management.md)。
 

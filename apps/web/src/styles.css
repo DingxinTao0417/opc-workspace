@@ -2649,8 +2649,20 @@ kbd {
 .roadmap-project-option { gap: 8px; padding: 7px 0; color: var(--text-secondary); font-size: 13px; }
 .roadmap-project-option small { margin-left: auto; color: var(--text-muted); }
 
+.content-calendar-toolbar { align-items: center; }
+.content-calendar-month { min-width: 120px; text-align: center; font-size: 14px; }
+.content-calendar-list { display: grid; gap: 10px; max-width: 880px; }
+.content-calendar-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.content-calendar-card-main { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.content-calendar-card h2 { margin: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.content-calendar-card p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.content-calendar-card-meta { display: flex; align-items: center; gap: 14px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.content-calendar-card-meta span { display: inline-flex; align-items: center; gap: 5px; }
+
 @media (max-width: 900px) {
   .roadmap-grid { grid-template-columns: 1fr; }
+  .content-calendar-card { align-items: flex-start; flex-direction: column; }
+  .content-calendar-card-meta { flex-wrap: wrap; }
 }
 
 .project-card {

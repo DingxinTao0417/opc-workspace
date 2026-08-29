@@ -112,6 +112,8 @@ import {
 	createRoadmapMilestone,
 	archiveRoadmapMilestone,
 	restoreRoadmapMilestone,
+	getContentItems,
+	createContentItem,
   pauseFocusSession,
   previewAutomationRule,
   createInboxItem,
@@ -167,7 +169,9 @@ import type {
   ClientFollowupListParams,
   ClientAttachmentListParams,
   ClientActorLinkListParams,
-  ClientListParams,
+	ClientListParams,
+	ContentItemListParams,
+	CreateContentItemInput,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
   CreateClientActorLinkInput,
@@ -3366,6 +3370,7 @@ export function useDeleteTag() {
 
 export const projectQueryKey = ["projects"] as const;
 export const roadmapMilestoneQueryKey = ["roadmap", "milestones"] as const;
+export const contentItemQueryKey = ["content-items"] as const;
 export const projectDetailQueryKey = (id: string) =>
   [...projectQueryKey, "detail", id] as const;
 export const projectEventQueryKey = (id: string) =>
@@ -3402,6 +3407,25 @@ export function useRoadmapMilestonesQuery(
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useContentItemsQuery(input: ContentItemListParams = {}) {
+  return useQuery({
+    queryKey: [...contentItemQueryKey, "list", input],
+    queryFn: ({ signal }) => getContentItems(input, signal),
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateContentItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateContentItemInput) => createContentItem(input),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: contentItemQueryKey }); },
   });
 }
 
