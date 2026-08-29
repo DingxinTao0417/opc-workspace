@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v7.7
+> **一人公司操作系统** · PRD v7.8
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
-> **v7.7 更新说明**：React 路由树新增全局错误边界，页面或 AppShell 渲染异常时以安全恢复页替代白屏；用户可重新渲染、返回今日或打开边界外仍可用的“运行诊断”。路由变化自动清除失败状态，原始异常不持久化、不显示、不复制，避免泄露任务、客户或文件内容。自动化覆盖脱敏、重试、诊断直达和路由恢复；schema 保持 v28，完整日志/诊断包、启动恢复页和 OS 全局快捷键仍未实现。
+> **v7.8 更新说明**：任务列表的原子批量 API 与交互扩展到六个受控生命周期命令：开始、阻塞、解除阻塞、完成、取消和重新打开。服务端先校验完整选择集的版本、来源状态、负责人和验收策略，再在单一 SQLite 事务中复用 Assignment/Submission/Event/Inbox 副作用；任一任务失败整批回滚。前端要求原因的命令提供输入，并对全部生命周期批量操作进行二次确认；schema 保持 v28，任务看板仍属于 v0.2。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -344,8 +344,9 @@ pnpm dev
    - 当前任务页已支持项目、标签（多标签同时包含）、状态、优先级、类型、精确计划日期、计划日期范围和截止日期范围筛选；API 另支持父任务与根任务筛选
    - 当前使用服务端 `LIKE` 搜索任务标题和描述；SQLite FTS 不在本纵切
 4. **批量操作**
-   - 当前已支持事务化批量移动项目、设置/清除计划日期和添加/移除标签
-   - 批量完成与批量删除在受控生命周期上线前不实现，避免绕过验收与审计
+   - 当前已支持事务化批量移动项目、设置/清除计划日期、添加/移除标签，以及开始、阻塞、解除阻塞、完成、取消和重新打开
+   - 生命周期批量命令先校验全部任务的 `expected_version`、来源状态、负责人和验收策略，再在同一事务内更新 Task、Submission、Assignment、Workflow Event 与 Inbox 投影；任一失败整批回滚
+   - 阻塞/取消要求统一原因，全部生命周期批量操作在前端二次确认；批量删除仍不提供
 5. **拆分、分派与验收**
    - 父子任务只表达真实的完成层级；项目产出产生的下游工单默认通过收件箱关联，不自动成为来源任务的子任务
    - 任务分派给本地 Actor；分派历史独立保存，不在任务上复制负责人状态
@@ -2099,7 +2100,7 @@ pnpm build:desktop
   → 预设自动化与后续业务事件源
 ```
 
-在对应纵切完成前，客户回访、发票“新建”和收入时间范围等无业务行为控件必须禁用或明确标记“后续版本”，不得用可点击外观暗示已经实现。Client 新建/编辑/基础详情/人工活动时间线/受控附件、Project 客户选择/筛选/追加式活动时间线、Inbox“全部已读”/已有 Task 关系/批量拆分分派/自动结清，以及一次性 Reminder 已接入真实 API，不再属于占位清单；Client 外部来源投影、其他系统故障 Inbox 来源、重复/原生通知、任务看板与生命周期批量操作仍未实现。
+在对应纵切完成前，客户回访、发票“新建”和收入时间范围等无业务行为控件必须禁用或明确标记“后续版本”，不得用可点击外观暗示已经实现。Client 新建/编辑/基础详情/人工活动时间线/受控附件、Project 客户选择/筛选/追加式活动时间线、Inbox“全部已读”/已有 Task 关系/批量拆分分派/自动结清、一次性 Reminder，以及任务事实/生命周期原子批量操作已接入真实 API，不再属于占位清单；Client 外部来源投影、其他系统故障 Inbox 来源、重复/原生通知与任务看板仍未实现。
 
 ---
 
@@ -2155,7 +2156,7 @@ pnpm build:desktop
 | GET / DELETE         | /api/v1/tasks/:id                         | 获取、删除任务                                                                           | 已实现；读取返回完整任务事实、`current_submission_id` 与 `ETag`；删除要求 `If-Match`，活动 Inbox 关系返回 `409 TASK_HAS_ACTIVE_INBOX_RELATIONS`，软解除后可删；历史关系的实时 FK 置空但原 Task ID/标题快照保留。其余聚合删除继续协调 Artifact 并级联成员              |
 | PATCH                | /api/v1/tasks/:id                         | 更新非生命周期字段                                                                       | 已实现；支持 `review_policy` 与其他任务事实并要求 `If-Match`，拒绝 `status`；策略变化仅允许 todo 且无任何 Submission 历史                                                                                                                                             |
 | PATCH                | /api/v1/tasks/:id/status                  | 旧任务状态入口                                                                           | 已废弃；固定返回 `410 TASK_STATUS_ENDPOINT_DEPRECATED`                                                                                                                                                                                                                |
-| PATCH                | /api/v1/tasks/batch                       | 原子批量安全操作                                                                         | 已实现；1–100 条任务，支持 set_project/set_planned_date/add_tags/remove_tags；每项 expected_version，任一失败整批回滚                                                                                                                                                 |
+| PATCH                | /api/v1/tasks/batch                       | 原子批量事实与生命周期操作                                                               | 已实现；1–100 条任务，支持 set_project/set_planned_date/add_tags/remove_tags/start/block/unblock/complete/cancel/reopen；每项 expected_version，block/cancel 原因必填，任一校验或副作用失败整批回滚                                                                   |
 | PUT                  | /api/v1/tasks/reorder                     | 原子保存手动排序                                                                         | 已实现；提交完整 planned_date 组和每项 expected_version，支持 manual/default；组成员或版本变化时拒绝                                                                                                                                                                  |
 | GET / POST           | /api/v1/task-saved-views                  | 列出或创建任务保存视图                                                                   | 已实现；工作区最多 20 个，名称大小写不敏感唯一；严格保存筛选/排序定义，不保存页码、选择或结果                                                                                                                                                                         |
 | PATCH / DELETE       | /api/v1/task-saved-views/:id              | 更新或确认删除任务保存视图                                                               | 已实现；要求 `If-Match`；更新重新校验完整定义，删除要求 `confirm=true`，版本冲突不自动覆盖                                                                                                                                                                            |
@@ -2371,3 +2372,4 @@ pnpm build:desktop
 | v7.5     | 2026-08-28 | 交付项目详情任务浏览器分页与筛选：顶层树/平铺查询改为每页 20 条服务端读取，支持防抖标题/描述搜索和状态筛选；筛选结果强制平铺并显示父任务上下文，清除条件后恢复树，分页计数不再冒充完整集合。复用既有 Task API 与 Query 缓存，不新增 schema；大数据量专项、Focus 高级分析及内嵌 Assignment/Submission 控件继续延期。                                                                                 |
 | v7.6     | 2026-08-28 | 交付设置运行诊断：联合严格 `/health` 与 Tauri `sidecar_status` 展示环境、生命周期、app/API/schema 和兼容性，支持重新检查、最近成功降级及复制脱敏摘要；桌面状态先经白名单规范化，令牌、监听地址、原始错误和路径不会进入诊断模型或摘要。命令面板可直达该只读模块；完整日志落盘/轮转、诊断包、恢复页和 OS 全局快捷键继续延期，schema 保持 v28。                                                        |
 | v7.7     | 2026-08-28 | 交付全局渲染错误恢复：错误边界包裹完整路由/AppShell，异常时显示安全恢复页并支持重新渲染、返回今日和打开边界外设置中的运行诊断；路由变化自动复位，原始异常不持久化、不展示、不复制。组件测试覆盖信息脱敏、重试、诊断直达和跨路由恢复；完整日志/诊断包、启动恢复页和 OS 全局快捷键继续延期，schema 保持 v28。                                                                                         |
+| v7.8     | 2026-08-28 | 交付任务生命周期原子批量操作：`/tasks/batch` 新增 start/block/unblock/complete/cancel/reopen，先验证完整选择集的版本、状态、负责人和验收策略，再在单事务内复用 Assignment 收束、待验收撤回、Workflow Event 和 Inbox 投影；任一失败整批回滚。任务页提供原因输入和二次确认，定向测试覆盖非法集合不变、版本冲突不变、事件审计及请求映射；schema 保持 v28，任务看板仍归 v0.2。                          |

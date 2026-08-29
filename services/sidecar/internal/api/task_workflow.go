@@ -183,66 +183,11 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		updates, closeReason, err := taskLifecycleUpdates(current, command, reason, now)
-		if err != nil {
-			return err
-		}
 		requestID := requestIDFromContext(c)
-		commandSequence := 1
-		if command == taskLifecycleCancel && taskHasPendingReview(current) {
-			commandSequence, err = withdrawCurrentSubmissionForCancellation(
-				tx, current, requestID, now, reason, commandSequence,
-			)
-			if err != nil {
-				return err
-			}
-		}
-		if closeReason != "" {
-			commandSequence, err = closeActiveAssignmentsForTerminalTask(
-				tx, taskIDValue, requestID, now, closeReason, commandSequence,
-			)
-			if err != nil {
-				return err
-			}
-		}
-
-		updates["updated_at"] = now
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.Task{}).
-			Where("id = ? AND version = ?", taskIDValue, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return mapTaskWorkflowConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-
-		updated, err := loadTask(tx, taskIDValue)
-		if err != nil {
-			return err
-		}
-		previousSnapshot := taskLifecycleSnapshot(current, "")
-		currentSnapshot := taskLifecycleSnapshot(updated, reasonForTaskEvent(command, reason))
-		event, err := recordTaskLifecycleEvent(
-			tx,
-			taskLifecycleActions[command],
-			taskIDValue,
-			previousSnapshot,
-			currentSnapshot,
-			requestID,
-			now,
-			commandSequence,
+		updated, event, err := applyValidatedTaskLifecycleTransition(
+			tx, current, command, reason, requestID, now,
 		)
 		if err != nil {
-			return err
-		}
-		if command == taskLifecycleBlock {
-			if err := projectTaskBlockedInboxItem(tx, updated, requestID, now); err != nil {
-				return err
-			}
-		}
-		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
 			return err
 		}
 		response = taskLifecycleResponse{Task: updated, Event: event}
@@ -271,6 +216,76 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 	response.Event.CreatedAt = normalizeTimestamp(response.Event.CreatedAt)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
+}
+
+func applyValidatedTaskLifecycleTransition(
+	tx *gorm.DB,
+	current models.Task,
+	command string,
+	reason string,
+	requestID string,
+	now string,
+) (models.Task, taskWorkflowEventOutput, error) {
+	updates, closeReason, err := taskLifecycleUpdates(current, command, reason, now)
+	if err != nil {
+		return models.Task{}, taskWorkflowEventOutput{}, err
+	}
+	commandSequence := 1
+	if command == taskLifecycleCancel && taskHasPendingReview(current) {
+		commandSequence, err = withdrawCurrentSubmissionForCancellation(
+			tx, current, requestID, now, reason, commandSequence,
+		)
+		if err != nil {
+			return models.Task{}, taskWorkflowEventOutput{}, err
+		}
+	}
+	if closeReason != "" {
+		commandSequence, err = closeActiveAssignmentsForTerminalTask(
+			tx, current.ID, requestID, now, closeReason, commandSequence,
+		)
+		if err != nil {
+			return models.Task{}, taskWorkflowEventOutput{}, err
+		}
+	}
+
+	updates["updated_at"] = now
+	updates["version"] = gorm.Expr("version + 1")
+	result := tx.Model(&models.Task{}).
+		Where("id = ? AND version = ?", current.ID, current.Version).
+		Updates(updates)
+	if result.Error != nil {
+		return models.Task{}, taskWorkflowEventOutput{}, mapTaskWorkflowConstraintError(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return models.Task{}, taskWorkflowEventOutput{}, taskVersionConflict()
+	}
+
+	updated, err := loadTask(tx, current.ID)
+	if err != nil {
+		return models.Task{}, taskWorkflowEventOutput{}, err
+	}
+	event, err := recordTaskLifecycleEvent(
+		tx,
+		taskLifecycleActions[command],
+		current.ID,
+		taskLifecycleSnapshot(current, ""),
+		taskLifecycleSnapshot(updated, reasonForTaskEvent(command, reason)),
+		requestID,
+		now,
+		commandSequence,
+	)
+	if err != nil {
+		return models.Task{}, taskWorkflowEventOutput{}, err
+	}
+	if command == taskLifecycleBlock {
+		if err := projectTaskBlockedInboxItem(tx, updated, requestID, now); err != nil {
+			return models.Task{}, taskWorkflowEventOutput{}, err
+		}
+	}
+	if err := reconcileInboxItemsForTask(tx, current.ID, requestID, now); err != nil {
+		return models.Task{}, taskWorkflowEventOutput{}, err
+	}
+	return updated, event, nil
 }
 
 func taskLifecycleReason(c *gin.Context, command string) (string, bool) {

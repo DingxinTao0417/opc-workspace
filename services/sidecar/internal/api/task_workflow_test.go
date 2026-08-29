@@ -36,6 +36,83 @@ func decodeTaskWorkflowEvents(t *testing.T, body []byte) ([]taskWorkflowEventOut
 	return envelope.Data, envelope.Meta
 }
 
+func TestBatchTaskLifecycleIsAtomicAndRecordsWorkflow(t *testing.T) {
+	router, store := newActorTestAPI(t)
+	first := createTaskForTaskFacts(t, router, `{"title":"Batch lifecycle first"}`)
+	second := createTaskForTaskFacts(t, router, `{"title":"Batch lifecycle second"}`)
+	person := createActorForTest(t, router, `{"type":"person","display_name":"Batch assignee"}`, nil)
+	createAssignmentForTest(t, router, first.ID, "assignee", person.ID, 1, "")
+
+	startBody := []byte(fmt.Sprintf(
+		`{"action":"start","items":[{"id":%q,"expected_version":2},{"id":%q,"expected_version":1}]}`,
+		first.ID, second.ID,
+	))
+	rejected := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", startBody, nil)
+	if rejected.Code != http.StatusConflict || responseErrorCode(t, rejected.Body.Bytes()) != "TASK_ASSIGNEE_REQUIRED" {
+		t.Fatalf("batch start without every assignee = %d: %s", rejected.Code, rejected.Body.String())
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		var task models.Task
+		if err := store.DB.First(&task, "id = ?", id).Error; err != nil {
+			t.Fatalf("load rejected batch task: %v", err)
+		}
+		if task.Status != "todo" {
+			t.Fatalf("rejected batch changed task %s to %s", id, task.Status)
+		}
+	}
+
+	createAssignmentForTest(t, router, second.ID, "assignee", person.ID, 1, "")
+	requestID := uuid.NewString()
+	started := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(
+		`{"action":"start","items":[{"id":%q,"expected_version":2},{"id":%q,"expected_version":2}]}`,
+		first.ID, second.ID,
+	)), map[string]string{"X-Request-ID": requestID})
+	if started.Code != http.StatusOK {
+		t.Fatalf("batch start = %d: %s", started.Code, started.Body.String())
+	}
+	var envelope struct {
+		Data batchUpdatedTasksResponse `json:"data"`
+	}
+	if err := json.Unmarshal(started.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode batch start: %v", err)
+	}
+	if envelope.Data.Action != taskLifecycleStart || envelope.Data.Changed != 2 || len(envelope.Data.Tasks) != 2 {
+		t.Fatalf("batch start response = %#v", envelope.Data)
+	}
+	for _, task := range envelope.Data.Tasks {
+		if task.Status != "in_progress" || task.Version != 3 {
+			t.Fatalf("batch-started task = %#v", task)
+		}
+	}
+
+	staleComplete := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(
+		`{"action":"complete","items":[{"id":%q,"expected_version":3},{"id":%q,"expected_version":2}]}`,
+		first.ID, second.ID,
+	)), nil)
+	if staleComplete.Code != http.StatusConflict || responseErrorCode(t, staleComplete.Body.Bytes()) != "VERSION_CONFLICT" {
+		t.Fatalf("stale batch complete = %d: %s", staleComplete.Code, staleComplete.Body.String())
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		var task models.Task
+		if err := store.DB.First(&task, "id = ?", id).Error; err != nil {
+			t.Fatalf("load stale batch task: %v", err)
+		}
+		if task.Status != "in_progress" || task.Version != 3 {
+			t.Fatalf("stale batch was not atomic for %s: %#v", id, task)
+		}
+	}
+
+	var eventCount int64
+	if err := store.DB.Model(&models.WorkflowEvent{}).
+		Where("aggregate_id IN ? AND action = ? AND request_id = ?", []string{first.ID, second.ID}, "task_started", requestID).
+		Count(&eventCount).Error; err != nil {
+		t.Fatalf("count batch lifecycle events: %v", err)
+	}
+	if eventCount != 2 {
+		t.Fatalf("batch lifecycle event count = %d, want 2", eventCount)
+	}
+}
+
 func TestTaskLifecycleCommandsIdempotencyAndTimeline(t *testing.T) {
 	router, store := newActorTestAPI(t)
 	task := createTaskForTaskFacts(t, router, `{"title":"Lifecycle command task"}`)

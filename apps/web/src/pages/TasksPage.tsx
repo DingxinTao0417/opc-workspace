@@ -48,6 +48,15 @@ const groups: { status: TaskStatus; label: string }[] = [
 
 type BatchAction = BatchUpdateTasksInput["action"];
 
+const lifecycleBatchLabels: Partial<Record<BatchAction, string>> = {
+  start: "开始任务",
+  block: "阻塞任务",
+  unblock: "解除阻塞",
+  complete: "完成任务",
+  cancel: "取消任务",
+  reopen: "重新打开",
+};
+
 function applyTaskOrder(tasks: Task[], orderedIds?: string[]): Task[] {
   if (!orderedIds || orderedIds.length !== tasks.length) return tasks;
   const byId = new Map(tasks.map((task) => [task.id, task]));
@@ -119,6 +128,9 @@ export function TasksPage() {
   const [batchProjectId, setBatchProjectId] = useState("");
   const [batchPlannedDate, setBatchPlannedDate] = useState("");
   const [batchTagId, setBatchTagId] = useState("");
+  const [batchReason, setBatchReason] = useState("");
+  const [batchConfirmationPending, setBatchConfirmationPending] =
+    useState(false);
   const [dragPreview, setDragPreview] = useState<
     Partial<Record<TaskStatus, string[]>>
   >({});
@@ -275,6 +287,7 @@ export function TasksPage() {
 
   useEffect(() => {
     setSelectedTasks({});
+    setBatchConfirmationPending(false);
     setDragPreview({});
     batchMutation.reset();
     dragMutation.reset();
@@ -369,9 +382,21 @@ export function TasksPage() {
         items,
         plannedDate: batchPlannedDate || null,
       };
-    } else {
+    } else if (batchAction === "add_tags" || batchAction === "remove_tags") {
       if (!batchTagId) return;
       input = { action: batchAction, items, tagIds: [batchTagId] };
+    } else {
+      if (!batchConfirmationPending) {
+        setBatchConfirmationPending(true);
+        return;
+      }
+      if (batchAction === "block" || batchAction === "cancel") {
+        const reason = batchReason.trim();
+        if (!reason) return;
+        input = { action: batchAction, items, reason };
+      } else {
+        input = { action: batchAction, items };
+      }
     }
     batchMutation.mutate(input, {
       onError: (error) => {
@@ -381,10 +406,14 @@ export function TasksPage() {
             error.code === "TASK_BATCH_SET_CHANGED")
         ) {
           setSelectedTasks({});
+          setBatchConfirmationPending(false);
           void query.refetch();
         }
       },
-      onSuccess: () => setSelectedTasks({}),
+      onSuccess: () => {
+        setSelectedTasks({});
+        setBatchConfirmationPending(false);
+      },
     });
   };
 
@@ -742,6 +771,7 @@ export function TasksPage() {
               checked={allPageSelected}
               disabled={!writeReady || batchMutation.isPending}
               onChange={(event) => {
+                setBatchConfirmationPending(false);
                 if (event.target.checked) {
                   setSelectedTasks((current) => {
                     const next = { ...current };
@@ -763,14 +793,26 @@ export function TasksPage() {
             aria-label="批量操作类型"
             onChange={(event) => {
               setBatchAction(event.target.value as BatchAction);
+              setBatchConfirmationPending(false);
+              setBatchReason("");
               batchMutation.reset();
             }}
             value={batchAction}
           >
-            <option value="set_project">移动到项目</option>
-            <option value="set_planned_date">设置计划日期</option>
-            <option value="add_tags">添加标签</option>
-            <option value="remove_tags">移除标签</option>
+            <optgroup label="任务事实">
+              <option value="set_project">移动到项目</option>
+              <option value="set_planned_date">设置计划日期</option>
+              <option value="add_tags">添加标签</option>
+              <option value="remove_tags">移除标签</option>
+            </optgroup>
+            <optgroup label="任务状态">
+              <option value="start">开始任务</option>
+              <option value="block">阻塞任务</option>
+              <option value="unblock">解除阻塞</option>
+              <option value="complete">完成任务</option>
+              <option value="cancel">取消任务</option>
+              <option value="reopen">重新打开</option>
+            </optgroup>
           </select>
           {batchAction === "set_project" ? (
             <select
@@ -809,23 +851,52 @@ export function TasksPage() {
               ))}
             </select>
           ) : null}
+          {batchAction === "block" || batchAction === "cancel" ? (
+            <input
+              aria-label="批量操作原因"
+              maxLength={1000}
+              onChange={(event) => {
+                setBatchReason(event.target.value);
+                setBatchConfirmationPending(false);
+              }}
+              placeholder={
+                batchAction === "block" ? "填写阻塞原因…" : "填写取消原因…"
+              }
+              value={batchReason}
+            />
+          ) : null}
+          {batchConfirmationPending ? (
+            <span className="task-batch-confirm" role="status">
+              将对 {selectedItems.length} 项执行“
+              {lifecycleBatchLabels[batchAction]}”，再次点击确认。
+            </span>
+          ) : null}
           <button
             className="button button-primary"
             disabled={
               !writeReady ||
               batchMutation.isPending ||
               ((batchAction === "add_tags" || batchAction === "remove_tags") &&
-                !batchTagId)
+                !batchTagId) ||
+              ((batchAction === "block" || batchAction === "cancel") &&
+                !batchReason.trim())
             }
             onClick={applyBatch}
             type="button"
           >
-            {batchMutation.isPending ? "应用中…" : "应用"}
+            {batchMutation.isPending
+              ? "应用中…"
+              : batchConfirmationPending
+                ? `确认${lifecycleBatchLabels[batchAction] ?? "操作"}`
+                : "应用"}
           </button>
           <button
             className="button button-quiet"
             disabled={batchMutation.isPending}
-            onClick={() => setSelectedTasks({})}
+            onClick={() => {
+              setSelectedTasks({});
+              setBatchConfirmationPending(false);
+            }}
             type="button"
           >
             取消选择
@@ -966,7 +1037,8 @@ export function TasksPage() {
                     onDropTask={(source, target) =>
                       dropTask(group.status, source, target)
                     }
-                    onSelectionChange={(task, selected) =>
+                    onSelectionChange={(task, selected) => {
+                      setBatchConfirmationPending(false);
                       setSelectedTasks((current) => {
                         const next = { ...current };
                         if (selected) {
@@ -979,8 +1051,8 @@ export function TasksPage() {
                           next[task.id] = task;
                         } else delete next[task.id];
                         return next;
-                      })
-                    }
+                      });
+                    }}
                     reorderPendingId={
                       moveMutation.isPending
                         ? (moveMutation.variables?.taskId ?? null)

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  batchUpdateTasks,
   createBackup,
   createPersonActor,
   createTag,
@@ -279,11 +280,12 @@ describe("actor requests", () => {
       ApiError,
     );
 
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      jsonResponse({
-        data: [actorPayload],
-        meta: { page: 2, page_size: 20, total: 21 },
-      }),
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          data: [actorPayload],
+          meta: { page: 2, page_size: 20, total: 21 },
+        }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1678,6 +1680,47 @@ describe("controlled task lifecycle", () => {
           ? { reason: input.reason }
           : {},
       );
+    });
+  });
+
+  it("maps atomic batch lifecycle commands and their shared reason", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          data: {
+            action: "block",
+            changed: 2,
+            tasks: [
+              taskPayload({ id: "task-1", status: "blocked", version: 8 }),
+              taskPayload({ id: "task-2", status: "blocked", version: 4 }),
+            ],
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await batchUpdateTasks({
+      action: "block",
+      items: [
+        { id: "task-1", expectedVersion: 7 },
+        { id: "task-2", expectedVersion: 3 },
+      ],
+      reason: "等待客户确认",
+    });
+
+    expect(result).toMatchObject({ action: "block", changed: 2 });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(new URL(String(url), "http://local").pathname).toBe(
+      "/api/v1/tasks/batch",
+    );
+    expect(init?.method).toBe("PATCH");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      action: "block",
+      items: [
+        { id: "task-1", expected_version: 7 },
+        { id: "task-2", expected_version: 3 },
+      ],
+      reason: "等待客户确认",
     });
   });
 });

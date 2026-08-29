@@ -1893,6 +1893,11 @@ kbd {
   color: var(--danger-text);
 }
 
+.task-batch-confirm {
+  flex-basis: 100%;
+  color: var(--orange);
+}
+
 .task-batch-warning {
   flex-basis: 100%;
   color: var(--orange);

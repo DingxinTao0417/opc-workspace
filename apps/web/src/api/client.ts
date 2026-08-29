@@ -4624,6 +4624,9 @@ export async function batchUpdateTasks(
   if (input.action === "add_tags" || input.action === "remove_tags") {
     body.tag_ids = input.tagIds;
   }
+  if (input.action === "block" || input.action === "cancel") {
+    body.reason = input.reason;
+  }
   const payload = await apiRequest<unknown>("/api/v1/tasks/batch", {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -4638,7 +4641,13 @@ export async function batchUpdateTasks(
     action !== "set_project" &&
     action !== "set_planned_date" &&
     action !== "add_tags" &&
-    action !== "remove_tags"
+    action !== "remove_tags" &&
+    action !== "start" &&
+    action !== "block" &&
+    action !== "unblock" &&
+    action !== "complete" &&
+    action !== "cancel" &&
+    action !== "reopen"
   ) {
     return invalidResponse("任务批量操作类型无效");
   }

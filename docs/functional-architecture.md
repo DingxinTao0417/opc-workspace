@@ -2,7 +2,7 @@
 
 > 文档版本：2.19
 > 日期：2026-08-28
-> 依据：[PRD v7.7](opc-workspace-PRD.md)
+> 依据：[PRD v7.8](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的

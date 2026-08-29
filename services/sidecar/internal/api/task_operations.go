@@ -37,6 +37,7 @@ type batchUpdateTasksRequest struct {
 	ProjectID   nullableStringPatch `json:"project_id"`
 	PlannedDate nullableStringPatch `json:"planned_date"`
 	TagIDs      []string            `json:"tag_ids"`
+	Reason      *string             `json:"reason"`
 }
 
 type batchUpdatedTasksResponse struct {
@@ -64,9 +65,11 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 	var projectID *string
 	var plannedDate *string
 	var tagIDs []string
+	var lifecycleCommand string
+	var lifecycleReason string
 	switch input.Action {
 	case "set_project":
-		if !input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) > 0 {
+		if !input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) > 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_project requires only project_id, which may be null")
 			return
 		}
@@ -79,7 +82,7 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			projectID = &value
 		}
 	case "set_planned_date":
-		if !input.PlannedDate.Set || input.ProjectID.Set || len(input.TagIDs) > 0 {
+		if !input.PlannedDate.Set || input.ProjectID.Set || len(input.TagIDs) > 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_planned_date requires only planned_date, which may be null")
 			return
 		}
@@ -92,7 +95,7 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			plannedDate = &value
 		}
 	case "add_tags", "remove_tags":
-		if input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) == 0 {
+		if input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) == 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" requires only a non-empty tag_ids array")
 			return
 		}
@@ -102,8 +105,29 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 			return
 		}
+	case taskLifecycleStart, taskLifecycleBlock, taskLifecycleUnblock, taskLifecycleComplete, taskLifecycleCancel, taskLifecycleReopen:
+		if input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) > 0 {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" does not accept project_id, planned_date, or tag_ids")
+			return
+		}
+		lifecycleCommand = input.Action
+		if lifecycleCommand == taskLifecycleBlock || lifecycleCommand == taskLifecycleCancel {
+			if input.Reason == nil {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "reason is required")
+				return
+			}
+			var err error
+			lifecycleReason, err = validateAssignmentReason(*input.Reason)
+			if err != nil {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+				return
+			}
+		} else if input.Reason != nil {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" does not accept reason")
+			return
+		}
 	default:
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "action must be set_project, set_planned_date, add_tags, or remove_tags")
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "unsupported batch action")
 		return
 	}
 
@@ -123,6 +147,16 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 		for id, expectedVersion := range versions {
 			if currentByID[id].Version != expectedVersion {
 				return taskVersionConflict()
+			}
+		}
+		if lifecycleCommand != "" {
+			for _, id := range orderedIDs {
+				task := currentByID[id]
+				normalizeTask(&task)
+				currentByID[id] = task
+				if err := validateTaskLifecycleTransition(tx, task, lifecycleCommand); err != nil {
+					return err
+				}
 			}
 		}
 		if projectID != nil {
@@ -180,6 +214,15 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 		for _, id := range orderedIDs {
 			task := currentByID[id]
 			changed := false
+			if lifecycleCommand != "" {
+				if _, _, err := applyValidatedTaskLifecycleTransition(
+					tx, task, lifecycleCommand, lifecycleReason, requestIDFromContext(c), now,
+				); err != nil {
+					return err
+				}
+				response.Changed++
+				continue
+			}
 			switch input.Action {
 			case "set_project":
 				if !sameNullableString(task.ProjectID, projectID) {

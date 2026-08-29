@@ -272,6 +272,60 @@ describe("TasksPage", () => {
     );
   });
 
+  it("requires an explicit second confirmation for batch lifecycle commands", () => {
+    render(<TasksPage />);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    fireEvent.change(screen.getByLabelText("批量操作类型"), {
+      target: { value: "complete" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "将对 1 项执行“完成任务”，再次点击确认。",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "确认完成任务" }));
+    expect(mocks.batch).toHaveBeenCalledWith(
+      {
+        action: "complete",
+        items: [{ id: task.id, expectedVersion: task.version }],
+      },
+      expect.objectContaining({
+        onError: expect.any(Function),
+        onSuccess: expect.any(Function),
+      }),
+    );
+  });
+
+  it("includes the normalized reason in a confirmed batch block", () => {
+    render(<TasksPage />);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    fireEvent.change(screen.getByLabelText("批量操作类型"), {
+      target: { value: "block" },
+    });
+    fireEvent.change(screen.getByLabelText("批量操作原因"), {
+      target: { value: "  等待外部确认  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认阻塞任务" }));
+
+    expect(mocks.batch).toHaveBeenCalledWith(
+      {
+        action: "block",
+        items: [{ id: task.id, expectedVersion: task.version }],
+        reason: "等待外部确认",
+      },
+      expect.any(Object),
+    );
+  });
+
   it("drops a stale selection when a selected task was deleted elsewhere", () => {
     render(<TasksPage />);
 

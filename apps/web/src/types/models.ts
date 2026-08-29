@@ -676,6 +676,15 @@ export type BatchUpdateTasksInput =
       action: "add_tags" | "remove_tags";
       items: TaskVersionItem[];
       tagIds: string[];
+    }
+  | {
+      action: Exclude<TaskLifecycleAction, "block" | "cancel">;
+      items: TaskVersionItem[];
+    }
+  | {
+      action: "block" | "cancel";
+      items: TaskVersionItem[];
+      reason: string;
     };
 
 export interface BatchUpdateTasksResult {
