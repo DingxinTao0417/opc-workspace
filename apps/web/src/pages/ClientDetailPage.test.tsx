@@ -91,6 +91,17 @@ vi.mock("../api/hooks", () => ({
     isSuccess: true,
     refetch: vi.fn(),
   }),
+  useClientFollowupsQuery: () => ({
+    data: {
+      items: [],
+      meta: { page: 1, pageSize: 6, total: 0 },
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
   useCreateClientActivity: () => state.activityMutation,
   useUpdateClientActivity: () => state.activityMutation,
   useDeleteClientActivity: () => state.activityMutation,
@@ -155,7 +166,7 @@ describe("ClientDetailPage", () => {
 
   afterEach(cleanup);
 
-  it("shows real related projects, local activity and attachment entry, and explicit future placeholders", () => {
+  it("shows real related projects, local activity, followup history and attachment entry", () => {
     renderDetail();
 
     expect(screen.getByRole("link", { name: /品牌官网改版/ })).toHaveAttribute(
@@ -168,7 +179,8 @@ describe("ClientDetailPage", () => {
     expect(screen.getByRole("button", { name: "添加附件" })).toBeEnabled();
     expect(screen.getByRole("heading", { name: "本地联系人" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(screen.getByText(/回访计划属于后续业务版本/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "客户回访" })).toBeTruthy();
+    expect(screen.getByText(/到期项会同步投影到本地收件箱/)).toBeTruthy();
     expect(state.projectQueryInput).toEqual(
       expect.objectContaining({
         clientId: activeClient.id,

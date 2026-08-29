@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.51
+> 文档版本：2.52
 > 日期：2026-08-29
-> 依据：[PRD v9.30](opc-workspace-PRD.md)
+> 依据：[PRD v9.32](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.51 说明：客户回访 C4 已接终态与重排 API。完成、跳过、确认取消均只能从 planned 进入不可重开终态；重排会同事务取消旧计划、创建带来源的新计划，并为两个聚合写不可变 Workflow Event。提醒和页面仍待后续纵切。
+> 2.52 说明：客户回访 C5 已接到期 Inbox 投影与客户详情只读时间线。React 只读取版本化 API 返回的本地事实，`overdue` 由 planned + 计划时间即时派生；客户详情不提供未接入的写操作，Today 与 Inbox 反向处理仍待后续纵切。
 
 ## 1. 目的
 
@@ -133,7 +133,7 @@
 | [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                             | 已实现受控文件一致性、手工及内部自动回滚包容量准入、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划                              | 当前文件安全、已校验备份、恢复状态、准入反馈、失败 Inbox 与便携导入导出                                                                  |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                       | 原生窗口、受管 Sidecar generation/重启预算/父管道与 shutdown、权限、运行日志和发布                                                                                                        | 可运行、可恢复、可诊断的本地应用环境                                                                                                     |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                   | 财务与发票业务事实                                                                                                                                                                        | 本地提醒、Inbox Item、客户聚合                                                                                                           |
-| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划与结果                                                                                                                                                                        | Inbox 到期项、客户活动                                                                                                                   |
+| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划、终态结果与客户详情只读时间线                                                                                                                                                | Inbox 到期项、客户活动                                                                                                                   |
 | [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                         | 季度和里程碑规划                                                                                                                                                                          | 临期/达成 Inbox 事件                                                                                                                     |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                           | 内容计划和准备工作                                                                                                                                                                        | 准备 Task、审核/发布时间 Inbox 事件                                                                                                      |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                    | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                                    | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                             |

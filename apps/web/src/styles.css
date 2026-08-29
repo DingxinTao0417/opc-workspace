@@ -3326,6 +3326,7 @@ kbd {
 }
 
 .client-activities-section,
+.client-followups-section,
 .project-notes-section {
   margin-top: 12px;
 }
@@ -3426,6 +3427,98 @@ kbd {
   overflow: hidden;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
+}
+
+.client-followup-list {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.client-followup-list article {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.client-followup-list article:last-child {
+  border-bottom: 0;
+}
+
+.client-followup-list article.is-overdue {
+  background: color-mix(in srgb, var(--danger-bg) 60%, transparent);
+}
+
+.client-followup-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.client-followup-list article.is-overdue .client-followup-icon {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.client-followup-copy {
+  min-width: 0;
+}
+
+.client-followup-copy > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.client-followup-copy strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.client-followup-copy > div span {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--panel-hover);
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.client-followup-copy > div .client-followup-priority.high {
+  color: var(--danger);
+}
+
+.client-followup-copy > div .client-followup-priority.low {
+  color: var(--text-dim);
+}
+
+.client-followup-copy p {
+  margin: 5px 0 4px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.client-followup-copy small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.client-followup-copy .client-followup-next-step {
+  display: block;
+  margin-top: 3px;
 }
 
 .client-activity-list article {

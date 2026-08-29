@@ -1049,6 +1049,50 @@ export interface DeleteClientResult {
   detachedProjects: number;
 }
 
+export type ClientFollowupStatus =
+  "planned" | "completed" | "skipped" | "cancelled";
+export type ClientFollowupPriority = "low" | "normal" | "high";
+
+export interface ClientFollowup {
+  id: string;
+  clientId: string;
+  clientName: string;
+  assignedActorId: string;
+  assignedActorName: string;
+  assignedActorType: ActorType;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+  purpose: string;
+  notes: string | null;
+  status: ClientFollowupStatus;
+  priority: ClientFollowupPriority;
+  completedAt: string | null;
+  result: string | null;
+  nextStep: string | null;
+  skippedAt: string | null;
+  skipReason: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  rescheduledFromId: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  clientVersion: number;
+}
+
+export interface ClientFollowupListResult {
+  items: ClientFollowup[];
+  meta: PageMeta;
+}
+
+export interface ClientFollowupListParams {
+  page?: number;
+  pageSize?: number;
+  status?: ClientFollowupStatus;
+  assignedActorId?: string;
+}
+
 export type ClientActivityKind = "note" | "meeting" | "system_reference";
 
 export interface ClientActivityActor {

@@ -49,6 +49,9 @@ import type {
   ClientActorLinkListResult,
   ClientActivityListParams,
   ClientActivityListResult,
+  ClientFollowup,
+  ClientFollowupListParams,
+  ClientFollowupListResult,
   ClientInput,
   ClientListParams,
   ClientListResult,
@@ -1208,6 +1211,114 @@ export function normalizeClientActivity(value: unknown): ClientActivity {
     clientVersion: positiveInteger(
       fieldValue(value, "client_version", "clientVersion"),
       "客户聚合版本",
+    ),
+  };
+}
+
+export function normalizeClientFollowup(value: unknown): ClientFollowup {
+  if (!isRecord(value)) return invalidResponse("客户回访响应格式无效");
+  const id = stringField(value, "id");
+  const clientId = stringField(value, "client_id", "clientId");
+  const clientName = stringField(value, "client_name", "clientName");
+  const assignedActorId = stringField(
+    value,
+    "assigned_actor_id",
+    "assignedActorId",
+  );
+  const assignedActorName = stringField(
+    value,
+    "assigned_actor_name",
+    "assignedActorName",
+  );
+  const scheduledAt = stringField(value, "scheduled_at", "scheduledAt");
+  const timezone = stringField(value, "timezone");
+  const channel = stringField(value, "channel");
+  const purpose = stringField(value, "purpose");
+  const createdAt = stringField(value, "created_at", "createdAt");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  if (
+    !id ||
+    !clientId ||
+    !clientName ||
+    !assignedActorId ||
+    !assignedActorName ||
+    !scheduledAt ||
+    !timezone ||
+    !channel ||
+    !purpose ||
+    !createdAt ||
+    !updatedAt
+  ) {
+    return invalidResponse("客户回访响应格式无效");
+  }
+  const status = value.status;
+  if (
+    status !== "planned" &&
+    status !== "completed" &&
+    status !== "skipped" &&
+    status !== "cancelled"
+  ) {
+    return invalidResponse("客户回访状态响应无效");
+  }
+  const priority = value.priority;
+  if (priority !== "low" && priority !== "normal" && priority !== "high") {
+    return invalidResponse("客户回访优先级响应无效");
+  }
+  const assignedActorType = asActorType(
+    fieldValue(value, "assigned_actor_type", "assignedActorType"),
+  );
+  if (assignedActorType !== "owner" && assignedActorType !== "person") {
+    return invalidResponse("客户回访负责人响应无效");
+  }
+  return {
+    id,
+    clientId,
+    clientName,
+    assignedActorId,
+    assignedActorName,
+    assignedActorType,
+    scheduledAt,
+    timezone,
+    channel,
+    purpose,
+    notes: clientOptionalString(value.notes, "客户回访备注"),
+    status,
+    priority,
+    completedAt: clientOptionalString(
+      fieldValue(value, "completed_at", "completedAt"),
+      "客户回访完成时间",
+    ),
+    result: clientOptionalString(value.result, "客户回访结果"),
+    nextStep: clientOptionalString(
+      fieldValue(value, "next_step", "nextStep"),
+      "客户回访下一步",
+    ),
+    skippedAt: clientOptionalString(
+      fieldValue(value, "skipped_at", "skippedAt"),
+      "客户回访跳过时间",
+    ),
+    skipReason: clientOptionalString(
+      fieldValue(value, "skip_reason", "skipReason"),
+      "客户回访跳过原因",
+    ),
+    cancelledAt: clientOptionalString(
+      fieldValue(value, "cancelled_at", "cancelledAt"),
+      "客户回访取消时间",
+    ),
+    cancelReason: clientOptionalString(
+      fieldValue(value, "cancel_reason", "cancelReason"),
+      "客户回访取消原因",
+    ),
+    rescheduledFromId: clientOptionalString(
+      fieldValue(value, "rescheduled_from_id", "rescheduledFromId"),
+      "客户回访重排来源",
+    ),
+    version: positiveInteger(value.version, "客户回访版本"),
+    createdAt,
+    updatedAt,
+    clientVersion: positiveInteger(
+      fieldValue(value, "client_version", "clientVersion"),
+      "客户回访对应客户版本",
     ),
   };
 }
@@ -6699,6 +6810,41 @@ export async function getClientActivities(
         fieldValue(payload.meta, "client_version", "clientVersion"),
         "客户活动对应客户版本",
       ),
+    },
+  };
+}
+
+export async function getClientFollowups(
+  clientId: string,
+  input: ClientFollowupListParams = {},
+): Promise<ClientFollowupListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.status) params.set("status", input.status);
+  if (input.assignedActorId?.trim()) {
+    params.set("assigned_actor_id", input.assignedActorId.trim());
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/clients/${encodeURIComponent(clientId)}/followups?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("客户回访列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(normalizeClientFollowup),
+    meta: {
+      page: positiveInteger(payload.meta.page, "客户回访页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "客户回访每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "客户回访总数"),
     },
   };
 }

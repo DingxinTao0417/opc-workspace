@@ -68,6 +68,7 @@ import {
   getActors,
   getClient,
   getClientActivities,
+  getClientFollowups,
   getClientAttachments,
   getClientActorLinks,
   getClients,
@@ -150,6 +151,7 @@ import type {
   CreateTaskSavedViewInput,
   ClientInput,
   ClientActivityListParams,
+  ClientFollowupListParams,
   ClientAttachmentListParams,
   ClientActorLinkListParams,
   ClientListParams,
@@ -623,6 +625,22 @@ export function useClientActivitiesQuery(
   return useQuery({
     queryKey: [...clientActivityQueryKey(clientId ?? "missing"), "list", input],
     queryFn: () => getClientActivities(clientId!, input),
+    enabled: Boolean(clientId),
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+export const clientFollowupQueryKey = (clientId: string) =>
+  [...clientDetailQueryKey(clientId), "followups"] as const;
+
+export function useClientFollowupsQuery(
+  clientId: string | null,
+  input: ClientFollowupListParams = {},
+) {
+  return useQuery({
+    queryKey: [...clientFollowupQueryKey(clientId ?? "missing"), "list", input],
+    queryFn: () => getClientFollowups(clientId!, input),
     enabled: Boolean(clientId),
     placeholderData: keepPreviousData,
     retry: 1,

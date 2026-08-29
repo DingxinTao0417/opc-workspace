@@ -21,6 +21,7 @@ import { ClientFormModal } from "../components/ClientFormModal";
 import { ClientActivitiesSection } from "../components/ClientActivitiesSection";
 import { ClientAttachmentsSection } from "../components/ClientAttachmentsSection";
 import { ClientActorLinksSection } from "../components/ClientActorLinksSection";
+import { ClientFollowupsSection } from "../components/ClientFollowupsSection";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import type { ClientStatus, ProjectStatus } from "../types/models";
@@ -327,6 +328,8 @@ export function ClientDetailPage() {
 
       <ClientActivitiesSection clientId={client.id} />
 
+      <ClientFollowupsSection clientId={client.id} />
+
       <ClientAttachmentsSection
         clientId={client.id}
         clientVersion={client.version}
@@ -342,11 +345,6 @@ export function ClientDetailPage() {
         <article>
           <strong>收入与发票</strong>
           <p>v0.4 交付财务事实后可用；当前不展示金额或发票模拟数据。</p>
-          <span>后续版本</span>
-        </article>
-        <article>
-          <strong>客户回访</strong>
-          <p>回访计划属于后续业务版本，不自动发送任何外部消息。</p>
           <span>后续版本</span>
         </article>
       </section>
