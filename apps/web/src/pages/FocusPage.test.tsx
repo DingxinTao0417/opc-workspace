@@ -57,6 +57,13 @@ const mocks = vi.hoisted(() => ({
         seconds: 0,
         minutes: 0,
       })),
+      heatmap: Array.from({ length: 7 * 24 }, (_, index) => ({
+        weekday: Math.floor(index / 24) + 1,
+        hour: index % 24,
+        sessions: 0,
+        seconds: 0,
+        minutes: 0,
+      })),
       currentStreakDays: 0,
       longestStreakDays: 0,
     } as FocusReport,
@@ -199,6 +206,13 @@ describe("FocusPage", () => {
         seconds: hour === 9 ? 3000 : 0,
         minutes: hour === 9 ? 50 : 0,
       })),
+      heatmap: Array.from({ length: 7 * 24 }, (_, index) => ({
+        weekday: Math.floor(index / 24) + 1,
+        hour: index % 24,
+        sessions: index === 8 ? 2 : 0,
+        seconds: index === 8 ? 3000 : 0,
+        minutes: index === 8 ? 50 : 0,
+      })),
       currentStreakDays: 2,
       longestStreakDays: 4,
     };
@@ -235,6 +249,9 @@ describe("FocusPage", () => {
     expect(screen.getByText("最佳 09:00–10:00")).toBeInTheDocument();
     expect(
       screen.getByLabelText("09:00–10:00，50 分钟，2 个专注块"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("周一 08:00–09:00，50 分钟，2 个专注块"),
     ).toBeInTheDocument();
   });
 

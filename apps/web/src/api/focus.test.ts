@@ -234,6 +234,13 @@ describe("focus API contract", () => {
             seconds: hour === 9 ? 3000 : 0,
             minutes: hour === 9 ? 50 : 0,
           })),
+          heatmap: Array.from({ length: 7 * 24 }, (_, index) => ({
+            weekday: Math.floor(index / 24) + 1,
+            hour: index % 24,
+            sessions: index === 8 ? 2 : 0,
+            seconds: index === 8 ? 3000 : 0,
+            minutes: index === 8 ? 50 : 0,
+          })),
           current_streak_days: 1,
           longest_streak_days: 2,
         },
@@ -261,6 +268,14 @@ describe("focus API contract", () => {
       ],
       hours: expect.arrayContaining([
         expect.objectContaining({ hour: 9, minutes: 50, sessions: 2 }),
+      ]),
+      heatmap: expect.arrayContaining([
+        expect.objectContaining({
+          weekday: 1,
+          hour: 8,
+          minutes: 50,
+          sessions: 2,
+        }),
       ]),
     });
   });

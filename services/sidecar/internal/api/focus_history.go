@@ -40,16 +40,25 @@ type focusPeriodHour struct {
 	Minutes  int   `json:"minutes"`
 }
 
+type focusPeriodHeatmapCell struct {
+	Weekday  int   `json:"weekday"`
+	Hour     int   `json:"hour"`
+	Sessions int   `json:"sessions"`
+	Seconds  int64 `json:"seconds"`
+	Minutes  int   `json:"minutes"`
+}
+
 type focusPeriodStatsResponse struct {
-	DateFrom          string               `json:"date_from"`
-	DateTo            string               `json:"date_to"`
-	Timezone          string               `json:"timezone"`
-	Totals            focusStats           `json:"totals"`
-	Days              []focusPeriodDay     `json:"days"`
-	Projects          []focusPeriodProject `json:"projects"`
-	Hours             []focusPeriodHour    `json:"hours"`
-	CurrentStreakDays int                  `json:"current_streak_days"`
-	LongestStreakDays int                  `json:"longest_streak_days"`
+	DateFrom          string                   `json:"date_from"`
+	DateTo            string                   `json:"date_to"`
+	Timezone          string                   `json:"timezone"`
+	Totals            focusStats               `json:"totals"`
+	Days              []focusPeriodDay         `json:"days"`
+	Projects          []focusPeriodProject     `json:"projects"`
+	Hours             []focusPeriodHour        `json:"hours"`
+	Heatmap           []focusPeriodHeatmapCell `json:"heatmap"`
+	CurrentStreakDays int                      `json:"current_streak_days"`
+	LongestStreakDays int                      `json:"longest_streak_days"`
 }
 
 type completedFocusInterval struct {
@@ -300,8 +309,12 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		seconds  int64
 	}
 	hourBuckets := make([]hourAccumulator, 24)
+	heatmapBuckets := make([]hourAccumulator, 7*24)
 	for hour := range hourBuckets {
 		hourBuckets[hour].sessions = make(map[string]struct{})
+	}
+	for cell := range heatmapBuckets {
+		heatmapBuckets[cell].sessions = make(map[string]struct{})
 	}
 	for _, interval := range intervals {
 		overlapStart, overlapEnd, exists, overlapErr := focusIntervalOverlapRange(interval, rangeStartUTC, rangeEndUTC)
@@ -319,9 +332,14 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 			}
 			seconds := int64(next.Sub(cursor) / time.Second)
 			if seconds > 0 {
-				hour := cursor.In(location).Hour()
+				localCursor := cursor.In(location)
+				hour := localCursor.Hour()
+				weekday := (int(localCursor.Weekday())+6)%7 + 1
 				hourBuckets[hour].seconds += seconds
 				hourBuckets[hour].sessions[interval.SessionID] = struct{}{}
+				cell := &heatmapBuckets[(weekday-1)*24+hour]
+				cell.seconds += seconds
+				cell.sessions[interval.SessionID] = struct{}{}
 			}
 			cursor = next
 		}
@@ -332,10 +350,20 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 			Hour: hour, Sessions: len(bucket.sessions), Seconds: bucket.seconds, Minutes: int(bucket.seconds / 60),
 		}
 	}
+	heatmap := make([]focusPeriodHeatmapCell, 0, 7*24)
+	for weekday := 1; weekday <= 7; weekday++ {
+		for hour := 0; hour < 24; hour++ {
+			bucket := heatmapBuckets[(weekday-1)*24+hour]
+			heatmap = append(heatmap, focusPeriodHeatmapCell{
+				Weekday: weekday, Hour: hour, Sessions: len(bucket.sessions),
+				Seconds: bucket.seconds, Minutes: int(bucket.seconds / 60),
+			})
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"data": focusPeriodStatsResponse{
 		DateFrom: dateFrom, DateTo: dateTo, Timezone: location.String(),
 		Totals: focusStats{Sessions: len(totalSessions), Seconds: totalSeconds, Minutes: int(totalSeconds / 60)},
-		Days:   days, Projects: projects, Hours: hours,
+		Days:   days, Projects: projects, Hours: hours, Heatmap: heatmap,
 		CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
 	}})
 }

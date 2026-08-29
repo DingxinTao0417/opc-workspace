@@ -4173,6 +4173,72 @@ kbd {
   font-size: 7px;
 }
 
+.focus-heatmap {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.focus-heatmap-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.focus-heatmap-heading strong {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.focus-heatmap-heading span {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.focus-heatmap-scroll {
+  overflow-x: auto;
+  padding-bottom: 3px;
+}
+
+.focus-heatmap-grid {
+  display: grid;
+  min-width: 430px;
+  grid-template-columns: 34px repeat(24, minmax(12px, 1fr));
+  gap: 3px;
+  align-items: center;
+}
+
+.focus-heatmap-grid > small {
+  color: var(--text-dim);
+  font-size: 7px;
+  text-align: center;
+}
+
+.focus-heatmap-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  gap: 3px;
+  align-items: center;
+}
+
+.focus-heatmap-row strong {
+  color: var(--text-dim);
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.focus-heatmap-row i {
+  display: block;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--accent-light);
+}
+
 .focus-empty-inline {
   display: flex;
   min-height: 112px;

@@ -147,6 +147,10 @@ func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T)
 		stats.Hours[23].Seconds != 600 || stats.Hours[5].Sessions != 1 {
 		t.Fatalf("Focus hour distribution=%#v", stats.Hours)
 	}
+	if len(stats.Heatmap) != 7*24 || stats.Heatmap[(1-1)*24+5].Seconds != 1800 ||
+		stats.Heatmap[(6-1)*24+23].Seconds != 600 || stats.Heatmap[(7-1)*24].Seconds != 600 {
+		t.Fatalf("Focus heatmap=%#v", stats.Heatmap)
+	}
 }
 
 func TestFocusPeriodHoursCombineRepeatedDSTHour(t *testing.T) {
@@ -169,6 +173,11 @@ func TestFocusPeriodHoursCombineRepeatedDSTHour(t *testing.T) {
 	}
 	if len(envelope.Data.Hours) != 24 || envelope.Data.Hours[1].Seconds != 3600 || envelope.Data.Hours[1].Sessions != 1 {
 		t.Fatalf("repeated local hour distribution=%#v", envelope.Data.Hours)
+	}
+	repeatedCell := envelope.Data.Heatmap[(7-1)*24+1]
+	if len(envelope.Data.Heatmap) != 7*24 || repeatedCell.Weekday != 7 || repeatedCell.Hour != 1 ||
+		repeatedCell.Seconds != 3600 || repeatedCell.Sessions != 1 {
+		t.Fatalf("repeated local hour heatmap=%#v", envelope.Data.Heatmap)
 	}
 }
 

@@ -60,6 +60,16 @@ function bestFocusHour(hours: FocusReportHour[]): FocusReportHour | null {
   );
 }
 
+const focusWeekdayLabels = [
+  "周一",
+  "周二",
+  "周三",
+  "周四",
+  "周五",
+  "周六",
+  "周日",
+];
+
 function recentDateRange(now = new Date()) {
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const start = new Date(end);
@@ -807,6 +817,58 @@ export function FocusPage() {
                               </div>
                             );
                           })}
+                        </div>
+                      </div>
+                      <div
+                        aria-label="周几与小时专注热力图"
+                        className="focus-heatmap"
+                      >
+                        <div className="focus-heatmap-heading">
+                          <strong>专注热力图</strong>
+                          <span>按当地星期与小时汇总</span>
+                        </div>
+                        <div className="focus-heatmap-scroll">
+                          <div className="focus-heatmap-grid">
+                            <span aria-hidden="true" />
+                            {focusReport.data.hours.map((hour) => (
+                              <small key={hour.hour}>
+                                {hour.hour % 3 === 0
+                                  ? String(hour.hour).padStart(2, "0")
+                                  : ""}
+                              </small>
+                            ))}
+                            {focusWeekdayLabels.map((label, weekdayIndex) => (
+                              <div className="focus-heatmap-row" key={label}>
+                                <strong>{label}</strong>
+                                {focusReport.data.heatmap
+                                  .slice(
+                                    weekdayIndex * 24,
+                                    (weekdayIndex + 1) * 24,
+                                  )
+                                  .map((cell) => {
+                                    const maxSeconds = Math.max(
+                                      ...focusReport.data.heatmap.map(
+                                        (item) => item.seconds,
+                                      ),
+                                      1,
+                                    );
+                                    return (
+                                      <i
+                                        aria-label={`${label} ${focusHourLabel(cell.hour)}，${cell.minutes} 分钟，${cell.sessions} 个专注块`}
+                                        key={cell.hour}
+                                        style={{
+                                          opacity: cell.seconds
+                                            ? 0.2 +
+                                              (cell.seconds / maxSeconds) * 0.8
+                                            : 0.06,
+                                        }}
+                                        title={`${label} ${focusHourLabel(cell.hour)} · ${cell.minutes} 分钟 · ${cell.sessions} 个专注块`}
+                                      />
+                                    );
+                                  })}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </>

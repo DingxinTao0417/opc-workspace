@@ -2193,7 +2193,8 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
     !isRecord(body.totals) ||
     !Array.isArray(body.days) ||
     !Array.isArray(body.projects) ||
-    !Array.isArray(body.hours)
+    !Array.isArray(body.hours) ||
+    !Array.isArray(body.heatmap)
   ) {
     return invalidResponse("专注周期统计响应格式无效");
   }
@@ -2214,6 +2215,25 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
   });
   if (hours.length !== 24 || hours.some((item, index) => item.hour !== index)) {
     return invalidResponse("专注小时统计响应格式无效");
+  }
+  const heatmap = body.heatmap.map((item) => {
+    if (!isRecord(item)) return invalidResponse("专注热力图响应格式无效");
+    return {
+      weekday: positiveInteger(item.weekday, "专注热力图星期"),
+      hour: nonNegativeInteger(item.hour, "专注热力图小时"),
+      sessions: nonNegativeInteger(item.sessions, "热力图专注块数"),
+      seconds: nonNegativeInteger(item.seconds, "热力图专注秒数"),
+      minutes: nonNegativeInteger(item.minutes, "热力图专注分钟数"),
+    };
+  });
+  if (
+    heatmap.length !== 7 * 24 ||
+    heatmap.some(
+      (item, index) =>
+        item.weekday !== Math.floor(index / 24) + 1 || item.hour !== index % 24,
+    )
+  ) {
+    return invalidResponse("专注热力图响应格式无效");
   }
   return {
     dateFrom,
@@ -2255,6 +2275,7 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
       };
     }),
     hours,
+    heatmap,
     currentStreakDays: nonNegativeInteger(
       fieldValue(body, "current_streak_days", "currentStreakDays"),
       "当前连续专注天数",

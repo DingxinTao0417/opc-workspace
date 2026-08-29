@@ -569,6 +569,14 @@ export interface FocusReportHour {
   minutes: number;
 }
 
+export interface FocusReportHeatmapCell {
+  weekday: number;
+  hour: number;
+  sessions: number;
+  seconds: number;
+  minutes: number;
+}
+
 export interface FocusReport {
   dateFrom: string;
   dateTo: string;
@@ -581,6 +589,7 @@ export interface FocusReport {
   days: FocusReportDay[];
   projects: FocusReportProject[];
   hours: FocusReportHour[];
+  heatmap: FocusReportHeatmapCell[];
   currentStreakDays: number;
   longestStreakDays: number;
 }
