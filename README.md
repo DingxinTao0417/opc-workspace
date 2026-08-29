@@ -18,7 +18,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用 `ProjectSelect`：每页只读 20 条，输入经 250 ms 防抖后使用既有 Project API 做服务端搜索，`q / page / includeArchived` 隔离 Query key，并向请求传递取消信号。候选按 ID 去重，显式清除才提交未归项目；选中详情或名称 fallback 使跨页、失败和当前已归档项目仍可见，默认候选不列其他归档项目。生产路径已移除串行拉取全部 Project 的 `getAllProjects`
 - 客户基础资料 CRUD、服务端分页/搜索/状态筛选/稳定排序、快照式创建幂等、`ETag`/`If-Match` 乐观锁和受约束硬删除；客户列表/基础详情、Project 客户关联、人工备注/会议活动，以及关联 Project 完成/重新打开时生成的只读系统活动已接真实 API。客户回访 C2–C6 已接计划/执行 API、到期 Inbox 投影、客户详情管理、Today 待办和 Inbox→客户详情入口：完成/跳过/确认取消/原子重排、完成时原子创建下一次本地计划、负责人/状态/服务端逾期筛选、幂等、并发控制和不可变审计事件均在本机；inactive 客户只能收口既有计划（完成、跳过或取消），新建、编辑、重排与完成时续排会返回明确冲突，恢复 `active/lead` 后才重新允许。更新或终态命令会同事务归档旧到期投影，Today/Inbox 不重复写入回访状态。共享 `ClientSelect` 已覆盖 Project 新建/编辑、Projects 筛选和 Tasks 筛选：每页读取 20 条、250 ms 服务端搜索、稳定分页和取消信号，跨页或加载失败时保留当前选择，inactive 客户保持可见可选，并提供加载、空、错误重试、更多提示和 combobox 键盘语义；真实浏览器、窄屏及 1,000/10,000 条数据性能仍待专项验收
 - 右侧“客户动态”已接跨客户只读聚合：只读取未删除的本地备注、会议和 Project 生命周期系统活动，按发生时间与 ID 稳定排序，展示最近 3 条并直达客户详情；不追踪邮件、提案下载或其他线上行为
-- 右侧“临近项目节点”已接 Roadmap 真实读模型：分别读取 planned/active 各 3 条并按目标日期/ID 合并取最近 3 条，显示 Project 和派生 Task 完成数，逾期节点明确标记；不复制进度或创建 demo 数据
+- 右侧“临近项目节点”已接 Roadmap 真实读模型：分别读取 planned/active 各 3 条并按目标日期/ID 合并取最近 3 条，显示 Project 和派生 Task 完成数，逾期节点明确标记；每条通过 `?milestone=<id>` 直达指定最新详情，不复制进度或创建 demo 数据
 - Actor 管理纵切：schema v7 固定创建唯一 owner/system，幂等回填历史任务的 owner Assignment 与迁移事件；`/api/v1/actors` 提供分页筛选、person 幂等新建、详情和 `If-Match` 编辑/停用，设置页“人员与责任”接入真实本地数据
 - Assignment 责任纵切：任务详情可查询当前负责人/审核人和分页历史，完成首次分派、改派与结束；命令以 Task `If-Match`/`version` 拒绝旧写入，支持可选幂等快照，并与 Assignment Workflow Event 在同一事务提交
 - 任务活动时间线：详情按需分页读取 Task 聚合的生命周期、分派和迁移事件；同一命令内通过 `command_seq` 稳定展示自动结束分派与最终状态事件
@@ -42,7 +42,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列，按月规则以当地日为锚点并在短月落到月末。右侧概览已读取真实本地客户动态和临近路线图节点，不伪造线上行为或复制项目进度。v0.2 首个受限预设自动化纵切也已接通，本地 Agent 已交付代码所有 Adapter 登记与安全诊断但 Runner/Run 尚未实现。客户回访已完成本地计划、终态、到期 Inbox 与跨时区/DST 边界；路线图已完成数据/API、R3 基础界面、R4 同季度/跨季度/跨年度/精确日期排期和 R5 本地到期/达成 Inbox 来源。内容日历已完成数据/API、六周月格、安全拖拽与即时预移/失败回滚、卡片键盘逐日改期、详情编辑、人工发布确认、准备 Task 关联、六周范围自动分页聚合，以及审核/发布到期的启动补偿、周期扫描、版本化去重、旧来源终结与 Inbox 详情。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v41。T-02 仍部分完成。[PRD v9.74](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列，按月规则以当地日为锚点并在短月落到月末。右侧概览已读取真实本地客户动态和可直达详情的临近路线图节点，不伪造线上行为或复制项目进度。v0.2 首个受限预设自动化纵切也已接通，本地 Agent 已交付代码所有 Adapter 登记与安全诊断但 Runner/Run 尚未实现。客户回访已完成本地计划、终态、到期 Inbox 与跨时区/DST 边界；路线图已完成数据/API、R3 基础界面、R4 同季度/跨季度/跨年度/精确日期排期和 R5 本地到期/达成 Inbox 来源。内容日历已完成数据/API、六周月格、安全拖拽与即时预移/失败回滚、卡片键盘逐日改期、详情编辑、人工发布确认、准备 Task 关联、六周范围自动分页聚合，以及审核/发布到期的启动补偿、周期扫描、版本化去重、旧来源终结与 Inbox 详情。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键和前端世代清理也已接通。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v41。T-02 仍部分完成。[PRD v9.75](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -66,7 +66,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.74）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.75）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -366,4 +366,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.74](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座和命令面板/新建任务的原生快捷键；Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实浏览器/WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。
+[PRD v9.75](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座和命令面板/新建任务的原生快捷键；Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实浏览器/WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。

@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   useArchiveRoadmapMilestone,
   useCreateRoadmapMilestone,
@@ -790,6 +790,7 @@ function DeleteRoadmapMilestoneModal({
 
 export function RoadmapPage() {
   const initial = useMemo(currentPeriod, []);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [year, setYear] = useState(initial.year);
   const [quarter, setQuarter] = useState(initial.quarter);
   const [status, setStatus] = useState<RoadmapMilestoneStatus | "">("");
@@ -799,7 +800,7 @@ export function RoadmapPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const detailId = searchParams.get("milestone")?.trim() || null;
   const [reordering, setReordering] = useState(false);
   const [quarterMoving, setQuarterMoving] = useState(false);
   const [dateMoving, setDateMoving] = useState(false);
@@ -876,6 +877,23 @@ export function RoadmapPage() {
           : query.isFetching || !query.isSuccess
             ? "路线图仍在读取，请稍候。"
             : null;
+  const openDetail = (id: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("milestone", id);
+      return next;
+    });
+  };
+  const closeDetail = () => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("milestone");
+        return next;
+      },
+      { replace: true },
+    );
+  };
   const calendarMonths = useMemo(
     () => quarterCalendarMonths(year, quarter),
     [quarter, year],
@@ -1454,7 +1472,7 @@ export function RoadmapPage() {
                               target.quarter,
                             );
                           }}
-                          onOpen={(value) => setDetailId(value.id)}
+                          onOpen={(value) => openDetail(value.id)}
                           quarterMoving={quarterMoving}
                         />
                       ))}
@@ -1529,7 +1547,7 @@ export function RoadmapPage() {
                   onMove={(direction) =>
                     moveDraftItem(milestone.id, index + direction)
                   }
-                  onOpen={(item) => setDetailId(item.id)}
+                  onOpen={(item) => openDetail(item.id)}
                   ordering={reordering}
                   orderIndex={index}
                   orderTotal={visibleMilestones.length}
@@ -1588,9 +1606,9 @@ export function RoadmapPage() {
       ) : null}
       <RoadmapMilestoneDetailModal
         milestoneId={detailId}
-        onClose={() => setDetailId(null)}
+        onClose={closeDetail}
         onEdit={(milestone) => {
-          setDetailId(null);
+          closeDetail();
           setEditing(milestone);
         }}
       />

@@ -201,7 +201,7 @@ describe("RightOverview upcoming roadmap milestones", () => {
       expect.stringContaining("最近节点"),
       expect.stringContaining("后续节点"),
     ]);
-    expect(links[0]).toHaveAttribute("href", "/roadmap");
+    expect(links[0]).toHaveAttribute("href", "/roadmap?milestone=near");
     expect(screen.getAllByText("桌面交付 · 2/4 任务")).toHaveLength(2);
     expect(mocks.roadmap).toHaveBeenCalledWith({
       page: 1,

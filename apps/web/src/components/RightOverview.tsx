@@ -257,7 +257,7 @@ export function RightOverview() {
                   aria-label={`查看路线图节点：${milestone.title}`}
                   className="milestone-overview-row"
                   key={milestone.id}
-                  to="/roadmap"
+                  to={`/roadmap?milestone=${encodeURIComponent(milestone.id)}`}
                 >
                   <span
                     className="activity-icon activity-blue"

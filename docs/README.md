@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v41。v9.74 已把 planned/active 路线图节点按目标日期稳定接入右侧概览，并显示真实 Project/Task 归属；不复制进度，也不创建 demo 数据。其余历史版本说明保持不变。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v41。v9.75 已让 Today 右侧与路线图卡片通过 `?milestone=<id>` 共享指定里程碑详情深链；关闭/编辑保留其他 URL 上下文。其余历史版本说明保持不变。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.74）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.75）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。

@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoadmapMilestone } from "../types/models";
 import { RoadmapPage } from "./RoadmapPage";
@@ -107,6 +107,13 @@ const secondMilestone: RoadmapMilestone = {
   version: 3,
 };
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <output data-testid="location-probe">{`${location.pathname}${location.search}`}</output>
+  );
+}
+
 describe("RoadmapPage", () => {
   afterEach(cleanup);
 
@@ -198,6 +205,28 @@ describe("RoadmapPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "编辑里程碑" }));
     expect(screen.getByRole("heading", { name: "编辑里程碑" })).toBeTruthy();
+  });
+
+  it("opens a URL-addressed milestone and removes only that query on close", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/roadmap?milestone=${milestone.id}&source=today-overview`,
+        ]}
+      >
+        <RoadmapPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    expect(hooks.detail).toHaveBeenLastCalledWith(milestone.id);
+    expect(screen.getByRole("dialog", { name: "里程碑详情" })).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "关闭" })[0]);
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/roadmap?source=today-overview",
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith(null);
   });
 
   it("requires a second action before deleting an archived milestone", () => {
