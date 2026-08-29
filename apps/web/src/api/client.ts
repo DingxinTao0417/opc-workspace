@@ -130,6 +130,7 @@ import type {
   RoadmapMilestoneStatus,
   CreateRoadmapMilestoneInput,
   UpdateRoadmapMilestoneInput,
+  DeleteRoadmapMilestoneResult,
   ContentItem,
   ContentItemListParams,
   ContentItemListResult,
@@ -6851,6 +6852,31 @@ export async function createRoadmapMilestone(
   );
 }
 
+export async function updateRoadmapMilestone(
+  id: string,
+  input: UpdateRoadmapMilestoneInput,
+): Promise<RoadmapMilestone> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/roadmap/milestones/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        year: input.year,
+        quarter: input.quarter,
+        target_date: input.targetDate,
+        status: input.status,
+        project_ids: input.projectIds,
+      }),
+    },
+  );
+  return normalizeRoadmapMilestone(
+    isRecord(payload) && "data" in payload ? payload.data : payload,
+  );
+}
+
 export async function archiveRoadmapMilestone(
   id: string,
   expectedVersion: number,
@@ -6875,6 +6901,21 @@ export async function restoreRoadmapMilestone(
   return normalizeRoadmapMilestone(
     isRecord(payload) && "data" in payload ? payload.data : payload,
   );
+}
+
+export async function deleteRoadmapMilestone(
+  id: string,
+  expectedVersion: number,
+): Promise<DeleteRoadmapMilestoneResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/roadmap/milestones/${encodeURIComponent(id)}?confirm=true`,
+    { method: "DELETE", headers: expectedVersionHeader(expectedVersion) },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("路线图里程碑删除响应格式无效");
+  return {
+    deletedId: stringField(body, "deleted_id", "deletedId") ?? id,
+  };
 }
 
 export async function getProject(

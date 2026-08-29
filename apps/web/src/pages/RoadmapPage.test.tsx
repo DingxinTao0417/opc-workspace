@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoadmapMilestone } from "../types/models";
@@ -7,6 +7,8 @@ import { RoadmapPage } from "./RoadmapPage";
 const hooks = vi.hoisted(() => ({
   milestones: vi.fn(),
   projects: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -26,6 +28,16 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
     mutate: vi.fn(),
+  }),
+  useUpdateRoadmapMilestone: () => ({
+    isPending: false,
+    isError: false,
+    mutate: hooks.update,
+  }),
+  useDeleteRoadmapMilestone: () => ({
+    isPending: false,
+    isError: false,
+    mutate: hooks.remove,
   }),
 }));
 
@@ -50,6 +62,8 @@ describe("RoadmapPage", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    hooks.update.mockReset();
+    hooks.remove.mockReset();
     hooks.milestones.mockReturnValue({
       data: { items: [milestone], meta: { page: 1, pageSize: 50, total: 1 } },
       isError: false,
@@ -77,6 +91,67 @@ describe("RoadmapPage", () => {
     expect(screen.getByRole("link", { name: /opc-workspace/ })).toHaveAttribute(
       "href",
       "/projects/project-1",
+    );
+  });
+
+  it("edits milestone facts with the current version", () => {
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("里程碑标题"), {
+      target: { value: "路线图交互收口" },
+    });
+    fireEvent.change(screen.getAllByLabelText("状态")[1], {
+      target: { value: "achieved" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存更改" }));
+
+    expect(hooks.update).toHaveBeenCalledWith(
+      {
+        id: milestone.id,
+        input: expect.objectContaining({
+          title: "路线图交互收口",
+          status: "achieved",
+          expectedVersion: milestone.version,
+        }),
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("requires a second action before deleting an archived milestone", () => {
+    const archived = {
+      ...milestone,
+      status: "archived" as const,
+      archivedFromStatus: "active" as const,
+    };
+    hooks.milestones.mockReturnValue({
+      data: { items: [archived], meta: { page: 1, pageSize: 50, total: 1 } },
+      isError: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    expect(
+      screen.getByText("此操作不可撤销。关联项目和任务不会被删除。"),
+    ).toBeTruthy();
+    expect(hooks.remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+
+    expect(hooks.remove).toHaveBeenCalledWith(
+      { id: milestone.id, expectedVersion: milestone.version },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
 });

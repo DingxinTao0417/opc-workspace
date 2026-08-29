@@ -1,6 +1,6 @@
 # 路线图模块
 
-> 目标版本：v0.3。该模块是本地季度规划和里程碑视图，不属于 v0.1。当前已完成 R2 数据/API（schema v36）及 R3 基础界面首个纵切；编辑、拖拽和本地事件仍待开发。
+> 目标版本：v0.3。该模块是本地季度规划和里程碑视图，不属于 v0.1。当前已完成 R2 数据/API（schema v36）及 R3 基础界面的创建、编辑、归档恢复和保护性删除；详情、分页、拖拽和本地事件仍待开发。
 
 ## 定位与边界
 
@@ -16,7 +16,7 @@
 - `/roadmap` 已替换为真实季度视图：可切换相邻年份、Q1–Q4 与状态筛选，展示真实里程碑、关联 Project 深链和只读派生 Task 完成度；具备加载、空、错误重试和不使用 demo 数据的提示。
 - schema v36 的 `roadmap_milestones` 与 `roadmap_milestone_projects` 保存标题、说明、明确年份/季度、同季度目标日期、状态、排序、归档来源、乐观版本及项目关联；项目删除被关联表外键阻止，删除里程碑会清理其关联。迁移不创建 demo 数据。
 - 已交付本地鉴权 API：`GET/POST /api/v1/roadmap/milestones`、`GET/PATCH/DELETE /api/v1/roadmap/milestones/:id`、`PUT /api/v1/roadmap/milestones/reorder`、归档/恢复端点。列表支持 year/quarter/status/project/归档筛选和分页；创建、编辑、项目关联、归档恢复与重排都由 Sidecar 校验，编辑/归档/恢复/删除使用 `If-Match`，重排的每项使用 `expected_version` 并在一个事务提交。响应只从关联 Project/Task 读取项目摘要及任务完成度，不写入第二份进度。
-- 当前界面可创建当前季度里程碑、选择最多 100 个已读取的非归档 Project 关联，并直接归档或恢复；实际编辑、删除、分页、跨年度跳转、拖拽重排及项目筛选控件仍未接入界面。
+- 当前界面可创建当前季度里程碑、选择最多 100 个已读取的非归档 Project 关联，并直接归档或恢复；非归档里程碑可编辑标题、说明、年份、季度、目标日期、状态和项目关联，所有写入携带当前 `version`。永久删除只在归档视图提供，必须先打开确认弹窗再提交，Sidecar 继续强制 `confirm=true`、`If-Match` 和“仅已归档可删”。详情、分页、跨年度快速跳转、拖拽重排及项目筛选控件仍未接入界面。
 - 里程碑暂未写入 Workflow Event、Inbox 或 Reminder；拖拽、日期跨季度批量调整、界面和通知仍未交付。
 - 历史路线图视觉原型已移除，后续以当前 React 占位实现、本文和 PRD 为准。
 - 现有项目 API 和完整任务事实层也尚未完成，是本模块的前置依赖。
@@ -77,7 +77,7 @@
 
 1. **R1 前置依赖**：完成项目 CRUD、任务关联和稳定的项目派生进度口径。
 2. **R2 数据/API（已完成）**：新增里程碑及关联迁移，实现 CRUD、筛选、状态、项目关联、派生 Task 完成度及并发测试。
-3. **R3 基础界面（进行中）**：已交付季度/状态浏览、新建、Project 跳转、归档恢复及加载/空/错误状态；编辑、详情、删除、分页和项目筛选控件待补。
+3. **R3 基础界面（进行中）**：已交付季度/状态浏览、新建、完整基础事实编辑、Project 跳转、归档恢复、保护性永久删除及加载/空/错误状态；详情、分页和项目筛选控件待补。
 4. **R4 排期交互**：拖拽日期/季度、批量重排、失败回滚和键盘替代操作。
 5. **R5 本地事件**：接入 Inbox、Reminder 和调度补偿，并验证稳定去重。
 
@@ -95,5 +95,6 @@
 
 - [产品 PRD](../opc-workspace-PRD.md)（§5.8、§10.7）
 - [路线注册](../../apps/web/src/App.tsx)
-- [当前占位页](../../apps/web/src/pages/LaterPage.tsx)
+- [路线图页面](../../apps/web/src/pages/RoadmapPage.tsx)
+- [路线图 API](../../services/sidecar/internal/api/roadmap_milestones.go)
 - [项目页](../../apps/web/src/pages/ProjectsPage.tsx)

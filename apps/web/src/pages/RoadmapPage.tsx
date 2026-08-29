@@ -1,19 +1,24 @@
 import {
+  AlertTriangle,
   Archive,
   CalendarDays,
+  Edit3,
   FolderKanban,
   Map,
   Plus,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   useArchiveRoadmapMilestone,
   useCreateRoadmapMilestone,
+  useDeleteRoadmapMilestone,
   useProjectsQuery,
   useRestoreRoadmapMilestone,
   useRoadmapMilestonesQuery,
+  useUpdateRoadmapMilestone,
 } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
@@ -36,7 +41,13 @@ function currentPeriod() {
 }
 
 function targetDateFor(year: number, quarter: number) {
-  return `${year}-${String(quarter * 3).padStart(2, "0")}-28`;
+  const month = quarter * 3;
+  const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function firstDateFor(year: number, quarter: number) {
+  return `${year}-${String((quarter - 1) * 3 + 1).padStart(2, "0")}-01`;
 }
 
 function milestoneStatusClass(status: RoadmapMilestoneStatus) {
@@ -46,7 +57,15 @@ function milestoneStatusClass(status: RoadmapMilestoneStatus) {
   return "status-blue";
 }
 
-function RoadmapMilestoneCard({ milestone }: { milestone: RoadmapMilestone }) {
+function RoadmapMilestoneCard({
+  milestone,
+  onDelete,
+  onEdit,
+}: {
+  milestone: RoadmapMilestone;
+  onDelete: (milestone: RoadmapMilestone) => void;
+  onEdit: (milestone: RoadmapMilestone) => void;
+}) {
   const archive = useArchiveRoadmapMilestone();
   const restore = useRestoreRoadmapMilestone();
   const busy = archive.isPending || restore.isPending;
@@ -106,35 +125,57 @@ function RoadmapMilestoneCard({ milestone }: { milestone: RoadmapMilestone }) {
       ) : null}
       <footer className="roadmap-card-actions">
         {milestone.status === "archived" ? (
-          <button
-            className="button button-secondary"
-            disabled={busy}
-            onClick={() =>
-              restore.mutate({
-                id: milestone.id,
-                expectedVersion: milestone.version,
-              })
-            }
-            type="button"
-          >
-            <RotateCcw size={14} />
-            恢复
-          </button>
+          <>
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() =>
+                restore.mutate({
+                  id: milestone.id,
+                  expectedVersion: milestone.version,
+                })
+              }
+              type="button"
+            >
+              <RotateCcw size={14} />
+              恢复
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={() => onDelete(milestone)}
+              type="button"
+            >
+              <Trash2 size={14} />
+              永久删除
+            </button>
+          </>
         ) : (
-          <button
-            className="button button-quiet"
-            disabled={busy}
-            onClick={() =>
-              archive.mutate({
-                id: milestone.id,
-                expectedVersion: milestone.version,
-              })
-            }
-            type="button"
-          >
-            <Archive size={14} />
-            归档
-          </button>
+          <>
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() => onEdit(milestone)}
+              type="button"
+            >
+              <Edit3 size={14} />
+              编辑
+            </button>
+            <button
+              className="button button-quiet"
+              disabled={busy}
+              onClick={() =>
+                archive.mutate({
+                  id: milestone.id,
+                  expectedVersion: milestone.version,
+                })
+              }
+              type="button"
+            >
+              <Archive size={14} />
+              归档
+            </button>
+          </>
         )}
       </footer>
     </article>
@@ -257,7 +298,7 @@ function CreateRoadmapMilestoneModal({
           <span>目标日期</span>
           <input
             max={targetDateFor(year, quarter)}
-            min={`${year}-${String((quarter - 1) * 3 + 1).padStart(2, "0")}-01`}
+            min={firstDateFor(year, quarter)}
             onChange={(event) => setTargetDate(event.target.value)}
             type="date"
             value={targetDate}
@@ -297,12 +338,279 @@ function CreateRoadmapMilestoneModal({
   );
 }
 
+function EditRoadmapMilestoneModal({
+  milestone,
+  onClose,
+}: {
+  milestone: RoadmapMilestone;
+  onClose: () => void;
+}) {
+  const update = useUpdateRoadmapMilestone();
+  const projects = useProjectsQuery({
+    page: 1,
+    pageSize: 100,
+    sort: "name",
+    includeArchived: true,
+  });
+  const [title, setTitle] = useState(milestone.title);
+  const [description, setDescription] = useState(milestone.description ?? "");
+  const [year, setYear] = useState(milestone.year);
+  const [quarter, setQuarter] = useState(milestone.quarter);
+  const [targetDate, setTargetDate] = useState(milestone.targetDate);
+  const [status, setStatus] = useState<
+    Exclude<RoadmapMilestoneStatus, "archived">
+  >(milestone.status === "archived" ? "planned" : milestone.status);
+  const [projectIds, setProjectIds] = useState(
+    milestone.projects.map((project) => project.id),
+  );
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const close = () => {
+    if (!update.isPending) onClose();
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      setValidationError("请填写里程碑标题。");
+      return;
+    }
+    if (
+      targetDate < firstDateFor(year, quarter) ||
+      targetDate > targetDateFor(year, quarter)
+    ) {
+      setValidationError("目标日期需要在所选季度内。");
+      return;
+    }
+    setValidationError(null);
+    update.mutate(
+      {
+        id: milestone.id,
+        input: {
+          title: cleanTitle,
+          description: description.trim() || null,
+          year,
+          quarter,
+          targetDate,
+          status,
+          projectIds,
+          expectedVersion: milestone.version,
+        },
+      },
+      { onSuccess: onClose },
+    );
+  };
+  const error =
+    validationError ||
+    (update.isError ? "保存失败，数据可能已变化，请刷新后重试。" : null);
+
+  return (
+    <Modal
+      footer={
+        <>
+          <button
+            className="button button-secondary"
+            disabled={update.isPending}
+            onClick={close}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="button button-primary"
+            disabled={update.isPending}
+            form="roadmap-milestone-edit-form"
+            type="submit"
+          >
+            {update.isPending ? "正在保存…" : "保存更改"}
+          </button>
+        </>
+      }
+      onClose={close}
+      open
+      title="编辑里程碑"
+      width="620px"
+    >
+      <form id="roadmap-milestone-edit-form" onSubmit={submit}>
+        <label className="form-field">
+          <span>里程碑标题</span>
+          <input
+            autoFocus
+            maxLength={200}
+            onChange={(event) => setTitle(event.target.value)}
+            value={title}
+          />
+        </label>
+        <label className="form-field">
+          <span>说明</span>
+          <textarea
+            maxLength={4000}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={3}
+            value={description}
+          />
+        </label>
+        <div className="roadmap-edit-period">
+          <label className="form-field">
+            <span>年份</span>
+            <input
+              max={9999}
+              min={1}
+              onChange={(event) => {
+                const nextYear = Number(event.target.value);
+                setYear(nextYear);
+                if (nextYear > 0) {
+                  setTargetDate(targetDateFor(nextYear, quarter));
+                }
+              }}
+              type="number"
+              value={year}
+            />
+          </label>
+          <label className="form-field">
+            <span>季度</span>
+            <select
+              onChange={(event) => {
+                const nextQuarter = Number(event.target.value) as 1 | 2 | 3 | 4;
+                setQuarter(nextQuarter);
+                setTargetDate(targetDateFor(year, nextQuarter));
+              }}
+              value={quarter}
+            >
+              {[1, 2, 3, 4].map((item) => (
+                <option key={item} value={item}>
+                  Q{item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>状态</span>
+            <select
+              onChange={(event) =>
+                setStatus(
+                  event.target.value as Exclude<
+                    RoadmapMilestoneStatus,
+                    "archived"
+                  >,
+                )
+              }
+              value={status}
+            >
+              <option value="planned">计划中</option>
+              <option value="active">进行中</option>
+              <option value="achieved">已达成</option>
+            </select>
+          </label>
+        </div>
+        <label className="form-field">
+          <span>目标日期</span>
+          <input
+            max={targetDateFor(year, quarter)}
+            min={firstDateFor(year, quarter)}
+            onChange={(event) => setTargetDate(event.target.value)}
+            type="date"
+            value={targetDate}
+          />
+        </label>
+        <fieldset className="form-field form-field-last">
+          <legend>关联项目</legend>
+          {projects.isPending ? (
+            <span className="form-field-hint">正在读取项目…</span>
+          ) : null}
+          {projects.data?.items.map((project) => (
+            <label className="roadmap-project-option" key={project.id}>
+              <input
+                checked={projectIds.includes(project.id)}
+                onChange={(event) =>
+                  setProjectIds((items) =>
+                    event.target.checked
+                      ? [...items, project.id]
+                      : items.filter((id) => id !== project.id),
+                  )
+                }
+                type="checkbox"
+              />
+              <span>{project.name}</span>
+              <small>{project.taskSummary.progressPercent}%</small>
+            </label>
+          ))}
+        </fieldset>
+        {error ? <p className="form-field-error">{error}</p> : null}
+      </form>
+    </Modal>
+  );
+}
+
+function DeleteRoadmapMilestoneModal({
+  milestone,
+  onClose,
+}: {
+  milestone: RoadmapMilestone;
+  onClose: () => void;
+}) {
+  const remove = useDeleteRoadmapMilestone();
+  const close = () => {
+    if (!remove.isPending) onClose();
+  };
+  const submit = () => {
+    remove.mutate(
+      { id: milestone.id, expectedVersion: milestone.version },
+      { onSuccess: onClose },
+    );
+  };
+
+  return (
+    <Modal
+      footer={
+        <>
+          <button
+            className="button button-secondary"
+            disabled={remove.isPending}
+            onClick={close}
+            type="button"
+          >
+            取消
+          </button>
+          <button
+            className="button button-danger"
+            disabled={remove.isPending}
+            onClick={submit}
+            type="button"
+          >
+            {remove.isPending ? "正在删除…" : "确认永久删除"}
+          </button>
+        </>
+      }
+      onClose={close}
+      open
+      title="永久删除里程碑"
+      width="500px"
+    >
+      <div className="roadmap-delete-confirm-copy">
+        <AlertTriangle size={22} />
+        <div>
+          <strong>{milestone.title}</strong>
+          <p>此操作不可撤销。关联项目和任务不会被删除。</p>
+        </div>
+      </div>
+      {remove.isError ? (
+        <p className="form-field-error">
+          删除失败，数据可能已变化，请刷新后重试。
+        </p>
+      ) : null}
+    </Modal>
+  );
+}
+
 export function RoadmapPage() {
   const initial = useMemo(currentPeriod, []);
   const [year, setYear] = useState(initial.year);
   const [quarter, setQuarter] = useState(initial.quarter);
   const [status, setStatus] = useState<RoadmapMilestoneStatus | "">("");
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
+  const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
   const query = useRoadmapMilestonesQuery({
     year,
     quarter,
@@ -418,7 +726,12 @@ export function RoadmapPage() {
             </div>
           </header>
           {milestones.map((milestone) => (
-            <RoadmapMilestoneCard key={milestone.id} milestone={milestone} />
+            <RoadmapMilestoneCard
+              key={milestone.id}
+              milestone={milestone}
+              onDelete={setDeleting}
+              onEdit={setEditing}
+            />
           ))}
         </section>
       ) : null}
@@ -428,6 +741,20 @@ export function RoadmapPage() {
         quarter={quarter}
         year={year}
       />
+      {editing ? (
+        <EditRoadmapMilestoneModal
+          key={`${editing.id}:${editing.version}`}
+          milestone={editing}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+      {deleting ? (
+        <DeleteRoadmapMilestoneModal
+          key={`${deleting.id}:${deleting.version}`}
+          milestone={deleting}
+          onClose={() => setDeleting(null)}
+        />
+      ) : null}
     </div>
   );
 }

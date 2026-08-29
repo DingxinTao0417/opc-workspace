@@ -1066,6 +1066,10 @@ export interface UpdateRoadmapMilestoneInput {
   expectedVersion: number;
 }
 
+export interface DeleteRoadmapMilestoneResult {
+  deletedId: string;
+}
+
 export type ContentItemStatus =
   "draft" | "in_review" | "scheduled" | "published" | "cancelled" | "archived";
 

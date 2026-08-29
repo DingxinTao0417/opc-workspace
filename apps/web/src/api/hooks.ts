@@ -110,8 +110,10 @@ import {
   getProjects,
   getRoadmapMilestones,
   createRoadmapMilestone,
+  updateRoadmapMilestone,
   archiveRoadmapMilestone,
   restoreRoadmapMilestone,
+  deleteRoadmapMilestone,
   getContentItems,
   createContentItem,
   updateContentItem,
@@ -221,6 +223,7 @@ import type {
   ProjectTransitionAction,
   RoadmapMilestoneListParams,
   CreateRoadmapMilestoneInput,
+  UpdateRoadmapMilestoneInput,
   ReminderListParams,
   SearchListParams,
   ReorderTasksInput,
@@ -3530,6 +3533,24 @@ export function useCreateRoadmapMilestone() {
   });
 }
 
+export function useUpdateRoadmapMilestone() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateRoadmapMilestoneInput;
+    }) => updateRoadmapMilestone(id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
+    },
+  });
+}
+
 export function useArchiveRoadmapMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -3558,6 +3579,24 @@ export function useRestoreRoadmapMilestone() {
       id: string;
       expectedVersion: number;
     }) => restoreRoadmapMilestone(id, expectedVersion),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
+    },
+  });
+}
+
+export function useDeleteRoadmapMilestone() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: roadmapMilestoneQueryKey,
