@@ -16,6 +16,7 @@ import { ApiError } from "../api/client";
 import {
   useDeleteProject,
   useProjectQuery,
+  useTagOptionsQuery,
   useTaskPageQuery,
   useTransitionProject,
 } from "../api/hooks";
@@ -31,6 +32,8 @@ import { useUiStore } from "../store/ui";
 import type {
   ProjectStatus,
   ProjectTransitionAction,
+  TaskKind,
+  TaskPriority,
   TaskStatus,
 } from "../types/models";
 
@@ -99,7 +102,20 @@ export function ProjectDetailPage() {
   const [taskSearchInput, setTaskSearchInput] = useState("");
   const [taskQueryText, setTaskQueryText] = useState("");
   const [taskStatus, setTaskStatus] = useState<TaskStatus | "">("");
-  const hasTaskFilters = Boolean(taskQueryText || taskStatus);
+  const [taskPriority, setTaskPriority] = useState<TaskPriority | "">("");
+  const [taskKind, setTaskKind] = useState<TaskKind | "">("");
+  const [taskTagId, setTaskTagId] = useState("");
+  const [taskPlannedState, setTaskPlannedState] = useState<
+    "scheduled" | "unscheduled" | ""
+  >("");
+  const hasTaskFilters = Boolean(
+    taskQueryText ||
+    taskStatus ||
+    taskPriority ||
+    taskKind ||
+    taskTagId ||
+    taskPlannedState,
+  );
   const hierarchicalTasks = taskView === "tree" && !hasTaskFilters;
   const tasksQuery = useTaskPageQuery({
     page: taskPage,
@@ -109,7 +125,12 @@ export function ProjectDetailPage() {
     rootOnly: hierarchicalTasks,
     sort: hierarchicalTasks ? "manual_order" : undefined,
     status: taskStatus || undefined,
+    priority: taskPriority || undefined,
+    kind: taskKind || undefined,
+    tagIds: taskTagId ? [taskTagId] : undefined,
+    plannedState: taskPlannedState || undefined,
   });
+  const taskTagsQuery = useTagOptionsQuery(true);
   const project = projectQuery.data;
   const projectTasks = tasksQuery.data?.items ?? [];
   const projectTaskResultTotal = tasksQuery.data?.meta.total ?? 0;
@@ -378,6 +399,78 @@ export function ProjectDetailPage() {
               <option value="cancelled">已取消</option>
             </select>
           </label>
+          <label className="toolbar-select">
+            <span className="sr-only">项目任务标签</span>
+            <select
+              aria-label="项目任务标签"
+              disabled={taskTagsQuery.isPending || taskTagsQuery.isError}
+              onChange={(event) => {
+                setTaskTagId(event.target.value);
+                setTaskPage(1);
+              }}
+              value={taskTagId}
+            >
+              <option value="">
+                {taskTagsQuery.isError ? "标签不可用" : "全部标签"}
+              </option>
+              {(taskTagsQuery.data ?? []).map((tag) => (
+                <option key={tag.id} value={tag.id}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="toolbar-select">
+            <span className="sr-only">项目任务优先级</span>
+            <select
+              aria-label="项目任务优先级"
+              onChange={(event) => {
+                setTaskPriority(event.target.value as TaskPriority | "");
+                setTaskPage(1);
+              }}
+              value={taskPriority}
+            >
+              <option value="">全部优先级</option>
+              <option value="P0">P0 紧急</option>
+              <option value="P1">P1 高</option>
+              <option value="P2">P2 中</option>
+              <option value="P3">P3 低</option>
+            </select>
+          </label>
+          <label className="toolbar-select">
+            <span className="sr-only">项目任务类型</span>
+            <select
+              aria-label="项目任务类型"
+              onChange={(event) => {
+                setTaskKind(event.target.value as TaskKind | "");
+                setTaskPage(1);
+              }}
+              value={taskKind}
+            >
+              <option value="">全部类型</option>
+              <option value="work">工作</option>
+              <option value="review">审核</option>
+              <option value="followup">跟进</option>
+              <option value="reminder">提醒</option>
+            </select>
+          </label>
+          <label className="toolbar-select">
+            <span className="sr-only">项目任务排期</span>
+            <select
+              aria-label="项目任务排期"
+              onChange={(event) => {
+                setTaskPlannedState(
+                  event.target.value as "scheduled" | "unscheduled" | "",
+                );
+                setTaskPage(1);
+              }}
+              value={taskPlannedState}
+            >
+              <option value="">全部排期</option>
+              <option value="scheduled">已排期</option>
+              <option value="unscheduled">未排期</option>
+            </select>
+          </label>
         </div>
         {tasksQuery.isPending ? <SkeletonRows count={4} /> : null}
         {tasksQuery.isError ? (
@@ -397,6 +490,10 @@ export function ProjectDetailPage() {
                     setTaskSearchInput("");
                     setTaskQueryText("");
                     setTaskStatus("");
+                    setTaskPriority("");
+                    setTaskKind("");
+                    setTaskTagId("");
+                    setTaskPlannedState("");
                     setTaskPage(1);
                   }}
                   type="button"

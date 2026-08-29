@@ -93,6 +93,19 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     refetch: vi.fn(),
   }),
+  useTagOptionsQuery: () => ({
+    data: [
+      {
+        id: "tag-1",
+        name: "交付",
+        color: "#6E7BF2",
+        version: 1,
+        createdAt: "2026-08-27T08:00:00Z",
+      },
+    ],
+    isError: false,
+    isPending: false,
+  }),
   useProjectQuery: () => ({
     data: project,
     isError: false,
@@ -191,6 +204,10 @@ vi.mock("../api/hooks", () => ({
     q?: string;
     rootOnly?: boolean;
     status?: string;
+    priority?: string;
+    kind?: string;
+    plannedState?: string;
+    tagIds?: string[];
   }) => {
     taskPageInput(input);
     const page = input.page ?? 1;
@@ -199,6 +216,16 @@ vi.mock("../api/hooks", () => ({
       if (input.parentTaskId) return task.parentTaskId === input.parentTaskId;
       if (input.rootOnly && task.parentTaskId !== null) return false;
       if (input.status && task.status !== input.status) return false;
+      if (input.priority && task.priority !== input.priority) return false;
+      if (input.kind && task.kind !== input.kind) return false;
+      if (
+        input.tagIds?.length &&
+        !input.tagIds.every((id) => task.tags.some((tag) => tag.id === id))
+      )
+        return false;
+      if (input.plannedState === "scheduled" && !task.plannedDate) return false;
+      if (input.plannedState === "unscheduled" && task.plannedDate)
+        return false;
       if (input.q && !`${task.title} ${task.description}`.includes(input.q)) {
         return false;
       }
@@ -328,6 +355,15 @@ describe("ProjectDetailPage", () => {
       title: index === 20 ? "最后一项交付" : `项目任务 ${index + 1}`,
       status: index === 20 ? "done" : "todo",
       subtaskTotal: 0,
+      tags: [
+        {
+          id: "tag-1",
+          name: "交付",
+          color: "#6E7BF2",
+          version: 1,
+          createdAt: "2026-08-27T08:00:00Z",
+        },
+      ],
     }));
     renderPage();
 
@@ -337,6 +373,18 @@ describe("ProjectDetailPage", () => {
 
     fireEvent.change(screen.getByRole("combobox", { name: "项目任务状态" }), {
       target: { value: "done" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "项目任务优先级" }), {
+      target: { value: "P1" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "项目任务类型" }), {
+      target: { value: "work" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "项目任务排期" }), {
+      target: { value: "unscheduled" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "项目任务标签" }), {
+      target: { value: "tag-1" },
     });
     expect(screen.getByText("1 / 21 项")).toBeTruthy();
     expect(
@@ -366,6 +414,10 @@ describe("ProjectDetailPage", () => {
         q: "不存在",
         rootOnly: false,
         status: "done",
+        priority: "P1",
+        kind: "work",
+        plannedState: "unscheduled",
+        tagIds: ["tag-1"],
       }),
     );
   });

@@ -2391,7 +2391,9 @@ kbd {
 
 .project-task-toolbar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px);
+  grid-template-columns:
+    minmax(180px, 1fr)
+    repeat(5, minmax(108px, 138px));
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -9135,6 +9137,14 @@ kbd {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .project-task-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .project-task-toolbar .toolbar-search {
+    grid-column: 1 / -1;
+  }
+
   .client-detail-card {
     grid-template-columns: 1fr;
   }
@@ -9184,6 +9194,14 @@ kbd {
 @media (max-width: 680px) {
   .today-inbox-grid {
     grid-template-columns: 1fr;
+  }
+
+  .project-task-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .project-task-toolbar .toolbar-search {
+    grid-column: auto;
   }
 
   .app-shell {
