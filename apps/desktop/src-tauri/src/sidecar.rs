@@ -2,6 +2,7 @@ use std::{
     env, fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
+    process::Command,
     str::FromStr,
     sync::{Arc, Condvar, Mutex, RwLock},
     time::Duration,
@@ -361,6 +362,28 @@ pub fn sidecar_status(state: State<'_, SidecarManager>) -> SidecarRuntimeStatus 
 pub fn restart_application(app: AppHandle, state: State<'_, SidecarManager>) -> Result<(), String> {
     state.shutdown_for_restart()?;
     app.request_restart();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_log_directory(app: AppHandle) -> Result<(), String> {
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|_| "无法定位应用日志目录".to_owned())?;
+    fs::create_dir_all(&log_dir).map_err(|_| "无法准备应用日志目录".to_owned())?;
+
+    #[cfg(target_os = "windows")]
+    let mut command = Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = Command::new("xdg-open");
+
+    command.arg(&log_dir);
+    command
+        .spawn()
+        .map_err(|_| "无法打开应用日志目录".to_owned())?;
     Ok(())
 }
 

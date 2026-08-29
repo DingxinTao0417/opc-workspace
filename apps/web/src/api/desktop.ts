@@ -27,6 +27,16 @@ export async function requestApplicationRestart(
   return true;
 }
 
+export async function openDesktopLogDirectory(
+  invokeCommand?: InvokeCommand,
+): Promise<boolean> {
+  if (!invokeCommand && !isDesktopRuntime()) return false;
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  await invoke("open_log_directory");
+  return true;
+}
+
 function optionalVersion(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }

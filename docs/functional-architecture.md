@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.23
+> 文档版本：2.24
 > 日期：2026-08-28
-> 依据：[PRD v9.0](opc-workspace-PRD.md)
+> 依据：[PRD v9.1](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
@@ -77,7 +77,7 @@
 - Tauri 与开发脚本均提供独立 Artifact root；Sidecar 在 ready 前校验 marker 的 `format_version / database_id / store_id`，并用不可变数据库身份与一次性 `artifact_store_id` 建立双向绑定，再获取进程级独占锁并协调 `.staging/objects/avatars/.trash/.quarantine`。Task/Client/Project 文件使用 `objects/<uuid>`，Workspace Avatar 使用 `avatars/<uuid>.<ext>`；schema v27 阻止四领域 ID 冲突。内容不经过任意路径 API，读取前复验 size 和 SHA-256。
 - Focus Core A（事实迁移）、B（API/状态机/事务）、C（前端接入与恢复）、D1（历史与周期报告）、D2a（Task 详情记录）和 D2b 日期范围回顾已交付：15 秒 Sidecar heartbeat 不递增版本，启动把遗留 active 转为 recovery_pending；Today 和周期报告只按 completed 的已关闭 interval 与 IANA 本地日边界 overlap 聚合；终态历史稳定分页，7/30 天、本月和最多 93 天自定义趋势与 Streak 均由服务端事实派生；Task 详情只按需读取关联历史，不复制或写回 Session；设置 committed/draft/preview 不改活动 Session。
 - T-11A1/T-11B 已交付手工 Inbox Item 创建、三视图列表、详情编辑、单条/快照式全部已读、稍后/恢复、带原因解决/忽略、重开和 Inbox Event 时间线；T-11A2 已交付已有 Task 活动/历史关系、服务端实时进度、required 修改、带原因软解除、`open / tracking` 联动、按活动关系重开、关系事件和 Task 删除互锁；T-11A3 已交付一次性本地 Reminder、启动补偿、周期扫描和幂等 Inbox 投影。
-- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、磁盘阈值配置、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及固定低空间投影到 Inbox；Sidecar 脱敏轮转日志已交付，Tauri 壳日志、打开日志入口和恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
+- 当前仍未实现 Focus 原生反馈、Client 外部活动来源/回访/财务、磁盘阈值配置、重复提醒、Agent Runtime、非空目标/跨 schema 冲突导入，因此完整工作编排仍是部分完成。Focus 分析与业务 JSON/含文件 ZIP 安全导入导出已交付；已登记来源、运行期数据库操作失败及固定低空间投影到 Inbox；Sidecar 脱敏轮转日志和桌面打开日志目录已交付，Tauri 壳自身日志和恢复页仍未交付。Project 产出区仍只读聚合，正文/下载/验收继续由 Task 领域处理。
 
 ### 3.2 目标扩展
 

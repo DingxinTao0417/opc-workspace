@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.0
+> **一人公司操作系统** · PRD v9.1
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
-> **v9.0 更新说明**：交付主动低磁盘空间监测。Sidecar 在 ready 前及每 5 分钟检查数据库、受控文件和备份根，规范化后去除重复路径；任一根可用空间低于固定 1 GiB 时投影 `storage:low_space` P1 系统维护事项。一次持续低空间周期只提示一次，容量恢复后再次跌破才形成新 incident；数据库不可写时复用安全 journal，下次健康启动补偿。Inbox/journal 不记录盘符、路径、精确容量或底层探测错误；探测失败只记固定内部日志且不伪造低空间事实。阈值配置和分卷详情展示仍属后续，schema 保持 v28。
+> **v9.1 更新说明**：交付桌面“打开日志目录”入口。设置“运行诊断”在 Tauri 环境调用无参数 `open_log_directory` command；Rust 只解析并创建自身 `appLogDir`，再按 Windows/macOS/Linux 调用系统文件管理器，不接受前端路径。浏览器开发模式明确禁用且继续由外部终端管理日志；打开失败只返回固定安全提示，不泄露本机路径。Go Sidecar 脱敏轮转日志可由该入口查看，Tauri 壳自身日志仍待实现。schema 保持 v28。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -889,7 +889,7 @@ v0.1 第一版可配置：
 
 **历史原型（已移除）**：`modal-command-palette.html`
 
-> **当前状态**：核心本地搜索、本地最近使用、设置运行诊断入口、脱敏诊断包 v1、Sidecar 脱敏轮转日志与全局渲染错误恢复已完成。支持已交付页面/安全操作命令、真实 Task/Project/Client/活动 Inbox 统一搜索、精确可刷新详情路由和完整键盘交互；空查询可展示有上限的非敏感最近命令/资源，并在确认资源 404 后清理。Tauri 壳日志/打开日志入口、启动恢复页和 OS 全局快捷键仍待开发。
+> **当前状态**：核心本地搜索、本地最近使用、设置运行诊断入口、脱敏诊断包 v1、Sidecar 脱敏轮转日志、桌面打开日志目录与全局渲染错误恢复已完成。支持已交付页面/安全操作命令、真实 Task/Project/Client/活动 Inbox 统一搜索、精确可刷新详情路由和完整键盘交互；空查询可展示有上限的非敏感最近命令/资源，并在确认资源 404 后清理。Tauri 壳自身日志、启动恢复页和 OS 全局快捷键仍待开发。
 
 - 模糊搜索所有页面、任务、项目、客户、发票
 - 快速执行操作：新建任务、切换页面、开始专注、生成发票
@@ -1814,7 +1814,7 @@ pnpm dev
 - **用户流程**：桌面应用启动后自动准备数据目录并连接本地服务；第二次启动复用单实例并聚焦主窗口；退出时先优雅关闭 Sidecar。
 - **实现方法**：生产配置通过 `externalBin` 内置 Go Sidecar，开发配置通过 `OPC_SIDECAR_URL` 连接外部 Sidecar。Rust 创建 `appDataDir`、`appLogDir` 及附件/Artifact/发票/备份/配置目录，通过环境注入数据库、`OPC_ARTIFACT_DIR`、`OPC_LOG_DIR`、动态端口和会话令牌；Sidecar 完成迁移，读取不可变数据库身份，校验/创建绑定 marker、取得 Artifact root 进程级独占锁并依据 Artifact/tombstone 协调 staging/objects/trash/quarantine 后输出 ready，错库或第二个共用 root 的进程启动失败。配置成功后 Sidecar 将脱敏运行日志同步写入 stderr 与 `opc-sidecar.log`，按 5 MiB/3 归档轮转，文件不可写时自动降级 stderr。Tauri 强制校验 `http://127.0.0.1:<非零端口>`，健康成功后以 `sidecar_status` 暴露连接状态和版本。退出写入 `shutdown\n`，最多等待 7 秒，超时只终止精确子进程；shutdown 已持有 child 时 ready 超时不伪造 exited。
 - **关键路径**：`apps/desktop/src-tauri/src/lib.rs`、`apps/desktop/src-tauri/src/sidecar.rs`、`tauri.conf.json`、`tauri.dev.conf.json`。
-- **验证/剩余**：ready 解析、loopback 校验、状态序列化和恢复安全重启门禁已有 Rust 单元测试；Go 测试覆盖日志双写、令牌/Bearer 遮盖、访问日志不含 query/header/body、panic 值排除、轮转保留、符号链接拒绝与文件故障降级。Tauri 自身日志、打开日志入口、系统托盘、原生通知、自动启动、签名离线更新、OS 全局快捷键、异常自动重启和恢复页未实现；在线 Updater 不属于当前阶段。
+- **验证/剩余**：ready 解析、loopback 校验、状态序列化和恢复安全重启门禁已有 Rust 单元测试；Go 测试覆盖日志双写、令牌/Bearer 遮盖、访问日志不含 query/header/body、panic 值排除、轮转保留、符号链接拒绝与文件故障降级；前端覆盖无参数打开日志 command 与浏览器降级。Tauri 自身日志、系统托盘、原生通知、自动启动、签名离线更新、OS 全局快捷键、异常自动重启和恢复页未实现；在线 Updater 不属于当前阶段。
 
 #### 10.4.3 T-03 Go 健康检查与 API 基础
 
@@ -2055,7 +2055,7 @@ pnpm build:desktop
 4. **继续收件箱来源投影**：T-11A1/A2/A3/B/C/F 的手工受理分诊、已有 Task 关系、Reminder、批量拆分/Assignment、统一 reconciliation、自动解决和运营统计，以及 follow-up Artifact/Task 阻塞/Task 临期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和固定 1 GiB 主动低空间投影均已交付；下一步评审是否需要用户可配置阈值，再继续真实业务来源。
 5. **扩展 Focus D2b**：Core A+B+C、D1、D2a 与日期范围回顾的持久化、恢复、精确工时、Today 统计、终态历史、7/30 天/本月/自定义趋势、Streak、项目/当前标签时间分布、DST 安全小时分布/最佳时段、周几×小时二维热力图和 Task 详情记录已交付；后续独立实现经平台验收的原生通知、托盘和 DND 引导。
 6. **补数据安全链路**：一致性备份完整闭环、迁移前自动回滚、启动后恢复结果诊断、业务 JSON 与含文件 ZIP 的空工作区同 schema 安全导入导出、脱敏诊断包 v1 已交付；下一步补跨 schema/非空目标冲突映射、大数据量进度与数据库打开前恢复页。
-7. **补桌面可靠性与发布能力**：Go Sidecar 脱敏日志落盘/轮转已交付；继续实现 Tauri 日志、打开日志入口、Sidecar 故障恢复、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页。
+7. **补桌面可靠性与发布能力**：Go Sidecar 脱敏日志落盘/轮转和桌面打开日志目录已交付；继续实现 Tauri 壳自身日志、Sidecar 故障恢复、托盘、原生通知、OS 全局快捷键、自动启动、签名更新和恢复页。
 8. **实现 v0.2 本地 Agent**：确定 Adapter、能力令牌、路径授权和崩溃恢复协议后，再接 Agent Run、复用 D2 产出命令、取消/重试和审核返工。
 9. **实现本地规划与预设自动化**：路线图、内容日历和规则引擎只创建本地收件箱项/任务，不自动对外发送。
 10. **排期 v0.4 业务版**：实现客户回访、收入/支出/发票纵切及其本地事件源；先数据契约和 CRUD，再做提醒、统计图和 PDF。
@@ -2394,3 +2394,4 @@ pnpm build:desktop
 | v8.8     | 2026-08-28 | 交付启动恢复结果诊断：只读 API 汇总待重启、本次已应用、applied 清理残留、failed 隔离和无效恢复记录，仅返回规范 ID/时间/状态/计数；设置页支持重新检查，并从服务端恢复重启门禁。清理 warning、路径与底层错误不进入响应，失败/残留不自动删除；数据库打开前实时进度页仍待 Tauri 壳实现，schema 保持 v28。 |
 | v8.9     | 2026-08-28 | 交付运行期数据库故障安全投影：版本化 API 非预期数据库错误、`/health` 数据库不可用、Focus 心跳和 Reminder/Task 到期来源扫描失败先尝试去重创建 `database:runtime` 系统维护 Inbox Item；数据库不可写时复用并发安全的白名单 journal，下次健康启动补偿。响应错误码不变，原始 SQL 错误、路径、Token 和请求数据不进入 Inbox/journal；主动低磁盘阈值监测仍待实现，schema 保持 v28。 |
 | v9.0     | 2026-08-28 | 交付主动低磁盘空间监测：ready 前和每 5 分钟检查数据库/受控文件/备份根，去除重复规范路径，任一根低于固定 1 GiB 时投影 `storage:low_space`；持续低空间周期只提示一次，恢复后再跌破才新建。数据库不可写时安全 journal 补偿；路径、盘符、精确容量和探测错误不进入 Inbox/journal，探测失败不伪造低空间事实；阈值配置仍待评审，schema 保持 v28。 |
+| v9.1     | 2026-08-28 | 交付桌面打开日志目录：设置运行诊断调用无参数 Tauri command，Rust 仅打开自身 `appLogDir`，不接受前端路径；Windows/macOS/Linux 分别调用系统文件管理器，浏览器模式明确禁用，错误提示不含路径。当前可查看 Sidecar 脱敏轮转日志，Tauri 壳自身日志仍待实现，schema 保持 v28。 |

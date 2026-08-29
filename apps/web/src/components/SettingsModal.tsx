@@ -6,6 +6,7 @@ import {
   DatabaseBackup,
   Download,
   Focus,
+  FolderOpen,
   ImagePlus,
   Info,
   LoaderCircle,
@@ -25,7 +26,11 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError, getAppSetting } from "../api/client";
-import { getRuntimeDiagnostics, type RuntimeDiagnostics } from "../api/desktop";
+import {
+  getRuntimeDiagnostics,
+  openDesktopLogDirectory,
+  type RuntimeDiagnostics,
+} from "../api/desktop";
 import {
   useAppSettingsQuery,
   useCommitAppSettingsWithAvatar,
@@ -425,6 +430,18 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         setDiagnosticPackageFeedback("诊断包生成失败，请保留当前页面并重试。");
       },
     });
+  };
+
+  const openLogDirectory = async () => {
+    setDiagnosticPackageFeedback(null);
+    try {
+      const opened = await openDesktopLogDirectory();
+      setDiagnosticPackageFeedback(
+        opened ? "已打开应用日志目录" : "浏览器开发模式不能打开桌面日志目录。",
+      );
+    } catch {
+      setDiagnosticPackageFeedback("无法打开应用日志目录，请稍后重试。");
+    }
   };
 
   const changeAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1028,6 +1045,20 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             >
               <Copy size={14} />
               复制脱敏摘要
+            </button>
+            <button
+              className="button button-secondary"
+              disabled={runtimeDiagnostics.environment !== "desktop"}
+              onClick={() => void openLogDirectory()}
+              title={
+                runtimeDiagnostics.environment === "desktop"
+                  ? "打开应用日志目录"
+                  : "浏览器开发模式由外部终端管理日志"
+              }
+              type="button"
+            >
+              <FolderOpen size={14} />
+              打开日志目录
             </button>
             <button
               className="button button-secondary"

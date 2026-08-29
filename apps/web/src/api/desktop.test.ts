@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getRuntimeDiagnostics,
   isDesktopRuntime,
+  openDesktopLogDirectory,
   requestApplicationRestart,
 } from "./desktop";
 
@@ -17,6 +18,18 @@ describe("desktop application restart", () => {
     const invoke = vi.fn(async () => undefined);
     await expect(requestApplicationRestart(invoke)).resolves.toBe(true);
     expect(invoke).toHaveBeenCalledWith("restart_application");
+  });
+});
+
+describe("desktop log directory", () => {
+  it("does not invent a log location in browser development", async () => {
+    await expect(openDesktopLogDirectory()).resolves.toBe(false);
+  });
+
+  it("invokes only the pathless desktop command", async () => {
+    const invoke = vi.fn(async () => undefined);
+    await expect(openDesktopLogDirectory(invoke)).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith("open_log_directory");
   });
 });
 
