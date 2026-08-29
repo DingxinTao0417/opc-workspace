@@ -83,6 +83,7 @@ describe("client followup API contract", () => {
       createdAt: "2026-08-28T08:00:00Z",
       updatedAt: "2026-08-28T08:01:00Z",
       clientVersion: 4,
+      nextFollowup: null,
     });
     expect(() =>
       normalizeClientFollowup(followupPayload({ status: "overdue" })),
@@ -185,6 +186,7 @@ describe("client followup API contract", () => {
       result: "已确认",
       nextStep: null,
       completedAt: "2026-08-29T08:00:00Z",
+      nextFollowup: { ...plan, purpose: "下次阶段回顾" },
       expectedVersion: 2,
     });
     await skipClientFollowup("followup-1", {
@@ -216,6 +218,20 @@ describe("client followup API contract", () => {
     );
     expect(new Headers(updateInit?.headers).get("If-Match")).toBe('"2"');
     expect(new Headers(completeInit?.headers).get("If-Match")).toBe('"2"');
+    expect(JSON.parse(String(completeInit?.body))).toEqual({
+      result: "已确认",
+      next_step: null,
+      completed_at: "2026-08-29T08:00:00Z",
+      next_followup: {
+        assigned_actor_id: "owner-1",
+        scheduled_at: "2026-08-30T08:00:00Z",
+        timezone: "Asia/Shanghai",
+        channel: "微信",
+        purpose: "下次阶段回顾",
+        notes: null,
+        priority: "normal",
+      },
+    });
     expect(new Headers(skipInit?.headers).get("If-Match")).toBe('"2"');
     expect(cancelUrl.searchParams.get("confirm")).toBe("true");
     expect(new Headers(cancelInit?.headers).get("If-Match")).toBe('"2"');

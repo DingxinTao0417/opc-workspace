@@ -9,7 +9,7 @@
 - [今日工作台](today.md)（T-06A–H 日期分组、导航、按钮排序、同日/跨日期拖拽、空精确日期/未排期落点、行内任意日期安排、安全执行快捷操作、编辑/确认删除入口、截止风险快捷筛选及客户回访待办已交付）
 - [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、共享服务端搜索 Client 筛选，以及 Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用的 Project 选择器已交付；六状态看板、直属子任务汇总自动待验收、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；Agent 待开发）
 - [项目管理](projects.md)（基础纵切、任务浏览器、共享选择器、笔记/附件、Task Artifact 聚合及 nullable follow-up/实时 required 进度、产出区四种跟进状态与 Inbox 深链、活动时间线、来源投影、Client 系统活动及项目 Focus 已交付；财务与里程碑增强待开发）
-- [客户管理](clients.md)（基础资料 CRUD、共享分页搜索选择器、Project 关联、人工活动时间线、Project 生命周期只读系统活动、受控附件、person 显式关联和客户回访详情管理已交付；真实浏览器/窄屏/大数据量专项及外部来源/财务仍待验收或开发）
+- [客户管理](clients.md)（基础资料 CRUD、共享分页搜索选择器、Project 关联、人工活动时间线、Project 生命周期只读系统活动、受控附件、person 显式关联、客户回访详情管理及完成时原子下一次计划已交付；真实浏览器/窄屏/大数据量专项及外部来源/财务仍待验收或开发）
 - [收件箱工作编排](inbox.md)（人工受理、关系/Reminder、来源投影、拆分/自动解决及客户回访来源上下文已交付；split 继承但可清除/改选可信来源 Project，写入独立完成条件并明确 person 本地责任，关系行打开共享 Task；成功 mutation 失效来源 Project，split 另失效 Task/Today/Project。required 仍是显式独立关系事实；Agent 待开发）
 - [本地提醒](reminders.md)（T-11A3 一次性与每日/每周本地 Reminder、启动补偿、跨 DST 递推和到期 Inbox 投影已交付；每月/自定义规则与原生/远程通知待开发）
 - [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）

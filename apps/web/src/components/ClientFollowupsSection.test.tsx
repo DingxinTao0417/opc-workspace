@@ -42,6 +42,7 @@ const followup: ClientFollowup = {
   createdAt: "2026-08-28T08:00:00Z",
   updatedAt: "2026-08-28T08:00:00Z",
   clientVersion: 3,
+  nextFollowup: null,
 };
 
 const state = vi.hoisted(() => ({
@@ -133,6 +134,39 @@ describe("ClientFollowupsSection", () => {
         input: expect.objectContaining({
           result: "客户确认验收。",
           expectedVersion: followup.version,
+        }),
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("can schedule the next local followup in the completion command", () => {
+    render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    fireEvent.change(screen.getByLabelText("回访结果"), {
+      target: { value: "客户希望下月继续沟通。" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "同时安排下一次本地回访" }),
+    );
+    fireEvent.change(screen.getByLabelText("渠道"), {
+      target: { value: "电话" },
+    });
+    fireEvent.change(screen.getByLabelText("目的"), {
+      target: { value: "确认下一阶段需求" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "记录回访结果" }));
+
+    expect(state.complete.mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: followup.id,
+        input: expect.objectContaining({
+          nextFollowup: expect.objectContaining({
+            assignedActorId: actor.id,
+            channel: "电话",
+            purpose: "确认下一阶段需求",
+          }),
         }),
       }),
       expect.objectContaining({ onSuccess: expect.any(Function) }),

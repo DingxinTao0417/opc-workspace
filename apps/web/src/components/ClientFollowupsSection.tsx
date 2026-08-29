@@ -307,6 +307,8 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
   const [result, setResult] = useState("");
   const [nextStep, setNextStep] = useState("");
   const [completedAt, setCompletedAt] = useState(localDateTime(new Date()));
+  const [scheduleNext, setScheduleNext] = useState(false);
+  const [nextPlanDraft, setNextPlanDraft] = useState<PlanDraft>(emptyPlanDraft);
   const [localError, setLocalError] = useState<string | null>(null);
   const items = query.data?.items ?? [];
   const actors = actorsQuery.data ?? [];
@@ -369,6 +371,10 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
     setResult("");
     setNextStep("");
     setCompletedAt(localDateTime(new Date()));
+    setScheduleNext(false);
+    setNextPlanDraft(
+      emptyPlanDraft(followup.assignedActorId || actors[0]?.id || ""),
+    );
     if (kind === "reschedule") setPlanDraft(planDraftFromFollowup(followup));
   };
   const closeEditors = () => {
@@ -418,6 +424,10 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
         return setLocalError("请选择有效的完成时间。");
       if (nextStep.trim().length > 4_000)
         return setLocalError("下一步不能超过 4,000 个字符。");
+      if (scheduleNext) {
+        const nextPlanError = planError(nextPlanDraft);
+        if (nextPlanError) return setLocalError(`下一次回访：${nextPlanError}`);
+      }
       resetFeedback();
       completeMutation.mutate(
         {
@@ -426,6 +436,7 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
             result: value,
             nextStep: nextStep.trim() || null,
             completedAt: completion.toISOString(),
+            nextFollowup: scheduleNext ? planInput(nextPlanDraft) : null,
             expectedVersion: followup.version,
           },
         },
@@ -600,6 +611,31 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                   value={nextStep}
                 />
               </label>
+              <div className="client-followup-field-wide client-followup-next-toggle">
+                <button
+                  aria-pressed={scheduleNext}
+                  className="button button-secondary"
+                  disabled={pending}
+                  onClick={() => setScheduleNext((current) => !current)}
+                  type="button"
+                >
+                  同时安排下一次本地回访
+                </button>
+                <small>
+                  保存时将与本次完成记录在同一事务提交，不发送外部消息。
+                </small>
+              </div>
+              {scheduleNext ? (
+                <div className="client-followup-field-wide client-followup-next-plan">
+                  <strong>下一次回访计划</strong>
+                  <PlanFields
+                    actors={actors}
+                    disabled={pending}
+                    draft={nextPlanDraft}
+                    onChange={setNextPlanDraft}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
           {action.kind === "reschedule" ? (

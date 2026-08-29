@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v35。v9.34 已交付客户回访 C3/C4 API、C5 到期 Inbox 投影、客户详情管理、Today 待办和 Inbox→客户详情入口：计划/终态事实以幂等、ETag/If-Match 和 Workflow Event 保护，详情可读、可新建、编辑、完成、跳过、取消与重排；Today/Inbox 不重复回访命令。v9.27 的命令面板/新建任务原生快捷键只发送固定 action，注册失败降级为应用内快捷键。v9.25 的本地 Agent Adapter 仍只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v35。v9.35 已交付客户回访 C3/C4 API、C5 到期 Inbox 投影、客户详情管理、Today 待办和 Inbox→客户详情入口：计划/终态事实以幂等、ETag/If-Match 和 Workflow Event 保护，详情可读、可新建、编辑、完成、跳过、取消与重排；完成时可选原子安排下一次本地计划。Today/Inbox 不重复回访命令。v9.27 的命令面板/新建任务原生快捷键只发送固定 action，注册失败降级为应用内快捷键。v9.25 的本地 Agent Adapter 仍只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
@@ -39,15 +39,15 @@
 
 ## 后续业务与规划模块
 
-| 模块             | 当前状态                                                         | 目标版本 | 文档                                               |
-| ---------------- | ---------------------------------------------------------------- | -------- | -------------------------------------------------- |
-| 收入、支出与发票 | 页面骨架 / 数据表预留                                            | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | C2–C5 数据/API、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成 | v0.4     | [client-followups.md](modules/client-followups.md) |
-| 路线图           | 占位页                                                           | v0.3     | [roadmap.md](modules/roadmap.md)                   |
-| 内容日历         | 占位页                                                           | v0.3     | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 首个纵向切片完成                                                 | v0.2     | [automation.md](modules/automation.md)             |
-| 本地知识库       | 未开始                                                           | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
-| AI 助手          | 未开始                                                           | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
+| 模块             | 当前状态                                                                         | 目标版本 | 文档                                               |
+| ---------------- | -------------------------------------------------------------------------------- | -------- | -------------------------------------------------- |
+| 收入、支出与发票 | 页面骨架 / 数据表预留                                                            | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成 | v0.4     | [client-followups.md](modules/client-followups.md) |
+| 路线图           | 占位页                                                                           | v0.3     | [roadmap.md](modules/roadmap.md)                   |
+| 内容日历         | 占位页                                                                           | v0.3     | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化       | 首个纵向切片完成                                                                 | v0.2     | [automation.md](modules/automation.md)             |
+| 本地知识库       | 未开始                                                                           | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
+| AI 助手          | 未开始                                                                           | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
 

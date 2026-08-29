@@ -213,3 +213,46 @@ func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND action IN ('client_followup_completed', 'client_followup_skipped', 'client_followup_rescheduled', 'client_followup_reschedule_created', 'client_followup_cancelled')", 5)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'inbox_item' AND action = 'source_resolved'", 4)
 }
+
+func TestClientFollowupCompletionCanAtomicallyScheduleNextPlan(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Followup Next Plan Client"}`, nil)
+	actor := createActorForTest(t, router, `{"type":"person","display_name":"Followup Planner"}`, nil)
+	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"`+actor.ID+`","scheduled_at":"2026-09-01T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"confirm delivery"}`), nil)
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("create followup = %d: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	created := decodeClientFollowupResponse(t, createdRecorder.Body.Bytes())
+	completion := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+created.ID+"/complete", []byte(`{"result":"delivery confirmed","next_step":"schedule review","next_followup":{"assigned_actor_id":"`+actor.ID+`","scheduled_at":"2026-10-01T09:00:00+08:00","timezone":"Asia/Shanghai","channel":"meeting","purpose":"review next phase","notes":"bring milestones","priority":"high"}}`), map[string]string{"If-Match": `"1"`})
+	if completion.Code != http.StatusOK || completion.Header().Get("ETag") != `"2"` {
+		t.Fatalf("complete with next plan = %d headers=%v body=%s", completion.Code, completion.Header(), completion.Body.String())
+	}
+	completed := decodeClientFollowupResponse(t, completion.Body.Bytes())
+	if completed.Status != "completed" || completed.NextFollowup == nil || completed.NextFollowup.ID == created.ID || completed.NextFollowup.ClientID != client.ID || completed.NextFollowup.AssignedActorID != actor.ID || completed.NextFollowup.Status != "planned" || completed.NextFollowup.ScheduledAt != "2026-10-01T01:00:00Z" || completed.NextFollowup.Purpose != "review next phase" || completed.NextFollowup.Notes == nil || *completed.NextFollowup.Notes != "bring milestones" {
+		t.Fatalf("completed next plan response = %#v", completed)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM client_followups WHERE client_id = ?", 2, client.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND aggregate_id = ? AND action = 'client_followup_completed'", 1, created.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'client_followup' AND aggregate_id = ? AND action = 'client_followup_created_from_completion'", 1, completed.NextFollowup.ID)
+
+	if recorder := performRequest(router, http.MethodPatch, "/api/v1/actors/"+actor.ID, []byte(`{"status":"inactive"}`), map[string]string{"If-Match": `"1"`}); recorder.Code != http.StatusOK {
+		t.Fatalf("inactivate next actor = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	followupRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-02T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"another delivery"}`), nil)
+	if followupRecorder.Code != http.StatusCreated {
+		t.Fatalf("create second followup = %d: %s", followupRecorder.Code, followupRecorder.Body.String())
+	}
+	second := decodeClientFollowupResponse(t, followupRecorder.Body.Bytes())
+	failed := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+second.ID+"/complete", []byte(`{"result":"done","next_followup":{"assigned_actor_id":"`+actor.ID+`","scheduled_at":"2026-10-02T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"should not persist"}}`), map[string]string{"If-Match": `"1"`})
+	if failed.Code != http.StatusUnprocessableEntity || responseErrorCode(t, failed.Body.Bytes()) != "CLIENT_FOLLOWUP_ASSIGNEE_UNAVAILABLE" {
+		t.Fatalf("complete with unavailable next assignee = %d: %s", failed.Code, failed.Body.String())
+	}
+	var unchanged models.ClientFollowup
+	if err := store.DB.First(&unchanged, "id = ?", second.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Status != "planned" || unchanged.Version != 1 {
+		t.Fatalf("failed complete changed source followup = %#v", unchanged)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM client_followups WHERE client_id = ?", 3, client.ID)
+}

@@ -76,6 +76,7 @@ const clientFollowup: ClientFollowup = {
   createdAt: "2026-08-28T10:00:00Z",
   updatedAt: "2026-08-29T10:00:00Z",
   clientVersion: 3,
+  nextFollowup: null,
 };
 
 function wrapperFor(queryClient: QueryClient) {
@@ -197,6 +198,7 @@ describe("client hooks", () => {
           result: "已确认",
           nextStep: null,
           completedAt: null,
+          nextFollowup: null,
           expectedVersion: 1,
         },
       }),

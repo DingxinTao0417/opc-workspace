@@ -43,9 +43,20 @@ type updateClientFollowupRequest struct {
 }
 
 type completeClientFollowupRequest struct {
-	Result      string  `json:"result"`
-	NextStep    *string `json:"next_step"`
-	CompletedAt *string `json:"completed_at"`
+	Result       string                     `json:"result"`
+	NextStep     *string                    `json:"next_step"`
+	CompletedAt  *string                    `json:"completed_at"`
+	NextFollowup *clientFollowupPlanRequest `json:"next_followup"`
+}
+
+type clientFollowupPlanRequest struct {
+	AssignedActorID string  `json:"assigned_actor_id"`
+	ScheduledAt     string  `json:"scheduled_at"`
+	Timezone        string  `json:"timezone"`
+	Channel         string  `json:"channel"`
+	Purpose         string  `json:"purpose"`
+	Notes           *string `json:"notes"`
+	Priority        string  `json:"priority"`
 }
 
 type skipClientFollowupRequest struct {
@@ -66,31 +77,32 @@ type rescheduleClientFollowupRequest struct {
 }
 
 type clientFollowupResponse struct {
-	ID                string  `json:"id"`
-	ClientID          string  `json:"client_id"`
-	ClientName        string  `json:"client_name"`
-	AssignedActorID   string  `json:"assigned_actor_id"`
-	AssignedActorName string  `json:"assigned_actor_name"`
-	AssignedActorType string  `json:"assigned_actor_type"`
-	ScheduledAt       string  `json:"scheduled_at"`
-	Timezone          string  `json:"timezone"`
-	Channel           string  `json:"channel"`
-	Purpose           string  `json:"purpose"`
-	Notes             *string `json:"notes"`
-	Status            string  `json:"status"`
-	Priority          string  `json:"priority"`
-	CompletedAt       *string `json:"completed_at"`
-	Result            *string `json:"result"`
-	NextStep          *string `json:"next_step"`
-	SkippedAt         *string `json:"skipped_at"`
-	SkipReason        *string `json:"skip_reason"`
-	CancelledAt       *string `json:"cancelled_at"`
-	CancelReason      *string `json:"cancel_reason"`
-	RescheduledFromID *string `json:"rescheduled_from_id"`
-	Version           int64   `json:"version"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
-	ClientVersion     int64   `json:"client_version"`
+	ID                string                  `json:"id"`
+	ClientID          string                  `json:"client_id"`
+	ClientName        string                  `json:"client_name"`
+	AssignedActorID   string                  `json:"assigned_actor_id"`
+	AssignedActorName string                  `json:"assigned_actor_name"`
+	AssignedActorType string                  `json:"assigned_actor_type"`
+	ScheduledAt       string                  `json:"scheduled_at"`
+	Timezone          string                  `json:"timezone"`
+	Channel           string                  `json:"channel"`
+	Purpose           string                  `json:"purpose"`
+	Notes             *string                 `json:"notes"`
+	Status            string                  `json:"status"`
+	Priority          string                  `json:"priority"`
+	CompletedAt       *string                 `json:"completed_at"`
+	Result            *string                 `json:"result"`
+	NextStep          *string                 `json:"next_step"`
+	SkippedAt         *string                 `json:"skipped_at"`
+	SkipReason        *string                 `json:"skip_reason"`
+	CancelledAt       *string                 `json:"cancelled_at"`
+	CancelReason      *string                 `json:"cancel_reason"`
+	RescheduledFromID *string                 `json:"rescheduled_from_id"`
+	Version           int64                   `json:"version"`
+	CreatedAt         string                  `json:"created_at"`
+	UpdatedAt         string                  `json:"updated_at"`
+	ClientVersion     int64                   `json:"client_version"`
+	NextFollowup      *clientFollowupResponse `json:"next_followup,omitempty"`
 }
 
 type clientFollowupRow struct {
@@ -408,13 +420,97 @@ func (a *API) completeClientFollowup(c *gin.Context) {
 			return
 		}
 	}
-	response, err := a.transitionClientFollowup(c, id, expected, "client_followup_completed", map[string]any{"status": "completed", "completed_at": completedAt, "result": result, "next_step": nextStep})
+	var nextPlan *models.ClientFollowup
+	if input.NextFollowup != nil {
+		plan, err := clientFollowupFromPlanRequest(*input.NextFollowup)
+		if err != nil {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+			return
+		}
+		nextPlan = &plan
+	}
+	response, err := a.completeClientFollowupWithNext(c, id, expected, result, nextStep, completedAt, nextPlan)
 	if err != nil {
 		a.writeClientFollowupTransitionError(c, err)
 		return
 	}
 	setProjectETag(c, response.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// completeClientFollowupWithNext writes the completed fact and an explicitly
+// requested next local plan together. Either both workflow events and records
+// are committed, or neither is, so a completed result can never claim a next
+// followup that was not actually scheduled.
+func (a *API) completeClientFollowupWithNext(c *gin.Context, id string, expected int64, result string, nextStep *string, completedAt string, nextPlan *models.ClientFollowup) (clientFollowupResponse, error) {
+	var response clientFollowupResponse
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var current models.ClientFollowup
+		if err := tx.First(&current, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
+			}
+			return err
+		}
+		if current.Version != expected {
+			return clientFollowupVersionConflict()
+		}
+		if current.Status != "planned" {
+			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
+		}
+		if nextPlan != nil {
+			if err := ensureClientFollowupReferences(tx, current.ClientID, nextPlan.AssignedActorID); err != nil {
+				return err
+			}
+		}
+		previousRow, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		updates := map[string]any{"status": "completed", "completed_at": completedAt, "result": result, "next_step": nextStep, "updated_at": now, "version": gorm.Expr("version + 1")}
+		write := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(updates)
+		if write.Error != nil {
+			return write.Error
+		}
+		if write.RowsAffected == 0 {
+			return clientFollowupVersionConflict()
+		}
+		row, err := loadClientFollowupRow(tx, id)
+		if err != nil {
+			return err
+		}
+		response = clientFollowupResponseFromRow(row)
+		var nextResponse *clientFollowupResponse
+		if nextPlan != nil {
+			nextPlan.ClientID, nextPlan.CreatedAt, nextPlan.UpdatedAt = current.ClientID, now, now
+			if err := tx.Create(nextPlan).Error; err != nil {
+				return fmt.Errorf("create next client followup: %w", err)
+			}
+			nextRow, err := loadClientFollowupRow(tx, nextPlan.ID)
+			if err != nil {
+				return err
+			}
+			created := clientFollowupResponseFromRow(nextRow)
+			nextResponse = &created
+			response.NextFollowup = nextResponse
+		}
+		if err := resolveClientFollowupInboxSources(tx, id, clientFollowupInboxResolutionReason("client_followup_completed"), requestIDFromContext(c), now); err != nil {
+			return err
+		}
+		currentEvent := clientFollowupEventState(response)
+		if nextResponse != nil {
+			currentEvent["next_followup_id"] = nextResponse.ID
+		}
+		if err := recordClientFollowupWorkflowEvent(tx, id, "client_followup_completed", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), currentEvent, requestIDFromContext(c), now); err != nil {
+			return err
+		}
+		if nextResponse == nil {
+			return nil
+		}
+		return recordClientFollowupWorkflowEvent(tx, nextResponse.ID, "client_followup_created_from_completion", nil, map[string]any{"client_id": nextResponse.ClientID, "completed_followup_id": id, "scheduled_at": nextResponse.ScheduledAt, "timezone": nextResponse.Timezone, "channel": nextResponse.Channel, "purpose": nextResponse.Purpose, "priority": nextResponse.Priority, "version": nextResponse.Version}, requestIDFromContext(c), now)
+	})
+	return response, err
 }
 
 func (a *API) skipClientFollowup(c *gin.Context) {
@@ -636,42 +732,17 @@ func (a *API) clientFollowupFromCreateRequest(input createClientFollowupRequest)
 	if err != nil {
 		return models.ClientFollowup{}, err
 	}
-	actorID, err := canonicalUUID(input.AssignedActorID, "assigned_actor_id")
+	followup, err := clientFollowupFromPlanRequest(clientFollowupPlanRequest{AssignedActorID: input.AssignedActorID, ScheduledAt: input.ScheduledAt, Timezone: input.Timezone, Channel: input.Channel, Purpose: input.Purpose, Notes: input.Notes, Priority: input.Priority})
 	if err != nil {
 		return models.ClientFollowup{}, err
 	}
-	scheduledAt, err := cleanClientFollowupTimestamp(input.ScheduledAt)
-	if err != nil {
-		return models.ClientFollowup{}, err
-	}
-	timezone, err := cleanClientFollowupTimezone(input.Timezone)
-	if err != nil {
-		return models.ClientFollowup{}, err
-	}
-	channel, err := cleanClientFollowupText(input.Channel, "channel", 80, false, false)
-	if err != nil {
-		return models.ClientFollowup{}, err
-	}
-	purpose, err := cleanClientFollowupText(input.Purpose, "purpose", 500, false, false)
-	if err != nil {
-		return models.ClientFollowup{}, err
-	}
-	notes, err := cleanClientFollowupOptionalText(input.Notes, "notes", 4000, true)
-	if err != nil {
-		return models.ClientFollowup{}, err
-	}
-	priority := strings.TrimSpace(input.Priority)
-	if priority == "" {
-		priority = "normal"
-	}
-	if _, valid := validClientFollowupPriorities[priority]; !valid {
-		return models.ClientFollowup{}, errors.New("priority must be low, normal, or high")
-	}
-	now := a.options.Now().UTC()
-	return models.ClientFollowup{ID: uuid.NewString(), ClientID: clientID, AssignedActorID: actorID, ScheduledAt: scheduledAt, Timezone: timezone, Channel: channel, Purpose: purpose, Notes: notes, Status: "planned", Priority: priority, Version: 1, CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano)}, nil
+	followup.ClientID = clientID
+	now := a.options.Now().UTC().Format(time.RFC3339Nano)
+	followup.CreatedAt, followup.UpdatedAt = now, now
+	return followup, nil
 }
 
-func (a *API) clientFollowupFromRescheduleRequest(input rescheduleClientFollowupRequest) (models.ClientFollowup, error) {
+func clientFollowupFromPlanRequest(input clientFollowupPlanRequest) (models.ClientFollowup, error) {
 	actorID, err := canonicalUUID(input.AssignedActorID, "assigned_actor_id")
 	if err != nil {
 		return models.ClientFollowup{}, err
@@ -704,6 +775,10 @@ func (a *API) clientFollowupFromRescheduleRequest(input rescheduleClientFollowup
 		return models.ClientFollowup{}, errors.New("priority must be low, normal, or high")
 	}
 	return models.ClientFollowup{ID: uuid.NewString(), AssignedActorID: actorID, ScheduledAt: scheduledAt, Timezone: timezone, Channel: channel, Purpose: purpose, Notes: notes, Status: "planned", Priority: priority, Version: 1}, nil
+}
+
+func (a *API) clientFollowupFromRescheduleRequest(input rescheduleClientFollowupRequest) (models.ClientFollowup, error) {
+	return clientFollowupFromPlanRequest(clientFollowupPlanRequest{AssignedActorID: input.AssignedActorID, ScheduledAt: input.ScheduledAt, Timezone: input.Timezone, Channel: input.Channel, Purpose: input.Purpose, Notes: input.Notes, Priority: input.Priority})
 }
 
 func clientFollowupUpdates(input updateClientFollowupRequest) (map[string]any, error) {

@@ -1079,6 +1079,7 @@ export interface ClientFollowup {
   createdAt: string;
   updatedAt: string;
   clientVersion: number;
+  nextFollowup: ClientFollowup | null;
 }
 
 export interface ClientFollowupListResult {
@@ -1119,7 +1120,18 @@ export interface CompleteClientFollowupInput {
   result: string;
   nextStep: string | null;
   completedAt: string | null;
+  nextFollowup: ClientFollowupPlanInput | null;
   expectedVersion: number;
+}
+
+export interface ClientFollowupPlanInput {
+  assignedActorId: string;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+  purpose: string;
+  notes: string | null;
+  priority: ClientFollowupPriority;
 }
 
 export interface SkipClientFollowupInput {

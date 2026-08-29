@@ -17,7 +17,7 @@
 - Client 基础资料 CRUD、列表、基础详情和 Project 客户关联已交付；客户页面当前明确显示没有本地活动事实，不伪造沟通记录。
 - **C2 数据契约已完成**：schema v35 新增 `client_followups` 与 Go model；计划/完成/跳过/取消字段组合受数据库约束，负责人只允许 active owner/person，终态不可重开、写入必须递增 version，客户存在回访历史时禁止硬删除。插入、更新、删除会递增客户聚合版本，业务 JSON/ZIP 的显式白名单同步包含该表。
 - **C3 计划 API 已完成**：`GET/POST /api/v1/client-followups`、`GET/PATCH /api/v1/client-followups/:id` 与 `GET /api/v1/clients/:id/followups` 已提供分页、客户/负责人/状态筛选、创建幂等、详情和 `If-Match` 编辑；成功创建或编辑同事务追加不可变 Workflow Event。API 使用 IANA 时区、RFC 3339 计划时间和 active owner/person 双层校验。
-- **C4 执行 API 已完成**：`complete` 必填结果、`skip`/确认 `DELETE` 必填原因；`reschedule` 在同一事务取消旧计划、创建带 `rescheduled_from_id` 的新计划，并为两个聚合追加不可变 Workflow Event。终态不可重开。
+- **C4 执行 API 已完成**：`complete` 必填结果，并可选在同一事务创建下一次本地计划；`skip`/确认 `DELETE` 必填原因；`reschedule` 在同一事务取消旧计划、创建带 `rescheduled_from_id` 的新计划，并为两个聚合追加不可变 Workflow Event。终态不可重开。
 - **C5 到期 Inbox 投影、详情管理与页面入口已完成**：Sidecar 启动与既有提醒扫描周期会读取到期的 `planned` 回访，以 `followup:<id>:due:<version>` 稳定键创建一条本地 Inbox 事件；重复扫描不重复创建，终态计划不会投影。客户详情通过 `GET /api/v1/clients/:id/followups` 严格校验并分页显示本地计划、终态结果、负责人、优先级、下一步和即时派生的逾期标识，具备加载、空和失败重试状态；同页已提供创建、编辑、完成、跳过、确认取消和重排表单，创建复用幂等键、写入复用回访 `If-Match`，负责人只可选 active owner/person。回访更新、完成、跳过、取消或重排在同一事务归档活动的旧到期 Inbox 投影，仍保留可审计事件，不会让已处理计划继续出现在 Today。Inbox 前端严格校验回访来源 key 与五字段 payload，并在来源上下文只深链客户详情；Today 通过受限 `GET /api/v1/inbox-items?source_entity_type=client_followup` 读取前五项待办与准确总数。执行命令不在 Inbox 或 Today 重复实现。
 - 当前代码没有邮件、短信或第三方 CRM 连接；历史设计材料中的线上客户行为不能作为真实事件使用，且后续以 React 实现与 PRD 为准。
 
@@ -36,7 +36,7 @@
 1. **创建计划**：用户从客户详情选择“安排回访”，填写本地日期时间、渠道、目的、负责人和备注后保存。
 2. **到期提醒**：调度器按用户 IANA 时区计算到期范围，以稳定事件键创建 Inbox Item；同一次计划只提醒一次。
 3. **处理回访**：用户从今日待办或收件箱来源上下文跳转客户详情，查看上下文并在线下完成沟通。
-4. **记录结果**：用户选择完成，填写结果、下一步和实际完成时间；需要持续跟进时原子创建下一次计划。
+4. **记录结果**：用户选择完成，填写结果、下一步和实际完成时间；需要持续跟进时可展开下一次计划表单，完成事实、下一条计划及两条审计事件原子写入。
 5. **跳过或重排**：用户填写原因后跳过，或选择新时间；系统保留原时间、原因和责任变化事件。
 6. **异常恢复**：调度漏跑或应用重启后补偿扫描，但不重复生成提醒，不自动改变回访状态。
 
@@ -59,7 +59,7 @@
 
 - `GET / POST /api/v1/client-followups`
 - `GET / PATCH / DELETE /api/v1/client-followups/:id`
-- `POST /api/v1/client-followups/:id/complete`
+- `POST /api/v1/client-followups/:id/complete`（可选 `next_followup`；与完成事实在同一事务创建）
 - `POST /api/v1/client-followups/:id/skip`
 - `POST /api/v1/client-followups/:id/reschedule`
 - `GET /api/v1/clients/:id/followups`
@@ -88,7 +88,7 @@
 1. **C1 前置依赖（已完成）**：客户基础 CRUD/详情、Client 活动事实、person 显式关联、Actor/Assignment 基线和 Inbox 人工闭环已交付；回访仍需自己的递增迁移与领域契约。
 2. **C2 数据契约（已完成）**：新增迁移、计划/终态字段组合、负责人和删除约束、版本步进、客户聚合失效，以及业务导入导出白名单。
 3. **C3 CRUD（计划部分已完成）**：已实现列表、创建、编辑、详情、分页、时区口径、幂等/并发和定向 API 测试；创建/编辑成功后追加 Workflow Event。取消与终态执行转入 C4。
-4. **C4 执行闭环（API 已完成）**：已实现完成、跳过、取消和重排的事务 API；下一次计划向导和客户时间线转入页面纵切。
+4. **C4 执行闭环（已完成）**：已实现完成、跳过、取消和重排的事务 API；完成表单可选同时安排下一次本地计划，二者及审计事件同一事务提交。
 5. **C5 提醒协作（已完成）**：已接入本地调度、启动补偿、Inbox 和事件去重，并在客户详情完成严格 API 读取及本地创建/执行表单；Today 展示真实待办及总数，Inbox 来源上下文可回到客户详情，执行命令仍保持单一入口。
 6. **C6 稳定性**：覆盖时区、夏令时、并发编辑、客户/Actor 停用和恢复测试。
 

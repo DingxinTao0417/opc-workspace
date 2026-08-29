@@ -3678,6 +3678,33 @@ kbd {
   grid-column: 1 / -1;
 }
 
+.client-followup-next-toggle .button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 9px;
+  font-size: 9px;
+}
+
+.client-followup-next-toggle small {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.client-followup-next-plan {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.client-followup-next-plan > strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
 .client-followup-actions {
   display: flex;
   flex-wrap: wrap;

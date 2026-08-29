@@ -1277,6 +1277,11 @@ export function normalizeClientFollowup(value: unknown): ClientFollowup {
   if (assignedActorType !== "owner" && assignedActorType !== "person") {
     return invalidResponse("客户回访负责人响应无效");
   }
+  const rawNextFollowup = fieldValue(value, "next_followup", "nextFollowup");
+  const nextFollowup =
+    rawNextFollowup === undefined || rawNextFollowup === null
+      ? null
+      : normalizeClientFollowup(rawNextFollowup);
   return {
     id,
     clientId,
@@ -1327,6 +1332,7 @@ export function normalizeClientFollowup(value: unknown): ClientFollowup {
       fieldValue(value, "client_version", "clientVersion"),
       "客户回访对应客户版本",
     ),
+    nextFollowup,
   };
 }
 
@@ -6940,6 +6946,17 @@ export async function completeClientFollowup(
         result: input.result,
         next_step: input.nextStep,
         completed_at: input.completedAt,
+        next_followup: input.nextFollowup
+          ? {
+              assigned_actor_id: input.nextFollowup.assignedActorId,
+              scheduled_at: input.nextFollowup.scheduledAt,
+              timezone: input.nextFollowup.timezone,
+              channel: input.nextFollowup.channel,
+              purpose: input.nextFollowup.purpose,
+              notes: input.nextFollowup.notes,
+              priority: input.nextFollowup.priority,
+            }
+          : null,
       }),
     },
   );

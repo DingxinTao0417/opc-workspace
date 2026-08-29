@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.54
+> 文档版本：2.55
 > 日期：2026-08-29
-> 依据：[PRD v9.34](opc-workspace-PRD.md)
+> 依据：[PRD v9.35](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.54 说明：客户回访 C5 已完成 Today 与 Inbox 展示入口。Sidecar 的 `client_followup` 到期投影经前端严格校验后，Inbox 只提供客户详情深链；Today 以受限来源筛选读取前五项和准确总数。更新、完成、跳过、取消和重排会同事务归档活动旧投影并失效 Inbox Query；终态命令保持在客户详情的单一命令面，React 不直接写 Inbox 或联系客户。
+> 2.55 说明：客户回访完成时可选同事务创建下一次本地计划。完成事实、下一条计划和各自 Workflow Event 要么一起提交，要么一起回滚；下一条负责人仍须为 active owner/person。既有到期投影归档和 Today/Inbox 只读深链边界不变，React 不直接写 Inbox 或联系客户。
 
 ## 1. 目的
 
@@ -133,7 +133,7 @@
 | [数据管理](modules/data-management.md)     | SQLite 与本地文件                                                                                                       | 已实现受控文件一致性、手工及内部自动回滚包容量准入、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划                              | 当前文件安全、已校验备份、恢复状态、准入反馈、失败 Inbox 与便携导入导出                                                                                          |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                                 | 原生窗口、受管 Sidecar generation/重启预算/父管道与 shutdown、权限、运行日志和发布                                                                                                        | 可运行、可恢复、可诊断的本地应用环境                                                                                                                             |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                             | 财务与发票业务事实                                                                                                                                                                        | 本地提醒、Inbox Item、客户聚合                                                                                                                                   |
-| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                                 | 本地回访计划、终态结果、客户详情管理、Today 待办和 Inbox→客户详情入口                                                                                                                     | Inbox 到期项；不自动创建客户活动或外部通信                                                                                                                       |
+| [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                                 | 本地回访计划、终态结果、完成时原子安排下一次计划、客户详情管理、Today 待办和 Inbox→客户详情入口                                                                                           | Inbox 到期项；不自动创建客户活动或外部通信                                                                                                                       |
 | [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 季度和里程碑规划                                                                                                                                                                          | 临期/达成 Inbox 事件                                                                                                                                             |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划和准备工作                                                                                                                                                                        | 准备 Task、审核/发布时间 Inbox 事件                                                                                                                              |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                                    | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                     |
