@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.46
+> 文档版本：2.47
 > 日期：2026-08-29
-> 依据：[PRD v9.23](opc-workspace-PRD.md)
+> 依据：[PRD v9.24](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v33
 
-> 2.46 说明：schema v33 交付首个受限预设自动化纵切。代码所有的五规则中，Project 完成 Inbox、daily 今日任务 Reminder、weekly 周五复盘 Reminder 可用，发票/Agent 规则保持 unavailable。事件/计划拥有稳定唯一键、事务动作、来源失败隔离、三次 attempt、IANA/DST 与离线窗口折叠；设置、Run 历史/重试和业务导入导出已接通。没有 Shell/SQL/HTTP、外发、AI/LLM、Agent Runtime 或自由规则。app v0.1.0 / API v1 不变。
+> 2.47 说明：接受 [ADR-003](adr/003-local-agent-runtime-security.md)。未来每个 Agent Run 使用一个短生命周期子进程，Sidecar 匿名 stdin/stdout 管道是唯一能力通道；不开放 Runtime HTTP、不复用 WebView Token、不接受任意命令/绝对路径。平台沙箱、禁网与子树清理未验证时执行必须关闭。当前仍没有 Adapter、Agent Run 或可执行 agent Actor；app v0.1.0 / API v1 / schema v33 不变。
 
 ## 1. 目的
 
@@ -298,6 +298,8 @@ React Query 的派生缓存按项目、日期和页码隔离，失效边界固�
 
 ### 6.7 本地 Agent 执行（v0.2）
 
+传输与安全边界已由 [ADR-003](adr/003-local-agent-runtime-security.md) 冻结；下图仍是目标流程，不表示当前代码已实现 Adapter 或 Run。平台隔离未验证时，流程必须停在 Adapter 诊断阶段。
+
 ```text
 Task 已分派给健康 agent Actor
   → owner 创建 Agent Run
@@ -447,7 +449,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 - WebView 使用启动期随机 Bearer Token 调用普通业务 API。
 - 本地 Agent 不使用 WebView Token，也不能直接打开 SQLite。
-- Agent Runtime 使用专用路由/中间件和单次能力令牌，或使用受控进程管道。
+- Agent Runtime 不开放 HTTP；每个 Run 使用 Sidecar 创建的短生命周期子进程和匿名 stdin/stdout 管道，进程内 nonce 只绑定本次协议会话。
 - Adapter 默认只获得本次 Run 明确授权的输入、路径和输出目录。
 - 跨平台进程沙箱和网络阻断必须经过 ADR 与实际验证；无法强制时 Adapter 只能保留为禁用诊断记录，正式 Agent 分派与执行入口不得启用。
 - person 无账号、无登录、无远程通知；由 owner 记录线下进度和结果。

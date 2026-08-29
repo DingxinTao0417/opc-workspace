@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v33。v9.23 交付首个受限预设自动化纵切：三个本地规则可用，两个缺少依赖的规则保持 unavailable；设置、运行记录、IANA/DST、离线折叠、重试、去重和业务导入导出均已接通。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v33。v9.24 已接受本地 Agent Runtime 安全 ADR，冻结单次匿名管道、无 Runtime HTTP、无 WebView Token、资源 ID 白名单和“平台隔离未验证即不可执行”的硬闸门；Adapter/Run 代码仍未实现。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.23）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.24）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -31,7 +31,7 @@
 
 | 模块                       | 当前状态                                                                                                                                                                                        | 目标版本            | 文档                                               |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 未开始                                                                                                                                                                                          | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 本地 Agent Runtime         | 已完成安全 ADR；Adapter、Run 与执行仍未实现                                                                                                                                                     | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                                                                                                                                        | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                                | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、启动后恢复结果诊断、全局启动故障恢复页 v1、失败 Inbox、业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；数据库打开前备份选择/实时恢复进度及高级合并待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
@@ -75,6 +75,10 @@
 7. 可验证的验收标准。
 
 代码交付一个纵向切片时，应同时更新对应模块文档的当前状态、PRD 的实现追踪和实际验证证据。只有页面、按钮外观、静态样式或数据库预留表时，不得将模块标记为“已完成”。
+
+## 架构决策
+
+- [ADR-003：本地 Agent Runtime 安全与传输边界](adr/003-local-agent-runtime-security.md)
 
 ## 核心术语
 

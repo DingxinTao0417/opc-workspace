@@ -1,6 +1,6 @@
 # 本地 Agent 执行模块
 
-> 文档状态：规划中；目标版本为 v0.2。当前仓库尚未实现任何可执行 Agent。
+> 文档状态：T-19 v0.2-A 安全 ADR 已完成；目标版本为 v0.2。当前仓库尚未实现 Adapter、Run 或任何可执行 Agent。
 
 ## 定位与边界
 
@@ -20,9 +20,11 @@
 
 ## 当前实现状态
 
-当前状态为未开始：
+当前状态为**前置 ADR 已完成、代码未开始**：
 
-- 当前 SQLite schema v13 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线，并包含 schema v11 Focus Core、schema v12 独立手工 Inbox Item，以及 schema v13 Inbox–Task 关系和 Task 删除互锁；v12–v13 均没有新增 Agent 表、适配器或自动执行能力。当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
+- [ADR-003](../adr/003-local-agent-runtime-security.md) 已冻结首版 Runtime 边界：每个 Run 一个短生命周期子进程；Sidecar 匿名 stdin/stdout 管道是唯一能力通道；不开放 Runtime HTTP、不传 WebView Token、不接受任意命令/路径；资源只用业务 ID 和单次 staging；各平台进程沙箱与禁网未验证时 `execution_ready=false`，不得创建可分派 agent Actor 或启动 Run。
+
+- 当前 SQLite schema v33 保留 schema v7–v9 已交付的 Actor/Assignment、Task 六状态命令、manual Submission/Artifact 和可查询的 Workflow Event 时间线，并包含 Focus、Inbox/Reminder、设置、客户/项目扩展与受限预设自动化；schema v10–v33 均没有新增 Agent 表、Adapter 或执行能力。当前 API 明确拒绝 agent assignee，仓库仍没有 `agent_adapters`、`agent_runs` 或可执行 agent Actor 的注册与运行链路。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Sidecar 没有 Adapter 注册、健康检查、Runner、超时、取消、重试或中断恢复能力。
 - API 只有 WebView 启动期会话令牌，没有 Agent 专用路由、鉴权中间件或单次能力令牌。
 - 前端没有 Agent 设置页、健康状态、agent 负责人选项、Run 详情、输出预览或验收入口；现有任务详情只列 active owner/person assignee 和 owner reviewer。
@@ -45,7 +47,7 @@
 - 为每类 Adapter 定义可枚举的能力白名单，不接受任意命令字符串。
 - 每次 Run 固化脱敏输入快照、允许读取的资源 ID、允许写入的受控 Artifact 目录和资源上限。
 - Sidecar 为单次 Run 发放短时、不可复用、可撤销的能力令牌，或通过受控进程管道传输等价能力。
-- Agent Runtime 使用独立路由组和专用鉴权中间件；普通业务 API 不接受 Agent 令牌，Agent 也不能获得 WebView 令牌。
+- Agent Runtime 不开放 HTTP；每个 Run 使用 Sidecar 创建的短生命周期子进程和匿名 stdin/stdout 管道，普通业务 API 不接受进程内 nonce，Agent 也不能获得 WebView 令牌。
 - 路径授权使用规范化后的受控引用，防止路径穿越、符号链接逃逸和越权读取。
 
 ### Run 生命周期
@@ -126,7 +128,7 @@
 | POST /api/v1/agent-runs/:id/retry       | 基于旧 Run 创建新尝试       |
 | POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工    |
 
-Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议必须在 v0.2 ADR 中冻结；在此之前不把临时方案视为正式 API。
+Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议已由 [ADR-003](../adr/003-local-agent-runtime-security.md) 冻结为单次匿名管道方案；实现仍必须通过平台隔离、禁网、进程树清理和协议验收，不能仅凭 ADR 标记为可执行。
 
 ### 状态与事件
 
@@ -166,7 +168,7 @@ Agent Run 状态为：
 
 ### v0.2-A：安全与 Adapter 契约
 
-- 编写 Adapter、专用鉴权、短时令牌、路径授权、沙箱和网络阻断 ADR。
+- [x] 编写 Adapter、专用传输、单次管道能力、路径授权、沙箱和网络阻断 ADR。
 - 完成 Adapter 表、manifest schema、注册/停用/健康检查 API。
 - 建立各平台能力矩阵；不能验证的隔离能力在 UI 中明确标注。
 
@@ -212,3 +214,4 @@ Agent Run 状态为：
 - [当前 Sidecar 路由](../../services/sidecar/internal/api/router.go)
 - [当前 WebView 鉴权与 Origin 中间件](../../services/sidecar/internal/api/middleware.go)
 - [当前 Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
+- [ADR-003：本地 Agent Runtime 安全与传输边界](../adr/003-local-agent-runtime-security.md)
