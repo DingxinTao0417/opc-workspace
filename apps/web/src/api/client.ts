@@ -131,6 +131,7 @@ import type {
   CreateRoadmapMilestoneInput,
   UpdateRoadmapMilestoneInput,
   DeleteRoadmapMilestoneResult,
+  ReorderRoadmapMilestonesInput,
   ContentItem,
   ContentItemListParams,
   ContentItemListResult,
@@ -6888,6 +6889,27 @@ export async function updateRoadmapMilestone(
   return normalizeRoadmapMilestone(
     isRecord(payload) && "data" in payload ? payload.data : payload,
   );
+}
+
+export async function reorderRoadmapMilestones(
+  input: ReorderRoadmapMilestonesInput,
+): Promise<RoadmapMilestone[]> {
+  const payload = await apiRequest<unknown>(
+    "/api/v1/roadmap/milestones/reorder",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        items: input.items.map((item) => ({
+          id: item.id,
+          expected_version: item.expectedVersion,
+        })),
+      }),
+    },
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("路线图里程碑重排响应格式无效");
+  }
+  return payload.data.map(normalizeRoadmapMilestone);
 }
 
 export async function archiveRoadmapMilestone(

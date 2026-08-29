@@ -115,6 +115,7 @@ import {
   archiveRoadmapMilestone,
   restoreRoadmapMilestone,
   deleteRoadmapMilestone,
+  reorderRoadmapMilestones,
   getContentItems,
   createContentItem,
   updateContentItem,
@@ -225,6 +226,7 @@ import type {
   RoadmapMilestoneListParams,
   CreateRoadmapMilestoneInput,
   UpdateRoadmapMilestoneInput,
+  ReorderRoadmapMilestonesInput,
   ReminderListParams,
   SearchListParams,
   ReorderTasksInput,
@@ -3558,6 +3560,24 @@ export function useUpdateRoadmapMilestone() {
       input: UpdateRoadmapMilestoneInput;
     }) => updateRoadmapMilestone(id, input),
     onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
+    },
+  });
+}
+
+export function useReorderRoadmapMilestones() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ReorderRoadmapMilestonesInput) =>
+      reorderRoadmapMilestones(input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
+    },
+    onError: async () => {
       await queryClient.invalidateQueries({
         queryKey: roadmapMilestoneQueryKey,
       });

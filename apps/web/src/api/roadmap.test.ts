@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deleteRoadmapMilestone,
   getRoadmapMilestone,
+  reorderRoadmapMilestones,
   resetRuntimeConnection,
   updateRoadmapMilestone,
 } from "./client";
@@ -92,6 +93,43 @@ describe("roadmap API contract", () => {
       target_date: "2026-09-30",
       status: "achieved",
       project_ids: ["project-1"],
+    });
+  });
+
+  it("serializes and normalizes an atomic milestone reorder", async () => {
+    const second = {
+      ...milestonePayload(),
+      id: "milestone-2",
+      title: "第二个里程碑",
+      manual_order: 2048,
+      version: 3,
+    };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: [second, milestonePayload()] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      reorderRoadmapMilestones({
+        items: [
+          { id: "milestone-2", expectedVersion: 3 },
+          { id: "milestone-1", expectedVersion: 5 },
+        ],
+      }),
+    ).resolves.toMatchObject([
+      { id: "milestone-2", manualOrder: 2048, version: 3 },
+      { id: "milestone-1", manualOrder: 1024, version: 5 },
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/v1/roadmap/milestones/reorder");
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      items: [
+        { id: "milestone-2", expected_version: 3 },
+        { id: "milestone-1", expected_version: 5 },
+      ],
     });
   });
 

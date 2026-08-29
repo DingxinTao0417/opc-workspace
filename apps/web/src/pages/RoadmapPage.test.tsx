@@ -16,6 +16,8 @@ const hooks = vi.hoisted(() => ({
   detail: vi.fn(),
   update: vi.fn(),
   remove: vi.fn(),
+  reorder: vi.fn(),
+  reorderReset: vi.fn(),
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -46,6 +48,13 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     isError: false,
     mutate: hooks.remove,
+  }),
+  useReorderRoadmapMilestones: () => ({
+    isPending: false,
+    isError: false,
+    error: null,
+    mutate: hooks.reorder,
+    reset: hooks.reorderReset,
   }),
 }));
 
@@ -87,12 +96,23 @@ const milestone: RoadmapMilestone = {
   taskSummary: { total: 4, completed: 2, inProgress: 1, progressPercent: 50 },
 };
 
+const secondMilestone: RoadmapMilestone = {
+  ...milestone,
+  id: "milestone-2",
+  title: "桌面壳联调",
+  targetDate: "2026-09-20",
+  manualOrder: 2048,
+  version: 3,
+};
+
 describe("RoadmapPage", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
     hooks.update.mockReset();
     hooks.remove.mockReset();
+    hooks.reorder.mockReset();
+    hooks.reorderReset.mockReset();
     hooks.detail.mockImplementation((id: string | null) => ({
       data: id ? milestone : undefined,
       isError: false,
@@ -280,6 +300,112 @@ describe("RoadmapPage", () => {
       expect(hooks.milestones).toHaveBeenLastCalledWith(
         expect.objectContaining({ page: 1 }),
       ),
+    );
+  });
+
+  it("reorders the complete quarter with a keyboard alternative", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone, secondMilestone],
+          meta: { page: input.page, pageSize: input.pageSize, total: 2 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "调整顺序" }));
+    const moveDown = await screen.findByRole("button", {
+      name: "下移：路线图 API",
+    });
+    fireEvent.click(moveDown);
+    fireEvent.click(screen.getByRole("button", { name: "保存顺序" }));
+
+    expect(hooks.reorder).toHaveBeenCalledWith(
+      {
+        items: [
+          { id: secondMilestone.id, expectedVersion: secondMilestone.version },
+          { id: milestone.id, expectedVersion: milestone.version },
+        ],
+      },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it("supports dragging one milestone onto another before saving", async () => {
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone, secondMilestone],
+          meta: { page: input.page, pageSize: input.pageSize, total: 2 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "调整顺序" }));
+    await screen.findByRole("button", { name: "下移：路线图 API" });
+    const firstCard = screen.getByText("路线图 API").closest("article");
+    const secondCard = screen.getByText("桌面壳联调").closest("article");
+    expect(firstCard).toBeTruthy();
+    expect(secondCard).toBeTruthy();
+    fireEvent.dragStart(firstCard!);
+    fireEvent.dragOver(secondCard!);
+    fireEvent.drop(secondCard!);
+    fireEvent.click(screen.getByRole("button", { name: "保存顺序" }));
+
+    expect(hooks.reorder).toHaveBeenCalledWith(
+      {
+        items: [
+          { id: secondMilestone.id, expectedVersion: secondMilestone.version },
+          { id: milestone.id, expectedVersion: milestone.version },
+        ],
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("does not offer a partial reorder above the API batch limit", () => {
+    hooks.milestones.mockReturnValue({
+      data: { items: [milestone], meta: { page: 1, pageSize: 20, total: 101 } },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    const button = screen.getByRole("button", { name: "调整顺序" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute(
+      "title",
+      "当前季度超过 100 个里程碑，暂不支持完整批量排序。",
     );
   });
 });

@@ -1,14 +1,19 @@
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Archive,
   CalendarDays,
   Edit3,
   Eye,
   FolderKanban,
+  GripVertical,
   Map,
   Plus,
   RotateCcw,
+  Save,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
@@ -17,6 +22,7 @@ import {
   useCreateRoadmapMilestone,
   useDeleteRoadmapMilestone,
   useProjectsQuery,
+  useReorderRoadmapMilestones,
   useRestoreRoadmapMilestone,
   useRoadmapMilestonesQuery,
   useUpdateRoadmapMilestone,
@@ -65,11 +71,27 @@ function RoadmapMilestoneCard({
   onDelete,
   onEdit,
   onOpen,
+  ordering = false,
+  orderIndex = 0,
+  orderTotal = 0,
+  dragging = false,
+  onDragStart,
+  onDragEnd,
+  onDrop,
+  onMove,
 }: {
   milestone: RoadmapMilestone;
   onDelete: (milestone: RoadmapMilestone) => void;
   onEdit: (milestone: RoadmapMilestone) => void;
   onOpen: (milestone: RoadmapMilestone) => void;
+  ordering?: boolean;
+  orderIndex?: number;
+  orderTotal?: number;
+  dragging?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onDrop?: () => void;
+  onMove?: (direction: -1 | 1) => void;
 }) {
   const archive = useArchiveRoadmapMilestone();
   const restore = useRestoreRoadmapMilestone();
@@ -77,9 +99,27 @@ function RoadmapMilestoneCard({
   const error = archive.error ?? restore.error;
 
   return (
-    <article className="roadmap-card">
+    <article
+      className={`roadmap-card${ordering ? " is-ordering" : ""}${dragging ? " is-dragging" : ""}`}
+      draggable={ordering}
+      onDragEnd={ordering ? onDragEnd : undefined}
+      onDragOver={
+        ordering
+          ? (event) => {
+              event.preventDefault();
+            }
+          : undefined
+      }
+      onDragStart={ordering ? onDragStart : undefined}
+      onDrop={ordering ? onDrop : undefined}
+    >
       <div className="roadmap-card-heading">
         <div>
+          {ordering ? (
+            <span aria-hidden="true" className="roadmap-drag-handle">
+              <GripVertical size={16} />
+            </span>
+          ) : null}
           <span
             className={`status-badge ${milestoneStatusClass(milestone.status)}`}
           >
@@ -129,7 +169,33 @@ function RoadmapMilestoneCard({
         <p className="form-field-error">操作未完成，请刷新后重试。</p>
       ) : null}
       <footer className="roadmap-card-actions">
-        {milestone.status === "archived" ? (
+        {ordering ? (
+          <div className="roadmap-reorder-controls">
+            <span aria-live="polite">
+              当前位置 {orderIndex + 1} / {orderTotal}
+            </span>
+            <button
+              aria-label={`上移：${milestone.title}`}
+              className="button button-secondary"
+              disabled={orderIndex === 0}
+              onClick={() => onMove?.(-1)}
+              type="button"
+            >
+              <ArrowUp size={14} />
+              上移
+            </button>
+            <button
+              aria-label={`下移：${milestone.title}`}
+              className="button button-secondary"
+              disabled={orderIndex === orderTotal - 1}
+              onClick={() => onMove?.(1)}
+              type="button"
+            >
+              <ArrowDown size={14} />
+              下移
+            </button>
+          </div>
+        ) : milestone.status === "archived" ? (
           <>
             <button
               className="button button-secondary"
@@ -635,9 +701,14 @@ export function RoadmapPage() {
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
+  const [reorderInitialized, setReorderInitialized] = useState(false);
+  const [draftOrder, setDraftOrder] = useState<RoadmapMilestone[]>([]);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const reorder = useReorderRoadmapMilestones();
   const query = useRoadmapMilestonesQuery({
-    page,
-    pageSize: 20,
+    page: reordering ? 1 : page,
+    pageSize: reordering ? 100 : 20,
     year,
     quarter,
     status: status || undefined,
@@ -648,24 +719,125 @@ export function RoadmapPage() {
   const total = query.data?.meta.total ?? 0;
   const pageSize = query.data?.meta.pageSize ?? 20;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const reorderReady =
+    reordering &&
+    query.isSuccess &&
+    !query.isFetching &&
+    query.data.meta.page === 1 &&
+    query.data.meta.pageSize === 100 &&
+    query.data.items.length === query.data.meta.total;
+  const visibleMilestones = reordering
+    ? reorderInitialized
+      ? draftOrder
+      : []
+    : milestones;
+  const reorderDisabledReason = status
+    ? "请先切换到未归档的全部状态。"
+    : projectId
+      ? "请先清除 Project 筛选。"
+      : total > 100
+        ? "当前季度超过 100 个里程碑，暂不支持完整批量排序。"
+        : total < 2
+          ? "至少需要两个里程碑才能调整顺序。"
+          : query.isFetching || !query.isSuccess
+            ? "路线图仍在读取，请稍候。"
+            : null;
 
   useEffect(() => {
-    if (!query.data || query.isFetching || page <= totalPages) return;
+    if (reordering || !query.data || query.isFetching || page <= totalPages)
+      return;
     setPage(totalPages);
-  }, [page, query.data, query.isFetching, totalPages]);
+  }, [page, query.data, query.isFetching, reordering, totalPages]);
+
+  useEffect(() => {
+    if (!reorderReady || reorderInitialized) return;
+    setDraftOrder(query.data.items);
+    setReorderInitialized(true);
+  }, [query.data, reorderInitialized, reorderReady]);
+
+  const cancelReorder = () => {
+    if (reorder.isPending) return;
+    setReordering(false);
+    setReorderInitialized(false);
+    setDraftOrder([]);
+    setDraggedId(null);
+    reorder.reset();
+  };
+  const moveDraftItem = (id: string, nextIndex: number) => {
+    setDraftOrder((items) => {
+      const currentIndex = items.findIndex((item) => item.id === id);
+      if (
+        currentIndex < 0 ||
+        nextIndex < 0 ||
+        nextIndex >= items.length ||
+        currentIndex === nextIndex
+      ) {
+        return items;
+      }
+      const next = [...items];
+      const [moved] = next.splice(currentIndex, 1);
+      next.splice(nextIndex, 0, moved);
+      return next;
+    });
+    reorder.reset();
+  };
+  const saveReorder = () => {
+    if (!reorderReady || !reorderInitialized || draftOrder.length < 2) return;
+    reorder.mutate(
+      {
+        items: draftOrder.map((milestone) => ({
+          id: milestone.id,
+          expectedVersion: milestone.version,
+        })),
+      },
+      {
+        onSuccess: () => {
+          setReordering(false);
+          setReorderInitialized(false);
+          setDraftOrder([]);
+          setDraggedId(null);
+        },
+        onError: () => {
+          setReorderInitialized(false);
+          setDraggedId(null);
+        },
+      },
+    );
+  };
 
   return (
     <div className="page">
       <PageHeader
         actions={
-          <button
-            className="button button-primary"
-            onClick={() => setCreating(true)}
-            type="button"
-          >
-            <Plus size={15} />
-            新建里程碑
-          </button>
+          <div className="roadmap-header-actions">
+            {!reordering ? (
+              <button
+                className="button button-secondary"
+                disabled={Boolean(reorderDisabledReason)}
+                onClick={() => {
+                  setPage(1);
+                  setReordering(true);
+                  setReorderInitialized(false);
+                  setDraftOrder([]);
+                  reorder.reset();
+                }}
+                title={reorderDisabledReason ?? "调整本季度里程碑顺序"}
+                type="button"
+              >
+                <GripVertical size={15} />
+                调整顺序
+              </button>
+            ) : null}
+            <button
+              className="button button-primary"
+              disabled={reordering}
+              onClick={() => setCreating(true)}
+              type="button"
+            >
+              <Plus size={15} />
+              新建里程碑
+            </button>
+          </div>
         }
         meta={
           <span className="page-count">
@@ -682,6 +854,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">年份</span>
           <select
+            disabled={reordering}
             onChange={(event) => {
               setYear(Number(event.target.value));
               setPage(1);
@@ -698,6 +871,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">季度</span>
           <select
+            disabled={reordering}
             onChange={(event) => {
               setQuarter(Number(event.target.value) as 1 | 2 | 3 | 4);
               setPage(1);
@@ -714,6 +888,7 @@ export function RoadmapPage() {
         <label className="toolbar-select">
           <span className="sr-only">状态</span>
           <select
+            disabled={reordering}
             onChange={(event) => {
               setStatus(event.target.value as RoadmapMilestoneStatus | "");
               setPage(1);
@@ -729,6 +904,7 @@ export function RoadmapPage() {
         </label>
         <ProjectSelect
           ariaLabel="关联项目筛选"
+          disabled={reordering}
           emptyLabel="全部项目"
           includeArchived
           onChange={(value) => {
@@ -739,6 +915,45 @@ export function RoadmapPage() {
           variant="toolbar"
         />
       </div>
+      {reordering ? (
+        <section className="roadmap-reorder-bar" aria-label="路线图排序工具">
+          <div>
+            <strong>调整本季度顺序</strong>
+            <span>
+              {reorderReady && reorderInitialized
+                ? "拖动卡片，或用每张卡片的上移、下移按钮调整。保存时会检查所有数据版本。"
+                : "正在读取本季度完整里程碑列表…"}
+            </span>
+            {reorder.isError ? (
+              <span className="form-field-error" role="alert">
+                保存失败，顺序已恢复到服务端最新状态；请检查后重试。
+              </span>
+            ) : null}
+          </div>
+          <div className="roadmap-reorder-actions">
+            <button
+              className="button button-secondary"
+              disabled={reorder.isPending}
+              onClick={cancelReorder}
+              type="button"
+            >
+              <X size={14} />
+              取消
+            </button>
+            <button
+              className="button button-primary"
+              disabled={
+                !reorderReady || !reorderInitialized || reorder.isPending
+              }
+              onClick={saveReorder}
+              type="button"
+            >
+              <Save size={14} />
+              {reorder.isPending ? "正在保存…" : "保存顺序"}
+            </button>
+          </div>
+        </section>
+      ) : null}
       {query.isFetching && !query.isPending ? (
         <p className="roadmap-refresh" role="status">
           正在刷新路线图…
@@ -751,7 +966,7 @@ export function RoadmapPage() {
         />
       ) : null}
       {query.isPending ? <SkeletonRows count={4} /> : null}
-      {query.isSuccess && milestones.length === 0 ? (
+      {query.isSuccess && !reordering && milestones.length === 0 ? (
         <EmptyState
           action={
             <button
@@ -767,10 +982,10 @@ export function RoadmapPage() {
           title={`${year} 年 Q${quarter} 暂无里程碑`}
         />
       ) : null}
-      {milestones.length > 0 ? (
+      {visibleMilestones.length > 0 ? (
         <>
           <section
-            className="roadmap-grid"
+            className={`roadmap-grid${reordering ? " is-reordering" : ""}`}
             aria-label={`${year} 年 Q${quarter} 路线图`}
           >
             <header className="roadmap-section-heading">
@@ -782,17 +997,34 @@ export function RoadmapPage() {
                 <span>按目标日期和手动排序展示</span>
               </div>
             </header>
-            {milestones.map((milestone) => (
+            {visibleMilestones.map((milestone, index) => (
               <RoadmapMilestoneCard
+                dragging={draggedId === milestone.id}
                 key={milestone.id}
                 milestone={milestone}
                 onDelete={setDeleting}
+                onDragEnd={() => setDraggedId(null)}
+                onDragStart={() => setDraggedId(milestone.id)}
+                onDrop={() => {
+                  if (!draggedId || draggedId === milestone.id) {
+                    setDraggedId(null);
+                    return;
+                  }
+                  moveDraftItem(draggedId, index);
+                  setDraggedId(null);
+                }}
                 onEdit={setEditing}
+                onMove={(direction) =>
+                  moveDraftItem(milestone.id, index + direction)
+                }
                 onOpen={(item) => setDetailId(item.id)}
+                ordering={reordering}
+                orderIndex={index}
+                orderTotal={visibleMilestones.length}
               />
             ))}
           </section>
-          {totalPages > 1 ? (
+          {!reordering && totalPages > 1 ? (
             <nav aria-label="路线图分页" className="pagination">
               <button
                 className="button button-secondary"

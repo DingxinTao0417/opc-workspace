@@ -2593,6 +2593,10 @@ kbd {
   gap: 12px;
 }
 
+.roadmap-grid.is-reordering {
+  grid-template-columns: 1fr;
+}
+
 .roadmap-section-heading {
   grid-column: 1 / -1;
   display: flex;
@@ -2623,6 +2627,24 @@ kbd {
   background: var(--panel);
 }
 
+.roadmap-card.is-ordering {
+  cursor: grab;
+  border-color: var(--border-hover);
+  transition:
+    border-color 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.roadmap-card.is-ordering:active {
+  cursor: grabbing;
+}
+
+.roadmap-card.is-dragging {
+  opacity: 0.55;
+  transform: scale(0.995);
+}
+
 .roadmap-card-heading,
 .roadmap-card-heading > div,
 .roadmap-card-meta,
@@ -2640,6 +2662,10 @@ kbd {
 .roadmap-card-heading > div {
   gap: 9px;
   min-width: 0;
+}
+.roadmap-drag-handle {
+  display: inline-flex;
+  color: var(--text-muted);
 }
 .roadmap-card h2 {
   margin: 0;
@@ -2684,6 +2710,48 @@ kbd {
   gap: 8px;
   justify-content: flex-end;
   min-height: 28px;
+}
+.roadmap-reorder-controls,
+.roadmap-header-actions,
+.roadmap-reorder-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.roadmap-reorder-controls {
+  width: 100%;
+  justify-content: flex-end;
+}
+.roadmap-reorder-controls > span {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.roadmap-reorder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-hover);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.roadmap-reorder-bar > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+.roadmap-reorder-bar strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.roadmap-reorder-bar span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.roadmap-reorder-bar .form-field-error {
+  color: var(--danger-text);
 }
 .roadmap-project-option {
   gap: 8px;
@@ -3021,6 +3089,13 @@ kbd {
 @media (max-width: 900px) {
   .roadmap-grid {
     grid-template-columns: 1fr;
+  }
+  .roadmap-reorder-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .roadmap-reorder-actions {
+    justify-content: flex-end;
   }
   .content-calendar-card {
     align-items: flex-start;

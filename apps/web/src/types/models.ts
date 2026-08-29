@@ -1070,6 +1070,13 @@ export interface DeleteRoadmapMilestoneResult {
   deletedId: string;
 }
 
+export interface ReorderRoadmapMilestonesInput {
+  items: Array<{
+    id: string;
+    expectedVersion: number;
+  }>;
+}
+
 export type ContentItemStatus =
   "draft" | "in_review" | "scheduled" | "published" | "cancelled" | "archived";
 
