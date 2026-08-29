@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useUiStore } from "../store/ui";
 import type {
   Task,
   TaskListParams,
@@ -213,6 +214,7 @@ describe("TasksPage", () => {
     mocks.taskStatus = "todo";
     mocks.taskItems = null;
     mocks.savedViews = [];
+    useUiStore.setState({ taskDetailId: null });
   });
 
   afterEach(cleanup);
@@ -249,6 +251,41 @@ describe("TasksPage", () => {
         clientId: "client-1",
       }),
     );
+  });
+
+  it("switches to the real six-state board without changing task lifecycle facts", () => {
+    mocks.taskItems = [
+      task,
+      { ...task, id: "task-2", title: "等待复核", status: "waiting_review" },
+    ];
+    render(<TasksPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({ page: 1, pageSize: 50, rootOnly: false }),
+    );
+    expect(screen.getByLabelText("任务看板")).toBeVisible();
+    for (const heading of [
+      "待办",
+      "进行中",
+      "阻塞",
+      "待验收",
+      "已完成",
+      "已取消",
+    ]) {
+      expect(screen.getByRole("heading", { name: heading })).toBeVisible();
+    }
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `查看任务：${task.title}` }),
+    );
+    expect(useUiStore.getState().taskDetailId).toBe(task.id);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    expect(screen.getByText("已选 1 项")).toBeVisible();
   });
 
   it("sends the selected task version with an atomic batch update", () => {

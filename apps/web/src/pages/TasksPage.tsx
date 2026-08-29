@@ -25,6 +25,7 @@ import {
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { TagManagerModal } from "../components/TagManagerModal";
+import { TaskBoard } from "../components/TaskBoard";
 import { TaskList } from "../components/TaskList";
 import { TaskSavedViewsControl } from "../components/TaskSavedViewsControl";
 import { useUiStore } from "../store/ui";
@@ -103,6 +104,7 @@ function apiErrorText(error: unknown): string | null {
 
 export function TasksPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
+  const [view, setView] = useState<"list" | "board">("list");
   const [searchInput, setSearchInput] = useState("");
   const [queryText, setQueryText] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -197,7 +199,7 @@ export function TasksPage() {
     dueFrom ||
     dueTo,
   );
-  const hierarchical = !hasFilters;
+  const hierarchical = view === "list" && !hasFilters;
   const query = useTaskPageQuery(
     {
       page,
@@ -265,7 +267,8 @@ export function TasksPage() {
       dueFrom ||
       dueTo
     );
-  const allowReorder = sort === "manual_order" && onlyPlanFilter;
+  const allowReorder =
+    view === "list" && sort === "manual_order" && onlyPlanFilter;
   const writeReady =
     filtersValid &&
     query.isSuccess &&
@@ -306,6 +309,7 @@ export function TasksPage() {
     dueFrom,
     dueTo,
     sort,
+    view,
   ]);
 
   useEffect(() => {
@@ -519,16 +523,25 @@ export function TasksPage() {
         </label>
         <div aria-label="视图" className="segmented">
           <button
-            aria-pressed="true"
-            className="segmented-active"
+            aria-label="列表视图"
+            aria-pressed={view === "list"}
+            className={view === "list" ? "segmented-active" : undefined}
+            onClick={() => {
+              setView("list");
+              setPage(1);
+            }}
             type="button"
           >
             <List size={15} />
           </button>
           <button
-            aria-label="看板视图将在后续版本提供"
-            disabled
-            title="后续版本"
+            aria-label="看板视图"
+            aria-pressed={view === "board"}
+            className={view === "board" ? "segmented-active" : undefined}
+            onClick={() => {
+              setView("board");
+              setPage(1);
+            }}
             type="button"
           >
             <Columns3 size={15} />
@@ -909,7 +922,7 @@ export function TasksPage() {
         </section>
       ) : null}
 
-      {sort === "manual_order" ? (
+      {view === "list" && sort === "manual_order" ? (
         <div className="task-order-banner">
           {allowReorder ? (
             <>
@@ -980,7 +993,29 @@ export function TasksPage() {
         />
       ) : null}
 
-      {filtersValid && tasks.length > 0 ? (
+      {filtersValid && tasks.length > 0 && view === "board" ? (
+        <TaskBoard
+          live={writeReady}
+          onSelectionChange={(task, selected) => {
+            setBatchConfirmationPending(false);
+            setSelectedTasks((current) => {
+              const next = { ...current };
+              if (selected) {
+                if (!next[task.id] && Object.keys(next).length >= 100) {
+                  return current;
+                }
+                next[task.id] = task;
+              } else delete next[task.id];
+              return next;
+            });
+          }}
+          selectedIds={selectedIds}
+          selectionLimitReached={selectedItems.length >= 100}
+          tasks={tasks}
+        />
+      ) : null}
+
+      {filtersValid && tasks.length > 0 && view === "list" ? (
         <div className="task-groups">
           {groups.map((group) => {
             const groupedTasks = applyTaskOrder(
