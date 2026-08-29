@@ -25,8 +25,8 @@ func TestProjectCompletionInboxProjectionMigrationGuardsSnapshotsAndDeletion(t *
 		t.Fatalf("upgrade v27 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 34 {
-		t.Fatalf("SchemaVersion = %d, want 34", store.SchemaVersion)
+	if store.SchemaVersion != 35 {
+		t.Fatalf("SchemaVersion = %d, want 35", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'project_completion'"); got != 0 {
 		t.Fatalf("migration invented %d Project completion Inbox Items", got)

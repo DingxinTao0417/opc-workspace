@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v34。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v32 仅扩展 Reminder，schema v33 仅新增受限 Automation Rule/Run，schema v34 仅新增 Agent Adapter 诊断事实。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源、回访和财务聚合尚未验收或交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v35。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v32 仅扩展 Reminder，schema v33 仅新增受限 Automation Rule/Run，schema v34 仅新增 Agent Adapter 诊断事实，schema v35 新增受约束的 Client Followup 计划事实。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源、回访 CRUD/提醒和财务聚合尚未验收或交付。
 
 ## 定位与边界
 

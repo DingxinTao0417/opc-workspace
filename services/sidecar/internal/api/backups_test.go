@@ -893,7 +893,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	}
 
 	var restoreStages []StartupRestoreStage
-	result, err := ApplyPendingRestoreWithProgress(backupDir, databasePath, artifactDir, 34, func(stage StartupRestoreStage) {
+	result, err := ApplyPendingRestoreWithProgress(backupDir, databasePath, artifactDir, 35, func(stage StartupRestoreStage) {
 		restoreStages = append(restoreStages, stage)
 	})
 	if err != nil {

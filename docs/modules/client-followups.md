@@ -15,8 +15,8 @@
 ## 当前实现状态
 
 - Client 基础资料 CRUD、列表、基础详情和 Project 客户关联已交付；客户页面当前明确显示没有本地活动事实，不伪造沟通记录。
-- 没有 `client_followups` 表、model、API、提醒调度、客户时间线或专用页面。
-- 今日工作台与收件箱尚不能展示到期/逾期回访。
+- **C2 数据契约已完成**：schema v35 新增 `client_followups` 与 Go model；计划/完成/跳过/取消字段组合受数据库约束，负责人只允许 active owner/person，终态不可重开、写入必须递增 version，客户存在回访历史时禁止硬删除。插入、更新、删除会递增客户聚合版本，业务 JSON/ZIP 的显式白名单同步包含该表。
+- API、提醒调度、客户详情时间线和专用页面尚未实现；今日工作台与收件箱尚不能展示到期/逾期回访。
 - 当前代码没有邮件、短信或第三方 CRM 连接；历史设计材料中的线上客户行为不能作为真实事件使用，且后续以 React 实现与 PRD 为准。
 
 ## 目标功能
@@ -83,8 +83,8 @@
 ## 分阶段实施
 
 1. **C1 前置依赖（已完成）**：客户基础 CRUD/详情、Client 活动事实、person 显式关联、Actor/Assignment 基线和 Inbox 人工闭环已交付；回访仍需自己的递增迁移与领域契约。
-2. **C2 数据契约**：新增迁移、状态命令、时区口径、删除约束和 Workflow Event。
-3. **C3 CRUD**：实现列表、创建、编辑、详情、分页及定向 API 测试。
+2. **C2 数据契约（已完成）**：新增迁移、计划/终态字段组合、负责人和删除约束、版本步进、客户聚合失效，以及业务导入导出白名单。
+3. **C3 CRUD**：实现列表、创建、编辑、详情、分页、时区口径和定向 API 测试；命令成功后追加 Workflow Event。
 4. **C4 执行闭环**：实现完成、跳过、重排、下一次计划和客户时间线。
 5. **C5 提醒协作**：接入本地调度、补偿扫描、今日和 Inbox，验证事件去重。
 6. **C6 稳定性**：覆盖时区、夏令时、并发编辑、客户/Actor 停用和恢复测试。
@@ -104,6 +104,7 @@
 
 - [产品 PRD](../opc-workspace-PRD.md)（§5.4、§10.4.17、§10.7、附录 C）
 - [客户页](../../apps/web/src/pages/ClientsPage.tsx)
-- [现有客户表迁移](../../services/sidecar/internal/database/migrations/001_initial_schema.sql)
+- [回访迁移](../../services/sidecar/internal/database/migrations/035_client_followups.sql)
+- [回访迁移测试](../../services/sidecar/internal/database/client_followup_migration_test.go)
 - [Sidecar 路由](../../services/sidecar/internal/api/router.go)
 - [前端路由](../../apps/web/src/App.tsx)

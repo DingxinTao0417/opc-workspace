@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v34。v9.27 已交付命令面板/新建任务的原生全局快捷键：只发送固定 action，注册失败降级为应用内快捷键，运行诊断只展示白名单状态。v9.25 的本地 Agent Adapter 仍只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v35。v9.28 已交付客户回访 C2 数据契约：本地计划/终态、负责人、版本和删除保护已入库，API/提醒/界面仍待 C3–C6。v9.27 的命令面板/新建任务原生快捷键只发送固定 action，注册失败降级为应用内快捷键。v9.25 的本地 Agent Adapter 仍只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.27）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.28）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -42,7 +42,7 @@
 | 模块             | 当前状态              | 目标版本 | 文档                                               |
 | ---------------- | --------------------- | -------- | -------------------------------------------------- |
 | 收入、支出与发票 | 页面骨架 / 数据表预留 | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | 未开始                | v0.4     | [client-followups.md](modules/client-followups.md) |
+| 客户回访         | C2 数据契约完成       | v0.4     | [client-followups.md](modules/client-followups.md) |
 | 路线图           | 占位页                | v0.3     | [roadmap.md](modules/roadmap.md)                   |
 | 内容日历         | 占位页                | v0.3     | [content-calendar.md](modules/content-calendar.md) |
 | 预设自动化       | 首个纵向切片完成      | v0.2     | [automation.md](modules/automation.md)             |
