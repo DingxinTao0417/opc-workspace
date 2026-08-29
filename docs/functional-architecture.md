@@ -2,7 +2,7 @@
 
 > 文档版本：2.48
 > 日期：2026-08-29
-> 依据：[PRD v9.26](opc-workspace-PRD.md)
+> 依据：[PRD v9.27](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v34
 
 > 2.48 说明：交付 Agent Adapter 登记与安全诊断边界。schema v34、Sidecar API、设置模块和业务导入导出只允许唯一代码所有清单；当前诊断固定返回隔离未验证，保持 `execution_ready=false`，不启动进程或创建 agent Actor/Assignment/Run。未来 Runner 继续遵守 [ADR-003](adr/003-local-agent-runtime-security.md) 的短生命周期子进程和匿名管道约束。

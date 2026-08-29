@@ -525,6 +525,10 @@ describe("SettingsModal", () => {
       environment: "desktop",
       phase: "restarting",
       generation: 2,
+      nativeShortcuts: {
+        commandPalette: "registered",
+        newTask: "unavailable",
+      },
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "16",
@@ -535,6 +539,7 @@ describe("SettingsModal", () => {
 
     expect(await screen.findByText("重启中")).toBeVisible();
     expect(screen.getByText("Tauri 桌面")).toBeVisible();
+    expect(screen.getByText("部分不可用；保留应用内快捷键")).toBeVisible();
   });
 
   it("shows a retryable About error when the local service is unavailable", async () => {

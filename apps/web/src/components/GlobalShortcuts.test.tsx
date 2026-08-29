@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useUiStore } from "../store/ui";
-import { GlobalShortcuts } from "./GlobalShortcuts";
+import { GlobalShortcuts, parseDesktopShortcutAction } from "./GlobalShortcuts";
 
 describe("GlobalShortcuts", () => {
   afterEach(() => {
@@ -29,5 +29,14 @@ describe("GlobalShortcuts", () => {
 
     fireEvent.keyDown(window, { metaKey: true, key: "n" });
     expect(useUiStore.getState().newTaskOpen).toBe(true);
+  });
+
+  it("accepts only fixed actions from the desktop shortcut bridge", () => {
+    expect(parseDesktopShortcutAction("command_palette")).toBe(
+      "command_palette",
+    );
+    expect(parseDesktopShortcutAction("new_task")).toBe("new_task");
+    expect(parseDesktopShortcutAction("C:\\private\\path")).toBeNull();
+    expect(parseDesktopShortcutAction({ action: "new_task" })).toBeNull();
   });
 });

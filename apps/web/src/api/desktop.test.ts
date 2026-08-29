@@ -40,6 +40,7 @@ describe("runtime diagnostics", () => {
       phase: "external",
       generation: null,
       startupStage: null,
+      nativeShortcuts: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -63,6 +64,7 @@ describe("runtime diagnostics", () => {
       phase: "ready",
       generation: 7,
       startupStage: null,
+      nativeShortcuts: null,
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "28",
@@ -110,6 +112,28 @@ describe("runtime diagnostics", () => {
         startupStage: "C:\\private\\workspace.db",
       })),
     ).rejects.toThrow("Invalid desktop startup stage");
+  });
+
+  it("reads only bounded native shortcut registration facts", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "sidecar_status")
+        return { phase: "ready", generation: 1 };
+      return { commandPalette: "registered", newTask: "unavailable" };
+    });
+    await expect(getRuntimeDiagnostics(invoke)).resolves.toMatchObject({
+      nativeShortcuts: {
+        commandPalette: "registered",
+        newTask: "unavailable",
+      },
+    });
+
+    await expect(
+      getRuntimeDiagnostics(async (command) =>
+        command === "sidecar_status"
+          ? { phase: "ready", generation: 1 }
+          : { commandPalette: "C:\\private\\shortcut", newTask: "unavailable" },
+      ),
+    ).resolves.toMatchObject({ nativeShortcuts: null });
   });
 
   it("rejects malformed desktop lifecycle data", async () => {

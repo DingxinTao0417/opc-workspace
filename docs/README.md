@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v34。v9.25 已交付本地 Agent Adapter 登记与安全诊断：只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。未来 Runner 继续遵守单次匿名管道、无 Runtime HTTP、无 WebView Token 和资源 ID 白名单。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v34。v9.27 已交付命令面板/新建任务的原生全局快捷键：只发送固定 action，注册失败降级为应用内快捷键，运行诊断只展示白名单状态。v9.25 的本地 Agent Adapter 仍只允许代码所有清单，平台隔离未验证时固定不可执行，不创建 agent Actor/Assignment/Run。T-20 分层质量门禁继续有效；当前 Windows 主机仍缺少 MSVC `link.exe` 和 Windows SDK。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.26）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.27）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。

@@ -4,7 +4,7 @@
 >
 > 版本边界：T-11A3 一次性本地 Reminder 及每日/每周重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”已能按 IANA 时区创建本地一次性 Reminder。每月/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.26](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.27](../opc-workspace-PRD.md) · [收件箱](inbox.md) · [预设自动化](automation.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与事实边界
 

@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v34（2026-08-29），本轮无桌面 migration。schema v12–v34 的业务事实均不改变 Tauri 桌面生命周期契约。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理和安全应用重启已实现；T-02 仍部分完成，真实父崩溃/进程树、三平台与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.26](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.27](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -88,8 +88,9 @@
 
 ### OS 全局快捷键
 
-- 注册命令面板、新建任务、开始/暂停专注和页面切换快捷键。
-- 注册失败、权限拒绝或与系统冲突时显示诊断，并保留 WebView 内快捷键。
+- 已尝试注册命令面板 `⌘/Ctrl+Shift+K` 与新建任务 `⌘/Ctrl+Shift+N`；触发时显示/聚焦主窗口，再向 `main` WebView 发出固定 `command_palette/new_task` action。
+- 注册失败、权限拒绝或与系统冲突时只报告 `unavailable`，并保留 WebView 内快捷键；运行诊断不显示原始平台错误。
+- 开始/暂停专注和页面切换快捷键仍待后续。
 - 系统快捷键只触发打开界面或安全动作，不能绕过确认、验收与权限。
 - v0.3 再支持用户自定义和冲突调整。
 
@@ -205,7 +206,7 @@
 | select_import / export_path | 原生文件选择和受控路径授权             |
 | desktop_capabilities        | 返回托盘、通知、快捷键、自启和更新能力 |
 | sidecar-state-changed       | 向 WebView 推送状态变化                |
-| global-shortcut-invoked     | 打开命令面板、新建任务或切换专注       |
+| desktop-global-shortcut     | 已注册的命令面板或新建任务固定 action  |
 | notification-activated      | 打开对应本地资源                       |
 
 正式名称在实现 ADR 中冻结。所有高风险命令限制到 main 窗口的最小 Tauri capability，并验证调用参数。
@@ -288,7 +289,7 @@
 - [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
 - [x] 全局服务恢复页 v1：starting/restarting/error 拦截业务页，ready 自动放行；generation、查询清理、状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
 - [ ] 数据库打开前备份选择与实时恢复进度。
-- [ ] 托盘、原生通知、OS 全局快捷键、开机启动和原生业务文件对话框。
+- [ ] 托盘、原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。
 - [ ] 当前主机补齐 MSVC `link.exe` 与 Windows SDK 后的 `cargo check` / `cargo test`、Tauri 链接与安装包检查。

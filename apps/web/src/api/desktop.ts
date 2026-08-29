@@ -14,11 +14,19 @@ export type StartupStage =
   | "initializing_workspace"
   | "starting_local_api";
 
+export type NativeShortcutRegistration = "registered" | "unavailable";
+
+export interface NativeShortcutDiagnostics {
+  commandPalette: NativeShortcutRegistration;
+  newTask: NativeShortcutRegistration;
+}
+
 export interface RuntimeDiagnostics {
   environment: "browser" | "desktop";
   phase: "external" | "starting" | "restarting" | "ready" | "error";
   generation: number | null;
   startupStage: StartupStage | null;
+  nativeShortcuts: NativeShortcutDiagnostics | null;
   appVersion: string | null;
   apiVersion: string | null;
   schemaVersion: string | null;
@@ -86,6 +94,24 @@ function startupStage(value: unknown): StartupStage | null {
   throw new Error("Invalid desktop startup stage");
 }
 
+function nativeShortcutRegistration(
+  value: unknown,
+): NativeShortcutRegistration {
+  if (value === "registered" || value === "unavailable") return value;
+  throw new Error("Invalid desktop shortcut registration");
+}
+
+function nativeShortcutDiagnostics(value: unknown): NativeShortcutDiagnostics {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid desktop shortcut status");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    commandPalette: nativeShortcutRegistration(record.commandPalette),
+    newTask: nativeShortcutRegistration(record.newTask),
+  };
+}
+
 export async function getRuntimeDiagnostics(
   invokeCommand?: InvokeCommand,
 ): Promise<RuntimeDiagnostics> {
@@ -95,6 +121,7 @@ export async function getRuntimeDiagnostics(
       phase: "external",
       generation: null,
       startupStage: null,
+      nativeShortcuts: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -108,6 +135,14 @@ export async function getRuntimeDiagnostics(
     throw new Error("Invalid desktop runtime status");
   }
   const record = value as Record<string, unknown>;
+  let nativeShortcuts: NativeShortcutDiagnostics | null = null;
+  try {
+    nativeShortcuts = nativeShortcutDiagnostics(
+      await invoke("desktop_shortcut_status"),
+    );
+  } catch {
+    // Native shortcut registration must never prevent a recovery-safe desktop status read.
+  }
   const phase = record.phase;
   if (
     phase !== "starting" &&
@@ -123,6 +158,7 @@ export async function getRuntimeDiagnostics(
     phase,
     generation: runtimeGeneration(record.generation),
     startupStage: startupStage(record.startupStage),
+    nativeShortcuts,
     appVersion: optionalVersion(record.appVersion),
     apiVersion: optionalVersion(record.apiVersion),
     schemaVersion: optionalVersion(record.schemaVersion),

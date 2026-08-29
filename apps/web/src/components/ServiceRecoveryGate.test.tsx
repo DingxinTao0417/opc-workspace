@@ -16,6 +16,7 @@ const ready: RuntimeDiagnostics = {
   phase: "ready",
   generation: 1,
   startupStage: null,
+  nativeShortcuts: null,
   appVersion: "0.1.0",
   apiVersion: "v1",
   schemaVersion: "29",

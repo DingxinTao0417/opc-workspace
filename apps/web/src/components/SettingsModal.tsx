@@ -1101,6 +1101,16 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             : desktopVersionComplete
               ? "桌面握手与 API 不一致"
               : "桌面握手版本不完整";
+      const nativeShortcuts = runtimeDiagnostics.nativeShortcuts ?? null;
+      const shortcutLabel =
+        runtimeDiagnostics.environment !== "desktop"
+          ? "浏览器内 Ctrl/Cmd+K、Ctrl/Cmd+N"
+          : nativeShortcuts === null
+            ? "状态未读取；保留应用内快捷键"
+            : nativeShortcuts.commandPalette === "registered" &&
+                nativeShortcuts.newTask === "registered"
+              ? "已注册 ⌘/Ctrl+Shift+K、⌘/Ctrl+Shift+N"
+              : "部分不可用；保留应用内快捷键";
 
       return (
         <>
@@ -1156,6 +1166,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             <div className="settings-about-row">
               <span>数据库 schema</span>
               <strong>v{health.schema.version}</strong>
+            </div>
+            <div className="settings-about-row">
+              <span>全局快捷键</span>
+              <strong>{shortcutLabel}</strong>
             </div>
           </div>
           {healthQuery.isError ? (
