@@ -4791,6 +4791,62 @@ kbd {
   font-size: 10px;
 }
 
+.app-error-boundary {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg);
+}
+
+.app-error-card {
+  width: min(520px, 100%);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+
+.app-error-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 16px;
+  place-items: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger-text) 10%, var(--panel-2));
+  color: var(--danger-text);
+}
+
+.app-error-card h1 {
+  margin: 4px 0 8px;
+  color: var(--text);
+  font-size: 20px;
+}
+
+.app-error-card > p:not(.eyebrow) {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.app-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.app-error-card small {
+  display: block;
+  margin-top: 16px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
 .settings-inline-warning {
   color: var(--danger-text);
 }

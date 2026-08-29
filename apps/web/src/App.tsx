@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { RoutedAppErrorBoundary } from "./components/AppErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
 import { FocusRecoveryModal } from "./components/FocusRecoveryModal";
@@ -33,29 +34,34 @@ export default function App() {
       <ThemeController />
       <FocusTicker />
       <FocusRecoveryModal />
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route element={<Navigate replace to={`/${defaultRoute}`} />} index />
-          <Route element={<TodayPage />} path="today" />
-          <Route element={<TasksPage />} path="tasks" />
-          <Route element={<TasksPage />} path="tasks/:taskId" />
-          <Route element={<ProjectsPage />} path="projects" />
-          <Route element={<ProjectDetailPage />} path="projects/:projectId" />
-          <Route element={<ClientsPage />} path="clients" />
-          <Route element={<ClientDetailPage />} path="clients/:clientId" />
-          <Route element={<IncomePage />} path="income" />
-          <Route element={<InvoicesPage />} path="invoices" />
-          <Route element={<InboxPage />} path="inbox" />
-          <Route element={<InboxPage />} path="inbox/:inboxItemId" />
-          <Route element={<FocusPage />} path="focus" />
-          <Route element={<LaterPage type="roadmap" />} path="roadmap" />
-          <Route
-            element={<LaterPage type="content-calendar" />}
-            path="content-calendar"
-          />
-          <Route element={<NotFoundPage />} path="*" />
-        </Route>
-      </Routes>
+      <RoutedAppErrorBoundary>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route
+              element={<Navigate replace to={`/${defaultRoute}`} />}
+              index
+            />
+            <Route element={<TodayPage />} path="today" />
+            <Route element={<TasksPage />} path="tasks" />
+            <Route element={<TasksPage />} path="tasks/:taskId" />
+            <Route element={<ProjectsPage />} path="projects" />
+            <Route element={<ProjectDetailPage />} path="projects/:projectId" />
+            <Route element={<ClientsPage />} path="clients" />
+            <Route element={<ClientDetailPage />} path="clients/:clientId" />
+            <Route element={<IncomePage />} path="income" />
+            <Route element={<InvoicesPage />} path="invoices" />
+            <Route element={<InboxPage />} path="inbox" />
+            <Route element={<InboxPage />} path="inbox/:inboxItemId" />
+            <Route element={<FocusPage />} path="focus" />
+            <Route element={<LaterPage type="roadmap" />} path="roadmap" />
+            <Route
+              element={<LaterPage type="content-calendar" />}
+              path="content-calendar"
+            />
+            <Route element={<NotFoundPage />} path="*" />
+          </Route>
+        </Routes>
+      </RoutedAppErrorBoundary>
       <CommandPalette />
       <NewTaskModal />
       <TaskDetailModal />

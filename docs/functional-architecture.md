@@ -2,7 +2,7 @@
 
 > 文档版本：2.19
 > 日期：2026-08-28
-> 依据：[PRD v7.6](opc-workspace-PRD.md)
+> 依据：[PRD v7.7](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v28
 
 ## 1. 目的
@@ -62,6 +62,7 @@
 - Client 列表/详情/创建/编辑/停用/恢复/确认硬删除已接真实 API；创建支持首次响应快照幂等，PATCH/DELETE 使用聚合 `ETag`，项目数从 Project 实时派生，最近动态从未删除 Activity 派生。人工 note/meeting 支持幂等创建、稳定分页、活动版本化编辑和带原因软删除；Client Attachment 支持严格 multipart 上传、稳定分页、完整性下载、软删历史和聚合删除文件补偿；Client contact 支持已有/原子新建 person 二选一、单 active 关系、带原因解除和不可变历史。相关变化都会使旧 Client 版本失效。Project 客户关联变化使旧 Client 版本失效，Client 名称变化继续使旧 Project 版本失效；Invoice 强引用阻止删除，Project 可选关联按外键置空。
 - schema v7 以固定 UUID 初始化唯一 owner 与 system，按历史任务完成状态幂等回填 owner Assignment 和 `migration_assignment_backfill` 事件；数据库保护内置主体、活动分派与引用历史。
 - 设置中的“人员与责任”已接真实 Actor API：可管理本地 person、编辑 owner 展示名并查看 system；创建支持幂等重放，读取/更新使用 `ETag`/`If-Match`，存在活动 Assignment 时 API 与数据库共同拒绝停用。“关于”按需读取 `/health`；“运行诊断”再读取并白名单化 Tauri Sidecar 状态，展示环境/生命周期/版本兼容并可复制脱敏摘要，原始令牌、地址、错误与路径不进入诊断模型。
+- React 路由树由全局错误边界保护：页面或 AppShell 渲染失败时替换为安全恢复页，原始异常不显示或持久化；用户可重新渲染、返回今日，或打开位于错误边界外的设置运行诊断。路由变化会复位失败状态。
 - 设置事实层已接 schema v16 与 `GET/PATCH /api/v1/settings`，schema v27 再接 `POST /settings/avatar` 与鉴权 content：头像选择只写 preview，保存时受控文件 replace/remove 与变化设置原子提交，取消恢复 committed。历史 localStorage Data URL 仅在服务端无头像时一次性导入，已存在服务端引用始终优先；验证后清理本地内容。
 - 任务详情已接 Assignment API/UI：可查询当前 assignee/reviewer 与结束历史，完成首次分派、改派和结束；命令使用 Task `If-Match`/`version`、可选幂等快照和事务化 Workflow Event。完成 Task 会结束活动 Assignment，重新打开不会恢复旧记录。
 - Task 已扩展为 `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态，并通过 `start / block / unblock / complete / cancel / reopen` 六个显式命令改变生命周期；新建只能进入 `todo`，旧通用状态端点返回 410。开始要求活动负责人，阻塞/取消要求原因，解除阻塞由服务端恢复来源状态，完成/取消会原子结束活动 Assignment，重新打开不会恢复旧分派。
