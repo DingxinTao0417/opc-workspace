@@ -2664,6 +2664,13 @@ kbd {
 .content-calendar-edit-wide { grid-column: 1 / -1; }
 .content-calendar-schedule-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
 .content-calendar-schedule-row .button { margin-bottom: 18px; }
+.content-calendar-tasks { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.content-calendar-tasks legend { padding: 0 5px; color: var(--text-secondary); font-size: 13px; }
+.content-calendar-tasks > p { margin: 0 0 10px; color: var(--text-muted); font-size: 12px; }
+.content-calendar-task { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.content-calendar-task small { color: var(--text-muted); }
+.content-calendar-task-link { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 9px; padding-top: 12px; }
+.content-calendar-task-link label { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
 
 @media (max-width: 900px) {
   .roadmap-grid { grid-template-columns: 1fr; }
@@ -2671,6 +2678,7 @@ kbd {
   .content-calendar-card-open { align-items: flex-start; flex-direction: column; }
   .content-calendar-card-meta { flex-wrap: wrap; }
   .content-calendar-edit-grid, .content-calendar-schedule-row { grid-template-columns: 1fr; }
+  .content-calendar-task, .content-calendar-task-link { grid-template-columns: 1fr; align-items: stretch; }
   .content-calendar-schedule-row .button { margin-bottom: 16px; }
 }
 

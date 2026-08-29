@@ -117,6 +117,8 @@ import {
 	updateContentItem,
 	scheduleContentItem,
 	publishContentItem,
+	linkContentItemTask,
+	unlinkContentItemTask,
   pauseFocusSession,
   previewAutomationRule,
   createInboxItem,
@@ -174,6 +176,7 @@ import type {
   ClientActorLinkListParams,
 	ClientListParams,
 	ContentItemListParams,
+	ContentItem,
 	CreateContentItemInput,
 	UpdateContentItemInput,
 	ScheduleContentItemInput,
@@ -3435,7 +3438,7 @@ export function useCreateContentItem() {
   });
 }
 
-function useContentItemMutation<T>(mutationFn: (input: T) => Promise<unknown>) {
+function useContentItemMutation<T>(mutationFn: (input: T) => Promise<ContentItem>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
@@ -3458,6 +3461,14 @@ export function useScheduleContentItem() {
 
 export function usePublishContentItem() {
   return useContentItemMutation(({ id, input }: { id: string; input: PublishContentItemInput }) => publishContentItem(id, input));
+}
+
+export function useLinkContentItemTask() {
+  return useContentItemMutation(({ id, taskId, isRequired, expectedVersion }: { id: string; taskId: string; isRequired: boolean; expectedVersion: number }) => linkContentItemTask(id, taskId, isRequired, expectedVersion));
+}
+
+export function useUnlinkContentItemTask() {
+  return useContentItemMutation(({ id, taskId, expectedVersion }: { id: string; taskId: string; expectedVersion: number }) => unlinkContentItemTask(id, taskId, expectedVersion));
 }
 
 export function useCreateRoadmapMilestone() {

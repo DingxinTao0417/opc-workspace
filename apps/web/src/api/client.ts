@@ -6658,6 +6658,16 @@ export async function publishContentItem(id: string, input: PublishContentItemIn
   return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
 }
 
+export async function linkContentItemTask(id: string, taskId: string, isRequired: boolean, expectedVersion: number): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/tasks`, { method: "POST", headers: expectedVersionHeader(expectedVersion), body: JSON.stringify({ task_id: taskId, is_required: isRequired }) });
+  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+}
+
+export async function unlinkContentItemTask(id: string, taskId: string, expectedVersion: number): Promise<ContentItem> {
+  const payload = await apiRequest<unknown>(`/api/v1/content-items/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE", headers: expectedVersionHeader(expectedVersion) });
+  return normalizeContentItem(isRecord(payload) && "data" in payload ? payload.data : payload);
+}
+
 export async function createRoadmapMilestone(
   input: CreateRoadmapMilestoneInput,
 ): Promise<RoadmapMilestone> {
