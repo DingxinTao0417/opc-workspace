@@ -22,6 +22,7 @@ import {
   useDeleteBackup,
   useDrillBackupRestore,
   useExportBusinessData,
+  useExportBusinessPackage,
   usePreviewBusinessDataImport,
   useScheduleBackupRestore,
   useVerifyBackup,
@@ -88,6 +89,12 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "DATA_EXPORT_FAILED") {
       return "无法生成一致的业务数据导出，请重试。";
+    }
+    if (error.code === "DATA_PACKAGE_EXPORT_UNAVAILABLE") {
+      return "当前数据目录未配置含文件业务导出。";
+    }
+    if (error.code === "DATA_PACKAGE_EXPORT_FAILED") {
+      return "无法生成完整的含文件业务包；请检查受控文件后重试。";
     }
     if (error.code === "INVALID_IMPORT_JSON") {
       return "所选文件不是有效的 opc-workspace 业务 JSON。";
@@ -236,6 +243,7 @@ export function BackupSettings() {
   const restoreMutation = useScheduleBackupRestore();
   const deleteMutation = useDeleteBackup();
   const exportMutation = useExportBusinessData();
+  const packageExportMutation = useExportBusinessPackage();
   const importPreviewMutation = usePreviewBusinessDataImport();
   const importApplyMutation = useApplyBusinessDataImport();
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -262,6 +270,7 @@ export function BackupSettings() {
     restoreMutation.isPending ||
     deleteMutation.isPending ||
     exportMutation.isPending ||
+    packageExportMutation.isPending ||
     importPreviewMutation.isPending ||
     importApplyMutation.isPending;
   const locked = pending || scheduledRestore !== null;
@@ -272,6 +281,7 @@ export function BackupSettings() {
     restoreMutation.error ??
     deleteMutation.error ??
     exportMutation.error ??
+    packageExportMutation.error ??
     importPreviewMutation.error ??
     importApplyMutation.error ??
     downloadError;
@@ -279,6 +289,7 @@ export function BackupSettings() {
   const resetExportFeedback = () => {
     setDownloadError(null);
     exportMutation.reset();
+    packageExportMutation.reset();
   };
 
   const create = () => {
@@ -391,13 +402,12 @@ export function BackupSettings() {
 
   const exportBusinessData = () => {
     setSuccess(null);
-    setDownloadError(null);
+    resetExportFeedback();
     createMutation.reset();
     verifyMutation.reset();
     drillMutation.reset();
     restoreMutation.reset();
     deleteMutation.reset();
-    exportMutation.reset();
     exportMutation.mutate(undefined, {
       onSuccess: (result) => {
         if (typeof URL.createObjectURL !== "function") {
@@ -416,6 +426,36 @@ export function BackupSettings() {
         anchor.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 0);
         setSuccess(`业务数据已导出：${result.fileName}`);
+      },
+    });
+  };
+
+  const exportBusinessPackage = () => {
+    setSuccess(null);
+    resetExportFeedback();
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    restoreMutation.reset();
+    deleteMutation.reset();
+    packageExportMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        if (typeof URL.createObjectURL !== "function") {
+          setDownloadError(
+            "当前运行环境不支持保存导出文件，请在桌面应用中重试。",
+          );
+          return;
+        }
+        const url = URL.createObjectURL(result.blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.fileName;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        setSuccess(`含文件业务包已导出：${result.fileName}`);
       },
     });
   };
@@ -542,6 +582,32 @@ export function BackupSettings() {
             <Download size={14} />
           )}
           {exportMutation.isPending ? "正在生成…" : "下载 JSON"}
+        </button>
+      </div>
+
+      <div className="settings-group settings-backup-export">
+        <div className="settings-backup-intro">
+          <Archive size={18} />
+          <div>
+            <strong>导出含文件业务包</strong>
+            <span>
+              下载 ZIP，包含版本化业务
+              JSON、清单和全部活动受控文件；生成时逐个校验大小与 SHA-256。
+            </span>
+          </div>
+        </div>
+        <button
+          className="button button-secondary settings-backup-export-button"
+          disabled={locked}
+          onClick={exportBusinessPackage}
+          type="button"
+        >
+          {packageExportMutation.isPending ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <Download size={14} />
+          )}
+          {packageExportMutation.isPending ? "正在打包…" : "下载含文件 ZIP"}
         </button>
       </div>
 
@@ -819,8 +885,9 @@ export function BackupSettings() {
       ) : null}
 
       <p className="settings-inline-note">
-        当前已开放版本化业务 JSON
-        导出与空工作区安全导入，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；文件产出正文需通过一致性备份保留。
+        当前已开放版本化业务 JSON、含活动受控文件的 ZIP 导出与空工作区安全 JSON
+        导入，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；含文件
+        ZIP 暂不支持直接导入。
       </p>
     </>
   );

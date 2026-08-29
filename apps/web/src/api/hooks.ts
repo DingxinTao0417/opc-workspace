@@ -45,6 +45,7 @@ import {
   downloadClientAttachment,
   downloadProjectAttachment,
   downloadBusinessDataExport,
+  downloadBusinessPackage,
   downloadDiagnosticPackage,
   previewBusinessDataImport,
   endTaskAssignment,
@@ -288,6 +289,10 @@ export function useDeleteBackup() {
 
 export function useExportBusinessData() {
   return useMutation({ mutationFn: downloadBusinessDataExport });
+}
+
+export function useExportBusinessPackage() {
+  return useMutation({ mutationFn: downloadBusinessPackage });
 }
 
 export function usePreviewBusinessDataImport() {

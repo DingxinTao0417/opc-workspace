@@ -165,7 +165,8 @@ func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 			return
 		}
 		if strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/backups") ||
-			c.Request.URL.Path == "/api/"+Version+"/imports/business-data" {
+			c.Request.URL.Path == "/api/"+Version+"/imports/business-data" ||
+			c.Request.URL.Path == "/api/"+Version+"/exports/business-package" {
 			c.Next()
 			return
 		}

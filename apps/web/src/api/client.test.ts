@@ -16,6 +16,7 @@ import {
   deleteTaskSavedView,
   drillBackupRestore,
   downloadBusinessDataExport,
+  downloadBusinessPackage,
   downloadDiagnosticPackage,
   endTaskAssignment,
   executeTaskLifecycleCommand,
@@ -1554,6 +1555,55 @@ describe("verified local backups", () => {
     expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Accept")).toBe(
       "application/json",
     );
+  });
+
+  it("downloads a versioned controlled-file business ZIP with a safe filename", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(new Uint8Array([80, 75, 3, 4]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/zip",
+            "Content-Disposition":
+              'attachment; filename="opc-workspace-business-files-20260828T120000Z.zip"',
+            "X-Business-Package-Format-Version": "1",
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await downloadBusinessPackage();
+    expect(result.fileName).toBe(
+      "opc-workspace-business-files-20260828T120000Z.zip",
+    );
+    expect(result.formatVersion).toBe(1);
+    expect(result.blob.size).toBe(4);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/exports/business-package",
+    );
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Accept")).toBe(
+      "application/zip",
+    );
+  });
+
+  it("rejects a controlled-file business ZIP without the exact format contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(new Uint8Array([80, 75, 3, 4]), {
+            status: 200,
+            headers: {
+              "Content-Type": "application/zip",
+              "X-Business-Package-Format-Version": "2",
+            },
+          }),
+      ),
+    );
+
+    await expect(downloadBusinessPackage()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
   });
 
   it("previews and explicitly confirms a business JSON import", async () => {

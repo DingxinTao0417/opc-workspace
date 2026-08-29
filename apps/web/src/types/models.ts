@@ -1615,6 +1615,12 @@ export interface BusinessDataExportDownload {
   formatVersion: 1;
 }
 
+export interface BusinessPackageDownload {
+  blob: Blob;
+  fileName: string;
+  formatVersion: 1;
+}
+
 export interface BusinessImportPreview {
   formatVersion: 1;
   schemaVersion: number;

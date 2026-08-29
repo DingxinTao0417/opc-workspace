@@ -24,7 +24,8 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
 - 客户责任关联纵切：客户详情可选择已有 active person，或原子新建 person 后显式关联；每个客户只允许一个 active contact，解除必须填写原因并保留不可变历史，关联变化传播 Client 聚合版本
 - 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并创建同规格自动回滚包；备份失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
-- 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task Artifact 与 Client Attachment 元数据但不嵌入文件正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
+- 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task/Client/Project 文件和 Workspace Avatar 元数据但不嵌入正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
+- 含文件业务 ZIP 导出：设置页可下载 manifest、同一版本化业务 JSON 和全部 active 受控文件；Sidecar 在维护写锁内逐文件复验 size/SHA-256，完整生成后才响应，缺失或篡改不会留下部分下载
 - 业务 JSON 安全导入 v1：设置页先预检官方 JSON，再显式确认；仅支持当前 schema、无受控文件/活动 Focus 且目标为空，应用前自动创建已校验回滚备份，整批事务失败不改变现有数据
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出并可直达任务验收，收入和发票目前只有路由与页面骨架，路线图和内容日历为后续版本占位页
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除
@@ -35,7 +36,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、业务 JSON 导出与空工作区安全导入、Sidecar 脱敏轮转日志，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移和 Sidecar 启动失败均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、含文件/冲突合并导入、Tauri 壳日志与恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v8.5](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、业务 JSON/含文件 ZIP 导出与空工作区安全 JSON 导入、Sidecar 脱敏轮转日志，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移和 Sidecar 启动失败均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、含文件/冲突合并导入、Tauri 壳日志与恢复页、系统快捷键及三平台安装包仍属于后续实现。[PRD v8.6](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -57,7 +58,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v8.5）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v8.6）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -331,4 +332,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v8.5](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar 脱敏轮转日志、备份恢复、业务 JSON 导出与空工作区安全导入、Inbox/Reminder/Task 编排及已登记来源投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、Tauri 壳日志/恢复页、重复/原生通知、Agent Runtime、含文件/冲突合并导入、恢复诊断、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v8.6](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar 脱敏轮转日志、备份恢复、业务 JSON/含文件 ZIP 导出与空工作区安全 JSON 导入、Inbox/Reminder/Task 编排及已登记来源投影；明确未交付 Focus 原生反馈、看板/内容日历、客户外部活动/回访/财务、Tauri 壳日志/恢复页、重复/原生通知、Agent Runtime、含文件/冲突合并导入、恢复诊断、自动化、SQLCipher、云同步、AI 助手或知识库。

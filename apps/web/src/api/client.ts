@@ -13,6 +13,7 @@ import type {
   BackupRestoreDrillResult,
   BackupVerificationStatus,
   BusinessDataExportDownload,
+  BusinessPackageDownload,
   BusinessImportPreview,
   BusinessImportResult,
   DiagnosticPackageDownload,
@@ -5159,6 +5160,31 @@ export async function downloadBusinessDataExport(): Promise<BusinessDataExportDo
     },
     {},
     "application/json",
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+}
+
+export async function downloadBusinessPackage(): Promise<BusinessPackageDownload> {
+  return apiFetch(
+    "/api/v1/exports/business-package",
+    async (response) => {
+      if (
+        response.headers.get("X-Business-Package-Format-Version") !== "1" ||
+        !response.headers.get("Content-Type")?.startsWith("application/zip")
+      ) {
+        return invalidResponse("含文件业务导出包响应格式无效");
+      }
+      return {
+        blob: await response.blob(),
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          "opc-workspace-business-files.zip",
+        ),
+        formatVersion: 1,
+      };
+    },
+    {},
+    "application/zip",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
 }

@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
   deleteBackup: vi.fn(),
   exportData: vi.fn(),
+  exportPackage: vi.fn(),
   previewImport: vi.fn(),
   applyImport: vi.fn(),
   restartApplication: vi.fn(),
@@ -107,6 +108,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useExportBusinessPackage: () => ({
+    mutate: mocks.exportPackage,
+    reset: mocks.reset,
+    isPending: false,
+    error: null,
+  }),
   usePreviewBusinessDataImport: () => ({
     mutate: mocks.previewImport,
     reset: mocks.reset,
@@ -140,6 +147,7 @@ describe("BackupSettings", () => {
     mocks.restore.mockClear();
     mocks.deleteBackup.mockClear();
     mocks.exportData.mockClear();
+    mocks.exportPackage.mockClear();
     mocks.previewImport.mockClear();
     mocks.applyImport.mockClear();
     mocks.restartApplication.mockReset();
@@ -203,6 +211,12 @@ describe("BackupSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
     expect(mocks.exportData).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下载含文件 ZIP" }));
+    expect(mocks.exportPackage).toHaveBeenCalledWith(
       undefined,
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );

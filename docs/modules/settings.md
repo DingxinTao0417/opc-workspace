@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v28。设置持久化、受控头像、Focus 解耦、Actor、备份闭环、业务 JSON 下载与空工作区安全导入、健康版本、诊断包 v1 和 Sidecar 脱敏轮转日志已交付。含文件/非空目标高级导入、Tauri 壳日志、打开日志入口和恢复页仍是后续范围。
+> 文档状态：部分实现；当前 schema v28。设置持久化、受控头像、Focus 解耦、Actor、备份闭环、业务 JSON/含文件 ZIP 下载与空工作区安全 JSON 导入、健康版本、诊断包 v1 和 Sidecar 脱敏轮转日志已交付。含文件/非空目标高级导入、Tauri 壳日志、打开日志入口和恢复页仍是后续范围。
 
 ## 定位与边界
 
@@ -25,7 +25,7 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
-- 数据与备份：从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；可下载版本化业务 JSON，也可选择 JSON 先预检再确认导入。导入仅允许当前 schema、无受控文件、终态 Focus 且目标为空，应用前自动已校验备份；界面展示行数、阻断、进行中、成功与错误，不把 JSON 冒充完整备份。
+- 数据与备份：从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；可分别下载版本化业务 JSON 或包含 manifest/活动受控文件的 ZIP，也可选择 JSON 先预检再确认导入。导入仅允许当前 schema、无受控文件、终态 Focus 且目标为空，应用前自动已校验备份；界面展示行数、阻断、进行中、成功与错误，不把 JSON 或仅导出的 ZIP 冒充完整备份。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取四个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
@@ -51,7 +51,7 @@
 - 四个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor 设置页、手动备份完整闭环、基础业务 JSON 导入导出和脱敏运行诊断/诊断包；Sidecar 已落盘脱敏轮转日志，但仍没有打开日志入口、Tauri 壳日志、通知、含文件/冲突合并导入、快捷键、恢复页或 Agent 设置页。
+- 已有 Actor 设置页、手动备份完整闭环、基础业务 JSON 导入导出、含文件 ZIP 导出和脱敏运行诊断/诊断包；Sidecar 已落盘脱敏轮转日志，但仍没有打开日志入口、Tauri 壳日志、通知、含文件/冲突合并导入、快捷键、恢复页或 Agent 设置页。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
 
 ## 目标功能
@@ -159,6 +159,7 @@
 8. 桌面模式下 owner 点击“立即安全重启”；Tauri 等待受管 Sidecar 优雅退出（必要时仅终止精确子进程）并确认退出后重启应用。浏览器开发模式不接管外部 Sidecar，页面提示手动停止并重新启动本地服务。
 9. owner 可对任意有效或 invalid 包点击“删除备份”并二次确认；Sidecar 先把精确 UUID 包移入隐藏删除态再永久清理，删除不改变当前数据。
 10. owner 可点击“下载 JSON”；Sidecar 在单事务内生成 format v1 业务表白名单快照，浏览器或 WebView 以服务端安全文件名保存。页面明确提示文件正文未包含，完整恢复仍使用已校验备份。
+11. owner 可点击“下载含文件 ZIP”；Sidecar 在维护写锁内生成 manifest、同格式业务 JSON 和全部活动受控文件，逐项复验 size/SHA-256，完成后才下载。页面明确该 ZIP 暂不能直接导入。
 
 ### 数据恢复
 
@@ -199,6 +200,7 @@
 | POST /api/v1/backups/:id/restore    | **已实现**：要求 `confirm=true`，重验目标、创建当前状态回滚包并挂起；下次 Sidecar 启动前原子替换和最终复验      |
 | DELETE /api/v1/backups/:id          | **已实现**：要求查询参数 `confirm=true`，原子移入隐藏删除态后永久清理；损坏包可删，不安全文件系统项拒绝         |
 | GET /api/v1/exports/business-data   | **已实现**：下载 format v1 单事务业务白名单快照；文件仅元数据，排除凭据、绝对路径和运行维护表                   |
+| GET /api/v1/exports/business-package | **已实现**：下载 format v1 含文件 ZIP；manifest/业务 JSON/活动受控文件完整生成并逐项校验，失败不返回部分包       |
 | GET /health                         | 提供真实 app、commit、API 和 schema 版本                                                                        |
 
 备份、隔离恢复演练和实际恢复由数据管理 API 提供，设置页只通过 Query/Mutation 展示服务端返回事实，不建立第二份备份状态。恢复计划成功后，设置页调用桌面 `restart_application` command；该命令不接受业务参数，也不绕过 Sidecar 的 pending 恢复协议。浏览器开发模式明确降级为手动重启，Agent Adapter 继续由本地 Agent 模块负责。
@@ -239,7 +241,7 @@
 
 ### v0.1-C：设置页面补齐
 
-- “人员与责任”、Assignment，“数据与备份”的完整备份链、业务 JSON 下载/空工作区安全导入，以及脱敏诊断与 Sidecar 日志已完成；通知、含文件/冲突合并导入、快捷键、Tauri 壳日志/打开日志入口和恢复页待实现。
+- “人员与责任”、Assignment，“数据与备份”的完整备份链、业务 JSON/含文件 ZIP 下载、空工作区安全 JSON 导入，以及脱敏诊断与 Sidecar 日志已完成；通知、含文件/冲突合并导入、快捷键、Tauri 壳日志/打开日志入口和恢复页待实现。
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
 - **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
 - **已完成**：运行诊断区分浏览器/Tauri 环境，白名单化桌面 Sidecar 状态，对照 health 版本，可复制脱敏摘要并下载诊断包 v1；命令面板可精确直达。
@@ -270,7 +272,7 @@
 - person UI 已明确说明不会发送或同步；停用受活动 Assignment、active Client contact 关联，以及 Client Activity/Attachment/Project Note/Project Attachment 历史外键保护，历史分派基础由 schema v7 建立并在当前 schema v28 延续。schema v12–v28 的其他迁移不改变 Assignment 约束。
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
-- “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除或业务 JSON 生成/下载后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、导出中/失败、挂起提示和 invalid 包均有明确状态。
+- “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整生成/下载后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导出中/失败、挂起提示和 invalid 包均有明确状态。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。
 - 在线 Updater 不作为当前设置项、启动依赖或默认网络行为出现。
@@ -299,6 +301,7 @@
 - [schema v16 设置迁移](../../services/sidecar/internal/database/migrations/016_app_settings.sql)
 - [设置 API 测试](../../services/sidecar/internal/api/settings_test.go)
 - [备份 API](../../services/sidecar/internal/api/backups.go)
+- [含文件业务 ZIP API](../../services/sidecar/internal/api/business_package_export.go)
 - [隔离恢复演练](../../services/sidecar/internal/api/backup_drill.go)
 - [重启前安全恢复](../../services/sidecar/internal/api/backup_restore.go)
 - [确认删除](../../services/sidecar/internal/api/backup_delete.go)
