@@ -1,6 +1,6 @@
 # 内容日历模块
 
-> 目标版本：v0.3。该模块提供本地内容排期与准备工作协同，不属于 v0.1。当前已完成 CC1 数据契约（schema v37）；API 与界面仍待开发。
+> 目标版本：v0.3。该模块提供本地内容排期与准备工作协同，不属于 v0.1。当前已完成 CC1 数据契约与 CC2 API（schema v37）；React 界面仍待开发。
 
 ## 定位与边界
 
@@ -14,9 +14,11 @@
 
 ## 当前实现状态
 
-- `/content-calendar` 路由存在，但只显示“后续版本”占位页。
+- `/content-calendar` 路由仍只显示“后续版本”占位页。
 - schema v37 已新增空的 `content_items` 与 `content_item_tasks`：标题、平台、状态、计划/确认发布时间、计划 IANA 时区、Project、备注、外部链接文本、排序、归档来源、版本及准备任务的 required 关联均受 SQLite 约束；迁移不创建 demo 数据，业务导入导出覆盖两表。
-- Go model 已就绪；API、月历、详情、新建/编辑或拖拽排期仍未交付。
+- Go model 与 `/api/v1/content-items` API 已交付：列表的时间范围/平台/状态/项目筛选，创建、读取、带 `If-Match` 的编辑、改期、人工发布确认、准备 Task 的关联/解除关联，以及“仅归档后永久删除”。所有写操作在 SQLite 事务内加载版本并返回 ETag。
+- 已发布条目保留本地发布确认时间；在没有历史归档字段前，API 明确拒绝将已发布条目归档，避免静默丢失发布事实。未发布条目可归档并可恢复为明确的非终态。
+- 月历、详情、新建/编辑界面或拖拽排期仍未交付。
 - 历史内容日历视觉原型已移除，后续以当前 React 占位实现、本文和 PRD 为准。
 - 项目、任务、Inbox 和本地调度尚未完成完整接口，均是协作能力的前置依赖。
 
@@ -49,12 +51,13 @@
 
 ### API
 
-- `GET / POST /api/v1/content-items`
-- `GET / PATCH / DELETE /api/v1/content-items/:id`
-- `PUT /api/v1/content-items/:id/schedule`
-- `POST /api/v1/content-items/:id/publish-confirmation`
-- `GET / POST /api/v1/content-items/:id/tasks`
-- `DELETE /api/v1/content-items/:id/tasks/:taskId`
+- `GET /api/v1/content-items`：支持 `scheduled_from` / `scheduled_to`（RFC 3339 UTC 半开区间）、`platform`、`status`、`project_id`、`include_archived` 与分页筛选。
+- `POST /api/v1/content-items`、`GET /api/v1/content-items/:id`、`PATCH /api/v1/content-items/:id` 与 `DELETE /api/v1/content-items/:id?confirm=true`。创建不接受 `published`/`archived`；发布和归档通过受控写入完成；永久删除只允许已归档的未发布条目。
+- `PUT /api/v1/content-items/:id/schedule`：`scheduled_at` 与 IANA `scheduled_timezone` 必须同时提交，排期自动转换为 UTC 并将可编辑条目标为 `scheduled`。
+- `POST /api/v1/content-items/:id/publish-confirmation`：owner 明确确认本地已发布，可写入外部链接文本；不访问、验证或发送到该链接。
+- `GET / POST /api/v1/content-items/:id/tasks` 与 `DELETE /api/v1/content-items/:id/tasks/:taskId`：准备任务仅保存关系与 required 标记，并返回由 Task 状态派生的 required 完成度。
+
+除创建、读取与列表外，所有变更均要求 `If-Match: "<version>"`；冲突返回 `409 VERSION_CONFLICT`，成功响应的 `ETag` 为新版本。
 
 列表支持月份范围、平台、状态、项目和分页筛选；重排/改期使用幂等键和乐观并发。
 
@@ -76,8 +79,8 @@
 
 ## 分阶段实施
 
-1. **CC1 数据契约（已完成）**：状态、计划时区、内容任务关联、Project/Task 删除保护和版本约束已由 schema v37 固化；事件格式仍待 CC2/CC5 定义。
-2. **CC2 API 闭环**：实现 CRUD、月份范围查询、改期、发布确认和关联任务测试。
+1. **CC1 数据契约（已完成）**：状态、计划时区、内容任务关联、Project/Task 删除保护和版本约束已由 schema v37 固化。
+2. **CC2 API 闭环（已完成）**：CRUD、时间范围查询、改期、手动发布确认、任务关联、乐观锁、保护性归档/删除与 API 测试已交付；Inbox/调度事件格式仍待 CC5。
 3. **CC3 基础界面**：月视图、月份切换、详情、新建/编辑及完整反馈状态。
 4. **CC4 排期交互**：实现跨日/跨月拖拽、键盘替代、乐观更新和失败回滚。
 5. **CC5 工作协同**：接入 Task、Inbox、调度补偿和重复提醒防护。
