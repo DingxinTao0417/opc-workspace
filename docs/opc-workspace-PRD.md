@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.10
+> **一人公司操作系统** · PRD v9.11
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-28
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
-> **v9.10 更新说明**：交付项目详情任务浏览器组合筛选。现有标题/描述搜索、状态和服务端分页新增优先级、任务类型、标签及已/未排期条件，全部复用 `GET /api/v1/tasks` 的既有契约并与 `project_id` 取 AND；任一筛选激活时展示带父任务上下文的平铺结果，清除全部条件后恢复任务树。标签选项来自真实 Tag API，窄屏工具栏分两列/单列响应。API v1/schema v29 不变。
+> **v9.11 更新说明**：交付手动一致性备份低空间准入门禁。仅 `POST /api/v1/backups` 在维护写锁与备份互斥锁内、幂等重放后、任何 staging/`VACUUM INTO` 前，按 SQLite 分配与文件上界、安全解析并复核实际普通文件大小的全部 active 受控文件、marker/manifest 估算载荷，并增加 20% 且最低 64 MiB 余量，只探测 backup root；精确边界允许继续。空间不足返回 HTTP 507 `BACKUP_SPACE_INSUFFICIENT`，容量无法确认返回 HTTP 503 `BACKUP_CAPACITY_UNAVAILABLE`，拒绝无 staging/新包/业务变化，也不投影 generic `backup:create` incident。响应/Inbox 不含路径、盘符、精确容量或底层错误；UI 提供清理或刷新指引并保留 note 草稿。导入、恢复和迁移内部回滚包不在本门禁范围。API v1/schema v29 不变。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -640,7 +640,7 @@ v0.1 人工编排阶段：
 - `task_output_submitted`：仅项目交付类任务或 owner 显式标记 `requires_followup` 的产出生成；普通子任务产出默认更新当前任务/收件箱，不递归创建新项。去重键必须包含 Artifact ID。
 - `task_due`：schema v25 已实现。非终态 Task 的截止时间进入未来 24 小时窗口时生成；同一 Task+截止时点稳定去重，投影时标记 due_soon/overdue，改期形成新的独立事实，已生成事项不随 Task 完成/取消/改期自动解决。
 - `task_blocked`：任务进入阻塞状态；schema v24 已实现，每次 block 按阻塞后的 Task version 形成独立事件，unblock 不自动替 owner 解决该事项。
-- `system_maintenance`：schema v26 已建立通用系统维护约束，当前已接备份创建/校验/恢复演练/恢复安排、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和主动低空间监测。版本化 API 非预期数据库错误、数据库健康检查、Focus 心跳及 Reminder/Task 到期扫描失败会先尽力投影 `database:runtime`；Sidecar 在 ready 前及每 5 分钟检查三个受控根，每轮读取 schema v29 `app_settings.storage`，任一可用空间低于默认 1 GiB、可配置 1–100 GiB 的阈值时投影 `storage:low_space`，持续低空间不重复提示，恢复后再跌破才开始新周期。若设置读取暂时失败，进程使用最近一次已验证值或默认值，不因数据库不可读而丢弃已知低空间事实；若 incident 投影失败，则把白名单 kind、稳定 UUID 和 UTC 时间写入并发安全 journal，下一次健康启动补偿。所有 Inbox payload 只含 component/operation/failure_code/occurred_at 和固定用户提示。同一 source id 仅允许一个 `open/tracking` incident，且 journal 稳定 ID 防止模糊清理重复；原错误码保持不变，阈值值、路径、盘符、精确容量和探测错误不进入 Inbox/journal。诊断包 v1 已能导出上述系统维护事实的错误码级汇总。
+- `system_maintenance`：schema v26 已建立通用系统维护约束，当前已接备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和主动低空间监测；手动备份的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 是当前请求的准入拒绝，不投影 generic `backup:create` incident。版本化 API 非预期数据库错误、数据库健康检查、Focus 心跳及 Reminder/Task 到期扫描失败会先尽力投影 `database:runtime`；Sidecar 在 ready 前及每 5 分钟检查三个受控根，每轮读取 schema v29 `app_settings.storage`，任一可用空间低于默认 1 GiB、可配置 1–100 GiB 的阈值时投影 `storage:low_space`，持续低空间不重复提示，恢复后再跌破才开始新周期。若设置读取暂时失败，进程使用最近一次已验证值或默认值，不因数据库不可读而丢弃已知低空间事实；若 incident 投影失败，则把白名单 kind、稳定 UUID 和 UTC 时间写入并发安全 journal，下一次健康启动补偿。所有 Inbox payload 只含 component/operation/failure_code/occurred_at 和固定用户提示。同一 source id 仅允许一个 `open/tracking` incident，且 journal 稳定 ID 防止模糊清理重复；原错误码保持不变，阈值值、路径、盘符、精确容量和探测错误不进入 Inbox/journal。诊断包 v1 已能导出上述已投影系统维护事实的错误码级汇总。
 
 v0.2 本地 Agent 阶段：
 
@@ -761,7 +761,7 @@ T-11E 目标列表与详情：
 
 - 列表以硬盘图标区分 `system_maintenance`；详情标注“系统维护”，展示固定安全说明，并提供“打开数据与备份”。
 - payload 不含 Go/SQL error、本机路径、备份 note、Token、请求正文或备份 ID；同一 `backup:create`、`backup:verify`、`backup:drill`、`backup:restore` 或 `database:runtime` 活动 incident 各自去重，归档后可再开。数据库不可写时安全 journal 延迟补偿，不改变原 API 错误。
-- `BACKUP_INVALID` 表示校验已完成且包不可用，不另开 Inbox incident。
+- `BACKUP_SPACE_INSUFFICIENT`、`BACKUP_CAPACITY_UNAVAILABLE` 和 `BACKUP_INVALID` 都不另开 Inbox incident；前两者的响应也不含备份根、盘符、精确容量或底层探测错误。
 
 T-11C 拆分任务面板（已交付）：
 
@@ -1486,11 +1486,14 @@ appLogDir/
 
 ### 7.3 备份策略
 
-版本边界：手动一致性备份的创建、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除，以及业务 JSON/含文件业务 ZIP 的空工作区同 schema 安全导入导出已经交付；数据库打开前的实时进度/恢复页仍需桌面壳实现。v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级冲突导入工具。
+版本边界：手动一致性备份的创建/低空间准入、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除，以及业务 JSON/含文件业务 ZIP 的空工作区同 schema 安全导入导出已经交付；容量准入只覆盖手动 `POST /api/v1/backups`，不覆盖导入、恢复或迁移内部创建的自动回滚包。数据库打开前的实时进度/恢复页仍需桌面壳实现。v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级冲突导入工具。
 
 1. **v0.1 一致性快照基础**
    - **已实现（手动）**：在维护写锁中使用 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件；普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁
    - **已实现**：用户可手动创建；已有工作区在首个显式 destructive 迁移前自动创建同规格回滚包，备份失败不执行破坏性 SQL；v0.1 不提供每日调度
+   - **已实现（仅手动 `POST /api/v1/backups`）**：维护写锁与备份互斥锁内先处理同键同请求幂等重放；仅未命中时才在任何 staging/`VACUUM INTO` 前，以 `max(PRAGMA page_count × page_size, 当前数据库文件大小)` + 全部 active Task/Client/Project/Avatar 受控文件 + marker 实际大小 + manifest 1 MiB 上界估算载荷，再增加向上取整 20% 且最低 64 MiB 余量。每个 active 文件先经受控路径解析、Lstat/open 普通文件复核，实际大小必须与数据库登记一致；复制链另限制最多读取登记大小 + 1 字节，避免检查后的增长写满目标卷。只对 backup root 探测可用/总字节，精确等于需求允许继续；估算溢出、PRAGMA/文件/list 无法确认、探测报错、总量为零或可用量大于总量均按无法确认拒绝
+   - **已实现（门禁结果）**：可用空间小于需求返回 HTTP 507 `BACKUP_SPACE_INSUFFICIENT`，无法确认返回 HTTP 503 `BACKUP_CAPACITY_UNAVAILABLE`；统一错误响应和 Inbox 不含路径、盘符、精确容量、note 或底层错误。两类拒绝不创建 staging/新包、不改变业务数据，也不投影 generic `backup:create` incident；UI 分别提示清理备份位置/旧备份或刷新容量状态/确认本地存储可用，保留未成功提交的 note，不伪造成功、不自动重试
+   - **明确不在本门禁范围**：导入前、恢复安排前和破坏性迁移前的自动回滚包调用内部备份创建链，仍按各自既有失败闭锁和完整校验处理，不能声称已经应用本手动容量门禁
    - **已实现**：快照先写 backup root 同卷 `.staging-<uuid>`；每个备份包含 SQLite 一致性快照、身份 marker、Task/Client/Project 的全部 active objects 与 Workspace Avatar，以及 app/commit/API/schema 版本、相对路径、大小和 SHA-256 manifest
    - **已实现**：发布前执行 `quick_check`、`foreign_key_check`、schema/identity/全部 active 受控文件元数据交叉校验并拒绝缺失、篡改或额外文件；通过后原子重命名为 `backups/<backup-id>/`
    - **已实现**：创建支持可选幂等键，列表展示上次校验事实，显式校验可重新逐字节验证并刷新 `verified_at`；绝对路径和幂等键明文不进入响应/manifest
@@ -1614,10 +1617,10 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 任务管理         | 完整 CRUD、父子任务、状态流转、标签、项目关联、完成条件、人工验收、列表视图、搜索和快捷键  | **部分完成**：schema v6–v9 事实、责任、六状态、时间线与 manual Submission/Artifact 验收，快照幂等、`ETag`/`If-Match`、分页筛选、层级、批量/排序和受控文件均已实现；schema v11 Focus 工时已接入；Today 与任务页均已消费计划组拖拽排序，六状态看板已接真实读取/筛选/分页/选择/详情和受控跨列生命周期命令 |
 | 项目管理         | 项目卡片、状态流转、项目进度、项目详情（任务列表）                                         | **部分完成**：CRUD、分页/搜索/状态筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、卡片/详情、任务派生进度/工时、项目任务树/平铺切换及服务端搜索/状态/优先级/类型/标签/排期筛选与分页、客户选择/筛选、可编辑人工笔记、受控附件、产出聚合、活动时间线、显式 follow-up、Task 阻塞/临期与 Project 完成节点→Inbox 已实现；高级分析待实现 |
 | 客户管理         | 客户列表表格、客户详情、基本 CRUD                                                          | **部分完成**：基础资料 CRUD、分页/搜索/状态筛选/排序、创建幂等、并发控制、基础详情、受约束删除、Project 关联、本地活动、受控附件和 person 显式关联已实现；外部来源投影、回访和财务待实现                                                                                                                             |
-| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决   | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；schema v23–v25 已交付 follow-up Artifact、Task 阻塞与 Task 临期来源投影/删除协调；备份四类操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已安全投影；物理卷同卷去重及无路径手动容量检查已在设置页交付，卷级趋势仍待实现 |
+| 收件箱与人工编排 | 本地 Actor 基础、事件受理、已读/稍后、任务拆分/关联、人工分派、验收/返工、审计和自动解决   | **部分完成**：schema v12–v15 已交付受理分诊、Reminder、Task 关系/拆分编排；T-11F 已交付 Sidebar/Today 运营计数与风险深链；schema v23–v25 已交付 follow-up Artifact、Task 阻塞与 Task 临期来源投影/删除协调；备份四类操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已安全投影，手动备份容量准入拒绝明确不投影 generic incident；物理卷同卷去重及无路径手动容量检查已在设置页交付，卷级趋势仍待实现 |
 | 专注模式         | 番茄钟、环形进度、工时记录、连续天数统计、暂停本应用通知、系统专注模式引导                 | **Core A+B+C、D1、D2a 与 D2b 分析已完成**：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、并发/幂等、精确工时、Today 汇总、终态历史、7/30 天/本月/自定义趋势、Streak、项目/标签/小时分布、周几×小时热力图与 Task 详情记录已实现；原生通知/托盘/DND 待实现                                               |
 | 全局功能         | 左侧导航、系统托盘、全局快捷键、自动启动、Go Sidecar 生命周期和健康检查                    | **部分完成**：导航、WebView 内快捷键、单实例、Sidecar 生命周期和健康检查已实现；托盘、系统全局快捷键、自动启动待实现                                                                                                                                                                                                 |
-| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控文件、手动/迁移前一致性备份、基础 JSON 导入导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v29、受控 Task/Client/Project 文件与 Workspace Avatar、版本化存储阈值、数据库身份强绑定、手动/迁移前备份恢复完整闭环、桌面安全重启、启动后恢复结果诊断，以及业务 JSON/含文件业务 ZIP 的空工作区同 schema 安全导入导出已交付；数据库打开前实时进度页仍待桌面壳实现；计划和高级冲突导入归 v0.3 |
+| 数据持久化       | Tauri `appDataDir`、SQLite 迁移、受控文件、手动/迁移前一致性备份、基础 JSON 导入导出与原子恢复 | **部分完成**：正式/开发隔离、WAL、外键、schema v29、受控 Task/Client/Project 文件与 Workspace Avatar、版本化存储阈值、数据库身份强绑定、手动备份低空间准入、手动/迁移前备份恢复完整闭环、桌面安全重启、启动后恢复结果诊断，以及业务 JSON/含文件业务 ZIP 的空工作区同 schema 安全导入导出已交付；门禁仅适用于手动 HTTP 创建，数据库打开前实时进度页仍待桌面壳实现；计划和高级冲突导入归 v0.3 |
 
 **MVP 不包含**（后续版本）：
 
@@ -1659,6 +1662,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 - [ ] 应用正常退出后不遗留 Sidecar 进程；Sidecar 异常退出时可诊断并按策略重启
 - [ ] 应用升级、Sidecar 重启和程序文件替换后，`appDataDir` 中数据完整保留
 - [x] WAL 模式下生成的手动备份通过 SQLite quick/foreign-key/schema/identity 与 Artifact size/SHA-256/全集校验
+- [x] 手动备份在双锁内先处理幂等重放，再于 staging/`VACUUM INTO` 前按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量只探测 backup root；不足/不可确认安全拒绝，精确边界放行，拒绝无新包、业务变化或 generic Inbox incident，UI 保留 note 草稿
 - [x] 已校验备份能在临时数据根演练，并在自动回滚点保护下于下次 Sidecar 启动前原子恢复；失败恢复旧数据
 - [ ] 首次启动后的所有核心功能在断网环境可用
 - [ ] 离线更新只接受签名有效、平台/架构正确且版本兼容的安装包；在线 Updater 不属于当前阶段
@@ -1674,7 +1678,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、WebView→Sidecar request ID、全局 Sidecar 启动故障恢复页 v1、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影、物理卷同卷去重和无路径手动容量检查、T-06A–H、T-07A–D 和 T-04B 一致性备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表第 9.1 节的完整 MVP、Focus 原生反馈、卷级趋势、数据库打开前备份选择/实时恢复进度、Agent 或冲突合并导入已经交付。
+> 状态截止：2026-08-28。当前版本是可运行、可扩展的 v0.1 基座；T-18A/B/C/D D1/D2、T-12 Focus Core A+B+C/D1/D2a/D2b 项目/标签/小时分布与二维热力图、T-13 脱敏诊断包 v1、Go Sidecar/Tauri 壳脱敏轮转日志与打开日志目录、WebView→Sidecar request ID、全局 Sidecar 启动故障恢复页 v1、T-11A1/A2/A3/B/C/F、T-11E follow-up Artifact/Task 阻塞/Task 临期/Project 完成来源、备份四类操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败、可配置低空间投影、物理卷同卷去重和无路径手动容量检查、T-06A–H、T-07A–D 和 T-04B 手动一致性备份低空间准入/备份完整闭环/迁移前自动回滚包/桌面安全重启/启动后恢复结果诊断/业务 JSON 与含文件 ZIP 安全导入导出 v1 已交付，但这不代表内部自动回滚包已应用手动容量门禁，也不代表第 9.1 节的完整 MVP、Focus 原生反馈、卷级趋势、数据库打开前备份选择/实时恢复进度、Agent 或冲突合并导入已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1782,14 +1786,14 @@ pnpm dev
 | T-02 Tauri 桌面壳与 Sidecar 生命周期 | 部分完成                     | 窗口、单实例、动态端口、令牌、ready/health、退出清理、全局 starting/error 恢复页 v1，以及恢复挂起后的受管 Sidecar 安全退出/应用重启；原进程内重拉起/退避、孤儿治理与数据库打开前恢复进度仍待实现                                                                                                                                                                                                                                                                     |
 | T-03 Go 健康检查与 API 基础          | 已完成                       | 版本化路由、安全中间件、统一错误和健康检查                                                                                                                                                                                                                                                                                                                               |
 | T-04 SQLite 初始化与迁移             | 已完成                       | schema v29、PRAGMA、嵌入迁移、demo 清理、Project/Task/Actor/Client/Focus/Inbox/Reminder、设置/保存视图、三类业务附件、Workspace Avatar、存储阈值与来源 guards                                                                                                                                                                                                                     |
-| T-04B 一致性备份                     | 基础安全闭环完成             | 专用 backup root、维护写锁、SQLite `VACUUM INTO`、全部 active 受控文件+marker+manifest、完整校验、同卷原子发布、创建幂等、列表/重新校验、隔离演练、恢复前/迁移前/导入前自动回滚点、pending/applied 提交点、重启原子恢复、桌面安全重启、启动后恢复结果诊断、确认删除、白名单业务 JSON 与含文件 ZIP 的空工作区安全导入导出、设置 UI、全局启动故障恢复页 v1，以及备份失败安全 Inbox 投影已交付；非空目标/跨 schema 合并与数据库打开前备份选择/实时恢复进度待后续纵切 |
+| T-04B 一致性备份                     | 基础安全闭环完成             | 专用 backup root、维护写锁、SQLite `VACUUM INTO`、全部 active 受控文件+marker+manifest、完整校验、同卷原子发布、创建幂等、手动创建低空间准入、列表/重新校验、隔离演练、恢复前/迁移前/导入前自动回滚点、pending/applied 提交点、重启原子恢复、桌面安全重启、启动后恢复结果诊断、确认删除、白名单业务 JSON 与含文件 ZIP 的空工作区安全导入导出、设置 UI、全局启动故障恢复页 v1，以及备份操作性失败安全 Inbox 投影已交付；容量门禁仅覆盖手动 HTTP 创建，不覆盖内部自动回滚包。非空目标/跨 schema 合并与数据库打开前备份选择/实时恢复进度待后续纵切 |
 | T-05 前端 AppShell 与原型复刻        | 已完成                       | Linear 深色三栏框架、导航、响应式和公共组件                                                                                                                                                                                                                                                                                                                              |
 | T-06 今日工作台                      | 部分完成                     | 日期切换/回到今天、真实日期分组与完整分页、真实任务/统计、共享任务详情、活动 Focus 概览、IANA 当地日 completed-only Focus 汇总和反馈状态                                                                                                                                                                                                                                 |
 | T-07 任务管理纵向闭环                | 部分完成                     | 任务事实、关系/标签、版本/ETag、稳定分页、批量/排序、Assignment、六状态/时间线、D2 manual Submission/Artifact/受控文件及 Focus 自动工时已交付；T-07A–D 已交付任务页计划组拖拽、日期/客户筛选和版本化保存视图；六状态看板已接读取闭环和受控跨列生命周期交互 |
 | T-08 项目管理                        | 部分完成                     | CRUD、分页/搜索/筛选、创建幂等、乐观锁、受控状态、归档恢复、确认硬删除、任务聚合与树/平铺/项目内检索分页、客户选择/筛选、笔记、项目附件、Task Artifact 聚合、活动时间线、显式 follow-up、Task 阻塞/临期与 Project 完成节点→Inbox；高级分析待实现                                                                                                                         |
 | T-09 客户管理                        | 部分完成                     | 基础资料 CRUD、列表/详情、创建幂等、乐观锁、删除约束、项目数聚合、Project 客户关联、本地活动、受控附件和 person 显式关联已交付；外部来源投影、回访/财务待实现                                                                                                                                                                                                            |
 | T-10 收入、支出与发票                | 页面骨架                     | 收入/发票路由和空状态已存在；支出、业务 API 与统计未开始，整体属于 v0.4                                                                                                                                                                                                                                                                                                  |
-| T-11 收件箱与工作编排中心            | 部分完成                     | T-11A1/A2/A3/B/C/F 已交付；T-11E 已交付 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间投影；物理卷同卷去重及无路径手动容量检查已在设置页交付，卷级趋势与 Agent 待实现 |
+| T-11 收件箱与工作编排中心            | 部分完成                     | T-11A1/A2/A3/B/C/F 已交付；T-11E 已交付 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成周期、备份四类操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间投影；手动容量准入拒绝不投影 generic `backup:create` incident。物理卷同卷去重及无路径手动容量检查已在设置页交付，卷级趋势与 Agent 待实现 |
 | T-12 专注设置与全局计时              | Core+D1+D2a+D2b 分析完成     | A+B+C：schema v11 Session/interval、任务绑定、绝对时间、心跳/恢复、状态命令、幂等/并发、精确工时与 Today 汇总；D1/D2b：终态历史分页、7/30 天/本月/最多 93 天自定义本地日趋势、Streak、项目/当前标签分布、DST 安全小时分布/最佳时段与周几×小时二维热力图；D2a：Task 详情按需专注记录已交付；通知/托盘/DND 延后                                                            |
 | T-13 命令面板与基础反馈              | 核心搜索、诊断与恢复反馈完成 | WebView 快捷键、已交付页面命令、Task/Project/Client/活动 Inbox 统一本地搜索、稳定详情路由、设置模块直达、combobox/listbox、焦点圈闭/恢复、IME 保护、加载/错误/重试/空状态、非敏感最近使用/404 资源清理、脱敏运行诊断/诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、打开日志目录、WebView→Sidecar request ID、全局渲染错误恢复与全局启动故障恢复页 v1；OS 全局快捷键和数据库打开前恢复进度待后续                                                                               |
 | T-14 设置持久化                      | 核心闭环完成                 | schema v16 四模块严格设置 + schema v27 受控头像；原子 PATCH/multipart、乐观锁、Query committed、即时预览/取消、旧 Data URL 迁移和备份恢复已交付；空工作区同 schema 业务 JSON/含文件 ZIP 导入已交付，非空目标/跨 schema 冲突合并待开发                                                                                                                                                                                                          |
@@ -1836,9 +1840,9 @@ pnpm dev
 
 - **需求映射**：7.1–7.4、9.1、10.3.3。
 - **用户流程**：设置 → 数据与备份可创建、校验、演练、恢复或删除真实本地包；“下载 JSON”保存轻量业务快照，“下载含文件 ZIP”保存 manifest、业务 JSON 和全部活动受控文件。选择 JSON 或 ZIP 后先显示 schema、总行数和可应用状态；ZIP 额外显示文件数与字节数。已有业务数据、不兼容版本、受控文件或活动 Focus 会在确认前阻断。可应用时用户再次确认，成功结果显示导入行数、文件数与自动回滚备份短 ID。
-- **实现方法**：`--backups` / `OPC_BACKUP_DIR` 声明与数据库同级且不和受控文件 root 重叠的安全 root。所有普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份、含文件导入导出和安排恢复取得写锁；用 `VACUUM INTO` 创建 WAL 一致性 SQLite 快照并校验/原子发布完整包。业务 JSON 使用一个 SQLite 读事务和固定白名单；含文件 ZIP 在 backup root 私有临时文件中预检/生成，manifest 固定记录业务 JSON/活动文件的相对路径、size/SHA-256。ZIP 导入 preview 严格拒绝重复、额外、危险路径和 symlink，复验 format/API/schema、表列行、正文 hash/size 及数据库文件元数据；apply 强制确认并再次预检，先创建已校验回滚备份，再把文件按既有 store 规则 staging 和无覆盖发布，数据库事务写入业务行、重建 `task_focus_totals`，并在提交前执行 `foreign_key_check/quick_check` 与磁盘正文复验；数据库失败补偿本次发布文件。
+- **实现方法**：`--backups` / `OPC_BACKUP_DIR` 声明与数据库同级且不和受控文件 root 重叠的安全 root。所有普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份、含文件导入导出和安排恢复取得写锁；手动 `POST /backups` 再持有备份互斥锁，先处理幂等重放，未命中时按 SQLite 分配/文件上界、active 受控文件、marker/manifest 及 20%（最低 64 MiB）余量估算，只探测 backup root，满足后才用 `VACUUM INTO` 创建 WAL 一致性 SQLite 快照并校验/原子发布完整包。不足/不可确认以 507/503 脱敏拒绝且不投影 generic incident，精确边界允许继续。业务 JSON 使用一个 SQLite 读事务和固定白名单；含文件 ZIP 在 backup root 私有临时文件中预检/生成，manifest 固定记录业务 JSON/活动文件的相对路径、size/SHA-256。ZIP 导入 preview 严格拒绝重复、额外、危险路径和 symlink，复验 format/API/schema、表列行、正文 hash/size 及数据库文件元数据；apply 强制确认并再次预检，先通过内部链创建已校验回滚备份，再把文件按既有 store 规则 staging 和无覆盖发布，数据库事务写入业务行、重建 `task_focus_totals`，并在提交前执行 `foreign_key_check/quick_check` 与磁盘正文复验；数据库失败补偿本次发布文件。导入/恢复/迁移内部回滚包不经过手动 HTTP 门禁。
 - **关键路径**：`services/sidecar/internal/api/backups.go`、`backup_restore.go`、`business_export.go`、`business_package_export.go`、`business_import.go`、`business_package_import.go`、相关 Go 测试、`apps/web/src/components/BackupSettings.tsx`、`api/client.ts`、`api/hooks.ts`。
-- **验证/剩余**：Go 集成测试覆盖备份恢复全链、启动恢复结果/残留/失败/无效记录诊断与脱敏、业务导出白名单/隐私、含文件 ZIP 的清单/正文/hash/空包/篡改拒绝/临时清理，以及 JSON/ZIP 导入预检、确认门禁、空目标、自动回滚点、原子应用、trigger/外键、文件全集/篡改/额外项拒绝和 DB 失败文件补偿；前端覆盖诊断 strict 响应/重启门禁、两类下载、两类导入和全局启动故障恢复页 v1。跨 schema 迁移、非空目标冲突合并、大数据量进度/取消、数据库打开前备份选择/实时恢复进度和真实磁盘故障仍未实现。
+- **验证/剩余**：Go 集成测试覆盖备份恢复全链、手动容量需求的小载荷/溢出、空间差 1 字节拒绝、容量探测异常、只探测 backup root、响应脱敏、无 staging/包/业务/Inbox 副作用、精确边界放行与幂等重放绕过探测，以及启动恢复结果/残留/失败/无效记录诊断与脱敏、业务导出白名单/隐私、含文件 ZIP 的清单/正文/hash/空包/篡改拒绝/临时清理、JSON/ZIP 导入预检/确认/空目标/自动回滚/原子应用/补偿；前端组件测试覆盖 507/503 操作提示、note 草稿保留、不伪造成功/不自动重试和未知错误 request ID 回归。全量前端 72 个测试文件、431 项测试已通过。跨 schema 迁移、非空目标冲突合并、大数据量进度/取消、数据库打开前备份选择/实时恢复进度和真实磁盘故障仍未实现。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -2036,7 +2040,7 @@ pnpm build:desktop
 | D2 API / Artifact store            | 通过         | Go 定向测试覆盖 manifest-first multipart、大小/类型/Actor 归属、提交/接受/返工/撤回、幂等/版本冲突、分页/详情、完整性下载、软删/Task 硬删 tombstone、数据库绑定 marker、进程锁、耐久同步、模糊 COMMIT、trash 哈希恢复、quarantine 和启动 reconcile |
 | 既有 Task/Actor/Assignment 回归    | 通过         | 六状态、策略锁定、Assignment 联动、Event 关联与不可变、旧 status 410、Task facts/Project 聚合及 Actor 权限由 Go 全量回归覆盖                                                                                                                       |
 | `pnpm --filter @opc/web typecheck` | 通过         | 覆盖 Task D2、Client/Project/Inbox API 类型、strict normalizer、Query hooks 和详情组件                                                                                                                                                             |
-| 前端测试                           | 通过         | `pnpm --filter @opc/web test` 全量通过；覆盖 D2、Client、Project 客户关联，以及 Inbox normalizer/hooks/列表/详情/冲突草稿/截止式全部已读、已有 Task 关系、候选失效、删除历史提示与 cache invalidation；组件测试不替代浏览器视觉验收                |
+| 前端测试                           | 通过         | `pnpm --filter @opc/web test` 全量 72 个测试文件、431 项测试通过；本次覆盖两种容量门禁错误、note 草稿保留、无成功/自动重试及其他错误 request ID。组件测试不替代浏览器视觉验收 |
 | Web 生产构建                       | 通过         | `pnpm --filter @opc/web build` / `pnpm build:web` 的 TypeScript 与 Vite 构建通过                                                                                                                                                                   |
 | 前端格式                           | 通过         | Web 范围 Prettier format check 通过                                                                                                                                                                                                                |
 | Go 全量测试与静态检查              | 通过         | `go test ./... -count=1` 与 `go vet ./...` 均通过；不虚构未统计的用例总数                                                                                                                                                                          |
@@ -2249,7 +2253,7 @@ pnpm build:desktop
 | POST                 | /api/v1/focus-sessions/:id/cancel         | 取消且不累计工时                                                                         | 已实现；active/paused，强制 `If-Match`，支持 `Idempotency-Key`；匹配的 cancelled 终态可稳定重放                                                                                                                                                                       |
 | GET / PATCH          | /api/v1/settings                          | 查询、更新版本化非敏感设置                                                               | 已实现；前端启动、保存与旧值兼容迁移均已接入                                                                                                                                                                                                                          |
 | GET                  | /api/v1/backups                           | 列出本机已发布备份包和最近完整校验结果                                                   | 已实现；只接受 canonical UUID 包，损坏 manifest 以 invalid 项返回，不暴露本机绝对路径                                                                                                                                                                                 |
-| POST                 | /api/v1/backups                           | 创建并完整校验 SQLite 与全部 active 受控文件的一致性备份                                 | 已实现；覆盖 Task Artifact 与 Client Attachment；维护写锁内同步执行，支持最多 200 字说明和 `Idempotency-Key`；经完整校验后才从同卷 staging 原子发布，失败不改变当前数据                                                                                               |
+| POST                 | /api/v1/backups                           | 创建并完整校验 SQLite 与全部 active 受控文件的一致性备份                                 | 已实现；维护写锁+备份互斥锁内先重放幂等结果，否则按 SQLite/全部 active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。小于需求返回 `507 BACKUP_SPACE_INSUFFICIENT`，无法确认返回 `503 BACKUP_CAPACITY_UNAVAILABLE`，等于需求允许继续；拒绝不泄露路径/盘符/精确容量/底层错误，不建 staging/包、不改业务事实、不投影 generic incident。通过后才完整校验并同卷原子发布 |
 | POST                 | /api/v1/backups/:id/verify                | 对指定备份包重新执行完整校验                                                             | 已实现；校验 manifest/预期文件全集、size/SHA-256、marker、SQLite quick/foreign-key/schema/identity 和 Artifact 元数据，仅成功时刷新 `verified_at`                                                                                                                     |
 | POST                 | /api/v1/backups/:id/drill                 | 在隔离临时数据根执行恢复演练                                                             | 已实现；再次完整校验后复制数据库/marker/objects，用当前迁移器打开副本并声明临时 Artifact store，最终复验并清理临时数据；不修改源备份或当前数据                                                                                                                        |
 | POST                 | /api/v1/backups/:id/restore               | 明确确认并安排下一次 Sidecar 启动前恢复                                                  | 已实现；`confirm=true` 后重验目标、创建当前状态回滚包并发布 pending，冻结普通写入；同目标可重放、异目标冲突。启动时验证目标/回滚、交换 SQLite/WAL/SHM 与完整 objects，失败回滚隔离、成功推进 applied 提交点                                                           |
@@ -2404,3 +2408,4 @@ pnpm build:desktop
 | v9.8     | 2026-08-28 | 交付低空间物理卷身份/同卷去重：Windows 卷 GUID、Unix 设备号只在 Sidecar 单次检查内分组，同卷逻辑位置只探测一次；身份失败退回规范路径，组内失败尝试下一逻辑路径。容量 API 只新增 `shared_volume`，不返回/持久化卷 ID、路径、盘符或底层错误；设置页提示共享容量。API v1/schema v29 不变。 |
 | v9.9     | 2026-08-28 | 交付任务看板跨列受控生命周期：拖拽只映射既有六命令并二次确认，携带 `expected_version`；阻塞/取消要求原因，解除阻塞只回来源状态，manual/待验收不允许绕过人工接受。服务端成功前不移动卡片，冲突刷新列表。API v1/schema v29 不变。 |
 | v9.10    | 2026-08-28 | 交付项目任务浏览器组合筛选：搜索/状态之外新增优先级、类型、标签和已/未排期，全部与 `project_id` 在真实 Task API 取 AND；筛选强制平铺并显示父任务上下文，清除后恢复树，工具栏响应窄屏。API v1/schema v29 不变。 |
+| v9.11    | 2026-08-28 | 交付仅手动 `POST /backups` 的一致性备份低空间准入：双锁内先幂等重放，再于 staging/VACUUM 前按 SQLite 上界、经路径/实际大小复核的 active 文件、marker/manifest 加 20% 且最低 64 MiB 余量，只探测 backup root；精确边界放行，不足/不可确认返回 507/503。拒绝不泄露机器容量信息、不建包、不改业务事实、不投影 generic incident；UI 保留 note 并提供清理/刷新指引。内部自动回滚包不在范围。API v1/schema v29 不变。 |

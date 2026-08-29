@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,10 +25,12 @@ import (
 )
 
 const (
-	backupFormatVersion = 1
-	backupManifestName  = "manifest.json"
-	maxBackupNoteRunes  = 200
-	maxBackupManifest   = 1 << 20
+	backupFormatVersion          = 1
+	backupManifestName           = "manifest.json"
+	maxBackupNoteRunes           = 200
+	maxBackupManifest            = 1 << 20
+	backupCapacityMinimumReserve = 64 << 20
+	backupCapacitySafetyDivisor  = 5
 )
 
 type backupStore struct {
@@ -240,6 +243,14 @@ func (a *API) createBackup(c *gin.Context) {
 			return
 		}
 	}
+	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options); err != nil {
+		if errors.Is(err, errBackupSpaceInsufficient) {
+			writeError(c, http.StatusInsufficientStorage, "BACKUP_SPACE_INSUFFICIENT", "There is not enough storage space to create a verified local backup")
+			return
+		}
+		writeError(c, http.StatusServiceUnavailable, "BACKUP_CAPACITY_UNAVAILABLE", "Backup storage capacity could not be confirmed; no backup was started")
+		return
+	}
 	summary, err := a.backupStore.create(a.db.WithContext(c.Request.Context()), a.options, note, keyHash, requestHash)
 	if err != nil {
 		a.logBackupError("create", err)
@@ -304,7 +315,138 @@ func (a *API) logBackupError(operation string, err error) {
 	}
 }
 
-var errBackupIdempotencyConflict = errors.New("backup idempotency conflict")
+var (
+	errBackupIdempotencyConflict = errors.New("backup idempotency conflict")
+	errBackupCapacityUnavailable = errors.New("backup capacity unavailable")
+	errBackupSpaceInsufficient   = errors.New("backup space insufficient")
+)
+
+func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options) error {
+	required, err := estimateBackupCreateCapacity(db, s.databasePath, s.artifacts, options.SchemaVersion)
+	if err != nil {
+		return errBackupCapacityUnavailable
+	}
+	checker := options.DiskSpaceCheck
+	if checker == nil {
+		checker = diskFreeBytes
+	}
+	available, total, err := checker(s.root)
+	if err != nil || total == 0 || available > total {
+		return errBackupCapacityUnavailable
+	}
+	if available < required {
+		return errBackupSpaceInsufficient
+	}
+	return nil
+}
+
+func estimateBackupCreateCapacity(db *gorm.DB, databasePath string, artifacts *artifactStore, schemaVersion int) (uint64, error) {
+	if artifacts == nil {
+		return 0, errBackupCapacityUnavailable
+	}
+	var pageCount, pageSize int64
+	if err := db.Raw("PRAGMA page_count").Row().Scan(&pageCount); err != nil || pageCount <= 0 {
+		return 0, errBackupCapacityUnavailable
+	}
+	if err := db.Raw("PRAGMA page_size").Row().Scan(&pageSize); err != nil || pageSize <= 0 {
+		return 0, errBackupCapacityUnavailable
+	}
+	databaseBytes, ok := checkedBackupCapacityMultiply(uint64(pageCount), uint64(pageSize))
+	if !ok {
+		return 0, errBackupCapacityUnavailable
+	}
+	databaseInfo, err := os.Lstat(databasePath)
+	if err != nil || !databaseInfo.Mode().IsRegular() || databaseInfo.Mode()&os.ModeSymlink != 0 || databaseInfo.Size() < 0 {
+		return 0, errBackupCapacityUnavailable
+	}
+	if fileBytes := uint64(databaseInfo.Size()); fileBytes > databaseBytes {
+		databaseBytes = fileBytes
+	}
+
+	rows, err := listActiveControlledFiles(db, schemaVersion)
+	if err != nil {
+		return 0, errBackupCapacityUnavailable
+	}
+	var artifactBytes uint64
+	for _, row := range rows {
+		if row.SizeBytes < 0 || !validControlledFileRelativePath(row.ID, row.RelativePath, schemaVersion) {
+			return 0, errBackupCapacityUnavailable
+		}
+		sourcePath, err := artifacts.resolveControlledFile(row.RelativePath)
+		if err != nil {
+			return 0, errBackupCapacityUnavailable
+		}
+		actualBytes, err := verifiedRegularFileSize(sourcePath)
+		if err != nil || actualBytes != uint64(row.SizeBytes) {
+			return 0, errBackupCapacityUnavailable
+		}
+		artifactBytes, ok = checkedBackupCapacityAdd(artifactBytes, actualBytes)
+		if !ok {
+			return 0, errBackupCapacityUnavailable
+		}
+	}
+
+	markerPath := filepath.Join(artifacts.root, artifactStoreMarkerName)
+	markerBytes, err := verifiedRegularFileSize(markerPath)
+	if err != nil {
+		return 0, errBackupCapacityUnavailable
+	}
+	return backupCapacityRequirement(databaseBytes, artifactBytes, markerBytes)
+}
+
+func verifiedRegularFileSize(path string) (uint64, error) {
+	linkedInfo, err := os.Lstat(path)
+	if err != nil || !linkedInfo.Mode().IsRegular() || linkedInfo.Mode()&os.ModeSymlink != 0 || linkedInfo.Size() < 0 {
+		return 0, errBackupCapacityUnavailable
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return 0, errBackupCapacityUnavailable
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || openedInfo.Size() < 0 || !os.SameFile(linkedInfo, openedInfo) {
+		return 0, errBackupCapacityUnavailable
+	}
+	return uint64(openedInfo.Size()), nil
+}
+
+func backupCapacityRequirement(databaseBytes, artifactBytes, markerBytes uint64) (uint64, error) {
+	payloadBytes := uint64(0)
+	var ok bool
+	for _, size := range []uint64{databaseBytes, artifactBytes, markerBytes, maxBackupManifest} {
+		payloadBytes, ok = checkedBackupCapacityAdd(payloadBytes, size)
+		if !ok {
+			return 0, errBackupCapacityUnavailable
+		}
+	}
+	safetyBytes := payloadBytes / backupCapacitySafetyDivisor
+	if payloadBytes%backupCapacitySafetyDivisor != 0 {
+		safetyBytes++
+	}
+	if safetyBytes < backupCapacityMinimumReserve {
+		safetyBytes = backupCapacityMinimumReserve
+	}
+	required, ok := checkedBackupCapacityAdd(payloadBytes, safetyBytes)
+	if !ok {
+		return 0, errBackupCapacityUnavailable
+	}
+	return required, nil
+}
+
+func checkedBackupCapacityAdd(left, right uint64) (uint64, bool) {
+	if right > ^uint64(0)-left {
+		return 0, false
+	}
+	return left + right, true
+}
+
+func checkedBackupCapacityMultiply(left, right uint64) (uint64, bool) {
+	if left != 0 && right > ^uint64(0)/left {
+		return 0, false
+	}
+	return left * right, true
+}
 
 func (s *backupStore) findIdempotent(keyHash, requestHash string, maxSchemaVersion int) (backupSummary, bool, error) {
 	entries, err := os.ReadDir(s.root)
@@ -386,17 +528,22 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 	}
 	databaseFile.Path = databaseRelative
 
-	markerRelative := "artifacts/" + artifactStoreMarkerName
-	markerSource := filepath.Join(s.artifacts.root, artifactStoreMarkerName)
-	markerFile, err := copyVerifiedBackupFile(markerSource, filepath.Join(stagingPath, filepath.FromSlash(markerRelative)), -1, "")
-	if err != nil {
-		return backupSummary{}, fmt.Errorf("copy Artifact marker: %w", err)
-	}
-	markerFile.Path = markerRelative
 	expectedMarker, err := artifactStoreMarkerBytes(databaseID, storeID)
 	if err != nil {
 		return backupSummary{}, err
 	}
+	markerRelative := "artifacts/" + artifactStoreMarkerName
+	markerSource := filepath.Join(s.artifacts.root, artifactStoreMarkerName)
+	markerFile, err := copyVerifiedBackupFile(
+		markerSource,
+		filepath.Join(stagingPath, filepath.FromSlash(markerRelative)),
+		int64(len(expectedMarker)),
+		sha256Hex(expectedMarker),
+	)
+	if err != nil {
+		return backupSummary{}, fmt.Errorf("copy Artifact marker: %w", err)
+	}
+	markerFile.Path = markerRelative
 	actualMarker, err := os.ReadFile(filepath.Join(stagingPath, filepath.FromSlash(markerRelative)))
 	if err != nil || string(actualMarker) != string(expectedMarker) {
 		return backupSummary{}, errors.New("Artifact marker does not match workspace identity")
@@ -856,15 +1003,22 @@ func copyVerifiedBackupFile(sourcePath, destinationPath string, expectedSize int
 	}
 	defer source.Close()
 	info, err := source.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	if err != nil || !info.Mode().IsRegular() || !os.SameFile(linkedInfo, info) {
 		return backupManifestFile{}, errors.New("backup source is not a regular file")
+	}
+	if expectedSize >= 0 && info.Size() != expectedSize {
+		return backupManifestFile{}, errors.New("backup source changed or failed integrity verification")
 	}
 	destination, err := os.OpenFile(destinationPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return backupManifestFile{}, err
 	}
 	hasher := sha256.New()
-	size, copyErr := io.Copy(io.MultiWriter(destination, hasher), source)
+	reader := io.Reader(source)
+	if expectedSize >= 0 && expectedSize < math.MaxInt64 {
+		reader = io.LimitReader(source, expectedSize+1)
+	}
+	size, copyErr := io.Copy(io.MultiWriter(destination, hasher), reader)
 	if copyErr == nil {
 		copyErr = destination.Sync()
 	}

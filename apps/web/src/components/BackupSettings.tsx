@@ -57,6 +57,12 @@ function formatLocalTime(value: string): string {
 function backupErrorText(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof ApiError) {
+    if (error.code === "BACKUP_SPACE_INSUFFICIENT") {
+      return "备份位置可用空间不足，请清理备份位置或旧备份后重试。";
+    }
+    if (error.code === "BACKUP_CAPACITY_UNAVAILABLE") {
+      return "暂时无法确认备份容量，请刷新容量状态并确认本地存储可用后重试。";
+    }
     if (error.code === "BACKUP_INVALID") {
       return "备份完整性校验失败，请勿用它恢复数据。";
     }

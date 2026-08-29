@@ -1,8 +1,8 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.33
+> 文档版本：2.34
 > 日期：2026-08-28
-> 依据：[PRD v9.10](opc-workspace-PRD.md)
+> 依据：[PRD v9.11](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v29
 
 ## 1. 目的
@@ -53,11 +53,11 @@
 - 任务看板与列表消费同一个严格 Task 契约：切换看板后使用平铺服务端分页，固定显示六状态列，复用全部筛选、最多 100 项批量选择及共享详情入口；跨列拖拽只映射既有生命周期命令，经过确认、版本、负责人、原因及人工验收门禁，服务端成功前不改卡片状态。
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性 Reminder 和 Today 统计 API；`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - SQLite 当前为 schema v29：schema v11–v22 依次交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client 扩展和 Project 笔记/附件；schema v23–v26 增加来源投影 guards；schema v27 新增受控工作区头像；schema v28 新增 Project 完成节点 Inbox 来源；schema v29 通过破坏性迁移闸门扩展 `app_settings.storage`，不回填默认设置或创建 demo 数据。
-- 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
+- 一致性备份与恢复已形成独立维护纵切：普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建/安排恢复取得写锁；SQLite 快照、全部 active objects/avatars、marker 和 manifest 在同卷 staging 中完整校验后原子发布。仅手动 `POST /api/v1/backups` 在维护写锁与备份互斥锁内先完成幂等重放查找，再于任何 staging/`VACUUM INTO` 前按 SQLite 分配与数据库文件上界、active 受控文件、marker/manifest 估算载荷，增加 20% 且最低 64 MiB 余量，并只探测 backup root；精确等于需求允许继续。空间不足/容量无法确认分别返回 507/503，拒绝无 staging、新包、业务变化或 generic `backup:create` incident。已有工作区启动时先执行非破坏性迁移；首个连续文件头带 `-- migration: destructive` 的迁移会触发迁移门禁。恢复安排创建当前状态回滚包并冻结写入，下一次 Sidecar 启动在 live 资源打开前同时交换数据库、objects 和 avatars，失败整体回滚、成功以 applied 提交点防止重复执行。
 - 健康启动后的恢复结果诊断由数据管理 API 持有：读取当前 pending、本进程 StartupRestoreResult、applied 清理残留、failed 隔离和 invalid 记录，只投影规范 ID、请求时间、状态与计数。设置页用它恢复重启门禁和展示结果；诊断不暴露路径/底层错误、不自动删除，数据库打开前实时进度仍由未来 Tauri 恢复页承载。
 - 基础业务 JSON 导出在单 SQLite 读事务中读取显式业务表白名单，以稳定表/列/行结构下载；Workspace Avatar 与 Task/Client/Project 文件只保留数据库元数据和 active 文件摘要，不嵌入正文，运行令牌、绝对路径、identity、幂等/迁移/墓碑/派生表不进入包。它是可迁移业务快照，不替代含文件的一致性备份。
 - 含文件业务 ZIP 导出在维护写锁内完整生成后才响应：`manifest.json` 记录 source、业务 JSON 及全部 active 受控文件的安全相对路径、size/SHA-256，`files/` 携带正文；复制时任一文件漂移都会整体失败并清理 staging。该包排除 SQLite、identity、store marker 和运行维护事实。
-- 业务 JSON 与含文件 ZIP 导入均先 strict 预检同 schema/固定表列/标量行/终态 Focus 和空目标；ZIP 额外校验 manifest、文件全集、安全路径、size/SHA-256 与数据库元数据。正式应用前创建已校验回滚备份；JSON 在单事务中写入，ZIP 先无覆盖发布文件，再于 DB 提交前复验磁盘正文，失败补偿本次文件。非空目标和跨 schema 包继续拒绝。
+- 业务 JSON 与含文件 ZIP 导入均先 strict 预检同 schema/固定表列/标量行/终态 Focus 和空目标；ZIP 额外校验 manifest、文件全集、安全路径、size/SHA-256 与数据库元数据。正式应用前创建已校验回滚备份；JSON 在单事务中写入，ZIP 先无覆盖发布文件，再于 DB 提交前复验磁盘正文，失败补偿本次文件。导入前回滚包与恢复/迁移自动回滚包均走内部创建链，当前不经过手动 `POST /backups` 的容量准入。非空目标和跨 schema 包继续拒绝。
 - 任务读取已返回项目/父任务标题、标签和子任务统计；任务与标签写入使用 `ETag`/`If-Match`，父子或嵌入标签事实变化会使相关任务版本失效。
 - 任务批量移动项目、改计划日期、加/删标签和完整计划日期组排序都在事务中先校验全部 ID/版本，再整体提交或回滚。
 - 任务响应嵌入的项目名也属于版本快照：Project 名称变化或硬删除会递增关联 Task 版本，避免基于旧项目上下文覆盖任务。
@@ -120,9 +120,9 @@
 | [Actor](modules/actors.md)                 | 设置中的本地 person 管理、任务详情 Assignment                                                                 | owner/person/system 身份、人工分派、生命周期责任与 D2 producer/recorder/reviewer 审计；agent 仅保留类型边界                              | Task 时间线、Submission/Artifact 责任；未来 Agent Run                                               |
 | [本地 Agent](modules/local-agents.md)      | agent Assignment、Task 上下文、能力授权                                                                       | 单次受控执行                                                                                                                             | Agent Run、Task Artifact、待验收或失败事件                                                          |
 | [专注](modules/focus.md)                   | 当前 Task                                                                                                     | 活动 Session 和有效工时                                                                                                                  | Task actual_minutes、今日/统计数据                                                                  |
-| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、Actor API、`/health`、Tauri 状态与数据维护 API | 本地偏好、person、诊断、备份闭环、业务 JSON 安全导入导出、含文件 ZIP 导出和全局启动故障恢复页 v1；高级导入与数据库打开前恢复进度待实现 | 布局、主题、Focus 默认值、Actor、版本、诊断、备份/导入导出和桌面行为 |
+| [设置](modules/settings.md)                | schema v16 设置 API/Query committed、Actor API、`/health`、Tauri 状态与数据维护 API | 本地偏好、person、诊断、手动备份容量反馈与草稿保留、备份闭环、业务 JSON 安全导入导出、含文件 ZIP 导出和全局启动故障恢复页 v1；高级导入与数据库打开前恢复进度待实现 | 布局、主题、Focus 默认值、Actor、版本、诊断、备份/导入导出和桌面行为 |
 | [命令面板/搜索](modules/command-search.md) | Task/Project/Client/活动 Inbox 当前事实                                                                       | 参数化统一本地查找、确定性相关排序、非敏感有上限最近使用与快捷操作入口                                                                   | 只输出稳定详情路由或触发既有受控命令，不复制业务事实                                                |
-| [数据管理](modules/data-management.md)     | SQLite 与本地文件 | 已实现受控文件一致性、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划 | 当前文件安全、已校验备份、恢复状态、失败 Inbox 与便携导入导出 |
+| [数据管理](modules/data-management.md)     | SQLite 与本地文件 | 已实现受控文件一致性、仅手动创建的容量准入、备份恢复、失败 Inbox，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标/跨 schema 冲突合并仍规划 | 当前文件安全、已校验备份、恢复状态、准入反馈、失败 Inbox 与便携导入导出 |
 | [桌面平台](modules/desktop-platform.md)    | Web 与 Sidecar 生命周期                                                                                       | 原生窗口、进程、权限、运行日志和发布                                                                                                     | 可运行、可诊断的本地应用环境                                                                        |
 | [财务/发票](modules/finance-invoices.md)   | Client、Project、owner 确认                                                                                   | 财务与发票业务事实                                                                                                                       | 本地提醒、Inbox Item、客户聚合                                                                      |
 | [客户回访](modules/client-followups.md)    | Client、Reminder、Actor                                                                                       | 本地回访计划与结果                                                                                                                       | Inbox 到期项、客户活动                                                                              |
@@ -254,7 +254,13 @@ Task 已分派给健康 agent Actor
 ### 6.8 备份操作失败的系统维护来源
 
 ```text
-POST /api/v1/backups 创建失败
+POST /api/v1/backups 手动创建
+  → 维护写锁 + 备份互斥锁内先查幂等重放；命中直接返回，不探测
+  → 未命中时在 staging/VACUUM 前估算 SQLite 上界 + 经受控路径/实际大小复核的 active 文件 + marker/manifest + 20%（最低 64 MiB）余量
+  → 只探测 backup root；可用量小于需求返回 507 BACKUP_SPACE_INSUFFICIENT，无法确认返回 503 BACKUP_CAPACITY_UNAVAILABLE
+  → 恰好等于需求允许继续；拒绝无 staging/新包/业务变化，也不投影 backup:create
+
+POST /api/v1/backups 通过准入后实际创建失败
   → 调用端仍收到 BACKUP_CREATE_FAILED；现有数据不变
   → Sidecar 尽力投影 source_entity_id=backup:create
 
@@ -274,7 +280,7 @@ BACKUP_INVALID（损坏/篡改）
 → 原错误响应保持不变
 → Sidecar 尽力投影 source_entity_id=backup:restore
 
-该链路复用 schema v26 的系统维护约束，当前已交付 `create / verify / drill / restore` 四个 operation。payload 只含 `component / operation / failure_code / occurred_at / message`。投影失败只记内部日志，不改变备份错误响应；`BACKUP_INVALID`、请求错误、包不存在、工作区不匹配和已有恢复计划均不投影。数据库/Sidecar 启动失败由下一节的安全 journal 补偿。诊断包 v1 只导出这些来源的错误码、状态、数量和最近发生时间，不导出 payload 正文。
+该链路复用 schema v26 的系统维护约束，当前已交付 `create / verify / drill / restore` 四个 operation。payload 只含 `component / operation / failure_code / occurred_at / message`。投影失败只记内部日志，不改变备份错误响应；`BACKUP_SPACE_INSUFFICIENT`、`BACKUP_CAPACITY_UNAVAILABLE`、`BACKUP_INVALID`、请求错误、包不存在、工作区不匹配和已有恢复计划均不投影。容量拒绝的 API 响应也不包含路径、盘符、精确容量、note 或底层探测错误。数据库/Sidecar 启动失败由下一节的安全 journal 补偿。诊断包 v1 只导出实际已投影来源的错误码、状态、数量和最近发生时间，不导出 payload 正文。
 
 ### 6.9 启动前故障 journal 与补偿投影
 
@@ -352,7 +358,7 @@ Sidecar ready 前 + 每 5 分钟
 
 ### 8.1 事件来源
 
-- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
+- v0.1：Reminder 到期、显式 follow-up Task Artifact、Task 阻塞、提前 24 小时 Task 临期、备份四类操作性失败（不含手动容量准入拒绝）、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和可配置低空间监测已交付。
 - v0.2：Agent Runner 追加 Workflow Event，内置自动化投影器以统一 source_event_key 作为 Agent 失败/验收 Inbox Item 的唯一生产者；其他预设自动化也复用同一去重框架。
 - v0.3：路线图里程碑、内容审核与发布时间。
 - v0.4：Invoice 到期/逾期、客户回访和项目开票节点。
@@ -366,7 +372,7 @@ Sidecar ready 前 + 每 5 分钟
 - 同 key/endpoint 不同请求摘要返回 `409 IDEMPOTENCY_CONFLICT`。
 - 幂等重放不重复写 Workflow Event。
 
-当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；系统维护来源使用 `system:<component>:<operation>:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；备份失败直接尽力投影，启动前或运行期数据库不可写失败用稳定 journal 延迟投影，均不改变原错误。`BACKUP_INVALID` 与可解释业务结果不投影。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和新故障按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
+当前可重试业务命令继续保存请求摘要与首次响应。Reminder 到期使用 `reminder:<id>:due`；follow-up Artifact 使用 `task-artifact:<artifact-id>:followup`；Task 阻塞使用 `task:<task-id>:blocked:<block-version>`；Task 临期使用 `task:<task-id>:due:<due-at>`；系统维护来源使用 `system:<component>:<operation>:<incident-id>`，且同一 source id 在 open/tracking 时只允许一个活动 incident。Artifact/阻塞分别与 Task 提交/block Event 同事务，临期来源由启动补偿和 15 秒扫描器按 Task+截止时点稳定投影；除手动容量准入拒绝外，已登记的备份操作性失败直接尽力投影，启动前或运行期数据库不可写失败用稳定 journal 延迟投影，均不改变原错误。`BACKUP_SPACE_INSUFFICIENT`、`BACKUP_CAPACITY_UNAVAILABLE`、`BACKUP_INVALID` 与其他可解释业务结果不投影。手动备份幂等重放还在容量探测之前返回，避免因当前容量状态改变而破坏首次成功响应。命令重放、重复扫描和重启都不重复创建活动事项，改期、重复阻塞和新故障按新事实形成独立事项。幂等 key 仍未加入调用 Actor 作用域；其他系统故障和业务来源仍待后续纵切。
 
 schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command_seq`：自动结束 Assignment 的事件从 1 递增，Task 主事件最后写入并取得最高序号。schema v9 再增加 nullable `submission_id / artifact_id`，并校验二者与 Task 聚合、彼此批次一致。Task 与 Project 时间线均按创建时间、命令序号和事件 ID 倒序读取；历史迁移事件允许序号为空，当前每个 Project 命令只产出一条序号 1 的事件。Workflow Event 不提供修改/删除 API，数据库 trigger 也拒绝更新和删除，唯一例外是 Task 聚合硬删除时由外键把已删除的 Assignment/Submission/Artifact 关联 ID 置空，其他快照保持不变。Project 删除没有事件外键级联，因此 `project_deleted` 及之前快照继续保留在业务导出中；资源 API 在 Project 不存在后返回 404。
 
@@ -389,7 +395,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 | ------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Sidecar 启动失败                | 桌面平台                         | **已交付 v1**：桌面根闸门在 `starting/error` 时拦截业务页和设置 bootstrap，提供自动/手动状态重查、打开脱敏日志目录和安全重启，不展示原始 message；浏览器开发模式不启用该闸门。shutdown 已持有 child 时 ready 超时处理不伪造 exited，仍由 shutdown 完成等待与兜底终止。备份选择和数据库打开前实时恢复进度仍待实现 |
 | Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                            |
-| 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。`BACKUP_INVALID` 与可解释业务结果不投影；启动应用失败转入下一行的 journal 补偿                                                                                                                                         |
+| 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝，以及 `BACKUP_INVALID` 等可解释结果不投影；UI 保留 note 并提示清理或刷新，启动应用失败转入下一行的 journal 补偿 |
 | 数据库/Sidecar/存储故障        | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、卷 ID、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、WebView→Sidecar request ID、全局启动故障恢复页 v1、可配置低空间监测、物理卷同卷去重和无路径手动容量检查已交付；数据库打开前恢复进度和卷级趋势仍待实现 |
 | 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`，先等待受管 Sidecar 真实退出再请求 Tauri 重启。健康启动后只读诊断 API 汇总 pending、本次 applied、清理残留、失败隔离和 invalid 记录，设置页恢复门禁并脱敏展示；数据库打开前实时进度页仍待实现 |
 | 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞与 Task 临期已实现：open/tracking 来源项阻止 Artifact/Task 删除；归档后删除原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                              |
@@ -426,7 +432,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 
 ## 12. 跨模块验收基线
 
-- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/可配置低空间来源投影、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；Client 外部活动来源和原生通知仍待交付。
+- 断开网络后，当前已实现的 Task/Assignment/manual 提交验收、Project/Client、手工 Inbox、Reminder、Task 编排、follow-up Artifact/Task 阻塞/Task 临期/备份四类操作性失败/数据库启动与迁移/Sidecar 启动/运行期数据库操作失败/可配置低空间来源投影、手动备份容量准入、备份闭环、业务 JSON 与含文件 ZIP 导出均可用；容量准入拒绝不伪造故障 Inbox，Client 外部活动来源和原生通知仍待交付。
 - 每个业务状态有且只有一个事实源。
 - 跨模块写操作具备事务、幂等和冲突检测。
 - 任何来源事件重扫和重启后不重复创建工作。

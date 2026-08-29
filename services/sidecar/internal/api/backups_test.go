@@ -22,6 +22,12 @@ import (
 
 func newBackupTestAPI(t *testing.T) (*gin.Engine, *database.Store, string, string) {
 	t.Helper()
+	router, store, _, artifactDir, backupDir := newBackupCapacityTestRuntime(t, nil)
+	return router.Engine, store, artifactDir, backupDir
+}
+
+func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, uint64, error)) (*Router, *database.Store, string, string, string) {
+	t.Helper()
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "workspace.db")
 	artifactDir := filepath.Join(root, "artifacts")
@@ -36,13 +42,14 @@ func newBackupTestAPI(t *testing.T) (*gin.Engine, *database.Store, string, strin
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
 		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
 		DatabasePath: databasePath, BackupDir: backupDir,
+		DiskSpaceCheck:         checker,
 		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
 	})
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
 	t.Cleanup(func() { _ = router.Close() })
-	return router.Engine, store, artifactDir, backupDir
+	return router, store, databasePath, artifactDir, backupDir
 }
 
 func newBackupRestoreTestRuntime(t *testing.T, root string) (*Router, *database.Store, string, string, string) {
@@ -214,8 +221,246 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	}
 }
 
+func TestBackupCapacityRequirementIncludesOverheadsAndRejectsOverflow(t *testing.T) {
+	required, err := backupCapacityRequirement(10, 20, 30)
+	want := uint64(10 + 20 + 30 + maxBackupManifest + backupCapacityMinimumReserve)
+	if err != nil || required != want {
+		t.Fatalf("small backup capacity requirement=%d err=%v, want %d", required, err, want)
+	}
+	largeDatabaseBytes := uint64(5 * backupCapacityMinimumReserve)
+	largePayloadBytes := largeDatabaseBytes + maxBackupManifest
+	largeWant := largePayloadBytes + (largePayloadBytes+backupCapacitySafetyDivisor-1)/backupCapacitySafetyDivisor
+	largeRequired, err := backupCapacityRequirement(largeDatabaseBytes, 0, 0)
+	if err != nil || largeRequired != largeWant {
+		t.Fatalf("large backup capacity requirement=%d err=%v, want %d", largeRequired, err, largeWant)
+	}
+	if _, err := backupCapacityRequirement(^uint64(0), 1, 1); !errors.Is(err, errBackupCapacityUnavailable) {
+		t.Fatalf("overflow requirement error=%v, want capacity unavailable", err)
+	}
+	if _, ok := checkedBackupCapacityMultiply(^uint64(0), 2); ok {
+		t.Fatal("overflowing SQLite allocation multiplication was accepted")
+	}
+}
+
+func TestBackupCreateRejectsInsufficientCapacityWithoutSideEffects(t *testing.T) {
+	var available, total uint64
+	var probedPaths []string
+	runtime, store, databasePath, artifactDir, backupDir := newBackupCapacityTestRuntime(t, func(path string) (uint64, uint64, error) {
+		probedPaths = append(probedPaths, path)
+		return available, total, nil
+	})
+	task := createTaskForTaskFacts(t, runtime.Engine, `{"title":"Capacity-protected task"}`)
+	var workflowCountBefore int64
+	if err := store.DB.Table("workflow_events").Count(&workflowCountBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	required, err := estimateBackupCreateCapacity(store.DB, databasePath, runtime.artifactStore, store.SchemaVersion)
+	if err != nil || required == 0 {
+		t.Fatalf("estimate backup capacity=%d err=%v", required, err)
+	}
+	available, total = required-1, required
+
+	const note = "capacity-note-canary-C-private"
+	rejected := performRequest(runtime.Engine, http.MethodPost, "/api/v1/backups", []byte(`{"note":"`+note+`"}`), nil)
+	if rejected.Code != http.StatusInsufficientStorage || responseErrorCode(t, rejected.Body.Bytes()) != "BACKUP_SPACE_INSUFFICIENT" {
+		t.Fatalf("insufficient backup capacity = %d: %s", rejected.Code, rejected.Body.String())
+	}
+	if len(probedPaths) != 1 || !sameFilesystemPath(probedPaths[0], backupDir) {
+		t.Fatalf("capacity probe paths=%q, want only backup root", probedPaths)
+	}
+	for _, privateValue := range []string{note, backupDir, databasePath, artifactDir} {
+		if strings.Contains(rejected.Body.String(), privateValue) {
+			t.Fatalf("capacity response leaked private value %q: %s", privateValue, rejected.Body.String())
+		}
+	}
+	assertBackupRootEmpty(t, backupDir)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE COALESCE(previous_json, '') LIKE ? OR COALESCE(current_json, '') LIKE ?", 0, "%"+note+"%", "%"+note+"%")
+
+	var taskAfter models.Task
+	if err := store.DB.First(&taskAfter, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if taskAfter.Title != task.Title || taskAfter.Status != task.Status || taskAfter.Version != task.Version {
+		t.Fatalf("rejected backup changed task before=%#v after=%#v", task, taskAfter)
+	}
+	var workflowCountAfter int64
+	if err := store.DB.Table("workflow_events").Count(&workflowCountAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if workflowCountAfter != workflowCountBefore {
+		t.Fatalf("rejected backup changed workflow data before=%d after=%d", workflowCountBefore, workflowCountAfter)
+	}
+}
+
+func TestBackupCreateRejectsOversizedControlledFileBeforeProbeOrStaging(t *testing.T) {
+	checks := 0
+	runtime, store, databasePath, artifactDir, backupDir := newBackupCapacityTestRuntime(t, func(string) (uint64, uint64, error) {
+		checks++
+		return 1 << 60, 1 << 60, nil
+	})
+	task, _ := setupManualReviewTask(t, runtime.Engine)
+	const artifactBody = "registered controlled file"
+	uploaded := performMultipartRequest(
+		runtime.Engine,
+		"/api/v1/tasks/"+task.ID+"/submit-output",
+		`{"summary":"Capacity mismatch fixture","artifacts":[{"client_ref":"upload","storage_kind":"file","name":"capacity.txt","file_field":"file"}]}`,
+		map[string][]byte{"file": []byte(artifactBody)},
+		map[string]string{"If-Match": `"3"`},
+	)
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("upload capacity mismatch fixture = %d: %s", uploaded.Code, uploaded.Body.String())
+	}
+	var row controlledFileBackupRow
+	if err := store.DB.Raw(`
+		SELECT id, relative_path, size_bytes, sha256
+		FROM task_artifacts
+		WHERE storage_kind = 'file' AND deleted_at IS NULL
+		LIMIT 1
+	`).Scan(&row).Error; err != nil || row.ID == "" {
+		t.Fatalf("read capacity mismatch fixture row=%#v err=%v", row, err)
+	}
+	objectPath := filepath.Join(artifactDir, filepath.FromSlash(row.RelativePath))
+	oversizedBody := append([]byte(artifactBody), make([]byte, 4096)...)
+	if err := os.WriteFile(objectPath, oversizedBody, 0o600); err != nil {
+		t.Fatalf("enlarge controlled file: %v", err)
+	}
+
+	const note = "oversized-controlled-file-note"
+	rejected := performRequest(runtime.Engine, http.MethodPost, "/api/v1/backups", []byte(`{"note":"`+note+`"}`), nil)
+	if rejected.Code != http.StatusServiceUnavailable || responseErrorCode(t, rejected.Body.Bytes()) != "BACKUP_CAPACITY_UNAVAILABLE" {
+		t.Fatalf("oversized controlled file backup = %d: %s", rejected.Code, rejected.Body.String())
+	}
+	if checks != 0 {
+		t.Fatalf("oversized controlled file triggered %d capacity probes", checks)
+	}
+	for _, privateValue := range []string{note, databasePath, artifactDir, backupDir, row.RelativePath} {
+		if strings.Contains(rejected.Body.String(), privateValue) {
+			t.Fatalf("oversized controlled file response leaked %q: %s", privateValue, rejected.Body.String())
+		}
+	}
+	assertBackupRootEmpty(t, backupDir)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 0)
+}
+
+func TestBackupCreateRejectsUnavailableCapacityWithoutLeakingOrProjecting(t *testing.T) {
+	tests := []struct {
+		name      string
+		available uint64
+		total     uint64
+		err       error
+	}{
+		{name: "probe error", available: 123456789, total: 987654321, err: errors.New(`private probe failed at C:\secret`)},
+		{name: "zero total", available: 0, total: 0},
+		{name: "available exceeds total", available: 987654321, total: 123456789},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var probedPaths []string
+			runtime, store, databasePath, _, backupDir := newBackupCapacityTestRuntime(t, func(path string) (uint64, uint64, error) {
+				probedPaths = append(probedPaths, path)
+				return test.available, test.total, test.err
+			})
+			const note = "unavailable-capacity-note-canary"
+			rejected := performRequest(runtime.Engine, http.MethodPost, "/api/v1/backups", []byte(`{"note":"`+note+`"}`), nil)
+			if rejected.Code != http.StatusServiceUnavailable || responseErrorCode(t, rejected.Body.Bytes()) != "BACKUP_CAPACITY_UNAVAILABLE" {
+				t.Fatalf("unavailable backup capacity = %d: %s", rejected.Code, rejected.Body.String())
+			}
+			if len(probedPaths) != 1 || !sameFilesystemPath(probedPaths[0], backupDir) {
+				t.Fatalf("capacity probe paths=%q, want only backup root", probedPaths)
+			}
+			for _, privateValue := range []string{note, backupDir, databasePath, "private probe", "C:\\secret", "123456789", "987654321"} {
+				if strings.Contains(rejected.Body.String(), privateValue) {
+					t.Fatalf("capacity response leaked private value %q: %s", privateValue, rejected.Body.String())
+				}
+			}
+			assertBackupRootEmpty(t, backupDir)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'system_maintenance'", 0)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE COALESCE(previous_json, '') LIKE ? OR COALESCE(current_json, '') LIKE ?", 0, "%"+note+"%", "%"+note+"%")
+		})
+	}
+}
+
+func TestBackupCreateAcceptsExactCapacityAndReplayBypassesCapacityProbe(t *testing.T) {
+	var available, total uint64
+	probeUnavailable := false
+	checks := 0
+	var probedPath string
+	runtime, store, databasePath, _, backupDir := newBackupCapacityTestRuntime(t, func(path string) (uint64, uint64, error) {
+		checks++
+		probedPath = path
+		if probeUnavailable {
+			return 0, 0, errors.New("capacity probe must not run during replay")
+		}
+		return available, total, nil
+	})
+	task, _ := setupManualReviewTask(t, runtime.Engine)
+	const artifactBody = "capacity boundary controlled file"
+	uploaded := performMultipartRequest(
+		runtime.Engine,
+		"/api/v1/tasks/"+task.ID+"/submit-output",
+		`{"summary":"Capacity fixture","artifacts":[{"client_ref":"upload","storage_kind":"file","name":"capacity.txt","file_field":"file"}]}`,
+		map[string][]byte{"file": []byte(artifactBody)},
+		map[string]string{"If-Match": `"3"`},
+	)
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("upload capacity fixture = %d: %s", uploaded.Code, uploaded.Body.String())
+	}
+	required, err := estimateBackupCreateCapacity(store.DB, databasePath, runtime.artifactStore, store.SchemaVersion)
+	if err != nil || required == 0 {
+		t.Fatalf("estimate exact capacity=%d err=%v", required, err)
+	}
+	available, total = required, required
+	headers := map[string]string{"Idempotency-Key": "capacity-boundary-replay"}
+	created := performRequest(runtime.Engine, http.MethodPost, "/api/v1/backups", []byte(`{"note":"exact capacity"}`), headers)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("exact-capacity backup = %d: %s", created.Code, created.Body.String())
+	}
+	summary := decodeBackupSummary(t, created.Body.Bytes())
+	if checks != 1 || !sameFilesystemPath(probedPath, backupDir) || summary.ArtifactBytes != int64(len(artifactBody)) {
+		t.Fatalf("exact-capacity probe checks=%d path=%q summary=%#v", checks, probedPath, summary)
+	}
+	snapshotPath := filepath.Join(backupDir, summary.ID, "database", "opc-workspace.db")
+	snapshotBefore, err := inspectFile(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	probeUnavailable = true
+	checks = 0
+	replayed := performRequest(runtime.Engine, http.MethodPost, "/api/v1/backups", []byte(`{"note":"exact capacity"}`), headers)
+	if replayed.Code != http.StatusCreated || decodeBackupSummary(t, replayed.Body.Bytes()).ID != summary.ID {
+		t.Fatalf("capacity-independent replay = %d: %s", replayed.Code, replayed.Body.String())
+	}
+	if checks != 0 {
+		t.Fatalf("idempotent replay performed %d capacity probes", checks)
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != summary.ID {
+		t.Fatalf("replay backup packages=%v err=%v", entries, err)
+	}
+	snapshotAfter, err := inspectFile(snapshotPath)
+	if err != nil || snapshotAfter != snapshotBefore {
+		t.Fatalf("replay changed backup data before=%#v after=%#v err=%v", snapshotBefore, snapshotAfter, err)
+	}
+}
+
+func assertBackupRootEmpty(t *testing.T, backupDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatalf("read backup root: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected backup left packages or staging entries: %v", entries)
+	}
+}
+
 func TestBackupCreateFailureProjectsOneSafeMaintenanceInboxIncident(t *testing.T) {
-	router, store, _, backupDir := newBackupTestAPI(t)
+	runtime, store, _, _, backupDir := newBackupCapacityTestRuntime(t, func(string) (uint64, uint64, error) {
+		return 1 << 60, 1 << 60, nil
+	})
+	router := runtime.Engine
 	if err := os.Remove(backupDir); err != nil {
 		t.Fatalf("remove backup root: %v", err)
 	}

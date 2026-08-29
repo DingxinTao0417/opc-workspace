@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v29。设置持久化、受控头像、Focus 解耦、1–100 GiB 低空间阈值、Actor、备份闭环、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录和全局启动故障恢复页 v1 已交付。非空目标/跨 schema 高级导入和数据库打开前备份选择/实时恢复进度仍是后续范围。
+> 文档状态：部分实现；当前 schema v29。设置持久化、受控头像、Focus 解耦、1–100 GiB 低空间阈值、Actor、备份闭环、仅手动一致性备份的低空间准入、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、健康版本、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志、桌面打开日志目录和全局启动故障恢复页 v1 已交付。非空目标/跨 schema 高级导入和数据库打开前备份选择/实时恢复进度仍是后续范围。
 
 ## 定位与边界
 
@@ -25,7 +25,7 @@
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
-- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前自动创建已校验回滚备份。
+- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手动创建在写入 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留备份说明草稿，不伪造成功或自动重试。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前自动创建已校验回滚备份，这些内部回滚包当前不经过手动 `POST /backups` 的容量门禁。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取五个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
@@ -97,6 +97,7 @@
 ### 数据与备份
 
 - 手动创建一致性备份、导出、校验并查看结果。
+- 手动备份在创建任何 staging/SQLite 快照前按数据库与 active 文件载荷加安全余量检查 backup root；空间不足或容量无法确认时保留说明草稿并给出可操作反馈。
 - 选择恢复包，先校验再确认原子恢复。
 - 显示数据目录、备份目录、最近成功时间和失败诊断。
 - 设置 1–100 GiB 低空间提醒阈值；修改时就地展示提醒口径，保存后由 Sidecar 下一轮扫描读取。
@@ -154,17 +155,19 @@
 
 1. owner 打开“数据与备份”，页面读取内部 backup root 的已发布 UUID 包；损坏 manifest 显示 invalid，而不是从文件名猜测成功。
 2. owner 可填写最多 200 字说明并点击“立即备份”；前端为同一次尝试保留稳定 Idempotency-Key，显示长操作进行中并阻止重复点击。
-3. Sidecar 获取维护写锁，等待普通业务请求、Focus heartbeat 与 Reminder 扫描结束；随后用 `VACUUM INTO` 创建 SQLite 一致性快照并复制全部 active Task Artifact / Client Attachment 文件和身份 marker。
-4. staging 包只有在逐项 size/SHA-256、预期文件全集、数据库 quick/foreign-key/schema/identity/active Artifact 校验全部通过后才原子发布；失败不改变当前数据库或 Artifact root。
-5. 页面刷新列表并展示创建时间、说明、schema、文件数量和总大小；owner 可点击“重新校验”再次逐字节验证并刷新 `verified_at`。
-6. owner 可点击“恢复演练”；Sidecar 再次校验源包，在隔离临时数据根复制、打开/迁移数据库、声明 Artifact store 并逐文件复验，成功或失败后都清理临时数据，不改当前数据库、Artifact root 或源备份。
-7. owner 可点击“恢复此备份”进入二次确认；确认后 Sidecar 重验目标并为当前状态创建完整自动回滚包，成功挂起后页面锁定普通备份操作并显示目标/回滚短 ID。
-8. 桌面模式下 owner 点击“立即安全重启”；Tauri 等待受管 Sidecar 优雅退出（必要时仅终止精确子进程）并确认退出后重启应用。浏览器开发模式不接管外部 Sidecar，页面提示手动停止并重新启动本地服务。
-9. owner 可对任意有效或 invalid 包点击“删除备份”并二次确认；Sidecar 先把精确 UUID 包移入隐藏删除态再永久清理，删除不改变当前数据。
-10. owner 可点击“下载 JSON”；Sidecar 在单事务内生成 format v1 业务表白名单快照，浏览器或 WebView 以服务端安全文件名保存。页面明确提示文件正文未包含，完整恢复仍使用已校验备份。
-11. owner 可点击“下载含文件 ZIP”；Sidecar 在维护写锁内生成 manifest、同格式业务 JSON 和全部活动受控文件，逐项复验 size/SHA-256，完成后才下载。
-12. owner 可选择业务 JSON 或含文件 ZIP；页面先上传预检并展示 schema/总行数，ZIP 额外展示文件数与字节数。只有当前 schema、终态 Focus 和空目标才可确认；Sidecar 再次预检、创建已校验回滚包后原子应用，ZIP 还会无覆盖发布文件并在数据库提交前复验正文。
-13. 页面读取启动恢复诊断；待重启计划即使关闭再打开设置也继续冻结备份写操作。已恢复、清理残留、失败隔离和无效记录只显示安全状态/计数，不显示路径或底层错误，也不提供未经确认的自动清理。
+3. Sidecar 获取维护写锁和备份互斥锁，先查找同键同说明的已发布幂等结果；命中时直接重放，不再次探测容量或创建包。没有结果时，以 `max(page_count × page_size, 数据库文件大小)`、安全解析并复核实际大小与登记值一致的全部 active 受控文件、marker 和 manifest 上界估算载荷，再增加 20% 且最低 64 MiB 余量，并且只探测 backup root；文件不一致时在探测和 staging 前安全拒绝。
+4. 可用空间小于需求时返回 HTTP 507 `BACKUP_SPACE_INSUFFICIENT`，容量无法可靠确认时返回 HTTP 503 `BACKUP_CAPACITY_UNAVAILABLE`；恰好等于需求允许继续。响应不含路径、盘符、精确容量或底层错误；拒绝不创建 staging/新包、不修改业务数据，也不生成 generic `backup:create` Inbox Item。页面分别提示清理备份位置/旧备份，或刷新容量状态并确认本地存储可用；当前 note 草稿保持原值，没有成功提示，也不会自动重试。
+5. 通过门禁后 Sidecar 才用 `VACUUM INTO` 创建 SQLite 一致性快照并复制全部 active Task/Client/Project 受控文件、Workspace Avatar 和身份 marker。
+6. staging 包只有在逐项 size/SHA-256、预期文件全集、数据库 quick/foreign-key/schema/identity/active Artifact 校验全部通过后才原子发布；失败不改变当前数据库或 Artifact root。
+7. 页面刷新列表并展示创建时间、说明、schema、文件数量和总大小；owner 可点击“重新校验”再次逐字节验证并刷新 `verified_at`。
+8. owner 可点击“恢复演练”；Sidecar 再次校验源包，在隔离临时数据根复制、打开/迁移数据库、声明 Artifact store 并逐文件复验，成功或失败后都清理临时数据，不改当前数据库、Artifact root 或源备份。
+9. owner 可点击“恢复此备份”进入二次确认；确认后 Sidecar 重验目标并为当前状态创建完整自动回滚包，成功挂起后页面锁定普通备份操作并显示目标/回滚短 ID。该内部回滚包不经过上述手动 HTTP 容量门禁。
+10. 桌面模式下 owner 点击“立即安全重启”；Tauri 等待受管 Sidecar 优雅退出（必要时仅终止精确子进程）并确认退出后重启应用。浏览器开发模式不接管外部 Sidecar，页面提示手动停止并重新启动本地服务。
+11. owner 可对任意有效或 invalid 包点击“删除备份”并二次确认；Sidecar 先把精确 UUID 包移入隐藏删除态再永久清理，删除不改变当前数据。
+12. owner 可点击“下载 JSON”；Sidecar 在单事务内生成 format v1 业务表白名单快照，浏览器或 WebView 以服务端安全文件名保存。页面明确提示文件正文未包含，完整恢复仍使用已校验备份。
+13. owner 可点击“下载含文件 ZIP”；Sidecar 在维护写锁内生成 manifest、同格式业务 JSON 和全部活动受控文件，逐项复验 size/SHA-256，完成后才下载。
+14. owner 可选择业务 JSON 或含文件 ZIP；页面先上传预检并展示 schema/总行数，ZIP 额外展示文件数与字节数。只有当前 schema、终态 Focus 和空目标才可确认；Sidecar 再次预检、创建已校验回滚包后原子应用，ZIP 还会无覆盖发布文件并在数据库提交前复验正文；导入前回滚包不经过手动 HTTP 容量门禁。
+15. 页面读取启动恢复诊断；待重启计划即使关闭再打开设置也继续冻结备份写操作。已恢复、清理残留、失败隔离和无效记录只显示安全状态/计数，不显示路径或底层错误，也不提供未经确认的自动清理。
 
 ### 数据恢复
 
@@ -200,7 +203,7 @@
 | GET /api/v1/settings/avatar/content | **已实现**：鉴权读取当前头像，复验 MIME/size/SHA-256，缺失或篡改拒绝输出                                        |
 | GET / POST /api/v1/actors           | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                  |
 | GET / PATCH /api/v1/actors/:id      | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用 |
-| GET / POST /api/v1/backups          | **已实现**：列出本地包，或在维护写锁内幂等创建并完整校验 SQLite+Artifact 备份                                   |
+| GET / POST /api/v1/backups          | **已实现**：列出本地包；手动创建在双锁内先重放幂等结果，否则按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。空间不足返回 507，容量无法确认返回 503，拒绝无副作用且不投影 generic incident；通过后才完整创建并校验 SQLite+Artifact 备份 |
 | POST /api/v1/backups/:id/verify     | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                                |
 | POST /api/v1/backups/:id/drill      | **已实现**：在隔离临时根复制并打开/迁移数据库、声明 Artifact store、逐文件验证后清理，不改当前数据              |
 | POST /api/v1/backups/:id/restore    | **已实现**：要求 `confirm=true`，重验目标、创建当前状态回滚包并挂起；下次 Sidecar 启动前原子替换和最终复验      |
@@ -224,7 +227,7 @@
 - saving / error：保存中和可重试错误。
 - capability：由桌面层或 Sidecar 返回的当前平台能力，只读展示。
 
-当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。备份创建/校验事实当前只写备份 manifest，不进入 Task/Project `workflow_events`；未来诊断事件需单独设计。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何事件。
+当前 Actor 创建、更新和停用已写 `actor_created / actor_updated / actor_deactivated` Workflow Event；设置 API 的每个成功模块写 `settings_updated`，仅含 stored/version/schema 元数据，整批失败不留事件。备份创建/校验事实当前只写备份 manifest，不进入 Task/Project `workflow_events`；手动容量准入拒绝也不创建通用备份故障 Inbox/Event。未来诊断事件需单独设计。`settings_migrated`、`backup_started` 和 `desktop_capability_changed` 仍是规划，敏感值不能进入任何事件。
 
 ## 与其他模块协作
 
@@ -284,6 +287,7 @@
 - “关于”显示真实 app、commit、API、schema 和 Sidecar 状态，不使用硬编码运行事实；加载、无服务、重试和最近成功数据均有明确状态。
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整导出/导入后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导入导出中/失败、预检阻断、挂起提示和 invalid 包均有明确状态。
+- **已验证（API/组件定向）**：手动创建空间不足与容量无法确认分别显示清理备份位置/旧备份和刷新容量状态/确认本地存储可用的提示；失败保留 note 草稿，不显示成功、不自动重试，未知错误仍保留 request ID。后端覆盖锁/重放顺序、估算溢出、精确容量放行、只探测 backup root、507/503 脱敏响应，以及拒绝后无 staging/新包/业务变化/Inbox incident。
 - 启动恢复诊断只显示规范 ID、时间、状态与计数；重新打开设置可恢复待重启门禁，本次恢复成功、清理残留、失败隔离与无效记录不会泄露本机路径或底层错误，也不会触发自动删除。
 - 不支持或尚未实现的桌面能力被禁用并说明原因。
 - 备份、恢复和 Sidecar 恢复失败不会被设置页伪装为成功。

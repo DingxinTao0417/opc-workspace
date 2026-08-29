@@ -23,7 +23,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 受控文件存储：Sidecar 以进程级独占锁管理 `artifacts/`；JSON marker 携带 `format_version / database_id / store_id`，schema v9 用不可变数据库身份和一次性 `artifact_store_id` 建立双向绑定，并使用 `.staging/`、`objects/`、`avatars/`、`.trash/` 和 `.quarantine/`；校验文件大小与 SHA-256，关键文件/目录项做耐久同步。Task/Client/Project 文件继续位于 `objects/`，工作区头像位于 `avatars/`；提交事务报错只清除数据库可证明无引用的文件，模糊 COMMIT 留给 reconcile
 - 客户附件纵切：客户详情支持选择本地文件后预览名称/大小、版本化幂等上传、稳定分页、完整性校验下载、带原因软删除和删除历史；Client Attachment 与 Task file Artifact 共享受控 store，跨表 object ID 唯一，Client 聚合硬删除也执行 tombstone/trash 补偿
 - 客户责任关联纵切：客户详情可选择已有 active person，或原子新建 person 后显式关联；每个客户只允许一个 active contact，解除必须填写原因并保留不可变历史，关联变化传播 Client 聚合版本
-- 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并创建同规格自动回滚包；备份失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
+- 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。仅手动 `POST /api/v1/backups` 在维护写锁和备份互斥锁内、幂等重放判断后、任何 staging 或 `VACUUM INTO` 前执行容量准入：以 `max(PRAGMA page_count × page_size, 当前数据库文件大小)`、经安全解析且实际普通文件大小与登记值一致的全部 active 受控文件、marker 和 manifest 上界之和为载荷，再增加 20% 且至少 64 MiB 余量，并只探测 backup root；可用空间恰好等于需求时允许继续。空间不足返回 `507 BACKUP_SPACE_INSUFFICIENT`，容量无法确认返回 `503 BACKUP_CAPACITY_UNAVAILABLE`，两者均不创建 staging/新包、不改业务数据，也不投影通用 `backup:create` 故障事项。该门禁不适用于导入、恢复安排或破坏性迁移创建的内部自动回滚包。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并创建同规格自动回滚包；备份失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
 - 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task/Client/Project 文件和 Workspace Avatar 元数据但不嵌入正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
 - 含文件业务 ZIP 导出：设置页可下载 manifest、同一版本化业务 JSON 和全部 active 受控文件；Sidecar 在维护写锁内逐文件复验 size/SHA-256，完整生成后才响应，缺失或篡改不会留下部分下载
 - 业务 JSON 安全导入 v1：设置页先预检官方 JSON，再显式确认；仅支持当前 schema、无受控文件/活动 Focus 且目标为空，应用前自动创建已校验回滚备份，整批事务失败不改变现有数据
@@ -37,7 +37,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测均会投影安全的系统维护 Inbox Item。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.10](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、Project/Client、Focus、Today、搜索、设置/诊断、备份恢复、启动后恢复结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录，以及 Inbox/Reminder/Task 编排已经交付；备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和按设置阈值运行的低空间监测会投影安全的系统维护 Inbox Item，手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不会投影通用备份创建故障。“数据与备份”可手动刷新三个受控逻辑位置的容量状态；Sidecar 按真实物理卷合并探测，UI 只提示逻辑位置同卷，不暴露卷 ID、路径或盘符。手动备份门禁响应同样不含路径、盘符、精确容量或底层探测错误；UI 给出清理备份位置/旧备份或刷新容量状态的提示，并保留未成功提交的备份说明。WebView 到 Sidecar 的每次请求均带规范 UUID，可在响应、前端错误和脱敏访问日志间关联。桌面启动阶段还会以全局恢复页拦截未就绪/失败状态，提供安全重查、打开日志和重启重试。任务页已提供复用真实筛选、分页、批量选择和详情入口的六状态看板；跨列拖拽映射真实生命周期命令并保留确认、版本、原因及人工验收门禁。Focus 原生反馈、客户外部来源/回访/财务、非空目标/跨 schema 冲突合并、数据库打开前备份选择/实时恢复进度、系统快捷键及三平台安装包仍属于后续实现。[PRD v9.11](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -59,7 +59,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.10）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.11）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -179,6 +179,7 @@ appLogDir/
 - Sidecar 通过 `OPC_LOG_DIR` 或 `--logs` 使用独立诊断目录；开发默认使用数据库同级 `logs/`。该目录不得与受控 Artifact 或备份根重叠。
 - Tauri 通过 `OPC_ARTIFACT_DIR` 把 `appDataDir/artifacts/` 交给 Sidecar；开发脚本等价地使用 `--artifacts .local/dev-data/artifacts`。
 - Sidecar 默认把数据库同级 `backups/` 用作本地备份根；也可由桌面层通过 `OPC_BACKUP_DIR` 或命令行 `--backups` 指定，且不得与 Artifact root 重叠。
+- 手动 `POST /api/v1/backups` 的容量准入只探测上述备份根；拒绝响应保持统一 `{ "code", "message", "request_id" }`，不返回本机路径、盘符、总量、剩余量或探测错误，也不会自动重试。
 - 业务接口统一位于 `/api/v1`；错误格式为 `{ "code", "message", "request_id" }`。
 - API 时间使用 RFC 3339 UTC，纯日期使用 `YYYY-MM-DD`，金额使用最小货币单位整数。
 
@@ -333,4 +334,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.10](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2 与六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查；明确未交付 Focus 原生反馈、内容日历、客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。
+[PRD v9.11](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2 与六状态看板及跨列受控生命周期、Project/Client/Focus/Today/搜索/设置、诊断包 v1、Sidecar/Tauri 壳脱敏轮转日志及桌面打开日志目录、WebView→Sidecar request ID 关联、全局 Sidecar 启动故障恢复页 v1、备份恢复与启动后结果诊断、手动一致性备份低空间准入、业务 JSON/含文件 ZIP 的空工作区安全导入导出、Inbox/Reminder/Task 编排、已登记来源、运行期数据库故障、可配置低空间投影、物理卷同卷去重及无路径手动容量检查；明确未交付 Focus 原生反馈、内容日历、客户外部活动/回访/财务、数据库打开前备份选择/实时恢复进度、重复/原生通知、Agent Runtime、非空目标/跨 schema 冲突合并、自动化、SQLCipher、云同步、AI 助手或知识库。

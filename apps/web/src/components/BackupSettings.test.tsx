@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type {
   BackupSummary,
   ScheduledBackupRestoreResult,
@@ -30,6 +31,7 @@ const backup: BackupSummary = {
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
+  createError: null as Error | null,
   verify: vi.fn(),
   drill: vi.fn(),
   restore: vi.fn(),
@@ -99,7 +101,7 @@ vi.mock("../api/hooks", () => ({
     mutate: mocks.create,
     reset: mocks.reset,
     isPending: false,
-    error: null,
+    error: mocks.createError,
   }),
   useVerifyBackup: () => ({
     mutate: mocks.verify,
@@ -201,6 +203,7 @@ describe("BackupSettings", () => {
       invalidEntryCount: 0,
     });
     mocks.create.mockClear();
+    mocks.createError = null;
     mocks.verify.mockClear();
     mocks.drill.mockClear();
     mocks.restore.mockClear();
@@ -311,6 +314,57 @@ describe("BackupSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "刷新备份列表" }));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      code: "BACKUP_SPACE_INSUFFICIENT",
+      status: 507,
+      message: "备份位置可用空间不足，请清理备份位置或旧备份后重试。",
+    },
+    {
+      code: "BACKUP_CAPACITY_UNAVAILABLE",
+      status: 503,
+      message: "暂时无法确认备份容量，请刷新容量状态并确认本地存储可用后重试。",
+    },
+  ])(
+    "shows actionable $code feedback and keeps the unsubmitted note draft",
+    ({ code, status, message }) => {
+      const { rerender } = render(<BackupSettings />);
+      const noteInput = screen.getByLabelText("备份说明");
+
+      fireEvent.change(noteInput, { target: { value: "空间门禁前草稿" } });
+      fireEvent.click(screen.getByRole("button", { name: "立即备份" }));
+
+      expect(mocks.create).toHaveBeenCalledOnce();
+      expect(noteInput).toHaveValue("空间门禁前草稿");
+
+      mocks.createError = new ApiError("服务端备份失败", {
+        code,
+        status,
+        requestId: "request-backup-space-gate",
+      });
+      rerender(<BackupSettings />);
+
+      expect(screen.getByRole("alert")).toHaveTextContent(message);
+      expect(screen.getByLabelText("备份说明")).toHaveValue("空间门禁前草稿");
+      expect(screen.queryByText(/备份已创建并校验：/)).not.toBeInTheDocument();
+      expect(mocks.create).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("keeps the existing request ID feedback for other backup errors", () => {
+    mocks.createError = new ApiError("服务端返回未知备份错误", {
+      code: "UNEXPECTED_BACKUP_ERROR",
+      status: 500,
+      requestId: "request-unknown-backup-error",
+    });
+
+    render(<BackupSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "服务端返回未知备份错误 · 请求 request-unknown-backup-error",
+    );
   });
 
   it("offers a safe desktop restart after a restore is scheduled", async () => {
