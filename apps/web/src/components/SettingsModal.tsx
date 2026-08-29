@@ -421,6 +421,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       "opc-workspace 运行诊断",
       `environment=${runtimeDiagnostics.environment}`,
       `sidecar_phase=${runtimeDiagnostics.phase}`,
+      `tray=${runtimeDiagnostics.desktopCapabilities?.tray ?? "unknown"}`,
       `app_version=${health.app.version}`,
       `app_commit=${health.app.commit}`,
       `api_version=${health.api.version}`,
@@ -1111,6 +1112,14 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                 nativeShortcuts.newTask === "registered"
               ? "已注册 ⌘/Ctrl+Shift+K、⌘/Ctrl+Shift+N"
               : "部分不可用；保留应用内快捷键";
+      const trayLabel =
+        runtimeDiagnostics.environment !== "desktop"
+          ? "仅桌面应用提供"
+          : runtimeDiagnostics.desktopCapabilities === null
+            ? "状态未读取"
+            : runtimeDiagnostics.desktopCapabilities.tray === "available"
+              ? "可用 · 关闭窗口时隐藏"
+              : "不可用 · 不拦截关闭窗口";
 
       return (
         <>
@@ -1170,6 +1179,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             <div className="settings-about-row">
               <span>全局快捷键</span>
               <strong>{shortcutLabel}</strong>
+            </div>
+            <div className="settings-about-row">
+              <span>系统托盘</span>
+              <strong>{trayLabel}</strong>
             </div>
           </div>
           {healthQuery.isError ? (

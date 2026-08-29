@@ -41,6 +41,7 @@ describe("runtime diagnostics", () => {
       generation: null,
       startupStage: null,
       nativeShortcuts: null,
+      desktopCapabilities: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -65,6 +66,7 @@ describe("runtime diagnostics", () => {
       generation: 7,
       startupStage: null,
       nativeShortcuts: null,
+      desktopCapabilities: null,
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "28",
@@ -134,6 +136,48 @@ describe("runtime diagnostics", () => {
           : { commandPalette: "C:\\private\\shortcut", newTask: "unavailable" },
       ),
     ).resolves.toMatchObject({ nativeShortcuts: null });
+  });
+
+  it("reads only bounded desktop capability facts", async () => {
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "sidecar_status")
+        return { phase: "ready", generation: 1 };
+      if (command === "desktop_capabilities") {
+        return {
+          tray: "available",
+          nativeNotifications: "not_implemented",
+          autostart: "not_implemented",
+          nativeFileDialogs: "not_implemented",
+          offlineUpdates: "not_implemented",
+        };
+      }
+      throw new Error("shortcut status unavailable");
+    });
+    await expect(getRuntimeDiagnostics(invoke)).resolves.toMatchObject({
+      desktopCapabilities: {
+        tray: "available",
+        nativeNotifications: "not_implemented",
+        autostart: "not_implemented",
+        nativeFileDialogs: "not_implemented",
+        offlineUpdates: "not_implemented",
+      },
+    });
+
+    await expect(
+      getRuntimeDiagnostics(async (command) =>
+        command === "sidecar_status"
+          ? { phase: "ready", generation: 1 }
+          : command === "desktop_capabilities"
+            ? {
+                tray: "C:\\private\\tray",
+                nativeNotifications: "not_implemented",
+                autostart: "not_implemented",
+                nativeFileDialogs: "not_implemented",
+                offlineUpdates: "not_implemented",
+              }
+            : { commandPalette: "registered", newTask: "registered" },
+      ),
+    ).resolves.toMatchObject({ desktopCapabilities: null });
   });
 
   it("rejects malformed desktop lifecycle data", async () => {

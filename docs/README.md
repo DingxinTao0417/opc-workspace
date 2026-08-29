@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v41。v9.77 已接通托盘显示/隐藏/显式退出和不可用安全降级源码；当前主机原生链接、专注状态/动作和三平台交互仍待验收。其余历史版本说明保持不变。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v41。v9.78 已接通托盘显示/隐藏/显式退出、不可用安全降级和运行诊断能力快照；当前主机原生链接、专注状态/动作和三平台交互仍待验收。其余历史版本说明保持不变。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.77）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.78）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -35,7 +35,7 @@
 | 设置                       | 部分完成                                                                                                                                                                                                   | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                                           | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、启动后恢复结果诊断、数据库打开前的白名单恢复进度、全局启动故障恢复页 v1、失败 Inbox、业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；启动前备份选择及高级合并待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
-| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown 和托盘最小源码闭环已交付；托盘原生链接、真实父崩溃/进程树、三平台与安装包仍待验收）                                                                 | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
+| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown、托盘最小源码闭环和运行诊断能力快照已交付；托盘原生链接、真实父崩溃/进程树、三平台与安装包仍待验收）                                                | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
 

@@ -21,12 +21,24 @@ export interface NativeShortcutDiagnostics {
   newTask: NativeShortcutRegistration;
 }
 
+export type DesktopCapabilityAvailability =
+  "available" | "unavailable" | "not_implemented";
+
+export interface DesktopCapabilities {
+  tray: DesktopCapabilityAvailability;
+  nativeNotifications: DesktopCapabilityAvailability;
+  autostart: DesktopCapabilityAvailability;
+  nativeFileDialogs: DesktopCapabilityAvailability;
+  offlineUpdates: DesktopCapabilityAvailability;
+}
+
 export interface RuntimeDiagnostics {
   environment: "browser" | "desktop";
   phase: "external" | "starting" | "restarting" | "ready" | "error";
   generation: number | null;
   startupStage: StartupStage | null;
   nativeShortcuts: NativeShortcutDiagnostics | null;
+  desktopCapabilities: DesktopCapabilities | null;
   appVersion: string | null;
   apiVersion: string | null;
   schemaVersion: string | null;
@@ -112,6 +124,35 @@ function nativeShortcutDiagnostics(value: unknown): NativeShortcutDiagnostics {
   };
 }
 
+function desktopCapabilityAvailability(
+  value: unknown,
+): DesktopCapabilityAvailability {
+  if (
+    value === "available" ||
+    value === "unavailable" ||
+    value === "not_implemented"
+  ) {
+    return value;
+  }
+  throw new Error("Invalid desktop capability availability");
+}
+
+function parseDesktopCapabilities(value: unknown): DesktopCapabilities {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid desktop capabilities");
+  }
+  const record = value as Record<string, unknown>;
+  return {
+    tray: desktopCapabilityAvailability(record.tray),
+    nativeNotifications: desktopCapabilityAvailability(
+      record.nativeNotifications,
+    ),
+    autostart: desktopCapabilityAvailability(record.autostart),
+    nativeFileDialogs: desktopCapabilityAvailability(record.nativeFileDialogs),
+    offlineUpdates: desktopCapabilityAvailability(record.offlineUpdates),
+  };
+}
+
 export async function getRuntimeDiagnostics(
   invokeCommand?: InvokeCommand,
 ): Promise<RuntimeDiagnostics> {
@@ -122,6 +163,7 @@ export async function getRuntimeDiagnostics(
       generation: null,
       startupStage: null,
       nativeShortcuts: null,
+      desktopCapabilities: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -136,12 +178,20 @@ export async function getRuntimeDiagnostics(
   }
   const record = value as Record<string, unknown>;
   let nativeShortcuts: NativeShortcutDiagnostics | null = null;
+  let desktopCapabilities: DesktopCapabilities | null = null;
   try {
     nativeShortcuts = nativeShortcutDiagnostics(
       await invoke("desktop_shortcut_status"),
     );
   } catch {
     // Native shortcut registration must never prevent a recovery-safe desktop status read.
+  }
+  try {
+    desktopCapabilities = parseDesktopCapabilities(
+      await invoke("desktop_capabilities"),
+    );
+  } catch {
+    // Capability discovery must never prevent a recovery-safe desktop status read.
   }
   const phase = record.phase;
   if (
@@ -159,6 +209,7 @@ export async function getRuntimeDiagnostics(
     generation: runtimeGeneration(record.generation),
     startupStage: startupStage(record.startupStage),
     nativeShortcuts,
+    desktopCapabilities,
     appVersion: optionalVersion(record.appVersion),
     apiVersion: optionalVersion(record.apiVersion),
     schemaVersion: optionalVersion(record.schemaVersion),

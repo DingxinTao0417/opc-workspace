@@ -17,6 +17,7 @@ const ready: RuntimeDiagnostics = {
   generation: 1,
   startupStage: null,
   nativeShortcuts: null,
+  desktopCapabilities: null,
   appVersion: "0.1.0",
   apiVersion: "v1",
   schemaVersion: "29",

@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v41。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，后续迁移均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、诊断、数据库打开前白名单启动进度与启动恢复均已交付。非空目标/跨 schema 高级导入、启动前备份选择和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema v41。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，后续迁移均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、脱敏运行诊断与托盘能力快照、数据库打开前白名单启动进度和启动恢复均已交付。非空目标/跨 schema 高级导入、启动前备份选择和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -29,7 +29,7 @@
 - 本地 Agent：从真实 `/api/v1/agent-adapters` 读取代码所有清单；支持空状态幂等登记、能力/安全闸门、手动诊断、加载/错误重试和未就绪启用禁用。当前诊断固定为隔离未验证，不启动进程、不创建 agent Actor/Assignment/Run；该模块使用 Adapter 自身版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
 - 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手工创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留未提交输入，不伪造成功或自动重试。恢复需求同时覆盖当前回滚点和 pending 目标副本。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前通过容量准入并自动创建已校验回滚备份。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
-- 运行诊断：联合 `/health` 与桌面 `sidecar_status` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema 与版本兼容；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，`sessionToken`、`baseUrl` 和原始 `message` 不进入诊断对象、UI 或 ZIP。
+- 运行诊断：联合 `/health`、桌面 `sidecar_status` 与 `desktop_capabilities` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema、版本兼容和托盘运行时可用性；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，能力只接受 `available / unavailable / not_implemented`，`sessionToken`、`baseUrl`、原始 `message` 和底层平台错误不进入诊断对象、UI 或 ZIP；能力读取失败不阻断生命周期诊断。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取五个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
 - 当前设置状态明确分为三层：服务端确认值是 committed，弹窗表单是本地 draft，store 的 `preview` 只供可逆预览。保存成功后才以服务端规范化响应替换 committed；取消丢弃 preview。
 - Zustand persist 不再保存头像内容；运行态只持有由鉴权 content 响应创建的 Blob URL。历史 `opc-settings-local-v1` 仅作为一次性迁移源，服务端事实确认后清理。
@@ -110,7 +110,7 @@
 ### 关于与诊断
 
 - **已完成基线**：展示真实应用版本、commit、API 版本、schema 版本和 Sidecar 状态；Sidecar 构建脚本注入 Git 短提交并为未提交工作树追加 `-dirty`，也支持 CI 显式覆盖；前端严格校验响应契约，失败不回退为硬编码事实。
-- **已完成脱敏运行诊断**：浏览器模式明确外部开发进程；桌面模式读取 `sidecar_status` 后只保留环境、`starting/ready/error` 生命周期和三类版本。版本与 `/health` 对照，摘要只包含环境、生命周期、版本、commit 和 health 状态。
+- **已完成脱敏运行诊断**：浏览器模式明确外部开发进程且不伪造托盘能力；桌面模式读取 `sidecar_status` 后只保留环境、`starting/restarting/ready/error` 生命周期和三类版本，并独立读取 `desktop_capabilities` 的固定枚举。版本与 `/health` 对照，摘要只包含环境、生命周期、托盘枚举、版本、commit 和 health 状态。
 - **已完成诊断包 v1**：`GET /api/v1/diagnostics/package` 返回 manifest、runtime、database、maintenance 四个 JSON 的 ZIP；数据库部分只含 quick-check 结果、foreign-key/journal/page 摘要和迁移清单，维护部分只含错误码、状态、数量与最近时间。包不含业务行、附件、原始日志、Token、端口、地址、路径或底层错误。
 - 显示当前数据目录、日志目录、平台与架构，不展示令牌。
 - 已提供重新检查服务、复制脱敏诊断摘要、下载诊断包和桌面打开日志目录；该 command 不接受路径，浏览器模式禁用。Tauri 壳只写白名单生命周期 JSONL 并与 Sidecar 分文件轮转；WebView→Sidecar request ID 已可关联前端错误与访问日志。全局启动故障恢复页 v1 在设置 bootstrap 之前运行，并复用状态重查、日志入口和安全应用重启。
@@ -257,7 +257,7 @@
 
 ### v0.1-C：设置页面补齐
 
-- “人员与责任”、Assignment，“数据与备份”的完整备份链、启动后恢复结果诊断、业务 JSON/含文件 ZIP 空工作区安全导入导出，以及脱敏诊断、Sidecar/Tauri 壳日志、桌面打开日志目录和含白名单恢复/迁移进度的全局启动故障恢复页已完成；运行诊断已展示固定原生快捷键的注册状态。通知、非空目标/跨 schema 冲突合并导入、快捷键自定义和启动前备份选择待实现。
+- “人员与责任”、Assignment，“数据与备份”的完整备份链、启动后恢复结果诊断、业务 JSON/含文件 ZIP 空工作区安全导入导出，以及脱敏诊断、Sidecar/Tauri 壳日志、桌面打开日志目录和含白名单恢复/迁移进度的全局启动故障恢复页已完成；运行诊断已展示固定原生快捷键注册状态和托盘运行时可用性。通知、非空目标/跨 schema 冲突合并导入、快捷键自定义和启动前备份选择待实现。
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
 - **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
 - **已完成**：运行诊断区分浏览器/Tauri 环境，白名单化桌面 Sidecar 状态，对照 health 版本，可复制脱敏摘要并下载诊断包 v1；命令面板可精确直达。

@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29），本轮无桌面 migration。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启，以及托盘显示/隐藏/显式退出最小源码闭环已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29），本轮无桌面 migration。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出最小源码闭环，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.77](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.78](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -46,7 +46,7 @@
 
 - 真实 Tauri/Sidecar 父进程崩溃、进程树、Windows/macOS/Linux 和安装包生命周期验收；当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
 - 数据库打开前的备份选择与安全回滚交互；当前恢复页已显示白名单恢复/迁移进度，但不提供路径、备份 ID、原始错误或启动前选择器。
-- `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
+- `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、托盘运行时可用性，复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。`desktop_capabilities` 对未接入集成只返回 `not_implemented`，读取失败不阻断生命周期诊断；诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
 - 托盘专注状态/快捷业务动作/设置开关、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；基础托盘源码已接但当前主机尚未完成原生链接与交互验收。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
 - Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
@@ -199,17 +199,18 @@
 
 - sidecar_status：返回当前 phase、generation、运行期 API 地址、会话令牌和版本。
 - restart_application：无业务参数；受管 child 存在时只接受 code 0 且无 signal 的真实退出，尚未创建 child 的内置启动失败可继续，延迟干净退出后可重试。浏览器开发模式、外部 Sidecar、非零/signal/未确认退出都会拒绝。
+- open_log_directory：无业务参数，只打开应用自身日志目录。
+- desktop_shortcut_status：只返回两个固定原生快捷键的 `registered / unavailable` 状态。
+- desktop_capabilities：只返回托盘、原生通知、自启、原生文件对话框和离线更新的 `available / unavailable / not_implemented` 白名单枚举；当前只有托盘可在初始化成功后为 available。
 
 规划 command 或事件职责：
 
-| 能力                        | 职责                                   |
-| --------------------------- | -------------------------------------- |
-| open_log_directory          | 打开应用日志目录                       |
-| select_import / export_path | 原生文件选择和受控路径授权             |
-| desktop_capabilities        | 返回托盘、通知、快捷键、自启和更新能力 |
-| sidecar-state-changed       | 向 WebView 推送状态变化                |
-| desktop-global-shortcut     | 已注册的命令面板或新建任务固定 action  |
-| notification-activated      | 打开对应本地资源                       |
+| 能力                        | 职责                                  |
+| --------------------------- | ------------------------------------- |
+| select_import / export_path | 原生文件选择和受控路径授权            |
+| sidecar-state-changed       | 向 WebView 推送状态变化               |
+| desktop-global-shortcut     | 已注册的命令面板或新建任务固定 action |
+| notification-activated      | 打开对应本地资源                      |
 
 正式名称在实现 ADR 中冻结。所有高风险命令限制到 main 窗口的最小 Tauri capability，并验证调用参数。
 
@@ -278,7 +279,7 @@
 - [x] 内置 Sidecar 最多按 500 ms、2 s 自动重启两次，当前 generation 连续 Ready 30 秒重置预算；只有真实 `Terminated` 才为已启动代际重拉，外部/shutdown/无 Terminated 流关闭均不触发。
 - [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确 child generation；并发调用共享一次 stop，ready 超时竞态不会伪造 exited，父管道 EOF 由 `OPC_EXIT_ON_STDIN_CLOSE=true` 触发 Go 优雅关闭。
 - [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，受管 child 只接受 code 0/no signal，未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试。
-- [x] 当前源码门禁通过 Web 全量 90 个文件 / 602 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
+- [x] 当前源码门禁通过 Web 全量 90 个文件 / 603 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘与能力快照新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收

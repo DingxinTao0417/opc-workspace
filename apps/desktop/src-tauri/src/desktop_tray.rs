@@ -1,7 +1,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use serde::Serialize;
 use tauri::{
-    App, AppHandle, Manager,
+    App, AppHandle, Manager, State,
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -18,6 +19,24 @@ pub struct DesktopTrayState {
     available: AtomicBool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopCapabilityAvailability {
+    Available,
+    Unavailable,
+    NotImplemented,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopCapabilities {
+    tray: DesktopCapabilityAvailability,
+    native_notifications: DesktopCapabilityAvailability,
+    autostart: DesktopCapabilityAvailability,
+    native_file_dialogs: DesktopCapabilityAvailability,
+    offline_updates: DesktopCapabilityAvailability,
+}
+
 impl DesktopTrayState {
     fn mark_available(&self) {
         self.available.store(true, Ordering::Release);
@@ -26,6 +45,25 @@ impl DesktopTrayState {
     fn is_available(&self) -> bool {
         self.available.load(Ordering::Acquire)
     }
+
+    fn capabilities(&self) -> DesktopCapabilities {
+        DesktopCapabilities {
+            tray: if self.is_available() {
+                DesktopCapabilityAvailability::Available
+            } else {
+                DesktopCapabilityAvailability::Unavailable
+            },
+            native_notifications: DesktopCapabilityAvailability::NotImplemented,
+            autostart: DesktopCapabilityAvailability::NotImplemented,
+            native_file_dialogs: DesktopCapabilityAvailability::NotImplemented,
+            offline_updates: DesktopCapabilityAvailability::NotImplemented,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn desktop_capabilities(state: State<'_, DesktopTrayState>) -> DesktopCapabilities {
+    state.capabilities()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,5 +251,26 @@ mod tests {
         assert!(!state.is_available());
         state.mark_available();
         assert!(state.is_available());
+    }
+
+    #[test]
+    fn capability_snapshot_distinguishes_runtime_and_planned_integrations() {
+        let state = DesktopTrayState::default();
+        let before = state.capabilities();
+        assert_eq!(before.tray, DesktopCapabilityAvailability::Unavailable);
+        assert_eq!(
+            before.native_notifications,
+            DesktopCapabilityAvailability::NotImplemented
+        );
+        assert_eq!(
+            before.native_file_dialogs,
+            DesktopCapabilityAvailability::NotImplemented
+        );
+
+        state.mark_available();
+        assert_eq!(
+            state.capabilities().tray,
+            DesktopCapabilityAvailability::Available
+        );
     }
 }

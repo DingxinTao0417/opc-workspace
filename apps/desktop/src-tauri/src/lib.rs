@@ -4,7 +4,9 @@ mod global_shortcuts;
 mod sidecar;
 
 use desktop_log::{DesktopEvent, DesktopLogger};
-use desktop_tray::{DesktopTrayState, hide_main_window_to_tray, install_desktop_tray};
+use desktop_tray::{
+    DesktopTrayState, desktop_capabilities, hide_main_window_to_tray, install_desktop_tray,
+};
 use global_shortcuts::{
     DesktopShortcutRegistry, desktop_shortcut_status, handle_global_shortcut,
     register_global_shortcuts,
@@ -40,7 +42,8 @@ pub fn run() {
             sidecar_status,
             restart_application,
             open_log_directory,
-            desktop_shortcut_status
+            desktop_shortcut_status,
+            desktop_capabilities
         ])
         .setup(move |app| {
             let logger = app

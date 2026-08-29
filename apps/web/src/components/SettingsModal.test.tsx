@@ -157,6 +157,9 @@ describe("SettingsModal", () => {
       environment: "browser",
       phase: "external",
       generation: null,
+      startupStage: null,
+      nativeShortcuts: null,
+      desktopCapabilities: null,
       appVersion: null,
       apiVersion: null,
       schemaVersion: null,
@@ -529,6 +532,13 @@ describe("SettingsModal", () => {
         commandPalette: "registered",
         newTask: "unavailable",
       },
+      desktopCapabilities: {
+        tray: "available",
+        nativeNotifications: "not_implemented",
+        autostart: "not_implemented",
+        nativeFileDialogs: "not_implemented",
+        offlineUpdates: "not_implemented",
+      },
       appVersion: "0.1.0",
       apiVersion: "v1",
       schemaVersion: "16",
@@ -540,6 +550,7 @@ describe("SettingsModal", () => {
     expect(await screen.findByText("重启中")).toBeVisible();
     expect(screen.getByText("Tauri 桌面")).toBeVisible();
     expect(screen.getByText("部分不可用；保留应用内快捷键")).toBeVisible();
+    expect(screen.getByText("可用 · 关闭窗口时隐藏")).toBeVisible();
   });
 
   it("shows a retryable About error when the local service is unavailable", async () => {
