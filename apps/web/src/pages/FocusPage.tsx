@@ -15,7 +15,7 @@ import {
   Square,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { FocusReportParams } from "../types/models";
+import type { FocusReportHour, FocusReportParams } from "../types/models";
 import { ApiError } from "../api/client";
 import {
   useActiveFocusSessionQuery,
@@ -45,6 +45,19 @@ function localDateKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function focusHourLabel(hour: number): string {
+  const nextHour = (hour + 1) % 24;
+  return `${String(hour).padStart(2, "0")}:00–${String(nextHour).padStart(2, "0")}:00`;
+}
+
+function bestFocusHour(hours: FocusReportHour[]): FocusReportHour | null {
+  return hours.reduce<FocusReportHour | null>(
+    (best, item) =>
+      item.seconds > 0 && (!best || item.seconds > best.seconds) ? item : best,
+    null,
+  );
 }
 
 function recentDateRange(now = new Date()) {
@@ -749,6 +762,52 @@ export function FocusPage() {
                             </div>
                           </article>
                         ))}
+                      </div>
+                      <div
+                        aria-label="每日时段专注分布"
+                        className="focus-hour-distribution"
+                      >
+                        <div className="focus-hour-distribution-heading">
+                          <strong>时段分布</strong>
+                          <span>
+                            {bestFocusHour(focusReport.data.hours)
+                              ? `最佳 ${focusHourLabel(
+                                  bestFocusHour(focusReport.data.hours)!.hour,
+                                )}`
+                              : "暂无有效时段"}
+                          </span>
+                        </div>
+                        <div className="focus-hour-grid">
+                          {focusReport.data.hours.map((hour) => {
+                            const maxSeconds = Math.max(
+                              ...focusReport.data.hours.map(
+                                (item) => item.seconds,
+                              ),
+                              1,
+                            );
+                            return (
+                              <div
+                                aria-label={`${focusHourLabel(hour.hour)}，${hour.minutes} 分钟，${hour.sessions} 个专注块`}
+                                key={hour.hour}
+                                title={`${focusHourLabel(hour.hour)} · ${hour.minutes} 分钟 · ${hour.sessions} 个专注块`}
+                              >
+                                <i
+                                  style={{
+                                    opacity: hour.seconds
+                                      ? 0.25 +
+                                        (hour.seconds / maxSeconds) * 0.75
+                                      : 0.08,
+                                  }}
+                                />
+                                <small>
+                                  {hour.hour % 6 === 0
+                                    ? String(hour.hour).padStart(2, "0")
+                                    : ""}
+                                </small>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </>
                   )}

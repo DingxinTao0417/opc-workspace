@@ -228,6 +228,12 @@ describe("focus API contract", () => {
               minutes: 50,
             },
           ],
+          hours: Array.from({ length: 24 }, (_, hour) => ({
+            hour,
+            sessions: hour === 9 ? 2 : 0,
+            seconds: hour === 9 ? 3000 : 0,
+            minutes: hour === 9 ? 50 : 0,
+          })),
           current_streak_days: 1,
           longest_streak_days: 2,
         },
@@ -253,6 +259,9 @@ describe("focus API contract", () => {
           minutes: 50,
         }),
       ],
+      hours: expect.arrayContaining([
+        expect.objectContaining({ hour: 9, minutes: 50, sessions: 2 }),
+      ]),
     });
   });
 });

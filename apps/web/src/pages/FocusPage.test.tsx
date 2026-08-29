@@ -51,6 +51,12 @@ const mocks = vi.hoisted(() => ({
         minutes: 0,
       })),
       projects: [],
+      hours: Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        sessions: 0,
+        seconds: 0,
+        minutes: 0,
+      })),
       currentStreakDays: 0,
       longestStreakDays: 0,
     } as FocusReport,
@@ -187,6 +193,12 @@ describe("FocusPage", () => {
           minutes: 25,
         },
       ],
+      hours: Array.from({ length: 24 }, (_, hour) => ({
+        hour,
+        sessions: hour === 9 ? 2 : 0,
+        seconds: hour === 9 ? 3000 : 0,
+        minutes: hour === 9 ? 50 : 0,
+      })),
       currentStreakDays: 2,
       longestStreakDays: 4,
     };
@@ -220,6 +232,10 @@ describe("FocusPage", () => {
     expect(screen.getByText("客户门户")).toBeInTheDocument();
     expect(screen.getByText("未归项目")).toBeInTheDocument();
     expect(screen.getByText("2 个专注块 · 50 分钟")).toBeInTheDocument();
+    expect(screen.getByText("最佳 09:00–10:00")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("09:00–10:00，50 分钟，2 个专注块"),
+    ).toBeInTheDocument();
   });
 
   it("switches local report ranges without changing active focus state", () => {

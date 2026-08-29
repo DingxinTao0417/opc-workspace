@@ -143,6 +143,33 @@ func TestFocusPeriodStatsUsesLocalDaysCompletedIntervalsAndStreaks(t *testing.T)
 		*stats.Projects[1].ProjectName != "Client delivery" || stats.Projects[1].Seconds != 1200 {
 		t.Fatalf("Focus project distribution=%#v", stats.Projects)
 	}
+	if len(stats.Hours) != 24 || stats.Hours[0].Seconds != 600 || stats.Hours[5].Seconds != 1800 ||
+		stats.Hours[23].Seconds != 600 || stats.Hours[5].Sessions != 1 {
+		t.Fatalf("Focus hour distribution=%#v", stats.Hours)
+	}
+}
+
+func TestFocusPeriodHoursCombineRepeatedDSTHour(t *testing.T) {
+	clock := &focusTestClock{now: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)}
+	router, store := newFocusTestAPI(t, clock)
+	seedTerminalFocusSession(
+		t, store, uuid.NewString(), nil, "completed",
+		"2026-11-01T08:30:00Z", "2026-11-01T09:30:00Z", 3600,
+	)
+
+	response := performRequest(router, http.MethodGet, "/api/v1/stats/focus?date_from=2026-11-01&date_to=2026-11-01&timezone=America%2FLos_Angeles", nil, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("Focus repeated-hour stats status=%d body=%s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data focusPeriodStatsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode repeated-hour stats: %v", err)
+	}
+	if len(envelope.Data.Hours) != 24 || envelope.Data.Hours[1].Seconds != 3600 || envelope.Data.Hours[1].Sessions != 1 {
+		t.Fatalf("repeated local hour distribution=%#v", envelope.Data.Hours)
+	}
 }
 
 func TestFocusPeriodStatsDefaultsAndValidatesRange(t *testing.T) {

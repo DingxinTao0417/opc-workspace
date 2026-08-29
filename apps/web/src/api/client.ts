@@ -2192,7 +2192,8 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
     !isRecord(body) ||
     !isRecord(body.totals) ||
     !Array.isArray(body.days) ||
-    !Array.isArray(body.projects)
+    !Array.isArray(body.projects) ||
+    !Array.isArray(body.hours)
   ) {
     return invalidResponse("专注周期统计响应格式无效");
   }
@@ -2201,6 +2202,18 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
   const timezone = stringField(body, "timezone");
   if (!dateFrom || !dateTo || !timezone) {
     return invalidResponse("专注周期统计响应格式无效");
+  }
+  const hours = body.hours.map((item) => {
+    if (!isRecord(item)) return invalidResponse("专注小时统计响应格式无效");
+    return {
+      hour: nonNegativeInteger(item.hour, "专注小时"),
+      sessions: nonNegativeInteger(item.sessions, "小时专注块数"),
+      seconds: nonNegativeInteger(item.seconds, "小时专注秒数"),
+      minutes: nonNegativeInteger(item.minutes, "小时专注分钟数"),
+    };
+  });
+  if (hours.length !== 24 || hours.some((item, index) => item.hour !== index)) {
+    return invalidResponse("专注小时统计响应格式无效");
   }
   return {
     dateFrom,
@@ -2241,6 +2254,7 @@ export function normalizeFocusReport(payload: unknown): FocusReport {
         minutes: nonNegativeInteger(item.minutes, "项目专注分钟数"),
       };
     }),
+    hours,
     currentStreakDays: nonNegativeInteger(
       fieldValue(body, "current_streak_days", "currentStreakDays"),
       "当前连续专注天数",

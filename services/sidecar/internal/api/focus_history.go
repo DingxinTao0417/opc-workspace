@@ -33,6 +33,13 @@ type focusPeriodProject struct {
 	Minutes     int     `json:"minutes"`
 }
 
+type focusPeriodHour struct {
+	Hour     int   `json:"hour"`
+	Sessions int   `json:"sessions"`
+	Seconds  int64 `json:"seconds"`
+	Minutes  int   `json:"minutes"`
+}
+
 type focusPeriodStatsResponse struct {
 	DateFrom          string               `json:"date_from"`
 	DateTo            string               `json:"date_to"`
@@ -40,6 +47,7 @@ type focusPeriodStatsResponse struct {
 	Totals            focusStats           `json:"totals"`
 	Days              []focusPeriodDay     `json:"days"`
 	Projects          []focusPeriodProject `json:"projects"`
+	Hours             []focusPeriodHour    `json:"hours"`
 	CurrentStreakDays int                  `json:"current_streak_days"`
 	LongestStreakDays int                  `json:"longest_streak_days"`
 }
@@ -287,18 +295,68 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		}
 		return leftID < rightID
 	})
+	type hourAccumulator struct {
+		sessions map[string]struct{}
+		seconds  int64
+	}
+	hourBuckets := make([]hourAccumulator, 24)
+	for hour := range hourBuckets {
+		hourBuckets[hour].sessions = make(map[string]struct{})
+	}
+	for _, interval := range intervals {
+		overlapStart, overlapEnd, exists, overlapErr := focusIntervalOverlapRange(interval, rangeStartUTC, rangeEndUTC)
+		if overlapErr != nil {
+			writeDatabaseError(c)
+			return
+		}
+		if !exists {
+			continue
+		}
+		for cursor := overlapStart; cursor.Before(overlapEnd); {
+			next := cursor.Truncate(time.Minute).Add(time.Minute)
+			if next.After(overlapEnd) {
+				next = overlapEnd
+			}
+			seconds := int64(next.Sub(cursor) / time.Second)
+			if seconds > 0 {
+				hour := cursor.In(location).Hour()
+				hourBuckets[hour].seconds += seconds
+				hourBuckets[hour].sessions[interval.SessionID] = struct{}{}
+			}
+			cursor = next
+		}
+	}
+	hours := make([]focusPeriodHour, 24)
+	for hour, bucket := range hourBuckets {
+		hours[hour] = focusPeriodHour{
+			Hour: hour, Sessions: len(bucket.sessions), Seconds: bucket.seconds, Minutes: int(bucket.seconds / 60),
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"data": focusPeriodStatsResponse{
 		DateFrom: dateFrom, DateTo: dateTo, Timezone: location.String(),
 		Totals: focusStats{Sessions: len(totalSessions), Seconds: totalSeconds, Minutes: int(totalSeconds / 60)},
-		Days:   days, Projects: projects, CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
+		Days:   days, Projects: projects, Hours: hours,
+		CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
 	}})
 }
 
 func focusIntervalOverlapSeconds(interval completedFocusInterval, rangeStart, rangeEnd time.Time) (int64, error) {
+	overlapStart, overlapEnd, exists, err := focusIntervalOverlapRange(interval, rangeStart, rangeEnd)
+	if err != nil || !exists {
+		return 0, err
+	}
+	return int64(overlapEnd.Sub(overlapStart) / time.Second), nil
+}
+
+func focusIntervalOverlapRange(
+	interval completedFocusInterval,
+	rangeStart time.Time,
+	rangeEnd time.Time,
+) (time.Time, time.Time, bool, error) {
 	startedAt, startErr := parseFocusTimestamp(interval.StartedAt)
 	endedAt, endErr := parseFocusTimestamp(interval.EndedAt)
 	if startErr != nil || endErr != nil || !endedAt.After(startedAt) || interval.DurationSeconds <= 0 {
-		return 0, errors.New("invalid completed Focus interval")
+		return time.Time{}, time.Time{}, false, errors.New("invalid completed Focus interval")
 	}
 	accountedEnd := startedAt.Add(time.Duration(interval.DurationSeconds) * time.Second)
 	if endedAt.Before(accountedEnd) {
@@ -313,9 +371,9 @@ func focusIntervalOverlapSeconds(interval completedFocusInterval, rangeStart, ra
 		overlapEnd = rangeEnd
 	}
 	if !overlapEnd.After(overlapStart) {
-		return 0, nil
+		return time.Time{}, time.Time{}, false, nil
 	}
-	return int64(overlapEnd.Sub(overlapStart) / time.Second), nil
+	return overlapStart, overlapEnd, true, nil
 }
 
 func normalizeFocusHistoryRow(row focusSessionRow) (focusSessionOutput, error) {
