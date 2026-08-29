@@ -5,7 +5,9 @@ import {
   deleteClientActivity,
   getClientActivities,
   getClientActivity,
+  getRecentClientActivities,
   normalizeClientActivity,
+  normalizeRecentClientActivity,
   resetRuntimeConnection,
   updateClientActivity,
 } from "./client";
@@ -131,6 +133,44 @@ describe("client activity API contract", () => {
       total: 6,
       clientVersion: 4,
     });
+  });
+
+  it("loads and strictly validates the cross-client recent activity read model", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [
+          activityPayload({
+            client_name: "示例客户",
+            client_status: "lead",
+          }),
+        ],
+        meta: { page: 1, page_size: 3, total: 1 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getRecentClientActivities({
+      pageSize: 3,
+      kind: "meeting",
+    });
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(url.pathname).toBe("/api/v1/client-activities");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "1",
+      page_size: "3",
+      kind: "meeting",
+    });
+    expect(result.items[0]).toMatchObject({
+      clientName: "示例客户",
+      clientStatus: "lead",
+      clientId: "client-1",
+    });
+    expect(result.meta).toEqual({ page: 1, pageSize: 3, total: 1 });
+    expect(() =>
+      normalizeRecentClientActivity(
+        activityPayload({ client_name: "示例客户", client_status: "paused" }),
+      ),
+    ).toThrow(ApiError);
   });
 
   it("uses idempotency, If-Match, and confirmed soft deletion contracts", async () => {

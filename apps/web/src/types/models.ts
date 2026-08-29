@@ -1361,6 +1361,22 @@ export interface ClientActivityListResult {
   meta: PageMeta & { clientVersion: number };
 }
 
+export interface RecentClientActivity extends ClientActivity {
+  clientName: string;
+  clientStatus: ClientStatus;
+}
+
+export interface RecentClientActivityListParams {
+  page?: number;
+  pageSize?: number;
+  kind?: ClientActivityKind;
+}
+
+export interface RecentClientActivityListResult {
+  items: RecentClientActivity[];
+  meta: PageMeta;
+}
+
 export interface CreateClientActivityInput {
   kind: Exclude<ClientActivityKind, "system_reference">;
   title: string;

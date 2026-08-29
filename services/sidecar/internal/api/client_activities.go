@@ -72,6 +72,8 @@ type clientActivityActorResponse struct {
 type clientActivityResponse struct {
 	ID               string                      `json:"id"`
 	ClientID         string                      `json:"client_id"`
+	ClientName       string                      `json:"client_name"`
+	ClientStatus     string                      `json:"client_status"`
 	Kind             string                      `json:"kind"`
 	Title            string                      `json:"title"`
 	Body             *string                     `json:"body"`
@@ -92,7 +94,61 @@ type clientActivityRow struct {
 	models.ClientActivity `gorm:"embedded"`
 	CreatedByType         string `gorm:"column:created_by_type"`
 	CreatedByDisplayName  string `gorm:"column:created_by_display_name"`
+	ClientName            string `gorm:"column:client_name"`
+	ClientStatus          string `gorm:"column:client_status"`
 	ClientVersion         int64  `gorm:"column:client_version"`
+}
+
+func (a *API) listRecentClientActivities(c *gin.Context) {
+	page, ok := queryInt(c, "page", 1, 1, 1_000_000)
+	if !ok {
+		return
+	}
+	pageSize, ok := queryInt(c, "page_size", 5, 1, 20)
+	if !ok {
+		return
+	}
+	kind := strings.TrimSpace(c.Query("kind"))
+	if kind != "" {
+		if _, valid := validClientActivityKinds[kind]; !valid {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "kind filter is invalid")
+			return
+		}
+	}
+
+	var total int64
+	var rows []clientActivityRow
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		query := tx.Table("client_activities").Where("client_activities.deleted_at IS NULL")
+		if kind != "" {
+			query = query.Where("client_activities.kind = ?", kind)
+		}
+		if err := query.Count(&total).Error; err != nil {
+			return err
+		}
+		return query.
+			Select(clientActivitySelectColumns).
+			Joins("JOIN actors created_by ON created_by.id = client_activities.created_by_actor_id").
+			Joins("JOIN clients ON clients.id = client_activities.client_id").
+			Order(clientActivityOccurredAtUTCKeyExpression + " DESC").
+			Order("client_activities.id ASC").
+			Offset((page - 1) * pageSize).
+			Limit(pageSize).
+			Scan(&rows).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+
+	items := make([]clientActivityResponse, len(rows))
+	for index := range rows {
+		items[index] = clientActivityResponseFromRow(rows[index])
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data": items,
+		"meta": gin.H{"page": page, "page_size": pageSize, "total": total},
+	})
 }
 
 func (a *API) listClientActivities(c *gin.Context) {
@@ -606,6 +662,8 @@ const clientActivitySelectColumns = `
 	client_activities.updated_at,
 	created_by.type AS created_by_type,
 	created_by.display_name AS created_by_display_name,
+	clients.name AS client_name,
+	clients.status AS client_status,
 	clients.version AS client_version
 `
 
@@ -626,7 +684,8 @@ func clientActivityResponseFromRow(row clientActivityRow) clientActivityResponse
 		body = nil
 	}
 	response := clientActivityResponse{
-		ID: row.ID, ClientID: row.ClientID, Kind: row.Kind, Title: row.Title, Body: body,
+		ID: row.ID, ClientID: row.ClientID, ClientName: row.ClientName, ClientStatus: row.ClientStatus,
+		Kind: row.Kind, Title: row.Title, Body: body,
 		OccurredAt: normalizeTimestamp(row.OccurredAt),
 		CreatedBy: clientActivityActorResponse{
 			ID: row.CreatedByActorID, Type: row.CreatedByType, DisplayName: row.CreatedByDisplayName,

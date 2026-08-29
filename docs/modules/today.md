@@ -1,6 +1,6 @@
 # 今日工作台模块
 
-> 实现状态截止：2026-08-29；当前数据库 schema v35。schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33 新增受限 Automation Rule/Run，schema v35 新增 Client Followup，均不改变 Today 原有 Task 字段、计划分组或统计 API 契约。T-06A 已交付真实计划日期分组与完整分页，T-06B 已交付日期导航，T-06C/D 已交付按钮式及同组拖拽排序，T-06E 已交付任意日期/未排期安排与模糊写入验证，T-06F 已交付受策略约束的开始/完成/开始专注快捷操作，T-06G 已交付四个可见分组间按真实日期跨组拖拽、空精确日期/未排期落点与排序部分成功反馈，T-06H 已交付任务行编辑直达与版本化确认删除；T-11F 已把 Inbox/必需 Task 派生计数接入 Today 与 Sidebar。PRD v9.34 进一步交付按 Sidecar 当前时刻派生的逾期/未来 24 小时临期快捷筛选及受限来源的客户回访待办，不新增表或迁移。
+> 实现状态截止：2026-08-29；当前数据库 schema v41。schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33–v41 的后续事实不改变 Today 原有 Task 字段、计划分组或统计 API 契约。T-06A–H、T-11F、截止风险快捷筛选和客户回访待办已交付；PRD v9.73 进一步把未删除的本地客户活动跨客户聚合到右侧概览，不新增表或迁移。
 >
 > 版本边界：本文同时描述当前实现与目标规划；凡标注“规划”的内容均未在该基线交付。
 
@@ -42,6 +42,7 @@
 - 通过 `GET /api/v1/stats/inbox` 展示待处理、跟进中、待验收、有阻塞和未读数量；卡片分别跳转 Inbox 全部或 `risk=tracking/blocked/waiting_review` 深链。计数只读取当前可见活动 Inbox 和活动必需 Task，未来 snooze 与归档项不进入口径。
 - Sidebar 使用同一统计事实显示待处理徽标，超过 99 显示 `99+`；所有 Inbox 写入会失效同一 Query 前缀，另有 15 秒低频刷新处理 snooze 自然到期。
 - 当前日期额外用受限 `source_entity_type=client_followup` 查询读取真实到期回访，展示前五项、准确总数、加载/空/失败重试和客户详情深链；该卡不以任务形式复制回访，也不提供会伪造沟通完成的行内命令。
+- 右侧“客户动态”通过 `GET /api/v1/client-activities?page=1&page_size=3` 读取所有客户中未删除的本地备注、会议和 Project 生命周期系统活动，按发生时间与 ID 稳定倒序；每条附带客户名称/状态并深链客户详情。加载、空和失败重试状态完整；它不复制活动、不写 Inbox，也不追踪邮件、提案下载等线上行为。
 
 ### 已知缺口
 
@@ -50,7 +51,7 @@
 - 阻塞、取消需要原因，manual review 需要 Submission/Artifact 验收，解除阻塞/重新打开只适用于 Today 不展示的状态，因此仍由详情页承载。行内编辑入口也刻意复用共享详情，而不是另建字段不完整的编辑器。
 - API 已返回 `dueSoon` 和精确专注秒数；今日页已展示并可筛选 `dueSoon`，专注仍只展示 Session 数和向下取整后的分钟数。
 - Today 以四个分页查询组成完整分组；极大数据量下请求次数随页数增长，后续可增加专用聚合端点或虚拟列表，但当前不会静默丢数据。
-- 月收入目标、本月收入和客户动态为固定空值；没有真实财务或客户事件来源。
+- 月收入目标和本月收入仍为固定空值；客户动态已经接入本地事实，但没有外部邮件、日历、提案下载或其他线上事件来源。
 
 ## 目标功能
 
@@ -111,6 +112,7 @@
 - `GET /api/v1/tasks` 已支持六个精确状态及派生 `active` 状态、`priority`、`kind`、`project_id`、精确/范围计划日期、`planned_state=scheduled/unscheduled`、截止日期范围、标签、父任务/根任务、`q`、稳定 `sort` 和分页参数。新增的 `due_state=overdue|due_soon` 是实时只读派生筛选：`overdue` 为截止时刻严格早于本请求捕获的 Sidecar UTC 当前时刻，`due_soon` 为当前时刻至未来 24 小时闭区间；两者固定排除 done/cancelled。`due_state` 不与 `due_from/due_to` 混用，显式 `status` 仅允许 `active`；非法组合返回 `400 INVALID_FILTER`。
 - `PUT /api/v1/tasks/reorder` 已实现：一个请求必须携带目标计划日期组的完整任务 ID/版本集合，原子写入手动顺序或恢复默认；组成员或版本变化时拒绝旧写入。
 - `GET /api/v1/stats/today?date=&timezone=` 已实现；任务统计按 `planned_date` 聚合，逾期/临期按 Sidecar 当前 UTC 时间计算。统计、`due_state` 与截止排序共同使用由规范 UTC 时间戳派生的固定宽度纳秒键，保留亚毫秒边界并按真实时间排列混合小数精度；固定同一时钟时，统计数分别等于风险列表 `meta.total`。cancelled 不计入总数、剩余、逾期、临期和预计分钟，但其历史实际分钟不会被抹除。
+- `GET /api/v1/client-activities?page=&page_size=&kind=` 已实现跨客户只读动态。默认每页 5 条、最大 20 条，只包含 `deleted_at IS NULL`，可按 note/meeting/system_reference 过滤；响应复用 Client Activity 严格字段并附加 `client_name / client_status`，不提供跨客户写入口。
 - Focus 统计只读取 `completed` Session 的已关闭正长度 interval，并以 interval 与目标本地日 UTC 边界的实际重叠秒数求和；IANA 时区用当地午夜和下一自然日计算，因此能覆盖跨午夜及夏令时 23/25 小时日。
 - Focus `sessions` 是与目标日有正重叠的去重 Session 数，`seconds` 是精确重叠秒数，`minutes=floor(seconds/60)`。paused、cancelled、interrupted、recovery_pending 与开放 interval 都不计入。
 

@@ -249,6 +249,68 @@ func TestClientActivityTimelineUsesUTCNanosecondOrderAcrossPages(t *testing.T) {
 	}
 }
 
+func TestRecentClientActivitiesListsActiveFactsAcrossClients(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	alpha := createClientForTest(t, router, `{"name":"Alpha Client"}`, nil)
+	beta := createClientForTest(t, router, `{"name":"Beta Client","status":"lead"}`, nil)
+	rows := []struct {
+		id         string
+		clientID   string
+		kind       string
+		title      string
+		occurredAt string
+		deletedAt  any
+	}{
+		{"018f0000-0000-7000-8000-000000001801", alpha.ID, "note", "较早记录", "2026-08-29T08:00:00Z", nil},
+		{"018f0000-0000-7000-8000-000000001802", beta.ID, "meeting", "最近会议", "2026-08-29T09:00:00Z", nil},
+		{"018f0000-0000-7000-8000-000000001803", alpha.ID, "note", "已删除记录", "2026-08-29T10:00:00Z", "2026-08-29T10:01:00Z"},
+	}
+	for _, row := range rows {
+		var deletedBy, deleteReason any
+		if row.deletedAt != nil {
+			deletedBy = models.BuiltinOwnerActorID
+			deleteReason = "重复"
+		}
+		if err := store.DB.Exec(`
+			INSERT INTO client_activities(
+				id, client_id, kind, title, body, occurred_at, created_by_actor_id,
+				version, deleted_at, deleted_by_actor_id, delete_reason, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, row.id, row.clientID, row.kind, row.title, "正文", row.occurredAt,
+			models.BuiltinOwnerActorID, row.deletedAt, deletedBy, deleteReason).Error; err != nil {
+			t.Fatalf("seed recent client activity %q: %v", row.title, err)
+		}
+	}
+
+	response := performRequest(router, http.MethodGet, "/api/v1/client-activities?page=1&page_size=2", nil, nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("recent client activities = %d: %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data []clientActivityResponse `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode recent client activities: %v", err)
+	}
+	if envelope.Meta.Page != 1 || envelope.Meta.PageSize != 2 || envelope.Meta.Total != 2 || len(envelope.Data) != 2 {
+		t.Fatalf("recent client activity envelope = %#v", envelope)
+	}
+	if envelope.Data[0].ID != rows[1].id || envelope.Data[0].ClientName != "Beta Client" || envelope.Data[0].ClientStatus != "lead" ||
+		envelope.Data[1].ID != rows[0].id || envelope.Data[1].ClientName != "Alpha Client" || envelope.Data[1].ClientStatus != "active" {
+		t.Fatalf("recent client activities = %#v", envelope.Data)
+	}
+
+	invalid := performRequest(router, http.MethodGet, "/api/v1/client-activities?kind=email", nil, nil)
+	if invalid.Code != http.StatusBadRequest || responseErrorCode(t, invalid.Body.Bytes()) != "INVALID_FILTER" {
+		t.Fatalf("invalid recent activity filter = %d: %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestClientActivityValidationAndReadOnlySystemReference(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Validation Client"}`, nil)

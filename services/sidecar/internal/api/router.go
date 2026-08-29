@@ -317,6 +317,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.DELETE("/clients/:id", service.deleteClient)
 		v1.GET("/clients/:id/activities", service.listClientActivities)
 		v1.POST("/clients/:id/activities", service.createClientActivity)
+		v1.GET("/client-activities", service.listRecentClientActivities)
 		v1.GET("/client-activities/:id", service.getClientActivity)
 		v1.PATCH("/client-activities/:id", service.updateClientActivity)
 		v1.DELETE("/client-activities/:id", service.deleteClientActivity)

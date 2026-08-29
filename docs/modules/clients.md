@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v35。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联；schema v21–v30 的其他扩展不改变 Client 表，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v32 仅扩展 Reminder，schema v33 仅新增受限 Automation Rule/Run，schema v34 仅新增 Agent Adapter 诊断事实，schema v35 新增受约束的 Client Followup 计划事实。v0.1 的资料 CRUD、供 Project/Task 共用的服务端分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 完成/重新打开系统活动、客户附件和本地联系人关联已交付；v0.4 前置的回访 API、到期 Inbox 投影、客户详情本地管理、Today 待办和 Inbox→客户详情入口也已交付，模块仍为**部分完成**；ClientSelect 的真实浏览器/窄屏/大数据量专项、邮件/日历等其他来源和财务聚合尚未验收或交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v41。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v35 新增受约束的 Client Followup 计划事实；schema v36–v41 不改变 Client/Activity 表。v0.1 的资料 CRUD、共享分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 生命周期系统活动、跨客户最近动态读模型、客户附件和本地联系人关联已交付；本地回访 API/投影/管理/Today/Inbox 入口也已交付。模块仍为**部分完成**；真实浏览器/窄屏/大数据量专项、邮件/日历等外部来源和财务聚合尚未验收或交付。
 
 ## 定位与边界
 
@@ -179,6 +179,7 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 | DELETE    | `/api/v1/clients/:id?confirm=true`                     | 强制 `If-Match`；只允许 inactive；Invoice 强引用阻止删除，Project 外键置空并返回 `deleted_id / detached_projects`                                                             |
 | GET       | `/api/v1/projects?client_id=:id&include_archived=true` | 查询 Client 的完整关联项目历史；普通项目列表仍默认排除归档项，项目新建/编辑支持关联、改绑或解除 Client                                                                        |
 | GET/POST  | `/api/v1/clients/:id/activities`                       | 稳定分页读取活动；POST 只创建人工 note/meeting，可用 `Idempotency-Key` 安全重放                                                                                               |
+| GET       | `/api/v1/client-activities`                            | 跨客户分页读取未删除本地活动；默认 5/页、最大 20/页，可按 kind 过滤，按发生时间与 ID 稳定倒序并附带客户名称/状态；只读，不创建第二份事实                                      |
 | GET/PATCH | `/api/v1/client-activities/:id`                        | 读取单条（包括删除历史）；PATCH 强制活动 `If-Match`，只允许修改未删除人工活动                                                                                                 |
 | DELETE    | `/api/v1/client-activities/:id?confirm=true`           | 强制活动 `If-Match` 和删除原因，执行可审计软删除；system reference 与已删除记录只读                                                                                           |
 | GET/POST  | `/api/v1/clients/:id/attachments`                      | 分页读取附件或严格 multipart 上传；上传强制 Client `If-Match`，可选幂等键                                                                                                     |
@@ -238,15 +239,15 @@ Client DELETE                     → link history cascade；person Actor 保留
 
 ## 与其他模块协作
 
-| 模块      | 当前协作方式                                                                                                                                          |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 项目      | 已实现 Project 可选关联、改绑、解除和列表筛选；Client 详情显式包含归档项目，从 Project 派生完整数量与分页列表。                                       |
-| 任务      | 客户相关工作仍应通过 Project 或未来 Inbox 落为 Task；Client 本身不拥有执行状态。                                                                      |
-| Actor     | 联系人不会自动成为 person；owner 可显式关联已有 active person 或原子新建并关联。active 关联会阻止 person 停用。                                       |
-| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，来源上下文只深链回客户详情。                                          |
-| 发票/财务 | Invoice 强引用删除约束已生效；业务 API、发票详情和收入聚合仍属 v0.4。                                                                                 |
-| 数据管理  | 客户附件复用受控 store；内部备份/演练/恢复包含 active objects，业务 JSON 仅导出元数据，不含文件正文。                                                 |
-| 今日      | Today 通过受限 Client Followup 来源读取前五项真实到期回访及准确总数，并只深链客户详情；普通客户活动仍只在客户列表/详情展示，不自动生成 Today 工作项。 |
+| 模块      | 当前协作方式                                                                                                                                                                                        |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 项目      | 已实现 Project 可选关联、改绑、解除和列表筛选；Client 详情显式包含归档项目，从 Project 派生完整数量与分页列表。                                                                                     |
+| 任务      | 客户相关工作仍应通过 Project 或未来 Inbox 落为 Task；Client 本身不拥有执行状态。                                                                                                                    |
+| Actor     | 联系人不会自动成为 person；owner 可显式关联已有 active person 或原子新建并关联。active 关联会阻止 person 停用。                                                                                     |
+| 收件箱    | 到期 planned 回访已由调度器以稳定键投影本地 Inbox Item；客户详情不直接写 Inbox，来源上下文只深链回客户详情。                                                                                        |
+| 发票/财务 | Invoice 强引用删除约束已生效；业务 API、发票详情和收入聚合仍属 v0.4。                                                                                                                               |
+| 数据管理  | 客户附件复用受控 store；内部备份/演练/恢复包含 active objects，业务 JSON 仅导出元数据，不含文件正文。                                                                                               |
+| 今日      | Today 通过受限 Client Followup 来源读取前五项真实到期回访；右侧概览另通过跨客户只读 API 展示最近 3 条未删除本地 Activity。两者只深链客户详情，不复制事实、不自动生成 Today Task，也不伪造线上行为。 |
 
 总体依赖见[整体功能架构](../functional-architecture.md)。
 

@@ -49,6 +49,9 @@ import type {
   ClientActorLinkListResult,
   ClientActivityListParams,
   ClientActivityListResult,
+  RecentClientActivity,
+  RecentClientActivityListParams,
+  RecentClientActivityListResult,
   ClientFollowup,
   CancelClientFollowupInput,
   CompleteClientFollowupInput,
@@ -1388,6 +1391,21 @@ export function normalizeClientActivity(value: unknown): ClientActivity {
     clientVersion: positiveInteger(
       fieldValue(value, "client_version", "clientVersion"),
       "客户聚合版本",
+    ),
+  };
+}
+
+export function normalizeRecentClientActivity(
+  value: unknown,
+): RecentClientActivity {
+  if (!isRecord(value)) return invalidResponse("最近客户动态响应格式无效");
+  const clientName = stringField(value, "client_name", "clientName");
+  if (!clientName) return invalidResponse("最近客户动态缺少客户名称");
+  return {
+    ...normalizeClientActivity(value),
+    clientName,
+    clientStatus: asClientStatus(
+      fieldValue(value, "client_status", "clientStatus"),
     ),
   };
 }
@@ -7362,6 +7380,37 @@ export async function getClientActivities(
         fieldValue(payload.meta, "client_version", "clientVersion"),
         "客户活动对应客户版本",
       ),
+    },
+  };
+}
+
+export async function getRecentClientActivities(
+  input: RecentClientActivityListParams = {},
+): Promise<RecentClientActivityListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 5),
+  });
+  if (input.kind) params.set("kind", input.kind);
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-activities?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("最近客户动态列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(normalizeRecentClientActivity),
+    meta: {
+      page: positiveInteger(payload.meta.page, "最近客户动态页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "最近客户动态每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "最近客户动态总数"),
     },
   };
 }

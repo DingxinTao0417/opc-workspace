@@ -1,8 +1,17 @@
-import { ArrowUpRight, Pause, Play, RefreshCw, Zap } from "lucide-react";
+import {
+  ArrowUpRight,
+  CalendarDays,
+  FileText,
+  Pause,
+  Play,
+  RefreshCw,
+  Zap,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   useActiveFocusSessionQuery,
   usePauseFocusSession,
+  useRecentClientActivitiesQuery,
   useResumeFocusSession,
 } from "../api/hooks";
 import {
@@ -15,6 +24,7 @@ import { useSettingsStore } from "../store/settings";
 
 export function RightOverview() {
   const focusQuery = useActiveFocusSessionQuery();
+  const recentActivitiesQuery = useRecentClientActivitiesQuery(3);
   const pauseFocus = usePauseFocusSession();
   const resumeFocus = useResumeFocusSession();
   const focusMinutes = useSettingsStore(
@@ -175,7 +185,58 @@ export function RightOverview() {
             查看全部
           </Link>
         </div>
-        <div className="overview-footnote">暂无客户动态</div>
+        {recentActivitiesQuery.isPending ? (
+          <div className="overview-footnote overview-activity-state">
+            正在读取本地动态…
+          </div>
+        ) : recentActivitiesQuery.isError ? (
+          <button
+            className="overview-activity-retry"
+            onClick={() => void recentActivitiesQuery.refetch()}
+            type="button"
+          >
+            <RefreshCw size={12} /> 读取失败，重试
+          </button>
+        ) : recentActivitiesQuery.data.items.length === 0 ? (
+          <div className="overview-footnote overview-activity-state">
+            暂无客户动态
+          </div>
+        ) : (
+          <div className="activity-list">
+            {recentActivitiesQuery.data.items.map((activity) => (
+              <Link
+                aria-label={`查看客户 ${activity.clientName}：${activity.title}`}
+                className="activity-row"
+                key={activity.id}
+                to={`/clients/${activity.clientId}`}
+              >
+                <span
+                  className={`activity-icon ${
+                    activity.kind === "meeting"
+                      ? "activity-green"
+                      : "activity-blue"
+                  }`}
+                  aria-hidden="true"
+                >
+                  {activity.kind === "meeting" ? (
+                    <CalendarDays size={13} />
+                  ) : (
+                    <FileText size={13} />
+                  )}
+                </span>
+                <span className="activity-copy">
+                  <strong>{activity.clientName}</strong> · {activity.title}
+                </span>
+                <time dateTime={activity.occurredAt}>
+                  {new Intl.DateTimeFormat("zh-CN", {
+                    month: "numeric",
+                    day: "numeric",
+                  }).format(new Date(activity.occurredAt))}
+                </time>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
     </aside>
   );

@@ -70,6 +70,7 @@ import {
   getActors,
   getClient,
   getClientActivities,
+  getRecentClientActivities,
   getClientFollowups,
   getClientAttachments,
   getClientActorLinks,
@@ -654,6 +655,20 @@ export function useDeleteClient() {
 
 export const clientActivityQueryKey = (clientId: string) =>
   [...clientDetailQueryKey(clientId), "activities"] as const;
+
+export const recentClientActivityQueryKey = [
+  ...clientQueryKey,
+  "activities",
+  "recent",
+] as const;
+
+export function useRecentClientActivitiesQuery(pageSize = 3) {
+  return useQuery({
+    queryKey: [...recentClientActivityQueryKey, { page: 1, pageSize }],
+    queryFn: () => getRecentClientActivities({ page: 1, pageSize }),
+    retry: 1,
+  });
+}
 
 export function useClientActivitiesQuery(
   clientId: string | null,
