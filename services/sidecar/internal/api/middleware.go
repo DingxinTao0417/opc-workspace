@@ -112,7 +112,7 @@ func recoveryMiddleware(logger *log.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				logger.Printf("request_id=%s panic=%v stack=%s", requestIDFromContext(c), recovered, debug.Stack())
+				logger.Printf("request_id=%s panic_recovered=true stack=%s", requestIDFromContext(c), debug.Stack())
 				writeError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "The request could not be completed")
 			}
 		}()

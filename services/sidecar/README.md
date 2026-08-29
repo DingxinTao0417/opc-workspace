@@ -18,17 +18,20 @@ Development starts with empty business data. `--seed` is an explicit, idempotent
 | SQLite path              | `--db`              | `OPC_DB_PATH`         |
 | Controlled Artifact root | `--artifacts`       | `OPC_ARTIFACT_DIR`    |
 | Verified backup root     | `--backups`         | `OPC_BACKUP_DIR`      |
+| Operational log root    | `--logs`            | `OPC_LOG_DIR`         |
 | Loopback port            | `--port`            | `OPC_PORT`            |
 | Session token            | —                   | `OPC_SESSION_TOKEN`   |
 | Exact Origin allowlist   | `--allowed-origins` | `OPC_ALLOWED_ORIGINS` |
 | Development mode         | `--dev`             | `OPC_DEV`             |
 | Development seed         | `--seed`            | `OPC_DEV_SEED`        |
 
-When omitted for a file-backed database, Artifact and backup roots default to `artifacts` and `backups` siblings of the database. An in-memory database requires both directories explicitly, but verified backup creation still requires a file-backed database. The roots cannot be filesystem volume roots, the database file, or overlap each other.
+When omitted for a file-backed database, Artifact, backup, and log roots default to `artifacts`, `backups`, and `logs` siblings of the database. An in-memory database requires all three directories explicitly, but verified backup creation still requires a file-backed database. The roots cannot be the database file or overlap each other.
 
 Outside explicit development mode a non-empty session token is required. Every endpoint, including `/health`, then requires `Authorization: Bearer <token>`. Browser requests must carry an exact allowlisted `Origin`; native Tauri probes may omit browser fetch headers. The process binds only `127.0.0.1`.
 
-After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event; operational logs go to stderr:
+After configuration succeeds, operational logs go to stderr and `<log-root>/opc-sidecar.log`. The file rotates before an entry would exceed 5 MiB and retains `opc-sidecar.log.1` through `.3`. Session-token literals and Bearer values are redacted at the final writer; access entries contain only request ID, method, route template, status, and duration. File logging failures fall back to stderr without preventing startup. Raw logs are intentionally excluded from the diagnostic package.
+
+After migrations, Artifact reconciliation, and listening succeed, stdout receives one newline-terminated ready event:
 
 ```json
 {

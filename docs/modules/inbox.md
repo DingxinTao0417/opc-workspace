@@ -139,7 +139,7 @@
 - 白名单分别映射为 `database:startup`、`database:migration` 和 `sidecar:startup`。同一种 kind 在 journal 未消费前只保留最早一条，文件最多 16 条、64 KiB，使用同目录临时文件和原子替换；非普通文件、未知字段、非法 UUID/时间/类型、重复记录或超限文件会隔离为 `.startup-incidents-invalid-<uuid>.json`，不会作为事件读取。
 - 下一次成功打开并迁移数据库后、Router ready 前补偿投影。payload 仍只有 `component / operation / failure_code / occurred_at / message`；`occurred_at` 使用原始失败时间。全部投影成功后删除 journal；投影或删除失败会保留/重现日志供后续重试。
 - journal 中的稳定 incident ID 同时进入 `source_event_key`。即使数据库提交成功而 journal 删除结果不确定，重放也先按 event key 查询，用户已经 resolve/dismiss 的同一失败不会被重新创建。新的启动失败在旧 journal 已消费后获得新 ID，遵循活动 incident 去重规则。
-- `OPC_LOG_DIR`/`--logs` 现在是独立受控诊断目录，默认使用数据库同级 `logs/`，不得与 Artifact/backup root 重叠。诊断包 v1 已能导出系统维护错误码级汇总，但该目录能力仍不是完整日志落盘、轮转或桌面恢复页；这些仍待开发。
+- `OPC_LOG_DIR`/`--logs` 是独立受控诊断目录，默认使用数据库同级 `logs/`，不得与 Artifact/backup root 重叠。Sidecar 已写入脱敏 `opc-sidecar.log` 并按 5 MiB/3 归档轮转；诊断包 v1 只导出系统维护错误码级汇总，明确不含原始日志。Tauri 壳日志、打开日志入口和桌面恢复页仍待开发。
 
 ### 已交付：T-11E 第八项——Project 完成节点
 

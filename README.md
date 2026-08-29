@@ -34,7 +34,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；到期以稳定事件键在同一事务中生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、计划/筛选/保存视图、Project 任务树/平铺及项目内搜索/状态筛选/服务端分页、笔记/附件/产出聚合/活动时间线与完成节点→Inbox、Client 本地事实、Focus Core/日期范围回顾/项目/标签/小时分布与二维热力图、Today、统一本地搜索、设置/受控头像/脱敏运行诊断与诊断包、全局渲染错误恢复、备份恢复/迁移前自动备份/业务 JSON，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移和 Sidecar 启动失败均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、重复提醒、完整日志落盘/轮转、启动恢复页、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v8.3](docs/opc-workspace-PRD.md) 记录了这条边界。
+受控任务 D1/D2、计划/筛选/保存视图、Project 任务树/平铺及项目内搜索/状态筛选/服务端分页、笔记/附件/产出聚合/活动时间线与完成节点→Inbox、Client 本地事实、Focus Core/日期范围回顾/项目/标签/小时分布与二维热力图、Today、统一本地搜索、设置/受控头像/脱敏运行诊断与诊断包、全局渲染错误恢复、备份恢复/迁移前自动备份/业务 JSON、Sidecar 脱敏轮转日志，以及 Inbox/Reminder/Task 编排已经交付；备份操作、数据库启动/迁移和 Sidecar 启动失败均会投影安全的系统维护 Inbox Item。Focus 原生反馈、客户外部来源/回访/财务、重复提醒、Tauri 壳日志与打开日志入口、启动恢复页、全局系统快捷键及三平台安装包仍属于后续实现。[PRD v8.4](docs/opc-workspace-PRD.md) 记录了这条边界。
 
 ## 目录结构
 
@@ -56,7 +56,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v8.3）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v8.4）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -162,7 +162,8 @@ appDataDir/
 appLogDir/
   startup-incidents-v1.json # 启动前安全故障 journal；成功补偿后删除
   .startup-incidents-invalid-*.json # 损坏 journal 隔离；不自动读取
-  opc-workspace.log          # 完整日志落盘管线仍待接入
+  opc-sidecar.log            # Sidecar 脱敏运行日志，5 MiB，保留 .1～.3
+  opc-workspace.log          # Tauri 桌面壳日志预留，尚未接入
 ```
 
 具体物理路径由操作系统和应用标识 `com.opcworkspace.desktop` 决定，业务代码不硬编码该路径。升级应用程序文件不会覆盖这里的数据。
@@ -329,4 +330,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v8.3](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 任务树/平铺及项目内搜索/状态筛选/服务端分页与 Client 本地纵切、Focus Core/日期范围回顾/项目/标签/小时分布/二维热力图、Today、统一本地搜索、设置/受控工作区头像/脱敏运行诊断/诊断包 v1、全局渲染错误恢复、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败来源投影；明确未交付 Focus 原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、完整日志落盘/轮转、启动恢复页、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。
+[PRD v8.4](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付 Actor/Assignment、Task D1/D2、任务计划/筛选/保存视图、Project 任务树/平铺及项目内搜索/状态筛选/服务端分页与 Client 本地纵切、Focus Core/日期范围回顾/项目/标签/小时分布/二维热力图、Today、统一本地搜索、设置/受控工作区头像/脱敏运行诊断/诊断包 v1、Sidecar 脱敏轮转日志、全局渲染错误恢复、手工一致性备份恢复、迁移前自动回滚包、业务 JSON、Inbox/Reminder/Task 编排，以及显式 follow-up Artifact、Task 阻塞、提前 24 小时 Task 临期、Project 完成节点、备份四类操作失败、数据库启动/迁移失败和 Sidecar 启动失败来源投影；明确未交付 Focus 原生反馈、任务/项目看板、内容日历、客户外部活动/回访/财务、Tauri 壳日志/打开日志入口、启动恢复页、重复/原生通知、Agent Runtime、导入、恢复诊断、自动化规则、SQLCipher、云同步、AI 助手或知识库。

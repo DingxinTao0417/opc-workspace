@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、Task/Client/Project 受控文件与 Workspace Avatar，以及 T-04B 一致性备份的创建、列表、完整校验、隔离恢复演练、重启前安全恢复、确认删除、破坏性迁移前自动回滚包和基础业务 JSON 导出已经实现；创建失败会尽力投影安全的系统维护 Inbox Item。导入、含文件导出包、计划备份、恢复诊断和完整跨版本恢复矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.3](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v8.4](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -94,7 +94,8 @@ appDataDir/
 appLogDir/
   startup-incidents-v1.json   # 启动前安全故障 journal；补偿后删除
   .startup-incidents-invalid-*.json # 损坏 journal 隔离
-  opc-workspace.log           # 完整日志落盘管线尚未完成
+  opc-sidecar.log             # 已实现 Sidecar 脱敏日志；5 MiB、保留 .1～.3
+  opc-workspace.log           # Tauri 桌面壳日志预留
 ```
 
 开发环境等价使用：

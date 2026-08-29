@@ -20,6 +20,7 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/api"
 	"github.com/opc-workspace/opc-sidecar/internal/config"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/operationlog"
 )
 
 var (
@@ -52,6 +53,17 @@ func run(args []string) int {
 	if err != nil {
 		logger.Printf("configuration error: %v", err)
 		return 2
+	}
+	fileLogger, logCloser, logErr := operationlog.Open(cfg.LogDir, os.Stderr, cfg.SessionToken)
+	if logErr != nil {
+		logger.Printf("operational file logging unavailable; continuing with stderr: %v", logErr)
+	} else {
+		logger = fileLogger
+		defer func() {
+			if err := logCloser.Close(); err != nil {
+				_, _ = fmt.Fprintln(os.Stderr, "sidecar operational log close failed")
+			}
+		}()
 	}
 	latestSchema, err := database.LatestSchemaVersion()
 	if err != nil {

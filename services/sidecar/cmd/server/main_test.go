@@ -48,6 +48,13 @@ func TestRunJournalsDatabaseStartupFailureForNextHealthyOpen(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run exit code = %d, want 1", code)
 	}
+	logContent, err := os.ReadFile(filepath.Join(logDir, "opc-sidecar.log"))
+	if err != nil {
+		t.Fatalf("read operational log: %v", err)
+	}
+	if !strings.Contains(string(logContent), "database initialization failed") {
+		t.Fatalf("operational log does not contain the safe startup stage: %s", logContent)
+	}
 
 	store, err := database.Open(filepath.Join(root, "healthy.db"))
 	if err != nil {
