@@ -12,6 +12,7 @@ import {
   applyBusinessDataImport,
   applyBusinessPackageImport,
   batchUpdateTasks,
+  cancelClientFollowup,
   createBackup,
   drillBackupRestore,
   cancelFocusSession,
@@ -21,6 +22,7 @@ import {
   enableAutomationRule,
   enableAgentAdapter,
   createClient,
+  createClientFollowup,
   createClientActivity,
   createClientAttachment,
   createClientActorLink,
@@ -118,13 +120,17 @@ import {
   reorderTasks,
   reassignTaskAssignment,
   resumeFocusSession,
+  rescheduleClientFollowup,
   reviewTaskSubmission,
   retryAutomationRun,
   scheduleBackupRestore,
   submitTaskOutput,
   splitInboxItem,
   stopFocusSession,
+  skipClientFollowup,
+  completeClientFollowup,
   updateClient,
+  updateClientFollowup,
   updateClientActivity,
   updateInboxItem,
   updateInboxItemTaskRequirement,
@@ -150,7 +156,10 @@ import type {
   BatchUpdateTasksInput,
   CreateTaskSavedViewInput,
   ClientInput,
+  CancelClientFollowupInput,
   ClientActivityListParams,
+  CompleteClientFollowupInput,
+  CreateClientFollowupInput,
   ClientFollowupListParams,
   ClientAttachmentListParams,
   ClientActorLinkListParams,
@@ -213,6 +222,9 @@ import type {
   RecoverFocusSessionInput,
   UpdateActorInput,
   UpdateClientInput,
+  RescheduleClientFollowupInput,
+  SkipClientFollowupInput,
+  UpdateClientFollowupInput,
   UpdateClientActivityInput,
   UpdateInboxItemInput,
   UpdateInboxItemTaskRequirementInput,
@@ -644,6 +656,125 @@ export function useClientFollowupsQuery(
     enabled: Boolean(clientId),
     placeholderData: keepPreviousData,
     retry: 1,
+  });
+}
+
+export function useClientFollowupActorOptionsQuery(enabled = true) {
+  return useQuery({
+    queryKey: [...actorQueryKey, "client-followup-options"],
+    queryFn: async () => {
+      const actors = await getAllActors({ status: "active" });
+      return actors.filter(
+        (actor) => actor.type === "owner" || actor.type === "person",
+      );
+    },
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+function useInvalidateClientFollowups() {
+  const queryClient = useQueryClient();
+  return async (clientId: string) => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: clientFollowupQueryKey(clientId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: clientDetailQueryKey(clientId),
+      }),
+      queryClient.invalidateQueries({ queryKey: clientQueryKey }),
+    ]);
+  };
+}
+
+export function useCreateClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateClientFollowupInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createClientFollowup(input, attempt.current.key);
+    },
+    onSuccess: async (followup) => {
+      attempt.current = null;
+      await invalidate(followup.clientId);
+    },
+  });
+}
+
+export function useUpdateClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateClientFollowupInput;
+    }) => updateClientFollowup(id, input),
+    onSuccess: async (followup) => invalidate(followup.clientId),
+  });
+}
+
+export function useCompleteClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: CompleteClientFollowupInput;
+    }) => completeClientFollowup(id, input),
+    onSuccess: async (followup) => invalidate(followup.clientId),
+  });
+}
+
+export function useSkipClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: SkipClientFollowupInput;
+    }) => skipClientFollowup(id, input),
+    onSuccess: async (followup) => invalidate(followup.clientId),
+  });
+}
+
+export function useCancelClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: CancelClientFollowupInput;
+    }) => cancelClientFollowup(id, input),
+    onSuccess: async (followup) => invalidate(followup.clientId),
+  });
+}
+
+export function useRescheduleClientFollowup() {
+  const invalidate = useInvalidateClientFollowups();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: RescheduleClientFollowupInput;
+    }) => rescheduleClientFollowup(id, input),
+    onSuccess: async (result) => invalidate(result.next.clientId),
   });
 }
 

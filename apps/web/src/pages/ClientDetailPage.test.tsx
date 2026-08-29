@@ -102,6 +102,18 @@ vi.mock("../api/hooks", () => ({
     isSuccess: true,
     refetch: vi.fn(),
   }),
+  useClientFollowupActorOptionsQuery: () => ({
+    data: [],
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useCreateClientFollowup: () => state.activityMutation,
+  useUpdateClientFollowup: () => state.activityMutation,
+  useCompleteClientFollowup: () => state.activityMutation,
+  useSkipClientFollowup: () => state.activityMutation,
+  useCancelClientFollowup: () => state.activityMutation,
+  useRescheduleClientFollowup: () => state.activityMutation,
   useCreateClientActivity: () => state.activityMutation,
   useUpdateClientActivity: () => state.activityMutation,
   useDeleteClientActivity: () => state.activityMutation,
@@ -180,7 +192,7 @@ describe("ClientDetailPage", () => {
     expect(screen.getByRole("heading", { name: "本地联系人" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(screen.getByRole("heading", { name: "客户回访" })).toBeTruthy();
-    expect(screen.getByText(/到期项会同步投影到本地收件箱/)).toBeTruthy();
+    expect(screen.getByText(/不会发送邮件、短信或其他外部消息/)).toBeTruthy();
     expect(state.projectQueryInput).toEqual(
       expect.objectContaining({
         clientId: activeClient.id,

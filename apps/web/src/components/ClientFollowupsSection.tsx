@@ -1,12 +1,45 @@
-import { CalendarClock, CircleCheck, CircleOff, Clock3 } from "lucide-react";
+import {
+  CalendarClock,
+  CheckCircle2,
+  CircleCheck,
+  CircleOff,
+  Clock3,
+  Pencil,
+  Plus,
+  RotateCcw,
+  XCircle,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useClientFollowupsQuery } from "../api/hooks";
+import { ApiError } from "../api/client";
+import {
+  useCancelClientFollowup,
+  useClientFollowupActorOptionsQuery,
+  useClientFollowupsQuery,
+  useCompleteClientFollowup,
+  useCreateClientFollowup,
+  useRescheduleClientFollowup,
+  useSkipClientFollowup,
+  useUpdateClientFollowup,
+} from "../api/hooks";
 import type {
+  Actor,
   ClientFollowup,
   ClientFollowupPriority,
   ClientFollowupStatus,
 } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
+
+type FollowupAction = "complete" | "skip" | "cancel" | "reschedule";
+
+interface PlanDraft {
+  assignedActorId: string;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+  purpose: string;
+  notes: string;
+  priority: ClientFollowupPriority;
+}
 
 const statusLabel: Record<ClientFollowupStatus, string> = {
   planned: "待回访",
@@ -20,6 +53,41 @@ const priorityLabel: Record<ClientFollowupPriority, string> = {
   normal: "普通优先级",
   high: "高优先级",
 };
+
+function localDateTime(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (number: number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function defaultTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function emptyPlanDraft(actorId = ""): PlanDraft {
+  return {
+    assignedActorId: actorId,
+    scheduledAt: localDateTime(new Date()),
+    timezone: defaultTimezone(),
+    channel: "",
+    purpose: "",
+    notes: "",
+    priority: "normal",
+  };
+}
+
+function planDraftFromFollowup(followup: ClientFollowup): PlanDraft {
+  return {
+    assignedActorId: followup.assignedActorId,
+    scheduledAt: localDateTime(followup.scheduledAt),
+    timezone: followup.timezone,
+    channel: followup.channel,
+    purpose: followup.purpose,
+    notes: followup.notes ?? "",
+    priority: followup.priority,
+  };
+}
 
 function formatTime(value: string): string {
   const date = new Date(value);
@@ -59,19 +127,368 @@ function detailCopy(followup: ClientFollowup): string | null {
   return followup.notes;
 }
 
+function followupError(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof ApiError) {
+    if (error.code === "VERSION_CONFLICT") {
+      return "回访计划已在其他窗口变化，已刷新最新记录，请核对后重试。";
+    }
+    if (error.code === "CLIENT_FOLLOWUP_FINAL") {
+      return "该回访已进入终态，不能再修改或重复处理。";
+    }
+    return error.requestId
+      ? `${error.message} · 请求 ${error.requestId}`
+      : error.message;
+  }
+  return "客户回访操作失败，请重试。";
+}
+
+function planError(draft: PlanDraft): string | null {
+  if (!draft.assignedActorId) return "请选择负责人。";
+  if (
+    !draft.scheduledAt ||
+    Number.isNaN(new Date(draft.scheduledAt).getTime())
+  ) {
+    return "请选择有效的计划时间。";
+  }
+  if (!draft.timezone.trim() || draft.timezone.trim().length > 100) {
+    return "请填写有效的 IANA 时区。";
+  }
+  if (!draft.channel.trim() || draft.channel.trim().length > 100) {
+    return "渠道需填写 1–100 个字符。";
+  }
+  if (!draft.purpose.trim() || draft.purpose.trim().length > 500) {
+    return "目的需填写 1–500 个字符。";
+  }
+  if (draft.notes.trim().length > 4_000) return "备注不能超过 4,000 个字符。";
+  return null;
+}
+
+function planInput(draft: PlanDraft) {
+  return {
+    assignedActorId: draft.assignedActorId,
+    scheduledAt: new Date(draft.scheduledAt).toISOString(),
+    timezone: draft.timezone.trim(),
+    channel: draft.channel.trim(),
+    purpose: draft.purpose.trim(),
+    notes: draft.notes.trim() || null,
+    priority: draft.priority,
+  };
+}
+
+function PlanFields({
+  actors,
+  draft,
+  disabled,
+  onChange,
+}: {
+  actors: Actor[];
+  draft: PlanDraft;
+  disabled: boolean;
+  onChange: (draft: PlanDraft) => void;
+}) {
+  return (
+    <div className="client-followup-editor-grid">
+      <label>
+        <span>计划时间</span>
+        <input
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({ ...draft, scheduledAt: event.target.value })
+          }
+          type="datetime-local"
+          value={draft.scheduledAt}
+        />
+      </label>
+      <label>
+        <span>负责人</span>
+        <select
+          disabled={disabled || actors.length === 0}
+          onChange={(event) =>
+            onChange({ ...draft, assignedActorId: event.target.value })
+          }
+          value={draft.assignedActorId}
+        >
+          <option value="">选择负责人</option>
+          {actors.map((actor) => (
+            <option key={actor.id} value={actor.id}>
+              {actor.displayName}（{actor.type === "owner" ? "owner" : "person"}
+              ）
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>渠道</span>
+        <input
+          disabled={disabled}
+          maxLength={100}
+          onChange={(event) =>
+            onChange({ ...draft, channel: event.target.value })
+          }
+          placeholder="例如：微信、电话、线下面谈"
+          value={draft.channel}
+        />
+      </label>
+      <label>
+        <span>优先级</span>
+        <select
+          disabled={disabled}
+          onChange={(event) =>
+            onChange({
+              ...draft,
+              priority: event.target.value as ClientFollowupPriority,
+            })
+          }
+          value={draft.priority}
+        >
+          <option value="high">高优先级</option>
+          <option value="normal">普通优先级</option>
+          <option value="low">低优先级</option>
+        </select>
+      </label>
+      <label className="client-followup-field-wide">
+        <span>目的</span>
+        <input
+          disabled={disabled}
+          maxLength={500}
+          onChange={(event) =>
+            onChange({ ...draft, purpose: event.target.value })
+          }
+          value={draft.purpose}
+        />
+      </label>
+      <label className="client-followup-field-wide">
+        <span>备注（可选）</span>
+        <textarea
+          disabled={disabled}
+          maxLength={4_000}
+          onChange={(event) =>
+            onChange({ ...draft, notes: event.target.value })
+          }
+          rows={3}
+          value={draft.notes}
+        />
+      </label>
+      <label className="client-followup-field-wide">
+        <span>IANA 时区</span>
+        <input
+          disabled={disabled}
+          maxLength={100}
+          onChange={(event) =>
+            onChange({ ...draft, timezone: event.target.value })
+          }
+          placeholder="例如：Asia/Shanghai"
+          value={draft.timezone}
+        />
+      </label>
+    </div>
+  );
+}
+
 export function ClientFollowupsSection({ clientId }: { clientId: string }) {
   const [page, setPage] = useState(1);
   const queryInput = useMemo(() => ({ page, pageSize: 6 }), [page]);
   const query = useClientFollowupsQuery(clientId, queryInput);
+  const actorsQuery = useClientFollowupActorOptionsQuery(true);
+  const createMutation = useCreateClientFollowup();
+  const updateMutation = useUpdateClientFollowup();
+  const completeMutation = useCompleteClientFollowup();
+  const skipMutation = useSkipClientFollowup();
+  const cancelMutation = useCancelClientFollowup();
+  const rescheduleMutation = useRescheduleClientFollowup();
+  const [editing, setEditing] = useState<ClientFollowup | "new" | null>(null);
+  const [planDraft, setPlanDraft] = useState<PlanDraft>(emptyPlanDraft);
+  const [action, setAction] = useState<{
+    kind: FollowupAction;
+    followup: ClientFollowup;
+  } | null>(null);
+  const [reason, setReason] = useState("");
+  const [result, setResult] = useState("");
+  const [nextStep, setNextStep] = useState("");
+  const [completedAt, setCompletedAt] = useState(localDateTime(new Date()));
+  const [localError, setLocalError] = useState<string | null>(null);
   const items = query.data?.items ?? [];
+  const actors = actorsQuery.data ?? [];
   const totalPages = Math.max(
     1,
     Math.ceil((query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 6)),
   );
+  const pending =
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    completeMutation.isPending ||
+    skipMutation.isPending ||
+    cancelMutation.isPending ||
+    rescheduleMutation.isPending;
+  const mutationError =
+    followupError(createMutation.error) ??
+    followupError(updateMutation.error) ??
+    followupError(completeMutation.error) ??
+    followupError(skipMutation.error) ??
+    followupError(cancelMutation.error) ??
+    followupError(rescheduleMutation.error);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (editing === "new" && !planDraft.assignedActorId && actors[0]) {
+      setPlanDraft((draft) => ({ ...draft, assignedActorId: actors[0].id }));
+    }
+  }, [actors, editing, planDraft.assignedActorId]);
+
+  const resetFeedback = () => {
+    setLocalError(null);
+    createMutation.reset();
+    updateMutation.reset();
+    completeMutation.reset();
+    skipMutation.reset();
+    cancelMutation.reset();
+    rescheduleMutation.reset();
+  };
+  const refreshAfterConflict = () => void query.refetch();
+  const openNew = () => {
+    resetFeedback();
+    setAction(null);
+    setPlanDraft(emptyPlanDraft(actors[0]?.id ?? ""));
+    setEditing("new");
+  };
+  const openEdit = (followup: ClientFollowup) => {
+    resetFeedback();
+    setAction(null);
+    setPlanDraft(planDraftFromFollowup(followup));
+    setEditing(followup);
+  };
+  const openAction = (kind: FollowupAction, followup: ClientFollowup) => {
+    resetFeedback();
+    setEditing(null);
+    setAction({ kind, followup });
+    setReason("");
+    setResult("");
+    setNextStep("");
+    setCompletedAt(localDateTime(new Date()));
+    if (kind === "reschedule") setPlanDraft(planDraftFromFollowup(followup));
+  };
+  const closeEditors = () => {
+    if (pending) return;
+    setEditing(null);
+    setAction(null);
+    setLocalError(null);
+  };
+  const submitPlan = () => {
+    const error = planError(planDraft);
+    if (error) return setLocalError(error);
+    resetFeedback();
+    const input = planInput(planDraft);
+    if (editing === "new") {
+      createMutation.mutate(
+        { clientId, ...input },
+        {
+          onSuccess: () => {
+            setEditing(null);
+            setPage(1);
+          },
+        },
+      );
+      return;
+    }
+    if (!editing) return;
+    updateMutation.mutate(
+      { id: editing.id, input: { ...input, expectedVersion: editing.version } },
+      {
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === "VERSION_CONFLICT")
+            refreshAfterConflict();
+        },
+        onSuccess: () => setEditing(null),
+      },
+    );
+  };
+  const submitAction = () => {
+    if (!action) return;
+    const { followup, kind } = action;
+    if (kind === "complete") {
+      const value = result.trim();
+      const completion = new Date(completedAt);
+      if (!value || value.length > 4_000)
+        return setLocalError("回访结果需填写 1–4,000 个字符。");
+      if (!completedAt || Number.isNaN(completion.getTime()))
+        return setLocalError("请选择有效的完成时间。");
+      if (nextStep.trim().length > 4_000)
+        return setLocalError("下一步不能超过 4,000 个字符。");
+      resetFeedback();
+      completeMutation.mutate(
+        {
+          id: followup.id,
+          input: {
+            result: value,
+            nextStep: nextStep.trim() || null,
+            completedAt: completion.toISOString(),
+            expectedVersion: followup.version,
+          },
+        },
+        {
+          onError: (error) => {
+            if (error instanceof ApiError && error.code === "VERSION_CONFLICT")
+              refreshAfterConflict();
+          },
+          onSuccess: () => setAction(null),
+        },
+      );
+      return;
+    }
+    const reasonValue = reason.trim();
+    if (!reasonValue || reasonValue.length > 1_000)
+      return setLocalError("请填写 1–1,000 个字符的原因。");
+    if (kind === "reschedule") {
+      const error = planError(planDraft);
+      if (error) return setLocalError(error);
+      resetFeedback();
+      rescheduleMutation.mutate(
+        {
+          id: followup.id,
+          input: {
+            ...planInput(planDraft),
+            reason: reasonValue,
+            expectedVersion: followup.version,
+          },
+        },
+        {
+          onError: (error) => {
+            if (error instanceof ApiError && error.code === "VERSION_CONFLICT")
+              refreshAfterConflict();
+          },
+          onSuccess: () => {
+            setAction(null);
+            setPage(1);
+          },
+        },
+      );
+      return;
+    }
+    const mutation = kind === "skip" ? skipMutation : cancelMutation;
+    mutation.mutate(
+      {
+        id: followup.id,
+        input: { reason: reasonValue, expectedVersion: followup.version },
+      },
+      {
+        onError: (error) => {
+          if (error instanceof ApiError && error.code === "VERSION_CONFLICT")
+            refreshAfterConflict();
+        },
+        onSuccess: () => setAction(null),
+      },
+    );
+  };
+  const actionTitle: Record<FollowupAction, string> = {
+    complete: "记录回访结果",
+    skip: "跳过回访",
+    cancel: "取消回访计划",
+    reschedule: "重新安排回访",
+  };
 
   return (
     <section className="project-detail-section client-followups-section">
@@ -79,12 +496,167 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
         <div>
           <h2>客户回访</h2>
           <p>
-            计划、到期提醒和历史均保存在本机；当前可查看时间线，创建和处理入口将在下一页面纵切提供。
+            计划、提醒与历史均保存在本机，不会发送邮件、短信或其他外部消息。
           </p>
         </div>
-        <span>{query.data?.meta.total ?? 0} 项</span>
+        <button
+          className="button button-primary"
+          disabled={pending || actorsQuery.isPending || actors.length === 0}
+          onClick={openNew}
+          title={
+            actorsQuery.isError
+              ? "无法读取负责人，请先重试。"
+              : actors.length === 0
+                ? "请先保留 active owner 或 person。"
+                : undefined
+          }
+          type="button"
+        >
+          <Plus size={14} /> 安排回访
+        </button>
       </div>
-
+      {actorsQuery.isError ? (
+        <ErrorState
+          compact
+          message="无法读取可分派的负责人。"
+          onRetry={() => void actorsQuery.refetch()}
+        />
+      ) : null}
+      {editing ? (
+        <div className="client-followup-editor">
+          <div>
+            <strong>
+              {editing === "new" ? "安排本地回访" : "编辑回访计划"}
+            </strong>
+            <p>回访只记录线下计划和结果；负责人不会收到应用通知。</p>
+          </div>
+          <PlanFields
+            actors={actors}
+            disabled={pending}
+            draft={planDraft}
+            onChange={setPlanDraft}
+          />
+          <div className="client-activity-editor-actions">
+            <button
+              className="button button-secondary"
+              disabled={pending}
+              onClick={closeEditors}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="button button-primary"
+              disabled={pending || actors.length === 0}
+              onClick={submitPlan}
+              type="button"
+            >
+              <CalendarClock size={14} />
+              {createMutation.isPending || updateMutation.isPending
+                ? "正在保存…"
+                : editing === "new"
+                  ? "保存回访计划"
+                  : "保存修改"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {action ? (
+        <div className="client-followup-editor client-followup-action-editor">
+          <div>
+            <strong>
+              {actionTitle[action.kind]}：{action.followup.purpose}
+            </strong>
+            <p>操作会保留本地状态与审计历史，不能自动联系客户。</p>
+          </div>
+          {action.kind === "complete" ? (
+            <div className="client-followup-editor-grid">
+              <label className="client-followup-field-wide">
+                <span>回访结果</span>
+                <textarea
+                  autoFocus
+                  disabled={pending}
+                  maxLength={4_000}
+                  onChange={(event) => setResult(event.target.value)}
+                  rows={3}
+                  value={result}
+                />
+              </label>
+              <label>
+                <span>完成时间</span>
+                <input
+                  disabled={pending}
+                  onChange={(event) => setCompletedAt(event.target.value)}
+                  type="datetime-local"
+                  value={completedAt}
+                />
+              </label>
+              <label>
+                <span>下一步（可选）</span>
+                <input
+                  disabled={pending}
+                  maxLength={4_000}
+                  onChange={(event) => setNextStep(event.target.value)}
+                  value={nextStep}
+                />
+              </label>
+            </div>
+          ) : null}
+          {action.kind === "reschedule" ? (
+            <PlanFields
+              actors={actors}
+              disabled={pending}
+              draft={planDraft}
+              onChange={setPlanDraft}
+            />
+          ) : null}
+          {action.kind !== "complete" ? (
+            <label className="client-followup-reason">
+              <span>{action.kind === "reschedule" ? "重排原因" : "原因"}</span>
+              <textarea
+                autoFocus={action.kind !== "reschedule"}
+                disabled={pending}
+                maxLength={1_000}
+                onChange={(event) => setReason(event.target.value)}
+                rows={2}
+                value={reason}
+              />
+            </label>
+          ) : null}
+          <div className="client-activity-editor-actions">
+            <button
+              className="button button-secondary"
+              disabled={pending}
+              onClick={closeEditors}
+              type="button"
+            >
+              返回
+            </button>
+            <button
+              className={
+                action.kind === "cancel"
+                  ? "button button-danger"
+                  : "button button-primary"
+              }
+              disabled={
+                pending || (action.kind === "reschedule" && actors.length === 0)
+              }
+              onClick={submitAction}
+              type="button"
+            >
+              {action.kind === "complete" ? <CheckCircle2 size={14} /> : null}
+              {action.kind === "reschedule" ? <RotateCcw size={14} /> : null}
+              {action.kind === "cancel" ? <XCircle size={14} /> : null}
+              {pending ? "正在处理…" : actionTitle[action.kind]}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {localError || mutationError ? (
+        <div className="form-error" role="alert">
+          {localError ?? mutationError}
+        </div>
+      ) : null}
       {query.isPending ? <SkeletonRows count={4} /> : null}
       {query.isError ? (
         <ErrorState
@@ -95,7 +667,18 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
       ) : null}
       {query.isSuccess && items.length === 0 ? (
         <EmptyState
-          message="客户回访计划创建后，会在这里按计划时间显示；到期项会同步投影到本地收件箱。"
+          action={
+            actors.length > 0 ? (
+              <button
+                className="button button-primary"
+                onClick={openNew}
+                type="button"
+              >
+                安排第一条回访
+              </button>
+            ) : undefined
+          }
+          message="创建回访计划后会在这里按计划时间显示；到期项会投影到本地收件箱。"
           title="暂无客户回访"
         />
       ) : null}
@@ -142,6 +725,51 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
                     </small>
                   ) : null}
                 </div>
+                {followup.status === "planned" ? (
+                  <div className="client-followup-actions">
+                    <button
+                      aria-label={`编辑回访 ${followup.purpose}`}
+                      className="icon-button"
+                      disabled={pending}
+                      onClick={() => openEdit(followup)}
+                      type="button"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      className="button button-secondary"
+                      disabled={pending}
+                      onClick={() => openAction("complete", followup)}
+                      type="button"
+                    >
+                      完成
+                    </button>
+                    <button
+                      className="button button-secondary"
+                      disabled={pending}
+                      onClick={() => openAction("reschedule", followup)}
+                      type="button"
+                    >
+                      重排
+                    </button>
+                    <button
+                      className="button button-quiet"
+                      disabled={pending}
+                      onClick={() => openAction("skip", followup)}
+                      type="button"
+                    >
+                      跳过
+                    </button>
+                    <button
+                      className="button button-quiet"
+                      disabled={pending}
+                      onClick={() => openAction("cancel", followup)}
+                      type="button"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : null}
               </article>
             );
           })}
@@ -151,7 +779,7 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
         <nav aria-label="客户回访分页" className="pagination">
           <button
             className="button button-secondary"
-            disabled={page <= 1 || query.isFetching}
+            disabled={page <= 1 || query.isFetching || pending}
             onClick={() => setPage((value) => Math.max(1, value - 1))}
             type="button"
           >
@@ -162,7 +790,7 @@ export function ClientFollowupsSection({ clientId }: { clientId: string }) {
           </span>
           <button
             className="button button-secondary"
-            disabled={page >= totalPages || query.isFetching}
+            disabled={page >= totalPages || query.isFetching || pending}
             onClick={() => setPage((value) => value + 1)}
             type="button"
           >

@@ -1093,6 +1093,62 @@ export interface ClientFollowupListParams {
   assignedActorId?: string;
 }
 
+export interface CreateClientFollowupInput {
+  clientId: string;
+  assignedActorId: string;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+  purpose: string;
+  notes: string | null;
+  priority: ClientFollowupPriority;
+}
+
+export interface UpdateClientFollowupInput {
+  assignedActorId?: string;
+  scheduledAt?: string;
+  timezone?: string;
+  channel?: string;
+  purpose?: string;
+  notes?: string | null;
+  priority?: ClientFollowupPriority;
+  expectedVersion: number;
+}
+
+export interface CompleteClientFollowupInput {
+  result: string;
+  nextStep: string | null;
+  completedAt: string | null;
+  expectedVersion: number;
+}
+
+export interface SkipClientFollowupInput {
+  reason: string;
+  expectedVersion: number;
+}
+
+export interface CancelClientFollowupInput {
+  reason: string;
+  expectedVersion: number;
+}
+
+export interface RescheduleClientFollowupInput {
+  assignedActorId: string;
+  scheduledAt: string;
+  timezone: string;
+  channel: string;
+  purpose: string;
+  notes: string | null;
+  priority: ClientFollowupPriority;
+  reason: string;
+  expectedVersion: number;
+}
+
+export interface RescheduleClientFollowupResult {
+  previous: ClientFollowup;
+  next: ClientFollowup;
+}
+
 export type ClientActivityKind = "note" | "meeting" | "system_reference";
 
 export interface ClientActivityActor {

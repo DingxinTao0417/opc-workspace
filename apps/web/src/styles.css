@@ -3437,7 +3437,7 @@ kbd {
 
 .client-followup-list article {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: flex-start;
   gap: 9px;
   padding: 11px;
@@ -3519,6 +3519,100 @@ kbd {
 .client-followup-copy .client-followup-next-step {
   display: block;
   margin-top: 3px;
+}
+
+.client-followup-editor {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 13px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+}
+
+.client-followup-editor > div:first-child strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.client-followup-editor > div:first-child p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.client-followup-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.client-followup-editor-grid label,
+.client-followup-reason {
+  display: grid;
+  gap: 5px;
+}
+
+.client-followup-editor-grid label > span,
+.client-followup-reason > span {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.client-followup-editor-grid input,
+.client-followup-editor-grid select,
+.client-followup-editor-grid textarea,
+.client-followup-reason textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  outline: 0;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+}
+
+.client-followup-editor-grid input,
+.client-followup-editor-grid select {
+  height: 34px;
+  padding: 0 9px;
+}
+
+.client-followup-editor-grid textarea,
+.client-followup-reason textarea {
+  min-height: 58px;
+  padding: 8px 9px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.client-followup-editor-grid input:focus,
+.client-followup-editor-grid select:focus,
+.client-followup-editor-grid textarea:focus,
+.client-followup-reason textarea:focus {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.client-followup-field-wide {
+  grid-column: 1 / -1;
+}
+
+.client-followup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.client-followup-actions .button {
+  min-height: 26px;
+  padding: 0 7px;
+  font-size: 9px;
 }
 
 .client-activity-list article {

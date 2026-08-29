@@ -50,12 +50,19 @@ import type {
   ClientActivityListParams,
   ClientActivityListResult,
   ClientFollowup,
+  CancelClientFollowupInput,
+  CompleteClientFollowupInput,
+  CreateClientFollowupInput,
   ClientFollowupListParams,
   ClientFollowupListResult,
   ClientInput,
   ClientListParams,
   ClientListResult,
   ClientStatus,
+  RescheduleClientFollowupInput,
+  RescheduleClientFollowupResult,
+  SkipClientFollowupInput,
+  UpdateClientFollowupInput,
   CreateClientActivityInput,
   CreateClientAttachmentInput,
   CreateClientActorLinkInput,
@@ -6846,6 +6853,138 @@ export async function getClientFollowups(
       ),
       total: nonNegativeInteger(payload.meta.total, "客户回访总数"),
     },
+  };
+}
+
+export async function createClientFollowup(
+  input: CreateClientFollowupInput,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<ClientFollowup> {
+  const payload = await apiRequest<unknown>("/api/v1/client-followups", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      client_id: input.clientId,
+      assigned_actor_id: input.assignedActorId,
+      scheduled_at: input.scheduledAt,
+      timezone: input.timezone,
+      channel: input.channel,
+      purpose: input.purpose,
+      notes: input.notes,
+      priority: input.priority,
+    }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientFollowup(body);
+}
+
+export async function updateClientFollowup(
+  id: string,
+  input: UpdateClientFollowupInput,
+): Promise<ClientFollowup> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-followups/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        ...(input.assignedActorId === undefined
+          ? {}
+          : { assigned_actor_id: input.assignedActorId }),
+        ...(input.scheduledAt === undefined
+          ? {}
+          : { scheduled_at: input.scheduledAt }),
+        ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+        ...(input.channel === undefined ? {} : { channel: input.channel }),
+        ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
+        ...(input.notes === undefined ? {} : { notes: input.notes }),
+        ...(input.priority === undefined ? {} : { priority: input.priority }),
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientFollowup(body);
+}
+
+export async function completeClientFollowup(
+  id: string,
+  input: CompleteClientFollowupInput,
+): Promise<ClientFollowup> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-followups/${encodeURIComponent(id)}/complete`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        result: input.result,
+        next_step: input.nextStep,
+        completed_at: input.completedAt,
+      }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientFollowup(body);
+}
+
+async function transitionClientFollowup(
+  id: string,
+  action: "skip" | "cancel",
+  input: SkipClientFollowupInput | CancelClientFollowupInput,
+): Promise<ClientFollowup> {
+  const suffix = action === "cancel" ? "?confirm=true" : "";
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-followups/${encodeURIComponent(id)}/${action}${suffix}`,
+    {
+      method: action === "skip" ? "POST" : "DELETE",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({ reason: input.reason }),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeClientFollowup(body);
+}
+
+export function skipClientFollowup(
+  id: string,
+  input: SkipClientFollowupInput,
+): Promise<ClientFollowup> {
+  return transitionClientFollowup(id, "skip", input);
+}
+
+export function cancelClientFollowup(
+  id: string,
+  input: CancelClientFollowupInput,
+): Promise<ClientFollowup> {
+  return transitionClientFollowup(id, "cancel", input);
+}
+
+export async function rescheduleClientFollowup(
+  id: string,
+  input: RescheduleClientFollowupInput,
+): Promise<RescheduleClientFollowupResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/client-followups/${encodeURIComponent(id)}/reschedule`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify({
+        assigned_actor_id: input.assignedActorId,
+        scheduled_at: input.scheduledAt,
+        timezone: input.timezone,
+        channel: input.channel,
+        purpose: input.purpose,
+        notes: input.notes,
+        priority: input.priority,
+        reason: input.reason,
+      }),
+    },
+  );
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("客户回访重排响应格式无效");
+  return {
+    previous: normalizeClientFollowup(body.previous),
+    next: normalizeClientFollowup(body.next),
   };
 }
 
