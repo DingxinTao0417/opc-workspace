@@ -177,6 +177,40 @@ func TestClientFollowupBlocksAssigneeDeactivationUntilPlanIsClosed(t *testing.T)
 	}
 }
 
+func TestClientFollowupKeepsInactiveClientPlansClosableButNotPlannable(t *testing.T) {
+	router, _ := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"Inactive Followup Client"}`, nil)
+	createdRecorder := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-01T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"close after client inactivity"}`), nil)
+	if createdRecorder.Code != http.StatusCreated {
+		t.Fatalf("create followup = %d: %s", createdRecorder.Code, createdRecorder.Body.String())
+	}
+	followup := decodeClientFollowupResponse(t, createdRecorder.Body.Bytes())
+	inactivated := performRequest(router, http.MethodPatch, "/api/v1/clients/"+client.ID, []byte(`{"status":"inactive"}`), map[string]string{"If-Match": `"2"`})
+	if inactivated.Code != http.StatusOK {
+		t.Fatalf("inactivate client = %d: %s", inactivated.Code, inactivated.Body.String())
+	}
+	createAfterInactivation := performRequest(router, http.MethodPost, "/api/v1/client-followups", []byte(`{"client_id":"`+client.ID+`","assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-02T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"must not create"}`), nil)
+	if createAfterInactivation.Code != http.StatusConflict || responseErrorCode(t, createAfterInactivation.Body.Bytes()) != "CLIENT_FOLLOWUP_CLIENT_INACTIVE" {
+		t.Fatalf("create followup for inactive client = %d: %s", createAfterInactivation.Code, createAfterInactivation.Body.String())
+	}
+	editAfterInactivation := performRequest(router, http.MethodPatch, "/api/v1/client-followups/"+followup.ID, []byte(`{"purpose":"must not edit"}`), map[string]string{"If-Match": `"1"`})
+	if editAfterInactivation.Code != http.StatusConflict || responseErrorCode(t, editAfterInactivation.Body.Bytes()) != "CLIENT_FOLLOWUP_CLIENT_INACTIVE" {
+		t.Fatalf("edit followup for inactive client = %d: %s", editAfterInactivation.Code, editAfterInactivation.Body.String())
+	}
+	rescheduleAfterInactivation := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+followup.ID+"/reschedule", []byte(`{"assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-03T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"must not reschedule","reason":"client is inactive"}`), map[string]string{"If-Match": `"1"`})
+	if rescheduleAfterInactivation.Code != http.StatusConflict || responseErrorCode(t, rescheduleAfterInactivation.Body.Bytes()) != "CLIENT_FOLLOWUP_CLIENT_INACTIVE" {
+		t.Fatalf("reschedule followup for inactive client = %d: %s", rescheduleAfterInactivation.Code, rescheduleAfterInactivation.Body.String())
+	}
+	continueAfterInactivation := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+followup.ID+"/complete", []byte(`{"result":"must not continue","next_followup":{"assigned_actor_id":"00000000-0000-5000-8000-000000000001","scheduled_at":"2026-09-03T09:00:00Z","timezone":"UTC","channel":"phone","purpose":"must not schedule next"}}`), map[string]string{"If-Match": `"1"`})
+	if continueAfterInactivation.Code != http.StatusConflict || responseErrorCode(t, continueAfterInactivation.Body.Bytes()) != "CLIENT_FOLLOWUP_CLIENT_INACTIVE" {
+		t.Fatalf("complete with next plan for inactive client = %d: %s", continueAfterInactivation.Code, continueAfterInactivation.Body.String())
+	}
+	completed := performRequest(router, http.MethodPost, "/api/v1/client-followups/"+followup.ID+"/complete", []byte(`{"result":"closed after client inactivity"}`), map[string]string{"If-Match": `"1"`})
+	if completed.Code != http.StatusOK || decodeClientFollowupResponse(t, completed.Body.Bytes()).Status != "completed" {
+		t.Fatalf("complete followup for inactive client = %d: %s", completed.Code, completed.Body.String())
+	}
+}
+
 func TestClientFollowupTerminalTransitionsAndReschedule(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	client := createClientForTest(t, router, `{"name":"Followup Transition Client"}`, nil)

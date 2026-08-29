@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：2.60
+> 文档版本：2.61
 > 日期：2026-08-29
-> 依据：[PRD v9.40](opc-workspace-PRD.md)
+> 依据：[PRD v9.41](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v35
 
-> 2.60 说明：Client Followup 的“逾期”列表筛选由 Sidecar 当前时钟与计划 UTC 事实按纳秒时间键派生，固定为 `planned + scheduled_at < server_now`；浏览器只传受限 `due_state=overdue`，不得把自己的时钟结果当作分页筛选事实。它可与 `status=planned`、负责人组合，仍不创建新的持久状态或命令入口。既有 Actor 停用责任门禁、IANA/DST 墙上时间解释、到期投影归档、完成时原子下一计划和 Today/Inbox 只读深链边界不变。
+> 2.61 说明：Client 设为 `inactive` 后不再接受 Client Followup 的新建、编辑、重排或完成时 `next_followup`，以免重新打开已停用关系；既有 `planned` 事实仍可完成、跳过或确认取消，保留可审计收口。Sidecar 返回稳定冲突码，恢复为 `active/lead` 后才重新允许计划类写入。逾期筛选、Actor 责任门禁、IANA/DST 墙上时间解释、到期投影归档和 Today/Inbox 只读深链边界不变。
 
 ## 1. 目的
 

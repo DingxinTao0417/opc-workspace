@@ -153,6 +153,9 @@ function followupError(error: unknown): string | null {
     if (error.code === "CLIENT_FOLLOWUP_FINAL") {
       return "该回访已进入终态，不能再修改或重复处理。";
     }
+    if (error.code === "CLIENT_FOLLOWUP_CLIENT_INACTIVE") {
+      return "该客户已停用；请先恢复客户状态，再安排、编辑或重新安排回访。";
+    }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
       : error.message;

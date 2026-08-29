@@ -366,8 +366,11 @@ func (a *API) updateClientFollowup(c *gin.Context) {
 		if current.Status != "planned" {
 			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be edited")
 		}
+		if err := ensureClientFollowupClientIsPlannable(tx, current.ClientID); err != nil {
+			return err
+		}
 		if actor, exists := updates["assigned_actor_id"]; exists {
-			if err := ensureClientFollowupReferences(tx, current.ClientID, actor.(string)); err != nil {
+			if err := ensureClientFollowupAssigneeIsAvailable(tx, actor.(string)); err != nil {
 				return err
 			}
 		}
@@ -934,13 +937,28 @@ func clientFollowupVersionConflict() error {
 }
 
 func ensureClientFollowupReferences(tx *gorm.DB, clientID, actorID string) error {
-	var clientCount, actorCount int64
-	if err := tx.Model(&models.Client{}).Where("id = ?", clientID).Count(&clientCount).Error; err != nil {
+	if err := ensureClientFollowupClientIsPlannable(tx, clientID); err != nil {
 		return err
 	}
-	if clientCount == 0 {
-		return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
+	return ensureClientFollowupAssigneeIsAvailable(tx, actorID)
+}
+
+func ensureClientFollowupClientIsPlannable(tx *gorm.DB, clientID string) error {
+	var client models.Client
+	if err := tx.Select("id", "status").First(&client, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
+		}
+		return err
 	}
+	if client.Status == "inactive" {
+		return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_CLIENT_INACTIVE", "Reactivate the client before scheduling or editing a followup plan")
+	}
+	return nil
+}
+
+func ensureClientFollowupAssigneeIsAvailable(tx *gorm.DB, actorID string) error {
+	var actorCount int64
 	if err := tx.Model(&models.Actor{}).Where("id = ? AND status = 'active' AND type IN ('owner', 'person')", actorID).Count(&actorCount).Error; err != nil {
 		return err
 	}
