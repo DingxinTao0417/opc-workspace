@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,13 +20,43 @@ const (
 	automationProjectCompletionItemSummary = "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。"
 )
 
-var errAutomationInboxSourceConflict = errors.New("automation Inbox action was already committed by another run")
+var (
+	errAutomationInboxSourceConflict    = errors.New("automation Inbox action was already committed by another run")
+	errAutomationActionSnapshotInvalid  = errors.New("automation action snapshot is invalid")
+	errAutomationAttemptContractInvalid = errors.New("automation attempt contract is invalid")
+	errAutomationSourceEventInvalid     = errors.New("automation source event is invalid")
+)
 
 type automationProjectCompletionAction struct {
 	Title       string
 	Priority    string
 	ProjectID   string
 	ProjectName string
+}
+
+type automationInvoiceOverdueAction struct {
+	InvoiceID     string
+	InvoiceNumber string
+	ProjectID     *string
+	Title         string
+	Description   string
+	Priority      string
+	DueDate       *string
+	PlannedDate   *string
+}
+
+type automationInvoiceEventSnapshot struct {
+	InvoiceNumber string  `json:"invoice_number"`
+	ClientID      string  `json:"client_id"`
+	ProjectID     *string `json:"project_id"`
+	AmountMinor   int64   `json:"amount_minor"`
+	Currency      string  `json:"currency"`
+	Status        string  `json:"status"`
+	IssueDate     string  `json:"issue_date"`
+	DueDate       string  `json:"due_date"`
+	PaidDate      *string `json:"paid_date"`
+	Notes         string  `json:"notes"`
+	Version       int64   `json:"version"`
 }
 
 type automationRunOutput struct {
@@ -128,6 +159,56 @@ func (a *API) executeProjectCompletionAutomationsSafely(tx *gorm.DB, eventID str
 		_ = tx.RollbackTo(savepoint).Error
 		if a.options.Logger != nil {
 			a.options.Logger.Print("project completion Automation failed without changing the source Project")
+		}
+	}
+}
+
+func executeInvoiceOverdueAutomations(tx *gorm.DB, eventID string, invoice models.Invoice, nowText string) error {
+	var rule models.AutomationRule
+	err := tx.First(&rule, "preset_key = ? AND enabled = 1", automationPresetInvoiceOverdue).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var existing int64
+	if err := tx.Model(&models.AutomationRun{}).Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Count(&existing).Error; err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
+	config, err := decodeAutomationConfig(rule.PresetKey, rule.ConfigJSON)
+	if err != nil {
+		return err
+	}
+	now, err := time.Parse(time.RFC3339Nano, nowText)
+	if err != nil {
+		return err
+	}
+	sourceEventID := eventID
+	action := automationInvoiceOverdueActionSnapshot(invoice, config.Priority)
+	_, err = executeAutomationAttempt(tx, automationAttemptInput{
+		Rule: rule, TriggerType: "event", SourceEventID: &sourceEventID,
+		LogicalKey: "event:" + rule.ID + ":" + eventID, Attempt: 1,
+		Config: config, ActionSnapshot: action, Now: now.UTC(),
+	})
+	return err
+}
+
+func (a *API) executeInvoiceOverdueAutomationsSafely(tx *gorm.DB, eventID string, invoice models.Invoice, nowText string) {
+	const savepoint = "invoice_overdue_automation"
+	if err := tx.SavePoint(savepoint).Error; err != nil {
+		if a.options.Logger != nil {
+			a.options.Logger.Print("Invoice overdue Automation could not create an isolation boundary")
+		}
+		return
+	}
+	if err := executeInvoiceOverdueAutomations(tx, eventID, invoice, nowText); err != nil {
+		_ = tx.RollbackTo(savepoint).Error
+		if a.options.Logger != nil {
+			a.options.Logger.Print("Invoice overdue Automation failed without changing the source Invoice")
 		}
 	}
 }
@@ -273,8 +354,18 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 	}
 	errorCode := "ACTION_WRITE_FAILED"
 	retryable := input.Attempt < automationMaxAttempts
-	if errors.Is(actionErr, errAutomationInboxSourceConflict) {
+	switch {
+	case errors.Is(actionErr, errAutomationInboxSourceConflict):
 		errorCode = "SOURCE_EVENT_CONFLICT"
+		retryable = false
+	case errors.Is(actionErr, errAutomationActionSnapshotInvalid):
+		errorCode = "ACTION_SNAPSHOT_INVALID"
+		retryable = false
+	case errors.Is(actionErr, errAutomationAttemptContractInvalid):
+		errorCode = "ATTEMPT_CONTRACT_INVALID"
+		retryable = false
+	case errors.Is(actionErr, errAutomationSourceEventInvalid):
+		errorCode = "SOURCE_EVENT_INVALID"
 		retryable = false
 	}
 	var retryAt *string
@@ -307,9 +398,14 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 
 func executeAutomationAction(tx *gorm.DB, runID string, input automationAttemptInput, nowText string) (automationActionResult, error) {
 	actionType, _ := input.ActionSnapshot["action_type"].(string)
+	if input.Rule.PresetKey == automationPresetInvoiceOverdue && actionType != "task" {
+		return automationActionResult{}, errAutomationActionSnapshotInvalid
+	}
 	switch actionType {
 	case "inbox_item":
 		return createAutomationInboxItem(tx, runID, input, nowText)
+	case "task":
+		return createAutomationInvoiceOverdueTask(tx, runID, input, nowText)
 	case "reminder":
 		return createAutomationReminder(tx, runID, input, nowText)
 	default:
@@ -424,6 +520,271 @@ func validateAutomationProjectCompletionInboxAttempt(
 		return errors.New("automation Inbox source event snapshot is invalid")
 	}
 	return nil
+}
+
+func automationInvoiceOverdueActionSnapshot(invoice models.Invoice, priority string) map[string]any {
+	var projectID any
+	if invoice.ProjectID != nil {
+		projectID = *invoice.ProjectID
+	}
+	return map[string]any{
+		"action_type":    "task",
+		"invoice_id":     invoice.ID,
+		"invoice_number": invoice.InvoiceNumber,
+		"project_id":     projectID,
+		"title":          automationInvoiceOverdueTaskTitle(invoice.InvoiceNumber),
+		"description": automationInvoiceOverdueTaskDescription(
+			invoice.InvoiceNumber, invoice.DueDate, invoice.AmountMinor, invoice.Currency,
+		),
+		"kind":          "followup",
+		"status":        "todo",
+		"review_policy": "none",
+		"priority":      priority,
+		// An Invoice due date is already in the past and is not a safe Task
+		// deadline. The source event also carries no owner-selected planning
+		// date, so neither field is invented by this preset.
+		"due_date":     nil,
+		"planned_date": nil,
+	}
+}
+
+func createAutomationInvoiceOverdueTask(
+	tx *gorm.DB,
+	runID string,
+	input automationAttemptInput,
+	nowText string,
+) (automationActionResult, error) {
+	action, err := automationInvoiceOverdueActionFromSnapshot(input.ActionSnapshot)
+	if err != nil {
+		return automationActionResult{}, err
+	}
+	if err := validateAutomationInvoiceOverdueTaskAttempt(tx, input, action); err != nil {
+		return automationActionResult{}, err
+	}
+	if action.ProjectID != nil {
+		if err := requireAssignableProject(tx, *action.ProjectID); err != nil {
+			return automationActionResult{}, err
+		}
+	}
+	task := models.Task{
+		ID: uuid.NewString(), Title: action.Title, Description: action.Description,
+		Kind: "followup", Status: "todo", ReviewPolicy: "none", Priority: action.Priority,
+		ProjectID: action.ProjectID, DueDate: action.DueDate, PlannedDate: action.PlannedDate,
+		ActualMinutes: 0, Version: 1, CreatedAt: nowText, UpdatedAt: nowText,
+	}
+	if err := tx.Create(&task).Error; err != nil {
+		return automationActionResult{}, err
+	}
+	if err := recordAutomationTaskCreatedWorkflowEvent(tx, task, runID, input, action.InvoiceID, nowText); err != nil {
+		return automationActionResult{}, err
+	}
+	return automationActionResult{Type: "task", ID: task.ID, Summary: "已创建本地发票逾期跟进任务。"}, nil
+}
+
+func automationInvoiceOverdueActionFromSnapshot(snapshot map[string]any) (automationInvoiceOverdueAction, error) {
+	actionType, actionTypeOK := snapshot["action_type"].(string)
+	invoiceID, invoiceIDOK := snapshot["invoice_id"].(string)
+	invoiceNumber, invoiceNumberOK := snapshot["invoice_number"].(string)
+	title, titleOK := snapshot["title"].(string)
+	description, descriptionOK := snapshot["description"].(string)
+	kind, kindOK := snapshot["kind"].(string)
+	status, statusOK := snapshot["status"].(string)
+	reviewPolicy, reviewPolicyOK := snapshot["review_policy"].(string)
+	priority, priorityOK := snapshot["priority"].(string)
+	projectID, projectOK := automationSnapshotOptionalString(snapshot, "project_id")
+	dueDate, dueOK := automationSnapshotOptionalString(snapshot, "due_date")
+	plannedDate, plannedOK := automationSnapshotOptionalString(snapshot, "planned_date")
+	if len(snapshot) != 12 || !actionTypeOK || actionType != "task" || !invoiceIDOK ||
+		!invoiceNumberOK || !titleOK || !descriptionOK || !kindOK || kind != "followup" ||
+		!statusOK || status != "todo" || !reviewPolicyOK || reviewPolicy != "none" ||
+		!priorityOK || !projectOK || !dueOK || dueDate != nil || !plannedOK || plannedDate != nil {
+		return automationInvoiceOverdueAction{}, errAutomationActionSnapshotInvalid
+	}
+	if !validCanonicalAutomationUUID(invoiceID) || strings.TrimSpace(invoiceNumber) != invoiceNumber ||
+		len([]rune(invoiceNumber)) < 1 || len([]rune(invoiceNumber)) > 80 ||
+		strings.TrimSpace(title) != title || len([]rune(title)) < 2 || len([]rune(title)) > 200 ||
+		title != automationInvoiceOverdueTaskTitle(invoiceNumber) || len([]rune(description)) > 10_000 {
+		return automationInvoiceOverdueAction{}, errAutomationActionSnapshotInvalid
+	}
+	if projectID != nil && !validCanonicalAutomationUUID(*projectID) {
+		return automationInvoiceOverdueAction{}, errAutomationActionSnapshotInvalid
+	}
+	if _, valid := validPriorities[priority]; !valid {
+		return automationInvoiceOverdueAction{}, errAutomationActionSnapshotInvalid
+	}
+	return automationInvoiceOverdueAction{
+		InvoiceID: invoiceID, InvoiceNumber: invoiceNumber, ProjectID: projectID,
+		Title: title, Description: description, Priority: priority,
+		DueDate: dueDate, PlannedDate: plannedDate,
+	}, nil
+}
+
+func automationSnapshotOptionalString(snapshot map[string]any, key string) (*string, bool) {
+	value, exists := snapshot[key]
+	if !exists {
+		return nil, false
+	}
+	if value == nil {
+		return nil, true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return nil, false
+	}
+	return &text, true
+}
+
+func validateAutomationInvoiceOverdueTaskAttempt(
+	tx *gorm.DB,
+	input automationAttemptInput,
+	action automationInvoiceOverdueAction,
+) error {
+	preset, presetOK := automationPresetByKey(input.Rule.PresetKey)
+	if !presetOK || input.Rule.PresetKey != automationPresetInvoiceOverdue || !preset.Available ||
+		preset.ID != input.Rule.ID || preset.TriggerType != "event" || preset.ActionType != "task" ||
+		!input.Rule.Enabled || input.Rule.Version < 1 || !validCanonicalAutomationUUID(input.Rule.ID) ||
+		input.TriggerType != "event" || input.SourceEventID == nil ||
+		!validCanonicalAutomationUUID(*input.SourceEventID) || input.ScheduledFor != nil ||
+		input.LogicalKey != "event:"+input.Rule.ID+":"+*input.SourceEventID ||
+		input.Attempt < 1 || input.Attempt > automationMaxAttempts ||
+		input.Config.Priority != action.Priority || input.Config.LocalTime != "" || input.Config.Timezone != "" {
+		return errAutomationAttemptContractInvalid
+	}
+	if (input.Attempt == 1 && input.RetryOfRunID != nil) ||
+		(input.Attempt > 1 && (input.RetryOfRunID == nil || !validCanonicalAutomationUUID(*input.RetryOfRunID))) {
+		return errAutomationAttemptContractInvalid
+	}
+	var sourceEvent models.WorkflowEvent
+	if err := tx.First(&sourceEvent, "id = ?", *input.SourceEventID).Error; err != nil {
+		return fmt.Errorf("%w: source Workflow Event is missing", errAutomationSourceEventInvalid)
+	}
+	if sourceEvent.AggregateType != "invoice" || sourceEvent.AggregateID != action.InvoiceID ||
+		sourceEvent.Action != "invoice_overdue" || sourceEvent.ActorID == nil ||
+		*sourceEvent.ActorID != models.BuiltinSystemActorID || sourceEvent.CommandSeq == nil ||
+		*sourceEvent.CommandSeq != 1 || sourceEvent.PreviousJSON == nil || sourceEvent.CurrentJSON == nil ||
+		sourceEvent.AssignmentID != nil || sourceEvent.SubmissionID != nil ||
+		sourceEvent.ArtifactID != nil || sourceEvent.AgentRunID != nil {
+		return fmt.Errorf("%w: source Workflow Event contract is invalid", errAutomationSourceEventInvalid)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, sourceEvent.CreatedAt); err != nil {
+		return fmt.Errorf("%w: source Workflow Event timestamp is invalid", errAutomationSourceEventInvalid)
+	}
+	previous, err := decodeAutomationInvoiceEventSnapshot(*sourceEvent.PreviousJSON)
+	if err != nil {
+		return fmt.Errorf("%w: previous Invoice snapshot is invalid", errAutomationSourceEventInvalid)
+	}
+	current, err := decodeAutomationInvoiceEventSnapshot(*sourceEvent.CurrentJSON)
+	if err != nil {
+		return fmt.Errorf("%w: current Invoice snapshot is invalid", errAutomationSourceEventInvalid)
+	}
+	if !validAutomationInvoiceEventSnapshot(previous) || !validAutomationInvoiceEventSnapshot(current) ||
+		(previous.Status != "sent" && previous.Status != "viewed") || current.Status != "overdue" ||
+		current.Version != previous.Version+1 || !sameAutomationInvoiceTransitionFacts(previous, current) {
+		return fmt.Errorf("%w: Invoice transition snapshot is invalid", errAutomationSourceEventInvalid)
+	}
+	if current.InvoiceNumber != action.InvoiceNumber || !sameOptionalString(current.ProjectID, action.ProjectID) ||
+		action.Title != automationInvoiceOverdueTaskTitle(current.InvoiceNumber) ||
+		action.Description != automationInvoiceOverdueTaskDescription(
+			current.InvoiceNumber, current.DueDate, current.AmountMinor, current.Currency,
+		) {
+		return fmt.Errorf("%w: action does not match the Invoice source snapshot", errAutomationActionSnapshotInvalid)
+	}
+	return nil
+}
+
+func decodeAutomationInvoiceEventSnapshot(raw string) (automationInvoiceEventSnapshot, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil || len(fields) != 11 {
+		return automationInvoiceEventSnapshot{}, errors.New("Invoice event snapshot must contain the exact field set")
+	}
+	for _, key := range []string{
+		"invoice_number", "client_id", "project_id", "amount_minor", "currency", "status",
+		"issue_date", "due_date", "paid_date", "notes", "version",
+	} {
+		if _, ok := fields[key]; !ok {
+			return automationInvoiceEventSnapshot{}, errors.New("Invoice event snapshot is missing a required field")
+		}
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var snapshot automationInvoiceEventSnapshot
+	if err := decoder.Decode(&snapshot); err != nil {
+		return automationInvoiceEventSnapshot{}, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return automationInvoiceEventSnapshot{}, errors.New("Invoice event snapshot contains trailing JSON")
+	}
+	return snapshot, nil
+}
+
+func validAutomationInvoiceEventSnapshot(snapshot automationInvoiceEventSnapshot) bool {
+	if strings.TrimSpace(snapshot.InvoiceNumber) != snapshot.InvoiceNumber ||
+		len([]rune(snapshot.InvoiceNumber)) < 1 || len([]rune(snapshot.InvoiceNumber)) > 80 ||
+		!validCanonicalAutomationUUID(snapshot.ClientID) || snapshot.AmountMinor < 1 ||
+		snapshot.AmountMinor > maxInvoiceAmountMinor || snapshot.Version < 1 ||
+		!validDate(snapshot.IssueDate) || !validDate(snapshot.DueDate) || snapshot.DueDate < snapshot.IssueDate ||
+		snapshot.PaidDate != nil || len([]rune(snapshot.Notes)) > 10_000 {
+		return false
+	}
+	if snapshot.ProjectID != nil && !validCanonicalAutomationUUID(*snapshot.ProjectID) {
+		return false
+	}
+	currency, err := normalizeInvoiceCurrency(snapshot.Currency)
+	return err == nil && currency == snapshot.Currency
+}
+
+func sameAutomationInvoiceTransitionFacts(previous, current automationInvoiceEventSnapshot) bool {
+	return previous.InvoiceNumber == current.InvoiceNumber && previous.ClientID == current.ClientID &&
+		sameOptionalString(previous.ProjectID, current.ProjectID) && previous.AmountMinor == current.AmountMinor &&
+		previous.Currency == current.Currency && previous.IssueDate == current.IssueDate &&
+		previous.DueDate == current.DueDate && previous.PaidDate == nil && current.PaidDate == nil &&
+		previous.Notes == current.Notes
+}
+
+func recordAutomationTaskCreatedWorkflowEvent(
+	tx *gorm.DB,
+	task models.Task,
+	runID string,
+	input automationAttemptInput,
+	invoiceID string,
+	nowText string,
+) error {
+	current, err := json.Marshal(map[string]any{
+		"id": task.ID, "title": task.Title, "description": task.Description,
+		"kind": task.Kind, "status": task.Status, "review_policy": task.ReviewPolicy,
+		"priority": task.Priority, "project_id": task.ProjectID,
+		"due_date": task.DueDate, "planned_date": task.PlannedDate, "version": task.Version,
+		"automation_rule_id": input.Rule.ID, "automation_run_id": runID,
+		"automation_preset_key": input.Rule.PresetKey, "source_event_id": input.SourceEventID,
+		"invoice_id": invoiceID,
+	})
+	if err != nil {
+		return err
+	}
+	actorID := models.BuiltinSystemActorID
+	commandSequence := 1
+	currentText := string(current)
+	event := models.WorkflowEvent{
+		ID: uuid.NewString(), AggregateType: "task", AggregateID: task.ID,
+		Action: "task_created_from_automation", ActorID: &actorID, CommandSeq: &commandSequence,
+		CurrentJSON: &currentText, CreatedAt: nowText,
+	}
+	return tx.Create(&event).Error
+}
+
+func automationInvoiceOverdueTaskTitle(invoiceNumber string) string {
+	value := []rune("跟进逾期发票：" + invoiceNumber)
+	if len(value) > 200 {
+		value = value[:200]
+	}
+	return string(value)
+}
+
+func automationInvoiceOverdueTaskDescription(invoiceNumber, dueDate string, amountMinor int64, currency string) string {
+	return fmt.Sprintf(
+		"发票 %s 已逾期（原到期日：%s，金额：%s）。请人工跟进并记录结果；自动化不会发送邮件、发票或客户消息。",
+		invoiceNumber, dueDate, formatInvoiceDueAmount(amountMinor, currency),
+	)
 }
 
 func createAutomationReminder(tx *gorm.DB, runID string, input automationAttemptInput, nowText string) (automationActionResult, error) {

@@ -106,6 +106,69 @@ describe("Automation API contract", () => {
     });
   });
 
+  it("normalizes the available invoice overdue task preset and its task result", async () => {
+    const invoiceRule = rulePayload({
+      id: "00000000-0000-5000-8000-000000000104",
+      preset_key: "invoice-overdue-task",
+      name: "发票逾期跟进",
+      description:
+        "发票进入逾期状态后创建本地跟进任务；不会自动发送邮件或客户消息。",
+      trigger_type: "event",
+      trigger_label: "发票工作流事件：invoice_overdue",
+      action_type: "task",
+      action_label: "创建“跟进逾期发票”本地任务",
+      config: { priority: "P1" },
+      permissions: [
+        "读取本地发票逾期事件",
+        "创建一条本地跟进任务",
+        "记录本地自动化运行",
+      ],
+      unavailable_reason: "",
+    });
+    const invoiceRun = runPayload({
+      rule_id: invoiceRule.id,
+      preset_key: invoiceRule.preset_key,
+      rule_name: invoiceRule.name,
+      trigger_type: "event",
+      source_event_id: "018f0000-0000-7000-8000-000000001611",
+      scheduled_for: null,
+      config_snapshot: { priority: "P1" },
+      action_snapshot: { action_type: "task", title: "跟进逾期发票" },
+      result_type: "task",
+      result_id: "018f0000-0000-7000-8000-000000001612",
+      result_summary: "已创建本地发票跟进任务。",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: [invoiceRule] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [invoiceRun],
+          meta: { page: 1, page_size: 20, total: 1 },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [rule] = await getAutomationRules();
+    const runs = await getAutomationRuns();
+
+    expect(rule).toMatchObject({
+      presetKey: "invoice-overdue-task",
+      status: "disabled",
+      available: true,
+      unavailableReason: "",
+      triggerType: "event",
+      actionType: "task",
+      config: { priority: "P1" },
+    });
+    expect(runs.items[0]).toMatchObject({
+      presetKey: "invoice-overdue-task",
+      resultType: "task",
+      resultId: "018f0000-0000-7000-8000-000000001612",
+      resultSummary: "已创建本地发票跟进任务。",
+    });
+  });
+
   it("serializes preview, update, commands and retry with optimistic locking", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {

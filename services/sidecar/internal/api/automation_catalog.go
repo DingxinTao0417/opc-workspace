@@ -65,12 +65,11 @@ var automationPresets = []automationPresetDefinition{
 	},
 	{
 		ID: "00000000-0000-5000-8000-000000000104", PresetKey: automationPresetInvoiceOverdue,
-		Name: "发票逾期跟进", Description: "发票逾期后创建本地跟进任务。",
-		TriggerType: "event", TriggerLabel: "Invoice overdue event",
-		ActionType: "task", ActionLabel: "创建本地发票跟进任务",
-		UnavailableReason: "发票模块尚未交付，当前没有可消费的逾期事实。",
-		DefaultConfig:     automationConfig{Priority: "P1"},
-		Permissions:       []string{"读取本地发票逾期事件", "创建一条本地 Task", "记录本地 Automation Run"},
+		Name: "发票逾期跟进", Description: "发票进入逾期状态后创建本地跟进任务；不会自动发送邮件或客户消息。",
+		TriggerType: "event", TriggerLabel: "发票工作流事件：invoice_overdue",
+		ActionType: "task", ActionLabel: "创建“跟进逾期发票”本地任务",
+		Available: true, DefaultConfig: automationConfig{Priority: "P1"},
+		Permissions: []string{"读取本地发票逾期事件", "创建一条本地跟进任务", "记录本地自动化运行"},
 	},
 	{
 		ID: "00000000-0000-5000-8000-000000000105", PresetKey: automationPresetAgentRunFailed,

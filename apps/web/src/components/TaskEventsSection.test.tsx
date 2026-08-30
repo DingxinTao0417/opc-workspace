@@ -75,6 +75,28 @@ describe("TaskEventsSection", () => {
     expect(screen.getByText(/我/)).toBeVisible();
   });
 
+  it("labels a task created by automation instead of using the generic fallback", async () => {
+    apiMocks.getTaskEvents.mockResolvedValue({
+      items: [
+        {
+          ...event,
+          action: "task_created_from_automation",
+          actor: null,
+          commandSeq: null,
+          previous: null,
+          current: { status: "todo", version: 1 },
+        },
+      ],
+      meta: { page: 1, pageSize: 20, total: 1, taskVersion: 1 },
+    });
+    renderSection();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看记录" }));
+
+    expect(await screen.findByText("自动化创建任务")).toBeVisible();
+    expect(screen.queryByText("任务记录已更新")).toBeNull();
+  });
+
   it("translates internal assignment reasons and migration events", async () => {
     apiMocks.getTaskEvents.mockResolvedValue({
       items: [

@@ -42,20 +42,36 @@ func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
 	if len(catalog.Data) != 5 {
 		t.Fatalf("automation catalog count = %d, want 5", len(catalog.Data))
 	}
-	var daily, invoice *automationRuleOutput
+	var daily, invoice, agent *automationRuleOutput
 	for index := range catalog.Data {
 		switch catalog.Data[index].PresetKey {
 		case automationPresetDailyToday:
 			daily = &catalog.Data[index]
 		case automationPresetInvoiceOverdue:
 			invoice = &catalog.Data[index]
+		case automationPresetAgentRunFailed:
+			agent = &catalog.Data[index]
 		}
 	}
 	if daily == nil || !daily.Available || daily.Status != "disabled" || daily.Config.LocalTime != "09:00" || daily.Config.Timezone != "UTC" {
 		t.Fatalf("daily preset = %#v", daily)
 	}
-	if invoice == nil || invoice.Available || invoice.Status != "unavailable" || invoice.UnavailableReason == "" {
+	if invoice == nil || !invoice.Available || invoice.Status != "disabled" || invoice.UnavailableReason != "" ||
+		invoice.Name != "发票逾期跟进" || invoice.TriggerLabel != "发票工作流事件：invoice_overdue" ||
+		invoice.ActionLabel != "创建“跟进逾期发票”本地任务" || invoice.Config.Priority != "P1" {
 		t.Fatalf("invoice preset = %#v", invoice)
+	}
+	wantInvoicePermissions := []string{"读取本地发票逾期事件", "创建一条本地跟进任务", "记录本地自动化运行"}
+	if len(invoice.Permissions) != len(wantInvoicePermissions) {
+		t.Fatalf("invoice permissions = %#v", invoice.Permissions)
+	}
+	for index := range wantInvoicePermissions {
+		if invoice.Permissions[index] != wantInvoicePermissions[index] {
+			t.Fatalf("invoice permissions = %#v", invoice.Permissions)
+		}
+	}
+	if agent == nil || agent.Available || agent.Status != "unavailable" || agent.UnavailableReason == "" {
+		t.Fatalf("agent preset = %#v", agent)
 	}
 
 	preview := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+daily.ID+"/preview", []byte(`{
@@ -69,7 +85,17 @@ func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
 	}`), nil)
 	assertAPIError(t, invalidPreview, http.StatusUnprocessableEntity, "VALIDATION_ERROR")
 
-	unavailable := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+invoice.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	enabledInvoice := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+invoice.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	if enabledInvoice.Code != http.StatusOK {
+		t.Fatalf("enable Invoice automation = %d: %s", enabledInvoice.Code, enabledInvoice.Body.String())
+	}
+	var enabledInvoiceRule automationRuleEnvelope
+	if err := json.Unmarshal(enabledInvoice.Body.Bytes(), &enabledInvoiceRule); err != nil ||
+		enabledInvoiceRule.Data.Status != "enabled" || enabledInvoiceRule.Data.Version != 2 {
+		t.Fatalf("enabled Invoice automation = %#v err=%v", enabledInvoiceRule.Data, err)
+	}
+
+	unavailable := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+agent.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
 	assertAPIError(t, unavailable, http.StatusConflict, "AUTOMATION_DEPENDENCY_UNAVAILABLE")
 }
 

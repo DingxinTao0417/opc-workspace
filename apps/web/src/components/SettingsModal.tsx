@@ -592,13 +592,15 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
   };
 
-  const close = () => {
+  const closeTo = (destination: string) => {
     if (saving) return;
     queueCloseToTrayPreview(getGeneralSettings().closeToTray);
     cancelPreview();
-    navigate(initialLocation.current);
+    navigate(destination);
     setOpen(false);
   };
+
+  const close = () => closeTo(initialLocation.current);
 
   const previewTheme = (theme: AppearanceTheme) => {
     setThemeDraft(theme);
@@ -1011,7 +1013,13 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
 
     if (activeModule === "automation") {
-      return <AutomationSettings />;
+      return (
+        <AutomationSettings
+          onOpenTask={(taskId) =>
+            closeTo(`/tasks/${encodeURIComponent(taskId)}`)
+          }
+        />
+      );
     }
 
     if (activeModule === "data") {

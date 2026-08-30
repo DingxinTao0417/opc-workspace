@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock3,
   Inbox,
+  ListTodo,
   LoaderCircle,
   RefreshCw,
   RotateCcw,
@@ -66,7 +67,11 @@ function ruleStatusLabel(rule: AutomationRule): string {
   return "未启用";
 }
 
-export function AutomationSettings() {
+export function AutomationSettings({
+  onOpenTask,
+}: {
+  onOpenTask: (taskId: string) => void;
+}) {
   const rulesQuery = useAutomationRulesQuery();
   const runsQuery = useAutomationRunsQuery({ pageSize: 20 });
   const preview = usePreviewAutomationRule();
@@ -197,7 +202,10 @@ export function AutomationSettings() {
     <div className="automation-settings">
       <header className="settings-content-header">
         <h3>自动化</h3>
-        <p>启用受限的本地预设，让明确事件或时间触发 Inbox 与 Reminder 动作。</p>
+        <p>
+          启用受限的本地预设，让明确事件或时间触发 Inbox、Task 与 Reminder
+          动作。
+        </p>
       </header>
 
       <div className="automation-boundary-note">
@@ -251,15 +259,30 @@ export function AutomationSettings() {
             <strong>{selected.triggerLabel}</strong>
           </div>
           <div>
-            <Inbox size={15} />
-            <span>动作</span>
+            {selected.actionType === "task" ? (
+              <ListTodo aria-hidden="true" size={15} />
+            ) : selected.actionType === "reminder" ? (
+              <BellRing aria-hidden="true" size={15} />
+            ) : (
+              <Inbox aria-hidden="true" size={15} />
+            )}
+            <span>
+              动作 ·{" "}
+              {selected.actionType === "task"
+                ? "任务"
+                : selected.actionType === "reminder"
+                  ? "提醒"
+                  : "收件箱事项"}
+            </span>
             <strong>{selected.actionLabel}</strong>
           </div>
         </div>
 
         {selected.triggerType === "event" ? (
           <label className="automation-field">
-            <span>事项优先级</span>
+            <span>
+              {selected.actionType === "task" ? "任务优先级" : "事项优先级"}
+            </span>
             <select
               disabled={!selected.available || pending}
               onChange={(event) =>
@@ -462,6 +485,16 @@ export function AutomationSettings() {
                     type="button"
                   >
                     重试
+                  </button>
+                ) : run.status === "succeeded" &&
+                  run.resultType === "task" &&
+                  run.resultId ? (
+                  <button
+                    className="button button-secondary"
+                    onClick={() => onOpenTask(run.resultId!)}
+                    type="button"
+                  >
+                    打开任务
                   </button>
                 ) : null}
               </article>

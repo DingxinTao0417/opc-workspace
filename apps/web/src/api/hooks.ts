@@ -1725,7 +1725,14 @@ export function useRetryAutomationRun() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: retryAutomationRun,
-    onSuccess: async () => invalidateAutomationFacts(queryClient),
+    onSuccess: async (run) => {
+      await Promise.all([
+        invalidateAutomationFacts(queryClient),
+        ...(run.resultType === "task"
+          ? [queryClient.invalidateQueries({ queryKey: taskQueryKey })]
+          : []),
+      ]);
+    },
     onError: async () => {
       await queryClient.invalidateQueries({ queryKey: automationRunsQueryKey });
     },

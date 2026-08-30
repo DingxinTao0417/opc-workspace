@@ -485,8 +485,14 @@ func (a *API) transitionInvoice(c *gin.Context) {
 		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
 			return err
 		}
-		if err := recordInvoiceWorkflowEvent(tx, id, eventAction, actorID, previous, invoiceEventState(invoice), requestIDFromContext(c), now); err != nil {
+		event, err := recordInvoiceWorkflowEventWithID(
+			tx, id, eventAction, actorID, previous, invoiceEventState(invoice), requestIDFromContext(c), now,
+		)
+		if err != nil {
 			return err
+		}
+		if eventAction == "invoice_overdue" {
+			a.executeInvoiceOverdueAutomationsSafely(tx, event.ID, invoice, now)
 		}
 		row, err := loadInvoiceRow(tx, id)
 		if err != nil {
@@ -1017,11 +1023,21 @@ func invoiceEventState(invoice models.Invoice) map[string]any {
 }
 
 func recordInvoiceWorkflowEvent(tx *gorm.DB, invoiceID, action, actorID string, previous, current map[string]any, requestID, createdAt string) error {
+	_, err := recordInvoiceWorkflowEventWithID(tx, invoiceID, action, actorID, previous, current, requestID, createdAt)
+	return err
+}
+
+func recordInvoiceWorkflowEventWithID(
+	tx *gorm.DB,
+	invoiceID, action, actorID string,
+	previous, current map[string]any,
+	requestID, createdAt string,
+) (models.WorkflowEvent, error) {
 	var previousText, currentText *string
 	if previous != nil {
 		encoded, err := json.Marshal(previous)
 		if err != nil {
-			return err
+			return models.WorkflowEvent{}, err
 		}
 		value := string(encoded)
 		previousText = &value
@@ -1029,7 +1045,7 @@ func recordInvoiceWorkflowEvent(tx *gorm.DB, invoiceID, action, actorID string, 
 	if current != nil {
 		encoded, err := json.Marshal(current)
 		if err != nil {
-			return err
+			return models.WorkflowEvent{}, err
 		}
 		value := string(encoded)
 		currentText = &value
@@ -1039,11 +1055,15 @@ func recordInvoiceWorkflowEvent(tx *gorm.DB, invoiceID, action, actorID string, 
 		requestIDValue = &requestID
 	}
 	sequence := 1
-	return tx.Create(&models.WorkflowEvent{
+	event := models.WorkflowEvent{
 		ID: uuid.NewString(), AggregateType: "invoice", AggregateID: invoiceID, Action: action,
 		ActorID: &actorID, RequestID: requestIDValue, CommandSeq: &sequence,
 		PreviousJSON: previousText, CurrentJSON: currentText, CreatedAt: createdAt,
-	}).Error
+	}
+	if err := tx.Create(&event).Error; err != nil {
+		return models.WorkflowEvent{}, err
+	}
+	return event, nil
 }
 
 func normalizeRequiredInvoiceUUID(raw, field string) (string, error) {

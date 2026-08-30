@@ -25,6 +25,9 @@ const desktopApi = vi.hoisted(() => ({
   getRuntimeDiagnostics: vi.fn(),
   setCloseToTrayEnabled: vi.fn(),
 }));
+const automationSettings = vi.hoisted(() => ({
+  resultTaskId: "018f0000-0000-7000-8000-000000001612",
+}));
 
 vi.mock("../api/desktop", async (importActual) => {
   const actual = await importActual<typeof import("../api/desktop")>();
@@ -34,6 +37,21 @@ vi.mock("../api/desktop", async (importActual) => {
     setCloseToTrayEnabled: desktopApi.setCloseToTrayEnabled,
   };
 });
+
+vi.mock("./AutomationSettings", () => ({
+  AutomationSettings: ({
+    onOpenTask,
+  }: {
+    onOpenTask: (taskId: string) => void;
+  }) => (
+    <button
+      onClick={() => onOpenTask(automationSettings.resultTaskId)}
+      type="button"
+    >
+      打开任务
+    </button>
+  ),
+}));
 
 function LocationProbe() {
   const location = useLocation();
@@ -850,5 +868,31 @@ describe("SettingsModal", () => {
     expect(await screen.findByText("这里只记录责任归属")).toBeTruthy();
     expect(screen.getByText("人员资料通过模块内按钮单独保存")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
+  it("closes settings and opens a successful automation result task", async () => {
+    useUiStore.setState({ settingsOpen: true, settingsModule: "automation" });
+    renderSettings();
+
+    expect(
+      await screen.findByRole("button", { name: "打开任务" }),
+    ).toBeVisible();
+    const currentSettings = useSettingsStore.getState();
+    currentSettings.setPreview({
+      focus: { ...DEFAULT_FOCUS_SETTINGS, focusMinutes: 55 },
+      general: DEFAULT_GENERAL_SETTINGS,
+      profile: DEFAULT_PROFILE_SETTINGS,
+      theme: DEFAULT_THEME,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开任务" }));
+
+    await waitFor(() => {
+      expect(useUiStore.getState().settingsOpen).toBe(false);
+      expect(useSettingsStore.getState().preview).toBeNull();
+      expect(screen.getByTestId("current-location")).toHaveTextContent(
+        `/tasks/${automationSettings.resultTaskId}`,
+      );
+    });
   });
 });

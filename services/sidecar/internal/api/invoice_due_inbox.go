@@ -137,12 +137,14 @@ func (a *API) projectInvoiceDue(ctx context.Context, id, today string, now time.
 			if err := tx.Where("id = ?", row.ID).Take(&row.Invoice).Error; err != nil {
 				return err
 			}
-			if err := recordInvoiceWorkflowEvent(
+			event, err := recordInvoiceWorkflowEventWithID(
 				tx, row.ID, "invoice_overdue", models.BuiltinSystemActorID,
 				previous, invoiceEventState(row.Invoice), "", createdAt,
-			); err != nil {
+			)
+			if err != nil {
 				return err
 			}
+			a.executeInvoiceOverdueAutomationsSafely(tx, event.ID, row.Invoice, createdAt)
 		}
 		if dueState == "overdue" && row.Status != "overdue" {
 			return nil

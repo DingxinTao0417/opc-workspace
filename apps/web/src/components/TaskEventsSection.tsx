@@ -13,6 +13,7 @@ import {
   UserRound,
   UserRoundCog,
   XCircle,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -30,6 +31,7 @@ interface EventPresentation {
 }
 
 const eventPresentations: Record<string, EventPresentation> = {
+  task_created_from_automation: { icon: Zap, label: "自动化创建任务" },
   task_started: { icon: CirclePlay, label: "开始执行任务" },
   task_blocked: { icon: ShieldAlert, label: "将任务标记为阻塞" },
   task_unblocked: { icon: RotateCcw, label: "解除任务阻塞" },
