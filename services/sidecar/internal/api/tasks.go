@@ -890,6 +890,17 @@ func (a *API) deleteTask(c *gin.Context) {
 				"Stop, cancel, or recover the open Focus Session before deleting this task",
 			)
 		}
+		var contentItemCount int64
+		if err := tx.Table("content_item_tasks").Where("task_id = ?", id).Count(&contentItemCount).Error; err != nil {
+			return err
+		}
+		if contentItemCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"TASK_CONTENT_ITEMS_EXIST",
+				"Unlink the Task from Content Items before deleting it",
+			)
+		}
 		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
 		if err := coordinateTaskBlockedInboxSourceDeletion(
 			tx,

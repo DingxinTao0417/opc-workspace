@@ -506,6 +506,117 @@ func TestTaskBlockedSourceProtectsDeleteAndKeepsSnapshot(t *testing.T) {
 	}
 }
 
+func TestTaskDeleteRejectsContentItemLinkWithoutSideEffects(t *testing.T) {
+	router, store := newActorTestAPI(t)
+	task := createTaskForTaskFacts(t, router, `{"title":"Content-linked task"}`)
+
+	blockedRecorder := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/block",
+		[]byte(`{"reason":"Create a terminal source snapshot"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if blockedRecorder.Code != http.StatusOK {
+		t.Fatalf("block Task = %d: %s", blockedRecorder.Code, blockedRecorder.Body.String())
+	}
+	var source models.InboxItem
+	if err := store.DB.First(&source, "source_event_key = ?", taskBlockedEventKey(task.ID, 2)).Error; err != nil {
+		t.Fatalf("load blocked Task source: %v", err)
+	}
+	resolved := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+source.ID+"/resolve",
+		[]byte(`{"reason":"Source acknowledged"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("resolve blocked Task source = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	if err := store.DB.First(&source, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("reload resolved Task source: %v", err)
+	}
+	unblocked := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/tasks/"+task.ID+"/unblock",
+		[]byte(`{}`),
+		map[string]string{"If-Match": `"2"`},
+	)
+	if unblocked.Code != http.StatusOK || decodeTaskLifecycleResponse(t, unblocked.Body.Bytes()).Task.Version != 3 {
+		t.Fatalf("unblock Task = %d: %s", unblocked.Code, unblocked.Body.String())
+	}
+
+	contentRecorder := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/content-items",
+		[]byte(`{"title":"Content delete guard","platform":"local"}`),
+		nil,
+	)
+	if contentRecorder.Code != http.StatusCreated {
+		t.Fatalf("create Content Item = %d: %s", contentRecorder.Code, contentRecorder.Body.String())
+	}
+	contentItem := decodeContentItemResponse(t, contentRecorder.Body.Bytes())
+	linkedRecorder := performRequest(
+		router,
+		http.MethodPost,
+		"/api/v1/content-items/"+contentItem.ID+"/tasks",
+		[]byte(fmt.Sprintf(`{"task_id":%q,"is_required":true}`, task.ID)),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if linkedRecorder.Code != http.StatusCreated {
+		t.Fatalf("link Task to Content Item = %d: %s", linkedRecorder.Code, linkedRecorder.Body.String())
+	}
+	linked := decodeContentItemResponse(t, linkedRecorder.Body.Bytes())
+
+	deleted := performRequest(
+		router,
+		http.MethodDelete,
+		"/api/v1/tasks/"+task.ID,
+		nil,
+		map[string]string{"If-Match": `"3"`},
+	)
+	var failure errorResponse
+	if err := json.Unmarshal(deleted.Body.Bytes(), &failure); err != nil {
+		t.Fatalf("decode Task delete error: %v", err)
+	}
+	if deleted.Code != http.StatusConflict || failure.Code != "TASK_CONTENT_ITEMS_EXIST" ||
+		failure.Message != "Unlink the Task from Content Items before deleting it" {
+		t.Fatalf("Content-linked Task deletion = %d %#v", deleted.Code, failure)
+	}
+
+	var taskAfter models.Task
+	if err := store.DB.First(&taskAfter, "id = ?", task.ID).Error; err != nil {
+		t.Fatalf("load protected Task: %v", err)
+	}
+	if taskAfter.Version != 3 || taskAfter.Status != "todo" {
+		t.Fatalf("protected Task changed = %#v", taskAfter)
+	}
+	contentAfter := performRequest(router, http.MethodGet, "/api/v1/content-items/"+contentItem.ID, nil, nil)
+	if contentAfter.Code != http.StatusOK {
+		t.Fatalf("load protected Content Item = %d: %s", contentAfter.Code, contentAfter.Body.String())
+	}
+	retainedContent := decodeContentItemResponse(t, contentAfter.Body.Bytes())
+	if retainedContent.Version != linked.Version || len(retainedContent.Tasks) != 1 || retainedContent.Tasks[0].ID != task.ID {
+		t.Fatalf("protected Content Item link changed = %#v", retainedContent)
+	}
+	var sourceAfter models.InboxItem
+	if err := store.DB.First(&sourceAfter, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load protected Task source: %v", err)
+	}
+	if sourceAfter.SourceDeletedAt != nil || sourceAfter.Status != source.Status || sourceAfter.Version != source.Version {
+		t.Fatalf("protected Task source changed = %#v", sourceAfter)
+	}
+	var sourceDeletedEvents int64
+	if err := store.DB.Model(&models.WorkflowEvent{}).
+		Where("aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_deleted'", source.ID).
+		Count(&sourceDeletedEvents).Error; err != nil || sourceDeletedEvents != 0 {
+		t.Fatalf("source_deleted events = %d, err=%v", sourceDeletedEvents, err)
+	}
+}
+
 func TestTaskLifecycleCancellationEndsBothRolesWithOneTaskVersion(t *testing.T) {
 	router, store := newActorTestAPI(t)
 	task := createTaskForTaskFacts(t, router, `{"title":"Cancel assigned task"}`)

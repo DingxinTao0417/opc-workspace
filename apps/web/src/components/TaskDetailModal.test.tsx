@@ -293,6 +293,28 @@ describe("TaskDetailModal", () => {
     expect(useUiStore.getState().taskDetailId).toBe(task.id);
   });
 
+  it("keeps the detail open and explains how to unlink Content Calendar items before deletion", async () => {
+    apiMocks.deleteTask.mockRejectedValueOnce(
+      new ApiError("Task is referenced by Content Calendar items", {
+        status: 409,
+        code: "TASK_CONTENT_ITEMS_EXIST",
+      }),
+    );
+    renderModal();
+
+    await screen.findByLabelText("任务名称");
+    fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(
+      await screen.findByText(
+        "该任务仍被内容日历条目引用。请先到内容日历解除任务关联，再删除任务。",
+      ),
+    ).toBeVisible();
+    expect(screen.getByLabelText("任务名称")).toBeVisible();
+    expect(useUiStore.getState().taskDetailId).toBe(task.id);
+  });
+
   it("keeps an unsaved task draft while an assignment write updates the task version", async () => {
     const updatedTask = {
       ...task,
