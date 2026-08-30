@@ -2,7 +2,7 @@
 
 > 文档版本：2.88
 > 日期：2026-08-29
-> 依据：[PRD v9.78](opc-workspace-PRD.md)
+> 依据：[PRD v9.79](opc-workspace-PRD.md)
 > 当前实现基线：app v0.1.0 / API v1 / SQLite schema v41
 
 > 2.88 说明：桌面新增白名单能力快照，设置运行诊断可读取托盘运行时可用性；未接入的通知、自启、文件对话框和离线更新只返回 `not_implemented`，能力读取失败与 Sidecar 生命周期诊断隔离。

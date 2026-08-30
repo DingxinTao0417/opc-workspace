@@ -257,6 +257,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const replaceCommitted = useSettingsStore((state) => state.replaceCommitted);
   const cancelPreview = useSettingsStore((state) => state.cancelPreview);
   const initialLocation = useRef("/today");
+  const activeModuleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeModule, setActiveModule] = useState<SettingsModule>("general");
   const [focusDraft, setFocusDraft] = useState<FocusSettings>(
     DEFAULT_FOCUS_SETTINGS,
@@ -328,6 +329,20 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       cancelled = true;
     };
   }, [activeModule, open, runtimeDiagnosticsSequence]);
+
+  useEffect(() => {
+    if (!open) return;
+    const button = activeModuleButtonRef.current;
+    if (!button) return;
+    const keepActiveModuleVisible = () =>
+      button.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    keepActiveModuleVisible();
+    const navigation = button.parentElement;
+    if (!navigation || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(keepActiveModuleVisible);
+    observer.observe(navigation);
+    return () => observer.disconnect();
+  }, [activeModule, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -1472,6 +1487,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
               data-active={activeModule === id}
               key={id}
               onClick={() => setActiveModule(id)}
+              ref={activeModule === id ? activeModuleButtonRef : undefined}
               type="button"
             >
               <Icon size={16} />

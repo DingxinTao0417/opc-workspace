@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29），本轮无桌面 migration。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出最小源码闭环，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.78](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.79](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -279,7 +279,7 @@
 - [x] 内置 Sidecar 最多按 500 ms、2 s 自动重启两次，当前 generation 连续 Ready 30 秒重置预算；只有真实 `Terminated` 才为已启动代际重拉，外部/shutdown/无 Terminated 流关闭均不触发。
 - [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确 child generation；并发调用共享一次 stop，ready 超时竞态不会伪造 exited，父管道 EOF 由 `OPC_EXIT_ON_STDIN_CLOSE=true` 触发 Go 优雅关闭。
 - [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，受管 child 只接受 code 0/no signal，未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试。
-- [x] 当前源码门禁通过 Web 全量 90 个文件 / 603 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘与能力快照新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
+- [x] 当前源码门禁通过 Web 全量 90 个文件 / 604 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘与能力快照新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收

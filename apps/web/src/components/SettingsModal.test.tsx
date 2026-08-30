@@ -523,6 +523,40 @@ describe("SettingsModal", () => {
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
   });
 
+  it("keeps the active settings module visible in a scrollable navigation", async () => {
+    const original = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    useUiStore.setState({ settingsOpen: true, settingsModule: "diagnostics" });
+
+    try {
+      renderSettings();
+
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          block: "nearest",
+          inline: "nearest",
+        }),
+      );
+    } finally {
+      if (original) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          original,
+        );
+      } else {
+        Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+      }
+    }
+  });
+
   it("labels a restarting desktop lifecycle in Chinese", async () => {
     desktopApi.getRuntimeDiagnostics.mockResolvedValue({
       environment: "desktop",
