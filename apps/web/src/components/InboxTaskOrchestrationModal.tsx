@@ -40,6 +40,7 @@ function sourceProjectId(item: InboxItem): string | null {
     item.sourceEntityType !== "task_artifact" &&
     item.sourceEntityType !== "task" &&
     item.sourceEntityType !== "task_due" &&
+    item.sourceEntityType !== "invoice_due" &&
     item.sourceEntityType !== "project_completion" &&
     item.sourceEntityType !== "automation"
   ) {

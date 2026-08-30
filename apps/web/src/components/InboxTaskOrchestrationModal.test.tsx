@@ -41,6 +41,36 @@ const item: InboxItem = {
   availableActions: ["edit", "read", "snooze", "resolve", "dismiss"],
 };
 
+function invoiceDueItem(projectId: string | null): InboxItem {
+  const invoiceId = "018f0000-0000-7000-8000-000000000826";
+  return {
+    ...item,
+    id: `inbox-invoice-${projectId ?? "unassigned"}`,
+    kind: "event",
+    title: "发票临期：INV-2026-0829",
+    sourceEntityType: "invoice_due",
+    sourceEntityId: invoiceId,
+    sourceEventKey: `invoice:${invoiceId}:due_soon:2026-09-01`,
+    dueAt: "2026-08-29T09:00:00+08:00",
+    payloadJson: {
+      invoice_id: invoiceId,
+      invoice_number: "INV-2026-0829",
+      client_id: "018f0000-0000-7000-8000-000000000827",
+      client_name: "星河设计事务所",
+      project_id: projectId,
+      project_name: projectId ? "来源项目" : null,
+      amount_minor: 128045,
+      currency: "CNY",
+      due_date: "2026-09-01",
+      due_state: "due_soon",
+      occurrence_date: "2026-08-29",
+      invoice_version: 4,
+      projected_at: "2026-08-29T08:00:00.123456789Z",
+      lead_days: 3,
+    },
+  };
+}
+
 const mocks = vi.hoisted(() => ({
   actors: vi.fn(),
   split: {
@@ -297,6 +327,105 @@ describe("InboxTaskOrchestrationModal", () => {
         }),
       ]),
     );
+  });
+
+  it("inherits a canonical Invoice snapshot Project and lets each draft clear or change it", async () => {
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={invoiceDueItem(sourceProjectId)}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+
+    const firstProject = screen.getByLabelText(
+      "第 1 个任务项目",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(firstProject.value).toBe(sourceProjectId));
+    expect(screen.getByText(/已从来源带入项目/)).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "核对临期发票" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
+    const projectInputs = screen.getAllByLabelText(/第 \d+ 个任务项目/);
+    expect((projectInputs[1] as HTMLSelectElement).value).toBe(sourceProjectId);
+
+    fireEvent.change(projectInputs[0], { target: { value: "" } });
+    fireEvent.change(projectInputs[1], { target: { value: "project-1" } });
+    fireEvent.change(screen.getAllByLabelText("任务名称")[1], {
+      target: { value: "准备跟进资料" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
+
+    expect(mocks.split.mutate.mock.calls[0][0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "核对临期发票", projectId: null }),
+        expect.objectContaining({
+          title: "准备跟进资料",
+          projectId: "project-1",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps every Invoice draft unassigned when its snapshot has no Project", async () => {
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={invoiceDueItem(null)}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("负责人") as HTMLSelectElement).value).toBe(
+        "owner-1",
+      ),
+    );
+    expect(
+      (screen.getByLabelText("第 1 个任务项目") as HTMLSelectElement).value,
+    ).toBe("");
+    expect(screen.queryByText(/已从来源带入项目/)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "核对无项目发票" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
+    const projectInputs = screen.getAllByLabelText(/第 \d+ 个任务项目/);
+    expect((projectInputs[1] as HTMLSelectElement).value).toBe("");
+    fireEvent.change(screen.getAllByLabelText("任务名称")[1], {
+      target: { value: "整理发票资料" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
+
+    expect(mocks.split.mutate.mock.calls[0][0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "核对无项目发票",
+          projectId: null,
+        }),
+        expect.objectContaining({ title: "整理发票资料", projectId: null }),
+      ]),
+    );
+  });
+
+  it("does not trust a non-canonical Invoice snapshot Project id", () => {
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={invoiceDueItem("project-1")}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+
+    expect(
+      (screen.getByLabelText("第 1 个任务项目") as HTMLSelectElement).value,
+    ).toBe("");
+    expect(screen.queryByText(/已从来源带入项目/)).toBeNull();
   });
 
   it("keeps the draft visible when the transaction fails", async () => {
