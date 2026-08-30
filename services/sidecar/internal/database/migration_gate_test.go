@@ -58,7 +58,7 @@ func TestOpenBeforeDestructiveMigrationsReturnsCurrentStoreWithoutGate(t *testin
 		t.Fatalf("OpenBeforeDestructiveMigrations() error = %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 49 {
+	if gate != nil || store.SchemaVersion != 50 {
 		t.Fatalf("store schema=%d gate=%#v", store.SchemaVersion, gate)
 	}
 }

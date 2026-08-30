@@ -251,6 +251,9 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 	if !validAutomationImportGraph(packageData) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Automation import relationships are invalid"}
 	}
+	if !validProjectCompletionImportSources(packageData) {
+		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source deletion history is invalid"}
+	}
 
 	report, err := buildBusinessImportConflictReport(a.db.WithContext(c), packageData)
 	if err != nil {
@@ -359,6 +362,15 @@ func buildBusinessImportConflictReport(db *gorm.DB, packageData businessExportPa
 					return &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Import rows contain a duplicate primary key"}
 				}
 				incomingKeys[key] = struct{}{}
+			}
+			if spec.Name == "projects" {
+				for _, sourceID := range projectCompletionImportTombstoneSourceIDs(tables["inbox_items"]) {
+					key, err := canonicalBusinessImportKey([]any{sourceID})
+					if err != nil {
+						return err
+					}
+					incomingKeys[key] = struct{}{}
+				}
 			}
 			targetRows, conflicts, err := scanBusinessImportTargetKeys(tx, spec.Name, primaryKeys, incomingKeys)
 			if err != nil {
@@ -489,6 +501,13 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		for _, table := range packageData.Tables {
 			tables[table.Name] = table
 		}
+		var pendingProjectCompletionAuthorizations int64
+		if err := tx.Table("business_import_project_completion_authorizations").Count(&pendingProjectCompletionAuthorizations).Error; err != nil {
+			return fmt.Errorf("check Project completion import authorizations: %w", err)
+		}
+		if pendingProjectCompletionAuthorizations != 0 {
+			return fmt.Errorf("Project completion import authorizations were not empty: count=%d", pendingProjectCompletionAuthorizations)
+		}
 		if err := importActorRows(tx, tables["actors"], applyMode == importModeAppend); err != nil {
 			return err
 		}
@@ -509,6 +528,14 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		}
 		for _, name := range order {
 			var err error
+			if name == "inbox_items" {
+				if err := restoreImportedProjectVersions(tx, tables["projects"]); err != nil {
+					return err
+				}
+				if err := authorizeHistoricalProjectCompletionImportSources(tx, tables["inbox_items"]); err != nil {
+					return err
+				}
+			}
 			if name == "tasks" {
 				err = insertTaskImportRows(tx, tables[name])
 			} else {
@@ -535,8 +562,11 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		`).Error; err != nil {
 			return err
 		}
-		if err := restoreImportedProjectVersions(tx, tables["projects"]); err != nil {
-			return err
+		if err := tx.Table("business_import_project_completion_authorizations").Count(&pendingProjectCompletionAuthorizations).Error; err != nil {
+			return fmt.Errorf("check consumed Project completion import authorizations: %w", err)
+		}
+		if pendingProjectCompletionAuthorizations != 0 {
+			return fmt.Errorf("Project completion import authorizations were not consumed: count=%d", pendingProjectCompletionAuthorizations)
 		}
 		var foreignKeyFailures int
 		if err := tx.Raw("SELECT COUNT(*) FROM pragma_foreign_key_check").Row().Scan(&foreignKeyFailures); err != nil || foreignKeyFailures != 0 {

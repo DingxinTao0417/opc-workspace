@@ -381,6 +381,315 @@ func TestAutomationImportGraphUsesImmutableProjectCompletionEventAfterProjectCha
 	}
 }
 
+type historicalProjectAutomationImportFixture struct {
+	jsonBody                []byte
+	zipBody                 []byte
+	projectID               string
+	runID                   string
+	resultInboxID           string
+	completionSourceInboxID string
+	sourceDeletedEventID    string
+	projectDeletedEventID   string
+}
+
+func TestAutomationBusinessJSONImportAcceptsDeletedProjectCompletionSourceTombstone(t *testing.T) {
+	fixture := newHistoricalProjectAutomationImportFixture(t)
+	assertHistoricalProjectAutomationImport(
+		t, fixture, fixture.jsonBody,
+		"/api/v1/imports/business-data/preview", "/api/v1/imports/business-data",
+		importAppendConfirmation, "IMPORT_APPLY_FAILED",
+	)
+}
+
+func TestAutomationBusinessPackageImportAcceptsDeletedProjectCompletionSourceTombstone(t *testing.T) {
+	fixture := newHistoricalProjectAutomationImportFixture(t)
+	assertHistoricalProjectAutomationImport(
+		t, fixture, fixture.zipBody,
+		"/api/v1/imports/business-package/preview", "/api/v1/imports/business-package",
+		packageImportAppendConfirmation, "IMPORT_PACKAGE_APPLY_FAILED",
+	)
+}
+
+func TestAutomationBusinessJSONImportRejectsDeletedSourceCollidingWithTargetProject(t *testing.T) {
+	fixture := newHistoricalProjectAutomationImportFixture(t)
+	router, store, artifactDir, backupDir := newBackupTestAPI(t)
+	if err := store.DB.Exec(`
+		INSERT INTO projects(id, name, status, version, created_at, updated_at)
+		VALUES (?, 'Retained conflicting Project', 'planning', 1, '2026-09-03T08:00:00Z', '2026-09-03T08:00:00Z')
+	`, fixture.projectID).Error; err != nil {
+		t.Fatalf("seed target Project colliding with historical source: %v", err)
+	}
+	markerPath := filepath.Join(artifactDir, "objects", "f22-conflict-marker")
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("create F22 conflict marker directory: %v", err)
+	}
+	if err := os.WriteFile(markerPath, []byte("retained F22 conflict file"), 0o600); err != nil {
+		t.Fatalf("seed F22 conflict marker: %v", err)
+	}
+
+	preview := performRequest(router, http.MethodPost, "/api/v1/imports/business-data/preview", fixture.jsonBody, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("historical source conflict preview = %d: %s", preview.Code, preview.Body.String())
+	}
+	var previewEnvelope struct {
+		Data businessImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &previewEnvelope); err != nil ||
+		previewEnvelope.Data.CanApply || previewEnvelope.Data.Blocker != importBlockerTargetConflicts ||
+		previewEnvelope.Data.ApplyMode != "" {
+		t.Fatalf("historical source conflict preview = %#v err=%v", previewEnvelope.Data, err)
+	}
+	apply := performRequest(
+		router, http.MethodPost, "/api/v1/imports/business-data", fixture.jsonBody,
+		map[string]string{"X-Import-Confirmation": importAppendConfirmation},
+	)
+	if apply.Code != http.StatusConflict || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_TARGET_CONFLICT" {
+		t.Fatalf("historical source conflict apply = %d: %s", apply.Code, apply.Body.String())
+	}
+
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM projects WHERE id = ? AND name = 'Retained conflicting Project' AND status = 'planning' AND version = 1", 1, fixture.projectID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE id = ?", 0, fixture.runID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id IN (?, ?)", 0, fixture.resultInboxID, fixture.completionSourceInboxID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM business_import_project_completion_authorizations", 0)
+	marker, err := os.ReadFile(markerPath)
+	if err != nil || string(marker) != "retained F22 conflict file" {
+		t.Fatalf("historical source conflict changed target file body=%q err=%v", marker, err)
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("historical source conflict created rollback backups: %v", backups)
+	}
+}
+
+func TestAutomationBusinessJSONImportRejectsUnknownSourceDeletedSnapshotField(t *testing.T) {
+	fixture := newHistoricalProjectAutomationImportFixture(t)
+	packageData := decodeAutomationImportPackage(t, fixture.jsonBody)
+	currentJSON := automationImportString(
+		t, &packageData, "workflow_events", "id", fixture.sourceDeletedEventID, "current_json",
+	)
+	current, ok := automationImportJSONObject(currentJSON)
+	if !ok || len(current) != 23 || current["dismiss_reason"] != nil {
+		t.Fatalf("source_deleted fixture current snapshot = %#v", current)
+	}
+	delete(current, "dismiss_reason")
+	current["unknown_null_replacement"] = nil
+	mutatedCurrent, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("encode mutated source_deleted snapshot: %v", err)
+	}
+	setAutomationImportValue(
+		t, &packageData, "workflow_events", "id", fixture.sourceDeletedEventID,
+		"current_json", string(mutatedCurrent),
+	)
+	body, err := json.Marshal(packageData)
+	if err != nil {
+		t.Fatalf("encode mutated source_deleted import: %v", err)
+	}
+	targetRouter, _, _, _ := newBackupTestAPI(t)
+	preview := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data/preview", body, nil)
+	if preview.Code != http.StatusUnprocessableEntity || responseErrorCode(t, preview.Body.Bytes()) != "IMPORT_ROW_INVALID" {
+		t.Fatalf("unknown source_deleted snapshot field preview = %d: %s", preview.Code, preview.Body.String())
+	}
+}
+
+func TestAutomationBusinessJSONImportRejectsUnknownProjectDeletedSnapshotFieldWithoutSideEffects(t *testing.T) {
+	fixture := newHistoricalProjectAutomationImportFixture(t)
+	packageData := decodeAutomationImportPackage(t, fixture.jsonBody)
+	previousJSON := automationImportString(
+		t, &packageData, "workflow_events", "id", fixture.projectDeletedEventID, "previous_json",
+	)
+	previous, ok := automationImportJSONObject(previousJSON)
+	if !ok || len(previous) != 11 || previous["client_id"] != nil {
+		t.Fatalf("project_deleted fixture previous snapshot = %#v", previous)
+	}
+	delete(previous, "client_id")
+	previous["unknown_null_replacement"] = nil
+	mutatedPrevious, err := json.Marshal(previous)
+	if err != nil {
+		t.Fatalf("encode mutated project_deleted snapshot: %v", err)
+	}
+	setAutomationImportValue(
+		t, &packageData, "workflow_events", "id", fixture.projectDeletedEventID,
+		"previous_json", string(mutatedPrevious),
+	)
+	body, err := json.Marshal(packageData)
+	if err != nil {
+		t.Fatalf("encode mutated project_deleted import: %v", err)
+	}
+	assertAutomationImportRejectedWithoutSideEffects(
+		t, body, "/api/v1/imports/business-data/preview", "/api/v1/imports/business-data", importReplaceConfirmation,
+	)
+}
+
+func TestSQLiteRejectsForgedOnlineProjectCompletionSourceTombstone(t *testing.T) {
+	_, store, _, _ := newBackupTestAPI(t)
+	projectID := uuid.NewString()
+	completedAt := formatInboxTimestamp(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
+	deletedAt := formatInboxTimestamp(time.Date(2026, 9, 3, 10, 0, 0, 0, time.UTC))
+	payload, err := json.Marshal(map[string]any{
+		"project_id": projectID, "project_name": "Forged Historical Project",
+		"completed_at": completedAt, "completion_version": 3, "incomplete_task_count": 0,
+	})
+	if err != nil {
+		t.Fatalf("encode forged Project completion tombstone payload: %v", err)
+	}
+	sourceKey := projectCompletionEventKey(projectID, 3)
+	sourceID := projectID
+	resolvedActorID := models.BuiltinOwnerActorID
+	resolutionReason := "Forged historical resolution"
+	resolutionMode := "manual"
+	err = store.DB.Create(&models.InboxItem{
+		ID: uuid.NewString(), Kind: "event", Title: projectCompletionTitle("Forged Historical Project"),
+		Summary:          "项目已标记完成，请确认交付收尾、归档或其他后续工作。",
+		SourceEntityType: projectCompletionInboxSourceType, SourceEntityID: &sourceID,
+		SourceEventKey: &sourceKey, SourceDeletedAt: &deletedAt, Priority: "P1", Status: "resolved",
+		ResolutionPolicy: "manual", TriagedAt: &completedAt, ResolvedByActorID: &resolvedActorID,
+		ResolvedAt: &completedAt, ResolutionReason: &resolutionReason, ResolutionMode: &resolutionMode,
+		PayloadJSON: string(payload), Version: 3, CreatedAt: completedAt, UpdatedAt: deletedAt,
+	}).Error
+	if err == nil {
+		t.Fatal("SQLite accepted a forged online Project completion source tombstone without import authorization")
+	}
+	if !strings.Contains(err.Error(), "INVALID_PROJECT_COMPLETION_INBOX_SOURCE") {
+		t.Fatalf("forged Project completion tombstone error = %v", err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'project_completion'", 0)
+}
+
+func newHistoricalProjectAutomationImportFixture(t *testing.T) historicalProjectAutomationImportFixture {
+	t.Helper()
+	router, store, _, _ := newBackupTestAPI(t)
+	rule := automationRuleByPreset(t, router, automationPresetProjectCompleted)
+	enabled := performRequest(
+		router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil,
+		map[string]string{"If-Match": `"1"`},
+	)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable historical Project Automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+
+	project := createProjectForTest(t, router, `{"name":"Historical Automation Project"}`, nil)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"start"}`)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"complete"}`)
+	var run models.AutomationRun
+	if err := store.DB.Where("rule_id = ? AND status = 'succeeded'", rule.ID).Take(&run).Error; err != nil ||
+		run.ResultType == nil || *run.ResultType != "inbox_item" || run.ResultID == nil || run.SourceEventID == nil {
+		t.Fatalf("load historical Project Automation Run: run=%#v err=%v", run, err)
+	}
+	var completionSource models.InboxItem
+	if err := store.DB.Where(
+		"source_entity_type = ? AND source_entity_id = ?", projectCompletionInboxSourceType, project.ID,
+	).Take(&completionSource).Error; err != nil {
+		t.Fatalf("load Project completion source projection: %v", err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id = ? AND source_entity_type = 'automation'", 1, *run.ResultID)
+
+	resolved := performRequest(
+		router, http.MethodPost, "/api/v1/inbox-items/"+completionSource.ID+"/resolve",
+		[]byte(`{"reason":"Project completion history retained before deletion"}`),
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, completionSource.Version)},
+	)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("resolve Project completion source before deletion = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"archive"}`)
+	deleted := performRequest(
+		router, http.MethodDelete, "/api/v1/projects/"+project.ID+"?confirm=true", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, project.Version)},
+	)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete historical Automation Project = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM projects WHERE id = ?", 0, project.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id = ? AND source_deleted_at IS NOT NULL", 1, completionSource.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_deleted'", 1, project.ID)
+	var projectDeletedEvent models.WorkflowEvent
+	if err := store.DB.Where(
+		"aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_deleted'", project.ID,
+	).Take(&projectDeletedEvent).Error; err != nil {
+		t.Fatalf("load retained project_deleted event: %v", err)
+	}
+	var sourceDeletedEvent models.WorkflowEvent
+	if err := store.DB.Where(
+		"aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_deleted'", completionSource.ID,
+	).Take(&sourceDeletedEvent).Error; err != nil {
+		t.Fatalf("load retained source_deleted event: %v", err)
+	}
+
+	jsonExport := performRequest(router, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
+	if jsonExport.Code != http.StatusOK {
+		t.Fatalf("export historical Project Automation JSON = %d: %s", jsonExport.Code, jsonExport.Body.String())
+	}
+	zipExport := performRequest(router, http.MethodGet, "/api/v1/exports/business-package", nil, nil)
+	if zipExport.Code != http.StatusOK {
+		t.Fatalf("export historical Project Automation ZIP = %d: %s", zipExport.Code, zipExport.Body.String())
+	}
+	return historicalProjectAutomationImportFixture{
+		jsonBody: bytes.Clone(jsonExport.Body.Bytes()), zipBody: bytes.Clone(zipExport.Body.Bytes()), projectID: project.ID,
+		runID: run.ID, resultInboxID: *run.ResultID, completionSourceInboxID: completionSource.ID,
+		sourceDeletedEventID: sourceDeletedEvent.ID, projectDeletedEventID: projectDeletedEvent.ID,
+	}
+}
+
+func assertHistoricalProjectAutomationImport(
+	t *testing.T,
+	fixture historicalProjectAutomationImportFixture,
+	body []byte,
+	previewPath, applyPath, confirmation, applyErrorCode string,
+) {
+	t.Helper()
+	router, store, artifactDir, backupDir := newBackupTestAPI(t)
+	const sentinelClientID = "018f0000-0000-7000-8000-000000009922"
+	if err := store.DB.Exec("INSERT INTO clients(id, name) VALUES (?, 'Retained F22 target client')", sentinelClientID).Error; err != nil {
+		t.Fatalf("seed F22 target sentinel: %v", err)
+	}
+	markerPath := filepath.Join(artifactDir, "f22-import-marker")
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
+		t.Fatalf("create F22 marker directory: %v", err)
+	}
+	if err := os.WriteFile(markerPath, []byte("retained F22 target file"), 0o600); err != nil {
+		t.Fatalf("seed F22 target marker: %v", err)
+	}
+
+	preview := performRequest(router, http.MethodPost, previewPath, body, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("historical Project Automation preview = %d: %s", preview.Code, preview.Body.String())
+	}
+	apply := performRequest(
+		router, http.MethodPost, applyPath, body,
+		map[string]string{"X-Import-Confirmation": confirmation},
+	)
+	if apply.Code != http.StatusOK {
+		if apply.Code != http.StatusUnprocessableEntity || responseErrorCode(t, apply.Body.Bytes()) != applyErrorCode {
+			t.Fatalf("historical Project Automation apply = %d: %s", apply.Code, apply.Body.String())
+		}
+		assertDatabaseCount(t, store, "SELECT COUNT(*) FROM clients WHERE id = ? AND name = 'Retained F22 target client'", 1, sentinelClientID)
+		assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE id = ?", 0, fixture.runID)
+		assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id IN (?, ?)", 0, fixture.resultInboxID, fixture.completionSourceInboxID)
+		marker, err := os.ReadFile(markerPath)
+		if err != nil || string(marker) != "retained F22 target file" {
+			t.Fatalf("failed historical import changed target file body=%q err=%v", marker, err)
+		}
+		if backups := backupPackageDirectories(t, backupDir); len(backups) != 1 {
+			t.Fatalf("failed historical import rollback backups = %v, want exactly one", backups)
+		}
+		t.Fatalf("historical Project Automation apply remained non-portable: %d %s", apply.Code, apply.Body.String())
+	}
+
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM clients WHERE id = ? AND name = 'Retained F22 target client'", 1, sentinelClientID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE id = ? AND status = 'succeeded'", 1, fixture.runID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id = ? AND source_entity_type = 'automation'", 1, fixture.resultInboxID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM projects WHERE id = ?", 0, fixture.projectID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE id = ? AND source_deleted_at IS NOT NULL", 1, fixture.completionSourceInboxID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_deleted'", 1, fixture.projectID)
+	marker, err := os.ReadFile(markerPath)
+	if err != nil || string(marker) != "retained F22 target file" {
+		t.Fatalf("historical import changed unrelated target file body=%q err=%v", marker, err)
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 1 {
+		t.Fatalf("successful historical import rollback backups = %v, want exactly one", backups)
+	}
+}
+
 func TestAutomationBusinessImportPreflightRejectsInvalidRunGraphsWithoutSideEffects(t *testing.T) {
 	fixture := newAutomationImportFixture(t)
 	if !validAutomationImportGraph(decodeAutomationImportPackage(t, fixture.jsonBody)) {

@@ -706,11 +706,17 @@ func automationImportInvoiceSourceTransition(
 	return current, valid
 }
 
+var automationImportProjectEventStateKeys = []string{
+	"id", "name", "description", "client_id", "status", "start_date", "due_date", "amount_minor", "color", "version", "archived_from_status",
+}
+
 func validAutomationImportProjectCompletionTransition(
 	previous, current map[string]any,
 	action automationProjectCompletionAction,
 ) bool {
-	if len(previous) != 11 || len(current) != 11 || current["id"] != action.ProjectID || current["name"] != action.ProjectName ||
+	if !automationImportObjectHasExactKeys(previous, automationImportProjectEventStateKeys) ||
+		!automationImportObjectHasExactKeys(current, automationImportProjectEventStateKeys) ||
+		current["id"] != action.ProjectID || current["name"] != action.ProjectName ||
 		current["status"] != "completed" || current["archived_from_status"] != nil || previous["archived_from_status"] != nil ||
 		(previous["status"] != "in_progress" && previous["status"] != "paused") {
 		return false
