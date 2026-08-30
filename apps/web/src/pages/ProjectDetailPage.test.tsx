@@ -326,6 +326,7 @@ describe("ProjectDetailPage", () => {
     project.availableActions = ["pause", "complete", "archive"];
     project.taskSummary.remaining = 2;
     project.taskSummary.total = 3;
+    project.invoiceCount = 0;
     projectTasks = [];
   });
 
@@ -398,6 +399,17 @@ describe("ProjectDetailPage", () => {
     );
     expect(focusHistoryInput).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: project.id, status: "terminal" }),
+    );
+  });
+
+  it("states the current Project financial scope without hiding delivered modules", () => {
+    project.invoiceCount = 2;
+    renderPage();
+
+    expect(
+      screen.getByRole("region", { name: "项目财务范围" }),
+    ).toHaveTextContent(
+      /当前项目关联 2 张发票；发票明细与本地账本请到对应\s*模块查看，项目内财务汇总尚未接入/,
     );
   });
 

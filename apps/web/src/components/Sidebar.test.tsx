@@ -85,6 +85,21 @@ describe("Sidebar", () => {
     expect(screen.getByLabelText("12 项待处理")).toHaveTextContent("12");
   });
 
+  it("shows delivered Roadmap and Content Calendar navigation without future badges", () => {
+    renderSidebar();
+
+    const roadmapLink = screen.getByRole("link", { name: "路线图" });
+    const contentLink = screen.getByRole("link", { name: "内容日历" });
+    expect(screen.getByText("规划与内容")).toBeVisible();
+    expect(roadmapLink).toHaveAttribute("href", "/roadmap");
+    expect(contentLink).toHaveAttribute("href", "/content-calendar");
+    expect(
+      roadmapLink.compareDocumentPosition(contentLink) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByText("后续")).toBeNull();
+  });
+
   it("requests the browser-local Monday through Sunday across a month boundary", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0));

@@ -24,7 +24,6 @@ interface NavItem {
   to: string;
   icon: LucideIcon;
   badge?: string;
-  later?: boolean;
 }
 
 const groups: { label: string; items: NavItem[] }[] = [
@@ -55,14 +54,13 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [{ label: "专注", to: "/focus", icon: Focus }],
   },
   {
-    label: "后续版本",
+    label: "规划与内容",
     items: [
-      { label: "路线图", to: "/roadmap", icon: Map, later: true },
+      { label: "路线图", to: "/roadmap", icon: Map },
       {
         label: "内容日历",
         to: "/content-calendar",
         icon: CalendarDays,
-        later: true,
       },
     ],
   },
@@ -151,7 +149,7 @@ export function Sidebar() {
         {groups.map((group) => (
           <div className="nav-group" key={group.label}>
             <div className="nav-label sidebar-copy">{group.label}</div>
-            {group.items.map(({ label, to, icon: Icon, badge, later }) => (
+            {group.items.map(({ label, to, icon: Icon, badge }) => (
               <NavLink
                 className={({ isActive }) =>
                   `nav-item${isActive ? " nav-item-active" : ""}`
@@ -172,9 +170,6 @@ export function Sidebar() {
                   >
                     {to === "/inbox" ? inboxBadge : badge}
                   </span>
-                ) : null}
-                {later ? (
-                  <span className="sidebar-copy later-badge">后续</span>
                 ) : null}
               </NavLink>
             ))}

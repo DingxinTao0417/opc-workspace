@@ -344,11 +344,14 @@ export function ClientDetailPage() {
         contactName={client.contactName}
       />
 
-      <section className="client-future-grid" aria-label="后续客户能力">
+      <section className="client-future-grid" aria-label="客户财务范围">
         <article>
           <strong>收入与发票</strong>
-          <p>v0.4 交付财务事实后可用；当前不展示金额或发票模拟数据。</p>
-          <span>后续版本</span>
+          <p>
+            本地账本与发票事实已可在收入、发票模块查看；客户详情尚未聚合金额、
+            收支或发票列表。
+          </p>
+          <span>当前范围</span>
         </article>
       </section>
 

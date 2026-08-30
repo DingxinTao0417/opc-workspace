@@ -348,8 +348,7 @@ kbd {
   white-space: nowrap;
 }
 
-.nav-badge,
-.later-badge {
+.nav-badge {
   border-radius: 999px;
   background: var(--panel-hover);
   color: var(--text-muted);
@@ -361,10 +360,6 @@ kbd {
   min-width: 19px;
   padding: 0 6px;
   text-align: center;
-}
-
-.later-badge {
-  padding: 0 6px;
 }
 
 .nav-item-active .nav-badge {

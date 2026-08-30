@@ -185,7 +185,14 @@ describe("ClientDetailPage", () => {
       "href",
       "/projects/project-1",
     );
-    expect(screen.getByText(/v0.4 交付财务事实后可用/)).toBeTruthy();
+    const financialScope = screen.getByRole("region", {
+      name: "客户财务范围",
+    });
+    expect(financialScope).toHaveTextContent(
+      /本地账本与发票事实已可在收入、发票模块查看；客户详情尚未聚合金额、\s*收支或发票列表/,
+    );
+    expect(financialScope).toHaveTextContent("当前范围");
+    expect(financialScope).not.toHaveTextContent("后续版本");
     expect(screen.getByRole("button", { name: "记录活动" })).toBeEnabled();
     expect(screen.getByText(/不代表客户回访或其他外部通信/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "添加附件" })).toBeEnabled();

@@ -161,6 +161,11 @@ describe("ActorSettings", () => {
     renderActors();
     await screen.findByText("还没有本地人员");
     fireEvent.click(screen.getByRole("button", { name: "新建人员" }));
+    expect(
+      screen.getByLabelText("新人员名称").closest("form"),
+    ).toHaveTextContent(
+      /保存后可在任务详情和 Inbox 拆分中选择为本地负责人或复核人；\s*仅记录本机责任，不会创建线上账号/,
+    );
     fireEvent.change(screen.getByLabelText("新人员名称"), {
       target: { value: " 林顾问 " },
     });

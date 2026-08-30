@@ -2,8 +2,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   CalendarDays,
-  Clock3,
   Edit3,
+  Info,
   List,
   ListTree,
   Plus,
@@ -697,9 +697,10 @@ export function ProjectDetailPage() {
         </section>
       ) : null}
 
-      <section className="project-future-note">
-        <Clock3 size={15} />
-        发票与收入将在后续业务版本接入，不展示模拟数据。
+      <section aria-label="项目财务范围" className="project-future-note">
+        <Info size={15} />
+        当前项目关联 {project.invoiceCount} 张发票；发票明细与本地账本请到对应
+        模块查看，项目内财务汇总尚未接入。
       </section>
 
       <ProjectFormModal

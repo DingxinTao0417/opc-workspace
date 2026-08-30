@@ -17,7 +17,6 @@ import { InboxPage } from "./pages/InboxPage";
 import { IncomePage } from "./pages/IncomePage";
 import { InvoiceDetailPage } from "./pages/InvoiceDetailPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
-import { LaterPage } from "./pages/LaterPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { RoadmapPage } from "./pages/RoadmapPage";

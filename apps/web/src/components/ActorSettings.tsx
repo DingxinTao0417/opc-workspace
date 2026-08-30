@@ -457,7 +457,10 @@ export function ActorSettings() {
             <div className="actor-settings-create-heading">
               <div>
                 <strong>新建本地人员</strong>
-                <span>保存为本机责任主体；任务分派入口将在后续模块接入。</span>
+                <span>
+                  保存后可在任务详情和 Inbox 拆分中选择为本地负责人或复核人；
+                  仅记录本机责任，不会创建线上账号。
+                </span>
               </div>
               <button
                 aria-label="关闭新建人员表单"
