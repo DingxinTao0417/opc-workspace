@@ -102,8 +102,18 @@ func TestInvoiceOverdueAutomationManualCreatesAuditedFollowupTask(t *testing.T) 
 	if err := store.DB.First(&invoiceModel, "id = ?", invoice.ID).Error; err != nil {
 		t.Fatalf("load overdue Invoice model: %v", err)
 	}
-	if err := executeInvoiceOverdueAutomations(store.DB, source.ID, invoiceModel, source.CreatedAt); err != nil {
-		t.Fatalf("replay Invoice overdue Automation: %v", err)
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		return enqueueInvoiceOverdueAutomationDelivery(tx, source.ID, invoiceModel, source.CreatedAt)
+	}); err != nil {
+		t.Fatalf("recapture Invoice overdue Automation: %v", err)
+	}
+	replayAt, err := time.Parse(time.RFC3339Nano, source.CreatedAt)
+	if err != nil {
+		t.Fatalf("parse Invoice Automation replay timestamp: %v", err)
+	}
+	replayService := &API{db: store.DB, options: Options{Now: func() time.Time { return replayAt }}}
+	if err := replayService.consumeDueAutomationEventDeliveries(context.Background(), replayAt); err != nil {
+		t.Fatalf("replay Invoice overdue delivery: %v", err)
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE rule_id = ? AND source_event_id = ?", 1, rule.ID, source.ID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM tasks WHERE id = ?", 1, task.ID)

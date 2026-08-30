@@ -40,3 +40,22 @@ type AutomationRun struct {
 }
 
 func (AutomationRun) TableName() string { return "automation_runs" }
+
+type AutomationEventDelivery struct {
+	ID                 string  `gorm:"column:id;primaryKey" json:"id"`
+	RuleID             string  `gorm:"column:rule_id" json:"rule_id"`
+	PresetKey          string  `gorm:"column:preset_key" json:"preset_key"`
+	RuleVersion        int64   `gorm:"column:rule_version" json:"rule_version"`
+	SourceEventID      string  `gorm:"column:source_event_id" json:"source_event_id"`
+	LogicalKey         string  `gorm:"column:logical_key" json:"logical_key"`
+	ConfigSnapshotJSON string  `gorm:"column:config_snapshot_json" json:"-"`
+	ActionSnapshotJSON string  `gorm:"column:action_snapshot_json" json:"-"`
+	DeliveryAttempts   int     `gorm:"column:delivery_attempts" json:"delivery_attempts"`
+	AvailableAt        string  `gorm:"column:available_at" json:"available_at"`
+	LastErrorCode      *string `gorm:"column:last_error_code" json:"last_error_code"`
+	LastErrorAt        *string `gorm:"column:last_error_at" json:"last_error_at"`
+	CapturedAt         string  `gorm:"column:captured_at" json:"captured_at"`
+	UpdatedAt          string  `gorm:"column:updated_at" json:"updated_at"`
+}
+
+func (AutomationEventDelivery) TableName() string { return "automation_event_deliveries" }

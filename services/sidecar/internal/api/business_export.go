@@ -72,6 +72,7 @@ var businessExportExcludedTables = []string{
 	"storage_capacity_samples",
 	"scheduled_backup_policy",
 	"invoice_number_sequences",
+	"automation_event_deliveries",
 }
 
 type businessExportTable struct {

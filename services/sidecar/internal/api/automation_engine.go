@@ -110,109 +110,6 @@ type automationActionResult struct {
 	Summary string
 }
 
-func executeProjectCompletionAutomations(tx *gorm.DB, eventID string, project models.Project, nowText string) error {
-	var rule models.AutomationRule
-	err := tx.First(&rule, "preset_key = ? AND enabled = 1", automationPresetProjectCompleted).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var existing int64
-	if err := tx.Model(&models.AutomationRun{}).Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Count(&existing).Error; err != nil {
-		return err
-	}
-	if existing > 0 {
-		return nil
-	}
-	config, err := decodeAutomationConfig(rule.PresetKey, rule.ConfigJSON)
-	if err != nil {
-		return err
-	}
-	now, err := time.Parse(time.RFC3339Nano, nowText)
-	if err != nil {
-		return err
-	}
-	sourceEventID := eventID
-	action := map[string]any{
-		"action_type": "inbox_item", "project_id": project.ID, "project_name": project.Name,
-		"title": automationProjectCompletionTitle(project.Name), "priority": config.Priority,
-	}
-	_, err = executeAutomationAttempt(tx, automationAttemptInput{
-		Rule: rule, TriggerType: "event", SourceEventID: &sourceEventID,
-		LogicalKey: "event:" + rule.ID + ":" + eventID, Attempt: 1,
-		Config: config, ActionSnapshot: action, Now: now.UTC(),
-	})
-	return err
-}
-
-func (a *API) executeProjectCompletionAutomationsSafely(tx *gorm.DB, eventID string, project models.Project, nowText string) {
-	const savepoint = "project_completion_automation"
-	if err := tx.SavePoint(savepoint).Error; err != nil {
-		if a.options.Logger != nil {
-			a.options.Logger.Print("project completion Automation could not create an isolation boundary")
-		}
-		return
-	}
-	if err := executeProjectCompletionAutomations(tx, eventID, project, nowText); err != nil {
-		_ = tx.RollbackTo(savepoint).Error
-		if a.options.Logger != nil {
-			a.options.Logger.Print("project completion Automation failed without changing the source Project")
-		}
-	}
-}
-
-func executeInvoiceOverdueAutomations(tx *gorm.DB, eventID string, invoice models.Invoice, nowText string) error {
-	var rule models.AutomationRule
-	err := tx.First(&rule, "preset_key = ? AND enabled = 1", automationPresetInvoiceOverdue).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var existing int64
-	if err := tx.Model(&models.AutomationRun{}).Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Count(&existing).Error; err != nil {
-		return err
-	}
-	if existing > 0 {
-		return nil
-	}
-	config, err := decodeAutomationConfig(rule.PresetKey, rule.ConfigJSON)
-	if err != nil {
-		return err
-	}
-	now, err := time.Parse(time.RFC3339Nano, nowText)
-	if err != nil {
-		return err
-	}
-	sourceEventID := eventID
-	action := automationInvoiceOverdueActionSnapshot(invoice, config.Priority)
-	_, err = executeAutomationAttempt(tx, automationAttemptInput{
-		Rule: rule, TriggerType: "event", SourceEventID: &sourceEventID,
-		LogicalKey: "event:" + rule.ID + ":" + eventID, Attempt: 1,
-		Config: config, ActionSnapshot: action, Now: now.UTC(),
-	})
-	return err
-}
-
-func (a *API) executeInvoiceOverdueAutomationsSafely(tx *gorm.DB, eventID string, invoice models.Invoice, nowText string) {
-	const savepoint = "invoice_overdue_automation"
-	if err := tx.SavePoint(savepoint).Error; err != nil {
-		if a.options.Logger != nil {
-			a.options.Logger.Print("Invoice overdue Automation could not create an isolation boundary")
-		}
-		return
-	}
-	if err := executeInvoiceOverdueAutomations(tx, eventID, invoice, nowText); err != nil {
-		_ = tx.RollbackTo(savepoint).Error
-		if a.options.Logger != nil {
-			a.options.Logger.Print("Invoice overdue Automation failed without changing the source Invoice")
-		}
-	}
-}
-
 func (a *API) projectDueAutomations(now time.Time) error {
 	if err := a.projectDueAutomationRetries(now.UTC()); err != nil {
 		return err
@@ -861,8 +758,9 @@ func (a *API) projectDueAutomationRetries(now time.Time) error {
 	var ids []string
 	if err := a.db.Table("automation_runs AS failed").
 		Select("failed.id").
-		Joins("JOIN automation_rules AS rule ON rule.id = failed.rule_id AND rule.enabled = 1").
+		Joins("JOIN automation_rules AS rule ON rule.id = failed.rule_id").
 		Where("failed.status = 'failed' AND failed.retryable = 1 AND failed.retry_at IS NOT NULL AND failed.retry_at <= ?", nowText).
+		Where("failed.trigger_type = 'event' OR rule.enabled = 1").
 		Where("NOT EXISTS (SELECT 1 FROM automation_runs child WHERE child.retry_of_run_id = failed.id)").
 		Order("failed.retry_at ASC").Order("failed.id ASC").Limit(100).Pluck("failed.id", &ids).Error; err != nil {
 		return err
@@ -895,13 +793,18 @@ func (a *API) retryAutomationRunByID(id string, now time.Time) error {
 		if err := tx.First(&rule, "id = ?", previous.RuleID).Error; err != nil {
 			return err
 		}
-		if !rule.Enabled {
+		if !rule.Enabled && previous.TriggerType != "event" {
 			return newProjectRequestError(http.StatusConflict, "AUTOMATION_RULE_DISABLED", "Enable the automation rule before retrying")
 		}
 		// A retry is another attempt of the original immutable run. Keep the
 		// captured rule version even if its editable configuration has since
 		// advanced; config and action snapshots already come from that run.
 		rule.Version = previous.RuleVersion
+		if previous.TriggerType == "event" {
+			// Event runs are retries of an immutable capture. Disabling or
+			// editing the rule after capture cannot revoke that delivery.
+			rule.Enabled = true
+		}
 		config, err := decodeAutomationConfig(previousRulePresetKey(rule), previous.ConfigSnapshotJSON)
 		if err != nil {
 			return err

@@ -225,6 +225,55 @@ func TestBusinessExportReturnsVersionedDeterministicAllowlistedSnapshot(t *testi
 	}
 }
 
+func TestBusinessExportClassifiesEveryApplicationTableExactlyOnce(t *testing.T) {
+	_, store, _, _ := newBackupTestAPI(t)
+
+	var applicationTables []string
+	if err := store.DB.Raw(`
+		SELECT name
+		FROM sqlite_schema
+		WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+		ORDER BY name
+	`).Scan(&applicationTables).Error; err != nil {
+		t.Fatalf("list application tables: %v", err)
+	}
+
+	classifications := make(map[string]int, len(businessExportTables)+len(businessExportExcludedTables))
+	exported := make(map[string]struct{}, len(businessExportTables))
+	excluded := make(map[string]struct{}, len(businessExportExcludedTables))
+	for _, spec := range businessExportTables {
+		classifications[spec.Name]++
+		exported[spec.Name] = struct{}{}
+	}
+	for _, table := range businessExportExcludedTables {
+		classifications[table]++
+		excluded[table] = struct{}{}
+	}
+
+	actual := make(map[string]struct{}, len(applicationTables))
+	for _, table := range applicationTables {
+		actual[table] = struct{}{}
+		if count := classifications[table]; count != 1 {
+			t.Errorf("application table %q has %d business export classifications, want exactly 1", table, count)
+		}
+	}
+	for table, count := range classifications {
+		if _, exists := actual[table]; !exists {
+			t.Errorf("business export classification references missing application table %q", table)
+		}
+		if count != 1 {
+			t.Errorf("business export table %q is classified %d times, want exactly 1", table, count)
+		}
+	}
+
+	if _, ok := exported["automation_event_deliveries"]; ok {
+		t.Error("pending automation event deliveries must not be included in portable business exports")
+	}
+	if _, ok := excluded["automation_event_deliveries"]; !ok {
+		t.Error("pending automation event deliveries must be explicitly classified as operational state")
+	}
+}
+
 func TestBusinessExportFailsClosedWhenAnAllowlistedTableIsUnavailable(t *testing.T) {
 	router, store, _, _ := newBackupTestAPI(t)
 	if err := store.DB.Exec("DROP TABLE invoices").Error; err != nil {

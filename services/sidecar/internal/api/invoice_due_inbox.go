@@ -72,6 +72,12 @@ func invoiceDueState(dueDate, occurrenceDate string) (string, bool) {
 // at most one current occurrence per invoice and never replays missed overdue
 // calendar days.
 func (a *API) projectDueInvoices(ctx context.Context) error {
+	err := a.projectDueInvoiceSources(ctx)
+	a.consumeAutomationEventDeliveriesBestEffort("invoice-due-sources")
+	return err
+}
+
+func (a *API) projectDueInvoiceSources(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -192,7 +198,9 @@ func (a *API) projectInvoiceDue(ctx context.Context, id, today string, now time.
 			if err != nil {
 				return err
 			}
-			a.executeInvoiceOverdueAutomationsSafely(tx, event.ID, row.Invoice, createdAt)
+			if err := enqueueInvoiceOverdueAutomationDelivery(tx, event.ID, row.Invoice, createdAt); err != nil {
+				return err
+			}
 		}
 		if dueState == "overdue" && row.Status != "overdue" {
 			return nil

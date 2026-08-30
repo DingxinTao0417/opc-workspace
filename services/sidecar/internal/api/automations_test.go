@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -310,8 +312,17 @@ func TestProjectCompletionAutomationCreatesOneAuditedInboxItem(t *testing.T) {
 	if reuseErr == nil || !strings.Contains(reuseErr.Error(), "already committed by another run") {
 		t.Fatalf("fresh run reused persisted Automation Inbox Item: %v", reuseErr)
 	}
-	if err := executeProjectCompletionAutomations(store.DB, eventID, projectModel, "2026-08-29T12:00:00.000000000Z"); err != nil {
-		t.Fatalf("replay project automation: %v", err)
+	replayAt := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		return enqueueProjectCompletionAutomationDelivery(
+			tx, eventID, projectModel, formatInboxTimestamp(replayAt),
+		)
+	}); err != nil {
+		t.Fatalf("recapture project automation: %v", err)
+	}
+	replayService := &API{db: store.DB, options: Options{Now: func() time.Time { return replayAt }}}
+	if err := replayService.consumeDueAutomationEventDeliveries(context.Background(), replayAt); err != nil {
+		t.Fatalf("replay project automation delivery: %v", err)
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE source_event_id = ?", 1, eventID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'automation' AND title LIKE '核对并准备发票%'", 1)
@@ -377,9 +388,17 @@ func TestProjectCompletionAutomationRejectsCorruptPersistedInboxSource(t *testin
 		t.Fatalf("load completed Project model: %v", err)
 	}
 	if err := store.DB.Transaction(func(tx *gorm.DB) error {
-		return executeProjectCompletionAutomations(tx, eventID, projectModel, now)
+		return enqueueProjectCompletionAutomationDelivery(tx, eventID, projectModel, now)
 	}); err != nil {
-		t.Fatalf("execute Automation with corrupt source: %v", err)
+		t.Fatalf("capture Automation with corrupt source: %v", err)
+	}
+	consumeAt, err := time.Parse(time.RFC3339Nano, now)
+	if err != nil {
+		t.Fatalf("parse Automation consume timestamp: %v", err)
+	}
+	service := &API{db: store.DB, options: Options{Now: func() time.Time { return consumeAt }}}
+	if err := service.consumeDueAutomationEventDeliveries(context.Background(), consumeAt); err != nil {
+		t.Fatalf("consume Automation with corrupt source: %v", err)
 	}
 	var failed models.AutomationRun
 	if err := store.DB.Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Take(&failed).Error; err != nil {
@@ -560,6 +579,14 @@ func TestAutomationFailureDoesNotRollbackSourceAndRetryCreatesNewAttempt(t *test
 	}
 	if err := store.DB.Exec("DROP TRIGGER reject_automation_inbox").Error; err != nil {
 		t.Fatalf("remove automation action failure: %v", err)
+	}
+	currentRule := automationRuleByPreset(t, router, automationPresetProjectCompleted)
+	disabled := performRequest(
+		router, http.MethodPost, "/api/v1/automations/rules/"+currentRule.ID+"/disable", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, currentRule.Version)},
+	)
+	if disabled.Code != http.StatusOK {
+		t.Fatalf("disable captured event rule = %d: %s", disabled.Code, disabled.Body.String())
 	}
 	retried := performRequest(router, http.MethodPost, "/api/v1/automations/runs/"+failed.ID+"/retry", nil, nil)
 	if retried.Code != http.StatusCreated {

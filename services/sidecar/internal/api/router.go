@@ -19,54 +19,58 @@ import (
 const Version = "v1"
 
 type Options struct {
-	AppVersion                  string
-	Commit                      string
-	SchemaVersion               int
-	SessionToken                string
-	DevMode                     bool
-	AllowedOrigins              []string
-	Logger                      *log.Logger
-	ArtifactDir                 string
-	InvoicePDFDir               string
-	DatabasePath                string
-	BackupDir                   string
-	LogDir                      string
-	DiskSpaceCheck              func(path string) (availableBytes uint64, totalBytes uint64, err error)
-	VolumeIdentityCheck         func(path string) (identity string, err error)
-	DiskSpaceScanInterval       time.Duration
-	Now                         func() time.Time
-	FocusHeartbeatInterval      time.Duration
-	ReminderScanInterval        time.Duration
-	ScheduledBackupScanInterval time.Duration
-	StartupRestore              StartupRestoreResult
+	AppVersion                     string
+	Commit                         string
+	SchemaVersion                  int
+	SessionToken                   string
+	DevMode                        bool
+	AllowedOrigins                 []string
+	Logger                         *log.Logger
+	ArtifactDir                    string
+	InvoicePDFDir                  string
+	DatabasePath                   string
+	BackupDir                      string
+	LogDir                         string
+	DiskSpaceCheck                 func(path string) (availableBytes uint64, totalBytes uint64, err error)
+	VolumeIdentityCheck            func(path string) (identity string, err error)
+	DiskSpaceScanInterval          time.Duration
+	Now                            func() time.Time
+	FocusHeartbeatInterval         time.Duration
+	ReminderScanInterval           time.Duration
+	AutomationDeliveryScanInterval time.Duration
+	ScheduledBackupScanInterval    time.Duration
+	StartupRestore                 StartupRestoreResult
 }
 
 type API struct {
-	db                    *gorm.DB
-	options               Options
-	artifactStore         *artifactStore
-	invoicePDFStore       *invoicePDFStore
-	backupStore           *backupStore
-	maintenance           *sync.RWMutex
-	restorePending        atomic.Bool
-	lowDiskActive         atomic.Bool
-	lowDiskThresholdBytes atomic.Uint64
+	db                        *gorm.DB
+	options                   Options
+	artifactStore             *artifactStore
+	invoicePDFStore           *invoicePDFStore
+	backupStore               *backupStore
+	maintenance               *sync.RWMutex
+	restorePending            atomic.Bool
+	lowDiskActive             atomic.Bool
+	lowDiskThresholdBytes     atomic.Uint64
+	automationEventDeliveryMu sync.Mutex
 }
 
 type Router struct {
 	*gin.Engine
-	artifactStore             *artifactStore
-	invoicePDFStore           *invoicePDFStore
-	focusHeartbeatCancel      context.CancelFunc
-	focusHeartbeatDone        chan struct{}
-	reminderScanCancel        context.CancelFunc
-	reminderScanDone          chan struct{}
-	diskSpaceScanCancel       context.CancelFunc
-	diskSpaceScanDone         chan struct{}
-	scheduledBackupScanCancel context.CancelFunc
-	scheduledBackupScanDone   chan struct{}
-	closeOnce                 sync.Once
-	closeErr                  error
+	artifactStore                *artifactStore
+	invoicePDFStore              *invoicePDFStore
+	focusHeartbeatCancel         context.CancelFunc
+	focusHeartbeatDone           chan struct{}
+	reminderScanCancel           context.CancelFunc
+	reminderScanDone             chan struct{}
+	automationDeliveryScanCancel context.CancelFunc
+	automationDeliveryScanDone   chan struct{}
+	diskSpaceScanCancel          context.CancelFunc
+	diskSpaceScanDone            chan struct{}
+	scheduledBackupScanCancel    context.CancelFunc
+	scheduledBackupScanDone      chan struct{}
+	closeOnce                    sync.Once
+	closeErr                     error
 }
 
 func (r *Router) Close() error {
@@ -81,6 +85,10 @@ func (r *Router) Close() error {
 		if r.reminderScanCancel != nil {
 			r.reminderScanCancel()
 			<-r.reminderScanDone
+		}
+		if r.automationDeliveryScanCancel != nil {
+			r.automationDeliveryScanCancel()
+			<-r.automationDeliveryScanDone
 		}
 		if r.diskSpaceScanCancel != nil {
 			r.diskSpaceScanCancel()
@@ -117,6 +125,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.ReminderScanInterval == 0 {
 		options.ReminderScanInterval = 15 * time.Second
+	}
+	if options.AutomationDeliveryScanInterval == 0 {
+		options.AutomationDeliveryScanInterval = 15 * time.Second
 	}
 	if options.DiskSpaceScanInterval == 0 {
 		if strings.TrimSpace(options.LogDir) == "" {
@@ -200,6 +211,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("initialize preset Automations: %w", err)
 	}
+	service.consumeAutomationEventDeliveriesBestEffort("startup-pending")
 	if err := service.projectDueAutomations(options.Now().UTC()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
@@ -236,12 +248,13 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("project due Roadmap Milestones: %w", err)
 	}
-	if err := service.projectDueInvoices(context.Background()); err != nil {
+	if err := service.projectDueInvoiceSources(context.Background()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
 		}
 		return nil, fmt.Errorf("project due Invoices: %w", err)
 	}
+	service.consumeAutomationEventDeliveriesBestEffort("startup-due-sources")
 	if options.DiskSpaceScanInterval > 0 {
 		if err := service.scanDiskSpace(); err != nil && options.Logger != nil {
 			options.Logger.Print("storage capacity check could not be completed safely")
@@ -507,7 +520,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 						err = service.projectDueRoadmapMilestones(ctx)
 					}
 					if err == nil {
-						err = service.projectDueInvoices(ctx)
+						err = service.projectDueInvoiceSources(ctx)
 					}
 					service.maintenance.RUnlock()
 					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
@@ -515,6 +528,35 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					}
 					if err != nil && !errors.Is(err, context.Canceled) {
 						service.recordRuntimeDatabaseFailure("due-source-scan")
+					}
+				}
+			}
+		}()
+	}
+	if options.AutomationDeliveryScanInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result.automationDeliveryScanCancel = cancel
+		result.automationDeliveryScanDone = make(chan struct{})
+		go func() {
+			defer close(result.automationDeliveryScanDone)
+			ticker := time.NewTicker(options.AutomationDeliveryScanInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if service.restorePending.Load() {
+						continue
+					}
+					service.maintenance.RLock()
+					err := service.consumeDueAutomationEventDeliveries(ctx, options.Now().UTC())
+					service.maintenance.RUnlock()
+					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+						options.Logger.Printf("Automation event delivery scan failed: %v", err)
+					}
+					if err != nil && !errors.Is(err, context.Canceled) {
+						service.recordRuntimeDatabaseFailure("automation-event-delivery-scan")
 					}
 				}
 			}

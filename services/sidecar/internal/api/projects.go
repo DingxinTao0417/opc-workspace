@@ -640,7 +640,9 @@ func (a *API) transitionProject(c *gin.Context) {
 			); err != nil {
 				return err
 			}
-			a.executeProjectCompletionAutomationsSafely(tx, eventID, row.Project, updatedAt)
+			if err := enqueueProjectCompletionAutomationDelivery(tx, eventID, row.Project, updatedAt); err != nil {
+				return err
+			}
 		}
 		response = projectResponseFromRow(row)
 		return nil
@@ -651,6 +653,9 @@ func (a *API) transitionProject(c *gin.Context) {
 		}
 		writeDatabaseError(c)
 		return
+	}
+	if input.Action == "complete" {
+		a.consumeAutomationEventDeliveriesBestEffort("project-completed")
 	}
 	setProjectETag(c, response.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})

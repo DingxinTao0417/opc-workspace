@@ -497,7 +497,9 @@ func (a *API) transitionInvoice(c *gin.Context) {
 			}
 		}
 		if eventAction == "invoice_overdue" {
-			a.executeInvoiceOverdueAutomationsSafely(tx, event.ID, invoice, now)
+			if err := enqueueInvoiceOverdueAutomationDelivery(tx, event.ID, invoice, now); err != nil {
+				return err
+			}
 		}
 		row, err := loadInvoiceRow(tx, id)
 		if err != nil {
@@ -519,6 +521,9 @@ func (a *API) transitionInvoice(c *gin.Context) {
 		}
 		writeDatabaseError(c)
 		return
+	}
+	if action == "mark_overdue" {
+		a.consumeAutomationEventDeliveriesBestEffort("invoice-overdue")
 	}
 	setProjectETag(c, response.Version)
 	if replayed {
