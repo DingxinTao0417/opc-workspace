@@ -3,7 +3,9 @@ import {
   disableAutomationRule,
   enableAutomationRule,
   getAutomationRules,
+  getAutomationRun,
   getAutomationRuns,
+  normalizeAutomationRunDetail,
   previewAutomationRule,
   resetRuntimeConnection,
   retryAutomationRun,
@@ -68,6 +70,58 @@ function runPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function attemptSummaryPayload(run = runPayload()) {
+  return {
+    id: run.id,
+    status: run.status,
+    attempt: run.attempt,
+    retry_of_run_id: run.retry_of_run_id,
+    retryable: run.retryable,
+    retry_at: run.retry_at,
+    error_code: run.error_code,
+    result_type: run.result_type,
+    result_id: run.result_id,
+    result_summary: run.result_summary,
+    started_at: run.started_at,
+    ended_at: run.ended_at,
+  };
+}
+
+function runDetailPayload(
+  runOverrides: Record<string, unknown> = {},
+  detailOverrides: Record<string, unknown> = {},
+) {
+  const run = runPayload(runOverrides);
+  const source =
+    run.trigger_type === "event"
+      ? {
+          kind: "event",
+          available: true,
+          event_id: run.source_event_id,
+          aggregate_type: "invoice",
+          aggregate_id: "018f0000-0000-7000-8000-000000001603",
+          action: "invoice_overdue",
+          occurred_at: "2026-08-29T01:00:00Z",
+          scheduled_for: null,
+        }
+      : {
+          kind: "schedule",
+          available: true,
+          event_id: null,
+          aggregate_type: null,
+          aggregate_id: null,
+          action: null,
+          occurred_at: null,
+          scheduled_for: run.scheduled_for,
+        };
+  return {
+    ...run,
+    source,
+    retry_chain: [attemptSummaryPayload(run)],
+    ...detailOverrides,
+  };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   resetRuntimeConnection();
@@ -104,6 +158,180 @@ describe("Automation API contract", () => {
       page_size: "20",
       status: "succeeded",
     });
+  });
+
+  it("encodes run filters and pagination and forwards cancellation", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        controller.abort();
+        expect(init?.signal?.aborted).toBe(true);
+        return jsonResponse({
+          data: [runPayload({ status: "failed" })],
+          meta: { page: 3, page_size: 7, total: 15 },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAutomationRuns(
+      {
+        ruleId: "00000000-0000-5000-8000-000000000102",
+        status: "failed",
+        page: 3,
+        pageSize: 7,
+      },
+      controller.signal,
+    );
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      page: "3",
+      page_size: "7",
+      rule_id: "00000000-0000-5000-8000-000000000102",
+      status: "failed",
+    });
+  });
+
+  it("normalizes an encoded run detail request and its immutable audit facts", async () => {
+    const id = "run/id with space";
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        controller.abort();
+        expect(init?.signal?.aborted).toBe(true);
+        return jsonResponse({ data: runDetailPayload({ id }) });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await getAutomationRun(id, controller.signal);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/automations/runs/run%2Fid%20with%20space",
+    );
+    expect(detail.source).toEqual({
+      kind: "schedule",
+      available: true,
+      eventId: null,
+      aggregateType: null,
+      aggregateId: null,
+      action: null,
+      occurredAt: null,
+      scheduledFor: "2026-08-29T01:00:00Z",
+    });
+    expect(detail.retryChain).toEqual([
+      expect.objectContaining({ id, attempt: 1, status: "succeeded" }),
+    ]);
+  });
+
+  it("accepts an unavailable immutable event source without inventing facts", () => {
+    const eventId = "018f0000-0000-7000-8000-000000001611";
+    const detail = normalizeAutomationRunDetail(
+      runDetailPayload(
+        {
+          trigger_type: "event",
+          source_event_id: eventId,
+          scheduled_for: null,
+        },
+        {
+          source: {
+            kind: "event",
+            available: false,
+            event_id: eventId,
+            aggregate_type: null,
+            aggregate_id: null,
+            action: null,
+            occurred_at: null,
+            scheduled_for: null,
+          },
+        },
+      ),
+    );
+
+    expect(detail.source).toMatchObject({
+      kind: "event",
+      available: false,
+      eventId,
+      aggregateType: null,
+      occurredAt: null,
+    });
+  });
+
+  it("preserves an explicitly empty execution summary", () => {
+    const detail = normalizeAutomationRunDetail(
+      runDetailPayload({ result_summary: "" }),
+    );
+
+    expect(detail.resultSummary).toBe("");
+    expect(detail.retryChain[0].resultSummary).toBe("");
+  });
+
+  it.each([
+    [
+      "source has an unknown field",
+      () => {
+        const detail = runDetailPayload();
+        return {
+          ...detail,
+          source: { ...(detail.source as object), unexpected: true },
+        };
+      },
+    ],
+    [
+      "source contradicts the run",
+      () => {
+        const detail = runDetailPayload();
+        return {
+          ...detail,
+          source: { ...(detail.source as object), scheduled_for: null },
+        };
+      },
+    ],
+    ["retry chain is empty", () => runDetailPayload({}, { retry_chain: [] })],
+    [
+      "retry attempts are duplicated",
+      () => {
+        const detail = runDetailPayload();
+        const summary = attemptSummaryPayload(detail);
+        return { ...detail, retry_chain: [summary, { ...summary }] };
+      },
+    ],
+    [
+      "different retry attempts reuse one run id",
+      () => {
+        const current = runPayload({ attempt: 2 });
+        const first = attemptSummaryPayload({
+          ...current,
+          attempt: 1,
+          retry_of_run_id: null,
+        });
+        const second = attemptSummaryPayload(current);
+        return runDetailPayload(
+          { attempt: 2 },
+          { retry_chain: [first, second] },
+        );
+      },
+    ],
+    [
+      "retry chain omits the selected run",
+      () => {
+        const detail = runDetailPayload();
+        return {
+          ...detail,
+          retry_chain: [
+            {
+              ...attemptSummaryPayload(detail),
+              id: "018f0000-0000-7000-8000-000000001699",
+            },
+          ],
+        };
+      },
+    ],
+  ])("rejects an invalid run detail when %s", (_label, payload) => {
+    expect(() => normalizeAutomationRunDetail(payload())).toThrowError(
+      expect.objectContaining({ code: "INVALID_RESPONSE" }),
+    );
   });
 
   it("normalizes the available invoice overdue task preset and its task result", async () => {

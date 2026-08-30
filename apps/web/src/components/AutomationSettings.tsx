@@ -25,7 +25,11 @@ import type {
   AutomationConfig,
   AutomationRule,
   AutomationRun,
+  AutomationRunStatus,
 } from "../types/models";
+import { AutomationRunDetailModal } from "./AutomationRunDetailModal";
+
+const RUN_PAGE_SIZE = 20;
 
 function automationError(error: unknown): string {
   if (error instanceof ApiError) {
@@ -68,12 +72,23 @@ function ruleStatusLabel(rule: AutomationRule): string {
 }
 
 export function AutomationSettings({
+  onOpenInboxItem,
   onOpenTask,
 }: {
+  onOpenInboxItem: (inboxItemId: string) => void;
   onOpenTask: (taskId: string) => void;
 }) {
   const rulesQuery = useAutomationRulesQuery();
-  const runsQuery = useAutomationRunsQuery({ pageSize: 20 });
+  const [runPage, setRunPage] = useState(1);
+  const [runRuleId, setRunRuleId] = useState("");
+  const [runStatus, setRunStatus] = useState<AutomationRunStatus | "">("");
+  const [detailRunId, setDetailRunId] = useState<string | null>(null);
+  const runsQuery = useAutomationRunsQuery({
+    page: runPage,
+    pageSize: RUN_PAGE_SIZE,
+    ruleId: runRuleId || undefined,
+    status: runStatus || undefined,
+  });
   const preview = usePreviewAutomationRule();
   const updateRule = useUpdateAutomationRule();
   const setEnabled = useSetAutomationRuleEnabled();
@@ -81,6 +96,12 @@ export function AutomationSettings({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<AutomationConfig>({});
   const [feedback, setFeedback] = useState<string | null>(null);
+
+  const runTotal = runsQuery.data?.meta.total ?? 0;
+  const runTotalPages = Math.max(1, Math.ceil(runTotal / RUN_PAGE_SIZE));
+  const changingRunResults =
+    runsQuery.isPlaceholderData && runsQuery.isFetching;
+  const hasRunFilters = Boolean(runRuleId || runStatus);
 
   const selected = useMemo(
     () => rulesQuery.data?.find((rule) => rule.id === selectedId) ?? null,
@@ -113,6 +134,11 @@ export function AutomationSettings({
     // should schedule a new server-authoritative preview.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, draft]);
+
+  useEffect(() => {
+    if (!runsQuery.data || runsQuery.isPlaceholderData) return;
+    if (runPage > runTotalPages) setRunPage(runTotalPages);
+  }, [runPage, runTotalPages, runsQuery.data, runsQuery.isPlaceholderData]);
 
   const pending = updateRule.isPending || setEnabled.isPending;
   const dirty = selected ? !sameConfig(selected.config, draft) : false;
@@ -439,15 +465,71 @@ export function AutomationSettings({
             刷新
           </button>
         </div>
-        {runsQuery.isError ? (
+        <div className="automation-history-filters" aria-label="运行记录筛选">
+          <label>
+            <span>规则</span>
+            <select
+              onChange={(event) => {
+                setRunRuleId(event.target.value);
+                setRunPage(1);
+              }}
+              value={runRuleId}
+            >
+              <option value="">全部规则</option>
+              {rulesQuery.data.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>状态</span>
+            <select
+              onChange={(event) => {
+                setRunStatus(event.target.value as AutomationRunStatus | "");
+                setRunPage(1);
+              }}
+              value={runStatus}
+            >
+              <option value="">全部状态</option>
+              <option value="succeeded">成功</option>
+              <option value="failed">失败</option>
+              <option value="skipped">已折叠</option>
+              <option value="cancelled">已取消</option>
+            </select>
+          </label>
+          <span aria-live="polite">
+            {runsQuery.data && !changingRunResults
+              ? `共 ${runTotal} 条记录`
+              : "正在更新计数…"}
+          </span>
+        </div>
+        {runsQuery.isError && runsQuery.data ? (
           <div className="automation-error" role="alert">
             <AlertCircle size={14} />
-            {automationError(runsQuery.error)}
+            <span>
+              运行记录刷新失败，当前显示上次成功读取的数据。
+              {automationError(runsQuery.error)}
+            </span>
           </div>
-        ) : runsQuery.isPending ? (
-          <div className="settings-state">
+        ) : null}
+        {runsQuery.isError && !runsQuery.data ? (
+          <div className="automation-error" role="alert">
+            <AlertCircle size={14} />
+            <span>{automationError(runsQuery.error)}</span>
+            <button
+              className="button button-secondary"
+              onClick={() => void runsQuery.refetch()}
+              type="button"
+            >
+              重试
+            </button>
+          </div>
+        ) : runsQuery.isPending || changingRunResults ? (
+          <div aria-live="polite" className="settings-state" role="status">
             <LoaderCircle className="animate-spin" size={15} />
-            正在读取运行记录…
+            {changingRunResults ? "正在切换运行记录…" : "正在读取运行记录…"}
           </div>
         ) : runsQuery.data?.items.length ? (
           <div className="automation-run-list">
@@ -477,36 +559,84 @@ export function AutomationSettings({
                       : ""}
                   </small>
                 </div>
-                {run.status === "failed" && run.retryable ? (
+                <div className="automation-run-actions">
+                  {run.status === "failed" && run.retryable ? (
+                    <button
+                      className="button button-secondary"
+                      disabled={retryRun.isPending}
+                      onClick={() => retryRun.mutate(run.id)}
+                      type="button"
+                    >
+                      重试
+                    </button>
+                  ) : run.status === "succeeded" &&
+                    run.resultType === "task" &&
+                    run.resultId ? (
+                    <button
+                      className="button button-secondary"
+                      onClick={() => onOpenTask(run.resultId!)}
+                      type="button"
+                    >
+                      打开任务
+                    </button>
+                  ) : run.status === "succeeded" &&
+                    run.resultType === "inbox_item" &&
+                    run.resultId ? (
+                    <button
+                      className="button button-secondary"
+                      onClick={() => onOpenInboxItem(run.resultId!)}
+                      type="button"
+                    >
+                      打开收件箱事项
+                    </button>
+                  ) : null}
                   <button
-                    className="button button-secondary"
-                    disabled={retryRun.isPending}
-                    onClick={() => retryRun.mutate(run.id)}
+                    className="button button-quiet"
+                    onClick={() => setDetailRunId(run.id)}
                     type="button"
                   >
-                    重试
+                    查看详情
                   </button>
-                ) : run.status === "succeeded" &&
-                  run.resultType === "task" &&
-                  run.resultId ? (
-                  <button
-                    className="button button-secondary"
-                    onClick={() => onOpenTask(run.resultId!)}
-                    type="button"
-                  >
-                    打开任务
-                  </button>
-                ) : null}
+                </div>
               </article>
             ))}
           </div>
         ) : (
           <div className="automation-empty">
             <Zap size={17} />
-            <strong>暂无运行记录</strong>
-            <span>启用规则并满足触发条件后，记录会显示在这里。</span>
+            <strong>
+              {hasRunFilters ? "没有符合筛选条件的运行记录" : "暂无运行记录"}
+            </strong>
+            <span>
+              {hasRunFilters
+                ? "调整规则或状态筛选后再试。"
+                : "启用规则并满足触发条件后，记录会显示在这里。"}
+            </span>
           </div>
         )}
+        {runsQuery.data && !changingRunResults && runTotalPages > 1 ? (
+          <div className="pagination" aria-label="运行记录分页">
+            <button
+              className="button button-secondary"
+              disabled={runPage <= 1 || runsQuery.isFetching}
+              onClick={() => setRunPage((page) => Math.max(1, page - 1))}
+              type="button"
+            >
+              上一页
+            </button>
+            <span>
+              第 {runPage} / {runTotalPages} 页
+            </span>
+            <button
+              className="button button-secondary"
+              disabled={runPage >= runTotalPages || runsQuery.isFetching}
+              onClick={() => setRunPage((page) => page + 1)}
+              type="button"
+            >
+              下一页
+            </button>
+          </div>
+        ) : null}
         {retryRun.error ? (
           <p className="automation-error" role="alert">
             <AlertCircle size={14} />
@@ -514,6 +644,12 @@ export function AutomationSettings({
           </p>
         ) : null}
       </section>
+      <AutomationRunDetailModal
+        onClose={() => setDetailRunId(null)}
+        onOpenInboxItem={onOpenInboxItem}
+        onOpenTask={onOpenTask}
+        runId={detailRunId}
+      />
     </div>
   );
 }

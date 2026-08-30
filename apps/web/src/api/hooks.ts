@@ -93,6 +93,7 @@ import {
   getHealth,
   getAppSettings,
   getAutomationRules,
+  getAutomationRun,
   getAutomationRuns,
   getAgentAdapters,
   commitAppSettingsWithAvatar,
@@ -1635,6 +1636,8 @@ export const automationRulesQueryKey = [
   "rules",
 ] as const;
 export const automationRunsQueryKey = [...automationQueryKey, "runs"] as const;
+export const automationRunDetailQueryKey = (id: string) =>
+  [...automationRunsQueryKey, "detail", id] as const;
 
 export function useAutomationRulesQuery(enabled = true) {
   return useQuery({
@@ -1653,12 +1656,22 @@ export function useAutomationRunsQuery(
 ) {
   return useQuery({
     queryKey: [...automationRunsQueryKey, input],
-    queryFn: () => getAutomationRuns(input),
+    queryFn: ({ signal }) => getAutomationRuns(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 1,
     staleTime: 5_000,
     refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,
+  });
+}
+
+export function useAutomationRunQuery(id: string | null) {
+  return useQuery({
+    queryKey: automationRunDetailQueryKey(id ?? "idle"),
+    queryFn: ({ signal }) => getAutomationRun(id!, signal),
+    enabled: Boolean(id),
+    retry: 1,
+    staleTime: 5_000,
   });
 }
 

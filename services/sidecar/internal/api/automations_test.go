@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +31,10 @@ type automationRuleListEnvelope struct {
 type automationRunListEnvelope struct {
 	Data []automationRunOutput `json:"data"`
 	Meta pageMeta              `json:"meta"`
+}
+
+type automationRunDetailEnvelope struct {
+	Data automationRunDetailOutput `json:"data"`
 }
 
 func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
@@ -751,6 +756,342 @@ func TestAutomationFailureDoesNotRollbackSourceAndRetryCreatesNewAttempt(t *test
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE logical_key = ?", 2, failed.LogicalKey)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE retry_of_run_id = ? AND attempt = 2 AND status = 'succeeded'", 1, failed.ID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'automation'", 1)
+}
+
+func TestAutomationRunDetailIncludesSafeSourceAndRetryChainWithoutInflatingList(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	eventRule := automationRuleByPreset(t, router, automationPresetProjectCompleted)
+	enabled := performRequest(
+		router, http.MethodPost, "/api/v1/automations/rules/"+eventRule.ID+"/enable", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, eventRule.Version)},
+	)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable event Automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+	if err := store.DB.Exec(`
+		CREATE TRIGGER reject_run_detail_automation_inbox
+		BEFORE INSERT ON inbox_items
+		WHEN NEW.source_entity_type = 'automation'
+		BEGIN SELECT RAISE(ABORT, 'TEST_RUN_DETAIL_ACTION_FAILURE'); END
+	`).Error; err != nil {
+		t.Fatalf("install run detail action failure: %v", err)
+	}
+	project := createProjectForTest(t, router, `{"name":"运行审计项目"}`, nil)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"start"}`)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"complete"}`)
+	var first models.AutomationRun
+	if err := store.DB.Where("rule_id = ? AND status = 'failed'", eventRule.ID).Take(&first).Error; err != nil {
+		t.Fatalf("load first Automation attempt: %v", err)
+	}
+	var sourceEvent models.WorkflowEvent
+	if first.SourceEventID == nil {
+		t.Fatalf("event Automation has no source event: %#v", first)
+	}
+	if err := store.DB.First(&sourceEvent, "id = ?", *first.SourceEventID).Error; err != nil {
+		t.Fatalf("load Automation source event: %v", err)
+	}
+	if err := store.DB.Exec("DROP TRIGGER reject_run_detail_automation_inbox").Error; err != nil {
+		t.Fatalf("remove run detail action failure: %v", err)
+	}
+	retried := performRequest(router, http.MethodPost, "/api/v1/automations/runs/"+first.ID+"/retry", nil, nil)
+	if retried.Code != http.StatusCreated {
+		t.Fatalf("retry Automation = %d: %s", retried.Code, retried.Body.String())
+	}
+	var second models.AutomationRun
+	if err := store.DB.Where("retry_of_run_id = ?", first.ID).Take(&second).Error; err != nil {
+		t.Fatalf("load second Automation attempt: %v", err)
+	}
+
+	readDetail := func(runID string) automationRunDetailOutput {
+		t.Helper()
+		response := performRequest(router, http.MethodGet, "/api/v1/automations/runs/"+runID, nil, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("get Automation Run %s = %d: %s", runID, response.Code, response.Body.String())
+		}
+		var envelope automationRunDetailEnvelope
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode Automation Run %s: %v", runID, err)
+		}
+		return envelope.Data
+	}
+	firstDetail := readDetail(first.ID)
+	secondDetail := readDetail(second.ID)
+	for _, detail := range []automationRunDetailOutput{firstDetail, secondDetail} {
+		if detail.Source.Kind != "event" || !detail.Source.Available || detail.Source.EventID == nil ||
+			*detail.Source.EventID != sourceEvent.ID || detail.Source.AggregateType == nil || *detail.Source.AggregateType != "project" ||
+			detail.Source.AggregateID == nil || *detail.Source.AggregateID != project.ID || detail.Source.Action == nil ||
+			*detail.Source.Action != "project_completed" || detail.Source.OccurredAt == nil ||
+			*detail.Source.OccurredAt != normalizeTimestamp(sourceEvent.CreatedAt) || detail.Source.ScheduledFor != nil {
+			t.Fatalf("event source detail = %#v", detail.Source)
+		}
+		if len(detail.RetryChain) != 2 || detail.RetryChain[0].ID != first.ID || detail.RetryChain[0].Attempt != 1 ||
+			detail.RetryChain[1].ID != second.ID || detail.RetryChain[1].Attempt != 2 ||
+			detail.RetryChain[1].RetryOfRunID == nil || *detail.RetryChain[1].RetryOfRunID != first.ID {
+			t.Fatalf("retry chain from %s = %#v", detail.ID, detail.RetryChain)
+		}
+	}
+	firstChainJSON, err := json.Marshal(firstDetail.RetryChain)
+	if err != nil {
+		t.Fatalf("encode first retry chain: %v", err)
+	}
+	secondChainJSON, err := json.Marshal(secondDetail.RetryChain)
+	if err != nil {
+		t.Fatalf("encode second retry chain: %v", err)
+	}
+	if string(firstChainJSON) != string(secondChainJSON) {
+		t.Fatalf("retry chain differs by selected attempt: first=%s second=%s", firstChainJSON, secondChainJSON)
+	}
+	if firstDetail.RetryChain[0].ErrorCode == nil || *firstDetail.RetryChain[0].ErrorCode != "ACTION_WRITE_FAILED" ||
+		!firstDetail.RetryChain[0].Retryable || firstDetail.RetryChain[0].RetryAt == nil ||
+		firstDetail.RetryChain[1].Status != "succeeded" || firstDetail.RetryChain[1].ResultType == nil ||
+		*firstDetail.RetryChain[1].ResultType != "inbox_item" || firstDetail.RetryChain[1].ResultID == nil {
+		t.Fatalf("retry chain summaries = %#v", firstDetail.RetryChain)
+	}
+	rawDetailResponse := performRequest(router, http.MethodGet, "/api/v1/automations/runs/"+first.ID, nil, nil)
+	var rawDetail struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rawDetailResponse.Body.Bytes(), &rawDetail); err != nil {
+		t.Fatalf("decode raw Automation Run detail: %v", err)
+	}
+	for _, prohibited := range []string{"logical_key", "dedupe_key"} {
+		if _, exists := rawDetail.Data[prohibited]; exists {
+			t.Fatalf("Automation Run detail exposed %s: %#v", prohibited, rawDetail.Data)
+		}
+	}
+	rawSource, ok := rawDetail.Data["source"].(map[string]any)
+	if !ok {
+		t.Fatalf("Automation Run detail source is not an object: %#v", rawDetail.Data["source"])
+	}
+	if len(rawSource) != 8 {
+		t.Fatalf("Automation Run source fields = %#v", rawSource)
+	}
+	for _, prohibited := range []string{"previous_json", "current_json", "request_id", "logical_key", "dedupe_key"} {
+		if _, exists := rawSource[prohibited]; exists {
+			t.Fatalf("Automation Run source exposed %s: %#v", prohibited, rawSource)
+		}
+	}
+	rawChain, ok := rawDetail.Data["retry_chain"].([]any)
+	if !ok || len(rawChain) != 2 {
+		t.Fatalf("Automation Run raw retry chain = %#v", rawDetail.Data["retry_chain"])
+	}
+	for _, rawAttempt := range rawChain {
+		attempt, ok := rawAttempt.(map[string]any)
+		if !ok {
+			t.Fatalf("Automation Run retry summary is not an object: %#v", rawAttempt)
+		}
+		for _, prohibited := range []string{"logical_key", "dedupe_key"} {
+			if _, exists := attempt[prohibited]; exists {
+				t.Fatalf("Automation Run retry summary exposed %s: %#v", prohibited, attempt)
+			}
+		}
+	}
+
+	missingEventID := uuid.NewString()
+	missing := first
+	missing.ID = uuid.NewString()
+	missing.SourceEventID = &missingEventID
+	missing.LogicalKey = "event:" + eventRule.ID + ":" + missingEventID
+	missing.DedupeKey = missing.LogicalKey + ":attempt:1"
+	missing.Retryable = false
+	missing.RetryAt = nil
+	if err := store.DB.Create(&missing).Error; err != nil {
+		t.Fatalf("create Automation Run with unavailable event: %v", err)
+	}
+	missingDetail := readDetail(missing.ID)
+	if missingDetail.Source.Kind != "event" || missingDetail.Source.Available || missingDetail.Source.EventID == nil ||
+		*missingDetail.Source.EventID != missingEventID || missingDetail.Source.AggregateType != nil ||
+		missingDetail.Source.AggregateID != nil || missingDetail.Source.Action != nil || missingDetail.Source.OccurredAt != nil ||
+		missingDetail.Source.ScheduledFor != nil {
+		t.Fatalf("unavailable event source detail = %#v", missingDetail.Source)
+	}
+
+	scheduleRule := automationRuleByPreset(t, router, automationPresetDailyToday)
+	enabled = performRequest(
+		router, http.MethodPost, "/api/v1/automations/rules/"+scheduleRule.ID+"/enable", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, scheduleRule.Version)},
+	)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable schedule Automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+	var persistedScheduleRule models.AutomationRule
+	if err := store.DB.First(&persistedScheduleRule, "id = ?", scheduleRule.ID).Error; err != nil {
+		t.Fatalf("load schedule Automation Rule: %v", err)
+	}
+	if persistedScheduleRule.NextRunAt == nil {
+		t.Fatalf("enabled schedule Automation has no next run: %#v", persistedScheduleRule)
+	}
+	dueAt, err := time.Parse(time.RFC3339Nano, *persistedScheduleRule.NextRunAt)
+	if err != nil {
+		t.Fatalf("parse schedule next run: %v", err)
+	}
+	service := &API{db: store.DB, options: Options{Now: func() time.Time { return dueAt }}}
+	if err := service.projectDueAutomationRule(scheduleRule.ID, dueAt); err != nil {
+		t.Fatalf("project schedule Automation: %v", err)
+	}
+	var scheduleRun models.AutomationRun
+	if err := store.DB.Where("rule_id = ? AND trigger_type = 'schedule'", scheduleRule.ID).Take(&scheduleRun).Error; err != nil {
+		t.Fatalf("load schedule Automation Run: %v", err)
+	}
+	scheduleDetail := readDetail(scheduleRun.ID)
+	if scheduleDetail.Source.Kind != "schedule" || !scheduleDetail.Source.Available || scheduleDetail.Source.EventID != nil ||
+		scheduleDetail.Source.AggregateType != nil || scheduleDetail.Source.AggregateID != nil || scheduleDetail.Source.Action != nil ||
+		scheduleDetail.Source.OccurredAt != nil || scheduleDetail.Source.ScheduledFor == nil || scheduleRun.ScheduledFor == nil ||
+		*scheduleDetail.Source.ScheduledFor != normalizeTimestamp(*scheduleRun.ScheduledFor) {
+		t.Fatalf("schedule source detail = %#v", scheduleDetail.Source)
+	}
+
+	listed := performRequest(router, http.MethodGet, "/api/v1/automations/runs", nil, nil)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list Automation Runs = %d: %s", listed.Code, listed.Body.String())
+	}
+	var rawList struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &rawList); err != nil {
+		t.Fatalf("decode raw Automation Run list: %v", err)
+	}
+	if len(rawList.Data) < 4 {
+		t.Fatalf("Automation Run list omitted fixtures: %#v", rawList.Data)
+	}
+	for _, run := range rawList.Data {
+		if _, exists := run["source"]; exists {
+			t.Fatalf("Automation Run list exposed source: %#v", run)
+		}
+		if _, exists := run["retry_chain"]; exists {
+			t.Fatalf("Automation Run list exposed retry chain: %#v", run)
+		}
+	}
+}
+
+func TestAutomationRunDetailRejectsNoncanonicalIDAndReturnsNotFound(t *testing.T) {
+	router := newTestAPI(t)
+	uppercase := strings.ToUpper(uuid.NewString())
+	for name, id := range map[string]string{
+		"invalid":   "not-a-run-id",
+		"uppercase": uppercase,
+		"spaced":    "%20" + uuid.NewString() + "%20",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := performRequest(router, http.MethodGet, "/api/v1/automations/runs/"+id, nil, nil)
+			if response.Code != http.StatusBadRequest || responseErrorCode(t, response.Body.Bytes()) != "INVALID_AUTOMATION_RUN_ID" {
+				t.Fatalf("response = %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+	missing := performRequest(router, http.MethodGet, "/api/v1/automations/runs/"+uuid.NewString(), nil, nil)
+	if missing.Code != http.StatusNotFound || responseErrorCode(t, missing.Body.Bytes()) != "AUTOMATION_RUN_NOT_FOUND" {
+		t.Fatalf("missing Automation Run = %d: %s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestAutomationRunListUsesOneReadTransactionForCountPageAndRuleLookup(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	rule := automationRuleByPreset(t, router, automationPresetDailyToday)
+	run := createSkippedScheduleAutomationRunForTest(t, store, rule)
+
+	const callbackName = "test_automation_run_list_read_transaction"
+	var sharedTransaction *sql.Tx
+	runQueries := 0
+	ruleQueries := 0
+	if err := store.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(db *gorm.DB) {
+		if db.Statement.Table != "automation_runs" && db.Statement.Table != "automation_rules" {
+			return
+		}
+		transaction, ok := db.Statement.ConnPool.(*sql.Tx)
+		if !ok {
+			db.AddError(fmt.Errorf("automation list query for %s did not use a SQL transaction", db.Statement.Table))
+			return
+		}
+		if sharedTransaction == nil {
+			sharedTransaction = transaction
+		} else if transaction != sharedTransaction {
+			db.AddError(fmt.Errorf("automation list query for %s used a different SQL transaction", db.Statement.Table))
+			return
+		}
+		if db.Statement.Table == "automation_runs" {
+			runQueries++
+		} else {
+			ruleQueries++
+		}
+	}); err != nil {
+		t.Fatalf("register Automation Run list transaction assertion: %v", err)
+	}
+	t.Cleanup(func() { _ = store.DB.Callback().Query().Remove(callbackName) })
+
+	response := performRequest(
+		router, http.MethodGet,
+		"/api/v1/automations/runs?rule_id="+rule.ID+"&status=skipped&page=1&page_size=1",
+		nil, nil,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list Automation Runs in read transaction = %d: %s", response.Code, response.Body.String())
+	}
+	var envelope automationRunListEnvelope
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode Automation Run transaction list: %v", err)
+	}
+	if envelope.Meta.Page != 1 || envelope.Meta.PageSize != 1 || envelope.Meta.Total != 1 ||
+		len(envelope.Data) != 1 || envelope.Data[0].ID != run.ID {
+		t.Fatalf("Automation Run transaction list = %#v", envelope)
+	}
+	if sharedTransaction == nil || runQueries != 2 || ruleQueries != 1 {
+		t.Fatalf("Automation Run list transaction queries: tx=%p runs=%d rules=%d", sharedTransaction, runQueries, ruleQueries)
+	}
+}
+
+func TestAutomationRunDetailTreatsMissingRelatedRuleAsIntegrityFailure(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	rule := automationRuleByPreset(t, router, automationPresetDailyToday)
+	run := createSkippedScheduleAutomationRunForTest(t, store, rule)
+	if err := store.DB.Exec("PRAGMA foreign_keys = OFF").Error; err != nil {
+		t.Fatalf("disable foreign keys for corrupt Automation fixture: %v", err)
+	}
+	t.Cleanup(func() { _ = store.DB.Exec("PRAGMA foreign_keys = ON").Error })
+	if err := store.DB.Delete(&models.AutomationRule{}, "id = ?", rule.ID).Error; err != nil {
+		t.Fatalf("delete related Automation Rule: %v", err)
+	}
+	if err := store.DB.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		t.Fatalf("restore foreign keys after corrupt Automation fixture: %v", err)
+	}
+
+	response := performRequest(router, http.MethodGet, "/api/v1/automations/runs/"+run.ID, nil, nil)
+	if response.Code != http.StatusInternalServerError || responseErrorCode(t, response.Body.Bytes()) != "INTERNAL_ERROR" {
+		t.Fatalf("Automation Run with missing related Rule = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func createSkippedScheduleAutomationRunForTest(
+	t *testing.T,
+	store *database.Store,
+	rule automationRuleOutput,
+) models.AutomationRun {
+	t.Helper()
+	configJSON, err := encodeAutomationConfig(rule.Config)
+	if err != nil {
+		t.Fatalf("encode Automation Run test config: %v", err)
+	}
+	actionJSON, err := json.Marshal(automationScheduleActionSnapshot(rule.PresetKey))
+	if err != nil {
+		t.Fatalf("encode Automation Run test action: %v", err)
+	}
+	scheduledFor := formatInboxTimestamp(time.Date(2026, 9, 8, 9, 0, 0, 0, time.UTC))
+	endedAt := formatInboxTimestamp(time.Date(2026, 9, 8, 9, 0, 1, 0, time.UTC))
+	errorCode := "SCHEDULE_WINDOW_EXPIRED"
+	logicalKey := "schedule:" + rule.ID + ":" + scheduledFor
+	run := models.AutomationRun{
+		ID: uuid.NewString(), RuleID: rule.ID, RuleVersion: rule.Version,
+		TriggerType: "schedule", ScheduledFor: &scheduledFor,
+		LogicalKey: logicalKey, DedupeKey: logicalKey + ":attempt:1",
+		Status: "skipped", Attempt: 1, ConfigSnapshotJSON: configJSON,
+		ActionSnapshotJSON: string(actionJSON), ErrorCode: &errorCode,
+		ResultSummary: "离线期间错过的旧计划窗口已折叠，不创建过期提醒。",
+		StartedAt:     scheduledFor, EndedAt: endedAt,
+	}
+	if err := store.DB.Create(&run).Error; err != nil {
+		t.Fatalf("create skipped Automation Run fixture: %v", err)
+	}
+	return run
 }
 
 func TestAutomationInfrastructureFailureNeverRollsBackCompletedProject(t *testing.T) {

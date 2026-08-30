@@ -1015,6 +1015,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     if (activeModule === "automation") {
       return (
         <AutomationSettings
+          onOpenInboxItem={(inboxItemId) =>
+            closeTo(`/inbox/${encodeURIComponent(inboxItemId)}`)
+          }
           onOpenTask={(taskId) =>
             closeTo(`/tasks/${encodeURIComponent(taskId)}`)
           }

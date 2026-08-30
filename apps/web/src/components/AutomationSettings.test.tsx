@@ -93,13 +93,16 @@ function invoiceRunPayload() {
   };
 }
 
-function renderSettings(onOpenTask = vi.fn()) {
+function renderSettings(onOpenTask = vi.fn(), onOpenInboxItem = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AutomationSettings onOpenTask={onOpenTask} />
+      <AutomationSettings
+        onOpenInboxItem={onOpenInboxItem}
+        onOpenTask={onOpenTask}
+      />
     </QueryClientProvider>,
   );
 }
@@ -275,5 +278,218 @@ describe("AutomationSettings", () => {
         "启用受限的本地预设，让明确事件或时间触发 Inbox、Task 与 Reminder 动作。",
       ),
     ).toBeTruthy();
+  });
+
+  it("uses server pagination and resets the page when filters change", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.endsWith("/automations/runs")) {
+        const page = Number(url.searchParams.get("page"));
+        const status = url.searchParams.get("status");
+        if (status === "cancelled") {
+          return response({
+            data: [],
+            meta: { page: 1, page_size: 20, total: 0 },
+          });
+        }
+        return response({
+          data: [
+            {
+              ...invoiceRunPayload(),
+              id: `018f0000-0000-7000-8000-00000000161${page}`,
+              result_summary: `第 ${page} 页记录`,
+            },
+          ],
+          meta: { page, page_size: 20, total: 45 },
+        });
+      }
+      if (url.pathname.endsWith("/preview")) {
+        return response({
+          data: {
+            can_enable: true,
+            unavailable_reason: "",
+            trigger_summary: "发票工作流事件：invoice_overdue",
+            action_summary: "创建任务",
+            config: { priority: "P1" },
+            next_run_at: null,
+            permissions: [],
+          },
+        });
+      }
+      return response({ data: [invoiceRulePayload()] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettings();
+
+    expect(await screen.findByText("第 1 页记录")).toBeVisible();
+    expect(screen.getByText("第 1 / 3 页")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(await screen.findByText("第 2 页记录")).toBeVisible();
+    expect(screen.queryByText("第 1 页记录")).toBeNull();
+    expect(screen.getByText("第 2 / 3 页")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("状态"), {
+      target: { value: "cancelled" },
+    });
+
+    expect(await screen.findByText("没有符合筛选条件的运行记录")).toBeVisible();
+    const filteredCall = fetchMock.mock.calls.find(([input]) => {
+      const url = new URL(String(input), "http://localhost");
+      return (
+        url.pathname.endsWith("/automations/runs") &&
+        url.searchParams.get("status") === "cancelled"
+      );
+    });
+    expect(
+      new URL(String(filteredCall?.[0]), "http://localhost").searchParams.get(
+        "page",
+      ),
+    ).toBe("1");
+    expect(
+      new URL(String(filteredCall?.[0]), "http://localhost").searchParams.get(
+        "page_size",
+      ),
+    ).toBe("20");
+  });
+
+  it("opens successful inbox results and keeps reminder results as facts", async () => {
+    const onOpenInboxItem = vi.fn();
+    const inboxRun = {
+      ...invoiceRunPayload(),
+      id: "018f0000-0000-7000-8000-000000001620",
+      result_type: "inbox_item",
+      result_id: "018f0000-0000-7000-8000-000000001621",
+      result_summary: "已创建收件箱事项",
+    };
+    const reminderRun = {
+      ...invoiceRunPayload(),
+      id: "018f0000-0000-7000-8000-000000001622",
+      result_type: "reminder",
+      result_id: "018f0000-0000-7000-8000-000000001623",
+      result_summary: "已创建提醒",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/automations/runs")) {
+          return response({
+            data: [inboxRun, reminderRun],
+            meta: { page: 1, page_size: 20, total: 2 },
+          });
+        }
+        if (url.endsWith("/preview")) {
+          return response({
+            data: {
+              can_enable: true,
+              unavailable_reason: "",
+              trigger_summary: "事件",
+              action_summary: "动作",
+              config: { priority: "P1" },
+              next_run_at: null,
+              permissions: [],
+            },
+          });
+        }
+        return response({ data: [invoiceRulePayload()] });
+      }),
+    );
+
+    renderSettings(vi.fn(), onOpenInboxItem);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "打开收件箱事项" }),
+    );
+    expect(onOpenInboxItem).toHaveBeenCalledWith(inboxRun.result_id);
+    expect(screen.getByText("已创建提醒")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "打开提醒" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "查看详情" })).toHaveLength(2);
+  });
+
+  it("distinguishes initial run load errors from refresh errors with stale data", async () => {
+    let runRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/automations/runs")) {
+        runRequests += 1;
+        if (runRequests > 1) {
+          return response(
+            { error: { code: "RUNS_UNAVAILABLE", message: "暂时不可用" } },
+            503,
+          );
+        }
+        return response({
+          data: [invoiceRunPayload()],
+          meta: { page: 1, page_size: 20, total: 1 },
+        });
+      }
+      if (url.endsWith("/preview")) {
+        return response({
+          data: {
+            can_enable: true,
+            unavailable_reason: "",
+            trigger_summary: "事件",
+            action_summary: "动作",
+            config: { priority: "P1" },
+            next_run_at: null,
+            permissions: [],
+          },
+        });
+      }
+      return response({ data: [invoiceRulePayload()] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderSettings();
+    expect(await screen.findByText("已创建本地发票跟进任务。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+
+    expect(
+      await screen.findByText(
+        /运行记录刷新失败，当前显示上次成功读取的数据/,
+        {},
+        { timeout: 3_000 },
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("已创建本地发票跟进任务。")).toBeVisible();
+  });
+
+  it("shows an actionable initial run load error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/automations/runs")) {
+          return response(
+            { error: { code: "RUNS_UNAVAILABLE", message: "暂时不可用" } },
+            503,
+          );
+        }
+        if (url.endsWith("/preview")) {
+          return response({
+            data: {
+              can_enable: true,
+              unavailable_reason: "",
+              trigger_summary: "事件",
+              action_summary: "动作",
+              config: { priority: "P1" },
+              next_run_at: null,
+              permissions: [],
+            },
+          });
+        }
+        return response({ data: [invoiceRulePayload()] });
+      }),
+    );
+
+    renderSettings();
+
+    const alert = await screen.findByRole("alert", {}, { timeout: 3_000 });
+    expect(alert).toHaveTextContent("请求失败（503）");
+    expect(alert).toContainElement(
+      screen.getByRole("button", { name: "重试" }),
+    );
+    expect(screen.queryByText("暂无运行记录")).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ var (
 	errAutomationInboxSourceConflict    = errors.New("automation Inbox action was already committed by another run")
 	errAutomationActionSnapshotInvalid  = errors.New("automation action snapshot is invalid")
 	errAutomationAttemptContractInvalid = errors.New("automation attempt contract is invalid")
+	errAutomationRunNotFound            = errors.New("automation run not found")
 	errAutomationSourceEventInvalid     = errors.New("automation source event is invalid")
 )
 
@@ -83,6 +85,38 @@ type automationRunOutput struct {
 	ResultSummary  string         `json:"result_summary"`
 	StartedAt      string         `json:"started_at"`
 	EndedAt        string         `json:"ended_at"`
+}
+
+type automationRunSourceOutput struct {
+	Kind          string  `json:"kind"`
+	Available     bool    `json:"available"`
+	EventID       *string `json:"event_id"`
+	AggregateType *string `json:"aggregate_type"`
+	AggregateID   *string `json:"aggregate_id"`
+	Action        *string `json:"action"`
+	OccurredAt    *string `json:"occurred_at"`
+	ScheduledFor  *string `json:"scheduled_for"`
+}
+
+type automationRunRetrySummary struct {
+	ID            string  `json:"id"`
+	Status        string  `json:"status"`
+	Attempt       int     `json:"attempt"`
+	RetryOfRunID  *string `json:"retry_of_run_id"`
+	Retryable     bool    `json:"retryable"`
+	RetryAt       *string `json:"retry_at"`
+	ErrorCode     *string `json:"error_code"`
+	ResultType    *string `json:"result_type"`
+	ResultID      *string `json:"result_id"`
+	ResultSummary string  `json:"result_summary"`
+	StartedAt     string  `json:"started_at"`
+	EndedAt       string  `json:"ended_at"`
+}
+
+type automationRunDetailOutput struct {
+	automationRunOutput
+	Source     automationRunSourceOutput   `json:"source"`
+	RetryChain []automationRunRetrySummary `json:"retry_chain"`
 }
 
 type automationRunListMeta struct {
@@ -835,40 +869,51 @@ func (a *API) listAutomationRuns(c *gin.Context) {
 	if !ok {
 		return
 	}
-	query := a.db.WithContext(c.Request.Context()).Model(&models.AutomationRun{})
-	if ruleID := strings.TrimSpace(c.Query("rule_id")); ruleID != "" {
+	ruleID := strings.TrimSpace(c.Query("rule_id"))
+	if ruleID != "" {
 		parsed, err := uuid.Parse(ruleID)
 		if err != nil || parsed.String() != ruleID {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "rule_id must be a canonical UUID")
 			return
 		}
-		query = query.Where("rule_id = ?", ruleID)
 	}
-	if status := strings.TrimSpace(c.Query("status")); status != "" {
+	status := strings.TrimSpace(c.Query("status"))
+	if status != "" {
 		if status != "succeeded" && status != "failed" && status != "skipped" && status != "cancelled" {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status is invalid")
 			return
 		}
-		query = query.Where("status = ?", status)
 	}
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		writeDatabaseError(c)
-		return
-	}
 	var runs []models.AutomationRun
-	if err := query.Order("started_at DESC").Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&runs).Error; err != nil {
+	var data []automationRunOutput
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&models.AutomationRun{})
+		if ruleID != "" {
+			query = query.Where("rule_id = ?", ruleID)
+		}
+		if status != "" {
+			query = query.Where("status = ?", status)
+		}
+		if err := query.Count(&total).Error; err != nil {
+			return err
+		}
+		if err := query.Order("started_at DESC").Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&runs).Error; err != nil {
+			return err
+		}
+		data = make([]automationRunOutput, len(runs))
+		for index := range runs {
+			output, err := automationRunOutputFromModel(tx, runs[index])
+			if err != nil {
+				return err
+			}
+			data[index] = output
+		}
+		return nil
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
 		writeDatabaseError(c)
 		return
-	}
-	data := make([]automationRunOutput, len(runs))
-	for index := range runs {
-		output, err := automationRunOutputFromModel(a.db, runs[index])
-		if err != nil {
-			writeDatabaseError(c)
-			return
-		}
-		data[index] = output
 	}
 	c.JSON(http.StatusOK, gin.H{"data": data, "meta": automationRunListMeta{Page: page, PageSize: pageSize, Total: total}})
 }
@@ -878,21 +923,31 @@ func (a *API) getAutomationRun(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var run models.AutomationRun
-	if err := a.db.WithContext(c.Request.Context()).First(&run, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	var detail automationRunDetailOutput
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var run models.AutomationRun
+		if err := tx.First(&run, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAutomationRunNotFound
+			}
+			return err
+		}
+		output, err := automationRunDetailOutputFromModel(tx, run)
+		if err != nil {
+			return err
+		}
+		detail = output
+		return nil
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		if errors.Is(err, errAutomationRunNotFound) {
 			writeError(c, http.StatusNotFound, "AUTOMATION_RUN_NOT_FOUND", "Automation run not found")
 		} else {
 			writeDatabaseError(c)
 		}
 		return
 	}
-	output, err := automationRunOutputFromModel(a.db, run)
-	if err != nil {
-		writeDatabaseError(c)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": output})
+	c.JSON(http.StatusOK, gin.H{"data": detail})
 }
 
 func (a *API) retryAutomationRun(c *gin.Context) {
@@ -925,7 +980,7 @@ func (a *API) retryAutomationRun(c *gin.Context) {
 }
 
 func automationRunID(c *gin.Context) (string, bool) {
-	id := strings.TrimSpace(c.Param("id"))
+	id := c.Param("id")
 	parsed, err := uuid.Parse(id)
 	if err != nil || parsed.String() != id {
 		writeError(c, http.StatusBadRequest, "INVALID_AUTOMATION_RUN_ID", "Automation run id must be a canonical UUID")
@@ -933,6 +988,73 @@ func automationRunID(c *gin.Context) (string, bool) {
 	}
 	return id, true
 }
+
+func automationRunDetailOutputFromModel(db *gorm.DB, run models.AutomationRun) (automationRunDetailOutput, error) {
+	output, err := automationRunOutputFromModel(db, run)
+	if err != nil {
+		return automationRunDetailOutput{}, err
+	}
+	source, err := automationRunSourceFromModel(db, run)
+	if err != nil {
+		return automationRunDetailOutput{}, err
+	}
+	var runs []models.AutomationRun
+	if err := db.Where("logical_key = ?", run.LogicalKey).Order("attempt ASC").Order("id ASC").Find(&runs).Error; err != nil {
+		return automationRunDetailOutput{}, err
+	}
+	chain := make([]automationRunRetrySummary, len(runs))
+	for index := range runs {
+		chain[index] = automationRunRetrySummaryFromModel(runs[index])
+	}
+	return automationRunDetailOutput{automationRunOutput: output, Source: source, RetryChain: chain}, nil
+}
+
+func automationRunSourceFromModel(db *gorm.DB, run models.AutomationRun) (automationRunSourceOutput, error) {
+	switch run.TriggerType {
+	case "schedule":
+		return automationRunSourceOutput{
+			Kind: "schedule", Available: true, ScheduledFor: normalizeTimestampPointer(run.ScheduledFor),
+		}, nil
+	case "event":
+		source := automationRunSourceOutput{Kind: "event", EventID: run.SourceEventID}
+		if run.SourceEventID == nil {
+			return source, nil
+		}
+		var event models.WorkflowEvent
+		if err := db.Select("id", "aggregate_type", "aggregate_id", "action", "created_at").First(&event, "id = ?", *run.SourceEventID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return source, nil
+			}
+			return automationRunSourceOutput{}, err
+		}
+		source.Available = true
+		source.AggregateType = stringPointer(event.AggregateType)
+		source.AggregateID = stringPointer(event.AggregateID)
+		source.Action = stringPointer(event.Action)
+		source.OccurredAt = stringPointer(normalizeTimestamp(event.CreatedAt))
+		return source, nil
+	default:
+		return automationRunSourceOutput{}, errors.New("automation run trigger type is invalid")
+	}
+}
+
+func automationRunRetrySummaryFromModel(run models.AutomationRun) automationRunRetrySummary {
+	return automationRunRetrySummary{
+		ID: run.ID, Status: run.Status, Attempt: run.Attempt, RetryOfRunID: run.RetryOfRunID,
+		Retryable: run.Retryable, RetryAt: normalizeTimestampPointer(run.RetryAt), ErrorCode: run.ErrorCode,
+		ResultType: run.ResultType, ResultID: run.ResultID, ResultSummary: run.ResultSummary,
+		StartedAt: normalizeTimestamp(run.StartedAt), EndedAt: normalizeTimestamp(run.EndedAt),
+	}
+}
+
+func normalizeTimestampPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	return stringPointer(normalizeTimestamp(*value))
+}
+
+func stringPointer(value string) *string { return &value }
 
 func automationRunOutputFromModel(db *gorm.DB, run models.AutomationRun) (automationRunOutput, error) {
 	var rule models.AutomationRule

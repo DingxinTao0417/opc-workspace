@@ -2163,6 +2163,37 @@ export interface AutomationRun {
   endedAt: string;
 }
 
+export interface AutomationRunSource {
+  kind: AutomationTriggerType;
+  available: boolean;
+  eventId: string | null;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  action: string | null;
+  occurredAt: string | null;
+  scheduledFor: string | null;
+}
+
+export interface AutomationRunAttemptSummary {
+  id: string;
+  status: AutomationRunStatus;
+  attempt: number;
+  retryOfRunId: string | null;
+  retryable: boolean;
+  retryAt: string | null;
+  errorCode: string | null;
+  resultType: string | null;
+  resultId: string | null;
+  resultSummary: string;
+  startedAt: string;
+  endedAt: string;
+}
+
+export interface AutomationRunDetail extends AutomationRun {
+  source: AutomationRunSource;
+  retryChain: AutomationRunAttemptSummary[];
+}
+
 export interface AutomationRunListParams {
   ruleId?: string;
   status?: AutomationRunStatus;

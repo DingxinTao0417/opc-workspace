@@ -15,8 +15,11 @@ import type {
   AutomationRule,
   AutomationRuleStatus,
   AutomationRun,
+  AutomationRunAttemptSummary,
+  AutomationRunDetail,
   AutomationRunListParams,
   AutomationRunListResult,
+  AutomationRunSource,
   AutomationRunStatus,
   AutomationTriggerType,
   AgentAdapter,
@@ -4076,16 +4079,19 @@ export function normalizeAutomationPreview(value: unknown): AutomationPreview {
 
 export function normalizeAutomationRun(value: unknown): AutomationRun {
   if (!isRecord(value)) return invalidResponse("自动化运行响应格式无效");
+  const resultSummary = fieldValue(value, "result_summary", "resultSummary");
   const requiredStrings = {
     id: stringField(value, "id"),
     ruleId: stringField(value, "rule_id", "ruleId"),
     presetKey: stringField(value, "preset_key", "presetKey"),
     ruleName: stringField(value, "rule_name", "ruleName"),
-    resultSummary: stringField(value, "result_summary", "resultSummary"),
     startedAt: stringField(value, "started_at", "startedAt"),
     endedAt: stringField(value, "ended_at", "endedAt"),
   };
-  if (Object.values(requiredStrings).some((item) => !item)) {
+  if (
+    Object.values(requiredStrings).some((item) => !item) ||
+    typeof resultSummary !== "string"
+  ) {
     return invalidResponse("自动化运行响应缺少必要字段");
   }
   const triggerType = asAutomationTriggerType(
@@ -4144,10 +4150,182 @@ export function normalizeAutomationRun(value: unknown): AutomationRun {
     errorCode: nullableString(fieldValue(value, "error_code", "errorCode")),
     resultType: nullableString(fieldValue(value, "result_type", "resultType")),
     resultId: nullableString(fieldValue(value, "result_id", "resultId")),
-    resultSummary: requiredStrings.resultSummary!,
+    resultSummary,
     startedAt: requiredStrings.startedAt!,
     endedAt: requiredStrings.endedAt!,
   };
+}
+
+const automationRunSourceKeys = [
+  "kind",
+  "available",
+  "event_id",
+  "aggregate_type",
+  "aggregate_id",
+  "action",
+  "occurred_at",
+  "scheduled_for",
+] as const;
+
+const automationRunAttemptSummaryKeys = [
+  "id",
+  "status",
+  "attempt",
+  "retry_of_run_id",
+  "retryable",
+  "retry_at",
+  "error_code",
+  "result_type",
+  "result_id",
+  "result_summary",
+  "started_at",
+  "ended_at",
+] as const;
+
+function normalizeAutomationRunSource(
+  value: unknown,
+  run: AutomationRun,
+): AutomationRunSource {
+  if (!isRecord(value) || !hasExactKeys(value, automationRunSourceKeys)) {
+    return invalidResponse("自动化运行来源响应格式无效");
+  }
+  const source: AutomationRunSource = {
+    kind: asAutomationTriggerType(value.kind),
+    available: value.available as boolean,
+    eventId: nullableString(value.event_id),
+    aggregateType: nullableString(value.aggregate_type),
+    aggregateId: nullableString(value.aggregate_id),
+    action: nullableString(value.action),
+    occurredAt: nullableString(value.occurred_at),
+    scheduledFor: nullableString(value.scheduled_for),
+  };
+  if (typeof value.available !== "boolean" || source.kind !== run.triggerType) {
+    return invalidResponse("自动化运行来源响应不一致");
+  }
+  if (source.kind === "schedule") {
+    if (
+      !source.available ||
+      source.eventId !== null ||
+      source.aggregateType !== null ||
+      source.aggregateId !== null ||
+      source.action !== null ||
+      source.occurredAt !== null ||
+      source.scheduledFor !== run.scheduledFor ||
+      !validRFC3339Timestamp(source.scheduledFor)
+    ) {
+      return invalidResponse("自动化计划运行来源响应不一致");
+    }
+    return source;
+  }
+  if (
+    source.eventId !== run.sourceEventId ||
+    source.scheduledFor !== null ||
+    (source.available
+      ? !source.aggregateType ||
+        !source.aggregateId ||
+        !source.action ||
+        !validRFC3339Timestamp(source.occurredAt)
+      : source.aggregateType !== null ||
+        source.aggregateId !== null ||
+        source.action !== null ||
+        source.occurredAt !== null)
+  ) {
+    return invalidResponse("自动化事件运行来源响应不一致");
+  }
+  return source;
+}
+
+function normalizeAutomationRunAttemptSummary(
+  value: unknown,
+): AutomationRunAttemptSummary {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, automationRunAttemptSummaryKeys)
+  ) {
+    return invalidResponse("自动化重试摘要响应格式无效");
+  }
+  const id = stringField(value, "id");
+  const resultSummary = value.result_summary;
+  const startedAt = stringField(value, "started_at");
+  const endedAt = stringField(value, "ended_at");
+  const attempt = positiveInteger(value.attempt, "自动化重试次数");
+  const resultType = nullableString(value.result_type);
+  if (
+    !id ||
+    typeof resultSummary !== "string" ||
+    !startedAt ||
+    !endedAt ||
+    attempt > 3 ||
+    typeof value.retryable !== "boolean"
+  ) {
+    return invalidResponse("自动化重试摘要响应不一致");
+  }
+  return {
+    id,
+    status: asAutomationRunStatus(value.status),
+    attempt,
+    retryOfRunId: nullableString(value.retry_of_run_id),
+    retryable: value.retryable,
+    retryAt: nullableString(value.retry_at),
+    errorCode: nullableString(value.error_code),
+    resultType,
+    resultId: nullableString(value.result_id),
+    resultSummary,
+    startedAt,
+    endedAt,
+  };
+}
+
+function automationRunMatchesAttemptSummary(
+  run: AutomationRun,
+  summary: AutomationRunAttemptSummary,
+): boolean {
+  return (
+    summary.id === run.id &&
+    summary.status === run.status &&
+    summary.attempt === run.attempt &&
+    summary.retryOfRunId === run.retryOfRunId &&
+    summary.retryable === run.retryable &&
+    summary.retryAt === run.retryAt &&
+    summary.errorCode === run.errorCode &&
+    summary.resultType === run.resultType &&
+    summary.resultId === run.resultId &&
+    summary.resultSummary === run.resultSummary &&
+    summary.startedAt === run.startedAt &&
+    summary.endedAt === run.endedAt
+  );
+}
+
+export function normalizeAutomationRunDetail(
+  value: unknown,
+): AutomationRunDetail {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(fieldValue(value, "retry_chain", "retryChain"))
+  ) {
+    return invalidResponse("自动化运行详情响应格式无效");
+  }
+  const run = normalizeAutomationRun(value);
+  const source = normalizeAutomationRunSource(value.source, run);
+  const retryChain = (
+    fieldValue(value, "retry_chain", "retryChain") as unknown[]
+  ).map(normalizeAutomationRunAttemptSummary);
+  if (
+    retryChain.length < 1 ||
+    retryChain.length > 3 ||
+    retryChain.some(
+      (attempt, index) =>
+        index > 0 && attempt.attempt <= retryChain[index - 1].attempt,
+    ) ||
+    new Set(retryChain.map((attempt) => attempt.id)).size !==
+      retryChain.length ||
+    !retryChain.some((attempt) =>
+      automationRunMatchesAttemptSummary(run, attempt),
+    )
+  ) {
+    return invalidResponse("自动化运行重试链响应不一致");
+  }
+  return { ...run, source, retryChain };
 }
 
 export function normalizeAutomationRunListResult(
@@ -9480,6 +9658,7 @@ export function disableAutomationRule(
 
 export async function getAutomationRuns(
   input: AutomationRunListParams = {},
+  signal?: AbortSignal,
 ): Promise<AutomationRunListResult> {
   const params = new URLSearchParams({
     page: String(input.page ?? 1),
@@ -9489,16 +9668,25 @@ export async function getAutomationRuns(
   if (input.status) params.set("status", input.status);
   const payload = await apiRequest<unknown>(
     `/api/v1/automations/runs?${params}`,
+    { signal },
   );
   return normalizeAutomationRunListResult(payload);
 }
 
-export async function getAutomationRun(id: string): Promise<AutomationRun> {
+export async function getAutomationRun(
+  id: string,
+  signal?: AbortSignal,
+): Promise<AutomationRunDetail> {
   const payload = await apiRequest<unknown>(
     `/api/v1/automations/runs/${encodeURIComponent(id)}`,
+    { signal },
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
-  return normalizeAutomationRun(body);
+  const detail = normalizeAutomationRunDetail(body);
+  if (detail.id !== id) {
+    return invalidResponse("自动化运行详情标识响应不一致");
+  }
+  return detail;
 }
 
 export async function retryAutomationRun(id: string): Promise<AutomationRun> {

@@ -26,7 +26,8 @@ const desktopApi = vi.hoisted(() => ({
   setCloseToTrayEnabled: vi.fn(),
 }));
 const automationSettings = vi.hoisted(() => ({
-  resultTaskId: "018f0000-0000-7000-8000-000000001612",
+  resultInboxItemId: "inbox/item ?#1",
+  resultTaskId: "task/item ?#1",
 }));
 
 vi.mock("../api/desktop", async (importActual) => {
@@ -40,16 +41,26 @@ vi.mock("../api/desktop", async (importActual) => {
 
 vi.mock("./AutomationSettings", () => ({
   AutomationSettings: ({
+    onOpenInboxItem,
     onOpenTask,
   }: {
+    onOpenInboxItem: (inboxItemId: string) => void;
     onOpenTask: (taskId: string) => void;
   }) => (
-    <button
-      onClick={() => onOpenTask(automationSettings.resultTaskId)}
-      type="button"
-    >
-      打开任务
-    </button>
+    <>
+      <button
+        onClick={() => onOpenTask(automationSettings.resultTaskId)}
+        type="button"
+      >
+        打开任务
+      </button>
+      <button
+        onClick={() => onOpenInboxItem(automationSettings.resultInboxItemId)}
+        type="button"
+      >
+        打开收件箱事项
+      </button>
+    </>
   ),
 }));
 
@@ -891,7 +902,23 @@ describe("SettingsModal", () => {
       expect(useUiStore.getState().settingsOpen).toBe(false);
       expect(useSettingsStore.getState().preview).toBeNull();
       expect(screen.getByTestId("current-location")).toHaveTextContent(
-        `/tasks/${automationSettings.resultTaskId}`,
+        `/tasks/${encodeURIComponent(automationSettings.resultTaskId)}`,
+      );
+    });
+  });
+
+  it("closes settings and opens an encoded automation inbox result", async () => {
+    useUiStore.setState({ settingsOpen: true, settingsModule: "automation" });
+    renderSettings();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "打开收件箱事项" }),
+    );
+
+    await waitFor(() => {
+      expect(useUiStore.getState().settingsOpen).toBe(false);
+      expect(screen.getByTestId("current-location")).toHaveTextContent(
+        `/inbox/${encodeURIComponent(automationSettings.resultInboxItemId)}`,
       );
     });
   });
