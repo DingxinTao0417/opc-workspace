@@ -7,6 +7,7 @@ import { ApiError } from "./client";
 import {
   financialEntryQueryKey,
   incomeStatsQueryKey,
+  inboxQueryKey,
   invoiceDetailQueryKey,
   invoicePdfQueryKey,
   invoiceQueryKey,
@@ -124,7 +125,7 @@ describe("useTransitionInvoice", () => {
     },
   );
 
-  it("refreshes invoice, ledger, income, and project facts after payment", async () => {
+  it("refreshes invoice, ledger, income, project, and inbox facts after payment", async () => {
     transitionInvoiceMock.mockResolvedValue(paidInvoice);
     const queryClient = createQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -153,6 +154,7 @@ describe("useTransitionInvoice", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: incomeStatsQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
   });
 });
 

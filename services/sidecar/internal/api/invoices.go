@@ -491,6 +491,11 @@ func (a *API) transitionInvoice(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		if target == "paid" {
+			if err := resolveInvoiceDueInboxSources(tx, id, requestIDFromContext(c), now); err != nil {
+				return err
+			}
+		}
 		if eventAction == "invoice_overdue" {
 			a.executeInvoiceOverdueAutomationsSafely(tx, event.ID, invoice, now)
 		}

@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	invoiceDueInboxSourceType = "invoice_due"
-	invoiceDueLeadDays        = 3
-	invoiceDueDateLayout      = "2006-01-02"
+	invoiceDueInboxSourceType         = "invoice_due"
+	invoiceDueLeadDays                = 3
+	invoiceDueDateLayout              = "2006-01-02"
+	invoiceDueReconciliationBatchSize = 100
+	invoicePaidInboxResolutionReason  = "invoice_paid"
 )
 
 type invoiceDueProjectionPayload struct {
@@ -74,6 +76,9 @@ func (a *API) projectDueInvoices(ctx context.Context) error {
 		return err
 	}
 	now := a.options.Now()
+	if err := a.reconcilePaidInvoiceDueSources(ctx, now); err != nil {
+		return err
+	}
 	today := now.Format(invoiceDueDateLayout)
 	var ids []string
 	err := a.db.WithContext(ctx).Table("invoices").
@@ -99,6 +104,49 @@ func (a *API) projectDueInvoices(ctx context.Context) error {
 		}
 		if err := a.projectInvoiceDue(ctx, id, today, now); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// reconcilePaidInvoiceDueSources drains a bounded set of stale actionable
+// projections left by older runtimes or restored/imported business facts. Each
+// Invoice is coordinated in its own transaction so one Invoice can never be
+// partially resolved.
+func (a *API) reconcilePaidInvoiceDueSources(ctx context.Context, now time.Time) error {
+	var ids []string
+	if err := a.db.WithContext(ctx).Table("invoices").
+		Where("status = 'paid'").
+		Where(`EXISTS (
+			SELECT 1 FROM inbox_items
+			WHERE source_entity_type = ?
+			  AND source_entity_id = invoices.id
+			  AND kind = 'event'
+			  AND status IN ('open', 'tracking')
+		)`, invoiceDueInboxSourceType).
+		Order("id ASC").Limit(invoiceDueReconciliationBatchSize).Pluck("id", &ids).Error; err != nil {
+		return fmt.Errorf("list paid Invoices with active due sources: %w", err)
+	}
+	nowText := formatInboxTimestamp(now.UTC())
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var invoice models.Invoice
+			if err := tx.Select("id", "status").Where("id = ?", id).Take(&invoice).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
+				return err
+			}
+			if invoice.Status != "paid" {
+				return nil
+			}
+			return resolveInvoiceDueInboxSources(tx, id, "", nowText)
+		})
+		if err != nil {
+			return fmt.Errorf("reconcile paid Invoice due sources: %w", err)
 		}
 	}
 	return nil
@@ -205,6 +253,58 @@ func validateInvoiceDueReplay(existing models.InboxItem, invoiceID string) error
 	if existing.Kind != "event" || existing.SourceEntityType != invoiceDueInboxSourceType ||
 		existing.SourceEntityID == nil || *existing.SourceEntityID != invoiceID {
 		return errors.New("Invoice due source_event_key belongs to an incompatible Inbox Item")
+	}
+	return nil
+}
+
+// resolveInvoiceDueInboxSources archives every still-actionable due projection
+// when the underlying Invoice is paid. The projections remain auditable, while
+// payment and source resolution commit as one business transaction.
+func resolveInvoiceDueInboxSources(tx *gorm.DB, invoiceID, requestID, now string) error {
+	var items []models.InboxItem
+	if err := tx.Where(
+		"source_entity_type = ? AND source_entity_id = ? AND kind = 'event' AND status IN ('open', 'tracking')",
+		invoiceDueInboxSourceType,
+		invoiceID,
+	).Order("id ASC").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, current := range items {
+		next := current
+		ownerID := models.BuiltinOwnerActorID
+		mode := "manual"
+		reason := invoicePaidInboxResolutionReason
+		next.Status = "resolved"
+		next.SnoozedUntil = nil
+		if next.TriagedAt == nil {
+			next.TriagedAt = &now
+		}
+		next.ResolvedByActorID = &ownerID
+		next.ResolvedAt = &now
+		next.ResolutionReason = &reason
+		next.ResolutionMode = &mode
+		next.Version++
+		next.UpdatedAt = now
+		result := tx.Model(&models.InboxItem{}).
+			Where("id = ? AND version = ? AND status IN ('open', 'tracking')", current.ID, current.Version).
+			Updates(inboxCommandUpdates(next))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return inboxVersionConflict()
+		}
+		if err := recordInboxWorkflowEvent(
+			tx,
+			current.ID,
+			"source_resolved",
+			inboxItemEventState(current, invoicePaidInboxResolutionReason),
+			inboxItemEventState(next, invoicePaidInboxResolutionReason),
+			requestID,
+			now,
+		); err != nil {
+			return err
+		}
 	}
 	return nil
 }
