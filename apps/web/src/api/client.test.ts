@@ -6,6 +6,7 @@ import {
   batchUpdateTasks,
   createBackup,
   createFinancialEntry,
+  createInvoice,
   createPersonActor,
   createTag,
   createTask,
@@ -14,6 +15,7 @@ import {
   deleteTaskArtifact,
   deleteBackup,
   deleteTag,
+  deleteInvoice,
   deleteTask,
   deleteTaskSavedView,
   drillBackupRestore,
@@ -31,6 +33,8 @@ import {
   getScheduledBackupPolicy,
   getHealth,
   getIncomeStats,
+  getInvoice,
+  getInvoices,
   getContentItem,
   getRestoreDiagnostics,
   getTags,
@@ -48,6 +52,7 @@ import {
   normalizeActorSummary,
   normalizeBackupSummary,
   normalizeFinancialEntry,
+  normalizeInvoice,
   normalizeScheduledBackupPolicy,
   normalizeHealthResponse,
   normalizeTaskAssignment,
@@ -73,8 +78,10 @@ import {
   updateTaskSavedView,
   updateActor,
   updateFinancialEntry,
+  updateInvoice,
   updateScheduledBackupPolicy,
   verifyBackup,
+  transitionInvoice,
   voidFinancialEntry,
 } from "./client";
 
@@ -2833,5 +2840,231 @@ describe("financial entry requests", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "currency=CNY&date_from=2026-08-01&date_to=2026-08-31",
     );
+  });
+});
+
+describe("invoice requests", () => {
+  const invoicePayload = {
+    id: "invoice-1",
+    invoice_number: "INV-2026-001",
+    client_id: "client-1",
+    client_name: "星河工作室",
+    project_id: "project-1",
+    project_name: "客户门户",
+    amount_minor: 12800,
+    currency: "CNY",
+    status: "draft",
+    issue_date: "2026-08-29",
+    due_date: "2026-09-29",
+    paid_date: null,
+    notes: "首期款",
+    financial_entry_id: null,
+    version: 1,
+    created_at: "2026-08-29T00:00:00Z",
+    updated_at: "2026-08-29T00:00:00Z",
+  };
+
+  it("strictly normalizes invoice facts and paid linkage", () => {
+    expect(normalizeInvoice(invoicePayload)).toMatchObject({
+      id: "invoice-1",
+      invoiceNumber: "INV-2026-001",
+      clientName: "星河工作室",
+      status: "draft",
+      version: 1,
+    });
+    expect(
+      normalizeInvoice({
+        ...invoicePayload,
+        status: "paid",
+        paid_date: "2026-09-02",
+        financial_entry_id: "entry-1",
+      }),
+    ).toMatchObject({
+      status: "paid",
+      paidDate: "2026-09-02",
+      financialEntryId: "entry-1",
+    });
+    expect(() =>
+      normalizeInvoice({ ...invoicePayload, unexpected: true }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInvoice({ ...invoicePayload, issue_date: "2026-02-30" }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInvoice({
+        ...invoicePayload,
+        status: "paid",
+        paid_date: "2026-02-30",
+        financial_entry_id: "entry-1",
+      }),
+    ).toThrow(ApiError);
+    expect(
+      normalizeInvoice({
+        ...invoicePayload,
+        status: "paid",
+        paid_date: "2026-09-02",
+      }),
+    ).toMatchObject({
+      status: "paid",
+      paidDate: "2026-09-02",
+      financialEntryId: null,
+    });
+    expect(() =>
+      normalizeInvoice({
+        ...invoicePayload,
+        financial_entry_id: "entry-1",
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("maps filters and sends versioned invoice commands", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [invoicePayload],
+          meta: { page: 2, page_size: 20, total: 21 },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ data: invoicePayload }))
+      .mockResolvedValueOnce(jsonResponse({ data: invoicePayload }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { ...invoicePayload, notes: "更新", version: 2 },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            ...invoicePayload,
+            status: "paid",
+            paid_date: "2026-09-02",
+            financial_entry_id: "entry-1",
+            version: 3,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { deleted_id: "invoice-1" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getInvoices({
+      page: 2,
+      pageSize: 20,
+      q: "  INV-2026 ",
+      status: "draft",
+      currency: "CNY",
+      clientId: "client-1",
+      projectId: "project-1",
+      issueFrom: "2026-08-01",
+      issueTo: "2026-08-31",
+      dueFrom: "2026-09-01",
+      dueTo: "2026-09-30",
+      sort: "-issue_date",
+    });
+    await getInvoice("invoice/1");
+    await createInvoice(
+      {
+        clientId: "client-1",
+        projectId: "project-1",
+        amountMinor: 12800,
+        currency: "CNY",
+        issueDate: "2026-08-29",
+        dueDate: "2026-09-29",
+        notes: "首期款",
+      },
+      "invoice-key",
+    );
+    await updateInvoice("invoice-1", {
+      notes: "更新",
+      expectedVersion: 1,
+    });
+    await transitionInvoice(
+      "invoice-1",
+      {
+        action: "mark_paid",
+        paidDate: "2026-09-02",
+        expectedVersion: 2,
+      },
+      "invoice-transition-key",
+    );
+    await expect(deleteInvoice("invoice-1", 3)).resolves.toEqual({
+      deletedId: "invoice-1",
+    });
+
+    const listURL = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(Object.fromEntries(listURL.searchParams)).toEqual({
+      page: "2",
+      page_size: "20",
+      q: "INV-2026",
+      status: "draft",
+      currency: "CNY",
+      client_id: "client-1",
+      project_id: "project-1",
+      issue_from: "2026-08-01",
+      issue_to: "2026-08-31",
+      due_from: "2026-09-01",
+      due_to: "2026-09-30",
+      sort: "-issue_date",
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "/invoices/invoice%2F1",
+    );
+    expect(
+      new Headers(fetchMock.mock.calls[2][1]?.headers).get("Idempotency-Key"),
+    ).toBe("invoice-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      client_id: "client-1",
+      project_id: "project-1",
+      amount_minor: 12800,
+      currency: "CNY",
+      issue_date: "2026-08-29",
+      due_date: "2026-09-29",
+      notes: "首期款",
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[3][1]?.headers).get("If-Match"),
+    ).toBe('"1"');
+    expect(JSON.parse(String(fetchMock.mock.calls[3][1]?.body))).toEqual({
+      notes: "更新",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[4][1]?.body))).toEqual({
+      action: "mark_paid",
+      paid_date: "2026-09-02",
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[4][1]?.headers).get("Idempotency-Key"),
+    ).toBe("invoice-transition-key");
+    expect(String(fetchMock.mock.calls[5][0])).toContain(
+      "/api/v1/invoices/invoice-1?confirm=true",
+    );
+    expect(fetchMock.mock.calls[5][1]?.body).toBeUndefined();
+    expect(
+      new Headers(fetchMock.mock.calls[5][1]?.headers).get("If-Match"),
+    ).toBe('"3"');
+  });
+
+  it("rejects malformed hard-delete responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ data: { deleted_id: "other" } })),
+    );
+    await expect(deleteInvoice("invoice-1", 1)).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+
+  it("rejects non-exact invoice response envelopes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({ data: invoicePayload, unexpected: true }),
+      ),
+    );
+    await expect(getInvoice("invoice-1")).rejects.toBeInstanceOf(ApiError);
   });
 });

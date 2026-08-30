@@ -32,6 +32,25 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	if checked.Code != http.StatusOK {
 		t.Fatalf("check source Agent Adapter = %d: %s", checked.Code, checked.Body.String())
 	}
+	invoice := createInvoiceForTest(
+		t,
+		sourceRouter,
+		`{"client_id":"018f0000-0000-7000-8000-000000002001","project_id":"018f0000-0000-7000-8000-000000002002","amount_minor":128000,"currency":"CNY","issue_date":"2026-08-01","due_date":"2026-08-31"}`,
+		map[string]string{"Idempotency-Key": "business-import-invoice"},
+	)
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_sent"}`, "business-import-invoice-sent")
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_viewed"}`, "business-import-invoice-viewed")
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_paid","paid_date":"2026-08-20"}`, "business-import-invoice-paid")
+	if invoice.FinancialEntryID == nil {
+		t.Fatal("paid source invoice has no financial entry")
+	}
+	var sourceProject struct {
+		Version   int64  `gorm:"column:version"`
+		UpdatedAt string `gorm:"column:updated_at"`
+	}
+	if err := sourceStore.DB.Table("projects").Select("version, updated_at").Where("id = ?", "018f0000-0000-7000-8000-000000002002").Take(&sourceProject).Error; err != nil {
+		t.Fatalf("read source project aggregate: %v", err)
+	}
 	exported := performRequest(sourceRouter, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
 	if exported.Code != http.StatusOK {
 		t.Fatalf("source export = %d: %s", exported.Code, exported.Body.String())
@@ -70,7 +89,7 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	if err := json.Unmarshal(applyResponse.Body.Bytes(), &resultEnvelope); err != nil || resultEnvelope.Data.BackupID == "" || resultEnvelope.Data.ImportedRows != previewEnvelope.Data.TotalRows {
 		t.Fatalf("import result = %#v err=%v", resultEnvelope.Data, err)
 	}
-	for table, want := range map[string]int64{"clients": 1, "projects": 1, "tasks": 1, "agent_adapters": 1} {
+	for table, want := range map[string]int64{"clients": 1, "projects": 1, "tasks": 1, "invoices": 1, "financial_entries": 1, "agent_adapters": 1} {
 		var count int64
 		if err := targetStore.DB.Table(table).Count(&count).Error; err != nil || count != want {
 			t.Fatalf("%s count = %d err=%v", table, count, err)
@@ -87,6 +106,22 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	var ownerName string
 	if err := targetStore.DB.Table("actors").Where("id = ?", "00000000-0000-5000-8000-000000000001").Pluck("display_name", &ownerName).Error; err != nil || ownerName != "Imported Owner" {
 		t.Fatalf("owner display name = %q err=%v", ownerName, err)
+	}
+	var importedProject struct {
+		Version   int64  `gorm:"column:version"`
+		UpdatedAt string `gorm:"column:updated_at"`
+	}
+	if err := targetStore.DB.Table("projects").Select("version, updated_at").Where("id = ?", "018f0000-0000-7000-8000-000000002002").Take(&importedProject).Error; err != nil || importedProject != sourceProject {
+		t.Fatalf("imported project aggregate = %#v, want %#v err=%v", importedProject, sourceProject, err)
+	}
+	var importedInvoice invoiceResponse
+	if err := targetStore.DB.Raw(`
+		SELECT invoices.id, invoices.status, financial_entries.id AS financial_entry_id
+		FROM invoices
+		JOIN financial_entries ON financial_entries.invoice_id = invoices.id
+		WHERE invoices.id = ?
+	`, invoice.ID).Scan(&importedInvoice).Error; err != nil || importedInvoice.ID != invoice.ID || importedInvoice.Status != "paid" || importedInvoice.FinancialEntryID == nil || *importedInvoice.FinancialEntryID != *invoice.FinancialEntryID {
+		t.Fatalf("imported invoice linkage = %#v err=%v", importedInvoice, err)
 	}
 	var foreignKeyFailures int64
 	if err := targetStore.DB.Raw("SELECT COUNT(*) FROM pragma_foreign_key_check").Row().Scan(&foreignKeyFailures); err != nil || foreignKeyFailures != 0 {
@@ -199,7 +234,7 @@ func TestBusinessImportSafelyAppendsToNonEmptyTarget(t *testing.T) {
 		Data businessImportPreview `json:"data"`
 	}
 	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" ||
-		envelope.Data.TargetSchemaVersion != 45 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
+		envelope.Data.TargetSchemaVersion != 46 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
 		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 1, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("preview = %#v err=%v", envelope.Data, err)
 	}
@@ -299,7 +334,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 		blocker string
 	}{
 		{name: "older", schema: 42, blocker: "source_schema_older"},
-		{name: "newer", schema: 46, blocker: "source_schema_newer"},
+		{name: "newer", schema: 47, blocker: "source_schema_newer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			router, store, _, backupDir := newBackupTestAPI(t)
@@ -317,7 +352,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 				Data businessImportPreview `json:"data"`
 			}
 			if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != test.blocker ||
-				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 45 || envelope.Data.TargetRows != 0 ||
+				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 46 || envelope.Data.TargetRows != 0 ||
 				envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 0 {
 				t.Fatalf("schema preview = %#v err=%v", envelope.Data, err)
 			}

@@ -5341,6 +5341,171 @@ kbd {
   color: var(--danger-text);
 }
 
+.finance-readonly-mark {
+  color: var(--text-dim);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.invoices-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.invoices-toolbar .toolbar-search {
+  max-width: 420px;
+}
+
+.invoice-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.invoice-stat-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.invoice-stat-card strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-stat-card small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-stat-overdue {
+  color: var(--danger-text) !important;
+}
+
+.invoices-table-panel {
+  margin-top: 12px;
+}
+
+.invoices-table {
+  min-width: 760px;
+}
+
+.invoices-table td {
+  height: 48px;
+}
+
+.invoice-number {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.invoice-client-cell,
+.invoice-date-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.invoice-client-cell span,
+.invoice-date-cell span {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-client-cell small,
+.invoice-date-cell small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invoice-date-cell {
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+
+.invoice-date-overdue {
+  color: var(--danger-text) !important;
+}
+
+.invoice-amount-cell {
+  color: var(--text) !important;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.invoices-table th:nth-child(3) {
+  text-align: right;
+}
+
+.invoice-table-action {
+  position: relative;
+  width: 48px;
+  text-align: right;
+}
+
+.invoice-row-actions {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.invoice-action-menu {
+  position: absolute;
+  z-index: 20;
+  top: 32px;
+  right: 0;
+  display: grid;
+  width: 138px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  box-shadow: 0 12px 36px var(--modal-shadow);
+}
+
+.invoice-action-menu button {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+
+.invoice-action-menu button:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.invoice-action-menu .danger-text {
+  color: var(--danger-text);
+}
+
+.invoice-readonly-mark {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
 .modal-copy {
   margin: 0 0 14px;
   color: var(--text-secondary);
@@ -5356,6 +5521,15 @@ kbd {
 
 @media (max-width: 640px) {
   .finance-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .invoices-toolbar .toolbar-search {
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .invoice-stat-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -530,6 +530,9 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		`).Error; err != nil {
 			return err
 		}
+		if err := restoreImportedProjectVersions(tx, tables["projects"]); err != nil {
+			return err
+		}
 		var foreignKeyFailures int
 		if err := tx.Raw("SELECT COUNT(*) FROM pragma_foreign_key_check").Row().Scan(&foreignKeyFailures); err != nil || foreignKeyFailures != 0 {
 			return fmt.Errorf("foreign key validation failed: count=%d err=%w", foreignKeyFailures, err)
@@ -545,6 +548,34 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		}
 		return nil
 	})
+}
+
+func restoreImportedProjectVersions(tx *gorm.DB, table businessExportTable) error {
+	if len(table.Rows) == 0 {
+		return nil
+	}
+	idIndex := columnIndex(table.Columns, "id")
+	versionIndex := columnIndex(table.Columns, "version")
+	updatedAtIndex := columnIndex(table.Columns, "updated_at")
+	if idIndex < 0 || versionIndex < 0 || updatedAtIndex < 0 {
+		return errors.New("project import aggregate columns are incomplete")
+	}
+	for _, row := range table.Rows {
+		id, ok := row[idIndex].(string)
+		version, versionOK := importInteger(row[versionIndex])
+		updatedAt, updatedAtOK := row[updatedAtIndex].(string)
+		if !ok || id == "" || !versionOK || version < 1 || !updatedAtOK || updatedAt == "" {
+			return errors.New("project import aggregate values are invalid")
+		}
+		result := tx.Exec("UPDATE projects SET version = ?, updated_at = ? WHERE id = ?", version, updatedAt, id)
+		if result.Error != nil {
+			return fmt.Errorf("restore imported project aggregate: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("restore imported project aggregate did not match its project")
+		}
+	}
+	return nil
 }
 
 func insertTaskImportRows(tx *gorm.DB, table businessExportTable) error {

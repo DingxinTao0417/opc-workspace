@@ -33,7 +33,8 @@ vi.mock("../api/hooks", () => ({
     page: number,
     enabled: boolean,
     includeArchived: boolean,
-  ) => hooks.optionsHook(search, page, enabled, includeArchived),
+    clientId?: string,
+  ) => hooks.optionsHook(search, page, enabled, includeArchived, clientId),
   useProjectQuery: (id: string | null) => hooks.selectedHook(id),
 }));
 
@@ -133,16 +134,53 @@ describe("ProjectSelect", () => {
     renderSelect({ includeArchived: true, variant: "filter" });
     const combobox = screen.getByRole("combobox", { name: "项目" });
 
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, false, true);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      false,
+      true,
+      undefined,
+    );
     fireEvent.focus(combobox);
     fireEvent.change(combobox, { target: { value: "  官网  " } });
 
     expect(screen.getByText("正在等待输入…")).toBeTruthy();
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true, true);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      true,
+      true,
+      undefined,
+    );
     act(() => vi.advanceTimersByTime(249));
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true, true);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      true,
+      true,
+      undefined,
+    );
     act(() => vi.advanceTimersByTime(1));
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("官网", 1, true, true);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "官网",
+      1,
+      true,
+      true,
+      undefined,
+    );
+  });
+
+  it("forwards the selected client scope to project options", () => {
+    renderSelect({ clientId: "client-1" });
+    fireEvent.focus(screen.getByRole("combobox", { name: "项目" }));
+
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      true,
+      false,
+      "client-1",
+    );
   });
 
   it("shows every project status and disambiguates same names with client context", () => {
@@ -213,7 +251,13 @@ describe("ProjectSelect", () => {
         name: "另一历史项目，已归档，未关联客户",
       }),
     ).toBeNull();
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true, false);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      true,
+      false,
+      undefined,
+    );
   });
 
   it("uses the keyboard without submitting the surrounding form", () => {
@@ -373,7 +417,13 @@ describe("ProjectSelect", () => {
     const nextPage = screen.getByRole("button", { name: "下一页项目" });
     expect(nextPage.tabIndex).toBe(-1);
     fireEvent.click(nextPage);
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 2, true, false);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      2,
+      true,
+      false,
+      undefined,
+    );
     expect(screen.getByText("正在读取第 2 页…")).toBeTruthy();
     expect(
       screen.getByRole("option", {
@@ -410,9 +460,21 @@ describe("ProjectSelect", () => {
       }),
     ).toBeEnabled();
     fireEvent.keyDown(combobox, { key: "PageUp" });
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true, false);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      1,
+      true,
+      false,
+      undefined,
+    );
     fireEvent.keyDown(combobox, { key: "PageDown" });
-    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 2, true, false);
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      2,
+      true,
+      false,
+      undefined,
+    );
   });
 
   it("renders in the viewport portal and keeps IME or selector Escape inside a real Modal", () => {

@@ -31,8 +31,8 @@ func TestWeekdayReminderMigrationPreservesMonthlyAnchor(t *testing.T) {
 		t.Fatalf("upgrade v40 Reminder database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 45 {
-		t.Fatalf("SchemaVersion = %d, want 45", store.SchemaVersion)
+	if store.SchemaVersion != 46 {
+		t.Fatalf("SchemaVersion = %d, want 46", store.SchemaVersion)
 	}
 	var recurrenceType string
 	var anchorDay int

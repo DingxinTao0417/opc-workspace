@@ -26,6 +26,15 @@ const entry: FinancialEntry = {
   updatedAt: "2026-08-29T01:00:00Z",
 };
 
+const invoiceLinkedEntry: FinancialEntry = {
+  ...entry,
+  id: "entry-invoice-1",
+  category: "发票回款",
+  invoiceId: "invoice-1",
+  invoiceNumber: "INV-202608-001",
+  notes: "发票付款自动生成",
+};
+
 const hooks = vi.hoisted(() => ({
   entries: vi.fn(),
   stats: vi.fn(),
@@ -159,5 +168,31 @@ describe("IncomePage", () => {
     render(<IncomePage />);
     fireEvent.click(screen.getByRole("button", { name: "新建记录" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("keeps invoice-generated income read-only in the row actions", () => {
+    hooks.entries.mockReturnValue({
+      data: {
+        items: [invoiceLinkedEntry],
+        meta: { page: 1, pageSize: 20, total: 1 },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    render(<IncomePage />);
+
+    expect(screen.getByText("发票同步")).toHaveAttribute(
+      "title",
+      "由发票付款自动生成，不可单独编辑或作废",
+    );
+    expect(
+      screen.queryByRole("button", { name: "打开 发票回款 操作" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "编辑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "作废" })).toBeNull();
   });
 });

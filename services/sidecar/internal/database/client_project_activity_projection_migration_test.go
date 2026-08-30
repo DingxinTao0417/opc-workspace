@@ -2,6 +2,7 @@ package database
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -84,7 +85,7 @@ func TestClientProjectActivityProjectionMigrationUpgradesV30WithoutBackfill(t *t
 		t.Fatalf("upgrade v30 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 39 || gate == nil || gate.CurrentVersion != 39 || gate.TargetVersion != 45 || len(gate.PendingVersions) != 6 || gate.PendingVersions[0] != 40 || gate.PendingVersions[1] != 41 || gate.PendingVersions[2] != 42 || gate.PendingVersions[3] != 43 || gate.PendingVersions[4] != 44 || gate.PendingVersions[5] != 45 {
+	if store.SchemaVersion != 39 || gate == nil || gate.CurrentVersion != 39 || gate.TargetVersion != 46 || !reflect.DeepEqual(gate.PendingVersions, []int{40, 41, 42, 43, 44, 45, 46}) {
 		t.Fatalf("v30 to v31 migration store=%d gate=%#v", store.SchemaVersion, gate)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM client_activities"); got != 4 {

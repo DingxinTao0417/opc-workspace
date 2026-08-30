@@ -410,7 +410,15 @@ export function IncomePage() {
                       {formatAmount(entry.amountMinor, entry.currency)}
                     </td>
                     <td className="finance-table-action">
-                      {entry.status !== "voided" ? (
+                      {entry.invoiceId || entry.invoiceNumber ? (
+                        <span
+                          aria-label={`${entry.invoiceNumber ?? "关联发票"} 自动生成，只读`}
+                          className="finance-readonly-mark"
+                          title="由发票付款自动生成，不可单独编辑或作废"
+                        >
+                          发票同步
+                        </span>
+                      ) : entry.status !== "voided" ? (
                         <div className="finance-row-actions">
                           <button
                             aria-label={`打开 ${entry.category} 操作`}

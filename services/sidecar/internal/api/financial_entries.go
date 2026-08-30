@@ -298,6 +298,9 @@ func (a *API) updateFinancialEntry(c *gin.Context) {
 		if entry.Version != expectedVersion {
 			return financialEntryVersionConflict()
 		}
+		if entry.InvoiceID != nil {
+			return newFinancialEntryRequestError(http.StatusConflict, "INVOICE_LINKED_FINANCIAL_ENTRY_IMMUTABLE", "Invoice-linked financial entries can only be changed through the invoice workflow")
+		}
 		if entry.Status == "voided" {
 			return newFinancialEntryRequestError(http.StatusConflict, "FINANCIAL_ENTRY_VOIDED", "A voided financial entry cannot be edited")
 		}
@@ -375,6 +378,9 @@ func (a *API) voidFinancialEntry(c *gin.Context) {
 		}
 		if entry.Version != expectedVersion {
 			return financialEntryVersionConflict()
+		}
+		if entry.InvoiceID != nil {
+			return newFinancialEntryRequestError(http.StatusConflict, "INVOICE_LINKED_FINANCIAL_ENTRY_IMMUTABLE", "Invoice-linked financial entries can only be changed through the invoice workflow")
 		}
 		if entry.Status == "voided" {
 			return newFinancialEntryRequestError(http.StatusConflict, "FINANCIAL_ENTRY_VOIDED", "Financial entry is already voided")

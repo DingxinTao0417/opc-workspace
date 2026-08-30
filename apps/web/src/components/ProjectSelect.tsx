@@ -48,6 +48,7 @@ export interface ProjectSelectProps {
   disabled?: boolean;
   selectedName?: string | null;
   includeArchived?: boolean;
+  clientId?: string;
   variant: "form" | "toolbar" | "filter";
 }
 
@@ -78,6 +79,7 @@ export function ProjectSelect({
   disabled = false,
   selectedName,
   includeArchived = false,
+  clientId,
   variant,
 }: ProjectSelectProps) {
   const listboxId = `project-select-${useId().replace(/:/g, "")}`;
@@ -99,6 +101,7 @@ export function ProjectSelect({
     page,
     open && !disabled,
     includeArchived,
+    clientId,
   );
   const selectedQuery = useProjectQuery(value || null);
 

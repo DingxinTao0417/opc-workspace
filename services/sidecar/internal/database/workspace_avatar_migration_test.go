@@ -25,8 +25,8 @@ func TestWorkspaceAvatarMigrationPreservesSettingsAndStartsEmpty(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 45 {
-		t.Fatalf("SchemaVersion = %d, want 45", store.SchemaVersion)
+	if store.SchemaVersion != 46 {
+		t.Fatalf("SchemaVersion = %d, want 46", store.SchemaVersion)
 	}
 	var value string
 	var version int

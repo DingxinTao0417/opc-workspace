@@ -11,8 +11,8 @@ func TestFinancialEntriesMigrationCreatesConstrainedAuditLedger(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 45 {
-		t.Fatalf("schema version = %d, want 45", store.SchemaVersion)
+	if store.SchemaVersion != 46 {
+		t.Fatalf("schema version = %d, want 46", store.SchemaVersion)
 	}
 	var initialCount int64
 	if err := store.DB.Table("financial_entries").Count(&initialCount).Error; err != nil || initialCount != 0 {

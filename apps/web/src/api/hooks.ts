@@ -71,6 +71,8 @@ import {
   getStorageCapacityHistory,
   getInboxStats,
   getIncomeStats,
+  getInvoice,
+  getInvoices,
   getActor,
   getActors,
   getClient,
@@ -157,6 +159,7 @@ import {
   updateClientFollowup,
   updateClientActivity,
   updateFinancialEntry,
+  updateInvoice,
   updateInboxItem,
   updateInboxItemTaskRequirement,
   updateTag,
@@ -173,6 +176,9 @@ import {
   unlinkInboxItemTask,
   verifyBackup,
   voidFinancialEntry,
+  createInvoice,
+  deleteInvoice,
+  transitionInvoice,
 } from "./client";
 import type {
   ActorListParams,
@@ -227,6 +233,10 @@ import type {
   InboxItemListParams,
   InboxItemTaskListParams,
   IncomeStatsParams,
+  InvoiceInput,
+  InvoiceListParams,
+  TransitionInvoiceInput,
+  UpdateInvoiceInput,
   LinkInboxItemTaskInput,
   MarkAllInboxReadInput,
   CancelReminderInput,
@@ -835,6 +845,133 @@ export function useExportFinancialEntries() {
   return useMutation({
     mutationFn: (input: FinancialEntryListParams) =>
       downloadFinancialEntriesCSV(input),
+  });
+}
+
+export const invoiceQueryKey = ["invoices"] as const;
+export const invoiceDetailQueryKey = (id: string) =>
+  [...invoiceQueryKey, "detail", id] as const;
+
+export function useInvoicesQuery(
+  input: InvoiceListParams = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...invoiceQueryKey, "list", input],
+    queryFn: () => getInvoices(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useInvoiceQuery(id: string | null) {
+  return useQuery({
+    queryKey: invoiceDetailQueryKey(id ?? "missing"),
+    queryFn: () => getInvoice(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+async function invalidateInvoiceReadModels(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
+    queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
+    queryClient.invalidateQueries({ queryKey: incomeStatsQueryKey }),
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+  ]);
+}
+
+export function useCreateInvoice() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: InvoiceInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createInvoice(input, attempt.current.key);
+    },
+    onSuccess: async (invoice) => {
+      attempt.current = null;
+      queryClient.setQueryData(invoiceDetailQueryKey(invoice.id), invoice);
+      await invalidateInvoiceReadModels(queryClient);
+    },
+  });
+}
+
+export function useUpdateInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateInvoiceInput }) =>
+      updateInvoice(id, input),
+    onSuccess: async (invoice) => {
+      queryClient.setQueryData(invoiceDetailQueryKey(invoice.id), invoice);
+      await invalidateInvoiceReadModels(queryClient);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateInvoiceReadModels(queryClient);
+      }
+    },
+  });
+}
+
+export function useTransitionInvoice() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: TransitionInvoiceInput;
+    }) => {
+      const fingerprint = JSON.stringify({ id, ...input });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return transitionInvoice(id, input, attempt.current.key);
+    },
+    onSuccess: async (invoice) => {
+      attempt.current = null;
+      queryClient.setQueryData(invoiceDetailQueryKey(invoice.id), invoice);
+      await invalidateInvoiceReadModels(queryClient);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateInvoiceReadModels(queryClient);
+      }
+    },
+  });
+}
+
+export function useDeleteInvoice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteInvoice(id, expectedVersion),
+    onSuccess: async (_, variables) => {
+      queryClient.removeQueries({
+        queryKey: invoiceDetailQueryKey(variables.id),
+      });
+      await invalidateInvoiceReadModels(queryClient);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateInvoiceReadModels(queryClient);
+      }
+    },
   });
 }
 
@@ -3857,6 +3994,7 @@ export function useProjectOptionsQuery(
   page = 1,
   enabled = true,
   includeArchived = false,
+  clientId?: string,
 ) {
   const normalizedSearch = search.trim();
   return useQuery({
@@ -3866,6 +4004,7 @@ export function useProjectOptionsQuery(
       normalizedSearch,
       page,
       includeArchived,
+      clientId ?? null,
     ],
     queryFn: ({ signal }) =>
       getProjects(
@@ -3875,6 +4014,7 @@ export function useProjectOptionsQuery(
           query: normalizedSearch || undefined,
           sort: "name",
           includeArchived,
+          ...(clientId ? { clientId } : {}),
         },
         signal,
       ),

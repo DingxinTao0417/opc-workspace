@@ -128,6 +128,14 @@ import type {
   InboxWorkflowEvent,
   IncomeStats,
   IncomeStatsParams,
+  Invoice,
+  DeleteInvoiceResult,
+  InvoiceInput,
+  InvoiceListParams,
+  InvoiceListResult,
+  InvoiceStatus,
+  TransitionInvoiceInput,
+  UpdateInvoiceInput,
   CreateInboxItemInput,
   LinkInboxItemTaskInput,
   MarkAllInboxReadResult,
@@ -1412,6 +1420,150 @@ function normalizeFinancialEntryListResult(
       total: nonNegativeInteger(value.meta.total, "财务记录总数"),
     },
   };
+}
+
+const invoiceKeys = [
+  "id",
+  "invoice_number",
+  "client_id",
+  "client_name",
+  "project_id",
+  "project_name",
+  "amount_minor",
+  "currency",
+  "status",
+  "issue_date",
+  "due_date",
+  "paid_date",
+  "notes",
+  "financial_entry_id",
+  "version",
+  "created_at",
+  "updated_at",
+] as const;
+
+function asInvoiceStatus(value: unknown): InvoiceStatus {
+  if (
+    value === "draft" ||
+    value === "sent" ||
+    value === "viewed" ||
+    value === "paid" ||
+    value === "overdue"
+  ) {
+    return value;
+  }
+  return invalidResponse("发票状态响应无效");
+}
+
+function validInvoiceDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+}
+
+export function normalizeInvoice(value: unknown): Invoice {
+  if (!isRecord(value) || !hasExactKeys(value, invoiceKeys)) {
+    return invalidResponse("发票响应格式无效");
+  }
+  const id = stringField(value, "id");
+  const invoiceNumber = stringField(value, "invoice_number");
+  const clientId = stringField(value, "client_id");
+  const clientName = stringField(value, "client_name");
+  const currency = stringField(value, "currency");
+  const issueDate = stringField(value, "issue_date");
+  const dueDate = stringField(value, "due_date");
+  const createdAt = stringField(value, "created_at");
+  const updatedAt = stringField(value, "updated_at");
+  const status = asInvoiceStatus(value.status);
+  const projectId = nullableFinancialString(value.project_id, "发票项目 ID");
+  const projectName = nullableFinancialString(
+    value.project_name,
+    "发票项目名称",
+  );
+  const paidDate = nullableFinancialString(value.paid_date, "发票付款日期");
+  const financialEntryId = nullableFinancialString(
+    value.financial_entry_id,
+    "发票收入记录 ID",
+  );
+  if (!issueDate || !dueDate) {
+    return invalidResponse("发票日期响应字段无效");
+  }
+  if (
+    !id ||
+    !invoiceNumber ||
+    !clientId ||
+    !clientName ||
+    !currency?.match(/^[A-Z]{3}$/) ||
+    !validInvoiceDate(issueDate) ||
+    !validInvoiceDate(dueDate) ||
+    dueDate < issueDate ||
+    (projectId === null) !== (projectName === null) ||
+    (paidDate !== null &&
+      (!validInvoiceDate(paidDate) || paidDate < issueDate)) ||
+    typeof value.notes !== "string" ||
+    !createdAt ||
+    !updatedAt ||
+    (status === "paid") !== (paidDate !== null) ||
+    (status !== "paid" && financialEntryId !== null)
+  ) {
+    return invalidResponse("发票响应字段无效");
+  }
+  return {
+    id,
+    invoiceNumber,
+    clientId,
+    clientName,
+    projectId,
+    projectName,
+    amountMinor: financialAmount(value.amount_minor, "发票金额"),
+    currency,
+    status,
+    issueDate,
+    dueDate,
+    paidDate,
+    notes: value.notes,
+    financialEntryId,
+    version: positiveInteger(value.version, "发票版本"),
+    createdAt,
+    updatedAt,
+  };
+}
+
+function normalizeInvoiceListResult(
+  value: unknown,
+  input: InvoiceListParams = {},
+): InvoiceListResult {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["data", "meta"]) ||
+    !Array.isArray(value.data) ||
+    !isRecord(value.meta) ||
+    !hasExactKeys(value.meta, ["page", "page_size", "total"])
+  ) {
+    return invalidResponse("发票列表响应格式无效");
+  }
+  return {
+    items: value.data.map(normalizeInvoice),
+    meta: {
+      page: positiveInteger(value.meta.page, "发票页码", input.page ?? 1),
+      pageSize: positiveInteger(
+        value.meta.page_size,
+        "发票每页数量",
+        input.pageSize ?? 50,
+      ),
+      total: nonNegativeInteger(value.meta.total, "发票总数"),
+    },
+  };
+}
+
+function normalizeInvoiceResponse(value: unknown): Invoice {
+  if (!isRecord(value) || !hasExactKeys(value, ["data"])) {
+    return invalidResponse("发票详情响应格式无效");
+  }
+  return normalizeInvoice(value.data);
 }
 
 export function normalizeIncomeStats(value: unknown): IncomeStats {
@@ -7972,6 +8124,125 @@ export async function downloadFinancialEntriesCSV(
     {},
     "text/csv",
   );
+}
+
+function invoiceSearchParams(input: InvoiceListParams = {}): URLSearchParams {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.q?.trim()) params.set("q", input.q.trim());
+  if (input.status) params.set("status", input.status);
+  if (input.currency?.trim()) params.set("currency", input.currency.trim());
+  if (input.clientId) params.set("client_id", input.clientId);
+  if (input.projectId) params.set("project_id", input.projectId);
+  if (input.issueFrom) params.set("issue_from", input.issueFrom);
+  if (input.issueTo) params.set("issue_to", input.issueTo);
+  if (input.dueFrom) params.set("due_from", input.dueFrom);
+  if (input.dueTo) params.set("due_to", input.dueTo);
+  if (input.sort) params.set("sort", input.sort);
+  return params;
+}
+
+export async function getInvoices(
+  input: InvoiceListParams = {},
+): Promise<InvoiceListResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices?${invoiceSearchParams(input)}`,
+  );
+  return normalizeInvoiceListResult(payload, input);
+}
+
+export async function getInvoice(id: string): Promise<Invoice> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices/${encodeURIComponent(id)}`,
+  );
+  return normalizeInvoiceResponse(payload);
+}
+
+function invoiceBody(input: Partial<InvoiceInput>) {
+  return {
+    client_id: input.clientId,
+    project_id: input.projectId,
+    amount_minor: input.amountMinor,
+    currency: input.currency,
+    issue_date: input.issueDate,
+    due_date: input.dueDate,
+    notes: input.notes,
+  };
+}
+
+export async function createInvoice(
+  input: InvoiceInput,
+  idempotencyKey: string,
+): Promise<Invoice> {
+  const payload = await apiRequest<unknown>("/api/v1/invoices", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(invoiceBody(input)),
+  });
+  return normalizeInvoiceResponse(payload);
+}
+
+export async function updateInvoice(
+  id: string,
+  input: UpdateInvoiceInput,
+): Promise<Invoice> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: expectedVersionHeader(input.expectedVersion),
+      body: JSON.stringify(invoiceBody(input)),
+    },
+  );
+  return normalizeInvoiceResponse(payload);
+}
+
+export async function transitionInvoice(
+  id: string,
+  input: TransitionInvoiceInput,
+  idempotencyKey: string,
+): Promise<Invoice> {
+  const body =
+    input.action === "mark_paid"
+      ? { action: input.action, paid_date: input.paidDate }
+      : { action: input.action };
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices/${encodeURIComponent(id)}/transition`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(input.expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  return normalizeInvoiceResponse(payload);
+}
+
+export async function deleteInvoice(
+  id: string,
+  expectedVersion: number,
+): Promise<DeleteInvoiceResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(expectedVersion),
+    },
+  );
+  if (
+    !isRecord(payload) ||
+    !hasExactKeys(payload, ["data"]) ||
+    !isRecord(payload.data) ||
+    !hasExactKeys(payload.data, ["deleted_id"]) ||
+    payload.data.deleted_id !== id
+  ) {
+    return invalidResponse("发票删除响应格式无效");
+  }
+  return { deletedId: id };
 }
 
 export async function getClients(

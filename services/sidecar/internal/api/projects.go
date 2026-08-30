@@ -490,6 +490,13 @@ func (a *API) updateProject(c *gin.Context) {
 			Where("id = ? AND version = ?", id, expectedVersion).
 			Updates(updates)
 		if result.Error != nil {
+			if strings.Contains(result.Error.Error(), "PROJECT_CLIENT_CHANGE_BLOCKED_BY_INVOICES") {
+				return newProjectRequestError(
+					http.StatusConflict,
+					"PROJECT_CLIENT_CHANGE_BLOCKED_BY_INVOICES",
+					"Project client cannot be changed while invoices reference this project",
+				)
+			}
 			return result.Error
 		}
 		if result.RowsAffected == 0 {

@@ -16,8 +16,8 @@ func TestContentCalendarInboxProjectionMigrationGuardsVersionedSources(t *testin
 		t.Fatalf("upgrade v37 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 45 {
-		t.Fatalf("SchemaVersion = %d, want 45", store.SchemaVersion)
+	if store.SchemaVersion != 46 {
+		t.Fatalf("SchemaVersion = %d, want 46", store.SchemaVersion)
 	}
 	const contentID = "018f0000-0000-7000-8000-000000003801"
 	const inboxID = "018f0000-0000-7000-8000-000000003802"
