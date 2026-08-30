@@ -2160,6 +2160,46 @@ export function useTasksQuery(
   });
 }
 
+export interface SidebarWeekTasks {
+  plannedFrom: string;
+  plannedTo: string;
+  taskCount: number;
+  completedCount: number;
+  completedPercent: number;
+}
+
+export function useSidebarWeekTasksQuery({
+  plannedFrom,
+  plannedTo,
+}: {
+  plannedFrom: string;
+  plannedTo: string;
+}) {
+  return useQuery({
+    queryKey: [...taskQueryKey, "sidebar-week", plannedFrom, plannedTo],
+    queryFn: async (): Promise<SidebarWeekTasks> => {
+      const tasks = await getAllTasks({ plannedFrom, plannedTo });
+      const includedTasks = tasks.filter((task) => task.status !== "cancelled");
+      const completedCount = includedTasks.filter(
+        (task) => task.status === "done",
+      ).length;
+      const taskCount = includedTasks.length;
+      return {
+        plannedFrom,
+        plannedTo,
+        taskCount,
+        completedCount,
+        completedPercent: taskCount
+          ? Math.round((completedCount / taskCount) * 100)
+          : 0,
+      };
+    },
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
 function shiftDateKey(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day + days));

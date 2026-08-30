@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useInboxStatsQuery, useTasksQuery } from "../api/hooks";
+import { useInboxStatsQuery, useSidebarWeekTasksQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 
@@ -68,8 +68,40 @@ const groups: { label: string; items: NavItem[] }[] = [
   },
 ];
 
+function localDateKey(date: Date): string {
+  return [
+    String(date.getFullYear()).padStart(4, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function currentLocalWeekRange(): {
+  plannedFrom: string;
+  plannedTo: string;
+} {
+  const now = new Date();
+  const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
+  const monday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - daysSinceMonday,
+  );
+  const sunday = new Date(
+    monday.getFullYear(),
+    monday.getMonth(),
+    monday.getDate() + 6,
+  );
+  return {
+    plannedFrom: localDateKey(monday),
+    plannedTo: localDateKey(sunday),
+  };
+}
+
 export function Sidebar() {
-  const tasksQuery = useTasksQuery();
+  const weeklyExecutionQuery = useSidebarWeekTasksQuery(
+    currentLocalWeekRange(),
+  );
   const inboxStatsQuery = useInboxStatsQuery();
   const displayName = useSettingsStore(
     (state) => state.preview?.profile.displayName ?? state.displayName,
@@ -81,13 +113,6 @@ export function Sidebar() {
     (state) => state.setCommandPaletteOpen,
   );
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
-  const taskCount =
-    tasksQuery.data?.filter((task) => task.status !== "cancelled").length ?? 0;
-  const completedCount =
-    tasksQuery.data?.filter((task) => task.status === "done").length ?? 0;
-  const completedPercent = taskCount
-    ? Math.round((completedCount / taskCount) * 100)
-    : 0;
   const inboxBadge = inboxStatsQuery.data?.pending
     ? inboxStatsQuery.data.pending > 99
       ? "99+"
@@ -162,15 +187,43 @@ export function Sidebar() {
           <span className="weekly-title">本周执行</span>
           <Clock3 size={14} />
         </div>
-        <div
-          className="progress-track"
-          aria-label={`本周完成度 ${completedPercent}%`}
-        >
-          <span style={{ width: `${completedPercent}%` }} />
-        </div>
-        <div className="weekly-copy">
-          {taskCount ? `${completedCount} / ${taskCount} 项` : "暂无任务"}
-        </div>
+        {weeklyExecutionQuery.isPending ? (
+          <div className="weekly-copy" role="status">
+            正在加载本周任务…
+          </div>
+        ) : weeklyExecutionQuery.isError ? (
+          <div className="weekly-copy" role="alert">
+            无法读取本周任务 ·{" "}
+            <button
+              className="form-inline-action"
+              onClick={() => void weeklyExecutionQuery.refetch()}
+              type="button"
+            >
+              重试
+            </button>
+          </div>
+        ) : weeklyExecutionQuery.data?.taskCount ? (
+          <>
+            <div
+              className="progress-track"
+              aria-label={`本周完成度 ${weeklyExecutionQuery.data.completedPercent}%`}
+            >
+              <span
+                style={{
+                  width: `${weeklyExecutionQuery.data.completedPercent}%`,
+                }}
+              />
+            </div>
+            <div className="weekly-copy">
+              {weeklyExecutionQuery.data.completedCount} /{" "}
+              {weeklyExecutionQuery.data.taskCount} 项
+            </div>
+          </>
+        ) : (
+          <div className="weekly-copy" role="status">
+            本周暂无已排期任务
+          </div>
+        )}
       </div>
 
       <button

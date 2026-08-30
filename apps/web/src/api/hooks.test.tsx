@@ -44,6 +44,7 @@ import {
   useReorderActiveTasksWithinPlan,
   useReorderTaskWithinPlanStatus,
   useSetTaskPlannedDate,
+  useSidebarWeekTasksQuery,
   useDeleteTaskArtifact,
   useDeleteTask,
   useTaskPageQuery,
@@ -441,6 +442,58 @@ describe("task queries", () => {
     expect(result.current.data?.today).toHaveLength(1);
     expect(result.current.data?.thisWeek).toHaveLength(1);
     expect(result.current.data?.unscheduled).toHaveLength(1);
+  });
+
+  it("loads the complete Sidebar week and excludes cancelled Tasks from progress", async () => {
+    const doneTask = { ...task, id: "done", status: "done" as const };
+    const reviewTask = {
+      ...task,
+      id: "review",
+      status: "waiting_review" as const,
+    };
+    const cancelledTask = {
+      ...task,
+      id: "cancelled",
+      status: "cancelled" as const,
+    };
+    getAllTasksMock.mockResolvedValue([
+      task,
+      doneTask,
+      reviewTask,
+      cancelledTask,
+    ]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { result } = renderHook(
+      () =>
+        useSidebarWeekTasksQuery({
+          plannedFrom: "2026-02-23",
+          plannedTo: "2026-03-01",
+        }),
+      { wrapper: wrapperFor(queryClient) },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getAllTasksMock).toHaveBeenCalledWith({
+      plannedFrom: "2026-02-23",
+      plannedTo: "2026-03-01",
+    });
+    expect(result.current.data).toEqual({
+      plannedFrom: "2026-02-23",
+      plannedTo: "2026-03-01",
+      taskCount: 3,
+      completedCount: 1,
+      completedPercent: 33,
+    });
+    expect(
+      queryClient.getQueryData([
+        ...taskQueryKey,
+        "sidebar-week",
+        "2026-02-23",
+        "2026-03-01",
+      ]),
+    ).toEqual(result.current.data);
   });
 
   it("moves across active statuses while preserving terminal task slots", async () => {
