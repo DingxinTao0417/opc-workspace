@@ -5,6 +5,7 @@ import {
   getAppSetting,
   getAppSettings,
   getStorageCapacity,
+  getStorageCapacityHistory,
   getWorkspaceAvatarBlob,
   normalizeAppSettingsResponse,
   updateAppSettings,
@@ -142,6 +143,83 @@ describe("settings API", () => {
         },
       ],
     });
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/diagnostics/storage/check"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("strictly reads chronological pathless storage history", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                from: "2026-08-22T12:00:00Z",
+                to: "2026-08-29T12:00:00Z",
+                points: [
+                  {
+                    scope: "database+artifacts",
+                    checked_at: "2026-08-28T12:00:00Z",
+                    available_bytes: 10,
+                    total_bytes: 20,
+                    threshold_bytes: 5,
+                    status: "healthy",
+                  },
+                  {
+                    scope: "backups",
+                    checked_at: "2026-08-29T12:00:00Z",
+                    available_bytes: 2,
+                    total_bytes: 20,
+                    threshold_bytes: 5,
+                    status: "low",
+                  },
+                ],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    await expect(getStorageCapacityHistory()).resolves.toMatchObject({
+      points: [
+        { scope: "database+artifacts", availableBytes: 10 },
+        { scope: "backups", status: "low" },
+      ],
+    });
+  });
+
+  it("rejects storage history with private scope or reversed time", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                from: "2026-08-22T12:00:00Z",
+                to: "2026-08-29T12:00:00Z",
+                points: [
+                  {
+                    scope: "private-volume-id",
+                    checked_at: "2026-08-29T12:00:00Z",
+                    available_bytes: 2,
+                    total_bytes: 20,
+                    threshold_bytes: 5,
+                    status: "low",
+                  },
+                ],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    await expect(getStorageCapacityHistory()).rejects.toThrow(
+      "存储容量趋势点响应无效",
+    );
   });
 
   it("strictly normalizes all five settings modules", () => {

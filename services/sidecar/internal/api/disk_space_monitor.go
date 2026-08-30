@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +19,11 @@ import (
 )
 
 const bytesPerGiB uint64 = 1 << 30
+
+const (
+	storageCapacitySampleInterval = 15 * time.Minute
+	storageCapacityRetention      = 30 * 24 * time.Hour
+)
 
 type storageCapacityLocation struct {
 	Kind           string  `json:"kind"`
@@ -29,6 +37,21 @@ type storageCapacityResponse struct {
 	CheckedAt    string                    `json:"checked_at"`
 	ThresholdGiB uint64                    `json:"threshold_gib"`
 	Locations    []storageCapacityLocation `json:"locations"`
+}
+
+type storageCapacityHistoryPoint struct {
+	Scope          string `json:"scope"`
+	CheckedAt      string `json:"checked_at"`
+	AvailableBytes int64  `json:"available_bytes"`
+	TotalBytes     int64  `json:"total_bytes"`
+	ThresholdBytes int64  `json:"threshold_bytes"`
+	Status         string `json:"status"`
+}
+
+type storageCapacityHistoryResponse struct {
+	From   string                        `json:"from"`
+	To     string                        `json:"to"`
+	Points []storageCapacityHistoryPoint `json:"points"`
 }
 
 func loadLowDiskThresholdBytes(db *gorm.DB) (uint64, error) {
@@ -159,9 +182,13 @@ func (a *API) currentLowDiskThresholdBytes() uint64 {
 	return thresholdBytes
 }
 
-func (a *API) getStorageCapacity(c *gin.Context) {
+func (a *API) storageCapacitySnapshot(record bool) storageCapacityResponse {
 	thresholdBytes := a.currentLowDiskThresholdBytes()
 	targets, results, counts := probeStorageTargets(a.options)
+	checkedAt := a.options.Now().UTC()
+	if record {
+		a.recordStorageCapacitySamples(targets, results, thresholdBytes, checkedAt)
+	}
 	locations := make([]storageCapacityLocation, 0, len(targets))
 	for _, target := range targets {
 		location := storageCapacityLocation{
@@ -181,15 +208,51 @@ func (a *API) getStorageCapacity(c *gin.Context) {
 		}
 		locations = append(locations, location)
 	}
-	c.JSON(http.StatusOK, gin.H{"data": storageCapacityResponse{
-		CheckedAt: a.options.Now().UTC().Format(time.RFC3339Nano), ThresholdGiB: thresholdBytes / bytesPerGiB,
+	return storageCapacityResponse{
+		CheckedAt: checkedAt.Format(time.RFC3339Nano), ThresholdGiB: thresholdBytes / bytesPerGiB,
 		Locations: locations,
+	}
+}
+
+func (a *API) getStorageCapacity(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": a.storageCapacitySnapshot(false)})
+}
+
+func (a *API) checkStorageCapacity(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"data": a.storageCapacitySnapshot(true)})
+}
+
+func (a *API) getStorageCapacityHistory(c *gin.Context) {
+	days := 7
+	if raw := strings.TrimSpace(c.Query("days")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 30 {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "days must be an integer between 1 and 30")
+			return
+		}
+		days = parsed
+	}
+	to := a.options.Now().UTC()
+	from := to.Add(-time.Duration(days) * 24 * time.Hour)
+	points := make([]storageCapacityHistoryPoint, 0)
+	if err := a.db.Raw(`
+		SELECT scope, checked_at, available_bytes, total_bytes, threshold_bytes, status
+		FROM storage_capacity_samples
+		WHERE sample_bucket BETWEEN ? AND ?
+		ORDER BY sample_bucket ASC, scope ASC
+	`, from.Unix()/int64(storageCapacitySampleInterval/time.Second), to.Unix()/int64(storageCapacitySampleInterval/time.Second)).Scan(&points).Error; err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": storageCapacityHistoryResponse{
+		From: from.Format(time.RFC3339Nano), To: to.Format(time.RFC3339Nano), Points: points,
 	}})
 }
 
 func (a *API) scanDiskSpace() error {
 	thresholdBytes := a.currentLowDiskThresholdBytes()
-	_, results, _ := probeStorageTargets(a.options)
+	targets, results, _ := probeStorageTargets(a.options)
+	a.recordStorageCapacitySamples(targets, results, thresholdBytes, a.options.Now().UTC())
 	low := false
 	probeFailed := false
 	for _, result := range results {
@@ -216,4 +279,66 @@ func (a *API) scanDiskSpace() error {
 		return err
 	}
 	return nil
+}
+
+func (a *API) recordStorageCapacitySamples(targets []storageProbeTarget, results map[string]storageProbeResult, thresholdBytes uint64, checkedAt time.Time) {
+	if thresholdBytes == 0 || thresholdBytes > math.MaxInt64 {
+		return
+	}
+	scopes := make(map[string][]string)
+	for _, target := range targets {
+		if target.groupKey != "" {
+			scopes[target.groupKey] = append(scopes[target.groupKey], target.kind)
+		}
+	}
+	bucket := checkedAt.Unix() / int64(storageCapacitySampleInterval/time.Second)
+	cutoffBucket := checkedAt.Add(-storageCapacityRetention).Unix() / int64(storageCapacitySampleInterval/time.Second)
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		for groupKey, kinds := range scopes {
+			result, ok := results[groupKey]
+			if !ok || !result.valid() || result.available > math.MaxInt64 || result.total > math.MaxInt64 {
+				continue
+			}
+			sort.Strings(kinds)
+			scope := canonicalStorageCapacityScope(kinds)
+			if scope == "" {
+				continue
+			}
+			status := "healthy"
+			if result.available < thresholdBytes {
+				status = "low"
+			}
+			if err := tx.Exec(`
+				INSERT INTO storage_capacity_samples (
+					scope, sample_bucket, available_bytes, total_bytes, threshold_bytes, status, checked_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(scope, sample_bucket) DO UPDATE SET
+					available_bytes = excluded.available_bytes,
+					total_bytes = excluded.total_bytes,
+					threshold_bytes = excluded.threshold_bytes,
+					status = excluded.status,
+					checked_at = excluded.checked_at
+			`, scope, bucket, int64(result.available), int64(result.total), int64(thresholdBytes), status, checkedAt.Format(time.RFC3339Nano)).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Exec("DELETE FROM storage_capacity_samples WHERE sample_bucket < ?", cutoffBucket).Error
+	})
+	if err != nil && a.options.Logger != nil {
+		a.options.Logger.Print("storage capacity history could not be recorded safely")
+	}
+}
+
+func canonicalStorageCapacityScope(kinds []string) string {
+	present := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		present[kind] = true
+	}
+	ordered := make([]string, 0, 3)
+	for _, kind := range []string{"database", "artifacts", "backups"} {
+		if present[kind] {
+			ordered = append(ordered, kind)
+		}
+	}
+	return strings.Join(ordered, "+")
 }

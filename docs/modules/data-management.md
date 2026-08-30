@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；导入预检现可只读返回非空目标逐表行数/主键重叠清单，并把跨 schema 包分类为旧于或新于当前 schema。备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标实际合并、跨 schema 升级、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出及只读冲突预检已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择、非空目标实际合并、跨 schema 升级、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.81](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.82](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -70,7 +70,7 @@
 
 - 非空目标实际冲突合并、跨 schema 升级应用与兼容矩阵；只读冲突清单和 schema 方向分类已经实现；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
-- 卷级容量历史趋势；物理卷身份/同卷去重、用户阈值配置和三个受控逻辑位置的手动容量检查已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
+- 容量趋势的大数据量聚合与导出；物理卷身份/同卷去重、用户阈值配置、手动容量检查和 30 天本地历史已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
 
 ## 当前应用数据布局
@@ -174,7 +174,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v42：
+当前 schema v43：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -183,7 +183,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22–v41 依次交付受控 Project Attachment、来源保护、工作区头像、Project/Content/Roadmap Inbox 来源、storage 设置、父任务进度、Client Activity 来源、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap 和 Content Item；schema v40/v41 重建 Reminder 约束并增加 monthly/weekdays。schema v42 在同一破坏性迁移闸门和自动回滚包之后重建 `app_settings`，把值契约升为 2，为既有 general JSON 补 `close_to_tray=true`，保留行版本、Actor 与时间并恢复全部 triggers。v34–v42 均不创建业务 demo 数据；后续迁移从 `043_*` 继续。
+- schema v22–v42 依次交付受控附件、来源保护、头像、Inbox 来源、storage 设置、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘。schema v43 加法新增 `storage_capacity_samples`，按无路径逻辑 scope 保存 15 分钟桶；迁移不创建样本或业务 demo 数据，后续从 `044_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -203,7 +203,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `042_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖：真实旧版本数据保留、幂等重跑、约束/索引/trigger/外键、`foreign_key_check`、故障回滚、外键状态恢复，以及破坏性标记和迁移前备份门禁。schema v30–v39 都不声明 destructive；schema v40/v41 受破坏性迁移回滚包保护。v33 不扫描历史 Project 事件、不补跑遗漏动作，Sidecar 启动代码只幂等登记默认禁用的稳定预设定义，v35 不创建回访计划，v36 不创建里程碑，v41 不创建 Reminder 或其他业务数据。
+新增 schema 只能从 `044_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖真实旧版本数据保留、约束、回滚和外键状态。schema v43 是加法迁移，不创建初始容量样本；样本只来自后续真实探测。
 
 ## v0.1 备份/恢复目标与当前进度
 
@@ -239,7 +239,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v42 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。其他 Task/Reminder/Automation/Agent/Client/Roadmap/Content 严格契约和空目标门禁保持不变，旧 schema 包不会伪装为同 schema 导入。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v43 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。容量样本是本机运行诊断事实，不进入便携业务导入导出。
 
 正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标实际 UUID 重映射/合并策略仍待独立设计；preview 已先提供不含业务正文的表级主键冲突事实。
 
@@ -247,11 +247,11 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 计划备份（v0.3）
 
-后续再评审定时计划、保留数量、卷级趋势、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
+后续再评审定时计划、备份保留数量、容量趋势聚合/导出、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
 
 ## 当前 API 与后续作业状态
 
-当前创建和校验是同步本地命令，API 只在完整成功后返回；前端使用 180 秒超时并展示进行中状态。已实现：
+当前创建和校验是同步本地命令，API 只在完整成功后返回；前端使用 180 秒超时并展示进行中状态。容量诊断另提供：`GET /diagnostics/storage` 只读即时值，`POST /diagnostics/storage/check` 显式检查并写当前 15 分钟样本，`GET /diagnostics/storage/history?days=1..30` 返回无路径/卷标识的升序历史。其余已实现：
 
 | 方法与路径                                      | 当前契约                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -342,7 +342,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] ready 前及每 5 分钟跨数据库/受控文件/备份根主动容量探测、默认 1 GiB 且可配置为 1–100 GiB 的低空间预警、持续周期抑制与安全 journal 降级。
 - [x] 鉴权手动容量检查：固定返回数据库/受控文件/备份逻辑位置、可用/总字节、已保存阈值和 `healthy/low/unavailable`，不返回路径或探测错误；部分失败可独立展示和重试。
 - [x] Windows 卷 GUID / Unix 设备号只在进程内用于同卷去重；API 仅返回 `shared_volume` 布尔值，设置页提示共享容量，不暴露卷 ID、路径或盘符；身份探测失败安全退回规范路径独立检查。
-- [ ] 卷级容量历史趋势。
+- [x] schema v43 容量历史：物理卷按逻辑 scope 去重采样、15 分钟桶、30 天保留、1–30 天只读 API 与设置页 7 天趋势；不保存或返回路径、盘符、卷 ID。
+- [x] 真实浏览器已验证 schema v43 迁移后的设置页趋势、物理卷逻辑组合、首个样本和同桶手动刷新；本次验收后开发服务已停止。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
 - [x] 非空目标只读冲突映射：逐表源/目标行数与主键重叠，不返回业务值，不创建备份或改变数据；跨 schema 包分类旧/新方向并保持 apply 禁用。
 - [x] 真实浏览器用当前非空工作区的含文件 ZIP 验证只读预检：显示 18 行目标事实、18 条主键重叠及 4 个逐表清单项，确认按钮禁用；未执行 apply，数据库无写入。

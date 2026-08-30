@@ -94,6 +94,8 @@ import type {
   FocusSettingValue,
   GeneralSettingValue,
   StorageSettingValue,
+  StorageCapacityHistoryResult,
+  StorageCapacityScope,
   StorageCapacityResult,
   StorageCapacityStatus,
   InboxEventListParams,
@@ -6683,7 +6685,10 @@ export async function downloadDiagnosticPackage(): Promise<DiagnosticPackageDown
 }
 
 export async function getStorageCapacity(): Promise<StorageCapacityResult> {
-  const payload = await apiRequest<unknown>("/api/v1/diagnostics/storage");
+  const payload = await apiRequest<unknown>(
+    "/api/v1/diagnostics/storage/check",
+    { method: "POST" },
+  );
   if (
     !isRecord(payload) ||
     !hasExactKeys(payload, ["data"]) ||
@@ -6749,6 +6754,94 @@ export async function getStorageCapacity(): Promise<StorageCapacityResult> {
     thresholdGiB: positiveInteger(data.threshold_gib, "低空间阈值"),
     locations,
   };
+}
+
+const storageCapacityScopes = new Set<StorageCapacityScope>([
+  "database",
+  "artifacts",
+  "backups",
+  "database+artifacts",
+  "database+backups",
+  "artifacts+backups",
+  "database+artifacts+backups",
+]);
+
+export async function getStorageCapacityHistory(
+  days = 7,
+): Promise<StorageCapacityHistoryResult> {
+  if (!Number.isInteger(days) || days < 1 || days > 30) {
+    throw new Error("容量趋势天数必须是 1–30 的整数");
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/diagnostics/storage/history?days=${days}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !hasExactKeys(payload, ["data"]) ||
+    !isRecord(payload.data)
+  ) {
+    return invalidResponse("存储容量趋势响应格式无效");
+  }
+  const data = payload.data;
+  if (
+    !hasExactKeys(data, ["from", "to", "points"]) ||
+    typeof data.from !== "string" ||
+    typeof data.to !== "string" ||
+    Number.isNaN(Date.parse(data.from)) ||
+    Number.isNaN(Date.parse(data.to)) ||
+    Date.parse(data.from) > Date.parse(data.to) ||
+    !Array.isArray(data.points)
+  ) {
+    return invalidResponse("存储容量趋势响应格式无效");
+  }
+  const from = data.from;
+  const to = data.to;
+  let previousTime = -Infinity;
+  const points = data.points.map((point) => {
+    if (
+      !isRecord(point) ||
+      !hasExactKeys(point, [
+        "scope",
+        "checked_at",
+        "available_bytes",
+        "total_bytes",
+        "threshold_bytes",
+        "status",
+      ]) ||
+      typeof point.scope !== "string" ||
+      !storageCapacityScopes.has(point.scope as StorageCapacityScope) ||
+      typeof point.checked_at !== "string" ||
+      Number.isNaN(Date.parse(point.checked_at)) ||
+      (point.status !== "healthy" && point.status !== "low") ||
+      !Number.isSafeInteger(point.available_bytes) ||
+      !Number.isSafeInteger(point.total_bytes) ||
+      !Number.isSafeInteger(point.threshold_bytes) ||
+      (point.available_bytes as number) < 0 ||
+      (point.total_bytes as number) < 1 ||
+      (point.available_bytes as number) > (point.total_bytes as number) ||
+      (point.threshold_bytes as number) < 1
+    ) {
+      return invalidResponse("存储容量趋势点响应无效");
+    }
+    const checkedAt = Date.parse(point.checked_at);
+    if (
+      checkedAt < previousTime ||
+      checkedAt < Date.parse(from) ||
+      checkedAt > Date.parse(to)
+    ) {
+      return invalidResponse("存储容量趋势顺序无效");
+    }
+    previousTime = checkedAt;
+    return {
+      scope: point.scope as StorageCapacityScope,
+      checkedAt: point.checked_at,
+      availableBytes: point.available_bytes as number,
+      totalBytes: point.total_bytes as number,
+      thresholdBytes: point.threshold_bytes as number,
+      status: point.status as "healthy" | "low",
+    };
+  });
+  return { from, to, points };
 }
 
 export async function getTags(

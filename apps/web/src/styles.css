@@ -5683,7 +5683,7 @@ kbd {
   height: 5px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--surface-raised);
+  background: var(--panel-2);
 }
 
 .focus-project-distribution-track i {
@@ -6588,6 +6588,62 @@ kbd {
   display: flex;
   justify-content: flex-end;
   margin-top: 12px;
+}
+
+.settings-storage-trend {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.settings-storage-trend-header strong,
+.settings-storage-trend-header span,
+.settings-storage-trend-card strong,
+.settings-storage-trend-card span {
+  display: block;
+}
+
+.settings-storage-trend-header span,
+.settings-storage-trend-card span {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings-storage-trend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.settings-storage-trend-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.settings-storage-trend-card svg {
+  width: 96px;
+  height: 40px;
+  overflow: visible;
+}
+
+.settings-storage-trend-card polyline {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.settings-storage-trend-card polyline[data-status="low"] {
+  stroke: var(--red);
 }
 
 .settings-diagnostic-actions {

@@ -1,6 +1,6 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v40 增加每月规则与当地日锚点，schema v41 增加周一至周五工作日规则。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v40 增加每月规则与当地日锚点，schema v41 增加周一至周五工作日规则。
 >
 > 版本边界：T-11A3 一次性本地 Reminder 及每日/每周/工作日/每月重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”仍只按 IANA 时区创建本地一次性 Reminder。法定节假日/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 

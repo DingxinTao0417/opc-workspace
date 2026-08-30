@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.81](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.82](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -247,7 +247,7 @@
 
 - 已接通 OPC_LOG_DIR 的启动故障 journal、原子更新、损坏隔离和 ready 前补偿，以及 Go Sidecar/Tauri 壳脱敏日志、5 MiB/3 归档轮转、敏感信息排除和文件故障降级；WebView→Sidecar request ID 已完成。
 - 诊断页、脱敏摘要、诊断包 v1、无参数 `open_log_directory`、Tauri 壳自身日志和 API request ID 关联已完成。
-- 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和 1–100 GiB 可配置低空间已接 maintenance 状态；物理卷同卷去重与无路径手动容量检查已在设置页交付，卷身份不离开 Sidecar 进程，卷级趋势仍待评审。
+- 数据库启动/迁移、Sidecar 启动、备份恢复、运行期数据库操作失败和 1–100 GiB 可配置低空间已接 maintenance 状态；物理卷同卷去重、无路径手动容量检查和 30 天本地容量趋势已在设置页交付，卷身份不离开 Sidecar 进程或 API。
 
 ### v0.1-C：系统集成
 

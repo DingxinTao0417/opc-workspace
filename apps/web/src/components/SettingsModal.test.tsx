@@ -665,6 +665,35 @@ describe("SettingsModal", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes("/api/v1/diagnostics/storage/history")) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                from: "2026-08-21T12:00:00Z",
+                to: "2026-08-28T12:00:00Z",
+                points: [
+                  {
+                    scope: "database+artifacts",
+                    checked_at: "2026-08-27T12:00:00Z",
+                    available_bytes: 9 * 1024 ** 3,
+                    total_bytes: 100 * 1024 ** 3,
+                    threshold_bytes: 1024 ** 3,
+                    status: "healthy",
+                  },
+                  {
+                    scope: "database+artifacts",
+                    checked_at: "2026-08-28T12:00:00Z",
+                    available_bytes: 10 * 1024 ** 3,
+                    total_bytes: 100 * 1024 ** 3,
+                    threshold_bytes: 1024 ** 3,
+                    status: "healthy",
+                  },
+                ],
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         if (url.includes("/api/v1/diagnostics/storage")) {
           return new Response(
             JSON.stringify({
@@ -741,6 +770,9 @@ describe("SettingsModal", () => {
       screen.getByText("空间不足 · 512 MiB 可用 / 100 GiB · 与其他位置同卷"),
     ).toBeVisible();
     expect(screen.getByText("检查不可用")).toBeVisible();
+    expect(await screen.findByText("近 7 天容量趋势")).toBeVisible();
+    expect(screen.getByText("本地数据库 + 受控文件")).toBeVisible();
+    expect(screen.getByText(/10 GiB 可用 · \+1.0 GiB 变化/)).toBeVisible();
     expect(screen.getByRole("button", { name: "重新检查容量" })).toBeVisible();
     expect(screen.getByRole("button", { name: "立即备份" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "增加低空间提醒阈值" }));

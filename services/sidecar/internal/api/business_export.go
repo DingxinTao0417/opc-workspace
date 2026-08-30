@@ -67,6 +67,7 @@ var businessExportExcludedTables = []string{
 	"project_attachment_deletion_tombstones",
 	"workspace_avatar_deletion_tombstones",
 	"task_focus_totals",
+	"storage_capacity_samples",
 }
 
 type businessExportTable struct {

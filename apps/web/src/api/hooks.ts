@@ -65,6 +65,7 @@ import {
   getBackups,
   getRestoreDiagnostics,
   getStorageCapacity,
+  getStorageCapacityHistory,
   getInboxStats,
   getActor,
   getActors,
@@ -281,6 +282,10 @@ export function useSearchQuery(input: SearchListParams, enabled = true) {
 export const backupQueryKey = ["backups"] as const;
 export const restoreDiagnosticsQueryKey = ["restore-diagnostics"] as const;
 export const storageCapacityQueryKey = ["diagnostics", "storage"] as const;
+export const storageCapacityHistoryQueryKey = [
+  "diagnostics",
+  "storage-history",
+] as const;
 
 export function useBackupsQuery(enabled = true) {
   return useQuery({
@@ -309,6 +314,17 @@ export function useStorageCapacityQuery(enabled = true) {
     retry: 1,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useStorageCapacityHistoryQuery(enabled = true, days = 7) {
+  return useQuery({
+    queryKey: [...storageCapacityHistoryQueryKey, days],
+    queryFn: () => getStorageCapacityHistory(days),
+    enabled,
+    retry: 1,
+    retryDelay: 500,
+    staleTime: 60_000,
   });
 }
 

@@ -2162,3 +2162,27 @@ export interface StorageCapacityResult {
   thresholdGiB: number;
   locations: StorageCapacityLocation[];
 }
+
+export type StorageCapacityScope =
+  | "database"
+  | "artifacts"
+  | "backups"
+  | "database+artifacts"
+  | "database+backups"
+  | "artifacts+backups"
+  | "database+artifacts+backups";
+
+export interface StorageCapacityHistoryPoint {
+  scope: StorageCapacityScope;
+  checkedAt: string;
+  availableBytes: number;
+  totalBytes: number;
+  thresholdBytes: number;
+  status: "healthy" | "low";
+}
+
+export interface StorageCapacityHistoryResult {
+  from: string;
+  to: string;
+  points: StorageCapacityHistoryPoint[];
+}

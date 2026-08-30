@@ -329,6 +329,93 @@ func TestStorageCapacityEndpointMarksSharedVolumeWithoutReturningIdentity(t *tes
 	}
 }
 
+func TestStorageCapacityCheckRecordsDeduplicatedPathlessHistory(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "workspace.db")
+	store, err := database.Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, 8, 29, 8, 7, 0, 0, time.UTC)
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		DatabasePath: databasePath, ArtifactDir: filepath.Join(root, "artifacts"), BackupDir: filepath.Join(root, "backups"),
+		Logger: log.New(io.Discard, "", 0), Now: func() time.Time { return now },
+		VolumeIdentityCheck: func(path string) (string, error) {
+			if strings.HasSuffix(path, "backups") {
+				return "private-volume-b", nil
+			}
+			return "private-volume-a", nil
+		},
+		DiskSpaceCheck: func(path string) (uint64, uint64, error) {
+			if strings.HasSuffix(path, "backups") {
+				return 512 << 20, 20 << 30, nil
+			}
+			return 10 << 30, 100 << 30, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+
+	checked := performRequest(router.Engine, http.MethodPost, "/api/v1/diagnostics/storage/check", nil, nil)
+	if checked.Code != http.StatusOK {
+		t.Fatalf("storage check=%d: %s", checked.Code, checked.Body.String())
+	}
+	now = now.Add(5 * time.Minute)
+	checked = performRequest(router.Engine, http.MethodPost, "/api/v1/diagnostics/storage/check", nil, nil)
+	if checked.Code != http.StatusOK {
+		t.Fatalf("second storage check=%d: %s", checked.Code, checked.Body.String())
+	}
+
+	history := performRequest(router.Engine, http.MethodGet, "/api/v1/diagnostics/storage/history?days=7", nil, nil)
+	if history.Code != http.StatusOK {
+		t.Fatalf("storage history=%d: %s", history.Code, history.Body.String())
+	}
+	if strings.Contains(history.Body.String(), "private-volume") || strings.Contains(history.Body.String(), root) {
+		t.Fatalf("storage history leaked private identity: %s", history.Body.String())
+	}
+	var envelope struct {
+		Data storageCapacityHistoryResponse `json:"data"`
+	}
+	if err := json.Unmarshal(history.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(envelope.Data.Points) != 2 {
+		t.Fatalf("history points=%#v, want one point per physical scope in the same bucket", envelope.Data.Points)
+	}
+	if envelope.Data.Points[0].Scope != "backups" || envelope.Data.Points[0].Status != "low" ||
+		envelope.Data.Points[1].Scope != "database+artifacts" || envelope.Data.Points[1].Status != "healthy" {
+		t.Fatalf("history points=%#v", envelope.Data.Points)
+	}
+	invalid := performRequest(router.Engine, http.MethodGet, "/api/v1/diagnostics/storage/history?days=31", nil, nil)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid history window=%d: %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestStorageCapacityHistoryRetentionRemovesExpiredBuckets(t *testing.T) {
+	root := t.TempDir()
+	store, err := database.Open(filepath.Join(root, "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := &API{db: store.DB, options: Options{Logger: log.New(io.Discard, "", 0)}}
+	targets := []storageProbeTarget{{kind: "database", groupKey: "path:database"}}
+	results := map[string]storageProbeResult{"path:database": {available: 10, total: 20}}
+	now := time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC)
+	service.recordStorageCapacitySamples(targets, results, bytesPerGiB, now.Add(-31*24*time.Hour))
+	service.recordStorageCapacitySamples(targets, results, bytesPerGiB, now)
+	var count int64
+	if err := store.DB.Table("storage_capacity_samples").Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("retained sample count=%d err=%v, want 1", count, err)
+	}
+}
+
 func assertStorageIncidentCount(t *testing.T, store *database.Store, want int64) {
 	t.Helper()
 	var count int64

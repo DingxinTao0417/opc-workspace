@@ -39,6 +39,7 @@ import {
   useCommitAppSettingsWithAvatar,
   useHealthQuery,
   useDownloadDiagnosticPackage,
+  useStorageCapacityHistoryQuery,
   useStorageCapacityQuery,
   useUpdateAppSettings,
 } from "../api/hooks";
@@ -66,7 +67,11 @@ import {
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore, type SettingsModule } from "../store/ui";
-import type { AppSettingUpdate } from "../types/models";
+import type {
+  AppSettingUpdate,
+  StorageCapacityHistoryPoint,
+  StorageCapacityScope,
+} from "../types/models";
 import { ActorSettings } from "./ActorSettings";
 import { AgentAdapterSettings } from "./AgentAdapterSettings";
 import { AutomationSettings } from "./AutomationSettings";
@@ -145,6 +150,46 @@ function formatStorageBytes(value: number): string {
   const gib = value / (1024 * 1024 * 1024);
   if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 0 : 1)} GiB`;
   return `${(value / (1024 * 1024)).toFixed(0)} MiB`;
+}
+
+const storageLocationLabels = {
+  database: "本地数据库",
+  artifacts: "受控文件",
+  backups: "本地备份",
+} as const;
+
+function storageScopeLabel(scope: StorageCapacityScope): string {
+  return scope
+    .split("+")
+    .map(
+      (kind) =>
+        storageLocationLabels[kind as keyof typeof storageLocationLabels],
+    )
+    .join(" + ");
+}
+
+function storageTrendLine(points: StorageCapacityHistoryPoint[]): string {
+  if (points.length === 0) return "";
+  return points
+    .map((point, index) => {
+      const x = points.length === 1 ? 50 : (index / (points.length - 1)) * 100;
+      const ratio = Math.max(
+        0,
+        Math.min(1, point.availableBytes / point.totalBytes),
+      );
+      return `${x.toFixed(2)},${(36 - ratio * 32).toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function groupStorageCapacityPoints(points: StorageCapacityHistoryPoint[]) {
+  const groups = new Map<StorageCapacityScope, StorageCapacityHistoryPoint[]>();
+  for (const point of points) {
+    const group = groups.get(point.scope) ?? [];
+    group.push(point);
+    groups.set(point.scope, group);
+  }
+  return [...groups.entries()];
 }
 
 const defaultRouteOptions: { value: DefaultRoute; label: string }[] = [
@@ -305,6 +350,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const diagnosticPackageMutation = useDownloadDiagnosticPackage();
   const storageCapacityQuery = useStorageCapacityQuery(
     open && activeModule === "data",
+  );
+  const storageCapacityHistoryQuery = useStorageCapacityHistoryQuery(
+    open && activeModule === "data" && storageCapacityQuery.isSuccess,
   );
 
   useEffect(() => {
@@ -967,11 +1015,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     }
 
     if (activeModule === "data") {
-      const capacityLabels = {
-        database: "本地数据库",
-        artifacts: "受控文件",
-        backups: "本地备份",
-      } as const;
+      const trendGroups = groupStorageCapacityPoints(
+        storageCapacityHistoryQuery.data?.points ?? [],
+      );
       return (
         <BackupSettings
           storageSettings={
@@ -1018,7 +1064,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                   <div className="settings-about">
                     {storageCapacityQuery.data.locations.map((location) => (
                       <div className="settings-about-row" key={location.kind}>
-                        <span>{capacityLabels[location.kind]}</span>
+                        <span>{storageLocationLabels[location.kind]}</span>
                         <strong
                           className="settings-health-state"
                           data-status={
@@ -1040,7 +1086,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                     <button
                       className="button button-secondary"
                       disabled={storageCapacityQuery.isFetching}
-                      onClick={() => void storageCapacityQuery.refetch()}
+                      onClick={() => {
+                        void storageCapacityQuery
+                          .refetch()
+                          .then(() => storageCapacityHistoryQuery.refetch());
+                      }}
                       type="button"
                     >
                       <RefreshCw
@@ -1055,6 +1105,87 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
                         ? "检查中…"
                         : "重新检查容量"}
                     </button>
+                  </div>
+                  <div
+                    className="settings-storage-trend"
+                    aria-label="近 7 天容量趋势"
+                  >
+                    <div className="settings-storage-trend-header">
+                      <div>
+                        <strong>近 7 天容量趋势</strong>
+                        <span>
+                          每个物理卷最多每 15 分钟记录一次，保留 30 天
+                        </span>
+                      </div>
+                    </div>
+                    {storageCapacityHistoryQuery.isPending ? (
+                      <div className="settings-state" role="status">
+                        <LoaderCircle className="animate-spin" size={16} />
+                        正在读取容量趋势…
+                      </div>
+                    ) : storageCapacityHistoryQuery.isError ? (
+                      <div
+                        className="settings-state settings-state-error"
+                        role="alert"
+                      >
+                        <AlertCircle size={16} />
+                        <div>
+                          <strong>容量趋势读取失败</strong>
+                          <span>
+                            当前容量仍可使用；历史中不包含路径或卷标识。
+                          </span>
+                        </div>
+                        <button
+                          className="button button-secondary"
+                          onClick={() =>
+                            void storageCapacityHistoryQuery.refetch()
+                          }
+                          type="button"
+                        >
+                          <RefreshCw size={14} />
+                          重试趋势
+                        </button>
+                      </div>
+                    ) : trendGroups.length === 0 ? (
+                      <div className="settings-state settings-state-empty">
+                        <Info size={16} />
+                        首次容量样本正在积累，下一次检查后会形成趋势。
+                      </div>
+                    ) : (
+                      <div className="settings-storage-trend-grid">
+                        {trendGroups.map(([scope, points]) => {
+                          const latest = points.at(-1)!;
+                          const first = points[0];
+                          const delta =
+                            latest.availableBytes - first.availableBytes;
+                          return (
+                            <div
+                              className="settings-storage-trend-card"
+                              key={scope}
+                            >
+                              <div>
+                                <strong>{storageScopeLabel(scope)}</strong>
+                                <span>
+                                  {formatStorageBytes(latest.availableBytes)}{" "}
+                                  可用
+                                  {points.length > 1
+                                    ? ` · ${delta >= 0 ? "+" : ""}${formatStorageBytes(Math.abs(delta))}${delta < 0 ? " 减少" : " 变化"}`
+                                    : " · 首个样本"}
+                                </span>
+                              </div>
+                              <svg aria-hidden="true" viewBox="0 0 100 40">
+                                <polyline
+                                  data-status={latest.status}
+                                  fill="none"
+                                  points={storageTrendLine(points)}
+                                  vectorEffect="non-scaling-stroke"
+                                />
+                              </svg>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </>
               )}

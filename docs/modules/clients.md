@@ -2,7 +2,7 @@
 
 > 实现状态截止：2026-08-29（依据当前实现）
 >
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v42。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v35 新增受约束的 Client Followup 计划事实；schema v36–v42 不改变 Client/Activity 表。v0.1 的资料 CRUD、共享分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 生命周期系统活动、跨客户最近动态读模型、客户附件和本地联系人关联已交付；本地回访 API/投影/管理/Today/Inbox 入口也已交付。模块仍为**部分完成**；真实浏览器/窄屏/大数据量专项、邮件/日历等外部来源和财务聚合尚未验收或交付。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v43。客户基础事实由 schema v10 引入，schema v18 追加本地活动，schema v19 追加受控附件，schema v20 追加 Client–person 显式关联，schema v31 为 Project Workflow Event→Client `system_reference` 增加来源唯一约束，schema v35 新增受约束的 Client Followup 计划事实；schema v36–v43 不改变 Client/Activity 表。v0.1 的资料 CRUD、共享分页搜索选择器、Project 客户关联、人工备注/会议时间线、Project 生命周期系统活动、跨客户最近动态读模型、客户附件和本地联系人关联已交付；本地回访 API/投影/管理/Today/Inbox 入口也已交付。模块仍为**部分完成**；真实浏览器/窄屏/大数据量专项、邮件/日历等外部来源和财务聚合尚未验收或交付。
 
 ## 定位与边界
 

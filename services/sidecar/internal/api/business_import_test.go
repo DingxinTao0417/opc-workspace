@@ -187,7 +187,7 @@ func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
 		Data businessImportPreview `json:"data"`
 	}
 	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" ||
-		envelope.Data.TargetSchemaVersion != 42 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
+		envelope.Data.TargetSchemaVersion != 43 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
 		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("preview = %#v err=%v", envelope.Data, err)
 	}
@@ -258,8 +258,8 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 		schema  int
 		blocker string
 	}{
-		{name: "older", schema: 41, blocker: "source_schema_older"},
-		{name: "newer", schema: 43, blocker: "source_schema_newer"},
+		{name: "older", schema: 42, blocker: "source_schema_older"},
+		{name: "newer", schema: 44, blocker: "source_schema_newer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			router, store, _, backupDir := newBackupTestAPI(t)
@@ -277,7 +277,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 				Data businessImportPreview `json:"data"`
 			}
 			if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != test.blocker ||
-				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 42 || envelope.Data.TargetRows != 0 ||
+				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 43 || envelope.Data.TargetRows != 0 ||
 				envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 0 {
 				t.Fatalf("schema preview = %#v err=%v", envelope.Data, err)
 			}
