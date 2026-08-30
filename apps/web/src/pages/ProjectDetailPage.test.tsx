@@ -40,6 +40,11 @@ const project: Project = {
 };
 
 const transition = vi.hoisted(() => vi.fn());
+const deleteProject = vi.hoisted(() => vi.fn());
+const deleteProjectState = vi.hoisted(() => ({
+  error: null as unknown,
+  isPending: false,
+}));
 const projectRefetch = vi.hoisted(() => vi.fn());
 const taskPageInput = vi.hoisted(() => vi.fn());
 const focusReportInput = vi.hoisted(() => vi.fn());
@@ -290,9 +295,8 @@ vi.mock("../api/hooks", () => ({
     mutate: transition,
   }),
   useDeleteProject: () => ({
-    error: null,
-    isPending: false,
-    mutate: vi.fn(),
+    ...deleteProjectState,
+    mutate: deleteProject,
   }),
   useCreateProject: () => ({
     error: null,
@@ -311,6 +315,9 @@ vi.mock("../api/hooks", () => ({
 describe("ProjectDetailPage", () => {
   beforeEach(() => {
     transition.mockReset();
+    deleteProject.mockReset();
+    deleteProjectState.error = null;
+    deleteProjectState.isPending = false;
     projectRefetch.mockReset();
     taskPageInput.mockReset();
     focusReportInput.mockReset();
@@ -391,6 +398,35 @@ describe("ProjectDetailPage", () => {
     );
     expect(focusHistoryInput).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: project.id, status: "terminal" }),
+    );
+  });
+
+  it("explains that linked Content Calendar items and Roadmap milestones block permanent deletion", () => {
+    project.status = "archived";
+    project.availableActions = ["restore"];
+    renderPage();
+
+    const dangerZone = screen
+      .getByRole("heading", { name: "永久删除" })
+      .closest("section");
+    expect(dangerZone).toHaveTextContent(
+      /若仍有关联的内容日历条目或路线图里程碑，\s*删除会被阻止，需要先在对应模块解除项目关联/,
+    );
+    expect(dangerZone).toHaveTextContent(
+      /系统不会自动解除这些\s*关联或级联删除相关条目/,
+    );
+  });
+
+  it("shows an actionable message when Content Calendar links block deletion", () => {
+    project.status = "archived";
+    project.availableActions = ["restore"];
+    deleteProjectState.error = new ApiError("project has content items", {
+      code: "PROJECT_CONTENT_ITEMS_EXIST",
+    });
+    renderPage();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "该项目仍关联内容日历条目，当前不能永久删除。请先到内容日历解除项目关联后重试。",
     );
   });
 

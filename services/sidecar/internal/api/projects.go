@@ -696,6 +696,17 @@ func (a *API) deleteProject(c *gin.Context) {
 				"Remove the project's roadmap milestone associations before permanently deleting it",
 			)
 		}
+		var contentItemCount int64
+		if err := tx.Table("content_items").Where("project_id = ?", id).Count(&contentItemCount).Error; err != nil {
+			return err
+		}
+		if contentItemCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"PROJECT_CONTENT_ITEMS_EXIST",
+				"Remove the project's content item associations before permanently deleting it",
+			)
+		}
 		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		if err := coordinateProjectCompletionInboxSourceDeletion(
 			tx,

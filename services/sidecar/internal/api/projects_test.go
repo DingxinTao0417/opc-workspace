@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1272,5 +1273,168 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	missingEvents := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID+"/events", nil, nil)
 	if missingEvents.Code != http.StatusNotFound {
 		t.Fatalf("deleted project events = %d: %s", missingEvents.Code, missingEvents.Body.String())
+	}
+}
+
+func TestProjectHardDeleteRejectsContentItemsWithoutSideEffects(t *testing.T) {
+	router, store, artifactRoot := newClientAttachmentTestAPI(t)
+	clientID := uuid.NewString()
+	insertTestClient(t, store, clientID, "Content delete guard client")
+	project := createProjectForTest(t, router.Engine, fmt.Sprintf(`{"name":"Content delete guard","client_id":%q}`, clientID), nil)
+
+	attachmentContent := []byte("content delete guard attachment")
+	upload := performMultipartPartsRequest(router.Engine, "/api/v1/projects/"+project.ID+"/attachments", []multipartTestPart{
+		{field: "metadata", content: []byte(`{"name":"guard.txt"}`)},
+		{field: "file", filename: "guard.txt", content: attachmentContent},
+	}, map[string]string{"If-Match": `"1"`}, false)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload attachment = %d: %s", upload.Code, upload.Body.String())
+	}
+	attachment := decodeProjectAttachmentResponse(t, upload.Body.Bytes())
+	attachmentPath := filepath.Join(artifactRoot, "objects", attachment.ID)
+
+	taskRecorder := performRequest(
+		router.Engine,
+		http.MethodPost,
+		"/api/v1/tasks",
+		[]byte(fmt.Sprintf(`{"title":"Content delete guard task","project_id":%q}`, project.ID)),
+		nil,
+	)
+	if taskRecorder.Code != http.StatusCreated {
+		t.Fatalf("create task = %d: %s", taskRecorder.Code, taskRecorder.Body.String())
+	}
+	var taskEnvelope struct {
+		Data models.Task `json:"data"`
+	}
+	if err := json.Unmarshal(taskRecorder.Body.Bytes(), &taskEnvelope); err != nil {
+		t.Fatalf("decode task: %v", err)
+	}
+
+	invoiceID := uuid.NewString()
+	if err := store.DB.Exec(`
+		INSERT INTO invoices(
+			id, invoice_number, client_id, project_id, amount_minor, currency,
+			status, issue_date, due_date, notes, created_at, updated_at
+		) VALUES (?, ?, ?, ?, 10000, 'CNY', 'draft', '2026-08-28', '2026-09-28', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, invoiceID, "INV-CONTENT-GUARD", clientID, project.ID).Error; err != nil {
+		t.Fatalf("insert invoice: %v", err)
+	}
+
+	contentRecorder := performRequest(
+		router.Engine,
+		http.MethodPost,
+		"/api/v1/content-items",
+		[]byte(fmt.Sprintf(`{"title":"Protected content","platform":"local","project_id":%q}`, project.ID)),
+		nil,
+	)
+	if contentRecorder.Code != http.StatusCreated {
+		t.Fatalf("create content item = %d: %s", contentRecorder.Code, contentRecorder.Body.String())
+	}
+	contentItem := decodeContentItemResponse(t, contentRecorder.Body.Bytes())
+
+	currentRecorder := performRequest(router.Engine, http.MethodGet, "/api/v1/projects/"+project.ID, nil, nil)
+	current := decodeProjectResponse(t, currentRecorder.Body.Bytes())
+	started := transitionProjectForTest(t, router.Engine, project.ID, current.Version, `{"action":"start"}`)
+	completed := transitionProjectForTest(t, router.Engine, project.ID, started.Version, `{"action":"complete","confirm_incomplete_tasks":true}`)
+
+	var source models.InboxItem
+	if err := store.DB.First(&source, "source_entity_type = 'project_completion' AND source_entity_id = ?", project.ID).Error; err != nil {
+		t.Fatalf("load Project completion source: %v", err)
+	}
+	resolved := performRequest(
+		router.Engine,
+		http.MethodPost,
+		"/api/v1/inbox-items/"+source.ID+"/resolve",
+		[]byte(`{"reason":"Ready for deletion guard test"}`),
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, source.Version)},
+	)
+	if resolved.Code != http.StatusOK {
+		t.Fatalf("resolve Project completion source = %d: %s", resolved.Code, resolved.Body.String())
+	}
+	if err := store.DB.First(&source, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("reload resolved source: %v", err)
+	}
+	archived := transitionProjectForTest(t, router.Engine, project.ID, completed.Version, `{"action":"archive"}`)
+
+	blocked := performRequest(
+		router.Engine,
+		http.MethodDelete,
+		"/api/v1/projects/"+project.ID+"?confirm=true",
+		nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, archived.Version)},
+	)
+	var failure errorResponse
+	if err := json.Unmarshal(blocked.Body.Bytes(), &failure); err != nil {
+		t.Fatalf("decode delete error: %v", err)
+	}
+	if blocked.Code != http.StatusConflict || failure.Code != "PROJECT_CONTENT_ITEMS_EXIST" ||
+		failure.Message != "Remove the project's content item associations before permanently deleting it" {
+		t.Fatalf("content-protected project deletion = %d %#v", blocked.Code, failure)
+	}
+
+	var projectAfter models.Project
+	if err := store.DB.First(&projectAfter, "id = ?", project.ID).Error; err != nil {
+		t.Fatalf("load protected Project: %v", err)
+	}
+	if projectAfter.Status != "archived" || projectAfter.Version != archived.Version {
+		t.Fatalf("protected Project changed = %#v", projectAfter)
+	}
+	var contentAfter models.ContentItem
+	if err := store.DB.First(&contentAfter, "id = ?", contentItem.ID).Error; err != nil {
+		t.Fatalf("load protected Content Item: %v", err)
+	}
+	if contentAfter.ProjectID == nil || *contentAfter.ProjectID != project.ID {
+		t.Fatalf("Content Item project_id = %#v, want %q", contentAfter.ProjectID, project.ID)
+	}
+	var taskAfter models.Task
+	if err := store.DB.First(&taskAfter, "id = ?", taskEnvelope.Data.ID).Error; err != nil {
+		t.Fatalf("load protected Task: %v", err)
+	}
+	if taskAfter.ProjectID == nil || *taskAfter.ProjectID != project.ID || taskAfter.Version != taskEnvelope.Data.Version {
+		t.Fatalf("protected Task changed = %#v", taskAfter)
+	}
+	var invoiceAfter models.Invoice
+	if err := store.DB.First(&invoiceAfter, "id = ?", invoiceID).Error; err != nil {
+		t.Fatalf("load protected Invoice: %v", err)
+	}
+	if invoiceAfter.ProjectID == nil || *invoiceAfter.ProjectID != project.ID {
+		t.Fatalf("Invoice project_id = %#v, want %q", invoiceAfter.ProjectID, project.ID)
+	}
+	var sourceAfter models.InboxItem
+	if err := store.DB.First(&sourceAfter, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load protected Inbox source: %v", err)
+	}
+	if sourceAfter.SourceDeletedAt != nil || sourceAfter.Status != source.Status || sourceAfter.Version != source.Version {
+		t.Fatalf("protected Inbox source changed = %#v", sourceAfter)
+	}
+	var sourceDeletedEvents int64
+	if err := store.DB.Table("workflow_events").Where(
+		"aggregate_type = 'inbox_item' AND aggregate_id = ? AND action = 'source_deleted'",
+		source.ID,
+	).Count(&sourceDeletedEvents).Error; err != nil || sourceDeletedEvents != 0 {
+		t.Fatalf("source_deleted events = %d, err=%v", sourceDeletedEvents, err)
+	}
+	var projectDeletedEvents int64
+	if err := store.DB.Table("workflow_events").Where(
+		"aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_deleted'",
+		project.ID,
+	).Count(&projectDeletedEvents).Error; err != nil || projectDeletedEvents != 0 {
+		t.Fatalf("project_deleted events = %d, err=%v", projectDeletedEvents, err)
+	}
+	var attachmentAfter models.ProjectAttachment
+	if err := store.DB.First(&attachmentAfter, "id = ?", attachment.ID).Error; err != nil {
+		t.Fatalf("load protected attachment: %v", err)
+	}
+	if attachmentAfter.DeletedAt != nil {
+		t.Fatalf("protected attachment deleted_at = %v", attachmentAfter.DeletedAt)
+	}
+	if stored, err := os.ReadFile(attachmentPath); err != nil || string(stored) != string(attachmentContent) {
+		t.Fatalf("protected attachment file = %q, err=%v", stored, err)
+	}
+	var attachmentTombstones int64
+	if err := store.DB.Model(&models.ProjectAttachmentDeletionTombstone{}).
+		Where("attachment_id = ?", attachment.ID).
+		Count(&attachmentTombstones).Error; err != nil || attachmentTombstones != 0 {
+		t.Fatalf("attachment tombstones = %d, err=%v", attachmentTombstones, err)
 	}
 }
