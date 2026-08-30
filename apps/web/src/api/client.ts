@@ -7870,6 +7870,24 @@ export async function publishContentItem(
   );
 }
 
+export async function deleteContentItem(
+  id: string,
+  expectedVersion: number,
+): Promise<{ deletedId: string }> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/content-items/${encodeURIComponent(id)}?confirm=true`,
+    {
+      method: "DELETE",
+      headers: expectedVersionHeader(expectedVersion),
+    },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  if (!isRecord(body)) return invalidResponse("内容项删除响应格式无效");
+  const deletedId = stringField(body, "deleted_id");
+  if (deletedId !== id) return invalidResponse("内容项删除响应格式无效");
+  return { deletedId };
+}
+
 export async function linkContentItemTask(
   id: string,
   taskId: string,

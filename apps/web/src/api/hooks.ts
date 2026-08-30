@@ -134,6 +134,7 @@ import {
   updateContentItem,
   scheduleContentItem,
   publishContentItem,
+  deleteContentItem,
   linkContentItemTask,
   unlinkContentItemTask,
   pauseFocusSession,
@@ -3853,6 +3854,10 @@ export const roadmapMilestoneQueryKey = ["roadmap", "milestones"] as const;
 export const roadmapMilestoneDetailQueryKey = (id: string) =>
   [...roadmapMilestoneQueryKey, "detail", id] as const;
 export const contentItemQueryKey = ["content-items"] as const;
+export const contentItemListQueryKey = [
+  ...contentItemQueryKey,
+  "infinite-list",
+] as const;
 export const contentItemDetailQueryKey = (id: string) =>
   [...contentItemQueryKey, "detail", id] as const;
 export const projectDetailQueryKey = (id: string) =>
@@ -3910,7 +3915,7 @@ export function useContentItemsInfiniteQuery(
 ) {
   const query = { ...input, pageSize: input.pageSize ?? 100 };
   return useInfiniteQuery({
-    queryKey: [...contentItemQueryKey, "infinite-list", query],
+    queryKey: [...contentItemListQueryKey, query],
     queryFn: ({ pageParam, signal }) =>
       getContentItems({ ...query, page: pageParam }, signal),
     initialPageParam: 1,
@@ -3982,6 +3987,45 @@ export function usePublishContentItem() {
     ({ id, input }: { id: string; input: PublishContentItemInput }) =>
       publishContentItem(id, input),
   );
+}
+
+export function useDeleteContentItem() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteContentItem(id, expectedVersion),
+    onSuccess: async (_, variables) => {
+      queryClient.removeQueries({
+        queryKey: contentItemDetailQueryKey(variables.id),
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: contentItemListQueryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+      ]);
+    },
+    onError: async (error, variables) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: contentItemListQueryKey }),
+          queryClient.invalidateQueries({
+            queryKey: contentItemDetailQueryKey(variables.id),
+          }),
+        ]);
+      } else if (
+        error instanceof ApiError &&
+        error.code === "CONTENT_ITEM_HAS_ACTIVE_INBOX_SOURCES"
+      ) {
+        await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+      }
+    },
+  });
 }
 
 export function useLinkContentItemTask() {

@@ -4,9 +4,11 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import * as localCalendar from "../lib/localCalendar";
 import type { ContentItem } from "../types/models";
 import { ContentCalendarPage } from "./ContentCalendarPage";
@@ -22,6 +24,10 @@ const hooks = vi.hoisted(() => ({
   publish: vi.fn(),
   link: vi.fn(),
   unlink: vi.fn(),
+  remove: vi.fn(),
+  removeReset: vi.fn(),
+  removeError: null as Error | null,
+  removePending: false,
 }));
 vi.mock("../api/hooks", () => ({
   useContentItemsInfiniteQuery: hooks.items,
@@ -59,6 +65,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
     mutate: hooks.unlink,
+  }),
+  useDeleteContentItem: () => ({
+    isPending: hooks.removePending,
+    error: hooks.removeError,
+    mutate: hooks.remove,
+    reset: hooks.removeReset,
   }),
 }));
 
@@ -103,6 +115,10 @@ describe("ContentCalendarPage", () => {
     hooks.publish.mockReset();
     hooks.link.mockReset();
     hooks.unlink.mockReset();
+    hooks.remove.mockReset();
+    hooks.removeReset.mockReset();
+    hooks.removeError = null;
+    hooks.removePending = false;
     hooks.detail.mockImplementation((id: string | null) => ({
       data: id ? item : undefined,
       isError: false,
@@ -292,6 +308,208 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/content-calendar?source=inbox",
     );
+  });
+
+  it("offers permanent deletion only for an archived item", () => {
+    const archivedItem = {
+      ...item,
+      status: "archived" as const,
+      archivedFromStatus: "scheduled" as const,
+    };
+    const view = render(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "永久删除" })).toBeNull();
+
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id ? archivedItem : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "永久删除" })).toBeTruthy();
+  });
+
+  it("cancels permanent deletion without closing the archived detail", () => {
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id
+        ? {
+            ...item,
+            status: "archived" as const,
+            archivedFromStatus: "scheduled" as const,
+          }
+        : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?item=content-1&source=inbox"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    expect(screen.getByRole("heading", { name: "永久删除内容" })).toBeTruthy();
+    expect(screen.getByText(/此操作不可恢复/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(screen.queryByRole("heading", { name: "永久删除内容" })).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "内容详情与排期" }),
+    ).toBeTruthy();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?item=content-1&source=inbox",
+    );
+    expect(hooks.remove).not.toHaveBeenCalled();
+  });
+
+  it("permanently deletes an archived item and preserves unrelated query parameters", () => {
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id
+        ? {
+            ...item,
+            status: "archived" as const,
+            archivedFromStatus: "scheduled" as const,
+            version: 3,
+          }
+        : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
+    hooks.remove.mockImplementation((_input, options) => options.onSuccess());
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?item=content-1&source=inbox"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+
+    expect(hooks.remove).toHaveBeenCalledWith(
+      { id: "content-1", expectedVersion: 3 },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?source=inbox",
+    );
+  });
+
+  it.each([
+    ["VERSION_CONFLICT", "内容已在另一个窗口变化，请关闭确认框并刷新后重试。"],
+    [
+      "CONTENT_ITEM_NOT_ARCHIVED",
+      "仅已归档内容可永久删除，请刷新确认当前状态。",
+    ],
+    [
+      "CONTENT_ITEM_HAS_ACTIVE_INBOX_SOURCES",
+      "该内容仍有待处理的收件箱来源，请先到收件箱解决或忽略对应事项，再重试永久删除。",
+    ],
+    ["CONTENT_ITEM_NOT_FOUND", "该内容已不存在，请关闭详情并刷新内容日历。"],
+  ])("maps %s and keeps deletion retryable", (code, message) => {
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id
+        ? {
+            ...item,
+            status: "archived" as const,
+            archivedFromStatus: "scheduled" as const,
+          }
+        : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
+    const view = render(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+    hooks.removeError = new ApiError("private deletion detail", {
+      code,
+      requestId: "request-delete-1",
+    });
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      `${message} · 请求 ID：request-delete-1`,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+
+    expect(hooks.remove).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("heading", { name: "永久删除内容" })).toBeTruthy();
+  });
+
+  it("blocks duplicate permanent deletion while the request is pending", () => {
+    hooks.detail.mockImplementation((id: string | null) => ({
+      data: id
+        ? {
+            ...item,
+            status: "archived" as const,
+            archivedFromStatus: "scheduled" as const,
+          }
+        : undefined,
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    }));
+    const view = render(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "永久删除" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
+
+    hooks.removePending = true;
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?item=content-1"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    const pending = screen.getByRole("button", {
+      name: "正在永久删除…",
+    });
+    const confirmation = screen.getByRole("dialog", {
+      name: "永久删除内容",
+    });
+    expect(pending).toBeDisabled();
+    expect(
+      within(confirmation).getByRole("button", { name: "取消" }),
+    ).toBeDisabled();
+    expect(
+      within(confirmation).queryByRole("button", { name: "关闭" }),
+    ).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll(".modal-backdrop")).at(-1)?.tagName,
+    ).toBe("DIV");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("heading", { name: "永久删除内容" })).toBeTruthy();
+    fireEvent.click(pending);
+    expect(hooks.remove).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a URL-addressed detail failure retryable", () => {

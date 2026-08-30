@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -6,14 +7,17 @@ import {
   Edit3,
   Plus,
   Send,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ApiError } from "../api/client";
 import {
   useContentItemQuery,
   useCreateContentItem,
   useProjectsQuery,
   useContentItemsInfiniteQuery,
+  useDeleteContentItem,
   useLinkContentItemTask,
   usePublishContentItem,
   useScheduleContentItem,
@@ -113,6 +117,24 @@ function mutationMessage(error: unknown) {
   return error instanceof Error && error.message
     ? error.message
     : "操作失败，请刷新后重试。";
+}
+
+function contentItemDeletionMessage(error: unknown) {
+  let message = mutationMessage(error);
+  if (error instanceof ApiError) {
+    if (error.code === "VERSION_CONFLICT") {
+      message = "内容已在另一个窗口变化，请关闭确认框并刷新后重试。";
+    } else if (error.code === "CONTENT_ITEM_NOT_ARCHIVED") {
+      message = "仅已归档内容可永久删除，请刷新确认当前状态。";
+    } else if (error.code === "CONTENT_ITEM_HAS_ACTIVE_INBOX_SOURCES") {
+      message =
+        "该内容仍有待处理的收件箱来源，请先到收件箱解决或忽略对应事项，再重试永久删除。";
+    } else if (error.code === "CONTENT_ITEM_NOT_FOUND") {
+      message = "该内容已不存在，请关闭详情并刷新内容日历。";
+    }
+    if (error.requestId) message += ` · 请求 ID：${error.requestId}`;
+  }
+  return message;
 }
 
 function CreateContentItemModal({
@@ -251,6 +273,7 @@ function EditContentItemModal({
   const update = useUpdateContentItem();
   const schedule = useScheduleContentItem();
   const publish = usePublishContentItem();
+  const remove = useDeleteContentItem();
   const linkTask = useLinkContentItemTask();
   const unlinkTask = useUnlinkContentItemTask();
   const projects = useProjectsQuery(
@@ -275,11 +298,13 @@ function EditContentItemModal({
   const [taskId, setTaskId] = useState("");
   const [taskRequired, setTaskRequired] = useState(true);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   if (!item) return null;
   const busy =
     update.isPending ||
     schedule.isPending ||
     publish.isPending ||
+    remove.isPending ||
     linkTask.isPending ||
     unlinkTask.isPending;
   const saveDetails = (event: FormEvent<HTMLFormElement>) => {
@@ -356,6 +381,25 @@ function EditContentItemModal({
       { id: item.id, taskId: linkedTaskId, expectedVersion: item.version },
       { onSuccess: onClose },
     );
+  const openDeleteConfirm = () => {
+    remove.reset();
+    setDeleteConfirmOpen(true);
+  };
+  const closeDeleteConfirm = () => {
+    if (remove.isPending) return;
+    remove.reset();
+    setDeleteConfirmOpen(false);
+  };
+  const confirmDelete = () =>
+    remove.mutate(
+      { id: item.id, expectedVersion: item.version },
+      {
+        onSuccess: () => {
+          setDeleteConfirmOpen(false);
+          onClose();
+        },
+      },
+    );
   const error =
     update.error ??
     schedule.error ??
@@ -375,6 +419,17 @@ function EditContentItemModal({
           >
             关闭
           </button>
+          {item.status === "archived" ? (
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={openDeleteConfirm}
+              type="button"
+            >
+              <Trash2 size={14} />
+              永久删除
+            </button>
+          ) : null}
           {item.status !== "published" &&
           item.status !== "archived" &&
           item.status !== "cancelled" ? (
@@ -562,6 +617,49 @@ function EditContentItemModal({
           <p className="form-field-error">{mutationMessage(error)}</p>
         ) : null}
       </form>
+      <Modal
+        dismissible={!remove.isPending}
+        footer={
+          <>
+            <button
+              className="button button-secondary"
+              disabled={remove.isPending}
+              onClick={closeDeleteConfirm}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="button button-danger"
+              disabled={remove.isPending}
+              onClick={confirmDelete}
+              type="button"
+            >
+              {remove.isPending ? "正在永久删除…" : "确认永久删除"}
+            </button>
+          </>
+        }
+        onClose={closeDeleteConfirm}
+        open={deleteConfirmOpen}
+        title="永久删除内容"
+        width="500px"
+      >
+        <div className="roadmap-delete-confirm-copy">
+          <AlertTriangle size={22} />
+          <div>
+            <strong>{item.title}</strong>
+            <p>
+              此操作不可恢复。关联的准备任务不会被删除；若仍有待处理的 Inbox
+              来源，删除将被安全阻止。
+            </p>
+          </div>
+        </div>
+        {remove.error ? (
+          <p className="form-field-error" role="alert">
+            {contentItemDeletionMessage(remove.error)}
+          </p>
+        ) : null}
+      </Modal>
     </Modal>
   );
 }

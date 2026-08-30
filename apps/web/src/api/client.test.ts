@@ -14,6 +14,7 @@ import {
   createTaskAssignment,
   deleteTaskArtifact,
   deleteBackup,
+  deleteContentItem,
   deleteTag,
   deleteInvoice,
   deleteProject,
@@ -123,6 +124,42 @@ describe("content item detail request", () => {
     expect(
       new URL(String(fetchMock.mock.calls[0][0]), "http://local.test").pathname,
     ).toBe("/api/v1/content-items/content%2Fitem%201");
+  });
+
+  it("permanently deletes one archived content item with explicit confirmation and version", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: { deleted_id: "content/item 1" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteContentItem("content/item 1", 7)).resolves.toEqual({
+      deletedId: "content/item 1",
+    });
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(url.pathname).toBe("/api/v1/content-items/content%2Fitem%201");
+    expect(url.searchParams.get("confirm")).toBe("true");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("DELETE");
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("If-Match"),
+    ).toBe('"7"');
+  });
+
+  it.each([
+    ["missing deleted_id", { data: {} }],
+    ["mismatched deleted_id", { data: { deleted_id: "content-item-2" } }],
+  ])("rejects %s in a content item delete response", async (_name, payload) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(payload)),
+    );
+
+    await expect(deleteContentItem("content-item-1", 7)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
   });
 });
 
