@@ -9,6 +9,11 @@ import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { ApiError } from "../api/client";
 import { useFocusReportQuery, useFocusSessionHistoryQuery } from "../api/hooks";
+import {
+  localDateFromKey,
+  localDateKey,
+  useLocalCalendar,
+} from "../lib/localCalendar";
 import { formatFocusTime } from "../store/focus";
 import type { FocusSessionStatus } from "../types/models";
 import { ErrorState, LoadingState } from "./feedback";
@@ -20,13 +25,6 @@ interface ProjectFocusSectionProps {
 type ProjectFocusRangeKind = "seven_days" | "thirty_days" | "month";
 
 const historyPageSize = 6;
-
-function localDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function addLocalDays(date: Date, days: number): Date {
   const result = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -108,16 +106,13 @@ function queryError(error: unknown, fallback: string): string {
 }
 
 export function ProjectFocusSection({ projectId }: ProjectFocusSectionProps) {
+  const { dateKey: todayKey, timeZone: timezone } = useLocalCalendar();
   const [rangeKind, setRangeKind] =
     useState<ProjectFocusRangeKind>("seven_days");
   const [historyPage, setHistoryPage] = useState(1);
-  const timezone = useMemo(
-    () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    [],
-  );
   const selectedRange = useMemo(
-    () => projectFocusRange(rangeKind),
-    [rangeKind],
+    () => projectFocusRange(rangeKind, localDateFromKey(todayKey)),
+    [rangeKind, todayKey],
   );
   const report = useFocusReportQuery({
     dateFrom: selectedRange.dateFrom,

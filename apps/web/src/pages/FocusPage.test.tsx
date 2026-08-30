@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   FocusReport,
@@ -73,6 +79,7 @@ const mocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   reportHook: vi.fn(),
+  todayStatsHook: vi.fn(),
   create: vi.fn(),
   pause: vi.fn(),
   resume: vi.fn(),
@@ -92,9 +99,10 @@ vi.mock("../api/hooks", () => ({
   useResumeFocusSession: () => mutation(mocks.resume),
   useStopFocusSession: () => mutation(mocks.stop),
   useCancelFocusSession: () => mutation(mocks.cancel),
-  useTodayStatsQuery: () => ({
-    data: { focus: { sessions: 1, minutes: 25 } },
-  }),
+  useTodayStatsQuery: (dateKey: string) => {
+    mocks.todayStatsHook(dateKey);
+    return { data: { focus: { sessions: 1, minutes: 25 } } };
+  },
   useFocusSessionHistoryQuery: () => mocks.historyQuery,
   useFocusReportQuery: (...args: unknown[]) => {
     mocks.reportHook(...args);
@@ -115,7 +123,10 @@ beforeEach(() => {
   useUiStore.setState({ settingsOpen: false, settingsModule: "general" });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("FocusPage", () => {
   it("requires a second confirmation before starting without a task", () => {
@@ -311,6 +322,56 @@ describe("FocusPage", () => {
     expect(mocks.reportHook).toHaveBeenLastCalledWith(
       expect.any(Object),
       false,
+    );
+  });
+
+  it("refreshes today and preset ranges at midnight without changing a custom range", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 31, 23, 59, 59));
+    render(<FocusPage />);
+
+    expect(mocks.todayStatsHook).toHaveBeenLastCalledWith("2026-08-31");
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-25",
+        dateTo: "2026-08-31",
+      }),
+      true,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "自定义" }));
+    fireEvent.change(screen.getByLabelText("专注回顾开始日期"), {
+      target: { value: "2026-08-20" },
+    });
+    fireEvent.change(screen.getByLabelText("专注回顾结束日期"), {
+      target: { value: "2026-08-25" },
+    });
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-20",
+        dateTo: "2026-08-25",
+      }),
+      true,
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.todayStatsHook).toHaveBeenLastCalledWith("2026-09-01");
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-20",
+        dateTo: "2026-08-25",
+      }),
+      true,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "7 天" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-26",
+        dateTo: "2026-09-01",
+      }),
+      true,
     );
   });
 });

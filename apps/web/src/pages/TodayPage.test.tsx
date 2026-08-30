@@ -809,6 +809,47 @@ describe("TodayPage Inbox overview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("follows the new local day when the user is still viewing today", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 23, 59, 59));
+    mockTodayShell();
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-28");
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-29");
+    expect(
+      screen.queryByRole("button", { name: "回到今天" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves a manually browsed date when local midnight passes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 23, 59, 59));
+    mockTodayShell();
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "前一天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+    fireEvent.click(screen.getByRole("button", { name: "回到今天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-29");
+  });
+
   it("persists active ordering for the exact selected date and unscheduled group", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));

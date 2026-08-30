@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
@@ -109,6 +115,25 @@ describe("Sidebar", () => {
     expect(hooks.weekInput).toHaveBeenCalledWith({
       plannedFrom: "2026-02-23",
       plannedTo: "2026-03-01",
+    });
+  });
+
+  it("moves the weekly query range when local Monday begins", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 2, 1, 23, 59, 59));
+
+    renderSidebar();
+
+    expect(hooks.weekInput).toHaveBeenLastCalledWith({
+      plannedFrom: "2026-02-23",
+      plannedTo: "2026-03-01",
+    });
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(hooks.weekInput).toHaveBeenLastCalledWith({
+      plannedFrom: "2026-03-02",
+      plannedTo: "2026-03-08",
     });
   });
 

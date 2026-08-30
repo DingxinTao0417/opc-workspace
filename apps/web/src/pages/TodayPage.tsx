@@ -14,7 +14,7 @@ import {
   RotateCcw,
   Target,
 } from "lucide-react";
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
@@ -37,14 +37,12 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
 import { TaskList } from "../components/TaskList";
 import { TaskPlanModal } from "../components/TaskPlanModal";
+import {
+  localDateFromKey,
+  localDateKey,
+  useLocalCalendar,
+} from "../lib/localCalendar";
 import type { InboxItem, Task } from "../types/models";
-
-function localDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function formatToday(date: Date): string {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -73,8 +71,7 @@ function clientFollowupClientId(item: InboxItem): string | null {
 }
 
 function dateFromKey(dateKey: string): Date {
-  const [year, month, day] = dateKey.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return localDateFromKey(dateKey);
 }
 
 function shiftLocalDateKey(dateKey: string, days: number): string {
@@ -186,9 +183,9 @@ function previewTaskDropToGroup(
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
-  const today = new Date();
-  const todayKey = localDateKey(today);
+  const { dateKey: todayKey } = useLocalCalendar();
   const [dateKey, setDateKey] = useState(todayKey);
+  const previousTodayKey = useRef(todayKey);
   const [riskFilter, setRiskFilter] = useState<DueRiskFilter | null>(null);
   const [riskPage, setRiskPage] = useState(1);
   const [planningTask, setPlanningTask] = useState<Task | null>(null);
@@ -231,6 +228,14 @@ export function TodayPage() {
   const focusCycles = useSettingsStore((state) => state.cycles);
   const focusPhase = useFocusCycleStore((state) => state.phase);
   const beginFocusWork = useFocusCycleStore((state) => state.beginWork);
+
+  useEffect(() => {
+    const previousToday = previousTodayKey.current;
+    if (todayKey !== previousToday) {
+      setDateKey((current) => (current === previousToday ? todayKey : current));
+    }
+    previousTodayKey.current = todayKey;
+  }, [todayKey]);
   const riskTotal = riskTasksQuery.data?.meta.total ?? 0;
   const effectiveRiskPageSize = Math.max(
     1,

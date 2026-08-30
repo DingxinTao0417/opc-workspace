@@ -32,6 +32,11 @@ import {
 import { PageHeader } from "../components/PageHeader";
 import { ErrorState, LoadingState } from "../components/feedback";
 import {
+  localDateFromKey,
+  localDateKey,
+  useLocalCalendar,
+} from "../lib/localCalendar";
+import {
   formatFocusTime,
   useBreakClock,
   useFocusClock,
@@ -39,13 +44,6 @@ import {
 } from "../store/focus";
 import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
-
-function localDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 function focusHourLabel(hour: number): string {
   const nextHour = (hour + 1) % 24;
@@ -171,6 +169,7 @@ function focusError(...errors: unknown[]): string | null {
 }
 
 export function FocusPage() {
+  const { dateKey: todayKey, timeZone: timezone } = useLocalCalendar();
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
   const previewFocusMinutes = useSettingsStore(
     (state) => state.preview?.focus.focusMinutes ?? state.focusMinutes,
@@ -184,20 +183,22 @@ export function FocusPage() {
   const resumeFocus = useResumeFocusSession();
   const stopFocus = useStopFocusSession();
   const cancelFocus = useCancelFocusSession();
-  const todayStats = useTodayStatsQuery(localDateKey(new Date()));
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const initialReportRange = useMemo(() => recentDateRange(), []);
+  const todayStats = useTodayStatsQuery(todayKey);
   const [historyPage, setHistoryPage] = useState(1);
   const [reportRangeKind, setReportRangeKind] =
     useState<FocusReportRangeKind>("seven_days");
-  const [customReportRange, setCustomReportRange] =
-    useState(initialReportRange);
+  const [customReportRange, setCustomReportRange] = useState(() =>
+    recentDateRange(localDateFromKey(todayKey)),
+  );
   const selectedReportRange = useMemo(() => {
     if (reportRangeKind === "custom") {
       return { ...customReportRange, timezone, label: "自定义范围" };
     }
-    return { ...focusReportRange(reportRangeKind), timezone };
-  }, [customReportRange, reportRangeKind, timezone]);
+    return {
+      ...focusReportRange(reportRangeKind, localDateFromKey(todayKey)),
+      timezone,
+    };
+  }, [customReportRange, reportRangeKind, timezone, todayKey]);
   const customRangeDays = localDateDistance(
     customReportRange.dateFrom,
     customReportRange.dateTo,

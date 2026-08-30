@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -115,7 +116,10 @@ function LocationProbe() {
 }
 
 describe("RoadmapPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   beforeEach(() => {
     hooks.update.mockReset();
@@ -158,6 +162,91 @@ describe("RoadmapPage", () => {
       "href",
       "/projects/project-1",
     );
+  });
+
+  it("follows the next local quarter and resets pagination", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
+    hooks.milestones.mockImplementation(
+      (input: { page: number; pageSize: number }) => ({
+        data: {
+          items: [milestone],
+          meta: { page: input.page, pageSize: input.pageSize, total: 41 },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, year: 2026, quarter: 3 }),
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, year: 2026, quarter: 4 }),
+    );
+    expect(screen.getByLabelText("季度")).toHaveValue("4");
+  });
+
+  it("keeps a manually selected quarter when local midnight crosses a quarter", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText("季度"), {
+      target: { value: "2" },
+    });
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ year: 2026, quarter: 2 }),
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(screen.getByLabelText("季度")).toHaveValue("2");
+    expect(hooks.milestones).toHaveBeenLastCalledWith(
+      expect.objectContaining({ year: 2026, quarter: 2 }),
+    );
+  });
+
+  it("syncs a closed create date without overwriting an open draft", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
+    render(
+      <MemoryRouter>
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "新建里程碑" }));
+    const targetDate = screen.getByLabelText("目标日期");
+    expect(targetDate).toHaveValue("2026-09-30");
+    fireEvent.change(targetDate, { target: { value: "2026-09-15" } });
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(
+      screen.getByRole("heading", { name: "新建 2026 年 Q4 里程碑" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText("目标日期")).toHaveValue("2026-09-15");
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建里程碑" }));
+    expect(screen.getByLabelText("目标日期")).toHaveValue("2026-12-31");
   });
 
   it("edits milestone facts with the current version", () => {

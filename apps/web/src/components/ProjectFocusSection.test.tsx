@@ -139,6 +139,30 @@ describe("ProjectFocusSection", () => {
     });
   });
 
+  it("refreshes the selected preset range at local midnight", () => {
+    vi.setSystemTime(new Date(2026, 7, 31, 23, 59, 59));
+
+    render(<ProjectFocusSection projectId="project-1" />);
+
+    expect(hookMocks.report).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-25",
+        dateTo: "2026-08-31",
+        projectId: "project-1",
+      }),
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(hookMocks.report).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-26",
+        dateTo: "2026-09-01",
+        projectId: "project-1",
+      }),
+    );
+  });
+
   it("keeps a retryable report failure isolated from session history", () => {
     hookMocks.report.mockReturnValue(
       reportResult({

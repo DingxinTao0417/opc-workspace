@@ -16,6 +16,11 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { useInboxStatsQuery, useSidebarWeekTasksQuery } from "../api/hooks";
+import {
+  localDateFromKey,
+  localDateKey,
+  useLocalCalendar,
+} from "../lib/localCalendar";
 import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 
@@ -66,19 +71,11 @@ const groups: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-function localDateKey(date: Date): string {
-  return [
-    String(date.getFullYear()).padStart(4, "0"),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-}
-
-function currentLocalWeekRange(): {
+function currentLocalWeekRange(dateKey: string): {
   plannedFrom: string;
   plannedTo: string;
 } {
-  const now = new Date();
+  const now = localDateFromKey(dateKey);
   const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
   const monday = new Date(
     now.getFullYear(),
@@ -97,8 +94,9 @@ function currentLocalWeekRange(): {
 }
 
 export function Sidebar() {
+  const { dateKey } = useLocalCalendar();
   const weeklyExecutionQuery = useSidebarWeekTasksQuery(
-    currentLocalWeekRange(),
+    currentLocalWeekRange(dateKey),
   );
   const inboxStatsQuery = useInboxStatsQuery();
   const displayName = useSettingsStore(

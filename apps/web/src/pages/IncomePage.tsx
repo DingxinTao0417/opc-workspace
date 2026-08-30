@@ -7,7 +7,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   useExportFinancialEntries,
@@ -19,6 +19,7 @@ import { FinancialEntryFormModal } from "../components/FinancialEntryFormModal";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
+import { useLocalCalendar } from "../lib/localCalendar";
 import type {
   FinancialEntry,
   FinancialEntryStatus,
@@ -40,17 +41,6 @@ const statusLabels: Record<FinancialEntryStatus, string> = {
   voided: "已作废",
 };
 
-function localDateValue(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function currentMonthValue(): string {
-  return localDateValue().slice(0, 7);
-}
-
 function validMonthValue(value: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
@@ -64,11 +54,10 @@ function monthBounds(value: string) {
   };
 }
 
-function currentYearBounds(date = new Date()) {
-  const dateTo = localDateValue(date);
+function currentYearBounds(dateKey: string) {
   return {
-    dateFrom: `${dateTo.slice(0, 4)}-01-01`,
-    dateTo,
+    dateFrom: `${dateKey.slice(0, 4)}-01-01`,
+    dateTo: dateKey,
   };
 }
 
@@ -108,7 +97,10 @@ function apiErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function IncomePage() {
-  const [monthInput, setMonthInput] = useState(currentMonthValue());
+  const { dateKey: todayKey } = useLocalCalendar();
+  const currentMonth = todayKey.slice(0, 7);
+  const previousCurrentMonth = useRef(currentMonth);
+  const [monthInput, setMonthInput] = useState(currentMonth);
   const [currency, setCurrency] = useState("CNY");
   const [type, setType] = useState<FinancialEntryType | "">("");
   const [status, setStatus] = useState<FinancialEntryStatus | "">("");
@@ -120,9 +112,9 @@ export function IncomePage() {
   const [voiding, setVoiding] = useState<FinancialEntry | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [actionMenu, setActionMenu] = useState<string | null>(null);
-  const month = validMonthValue(monthInput) ? monthInput : currentMonthValue();
+  const month = validMonthValue(monthInput) ? monthInput : currentMonth;
   const bounds = useMemo(() => monthBounds(month), [month]);
-  const yearBounds = useMemo(() => currentYearBounds(), []);
+  const yearBounds = useMemo(() => currentYearBounds(todayKey), [todayKey]);
   const listInput = {
     page,
     pageSize: 20,
@@ -175,6 +167,18 @@ export function IncomePage() {
     yearlyStatsQuery.isError ||
     statsResponseMismatch ||
     yearlyStatsResponseMismatch;
+
+  useEffect(() => {
+    const previousMonth = previousCurrentMonth.current;
+    if (
+      currentMonth !== previousMonth &&
+      (monthInput === previousMonth || !validMonthValue(monthInput))
+    ) {
+      setMonthInput(currentMonth);
+      setPage(1);
+    }
+    previousCurrentMonth.current = currentMonth;
+  }, [currentMonth, monthInput]);
 
   const exportCSV = () => {
     exportMutation.mutate(

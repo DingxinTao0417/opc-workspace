@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { RightOverview } from "./RightOverview";
@@ -45,7 +51,10 @@ vi.mock("../store/settings", () => ({
     selector({ focusMinutes: 25, preview: null }),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 beforeEach(() => {
   mocks.refetch.mockReset();
@@ -333,5 +342,46 @@ describe("RightOverview upcoming roadmap milestones", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText("正在读取路线图节点…")).toBeInTheDocument();
+  });
+
+  it("refreshes the month query and roadmap date status at local midnight", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 31, 23, 59, 59));
+    mocks.roadmap.mockImplementation(
+      (input: { status: "planned" | "active" }) => ({
+        data: {
+          items:
+            input.status === "planned"
+              ? [milestone("month-end", "月末节点", "2026-08-31", "planned")]
+              : [],
+          meta: { page: 1, pageSize: 3, total: 1 },
+        },
+        isError: false,
+        isPending: false,
+        refetch: mocks.roadmapRefetch,
+      }),
+    );
+
+    render(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.income).toHaveBeenLastCalledWith({
+      currency: "CNY",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-31",
+    });
+    expect(screen.getByText("今天")).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.income).toHaveBeenLastCalledWith({
+      currency: "CNY",
+      dateFrom: "2026-09-01",
+      dateTo: "2026-09-30",
+    });
+    expect(screen.getByText("已逾期")).toHaveClass("is-overdue");
   });
 });

@@ -23,16 +23,15 @@ import {
   useFocusClock,
   useFocusCycleStore,
 } from "../store/focus";
+import {
+  localDateFromKey,
+  localDateKey,
+  useLocalCalendar,
+} from "../lib/localCalendar";
 import { useSettingsStore } from "../store/settings";
 
-function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function currentMonthBounds(date = new Date()) {
+function currentMonthBounds(dateKey: string) {
+  const date = localDateFromKey(dateKey);
   const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
   const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
   return { dateFrom: localDateKey(firstDay), dateTo: localDateKey(lastDay) };
@@ -46,18 +45,19 @@ function formatCny(amountMinor: number) {
   }).format(amountMinor / 100);
 }
 
-function milestoneDateLabel(targetDate: string) {
-  if (targetDate < localDateKey()) return "已逾期";
-  if (targetDate === localDateKey()) return "今天";
+function milestoneDateLabel(targetDate: string, todayKey: string) {
+  if (targetDate < todayKey) return "已逾期";
+  if (targetDate === todayKey) return "今天";
   const [, month, day] = targetDate.split("-");
   return `${Number(month)}月${Number(day)}日`;
 }
 
 export function RightOverview() {
+  const { dateKey: todayKey } = useLocalCalendar();
   const focusQuery = useActiveFocusSessionQuery();
   const incomeStatsQuery = useIncomeStatsQuery({
     currency: "CNY",
-    ...currentMonthBounds(),
+    ...currentMonthBounds(todayKey),
   });
   const recentActivitiesQuery = useRecentClientActivitiesQuery(3);
   const plannedMilestonesQuery = useRoadmapMilestonesQuery({
@@ -292,11 +292,11 @@ export function RightOverview() {
                   </span>
                   <time
                     className={
-                      milestone.targetDate < localDateKey() ? "is-overdue" : ""
+                      milestone.targetDate < todayKey ? "is-overdue" : ""
                     }
                     dateTime={milestone.targetDate}
                   >
-                    {milestoneDateLabel(milestone.targetDate)}
+                    {milestoneDateLabel(milestone.targetDate, todayKey)}
                   </time>
                 </Link>
               );

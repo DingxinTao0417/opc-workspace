@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   useArchiveRoadmapMilestone,
@@ -32,6 +32,7 @@ import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { RoadmapMilestoneDetailModal } from "../components/RoadmapMilestoneDetailModal";
+import { useLocalCalendar } from "../lib/localCalendar";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
 
 const statusLabels: Record<RoadmapMilestoneStatus, string> = {
@@ -41,11 +42,12 @@ const statusLabels: Record<RoadmapMilestoneStatus, string> = {
   archived: "已归档",
 };
 
-function currentPeriod() {
-  const now = new Date();
+function currentPeriod(dateKey: string) {
+  const year = Number(dateKey.slice(0, 4));
+  const month = Number(dateKey.slice(5, 7));
   return {
-    year: now.getFullYear(),
-    quarter: (Math.floor(now.getMonth() / 3) + 1) as 1 | 2 | 3 | 4,
+    year,
+    quarter: (Math.floor((month - 1) / 3) + 1) as 1 | 2 | 3 | 4,
   };
 }
 
@@ -388,6 +390,10 @@ function CreateRoadmapMilestoneModal({
   const [targetDate, setTargetDate] = useState(targetDateFor(year, quarter));
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) setTargetDate(targetDateFor(year, quarter));
+  }, [open, quarter, year]);
 
   const close = () => {
     if (!create.isPending) onClose();
@@ -789,10 +795,12 @@ function DeleteRoadmapMilestoneModal({
 }
 
 export function RoadmapPage() {
-  const initial = useMemo(currentPeriod, []);
+  const { dateKey } = useLocalCalendar();
+  const current = useMemo(() => currentPeriod(dateKey), [dateKey]);
+  const previousCurrent = useRef(current);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [year, setYear] = useState(initial.year);
-  const [quarter, setQuarter] = useState(initial.quarter);
+  const [year, setYear] = useState(current.year);
+  const [quarter, setQuarter] = useState(current.quarter);
   const [status, setStatus] = useState<RoadmapMilestoneStatus | "">("");
   const [projectId, setProjectId] = useState("");
   const [page, setPage] = useState(1);
@@ -898,6 +906,20 @@ export function RoadmapPage() {
     () => quarterCalendarMonths(year, quarter),
     [quarter, year],
   );
+
+  useEffect(() => {
+    const previous = previousCurrent.current;
+    previousCurrent.current = current;
+    if (
+      year === previous.year &&
+      quarter === previous.quarter &&
+      (year !== current.year || quarter !== current.quarter)
+    ) {
+      setYear(current.year);
+      setQuarter(current.quarter);
+      setPage(1);
+    }
+  }, [current, quarter, year]);
 
   useEffect(() => {
     if (

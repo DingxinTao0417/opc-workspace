@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -185,6 +186,57 @@ describe("IncomePage", () => {
         return input.dateFrom.includes("NaN") || input.dateTo.includes("NaN");
       }),
     ).toBe(false);
+  });
+
+  it("follows the new local month and year-to-date range at midnight", () => {
+    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
+    render(<IncomePage />);
+
+    expect(screen.getByLabelText("月份")).toHaveValue("2026-12");
+    expect(hooks.entries).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-12-01",
+        dateTo: "2026-12-31",
+      }),
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(screen.getByLabelText("月份")).toHaveValue("2027-01");
+    expect(hooks.entries).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2027-01-01",
+        dateTo: "2027-01-31",
+      }),
+    );
+    expect(hooks.stats).toHaveBeenCalledWith({
+      currency: "CNY",
+      dateFrom: "2027-01-01",
+      dateTo: "2027-01-01",
+    });
+  });
+
+  it("keeps a manually selected month while refreshing year-to-date bounds", () => {
+    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
+    render(<IncomePage />);
+    fireEvent.change(screen.getByLabelText("月份"), {
+      target: { value: "2026-11" },
+    });
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(screen.getByLabelText("月份")).toHaveValue("2026-11");
+    expect(hooks.entries).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-11-01",
+        dateTo: "2026-11-30",
+      }),
+    );
+    expect(hooks.stats).toHaveBeenCalledWith({
+      currency: "CNY",
+      dateFrom: "2027-01-01",
+      dateTo: "2027-01-01",
+    });
   });
 
   it("does not relabel placeholder statistics with a newly selected currency", () => {

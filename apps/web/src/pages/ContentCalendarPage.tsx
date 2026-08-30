@@ -7,7 +7,7 @@ import {
   Plus,
   Send,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   useContentItemQuery,
@@ -24,6 +24,7 @@ import {
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
+import { localDateFromKey, useLocalCalendar } from "../lib/localCalendar";
 import {
   formatDateTimeLocalInTimeZone,
   localDateTimeToZonedISOString,
@@ -61,6 +62,11 @@ function shiftDateKey(value: string, offset: number) {
   const [year, month, day] = value.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1, day + offset));
   return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+}
+function shiftMonthKey(value: string, offset: number) {
+  const [year, month] = value.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, month - 1 + offset, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 function calendarForMonth(month: Date) {
   const start = new Date(month.getFullYear(), month.getMonth(), 1);
@@ -605,9 +611,14 @@ function ContentItemDetailModal({
 }
 
 export function ContentCalendarPage() {
+  const { dateKey: todayKey, timeZone } = useLocalCalendar();
+  const currentMonthKey = todayKey.slice(0, 7);
+  const previousCurrentMonthKey = useRef(currentMonthKey);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [month, setMonth] = useState(
-    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  const [monthKey, setMonthKey] = useState(currentMonthKey);
+  const month = useMemo(
+    () => localDateFromKey(`${monthKey}-01`),
+    [monthKey, timeZone],
   );
   const [creating, setCreating] = useState(false);
   const detailId = searchParams.get("item")?.trim() || null;
@@ -642,6 +653,15 @@ export function ContentCalendarPage() {
     status: status || undefined,
     includeArchived: status === "archived",
   });
+  useEffect(() => {
+    const previousMonthKey = previousCurrentMonthKey.current;
+    if (currentMonthKey !== previousMonthKey) {
+      if (monthKey === previousMonthKey) {
+        setMonthKey(currentMonthKey);
+      }
+      previousCurrentMonthKey.current = currentMonthKey;
+    }
+  }, [currentMonthKey, monthKey]);
   useEffect(() => {
     if (
       query.hasNextPage &&
@@ -689,10 +709,7 @@ export function ContentCalendarPage() {
     return groups;
   }, [items, schedulePreviews]);
   const shift = (offset: number) =>
-    setMonth(
-      (current) =>
-        new Date(current.getFullYear(), current.getMonth() + offset, 1),
-    );
+    setMonthKey((current) => shiftMonthKey(current, offset));
   const moveItem = (itemID: string, targetDate: string) => {
     const item = items.find((candidate) => candidate.id === itemID);
     if (

@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as localCalendar from "../lib/localCalendar";
 import type { ContentItem } from "../types/models";
 import { ContentCalendarPage } from "./ContentCalendarPage";
 
@@ -90,7 +91,11 @@ function LocationProbe() {
 }
 
 describe("ContentCalendarPage", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
   beforeEach(() => {
     hooks.update.mockReset();
     hooks.schedule.mockReset();
@@ -133,6 +138,86 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByText("微信公众号")).toBeTruthy();
     expect(screen.getByText(/1\/2 项准备任务/)).toBeTruthy();
     expect(screen.queryByText("发布到平台")).toBeNull();
+  });
+
+  it("follows the new local month at midnight and refreshes the visible range", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("2026 年 12 月")).toBeTruthy();
+    expect(hooks.items).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scheduledFrom: new Date(2026, 10, 29).toISOString(),
+        scheduledTo: new Date(2027, 0, 10).toISOString(),
+      }),
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(screen.getByText("2027 年 1 月")).toBeTruthy();
+    expect(hooks.items).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scheduledFrom: new Date(2026, 11, 27).toISOString(),
+        scheduledTo: new Date(2027, 1, 7).toISOString(),
+      }),
+    );
+  });
+
+  it("keeps a manually selected month when local midnight passes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "上个月" }));
+    expect(screen.getByText("2026 年 11 月")).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(screen.getByText("2026 年 11 月")).toBeTruthy();
+    expect(hooks.items).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        scheduledFrom: new Date(2026, 10, 1).toISOString(),
+        scheduledTo: new Date(2026, 11, 13).toISOString(),
+      }),
+    );
+  });
+
+  it("rebuilds the same semantic month when only the browser time zone changes", () => {
+    const calendarSnapshot = vi
+      .spyOn(localCalendar, "useLocalCalendar")
+      .mockReturnValue({
+        dateKey: "2026-08-30",
+        timeZone: "America/Tijuana",
+      });
+    const dateFromKey = vi.spyOn(localCalendar, "localDateFromKey");
+    const view = render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("2026 年 8 月")).toBeTruthy();
+    dateFromKey.mockClear();
+
+    calendarSnapshot.mockReturnValue({
+      dateKey: "2026-08-30",
+      timeZone: "Asia/Shanghai",
+    });
+    view.rerender(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("2026 年 8 月")).toBeTruthy();
+    expect(dateFromKey).toHaveBeenCalledWith("2026-08-01");
   });
 
   it("opens the local edit workflow and exposes explicit schedule and publish actions", () => {
