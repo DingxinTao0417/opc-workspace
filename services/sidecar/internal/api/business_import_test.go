@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -185,7 +186,9 @@ func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
 	var envelope struct {
 		Data businessImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" {
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" ||
+		envelope.Data.TargetSchemaVersion != 42 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
+		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("preview = %#v err=%v", envelope.Data, err)
 	}
 	apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
@@ -195,6 +198,101 @@ func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
 	var count int64
 	if err := store.DB.Table("clients").Where("name = ?", "Existing Client").Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("existing data changed count=%d err=%v", count, err)
+	}
+}
+
+func TestBusinessImportPreviewMapsTableAndPrimaryKeyConflictsWithoutChangingTarget(t *testing.T) {
+	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t)
+	sharedID := "018f0000-0000-7000-8000-000000002060"
+	if err := sourceStore.DB.Exec(`
+		INSERT INTO clients(id, name, status, created_at, updated_at)
+		VALUES (?, 'Incoming Shared Client', 'active', '2026-08-29T09:00:00Z', '2026-08-29T09:00:00Z'),
+		       ('018f0000-0000-7000-8000-000000002061', 'Incoming New Client', 'active', '2026-08-29T09:01:00Z', '2026-08-29T09:01:00Z')
+	`, sharedID).Error; err != nil {
+		t.Fatal(err)
+	}
+	exported := performRequest(sourceRouter, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
+	if exported.Code != http.StatusOK {
+		t.Fatalf("source export = %d: %s", exported.Code, exported.Body.String())
+	}
+
+	targetRouter, targetStore, _, backupDir := newBackupTestAPI(t)
+	if err := targetStore.DB.Exec(`
+		INSERT INTO clients(id, name, status, created_at, updated_at)
+		VALUES (?, 'Existing Shared Client', 'active', '2026-08-29T08:00:00Z', '2026-08-29T08:00:00Z'),
+		       ('018f0000-0000-7000-8000-000000002062', 'Existing Only Client', 'active', '2026-08-29T08:01:00Z', '2026-08-29T08:01:00Z');
+		INSERT INTO projects(id, name, status, version, created_at, updated_at)
+		VALUES ('018f0000-0000-7000-8000-000000002063', 'Existing Project', 'in_progress', 1, '2026-08-29T08:02:00Z', '2026-08-29T08:02:00Z')
+	`, sharedID).Error; err != nil {
+		t.Fatal(err)
+	}
+	preview := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data/preview", exported.Body.Bytes(), nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview = %d: %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode conflict preview: %v", err)
+	}
+	if envelope.Data.TargetRows != 3 || envelope.Data.KeyConflicts != 1 || len(envelope.Data.ConflictTables) != 2 {
+		t.Fatalf("conflict summary = %#v", envelope.Data)
+	}
+	if envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 2, TargetRows: 2, KeyConflicts: 1}) ||
+		envelope.Data.ConflictTables[1] != (businessImportTableConflict{Table: "projects", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
+		t.Fatalf("conflict tables = %#v", envelope.Data.ConflictTables)
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("preview created backups: %v", backups)
+	}
+	var name string
+	if err := targetStore.DB.Table("clients").Where("id = ?", sharedID).Pluck("name", &name).Error; err != nil || name != "Existing Shared Client" {
+		t.Fatalf("preview changed target name=%q err=%v", name, err)
+	}
+}
+
+func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		schema  int
+		blocker string
+	}{
+		{name: "older", schema: 41, blocker: "source_schema_older"},
+		{name: "newer", schema: 43, blocker: "source_schema_newer"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			router, store, _, backupDir := newBackupTestAPI(t)
+			packageData := emptyBusinessExportFixture(t, router)
+			packageData.Source.SchemaVersion = test.schema
+			body, err := json.Marshal(packageData)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview := performRequest(router, http.MethodPost, "/api/v1/imports/business-data/preview", body, nil)
+			if preview.Code != http.StatusOK {
+				t.Fatalf("preview = %d: %s", preview.Code, preview.Body.String())
+			}
+			var envelope struct {
+				Data businessImportPreview `json:"data"`
+			}
+			if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != test.blocker ||
+				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 42 || envelope.Data.TargetRows != 0 ||
+				envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 0 {
+				t.Fatalf("schema preview = %#v err=%v", envelope.Data, err)
+			}
+			apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
+			if apply.Code != http.StatusUnprocessableEntity || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_VERSION_UNSUPPORTED" {
+				t.Fatalf("schema apply = %d: %s", apply.Code, apply.Body.String())
+			}
+			if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+				t.Fatalf("schema blocker created backups: %v", backups)
+			}
+			var clients int64
+			if err := store.DB.Table("clients").Count(&clients).Error; err != nil || clients != 0 {
+				t.Fatalf("schema blocker changed clients=%d err=%v", clients, err)
+			}
+		})
 	}
 }
 
@@ -229,4 +327,13 @@ func emptyBusinessExportFixture(t *testing.T, router http.Handler) businessExpor
 		t.Fatalf("decode export fixture: %v", err)
 	}
 	return packageData
+}
+
+func backupPackageDirectories(t *testing.T, backupDir string) []string {
+	t.Helper()
+	packages, err := filepath.Glob(filepath.Join(backupDir, "*", "manifest.json"))
+	if err != nil {
+		t.Fatalf("list backup packages: %v", err)
+	}
+	return packages
 }

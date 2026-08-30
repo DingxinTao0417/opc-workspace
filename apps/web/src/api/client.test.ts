@@ -1854,9 +1854,13 @@ describe("verified local backups", () => {
             data: {
               format_version: 1,
               schema_version: 28,
+              target_schema_version: 28,
               exported_at: "2026-08-28T12:00:00Z",
               table_counts: { tasks: 2, task_artifacts: 1 },
               total_rows: 3,
+              target_rows: 0,
+              key_conflicts: 0,
+              conflict_tables: [],
               file_count: 1,
               file_bytes: 2048,
               can_apply: true,
@@ -1888,7 +1892,10 @@ describe("verified local backups", () => {
     expect(preview).toMatchObject({
       formatVersion: 1,
       schemaVersion: 28,
+      targetSchemaVersion: 28,
       totalRows: 3,
+      targetRows: 0,
+      keyConflicts: 0,
       fileCount: 1,
       fileBytes: 2048,
       canApply: true,
@@ -1954,9 +1961,13 @@ describe("verified local backups", () => {
             data: {
               format_version: 1,
               schema_version: 28,
+              target_schema_version: 28,
               exported_at: "2026-08-28T12:00:00Z",
               table_counts: { tasks: 2 },
               total_rows: 2,
+              target_rows: 0,
+              key_conflicts: 0,
+              conflict_tables: [],
               can_apply: true,
             },
           }),
@@ -1985,7 +1996,10 @@ describe("verified local backups", () => {
     expect(preview).toMatchObject({
       formatVersion: 1,
       schemaVersion: 28,
+      targetSchemaVersion: 28,
       totalRows: 2,
+      targetRows: 0,
+      keyConflicts: 0,
       canApply: true,
       blocker: null,
     });
@@ -1999,6 +2013,126 @@ describe("verified local backups", () => {
         "X-Import-Confirmation",
       ),
     ).toBe("replace-empty-workspace");
+  });
+
+  it("strictly maps non-empty import conflicts without enabling apply", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                format_version: 1,
+                schema_version: 42,
+                target_schema_version: 42,
+                exported_at: "2026-08-29T12:00:00Z",
+                table_counts: { clients: 2, tasks: 4 },
+                total_rows: 6,
+                target_rows: 5,
+                key_conflicts: 2,
+                conflict_tables: [
+                  {
+                    table: "clients",
+                    incoming_rows: 2,
+                    target_rows: 2,
+                    key_conflicts: 1,
+                  },
+                  {
+                    table: "tasks",
+                    incoming_rows: 4,
+                    target_rows: 3,
+                    key_conflicts: 1,
+                  },
+                ],
+                can_apply: false,
+                blocker: "target_not_empty",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    await expect(
+      previewBusinessDataImport(
+        new File(["{}"], "conflicts.json", { type: "application/json" }),
+      ),
+    ).resolves.toMatchObject({
+      targetSchemaVersion: 42,
+      targetRows: 5,
+      keyConflicts: 2,
+      blocker: "target_not_empty",
+      conflictTables: [
+        { table: "clients", targetRows: 2, keyConflicts: 1 },
+        { table: "tasks", targetRows: 3, keyConflicts: 1 },
+      ],
+    });
+  });
+
+  it("classifies an older import schema and rejects inconsistent conflict totals", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              format_version: 1,
+              schema_version: 41,
+              target_schema_version: 42,
+              exported_at: "2026-08-29T12:00:00Z",
+              table_counts: { tasks: 2 },
+              total_rows: 2,
+              target_rows: 0,
+              key_conflicts: 0,
+              conflict_tables: [],
+              can_apply: false,
+              blocker: "source_schema_older",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              format_version: 1,
+              schema_version: 42,
+              target_schema_version: 42,
+              exported_at: "2026-08-29T12:00:00Z",
+              table_counts: { clients: 1 },
+              total_rows: 1,
+              target_rows: 2,
+              key_conflicts: 1,
+              conflict_tables: [
+                {
+                  table: "clients",
+                  incoming_rows: 1,
+                  target_rows: 1,
+                  key_conflicts: 1,
+                },
+              ],
+              can_apply: false,
+              blocker: "target_not_empty",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["{}"], "schema.json", {
+      type: "application/json",
+    });
+
+    await expect(previewBusinessDataImport(file)).resolves.toMatchObject({
+      schemaVersion: 41,
+      targetSchemaVersion: 42,
+      blocker: "source_schema_older",
+    });
+    await expect(previewBusinessDataImport(file)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
   });
 
   it("downloads a versioned local diagnostic package with a safe filename", async () => {

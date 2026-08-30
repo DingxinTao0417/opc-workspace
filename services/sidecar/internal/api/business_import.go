@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,13 +20,24 @@ const (
 )
 
 type businessImportPreview struct {
-	FormatVersion int            `json:"format_version"`
-	SchemaVersion int            `json:"schema_version"`
-	ExportedAt    string         `json:"exported_at"`
-	TableCounts   map[string]int `json:"table_counts"`
-	TotalRows     int            `json:"total_rows"`
-	CanApply      bool           `json:"can_apply"`
-	Blocker       string         `json:"blocker,omitempty"`
+	FormatVersion       int                           `json:"format_version"`
+	SchemaVersion       int                           `json:"schema_version"`
+	TargetSchemaVersion int                           `json:"target_schema_version"`
+	ExportedAt          string                        `json:"exported_at"`
+	TableCounts         map[string]int                `json:"table_counts"`
+	TotalRows           int                           `json:"total_rows"`
+	TargetRows          int                           `json:"target_rows"`
+	KeyConflicts        int                           `json:"key_conflicts"`
+	ConflictTables      []businessImportTableConflict `json:"conflict_tables"`
+	CanApply            bool                          `json:"can_apply"`
+	Blocker             string                        `json:"blocker,omitempty"`
+}
+
+type businessImportTableConflict struct {
+	Table        string `json:"table"`
+	IncomingRows int    `json:"incoming_rows"`
+	TargetRows   int    `json:"target_rows"`
+	KeyConflicts int    `json:"key_conflicts"`
 }
 
 type businessImportResult struct {
@@ -80,7 +92,7 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		return
 	}
 	if !preview.CanApply {
-		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
+		writeBusinessImportBlocker(c, preview.Blocker)
 		return
 	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
@@ -114,6 +126,15 @@ func writeImportRollbackCapacityError(c *gin.Context, err error) {
 	writeError(c, http.StatusServiceUnavailable, "IMPORT_BACKUP_CAPACITY_UNAVAILABLE", "Rollback backup storage capacity could not be confirmed; business data was not changed")
 }
 
+func writeBusinessImportBlocker(c *gin.Context, blocker string) {
+	switch blocker {
+	case "source_schema_older", "source_schema_newer":
+		writeError(c, http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The source schema cannot be applied by this version")
+	default:
+		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
+	}
+}
+
 func decodeBusinessImport(c *gin.Context) (businessExportPackage, error) {
 	limited := http.MaxBytesReader(c.Writer, c.Request.Body, maxBusinessImportBytes)
 	decoder := json.NewDecoder(limited)
@@ -141,7 +162,7 @@ func (a *API) validateBusinessImportWithFiles(c *gin.Context, packageData busine
 }
 
 func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExportPackage, allowControlledFiles bool) (businessImportPreview, error) {
-	if packageData.FormatVersion != businessExportFormatVersion || packageData.Source.APIVersion != Version || packageData.Source.SchemaVersion != a.options.SchemaVersion {
+	if packageData.FormatVersion != businessExportFormatVersion || packageData.Source.APIVersion != Version || packageData.Source.SchemaVersion < 1 {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The export format, API, or schema version is not compatible"}
 	}
 	if !allowControlledFiles && (packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount != 0 || packageData.ArtifactFiles.ActiveBytes != 0) {
@@ -150,6 +171,22 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 	if allowControlledFiles && (!packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount < 0 || packageData.ArtifactFiles.ActiveBytes < 0) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "The controlled-file package summary is invalid"}
 	}
+	counts, total, err := inspectBusinessImportEnvelope(packageData)
+	if err != nil {
+		return businessImportPreview{}, err
+	}
+	if packageData.Source.SchemaVersion != a.options.SchemaVersion {
+		blocker := "source_schema_older"
+		if packageData.Source.SchemaVersion > a.options.SchemaVersion {
+			blocker = "source_schema_newer"
+		}
+		return businessImportPreview{
+			FormatVersion: packageData.FormatVersion, SchemaVersion: packageData.Source.SchemaVersion,
+			TargetSchemaVersion: a.options.SchemaVersion, ExportedAt: packageData.ExportedAt,
+			TableCounts: counts, TotalRows: total, ConflictTables: []businessImportTableConflict{},
+			CanApply: false, Blocker: blocker,
+		}, nil
+	}
 	if !equalStrings(packageData.ExcludedOperationalTables, businessExportExcludedTables) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The operational-table exclusion manifest is invalid"}
 	}
@@ -157,8 +194,6 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The import table manifest is incomplete"}
 	}
 
-	counts := make(map[string]int, len(packageData.Tables))
-	total := 0
 	for index, spec := range businessExportTables {
 		table := packageData.Tables[index]
 		if table.Name != spec.Name {
@@ -167,18 +202,6 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		columns, err := tableColumns(a.db.WithContext(c), spec.Name)
 		if err != nil || !equalStrings(table.Columns, columns) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_SCHEMA_MISMATCH", "The import table columns do not match the current schema"}
-		}
-		for _, row := range table.Rows {
-			if len(row) != len(columns) {
-				return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An import row does not match its table columns"}
-			}
-			for _, value := range row {
-				switch value.(type) {
-				case nil, string, bool, json.Number:
-				default:
-					return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Import rows may only contain scalar JSON values"}
-				}
-			}
 		}
 		if !allowControlledFiles && tableContainsControlledFiles(table) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import cannot restore controlled-file metadata"}
@@ -195,22 +218,217 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		if table.Name == "agent_adapters" && tableHasInvalidAgentAdapters(table) {
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Agent Adapter manifest or diagnostic state is invalid"}
 		}
-		counts[table.Name] = len(table.Rows)
-		total += len(table.Rows)
 	}
 
-	empty, err := businessTargetEmpty(a.db.WithContext(c))
+	report, err := buildBusinessImportConflictReport(a.db.WithContext(c), packageData)
 	if err != nil {
+		var importErr *businessImportError
+		if errors.As(err, &importErr) {
+			return businessImportPreview{}, importErr
+		}
 		return businessImportPreview{}, &businessImportError{http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The target workspace could not be checked"}
 	}
 	preview := businessImportPreview{
 		FormatVersion: packageData.FormatVersion, SchemaVersion: packageData.Source.SchemaVersion,
-		ExportedAt: packageData.ExportedAt, TableCounts: counts, TotalRows: total, CanApply: empty,
+		TargetSchemaVersion: a.options.SchemaVersion, ExportedAt: packageData.ExportedAt,
+		TableCounts: counts, TotalRows: total, TargetRows: report.TargetRows,
+		KeyConflicts: report.KeyConflicts, ConflictTables: report.Tables, CanApply: report.TargetRows == 0,
 	}
-	if !empty {
+	if report.TargetRows != 0 {
 		preview.Blocker = "target_not_empty"
 	}
 	return preview, nil
+}
+
+func inspectBusinessImportEnvelope(packageData businessExportPackage) (map[string]int, int, error) {
+	if _, err := time.Parse(time.RFC3339Nano, packageData.ExportedAt); err != nil {
+		return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The export time is invalid"}
+	}
+	counts := make(map[string]int, len(packageData.Tables))
+	total := 0
+	for _, table := range packageData.Tables {
+		if strings.TrimSpace(table.Name) == "" {
+			return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "An import table name is invalid"}
+		}
+		if _, duplicate := counts[table.Name]; duplicate {
+			return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "Import table names must be unique"}
+		}
+		seenColumns := make(map[string]struct{}, len(table.Columns))
+		for _, column := range table.Columns {
+			if strings.TrimSpace(column) == "" {
+				return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_SCHEMA_MISMATCH", "An import table column is invalid"}
+			}
+			if _, duplicate := seenColumns[column]; duplicate {
+				return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_SCHEMA_MISMATCH", "Import table columns must be unique"}
+			}
+			seenColumns[column] = struct{}{}
+		}
+		for _, row := range table.Rows {
+			if len(row) != len(table.Columns) {
+				return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An import row does not match its table columns"}
+			}
+			for _, value := range row {
+				switch value.(type) {
+				case nil, string, bool, json.Number:
+				default:
+					return nil, 0, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Import rows may only contain scalar JSON values"}
+				}
+			}
+		}
+		counts[table.Name] = len(table.Rows)
+		total += len(table.Rows)
+	}
+	return counts, total, nil
+}
+
+type businessImportConflictReport struct {
+	TargetRows   int
+	KeyConflicts int
+	Tables       []businessImportTableConflict
+}
+
+func buildBusinessImportConflictReport(db *gorm.DB, packageData businessExportPackage) (businessImportConflictReport, error) {
+	tables := make(map[string]businessExportTable, len(packageData.Tables))
+	for _, table := range packageData.Tables {
+		tables[table.Name] = table
+	}
+	report := businessImportConflictReport{Tables: make([]businessImportTableConflict, 0)}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		for _, spec := range businessExportTables {
+			primaryKeys, err := tablePrimaryKeyColumns(tx, spec.Name)
+			if err != nil || len(primaryKeys) == 0 {
+				return fmt.Errorf("read import conflict key %s: %w", spec.Name, err)
+			}
+			incoming := tables[spec.Name]
+			keyIndexes := make([]int, len(primaryKeys))
+			for index, column := range primaryKeys {
+				keyIndexes[index] = columnIndex(incoming.Columns, column)
+				if keyIndexes[index] < 0 {
+					return fmt.Errorf("import conflict key %s.%s is missing", spec.Name, column)
+				}
+			}
+			incomingKeys := make(map[string]struct{}, len(incoming.Rows))
+			for _, row := range incoming.Rows {
+				values := make([]any, len(keyIndexes))
+				for index, rowIndex := range keyIndexes {
+					values[index] = row[rowIndex]
+				}
+				key, err := canonicalBusinessImportKey(values)
+				if err != nil {
+					return err
+				}
+				if _, duplicate := incomingKeys[key]; duplicate {
+					return &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Import rows contain a duplicate primary key"}
+				}
+				incomingKeys[key] = struct{}{}
+			}
+			targetRows, conflicts, err := scanBusinessImportTargetKeys(tx, spec.Name, primaryKeys, incomingKeys)
+			if err != nil {
+				return err
+			}
+			if targetRows == 0 {
+				continue
+			}
+			report.TargetRows += targetRows
+			report.KeyConflicts += conflicts
+			report.Tables = append(report.Tables, businessImportTableConflict{
+				Table: spec.Name, IncomingRows: len(incoming.Rows), TargetRows: targetRows, KeyConflicts: conflicts,
+			})
+		}
+		return nil
+	})
+	return report, err
+}
+
+func tablePrimaryKeyColumns(db *gorm.DB, table string) ([]string, error) {
+	rows, err := db.Raw("PRAGMA table_info(" + quoteIdentifier(table) + ")").Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type keyColumn struct {
+		name  string
+		order int
+	}
+	keys := make([]keyColumn, 0)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var column, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &column, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		if primaryKey > 0 {
+			keys = append(keys, keyColumn{name: column, order: primaryKey})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(keys, func(left, right int) bool { return keys[left].order < keys[right].order })
+	result := make([]string, len(keys))
+	for index, key := range keys {
+		result[index] = key.name
+	}
+	return result, nil
+}
+
+func scanBusinessImportTargetKeys(db *gorm.DB, table string, primaryKeys []string, incomingKeys map[string]struct{}) (int, int, error) {
+	columns := make([]string, len(primaryKeys))
+	for index, column := range primaryKeys {
+		columns[index] = quoteIdentifier(column)
+	}
+	query := "SELECT " + strings.Join(columns, ",") + " FROM " + quoteIdentifier(table)
+	if filter := businessImportTargetFilter(table); filter != "" {
+		query += " WHERE " + filter
+	}
+	rows, err := db.Raw(query).Rows()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer rows.Close()
+	targetRows := 0
+	conflicts := 0
+	for rows.Next() {
+		values := make([]any, len(primaryKeys))
+		destinations := make([]any, len(values))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return 0, 0, err
+		}
+		key, err := canonicalBusinessImportKey(values)
+		if err != nil {
+			return 0, 0, err
+		}
+		targetRows++
+		if _, exists := incomingKeys[key]; exists {
+			conflicts++
+		}
+	}
+	return targetRows, conflicts, rows.Err()
+}
+
+func canonicalBusinessImportKey(values []any) (string, error) {
+	for index, value := range values {
+		if raw, ok := value.([]byte); ok {
+			values[index] = string(raw)
+		}
+	}
+	payload, err := json.Marshal(normalizeImportValues(values))
+	return string(payload), err
+}
+
+func businessImportTargetFilter(table string) string {
+	switch table {
+	case "actors":
+		return "is_builtin = 0"
+	case "automation_rules":
+		return "enabled = 1 OR version <> 1"
+	default:
+		return ""
+	}
 }
 
 func (a *API) replaceBusinessTables(c *gin.Context, packageData businessExportPackage) error {

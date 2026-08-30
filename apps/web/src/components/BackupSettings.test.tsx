@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import type {
   BackupSummary,
+  BusinessImportPreview,
+  BusinessPackageImportPreview,
   ScheduledBackupRestoreResult,
 } from "../types/models";
 import { BackupSettings } from "./BackupSettings";
@@ -40,9 +42,11 @@ const mocks = vi.hoisted(() => ({
   exportData: vi.fn(),
   exportPackage: vi.fn(),
   previewImport: vi.fn(),
+  importPreviewData: null as BusinessImportPreview | null,
   applyImport: vi.fn(),
   applyImportError: null as Error | null,
   previewPackageImport: vi.fn(),
+  packageImportPreviewData: null as BusinessPackageImportPreview | null,
   applyPackageImport: vi.fn(),
   applyPackageImportError: null as Error | null,
   restartApplication: vi.fn(),
@@ -145,15 +149,7 @@ vi.mock("../api/hooks", () => ({
   usePreviewBusinessDataImport: () => ({
     mutate: mocks.previewImport,
     reset: mocks.reset,
-    data: {
-      formatVersion: 1,
-      schemaVersion: 28,
-      exportedAt: "2026-08-28T12:00:00Z",
-      tableCounts: { tasks: 2 },
-      totalRows: 2,
-      canApply: true,
-      blocker: null,
-    },
+    data: mocks.importPreviewData,
     isPending: false,
     error: null,
   }),
@@ -166,17 +162,7 @@ vi.mock("../api/hooks", () => ({
   usePreviewBusinessPackageImport: () => ({
     mutate: mocks.previewPackageImport,
     reset: mocks.reset,
-    data: {
-      formatVersion: 1,
-      schemaVersion: 28,
-      exportedAt: "2026-08-28T12:00:00Z",
-      tableCounts: { tasks: 2 },
-      totalRows: 2,
-      fileCount: 3,
-      fileBytes: 4096,
-      canApply: true,
-      blocker: null,
-    },
+    data: mocks.packageImportPreviewData,
     isPending: false,
     error: null,
   }),
@@ -205,6 +191,34 @@ describe("BackupSettings", () => {
       failedAttemptCount: 0,
       invalidEntryCount: 0,
     });
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 28,
+      targetSchemaVersion: 28,
+      exportedAt: "2026-08-28T12:00:00Z",
+      tableCounts: { tasks: 2 },
+      totalRows: 2,
+      targetRows: 0,
+      keyConflicts: 0,
+      conflictTables: [],
+      canApply: true,
+      blocker: null,
+    };
+    mocks.packageImportPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 28,
+      targetSchemaVersion: 28,
+      exportedAt: "2026-08-28T12:00:00Z",
+      tableCounts: { tasks: 2 },
+      totalRows: 2,
+      targetRows: 0,
+      keyConflicts: 0,
+      conflictTables: [],
+      fileCount: 3,
+      fileBytes: 4096,
+      canApply: true,
+      blocker: null,
+    };
     mocks.create.mockClear();
     mocks.createError = null;
     mocks.restoreError = null;
@@ -320,6 +334,86 @@ describe("BackupSettings", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "刷新备份列表" }));
     expect(mocks.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a read-only table conflict inventory for a non-empty target", () => {
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 42,
+      targetSchemaVersion: 42,
+      exportedAt: "2026-08-29T12:00:00Z",
+      tableCounts: { clients: 2, tasks: 4 },
+      totalRows: 6,
+      targetRows: 5,
+      keyConflicts: 2,
+      conflictTables: [
+        {
+          table: "clients",
+          incomingRows: 2,
+          targetRows: 2,
+          keyConflicts: 1,
+        },
+        {
+          table: "tasks",
+          incomingRows: 4,
+          targetRows: 3,
+          keyConflicts: 1,
+        },
+      ],
+      canApply: false,
+      blocker: "target_not_empty",
+    };
+    render(<BackupSettings />);
+    const file = new File(["{}"], "conflicts.json", {
+      type: "application/json",
+    });
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/已有 5 行业务事实/)).toHaveTextContent(
+      "检测到 2 条主键重叠",
+    );
+    expect(
+      screen.getByRole("list", { name: "导入冲突清单" }),
+    ).toHaveTextContent("客户源 2 · 目标 2 · 重叠 1");
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    expect(mocks.applyImport).not.toHaveBeenCalled();
+  });
+
+  it("classifies an older controlled-file package without enabling apply", () => {
+    mocks.packageImportPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 41,
+      targetSchemaVersion: 42,
+      exportedAt: "2026-08-29T12:00:00Z",
+      tableCounts: { tasks: 2 },
+      totalRows: 2,
+      targetRows: 0,
+      keyConflicts: 0,
+      conflictTables: [],
+      fileCount: 1,
+      fileBytes: 1024,
+      canApply: false,
+      blocker: "source_schema_older",
+    };
+    render(<BackupSettings />);
+    const file = new File(["PK"], "older.zip", {
+      type: "application/zip",
+    });
+
+    fireEvent.change(screen.getByLabelText("选择含文件业务 ZIP"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/源数据为 schema v41/)).toHaveTextContent(
+      "当前工作区为 v42",
+    );
+    expect(
+      screen.getByRole("button", { name: "确认含文件导入" }),
+    ).toBeDisabled();
   });
 
   it.each([

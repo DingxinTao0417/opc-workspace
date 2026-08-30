@@ -2,9 +2,9 @@
 
 > 当前基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；导入预检现可只读返回非空目标逐表行数/主键重叠清单，并把跨 schema 包分类为旧于或新于当前 schema。备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标实际合并、跨 schema 升级、计划备份和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.70](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.81](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -62,11 +62,13 @@
 - `GET /api/v1/exports/business-data` 在一个 SQLite 读事务内读取显式业务表白名单，输出 business-export format v1 的 attachment。`workspace_avatars` 元数据与其他业务/历史表进入导出，文件正文不嵌入；摘要统计全部 active Task/Client/Project/Avatar 受控文件。schema migrations、workspace identity、幂等响应、四类删除墓碑、派生 Focus totals、会话令牌和机器绝对路径均不进入包；任一白名单表不可用时整体失败，不返回部分文件。
 - `GET /api/v1/exports/business-package` 在维护写锁内先完整生成临时 ZIP，再开始响应。根目录固定为 `manifest.json` 与 `business-data.json`，活动受控文件按 `files/objects/<uuid>` 或 `files/avatars/<uuid>.<ext>` 写入；manifest format v1 记录 source、业务 JSON 和每个文件的相对路径、size/SHA-256、文件数与未压缩字节总量。复制时重新读取并校验每个 regular file，任一缺失、size/hash 漂移或不安全路径都整体失败并清理临时包。ZIP 不包含 SQLite、workspace identity、store marker、会话令牌、机器绝对路径或运行维护表。
 - `POST /api/v1/imports/business-package/preview` 把上传 ZIP 写入 backup root 私有临时文件并严格校验：最大 2 GiB、最多 10,000 个受控文件，拒绝重复/额外/目录/symlink/反斜杠/绝对或穿越路径；manifest、业务 JSON、source、表列行、文件全集、size/SHA-256 和数据库文件元数据必须一致。`POST /api/v1/imports/business-package` 要求固定确认头、当前 schema、无活动 Focus 和空目标；再次预检后先执行自动回滚容量准入并创建已校验回滚备份，随后按现有 store 规则 staging、无覆盖发布文件，并在数据库事务提交前复验磁盘正文。DB 失败会补偿本次发布文件。
+- 两类 preview 对同 schema 包从 SQLite `PRAGMA table_info` 读取实际复合主键顺序，在单个只读事务中按业务表白名单流式扫描目标键；响应固定返回 `target_schema_version / target_rows / key_conflicts / conflict_tables[]`，逐表只含表名、源行数、目标行数与主键重叠数，不返回 ID、名称、正文或其他字段。builtin Actor 与未修改的默认 Automation Rule 不计入非空目标。源包重复主键拒绝为 `IMPORT_ROW_INVALID`。
+- 源 schema 小于/大于当前 schema 时，preview 在基础格式、API、时间、表/列声明、标量行（ZIP 另含容器/哈希）校验后返回 `source_schema_older / source_schema_newer`。它只说明迁移方向，不声称当前列、关系或受控文件元数据兼容；apply 对两类 blocker 均继续返回 `IMPORT_VERSION_UNSUPPORTED`，且在容量探测/回滚包/业务写入之前退出。
 - 设置“数据与备份”提供业务 JSON 与含文件 ZIP 的下载和安全导入，以及备份说明、创建、加载/空/错误状态、摘要、重新校验、恢复演练、二次确认恢复和永久删除。手动创建遇到空间不足时提示清理备份位置或旧备份，容量无法确认时提示刷新容量状态并确认本地存储可用；失败保留尚未成功提交的 note 草稿，不显示成功，也不自动重试。导入先显示 schema/总行数/空目标阻断；ZIP 额外显示文件数与字节数，确认后才应用。长操作使用 180 秒客户端窗口。实际备份创建失败 Inbox Item 的详情可打开同一设置模块；容量准入拒绝不会生成该事项。
 
 ### 仍未实现
 
-- 非空目标冲突预览/映射与跨 schema 导入；
+- 非空目标实际冲突合并、跨 schema 升级应用与兼容矩阵；只读冲突清单和 schema 方向分类已经实现；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 卷级容量历史趋势；物理卷身份/同卷去重、用户阈值配置和三个受控逻辑位置的手动容量检查已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份、保留策略、增量备份、加密和云目标。
@@ -239,7 +241,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v42 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。其他 Task/Reminder/Automation/Agent/Client/Roadmap/Content 严格契约和空目标门禁保持不变，旧 schema 包不会伪装为同 schema 导入。
 
-正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标 UUID/冲突映射仍待独立设计。
+正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标实际 UUID 重映射/合并策略仍待独立设计；preview 已先提供不含业务正文的表级主键冲突事实。
 
 含文件 ZIP 导入 v1 复用业务 JSON 的表契约，并增加严格 manifest 和物理文件验证。apply 使用独立确认词；受控文件先写 staging，再以 no-replace 语义发布，随后数据库事务导入 Task/Client/Project 文件元数据和 Workspace Avatar/设置引用，并在提交前执行 `verifyArtifactObjects`。导入只支持空目标，因此不会覆盖已有文件或业务事实。
 
@@ -261,9 +263,9 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 | `DELETE /api/v1/backups/:id`                    | 要求 `confirm=true`；安全校验精确 UUID 目录，先原子移入隐藏删除态再清理并同步；损坏包可删，不安全文件系统项拒绝                                                                                                                                                                                                                                                                                                                                  |
 | `GET /api/v1/exports/business-data`             | 单事务生成 format v1 业务 JSON attachment；显式白名单、稳定结构，文件仅元数据，排除运行维护事实和机器私有信息                                                                                                                                                                                                                                                                                                                                    |
 | `GET /api/v1/exports/business-package`          | 维护写锁内生成 format v1 ZIP；包含 manifest、业务 JSON 与全部 active 受控文件，逐项复验 size/SHA-256，失败不返回部分包                                                                                                                                                                                                                                                                                                                           |
-| `POST /api/v1/imports/business-data/preview`    | strict 预检业务 JSON，返回 schema、各表/总行数、`can_apply` 与空目标 blocker；不改变数据                                                                                                                                                                                                                                                                                                                                                         |
+| `POST /api/v1/imports/business-data/preview`    | strict 预检业务 JSON，返回源/目标 schema、各表/总行数、目标行数、逐表主键重叠、`can_apply` 与三类 blocker；不改变数据                                                                                                                                                                                                                                                                                                                            |
 | `POST /api/v1/imports/business-data`            | 固定确认头后再次预检，导入前自动已校验备份，维护写锁内原子替换与完整性复验                                                                                                                                                                                                                                                                                                                                                                       |
-| `POST /api/v1/imports/business-package/preview` | strict 预检含文件 ZIP，返回 schema、表/总行数、文件数/字节数、`can_apply` 与空目标 blocker；不改变数据                                                                                                                                                                                                                                                                                                                                           |
+| `POST /api/v1/imports/business-package/preview` | strict 预检含文件 ZIP，返回源/目标 schema、表/总行数、文件数/字节数、目标冲突清单、`can_apply` 与三类 blocker；不改变数据                                                                                                                                                                                                                                                                                                                        |
 | `POST /api/v1/imports/business-package`         | 独立固定确认头后再次预检，导入前自动已校验备份；受控文件无覆盖发布，DB 提交前复验正文，失败补偿本次文件                                                                                                                                                                                                                                                                                                                                          |
 | `GET /api/v1/backups/restore-diagnostics`       | 只读汇总待重启、本次 applied、applied 清理残留、failed 隔离与 invalid 记录；只返回规范 ID/时间/状态/计数                                                                                                                                                                                                                                                                                                                                         |
 
@@ -276,7 +278,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [任务](tasks.md)：Submission/Artifact 元数据和受控 objects 必须作为一个恢复单元。
 - [Actor](actors.md)：Actor/Assignment/Event 历史引用必须保留，不能只导出当前 Task。
 - [桌面平台](desktop-platform.md)：负责 appData/appLog 定位、受管 Sidecar 安全退出和应用重启；浏览器开发模式保持外部 Sidecar 的人工生命周期。Sidecar 负责停写、SQLite 与 Artifact 一致性。
-- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；手动创建容量准入失败时展示可操作提示并保留 note 草稿，导入/恢复内部回滚容量失败时展示对应的安全退出提示，实际备份创建失败 Inbox Item 可打开同一模块。未来再接原生路径选择、跨 schema/非空目标合并和作业诊断。
+- [设置](settings.md)：当前发起手动创建、列出、重新校验、隔离演练、二次确认恢复、安全重启、永久删除，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出；非空目标显示逐表冲突清单，跨 schema 显示源/目标版本方向且确认按钮保持禁用。手动创建容量准入失败时展示可操作提示并保留 note 草稿，导入/恢复内部回滚容量失败时展示对应的安全退出提示，实际备份创建失败 Inbox Item 可打开同一模块。未来再接原生路径选择、跨 schema 升级/非空目标合并和作业诊断。
 - [收件箱](inbox.md)：备份四类操作的实际操作性失败直接尽力投影；手动 `POST /backups` 的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝不投影 generic `backup:create` incident。数据库启动/迁移和 Sidecar 启动失败先写安全 journal；运行期数据库操作失败和低空间先直接投影，数据库不可写时降级到同一 journal。下一次健康启动补偿为 `system_maintenance` Inbox Item。所有链路都只记录固定安全字段，不把成功、可解释请求/包状态、底层错误、路径或精确容量写成业务事件。`BACKUP_INVALID` 不投影。
 - [客户](clients.md)：Client Attachment 已复用受控 store 并进入备份、演练、恢复和业务 JSON 元数据白名单；schema v35 的 Client Followup 计划/终态同样已进入业务 JSON 与含文件 ZIP 的显式表白名单，导入仍只允许当前 schema 的空目标。
 - [财务与发票](finance-invoices.md)：Invoice 文件业务实现后扩展同一备份清单。
@@ -342,7 +344,9 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] Windows 卷 GUID / Unix 设备号只在进程内用于同卷去重；API 仅返回 `shared_volume` 布尔值，设置页提示共享容量，不暴露卷 ID、路径或盘符；身份探测失败安全退回规范路径独立检查。
 - [ ] 卷级容量历史趋势。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
-- [ ] 非空目标冲突映射、保留策略、计划备份和跨版本兼容矩阵。
+- [x] 非空目标只读冲突映射：逐表源/目标行数与主键重叠，不返回业务值，不创建备份或改变数据；跨 schema 包分类旧/新方向并保持 apply 禁用。
+- [x] 真实浏览器用当前非空工作区的含文件 ZIP 验证只读预检：显示 18 行目标事实、18 条主键重叠及 4 个逐表清单项，确认按钮禁用；未执行 apply，数据库无写入。
+- [ ] 非空目标实际合并、保留策略、计划备份和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 

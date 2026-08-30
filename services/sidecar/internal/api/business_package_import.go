@@ -27,15 +27,19 @@ const (
 )
 
 type businessPackageImportPreview struct {
-	FormatVersion int            `json:"format_version"`
-	SchemaVersion int            `json:"schema_version"`
-	ExportedAt    string         `json:"exported_at"`
-	TableCounts   map[string]int `json:"table_counts"`
-	TotalRows     int            `json:"total_rows"`
-	FileCount     int            `json:"file_count"`
-	FileBytes     int64          `json:"file_bytes"`
-	CanApply      bool           `json:"can_apply"`
-	Blocker       string         `json:"blocker,omitempty"`
+	FormatVersion       int                           `json:"format_version"`
+	SchemaVersion       int                           `json:"schema_version"`
+	TargetSchemaVersion int                           `json:"target_schema_version"`
+	ExportedAt          string                        `json:"exported_at"`
+	TableCounts         map[string]int                `json:"table_counts"`
+	TotalRows           int                           `json:"total_rows"`
+	TargetRows          int                           `json:"target_rows"`
+	KeyConflicts        int                           `json:"key_conflicts"`
+	ConflictTables      []businessImportTableConflict `json:"conflict_tables"`
+	FileCount           int                           `json:"file_count"`
+	FileBytes           int64                         `json:"file_bytes"`
+	CanApply            bool                          `json:"can_apply"`
+	Blocker             string                        `json:"blocker,omitempty"`
 }
 
 type businessPackageImportResult struct {
@@ -104,7 +108,7 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 		return
 	}
 	if !preview.CanApply {
-		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
+		writeBusinessImportBlocker(c, preview.Blocker)
 		return
 	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
@@ -344,6 +348,16 @@ func (a *API) validateBusinessPackageImport(c *gin.Context, packageArchive *busi
 	if err != nil {
 		return businessPackageImportPreview{}, nil, err
 	}
+	if base.Blocker == "source_schema_older" || base.Blocker == "source_schema_newer" {
+		return businessPackageImportPreview{
+			FormatVersion: base.FormatVersion, SchemaVersion: base.SchemaVersion,
+			TargetSchemaVersion: base.TargetSchemaVersion, ExportedAt: base.ExportedAt,
+			TableCounts: base.TableCounts, TotalRows: base.TotalRows,
+			TargetRows: base.TargetRows, KeyConflicts: base.KeyConflicts, ConflictTables: base.ConflictTables,
+			FileCount: packageArchive.manifest.FileCount, FileBytes: packageArchive.manifest.FileBytes,
+			CanApply: false, Blocker: base.Blocker,
+		}, nil, nil
+	}
 	expected, err := controlledImportFiles(packageArchive.business, a.options.SchemaVersion)
 	if err != nil {
 		return businessPackageImportPreview{}, nil, err
@@ -363,9 +377,12 @@ func (a *API) validateBusinessPackageImport(c *gin.Context, packageArchive *busi
 		return businessPackageImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "Controlled-file byte totals do not match business metadata"}
 	}
 	return businessPackageImportPreview{
-		FormatVersion: base.FormatVersion, SchemaVersion: base.SchemaVersion, ExportedAt: base.ExportedAt,
-		TableCounts: base.TableCounts, TotalRows: base.TotalRows, FileCount: packageArchive.manifest.FileCount,
-		FileBytes: packageArchive.manifest.FileBytes, CanApply: base.CanApply, Blocker: base.Blocker,
+		FormatVersion: base.FormatVersion, SchemaVersion: base.SchemaVersion,
+		TargetSchemaVersion: base.TargetSchemaVersion, ExportedAt: base.ExportedAt,
+		TableCounts: base.TableCounts, TotalRows: base.TotalRows,
+		TargetRows: base.TargetRows, KeyConflicts: base.KeyConflicts, ConflictTables: base.ConflictTables,
+		FileCount: packageArchive.manifest.FileCount, FileBytes: packageArchive.manifest.FileBytes,
+		CanApply: base.CanApply, Blocker: base.Blocker,
 	}, expected, nil
 }
 

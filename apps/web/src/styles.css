@@ -7011,6 +7011,39 @@ kbd {
   font-size: 8px;
 }
 
+.settings-import-conflicts {
+  margin-top: 6px;
+}
+
+.settings-import-conflicts ul {
+  display: grid;
+  gap: 4px;
+  max-height: 132px;
+  margin: 7px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.settings-import-conflicts li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel-strong) 72%, transparent);
+  color: var(--text-muted);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+}
+
+.settings-import-conflicts li span:last-child {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
 .settings-backup-confirm-actions {
   display: flex;
   grid-column: 1 / -1;

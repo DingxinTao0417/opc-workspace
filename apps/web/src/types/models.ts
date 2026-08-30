@@ -2074,13 +2074,27 @@ export interface BusinessPackageDownload {
 export interface BusinessPackageImportPreview {
   formatVersion: 1;
   schemaVersion: number;
+  targetSchemaVersion: number;
   exportedAt: string;
   tableCounts: Record<string, number>;
   totalRows: number;
+  targetRows: number;
+  keyConflicts: number;
+  conflictTables: BusinessImportTableConflict[];
   fileCount: number;
   fileBytes: number;
   canApply: boolean;
-  blocker: "target_not_empty" | null;
+  blocker: BusinessImportBlocker | null;
+}
+
+export type BusinessImportBlocker =
+  "target_not_empty" | "source_schema_older" | "source_schema_newer";
+
+export interface BusinessImportTableConflict {
+  table: string;
+  incomingRows: number;
+  targetRows: number;
+  keyConflicts: number;
 }
 
 export interface BusinessPackageImportResult {
@@ -2111,11 +2125,15 @@ export interface RestoreDiagnostics {
 export interface BusinessImportPreview {
   formatVersion: 1;
   schemaVersion: number;
+  targetSchemaVersion: number;
   exportedAt: string;
   tableCounts: Record<string, number>;
   totalRows: number;
+  targetRows: number;
+  keyConflicts: number;
+  conflictTables: BusinessImportTableConflict[];
   canApply: boolean;
-  blocker: "target_not_empty" | null;
+  blocker: BusinessImportBlocker | null;
 }
 
 export interface BusinessImportResult {

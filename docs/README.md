@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v42。v9.80 完成关闭到托盘偏好的迁移、严格 API、启动同步、即时预览/取消恢复和 Tauri 关闭决策；当前主机托盘原生链接、实际关闭交互、专注状态/动作和三平台仍待验收。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v42。v9.81 完成业务导入的跨 schema 方向分类与非空目标表/主键冲突只读清单；实际升级、合并和覆盖仍保持禁用。当前主机托盘原生链接、实际关闭交互、专注状态/动作和三平台仍待验收。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.80）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.81）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -56,7 +56,7 @@
 - v0.1 不调用 AI/LLM，不创建或运行 Agent；Project Artifact→Inbox→Task 只使用 owner/person 与 owner manual review。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
-- Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、Artifact root 锁、耐久同步与 quarantine 防止错库、双写和误删。数据库父目录另用固定 `.opc-sidecar-run.lock` 在任何恢复、迁移或打开前阻止第二个 Sidecar 接触同库。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空工作区安全导入导出；非空目标和跨 schema 合并仍未实现。
+- Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、Artifact root 锁、耐久同步与 quarantine 防止错库、双写和误删。数据库父目录另用固定 `.opc-sidecar-run.lock` 在任何恢复、迁移或打开前阻止第二个 Sidecar 接触同库。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空工作区安全导入导出；预检可只读列出非空目标表/主键重叠并分类跨 schema 方向，实际合并与版本升级仍未实现。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。

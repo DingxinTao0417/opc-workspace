@@ -6209,6 +6209,84 @@ export async function downloadBusinessPackage(): Promise<BusinessPackageDownload
   );
 }
 
+const businessImportBlockers = new Set([
+  "target_not_empty",
+  "source_schema_older",
+  "source_schema_newer",
+]);
+
+function normalizeBusinessImportConflictMetadata(
+  body: JsonRecord,
+  message: string,
+) {
+  const targetSchemaVersion = numberField(
+    body,
+    "target_schema_version",
+    "targetSchemaVersion",
+  );
+  const targetRows = numberField(body, "target_rows", "targetRows");
+  const keyConflicts = numberField(body, "key_conflicts", "keyConflicts");
+  const rawTables = fieldValue(body, "conflict_tables", "conflictTables");
+  if (
+    targetSchemaVersion === undefined ||
+    !Number.isInteger(targetSchemaVersion) ||
+    targetSchemaVersion < 1 ||
+    targetRows === undefined ||
+    !Number.isInteger(targetRows) ||
+    targetRows < 0 ||
+    keyConflicts === undefined ||
+    !Number.isInteger(keyConflicts) ||
+    keyConflicts < 0 ||
+    !Array.isArray(rawTables)
+  ) {
+    return invalidResponse(message);
+  }
+  const conflictTables = rawTables.map((value) => {
+    if (!isRecord(value)) return invalidResponse(message);
+    const table = stringField(value, "table");
+    const incomingRows = numberField(value, "incoming_rows", "incomingRows");
+    const tableTargetRows = numberField(value, "target_rows", "targetRows");
+    const tableKeyConflicts = numberField(
+      value,
+      "key_conflicts",
+      "keyConflicts",
+    );
+    if (
+      !table ||
+      incomingRows === undefined ||
+      !Number.isInteger(incomingRows) ||
+      incomingRows < 0 ||
+      tableTargetRows === undefined ||
+      !Number.isInteger(tableTargetRows) ||
+      tableTargetRows < 1 ||
+      tableKeyConflicts === undefined ||
+      !Number.isInteger(tableKeyConflicts) ||
+      tableKeyConflicts < 0 ||
+      tableKeyConflicts > incomingRows ||
+      tableKeyConflicts > tableTargetRows
+    ) {
+      return invalidResponse(message);
+    }
+    return {
+      table,
+      incomingRows,
+      targetRows: tableTargetRows,
+      keyConflicts: tableKeyConflicts,
+    };
+  });
+  const uniqueTables = new Set(conflictTables.map((table) => table.table));
+  if (
+    uniqueTables.size !== conflictTables.length ||
+    conflictTables.reduce((sum, table) => sum + table.targetRows, 0) !==
+      targetRows ||
+    conflictTables.reduce((sum, table) => sum + table.keyConflicts, 0) !==
+      keyConflicts
+  ) {
+    return invalidResponse(message);
+  }
+  return { targetSchemaVersion, targetRows, keyConflicts, conflictTables };
+}
+
 function normalizeBusinessPackageImportPreview(
   value: unknown,
 ): BusinessPackageImportPreview {
@@ -6223,6 +6301,10 @@ function normalizeBusinessPackageImportPreview(
   const canApply = fieldValue(body, "can_apply", "canApply");
   const blocker = fieldValue(body, "blocker");
   const rawCounts = fieldValue(body, "table_counts", "tableCounts");
+  const conflict = normalizeBusinessImportConflictMetadata(
+    body,
+    "含文件业务包预检响应格式无效",
+  );
   if (
     formatVersion !== 1 ||
     !schemaVersion ||
@@ -6240,9 +6322,11 @@ function normalizeBusinessPackageImportPreview(
     fileBytes < 0 ||
     typeof canApply !== "boolean" ||
     !isRecord(rawCounts) ||
-    (blocker !== undefined && blocker !== "target_not_empty") ||
+    (blocker !== undefined &&
+      (typeof blocker !== "string" || !businessImportBlockers.has(blocker))) ||
     (canApply && blocker !== undefined) ||
-    (!canApply && blocker !== "target_not_empty")
+    (!canApply &&
+      (typeof blocker !== "string" || !businessImportBlockers.has(blocker)))
   ) {
     return invalidResponse("含文件业务包预检响应格式无效");
   }
@@ -6255,20 +6339,45 @@ function normalizeBusinessPackageImportPreview(
   }
   if (
     Object.values(tableCounts).reduce((sum, count) => sum + count, 0) !==
-    totalRows
+      totalRows ||
+    (canApply &&
+      (schemaVersion !== conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0)) ||
+    (blocker === "target_not_empty" &&
+      (schemaVersion !== conflict.targetSchemaVersion ||
+        conflict.targetRows === 0)) ||
+    (blocker === "source_schema_older" &&
+      (schemaVersion >= conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0)) ||
+    (blocker === "source_schema_newer" &&
+      (schemaVersion <= conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0))
   ) {
     return invalidResponse("含文件业务包预检响应格式无效");
   }
   return {
     formatVersion: 1,
     schemaVersion,
+    targetSchemaVersion: conflict.targetSchemaVersion,
     exportedAt,
     tableCounts,
     totalRows,
+    targetRows: conflict.targetRows,
+    keyConflicts: conflict.keyConflicts,
+    conflictTables: conflict.conflictTables,
     fileCount,
     fileBytes,
     canApply,
-    blocker: blocker === "target_not_empty" ? blocker : null,
+    blocker:
+      typeof blocker === "string"
+        ? (blocker as BusinessPackageImportPreview["blocker"])
+        : null,
   };
 }
 
@@ -6439,6 +6548,10 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
   const canApply = fieldValue(body, "can_apply", "canApply");
   const blocker = fieldValue(body, "blocker");
   const rawCounts = fieldValue(body, "table_counts", "tableCounts");
+  const conflict = normalizeBusinessImportConflictMetadata(
+    body,
+    "业务数据导入预检响应格式无效",
+  );
   if (
     formatVersion !== 1 ||
     !schemaVersion ||
@@ -6450,9 +6563,11 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
     totalRows < 0 ||
     typeof canApply !== "boolean" ||
     !isRecord(rawCounts) ||
-    (blocker !== undefined && blocker !== "target_not_empty") ||
+    (blocker !== undefined &&
+      (typeof blocker !== "string" || !businessImportBlockers.has(blocker))) ||
     (canApply && blocker !== undefined) ||
-    (!canApply && blocker !== "target_not_empty")
+    (!canApply &&
+      (typeof blocker !== "string" || !businessImportBlockers.has(blocker)))
   ) {
     return invalidResponse("业务数据导入预检响应格式无效");
   }
@@ -6465,18 +6580,43 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
   }
   if (
     Object.values(tableCounts).reduce((sum, count) => sum + count, 0) !==
-    totalRows
+      totalRows ||
+    (canApply &&
+      (schemaVersion !== conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0)) ||
+    (blocker === "target_not_empty" &&
+      (schemaVersion !== conflict.targetSchemaVersion ||
+        conflict.targetRows === 0)) ||
+    (blocker === "source_schema_older" &&
+      (schemaVersion >= conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0)) ||
+    (blocker === "source_schema_newer" &&
+      (schemaVersion <= conflict.targetSchemaVersion ||
+        conflict.targetRows !== 0 ||
+        conflict.keyConflicts !== 0 ||
+        conflict.conflictTables.length !== 0))
   ) {
     return invalidResponse("业务数据导入预检响应格式无效");
   }
   return {
     formatVersion: 1,
     schemaVersion,
+    targetSchemaVersion: conflict.targetSchemaVersion,
     exportedAt,
     tableCounts,
     totalRows,
+    targetRows: conflict.targetRows,
+    keyConflicts: conflict.keyConflicts,
+    conflictTables: conflict.conflictTables,
     canApply,
-    blocker: blocker === "target_not_empty" ? blocker : null,
+    blocker:
+      typeof blocker === "string"
+        ? (blocker as BusinessImportPreview["blocker"])
+        : null,
   };
 }
 

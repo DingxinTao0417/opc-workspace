@@ -32,8 +32,8 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 一致性备份与安全恢复：设置“数据与备份”可创建、列出、重新校验、隔离演练、二次确认恢复和永久删除；Sidecar 在维护写锁内用 SQLite `VACUUM INTO` 建立快照，将全部 active 受控文件与身份 marker 写入同卷 staging，逐项验证后原子发布。手工备份及破坏性迁移、JSON/ZIP 导入、恢复安排使用的自动回滚包均在任何备份 staging 或 `VACUUM INTO` 前执行容量准入：以 `max(PRAGMA page_count × page_size, 当前数据库文件大小)`、经安全解析且实际普通文件大小与登记值一致的全部 active 受控文件、marker 和 manifest 上界之和为载荷，再增加 20% 且至少 64 MiB 余量，并只探测 backup root；恢复另合并预留目标 pending 副本和 plan。可用空间恰好等于需求时允许继续；空间不足/容量无法确认以脱敏 507/503 或迁移启动失败拒绝，不创建回滚包、不改业务数据，也不投影通用备份故障事项。已有工作区遇到带 `-- migration: destructive` 标记的迁移时，会先执行安全迁移、停在破坏性边界并通过准入创建同规格自动回滚包；失败则拒绝执行破坏性 SQL。恢复安排再次演练目标、通过合计容量准入后创建当前状态回滚包并冻结写入；下一次启动在 live 资源打开前交换数据库与完整 objects，最终验证失败自动回滚，成功以提交点防止重复应用
 - 版本化业务 JSON 导出：设置页可下载单事务一致视图下的显式业务表白名单；包携带格式、应用/API/schema 版本、稳定列与行结构以及全部 active 受控文件摘要，保留 Task/Client/Project 文件和 Workspace Avatar 元数据但不嵌入正文，并明确排除会话令牌、机器绝对路径、数据库身份、幂等快照和派生/维护表
 - 含文件业务 ZIP 导出：设置页可下载 manifest、同一版本化业务 JSON 和全部 active 受控文件；Sidecar 在维护写锁内逐文件复验 size/SHA-256，完整生成后才响应，缺失或篡改不会留下部分下载
-- 业务 JSON 安全导入 v1：设置页先预检官方 JSON，再显式确认；仅支持当前 schema、无受控文件/活动 Focus 且目标为空，应用前自动创建已校验回滚备份，整批事务失败不改变现有数据
-- 含文件业务 ZIP 安全导入 v1：设置页先预检 manifest、业务 JSON、文件全集/哈希与数据库元数据，再以独立确认词应用；仅支持当前 schema、终态 Focus 且目标为空，应用前自动创建已校验回滚备份，文件无覆盖发布并在 DB 提交前复验，失败补偿本次文件
+- 业务 JSON 安全导入 v1：设置页先预检官方 JSON，再显式确认；同 schema 非空目标会返回只读的表级目标行数与主键重叠清单，跨 schema 会区分旧包/新包方向但保持禁用。实际应用仍仅支持当前 schema、无受控文件/活动 Focus 且目标为空，应用前自动创建已校验回滚备份，整批事务失败不改变现有数据
+- 含文件业务 ZIP 安全导入 v1：设置页先预检 manifest、业务 JSON、文件全集/哈希与数据库元数据，并复用非空目标冲突清单和跨 schema 方向分类；再以独立确认词应用。实际应用仍仅支持当前 schema、终态 Focus 且目标为空，应用前自动创建已校验回滚备份，文件无覆盖发布并在 DB 提交前复验，失败补偿本次文件
 - React 三栏应用框架、今日/任务/项目/客户页面，以及已接真实 Session 的专注页和右侧概览；项目详情已聚合所属 Task 的真实产出、项目级 Focus 报告与终态 Session 历史，并可直达任务验收，收入和发票目前只有路由与页面骨架；路线图 R3 基础界面、R4 同季度安全排序/年度 Q1–Q4 跨季度与跨年度移动/季度内精确日期拖拽和 R5 本地到期/达成 Inbox 协同已完成；内容日历已接入六周月格、跨日/可见跨月拖拽即时预移与失败回滚、卡片 Alt+方向键逐日改期、详情编辑、IANA/DST 安全改期、人工发布确认、准备任务关联，以及审核/发布到期的幂等 Inbox 协同；月格卡片和 Inbox 内容来源都可通过 `?item=<id>` 跨月份直达指定最新详情
 - Today 真实日期任务视图：支持日期导航，按所选浏览器本地日期分页拉全逾期、当天、本周稍后和未排期活动任务；四个可见组共享同日/跨日期拖拽，空的所选日期/未排期可接收任务，跨日期明确区分改期事实和两个组的排序结果；四组任务也可行内安排任意日期，模糊响应必须回读证明后才确认成功；todo 可行内开始、无需验收的 in_progress 可行内完成，Focus 空闲时可直接开始绑定专注，并可从任务行直达完整编辑或经版本化二次确认删除。统计条另提供与服务端当前时刻一致的逾期/未来 24 小时临期快捷筛选，读取完整分页结果而不拿当前日期分组冒充截止风险
 - `Ctrl/Cmd + K` 命令面板、`Ctrl/Cmd + N` 新建任务入口；桌面可额外注册 `⌘/Ctrl+Shift+K` 与 `⌘/Ctrl+Shift+N`，跨应用显示并聚焦主窗口后只发送固定打开命令/新建任务事件；注册冲突只降级为应用内快捷键，运行诊断不暴露平台错误。命令面板以 200 ms 防抖调用统一本地搜索，跨真实 Task/Project/Client/活动 Inbox 返回确定性相关结果并直达可刷新详情/指定设置模块；空查询优先显示本地最近使用，容量/保留期受限且不保存搜索词或业务正文，已删资源在本地确认 404 后自动清理；具备加载、错误、重试、空状态、焦点圈闭/恢复和输入法保护，并与业务 Modal 共用叠层、背景滚动锁和最上层 Escape 边界
@@ -43,7 +43,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效、关闭到托盘偏好和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v42。T-02 仍部分完成。[PRD v9.80](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。业务导入预检已能只读盘点非空目标表/主键重叠并分类跨 schema 方向，实际合并/升级仍保持禁用。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v42。T-02 仍部分完成。[PRD v9.81](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -67,7 +67,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.80）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.81）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -367,4 +367,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.80](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。
+[PRD v9.81](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。业务导入 preview 已能列出非空目标表/主键冲突并分类跨 schema 方向，但实际合并/升级仍保持禁用。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。

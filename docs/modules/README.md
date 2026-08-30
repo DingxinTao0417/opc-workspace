@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.80](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.81](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -16,7 +16,7 @@
 - [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；通用托盘不改变 Focus，专注状态/动作与原生通知延后）
 - [设置](settings.md)（SQLite 设置 schema v2、草稿预览、受控工作区头像、关闭到托盘即时预览/保存/取消、Actor、数据、脱敏运行诊断/诊断包与关于入口）
 - [命令面板与搜索](command-search.md)（Task/Project/Client/活动 Inbox 统一本地搜索、可刷新详情直达、本地最近使用、运行诊断直达、全局渲染错误恢复及命令面板/新建任务 OS 快捷键已交付）
-- [数据、受控文件、备份与恢复](data-management.md)（受控文件 store、一致性备份恢复、启动后恢复结果诊断、数据库父目录运行锁、数据库打开前白名单恢复进度、全局启动故障恢复页 v1、故障 Inbox、桌面安全重启，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；启动前备份选择、非空目标/跨 schema 冲突合并仍待开发）
+- [数据、受控文件、备份与恢复](data-management.md)（受控文件 store、一致性备份恢复、启动后恢复结果诊断、数据库父目录运行锁、数据库打开前白名单恢复进度、全局启动故障恢复页 v1、故障 Inbox、桌面安全重启，以及业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；非空目标表/主键冲突清单和跨 schema 方向分类已交付，启动前备份选择、实际冲突合并与版本升级仍待开发）
 - [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界恢复、父管道 EOF、前端世代清理、并发 shutdown、托盘最小闭环、持久化关闭偏好和运行诊断能力快照已交付；T-02 仍部分完成，托盘原生链接/实机交互、真实父崩溃/进程树、三平台与安装包待验收）
 
 ## v0.2 本地编排

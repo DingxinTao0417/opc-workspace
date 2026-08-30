@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.80](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.81](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 

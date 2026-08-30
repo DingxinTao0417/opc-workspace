@@ -30,7 +30,11 @@ import {
   useScheduleBackupRestore,
   useVerifyBackup,
 } from "../api/hooks";
-import type { BackupSummary } from "../types/models";
+import type {
+  BackupSummary,
+  BusinessImportPreview,
+  BusinessPackageImportPreview,
+} from "../types/models";
 
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
@@ -52,6 +56,68 @@ function formatLocalTime(value: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(parsed);
+}
+
+type ImportPreview = BusinessImportPreview | BusinessPackageImportPreview;
+
+const importTableLabels: Record<string, string> = {
+  actors: "人员",
+  app_settings: "设置",
+  clients: "客户",
+  client_activities: "客户动态",
+  client_attachments: "客户附件",
+  client_followups: "客户回访",
+  projects: "项目",
+  project_attachments: "项目附件",
+  project_notes: "项目笔记",
+  tasks: "任务",
+  task_artifacts: "任务产出",
+  focus_sessions: "专注记录",
+  inbox_items: "收件箱",
+  reminders: "提醒",
+  roadmap_milestones: "路线图",
+  content_items: "内容日历",
+};
+
+function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
+  if (preview.blocker === "source_schema_older") {
+    return (
+      <small className="settings-import-blocker">
+        源数据为 schema v{preview.schemaVersion}，当前工作区为 v
+        {preview.targetSchemaVersion}
+        。已识别为旧版本包，但尚未执行升级映射，数据没有改变。
+      </small>
+    );
+  }
+  if (preview.blocker === "source_schema_newer") {
+    return (
+      <small className="settings-import-blocker">
+        源数据为较新的 schema v{preview.schemaVersion}，当前应用只支持 v
+        {preview.targetSchemaVersion}。请升级应用后重试，数据没有改变。
+      </small>
+    );
+  }
+  if (preview.blocker !== "target_not_empty") return null;
+  return (
+    <div className="settings-import-conflicts">
+      <small className="settings-import-blocker">
+        当前工作区已有 {preview.targetRows} 行业务事实；检测到{" "}
+        {preview.keyConflicts}{" "}
+        条主键重叠。当前仅提供只读冲突清单，不会覆盖或合并数据。
+      </small>
+      <ul aria-label="导入冲突清单">
+        {preview.conflictTables.map((table) => (
+          <li key={table.table}>
+            <span>{importTableLabels[table.table] ?? table.table}</span>
+            <span>
+              源 {table.incomingRows} · 目标 {table.targetRows} · 重叠{" "}
+              {table.keyConflicts}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function backupErrorText(error: unknown): string {
@@ -774,8 +840,9 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
           <div>
             <strong>导入业务数据 JSON</strong>
             <span>
-              先预检官方导出文件；当前仅支持无受控文件的同 schema
-              数据，并且只能导入空工作区。
+              先预检官方导出文件；跨 schema
+              会标明升级方向，非空工作区会列出目标表和主键重叠，但当前只对同
+              schema 空工作区开放应用。
             </span>
           </div>
         </div>
@@ -809,7 +876,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 {importPreviewMutation.data.totalRows} 行业务数据
               </p>
               {!importPreviewMutation.data.canApply ? (
-                <small>当前工作区已有业务数据，已禁止覆盖导入。</small>
+                <ImportBlockerDetails preview={importPreviewMutation.data} />
               ) : (
                 <small>
                   应用前会自动创建并校验回滚备份；任一行失败则整批回滚。
@@ -852,8 +919,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
           <div>
             <strong>导入含文件业务包</strong>
             <span>
-              选择官方 ZIP
-              后先校验清单、业务数据和全部文件；仅可导入空工作区，应用前自动创建回滚备份。
+              选择官方 ZIP 后先校验清单、业务数据和全部文件；预检会分类 schema
+              方向与非空目标冲突，当前只对同 schema 空工作区开放应用。
             </span>
           </div>
         </div>
@@ -889,7 +956,9 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 {formatBytes(packageImportPreviewMutation.data.fileBytes)}
               </p>
               {!packageImportPreviewMutation.data.canApply ? (
-                <small>当前工作区已有业务数据，已禁止覆盖导入。</small>
+                <ImportBlockerDetails
+                  preview={packageImportPreviewMutation.data}
+                />
               ) : (
                 <small>
                   应用前会自动创建并校验回滚备份；数据库或任一文件失败都会整批补偿。
