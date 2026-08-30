@@ -1758,6 +1758,7 @@ export interface InboxItem {
     | "content_item"
     | "roadmap_milestone"
     | "project_completion"
+    | "automation"
     | "system_maintenance";
   sourceEntityId: string | null;
   sourceEventKey: string | null;

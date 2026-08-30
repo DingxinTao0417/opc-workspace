@@ -405,6 +405,46 @@ describe("InboxSourceContext", () => {
     expect(screen.queryByRole("link", { name: /查看来源项目/ })).toBeNull();
   });
 
+  it("shows the immutable local Automation snapshot and Project deep link", () => {
+    const projectId = "018f0000-0000-7000-8000-000000000201";
+    const automationItem: InboxItem = {
+      ...sourceItem,
+      title: "核对并准备发票：官网升级",
+      summary:
+        "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
+      sourceEntityType: "automation",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000826",
+      sourceEventKey:
+        "automation:event:00000000-0000-5000-8000-000000000101:018f0000-0000-7000-8000-000000000825",
+      dueAt: null,
+      payloadJson: {
+        automation_rule_id: "00000000-0000-5000-8000-000000000101",
+        automation_run_id: "018f0000-0000-7000-8000-000000000826",
+        preset_key: "project-completed-inbox",
+        project_id: projectId,
+        project_name: "官网升级",
+      },
+    };
+
+    render(
+      <MemoryRouter>
+        <InboxSourceContext item={automationItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("项目完成自动化")).toBeTruthy();
+    expect(screen.getByText("本地规则生成的核对事项")).toBeTruthy();
+    expect(screen.getByText("官网升级")).toBeTruthy();
+    expect(screen.getByText("项目完成后核对开票")).toBeTruthy();
+    expect(
+      screen.getByText("仅创建本地核对事项，不会生成或发送发票"),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源项目/ })).toHaveAttribute(
+      "href",
+      `/projects/${projectId}`,
+    );
+  });
+
   it("shows a safe backup-create maintenance snapshot and opens data settings", () => {
     const maintenanceItem: InboxItem = {
       ...sourceItem,

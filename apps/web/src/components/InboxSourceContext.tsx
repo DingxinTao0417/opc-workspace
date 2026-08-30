@@ -6,6 +6,7 @@ import {
   FileCheck2,
   ReceiptText,
   TriangleAlert,
+  Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { InboxItem } from "../types/models";
@@ -92,6 +93,14 @@ interface ProjectCompletionSourceSnapshot {
   completedAt: string;
   completionVersion: number;
   incompleteTaskCount: number;
+}
+
+interface AutomationSourceSnapshot {
+  automationRuleId: string;
+  automationRunId: string;
+  presetKey: "project-completed-inbox";
+  projectId: string;
+  projectName: string;
 }
 
 interface SystemMaintenanceSourceSnapshot {
@@ -340,6 +349,50 @@ function projectCompletionSnapshot(
     completedAt,
     completionVersion: completionVersion as number,
     incompleteTaskCount: incompleteTaskCount as number,
+  };
+}
+
+function canonicalUUID(value: string | null): value is string {
+  return Boolean(
+    value &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      value,
+    ),
+  );
+}
+
+function automationSnapshot(item: InboxItem): AutomationSourceSnapshot | null {
+  if (item.sourceEntityType !== "automation") return null;
+  const payload = item.payloadJson;
+  const automationRuleId = stringValue(payload, "automation_rule_id");
+  const automationRunId = stringValue(payload, "automation_run_id");
+  const presetKey = stringValue(payload, "preset_key");
+  const projectId = stringValue(payload, "project_id");
+  const projectName = stringValue(payload, "project_name");
+  const sourceEventKey = item.sourceEventKey;
+  const eventKeyPrefix = automationRuleId
+    ? `automation:event:${automationRuleId}:`
+    : null;
+  if (
+    Object.keys(payload).length !== 5 ||
+    !canonicalUUID(automationRuleId) ||
+    !canonicalUUID(automationRunId) ||
+    automationRunId !== item.sourceEntityId ||
+    presetKey !== "project-completed-inbox" ||
+    !canonicalUUID(projectId) ||
+    !projectName ||
+    !eventKeyPrefix ||
+    !sourceEventKey?.startsWith(eventKeyPrefix) ||
+    !canonicalUUID(sourceEventKey.slice(eventKeyPrefix.length))
+  ) {
+    return null;
+  }
+  return {
+    automationRuleId,
+    automationRunId,
+    presetKey,
+    projectId,
+    projectName,
   };
 }
 
@@ -630,6 +683,44 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <ExternalLink aria-hidden="true" size={13} />
           </Link>
         )}
+      </section>
+    );
+  }
+
+  const automationSource = automationSnapshot(item);
+  if (automationSource) {
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <Zap size={15} />
+          </span>
+          <div>
+            <strong>项目完成自动化</strong>
+            <small>本地规则生成的核对事项</small>
+          </div>
+        </div>
+        <dl>
+          <div>
+            <dt>来源项目</dt>
+            <dd>{automationSource.projectName}</dd>
+          </div>
+          <div>
+            <dt>触发规则</dt>
+            <dd>项目完成后核对开票</dd>
+          </div>
+          <div>
+            <dt>处理边界</dt>
+            <dd>仅创建本地核对事项，不会生成或发送发票</dd>
+          </div>
+        </dl>
+        <Link
+          className="button button-secondary"
+          to={`/projects/${automationSource.projectId}`}
+        >
+          查看来源项目
+          <ExternalLink aria-hidden="true" size={13} />
+        </Link>
       </section>
     );
   }

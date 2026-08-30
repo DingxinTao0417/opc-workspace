@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "../api/client";
 import type { InboxItem } from "../types/models";
 import { InboxItemDetailModal } from "./InboxItemDetailModal";
@@ -183,6 +184,52 @@ describe("InboxItemDetailModal", () => {
     render(<InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />);
 
     expect(screen.getByText("发票到期提醒 · 仅保存在本机")).toBeTruthy();
+    expect(screen.queryByText("任务产出跟进 · 仅保存在本机")).toBeNull();
+  });
+
+  it("labels an Automation source and shows its immutable Project snapshot", () => {
+    const projectId = "018f0000-0000-7000-8000-000000000201";
+    hooks.detail.mockReturnValue({
+      data: {
+        ...baseItem,
+        kind: "event",
+        title: "核对并准备发票：官网升级",
+        summary:
+          "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
+        sourceEntityType: "automation",
+        sourceEntityId: "018f0000-0000-7000-8000-000000000826",
+        sourceEventKey:
+          "automation:event:00000000-0000-5000-8000-000000000101:018f0000-0000-7000-8000-000000000825",
+        dueAt: null,
+        payloadJson: {
+          automation_rule_id: "00000000-0000-5000-8000-000000000101",
+          automation_run_id: "018f0000-0000-7000-8000-000000000826",
+          preset_key: "project-completed-inbox",
+          project_id: projectId,
+          project_name: "官网升级",
+        },
+      },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("本地自动化事项 · 仅保存在本机")).toBeTruthy();
+    expect(screen.getByText("项目完成自动化")).toBeTruthy();
+    expect(screen.getByText("官网升级")).toBeTruthy();
+    expect(
+      screen.getByText("仅创建本地核对事项，不会生成或发送发票"),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源项目/ })).toHaveAttribute(
+      "href",
+      `/projects/${projectId}`,
+    );
     expect(screen.queryByText("任务产出跟进 · 仅保存在本机")).toBeNull();
   });
 

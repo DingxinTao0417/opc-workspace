@@ -11,6 +11,7 @@ import {
   ReceiptText,
   Search,
   TriangleAlert,
+  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -97,6 +98,7 @@ function defaultInboxSummary(item: InboxItem): string {
     return "发票到期提醒";
   }
   if (item.kind === "reminder") return "本地提醒";
+  if (item.sourceEntityType === "automation") return "本地自动化事项";
   if (item.sourceEntityType === "system_maintenance") return "系统维护";
   if (item.kind === "event") return "任务产出跟进";
   return "手工记录";
@@ -149,6 +151,8 @@ function InboxRow({
           <CalendarClock size={15} />
         ) : item.sourceEntityType === "task" ? (
           <TriangleAlert size={15} />
+        ) : item.sourceEntityType === "automation" ? (
+          <Zap size={15} />
         ) : item.sourceEntityType === "system_maintenance" ? (
           <HardDrive size={15} />
         ) : item.kind === "event" ? (

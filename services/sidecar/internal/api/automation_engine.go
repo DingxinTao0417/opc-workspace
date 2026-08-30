@@ -14,6 +14,20 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	automationInboxSourceType              = "automation"
+	automationProjectCompletionItemSummary = "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。"
+)
+
+var errAutomationInboxSourceConflict = errors.New("automation Inbox action was already committed by another run")
+
+type automationProjectCompletionAction struct {
+	Title       string
+	Priority    string
+	ProjectID   string
+	ProjectName string
+}
+
 type automationRunOutput struct {
 	ID             string         `json:"id"`
 	RuleID         string         `json:"rule_id"`
@@ -259,6 +273,10 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 	}
 	errorCode := "ACTION_WRITE_FAILED"
 	retryable := input.Attempt < automationMaxAttempts
+	if errors.Is(actionErr, errAutomationInboxSourceConflict) {
+		errorCode = "SOURCE_EVENT_CONFLICT"
+		retryable = false
+	}
 	var retryAt *string
 	if retryable {
 		delay := time.Minute
@@ -300,38 +318,39 @@ func executeAutomationAction(tx *gorm.DB, runID string, input automationAttemptI
 }
 
 func createAutomationInboxItem(tx *gorm.DB, runID string, input automationAttemptInput, nowText string) (automationActionResult, error) {
-	title, titleOK := input.ActionSnapshot["title"].(string)
-	priority, priorityOK := input.ActionSnapshot["priority"].(string)
-	projectID, projectOK := input.ActionSnapshot["project_id"].(string)
-	projectName, nameOK := input.ActionSnapshot["project_name"].(string)
-	if !titleOK || !priorityOK || !projectOK || !nameOK {
-		return automationActionResult{}, errors.New("automation Inbox action snapshot is invalid")
+	action, err := automationProjectCompletionActionFromSnapshot(input.ActionSnapshot)
+	if err != nil {
+		return automationActionResult{}, err
 	}
 	key := "automation:" + input.LogicalKey
 	var existing models.InboxItem
-	err := tx.First(&existing, "source_event_key = ?", key).Error
+	err = tx.First(&existing, "source_event_key = ?", key).Error
 	if err == nil {
-		if existing.SourceEntityType != "automation" {
-			return automationActionResult{}, errors.New("automation source key is incompatible")
-		}
-		return automationActionResult{Type: "inbox_item", ID: existing.ID, Summary: "已复用同一自动化事项。"}, nil
+		// Every call to executeAutomationAttempt owns a fresh run ID. A valid
+		// or damaged persisted item under this immutable source key cannot be
+		// reused without making source_entity_id/payload disagree with that run.
+		// Normal event dedupe prevents this branch.
+		return automationActionResult{}, errAutomationInboxSourceConflict
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return automationActionResult{}, err
 	}
+	if err := validateAutomationProjectCompletionInboxAttempt(tx, input, action); err != nil {
+		return automationActionResult{}, err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"automation_rule_id": input.Rule.ID, "automation_run_id": runID,
-		"preset_key": input.Rule.PresetKey, "project_id": projectID, "project_name": projectName,
+		"preset_key": input.Rule.PresetKey, "project_id": action.ProjectID, "project_name": action.ProjectName,
 	})
 	if err != nil {
 		return automationActionResult{}, err
 	}
 	sourceID := runID
 	item := models.InboxItem{
-		ID: uuid.NewString(), Kind: "event", Title: title,
-		Summary:          "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
-		SourceEntityType: "automation", SourceEntityID: &sourceID, SourceEventKey: &key,
-		Priority: priority, Status: "open", ResolutionPolicy: "manual",
+		ID: uuid.NewString(), Kind: "event", Title: action.Title,
+		Summary:          automationProjectCompletionItemSummary,
+		SourceEntityType: automationInboxSourceType, SourceEntityID: &sourceID, SourceEventKey: &key,
+		Priority: action.Priority, Status: "open", ResolutionPolicy: "manual",
 		PayloadJSON: string(payload), Version: 1, CreatedAt: nowText, UpdatedAt: nowText,
 	}
 	if err := tx.Create(&item).Error; err != nil {
@@ -341,6 +360,70 @@ func createAutomationInboxItem(tx *gorm.DB, runID string, input automationAttemp
 		return automationActionResult{}, err
 	}
 	return automationActionResult{Type: "inbox_item", ID: item.ID, Summary: "已创建本地核对事项。"}, nil
+}
+
+func automationProjectCompletionActionFromSnapshot(snapshot map[string]any) (automationProjectCompletionAction, error) {
+	actionType, actionTypeOK := snapshot["action_type"].(string)
+	title, titleOK := snapshot["title"].(string)
+	priority, priorityOK := snapshot["priority"].(string)
+	projectID, projectOK := snapshot["project_id"].(string)
+	projectName, nameOK := snapshot["project_name"].(string)
+	if len(snapshot) != 5 || !actionTypeOK || actionType != "inbox_item" || !titleOK || !priorityOK ||
+		!projectOK || !nameOK || title != automationProjectCompletionTitle(projectName) {
+		return automationProjectCompletionAction{}, errors.New("automation Inbox action snapshot is invalid")
+	}
+	if _, valid := validPriorities[priority]; !valid || !validCanonicalAutomationUUID(projectID) ||
+		strings.TrimSpace(projectName) == "" || strings.TrimSpace(projectName) != projectName {
+		return automationProjectCompletionAction{}, errors.New("automation Inbox action snapshot is invalid")
+	}
+	return automationProjectCompletionAction{Title: title, Priority: priority, ProjectID: projectID, ProjectName: projectName}, nil
+}
+
+func validCanonicalAutomationUUID(value string) bool {
+	parsed, err := uuid.Parse(value)
+	return err == nil && parsed.String() == value
+}
+
+func validateAutomationProjectCompletionInboxAttempt(
+	tx *gorm.DB,
+	input automationAttemptInput,
+	action automationProjectCompletionAction,
+) error {
+	preset, presetOK := automationPresetByKey(input.Rule.PresetKey)
+	if !presetOK || input.Rule.PresetKey != automationPresetProjectCompleted || !preset.Available ||
+		preset.ID != input.Rule.ID || preset.TriggerType != "event" || preset.ActionType != "inbox_item" ||
+		!input.Rule.Enabled || input.Rule.Version < 1 || !validCanonicalAutomationUUID(input.Rule.ID) ||
+		input.TriggerType != "event" || input.SourceEventID == nil ||
+		!validCanonicalAutomationUUID(*input.SourceEventID) || input.ScheduledFor != nil ||
+		input.LogicalKey != "event:"+input.Rule.ID+":"+*input.SourceEventID ||
+		input.Attempt < 1 || input.Attempt > automationMaxAttempts ||
+		input.Config.Priority != action.Priority || input.Config.LocalTime != "" || input.Config.Timezone != "" {
+		return errors.New("automation Inbox attempt contract is invalid")
+	}
+	if (input.Attempt == 1 && input.RetryOfRunID != nil) ||
+		(input.Attempt > 1 && (input.RetryOfRunID == nil || !validCanonicalAutomationUUID(*input.RetryOfRunID))) {
+		return errors.New("automation Inbox attempt contract is invalid")
+	}
+	var sourceEvent models.WorkflowEvent
+	if err := tx.First(&sourceEvent, "id = ?", *input.SourceEventID).Error; err != nil {
+		return errors.New("automation Inbox source event is missing")
+	}
+	if sourceEvent.AggregateType != "project" || sourceEvent.AggregateID != action.ProjectID ||
+		sourceEvent.Action != "project_completed" || sourceEvent.CurrentJSON == nil {
+		return errors.New("automation Inbox source event contract is invalid")
+	}
+	var eventProject map[string]any
+	if err := json.Unmarshal([]byte(*sourceEvent.CurrentJSON), &eventProject); err != nil {
+		return errors.New("automation Inbox source event snapshot is invalid")
+	}
+	projectID, projectIDOK := eventProject["id"].(string)
+	projectName, projectNameOK := eventProject["name"].(string)
+	projectStatus, projectStatusOK := eventProject["status"].(string)
+	if !projectIDOK || !projectNameOK || !projectStatusOK || projectID != action.ProjectID ||
+		projectName != action.ProjectName || projectStatus != "completed" {
+		return errors.New("automation Inbox source event snapshot is invalid")
+	}
+	return nil
 }
 
 func createAutomationReminder(tx *gorm.DB, runID string, input automationAttemptInput, nowText string) (automationActionResult, error) {

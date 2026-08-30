@@ -419,6 +419,58 @@ describe("InboxPage", () => {
     ).toBeTruthy();
   });
 
+  it("lists a local Automation item without relabeling it as a Task output", () => {
+    const automationItem: InboxItem = {
+      ...item,
+      kind: "event",
+      title: "核对并准备发票：官网升级",
+      summary:
+        "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
+      sourceEntityType: "automation",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000826",
+      sourceEventKey:
+        "automation:event:00000000-0000-5000-8000-000000000101:018f0000-0000-7000-8000-000000000825",
+      dueAt: null,
+      payloadJson: {
+        automation_rule_id: "00000000-0000-5000-8000-000000000101",
+        automation_run_id: "018f0000-0000-7000-8000-000000000826",
+        preset_key: "project-completed-inbox",
+        project_id: "018f0000-0000-7000-8000-000000000201",
+        project_name: "官网升级",
+      },
+    };
+    hooks.items.mockReturnValue({
+      data: {
+        items: [automationItem],
+        meta: {
+          page: 1,
+          pageSize: 30,
+          total: 1,
+          unreadTotal: 1,
+          snapshotAt: "2026-08-28T10:05:00.123456789Z",
+          serverNow: "2026-08-28T10:05:00.123456789Z",
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    renderInbox();
+
+    expect(
+      screen.getByRole("button", { name: "查看 核对并准备发票：官网升级" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("任务产出跟进")).toBeNull();
+  });
+
   it("lists a backup-verify maintenance item with its safe title", () => {
     const maintenanceItem: InboxItem = {
       ...item,

@@ -12,6 +12,7 @@ import {
   Save,
   TriangleAlert,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
@@ -356,6 +357,8 @@ export function InboxItemDetailModal({
                 <CalendarClock size={17} />
               ) : item.sourceEntityType === "task" ? (
                 <TriangleAlert size={17} />
+              ) : item.sourceEntityType === "automation" ? (
+                <Zap size={17} />
               ) : item.sourceEntityType === "system_maintenance" ? (
                 <HardDrive size={17} />
               ) : item.kind === "event" ? (
@@ -390,11 +393,13 @@ export function InboxItemDetailModal({
                               : "内容待发布"
                             : item.sourceEntityType === "task"
                               ? "任务阻塞"
-                              : item.sourceEntityType === "system_maintenance"
-                                ? "系统维护"
-                                : item.kind === "event"
-                                  ? "任务产出跟进"
-                                  : "手工录入"}{" "}
+                              : item.sourceEntityType === "automation"
+                                ? "本地自动化事项"
+                                : item.sourceEntityType === "system_maintenance"
+                                  ? "系统维护"
+                                  : item.kind === "event"
+                                    ? "任务产出跟进"
+                                    : "手工录入"}{" "}
                 · 仅保存在本机
               </p>
             </div>

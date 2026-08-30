@@ -3265,6 +3265,23 @@ const invoiceDuePayloadKeys = [
   "lead_days",
 ] as const;
 
+const automationInboxPayloadKeys = [
+  "automation_rule_id",
+  "automation_run_id",
+  "preset_key",
+  "project_id",
+  "project_name",
+] as const;
+
+function validCanonicalUUID(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      value,
+    )
+  );
+}
+
 function validRFC3339Timestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const match = value.match(
@@ -3358,7 +3375,8 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       rawPayload.due_state === "overdue") &&
     rawPayload.lead_minutes === 1440 &&
     sourceEventKey === `task:${sourceEntityId}:due:${rawPayload.due_at}`;
-  const dueAt = nullableString(fieldValue(value, "due_at", "dueAt"));
+  const rawDueAt = fieldValue(value, "due_at", "dueAt");
+  const dueAt = nullableString(rawDueAt);
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
@@ -3495,6 +3513,29 @@ export function normalizeInboxItem(value: unknown): InboxItem {
     (rawPayload.incomplete_task_count as number) >= 0 &&
     sourceEventKey ===
       `project:${sourceEntityId}:completed:${String(rawPayload.completion_version)}`;
+  const automationRuleId = isRecord(rawPayload)
+    ? rawPayload.automation_rule_id
+    : undefined;
+  const automationEventKeyPrefix = validCanonicalUUID(automationRuleId)
+    ? `automation:event:${automationRuleId}:`
+    : null;
+  const validAutomationEvent =
+    sourceEntityType === "automation" &&
+    validCanonicalUUID(sourceEntityId) &&
+    (rawDueAt === null || validRFC3339Timestamp(rawDueAt)) &&
+    sourceDeletedAt === null &&
+    isRecord(rawPayload) &&
+    hasExactKeys(rawPayload, automationInboxPayloadKeys) &&
+    validCanonicalUUID(automationRuleId) &&
+    rawPayload.automation_run_id === sourceEntityId &&
+    rawPayload.preset_key === "project-completed-inbox" &&
+    validCanonicalUUID(rawPayload.project_id) &&
+    typeof rawPayload.project_name === "string" &&
+    rawPayload.project_name.trim().length > 0 &&
+    typeof sourceEventKey === "string" &&
+    automationEventKeyPrefix !== null &&
+    sourceEventKey.startsWith(automationEventKeyPrefix) &&
+    validCanonicalUUID(sourceEventKey.slice(automationEventKeyPrefix.length));
   const maintenanceDefinition =
     typeof sourceEntityId === "string"
       ? systemMaintenanceDefinitions[
@@ -3536,6 +3577,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "content_item" &&
       sourceEntityType !== "roadmap_milestone" &&
       sourceEntityType !== "project_completion" &&
+      sourceEntityType !== "automation" &&
       sourceEntityType !== "system_maintenance") ||
     (kind === "manual" &&
       (sourceEntityType !== "manual" ||
@@ -3554,6 +3596,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validContentItemEvent &&
       !validRoadmapMilestoneEvent &&
       !validProjectCompletionEvent &&
+      !validAutomationEvent &&
       !validSystemMaintenanceEvent) ||
     (fieldValue(value, "resolution_policy", "resolutionPolicy") !== "manual" &&
       fieldValue(value, "resolution_policy", "resolutionPolicy") !==

@@ -240,6 +240,65 @@ describe("InboxTaskOrchestrationModal", () => {
     );
   });
 
+  it("inherits an Automation snapshot Project for existing and added drafts while allowing a clear", async () => {
+    const automationItem: InboxItem = {
+      ...item,
+      id: "inbox-automation",
+      kind: "event",
+      sourceEntityType: "automation",
+      sourceEntityId: "018f0000-0000-7000-8000-000000000826",
+      sourceEventKey:
+        "automation:event:00000000-0000-5000-8000-000000000101:018f0000-0000-7000-8000-000000000825",
+      payloadJson: {
+        automation_rule_id: "00000000-0000-5000-8000-000000000101",
+        automation_run_id: "018f0000-0000-7000-8000-000000000826",
+        preset_key: "project-completed-inbox",
+        project_id: sourceProjectId,
+        project_name: "来源项目",
+      },
+    };
+    render(
+      <InboxTaskOrchestrationModal
+        expectedVersion={4}
+        item={automationItem}
+        onClose={vi.fn()}
+        open
+      />,
+    );
+
+    const firstProject = screen.getByLabelText(
+      "第 1 个任务项目",
+    ) as HTMLSelectElement;
+    await waitFor(() => expect(firstProject.value).toBe(sourceProjectId));
+    expect(screen.getByText(/已从来源带入项目/)).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "核对开票条件" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加任务" }));
+    const projectInputs = screen.getAllByLabelText(/第 \d+ 个任务项目/);
+    expect((projectInputs[1] as HTMLSelectElement).value).toBe(sourceProjectId);
+
+    fireEvent.change(projectInputs[0], { target: { value: "" } });
+    fireEvent.change(screen.getAllByLabelText("任务名称")[1], {
+      target: { value: "准备发票资料" },
+    });
+    fireEvent.change(screen.getAllByLabelText("完成条件")[1], {
+      target: { value: "资料已核对" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建并开始跟踪" }));
+
+    expect(mocks.split.mutate.mock.calls[0][0].tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "核对开票条件", projectId: null }),
+        expect.objectContaining({
+          title: "准备发票资料",
+          projectId: sourceProjectId,
+        }),
+      ]),
+    );
+  });
+
   it("keeps the draft visible when the transaction fails", async () => {
     mocks.split.error = new Error("failed");
     const { rerender } = render(

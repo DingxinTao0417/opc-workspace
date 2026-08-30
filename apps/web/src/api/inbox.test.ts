@@ -618,6 +618,91 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Automation Inbox snapshots and source identity", () => {
+    const ruleId = "00000000-0000-5000-8000-000000000101";
+    const runId = "018f0000-0000-7000-8000-000000000826";
+    const projectId = "018f0000-0000-7000-8000-000000000201";
+    const sourceEventId = "018f0000-0000-7000-8000-000000000825";
+    const projected = inboxPayload({
+      kind: "event",
+      title: "核对并准备发票：官网升级",
+      summary:
+        "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。",
+      source_entity_type: "automation",
+      source_entity_id: runId,
+      source_event_key: `automation:event:${ruleId}:${sourceEventId}`,
+      source_deleted_at: null,
+      due_at: null,
+      payload_json: {
+        automation_rule_id: ruleId,
+        automation_run_id: runId,
+        preset_key: "project-completed-inbox",
+        project_id: projectId,
+        project_name: "官网升级",
+      },
+    });
+
+    expect(normalizeInboxItem(projected)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "automation",
+      sourceEntityId: runId,
+      sourceEventKey: `automation:event:${ruleId}:${sourceEventId}`,
+      sourceDeletedAt: null,
+      dueAt: null,
+      payloadJson: {
+        automation_rule_id: ruleId,
+        automation_run_id: runId,
+        preset_key: "project-completed-inbox",
+        project_id: projectId,
+        project_name: "官网升级",
+      },
+    });
+    expect(
+      normalizeInboxItem({
+        ...projected,
+        due_at: "2026-08-30T09:30:00+08:00",
+      }),
+    ).toMatchObject({ dueAt: "2026-08-30T09:30:00+08:00" });
+
+    for (const invalid of [
+      {
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          automation_run_id: "018f0000-0000-7000-8000-000000000827",
+        },
+      },
+      {
+        ...projected,
+        payload_json: { ...projected.payload_json, internal_path: "secret" },
+      },
+      {
+        ...projected,
+        payload_json: {
+          ...projected.payload_json,
+          preset_key: "unknown-preset",
+        },
+      },
+      {
+        ...projected,
+        source_event_key: `automation:event:018f0000-0000-7000-8000-000000000828:${sourceEventId}`,
+      },
+      {
+        ...projected,
+        payload_json: { ...projected.payload_json, project_id: "not-a-uuid" },
+      },
+      { ...projected, due_at: "2026-08-29" },
+      { ...projected, due_at: "2026-08-29T24:00:00Z" },
+      { ...projected, due_at: 123 },
+      {
+        ...projected,
+        source_deleted_at: "2026-08-29T12:00:00Z",
+      },
+    ]) {
+      expect(() => normalizeInboxItem(invalid)).toThrow(ApiError);
+    }
+  });
+
   it("strictly validates backup-create system maintenance snapshots", () => {
     const projected = inboxPayload({
       kind: "event",

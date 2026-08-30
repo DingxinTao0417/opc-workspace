@@ -6,11 +6,14 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
+	"gorm.io/gorm"
 )
 
 type automationRuleEnvelope struct {
@@ -91,6 +94,14 @@ func TestProjectCompletionAutomationCreatesOneAuditedInboxItem(t *testing.T) {
 	if enabled.Code != http.StatusOK {
 		t.Fatalf("enable project automation = %d: %s", enabled.Code, enabled.Body.String())
 	}
+	var enabledRule automationRuleEnvelope
+	if err := json.Unmarshal(enabled.Body.Bytes(), &enabledRule); err != nil {
+		t.Fatalf("decode enabled project automation: %v", err)
+	}
+	if enabledRule.Data.ID != rule.ID || enabledRule.Data.PresetKey != automationPresetProjectCompleted ||
+		enabledRule.Data.Status != "enabled" || enabledRule.Data.Version != rule.Version+1 {
+		t.Fatalf("enabled project automation = %#v", enabledRule.Data)
+	}
 	project := createProjectForTest(t, router, `{"name":"自动化交付项目"}`, map[string]string{"Idempotency-Key": "automation-project"})
 	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"start"}`)
 	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"complete"}`)
@@ -105,17 +116,333 @@ func TestProjectCompletionAutomationCreatesOneAuditedInboxItem(t *testing.T) {
 	`, project.ID).Row().Scan(&eventID); err != nil {
 		t.Fatalf("load source event: %v", err)
 	}
-	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE source_event_id = ? AND status = 'succeeded'", 1, eventID)
-	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'automation' AND title LIKE '核对并准备发票%'", 1)
+	runsResponse := performRequest(router, http.MethodGet, "/api/v1/automations/runs?rule_id="+rule.ID, nil, nil)
+	if runsResponse.Code != http.StatusOK {
+		t.Fatalf("list project completion runs = %d: %s", runsResponse.Code, runsResponse.Body.String())
+	}
+	var runs automationRunListEnvelope
+	if err := json.Unmarshal(runsResponse.Body.Bytes(), &runs); err != nil {
+		t.Fatalf("decode project completion runs: %v", err)
+	}
+	if runs.Meta.Total != 1 || len(runs.Data) != 1 {
+		t.Fatalf("project completion runs = %#v", runs)
+	}
+	run := runs.Data[0]
+	if run.RuleID != rule.ID || run.PresetKey != automationPresetProjectCompleted || run.RuleVersion != enabledRule.Data.Version ||
+		run.TriggerType != "event" || run.SourceEventID == nil || *run.SourceEventID != eventID || run.ScheduledFor != nil ||
+		run.Status != "succeeded" || run.Attempt != 1 || run.ResultType == nil || *run.ResultType != "inbox_item" || run.ResultID == nil {
+		t.Fatalf("project completion run contract = %#v", run)
+	}
+	if len(run.ConfigSnapshot) != 1 || run.ConfigSnapshot["priority"] != "P1" ||
+		len(run.ActionSnapshot) != 5 || run.ActionSnapshot["action_type"] != "inbox_item" ||
+		run.ActionSnapshot["project_id"] != project.ID || run.ActionSnapshot["project_name"] != project.Name ||
+		run.ActionSnapshot["title"] != automationProjectCompletionTitle(project.Name) || run.ActionSnapshot["priority"] != "P1" {
+		t.Fatalf("project completion run snapshots = config=%#v action=%#v", run.ConfigSnapshot, run.ActionSnapshot)
+	}
+
+	inboxResponse := performRequest(router, http.MethodGet, "/api/v1/inbox-items?source_entity_type=automation", nil, nil)
+	if inboxResponse.Code != http.StatusOK {
+		t.Fatalf("list Automation Inbox Items = %d: %s", inboxResponse.Code, inboxResponse.Body.String())
+	}
+	var inbox struct {
+		Data []inboxItemOutput `json:"data"`
+		Meta inboxListMeta     `json:"meta"`
+	}
+	if err := json.Unmarshal(inboxResponse.Body.Bytes(), &inbox); err != nil {
+		t.Fatalf("decode Automation Inbox list: %v", err)
+	}
+	if inbox.Meta.Total != 1 || len(inbox.Data) != 1 {
+		t.Fatalf("Automation Inbox list = %#v", inbox)
+	}
+	item := inbox.Data[0]
+	expectedSourceKey := "automation:event:" + rule.ID + ":" + eventID
+	if item.ID != *run.ResultID || item.Kind != "event" || item.Title != automationProjectCompletionTitle(project.Name) ||
+		item.Summary != "项目已完成。请人工核对是否需要开票，并准备后续资料；自动化不会生成或发送发票。" ||
+		item.SourceEntityType != automationInboxSourceType || item.SourceEntityID == nil || *item.SourceEntityID != run.ID ||
+		item.SourceEventKey == nil || *item.SourceEventKey != expectedSourceKey || item.SourceDeletedAt != nil ||
+		item.Priority != "P1" || item.Status != "open" || item.ResolutionPolicy != "manual" || item.DueAt != nil ||
+		item.ReadAt != nil || item.TriagedAt != nil || item.SnoozedUntil != nil || item.ResolvedByActorID != nil ||
+		item.ResolvedAt != nil || item.ResolutionReason != nil || item.ResolutionMode != nil ||
+		item.DismissedByActorID != nil || item.DismissedAt != nil || item.DismissReason != nil || item.Version != 1 ||
+		item.CreatedAt == "" || item.UpdatedAt != item.CreatedAt {
+		t.Fatalf("Automation Inbox Item contract = %#v", item)
+	}
+	expectedActions := []string{"edit", "read", "snooze", "resolve", "dismiss"}
+	if len(item.AvailableActions) != len(expectedActions) {
+		t.Fatalf("Automation Inbox Item actions = %#v", item.AvailableActions)
+	}
+	for index := range expectedActions {
+		if item.AvailableActions[index] != expectedActions[index] {
+			t.Fatalf("Automation Inbox Item actions = %#v", item.AvailableActions)
+		}
+	}
+	expectedPayload := map[string]string{
+		"automation_rule_id": rule.ID,
+		"automation_run_id":  run.ID,
+		"preset_key":         automationPresetProjectCompleted,
+		"project_id":         project.ID,
+		"project_name":       project.Name,
+	}
+	if len(item.PayloadJSON) != len(expectedPayload) {
+		t.Fatalf("Automation Inbox payload keys = %#v", item.PayloadJSON)
+	}
+	for key, expected := range expectedPayload {
+		if actual, ok := item.PayloadJSON[key].(string); !ok || actual != expected {
+			t.Fatalf("Automation Inbox payload[%s] = %#v, want %q; payload=%#v", key, item.PayloadJSON[key], expected, item.PayloadJSON)
+		}
+	}
+
+	unknownFilter := performRequest(router, http.MethodGet, "/api/v1/inbox-items?source_entity_type=automation_unknown", nil, nil)
+	if unknownFilter.Code != http.StatusBadRequest || responseErrorCode(t, unknownFilter.Body.Bytes()) != "INVALID_FILTER" {
+		t.Fatalf("unknown source filter = %d: %s", unknownFilter.Code, unknownFilter.Body.String())
+	}
 	var projectModel models.Project
 	if err := store.DB.First(&projectModel, "id = ?", project.ID).Error; err != nil {
 		t.Fatalf("load completed Project model: %v", err)
+	}
+	var ruleModel models.AutomationRule
+	if err := store.DB.First(&ruleModel, "id = ?", rule.ID).Error; err != nil {
+		t.Fatalf("load enabled Automation Rule model: %v", err)
+	}
+	sourceEventID := eventID
+	attemptInput := automationAttemptInput{
+		Rule: ruleModel, TriggerType: "event", SourceEventID: &sourceEventID,
+		LogicalKey: "event:" + rule.ID + ":" + eventID, Attempt: 1,
+		Config: automationConfig{Priority: "P1"},
+		ActionSnapshot: map[string]any{
+			"action_type": "inbox_item", "project_id": project.ID, "project_name": project.Name,
+			"title": automationProjectCompletionTitle(project.Name), "priority": "P1",
+		},
+		Now: time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC),
+	}
+	action, err := automationProjectCompletionActionFromSnapshot(attemptInput.ActionSnapshot)
+	if err != nil {
+		t.Fatalf("decode valid project completion action: %v", err)
+	}
+	if err := validateAutomationProjectCompletionInboxAttempt(store.DB, attemptInput, action); err != nil {
+		t.Fatalf("validate baseline project completion attempt: %v", err)
+	}
+	if !attemptInput.Rule.Enabled {
+		t.Fatal("contract test baseline must use an enabled Automation Rule")
+	}
+	invalidActionSnapshot := map[string]any{
+		"action_type": "reminder", "project_id": project.ID, "project_name": project.Name,
+		"title": automationProjectCompletionTitle(project.Name), "priority": "P1",
+	}
+	if _, err := automationProjectCompletionActionFromSnapshot(invalidActionSnapshot); err == nil {
+		t.Fatal("non-Inbox action type was accepted in project completion snapshot")
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*automationAttemptInput)
+	}{
+		{name: "preset binding", mutate: func(input *automationAttemptInput) {
+			input.Rule.PresetKey = automationPresetDailyToday
+		}},
+		{name: "trigger binding", mutate: func(input *automationAttemptInput) {
+			input.TriggerType = "schedule"
+		}},
+		{name: "logical key", mutate: func(input *automationAttemptInput) {
+			input.LogicalKey += ":tampered"
+		}},
+		{name: "canonical rule UUID", mutate: func(input *automationAttemptInput) {
+			input.Rule.ID = "{" + input.Rule.ID + "}"
+			input.LogicalKey = "event:" + input.Rule.ID + ":" + *input.SourceEventID
+		}},
+		{name: "canonical event UUID", mutate: func(input *automationAttemptInput) {
+			value := "{" + *input.SourceEventID + "}"
+			input.SourceEventID = &value
+			input.LogicalKey = "event:" + input.Rule.ID + ":" + value
+		}},
+		{name: "retry shape", mutate: func(input *automationAttemptInput) {
+			input.Attempt = 2
+		}},
+	} {
+		t.Run("attempt contract/"+test.name, func(t *testing.T) {
+			invalid := attemptInput
+			test.mutate(&invalid)
+			if err := validateAutomationProjectCompletionInboxAttempt(store.DB, invalid, action); err == nil {
+				t.Fatalf("invalid %s was accepted", test.name)
+			}
+		})
+	}
+
+	editedResponse := performRequest(
+		router, http.MethodPatch, "/api/v1/inbox-items/"+item.ID,
+		[]byte(`{"title":"核对并准备发票：人工补充","summary":"人工补充的核对说明","priority":"P2"}`),
+		map[string]string{"If-Match": `"1"`},
+	)
+	if editedResponse.Code != http.StatusOK || editedResponse.Header().Get("ETag") != `"2"` {
+		t.Fatalf("edit Automation Inbox mutable facts = %d headers=%v: %s", editedResponse.Code, editedResponse.Header(), editedResponse.Body.String())
+	}
+	editedItem := decodeInboxItemData(t, editedResponse.Body.Bytes())
+	if editedItem.Title != "核对并准备发票：人工补充" || editedItem.Summary != "人工补充的核对说明" ||
+		editedItem.Priority != "P2" || editedItem.Version != 2 {
+		t.Fatalf("edited Automation Inbox mutable facts = %#v", editedItem)
+	}
+	_, reuseErr := createAutomationInboxItem(store.DB, uuid.NewString(), attemptInput, "2026-08-29T12:00:00.000000000Z")
+	if reuseErr == nil || !strings.Contains(reuseErr.Error(), "already committed by another run") {
+		t.Fatalf("fresh run reused persisted Automation Inbox Item: %v", reuseErr)
 	}
 	if err := executeProjectCompletionAutomations(store.DB, eventID, projectModel, "2026-08-29T12:00:00.000000000Z"); err != nil {
 		t.Fatalf("replay project automation: %v", err)
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE source_event_id = ?", 1, eventID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'automation' AND title LIKE '核对并准备发票%'", 1)
+}
+
+func TestProjectCompletionAutomationRejectsCorruptPersistedInboxSource(t *testing.T) {
+	store, err := database.Open(filepath.Join(t.TempDir(), "automation-corrupt-source.db"))
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer store.Close()
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		Logger: log.New(io.Discard, "", 0), ReminderScanInterval: -1,
+	})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	defer router.Close()
+
+	project := createProjectForTest(t, router, `{"name":"自动化契约损坏项目"}`, nil)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"start"}`)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"complete"}`)
+	var eventID string
+	if err := store.DB.Raw(`
+		SELECT id FROM workflow_events
+		WHERE aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_completed'
+	`, project.ID).Row().Scan(&eventID); err != nil {
+		t.Fatalf("load source event: %v", err)
+	}
+
+	rule := automationRuleByPreset(t, router, automationPresetProjectCompleted)
+	enabled := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable project automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+	corruptRunID := uuid.NewString()
+	corruptItemID := uuid.NewString()
+	key := "automation:event:" + rule.ID + ":" + eventID
+	now := "2026-08-29T12:00:00.000000000Z"
+	payload, err := json.Marshal(map[string]any{
+		"automation_rule_id": rule.ID,
+		"automation_run_id":  corruptRunID,
+		"preset_key":         automationPresetProjectCompleted,
+		"project_id":         project.ID,
+		"project_name":       "被篡改的项目名",
+	})
+	if err != nil {
+		t.Fatalf("encode corrupt payload: %v", err)
+	}
+	if err := store.DB.Create(&models.InboxItem{
+		ID: corruptItemID, Kind: "event", Title: automationProjectCompletionTitle(project.Name),
+		Summary: automationProjectCompletionItemSummary, SourceEntityType: automationInboxSourceType,
+		SourceEntityID: &corruptRunID, SourceEventKey: &key, Priority: "P1", Status: "open",
+		ResolutionPolicy: "manual", PayloadJSON: string(payload), Version: 1, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed corrupt Automation Inbox source: %v", err)
+	}
+
+	var projectModel models.Project
+	if err := store.DB.First(&projectModel, "id = ?", project.ID).Error; err != nil {
+		t.Fatalf("load completed Project model: %v", err)
+	}
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		return executeProjectCompletionAutomations(tx, eventID, projectModel, now)
+	}); err != nil {
+		t.Fatalf("execute Automation with corrupt source: %v", err)
+	}
+	var failed models.AutomationRun
+	if err := store.DB.Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Take(&failed).Error; err != nil {
+		t.Fatalf("load rejected Automation Run: %v", err)
+	}
+	if failed.Status != "failed" || failed.ErrorCode == nil || *failed.ErrorCode != "SOURCE_EVENT_CONFLICT" ||
+		failed.ResultType != nil || failed.ResultID != nil || failed.Retryable || failed.RetryAt != nil {
+		t.Fatalf("rejected Automation Run = %#v", failed)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE rule_id = ? AND status = 'succeeded'", 0, rule.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = 'automation'", 1)
+	var retained models.InboxItem
+	if err := store.DB.First(&retained, "id = ?", corruptItemID).Error; err != nil {
+		t.Fatalf("load retained corrupt source: %v", err)
+	}
+	if retained.Version != 1 || retained.PayloadJSON != string(payload) || retained.UpdatedAt != now {
+		t.Fatalf("corrupt source changed despite rejected action: %#v", retained)
+	}
+	if err := store.DB.First(&projectModel, "id = ?", project.ID).Error; err != nil || projectModel.Status != "completed" {
+		t.Fatalf("source Project changed after rejected Automation: project=%#v err=%v", projectModel, err)
+	}
+}
+
+func TestProjectCompletionAutomationRollsBackPartialInboxAction(t *testing.T) {
+	store, err := database.Open(filepath.Join(t.TempDir(), "automation-partial-action.db"))
+	if err != nil {
+		t.Fatalf("database.Open: %v", err)
+	}
+	defer store.Close()
+	router, err := NewRouter(store.DB, Options{
+		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+		Logger: log.New(io.Discard, "", 0), ReminderScanInterval: -1,
+	})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	defer router.Close()
+
+	rule := automationRuleByPreset(t, router, automationPresetProjectCompleted)
+	enabled := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable project automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+	project := createProjectForTest(t, router, `{"name":"自动化部分写入回滚项目"}`, nil)
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"start"}`)
+	if err := store.DB.Exec(`
+		CREATE TRIGGER fail_automation_inbox_source_event
+		BEFORE INSERT ON workflow_events
+		WHEN NEW.aggregate_type = 'inbox_item'
+		 AND NEW.action = 'source_projected'
+		 AND EXISTS (
+			SELECT 1 FROM inbox_items
+			WHERE id = NEW.aggregate_id AND source_entity_type = 'automation'
+		 )
+		BEGIN
+			SELECT RAISE(ABORT, 'TEST_AUTOMATION_SOURCE_EVENT_FAILURE');
+		END
+	`).Error; err != nil {
+		t.Fatalf("install Automation source event failure: %v", err)
+	}
+	project = transitionProjectForTest(t, router, project.ID, project.Version, `{"action":"complete"}`)
+	if project.Status != "completed" {
+		t.Fatalf("Project completion was rolled back: %#v", project)
+	}
+	var eventID string
+	if err := store.DB.Raw(`
+		SELECT id FROM workflow_events
+		WHERE aggregate_type = 'project' AND aggregate_id = ? AND action = 'project_completed'
+	`, project.ID).Row().Scan(&eventID); err != nil {
+		t.Fatalf("load source event: %v", err)
+	}
+	var failed models.AutomationRun
+	if err := store.DB.Where("rule_id = ? AND source_event_id = ?", rule.ID, eventID).Take(&failed).Error; err != nil {
+		t.Fatalf("load failed Automation Run: %v", err)
+	}
+	if failed.Status != "failed" || failed.ErrorCode == nil || *failed.ErrorCode != "ACTION_WRITE_FAILED" ||
+		failed.ResultType != nil || failed.ResultID != nil || !failed.Retryable || failed.RetryAt == nil {
+		t.Fatalf("partial action failure Run = %#v", failed)
+	}
+	key := "automation:event:" + rule.ID + ":" + eventID
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_event_key = ?", 0, key)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM automation_runs WHERE rule_id = ?", 1, rule.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_run' AND aggregate_id = ? AND action = 'automation_run_failed'", 1, failed.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_run' AND aggregate_id = ? AND action = 'automation_run_succeeded'", 0, failed.ID)
+	var persistedProject models.Project
+	if err := store.DB.First(&persistedProject, "id = ?", project.ID).Error; err != nil || persistedProject.Status != "completed" {
+		t.Fatalf("source Project changed after partial action rollback: project=%#v err=%v", persistedProject, err)
+	}
 }
 
 func TestScheduledAutomationFoldsOfflineWindowsAndPreservesLocalClock(t *testing.T) {
