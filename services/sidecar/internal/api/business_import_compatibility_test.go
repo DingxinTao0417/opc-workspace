@@ -30,6 +30,13 @@ var frozenBusinessExportV49ExcludedTables = []string{
 	"automation_event_deliveries",
 }
 
+func TestBusinessImportSchemaContractAllowsSchema50Into51(t *testing.T) {
+	excluded, ok := businessImportSchemaContract(businessImportSchema50, businessImportSchema51)
+	if !ok || !equalStrings(excluded, businessExportExcludedTables) {
+		t.Fatalf("schema 50 to 51 contract = %#v, ok=%v", excluded, ok)
+	}
+}
+
 func TestBusinessImportAcceptsFrozenV49DeletedProjectCompletionHistory(t *testing.T) {
 	fixture := newHistoricalProjectAutomationImportFixture(t)
 	jsonPackage := frozenBusinessExportV49(t, fixture.jsonBody)
@@ -98,7 +105,7 @@ func TestBusinessImportAcceptsFrozenV49IntoEmptyWorkspace(t *testing.T) {
 			}
 			if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil ||
 				!envelope.Data.CanApply || envelope.Data.ApplyMode != importModeReplaceEmpty ||
-				envelope.Data.SchemaVersion != frozenBusinessImportSchemaV49 || envelope.Data.TargetSchemaVersion != 50 {
+				envelope.Data.SchemaVersion != frozenBusinessImportSchemaV49 || envelope.Data.TargetSchemaVersion != 51 {
 				t.Fatalf("empty v49 preview = %#v err=%v", envelope.Data, err)
 			}
 			apply := performRequest(
@@ -129,7 +136,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 51, blocker: "source_schema_newer"},
+		{version: 52, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string
@@ -237,10 +244,10 @@ func frozenBusinessExportV49(t *testing.T, source []byte) businessExportPackage 
 	t.Helper()
 	var packageData businessExportPackage
 	if err := json.Unmarshal(source, &packageData); err != nil {
-		t.Fatalf("decode real v50 business export: %v", err)
+		t.Fatalf("decode real v51 business export: %v", err)
 	}
-	if packageData.Source.SchemaVersion != 50 {
-		t.Fatalf("compatibility fixture source schema = %d, want real v50 export", packageData.Source.SchemaVersion)
+	if packageData.Source.SchemaVersion != 51 {
+		t.Fatalf("compatibility fixture source schema = %d, want real v51 export", packageData.Source.SchemaVersion)
 	}
 	packageData.Source.SchemaVersion = frozenBusinessImportSchemaV49
 	packageData.ExcludedOperationalTables = append([]string(nil), frozenBusinessExportV49ExcludedTables...)
@@ -319,7 +326,7 @@ func assertBusinessImportSchemaBlockedWithoutSideEffects(
 	}
 	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil ||
 		envelope.Data.CanApply || envelope.Data.Blocker != blocker ||
-		envelope.Data.SchemaVersion != schemaVersion || envelope.Data.TargetSchemaVersion != 50 ||
+		envelope.Data.SchemaVersion != schemaVersion || envelope.Data.TargetSchemaVersion != 51 ||
 		envelope.Data.ApplyMode != "" {
 		t.Fatalf("schema %d preview = %#v err=%v", schemaVersion, envelope.Data, err)
 	}

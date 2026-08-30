@@ -258,6 +258,13 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 	if !validProjectCompletionImportSources(packageData) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source deletion history is invalid"}
 	}
+	artifactReplays, ok := taskArtifactImportReplayPlan(packageData)
+	if !ok {
+		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task Artifact Inbox source deletion history is invalid"}
+	}
+	if !validTaskArtifactAssignmentImportHistory(packageData, artifactReplays) {
+		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task assignment history is invalid"}
+	}
 
 	report, err := buildBusinessImportConflictReport(a.db.WithContext(c), packageData)
 	if err != nil {
@@ -505,6 +512,17 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		for _, table := range packageData.Tables {
 			tables[table.Name] = table
 		}
+		artifactReplays, ok := taskArtifactImportReplayPlan(packageData)
+		if !ok {
+			return errors.New("Task Artifact import replay plan is invalid")
+		}
+		historicalAssignments, remainingAssignments, ok := partitionTaskArtifactHistoricalAssignmentRows(
+			tables["tasks"], tables["task_assignments"], artifactReplays.taskIDs,
+		)
+		if !ok {
+			return errors.New("Task assignment import history is invalid")
+		}
+		tables["task_assignments"] = remainingAssignments
 		var pendingProjectCompletionAuthorizations int64
 		if err := tx.Table("business_import_project_completion_authorizations").Count(&pendingProjectCompletionAuthorizations).Error; err != nil {
 			return fmt.Errorf("check Project completion import authorizations: %w", err)
@@ -520,6 +538,19 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 				return err
 			}
 		} else if err := mergeAutomationImportRows(tx, tables["automation_rules"]); err != nil {
+			return err
+		}
+		// Ended assignment rows are history, not new active assignments. Insert
+		// them while their deferred Task foreign keys are absent so the online
+		// Task and Actor guards remain unchanged for active assignment imports.
+		activatedActors, err := activateHistoricalAssignmentActors(tx, historicalAssignments)
+		if err != nil {
+			return err
+		}
+		if err := insertBusinessImportRows(tx, historicalAssignments); err != nil {
+			return err
+		}
+		if err := restoreHistoricalAssignmentActors(tx, activatedActors); err != nil {
 			return err
 		}
 		order := []string{
@@ -542,11 +573,22 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 			}
 			if name == "tasks" {
 				err = insertTaskImportRows(tx, tables[name])
+			} else if name == "task_artifacts" {
+				err = insertTaskArtifactImportRows(tx, tables[name], artifactReplays)
+			} else if name == "inbox_items" {
+				err = insertTaskArtifactInboxImportRows(tx, tables[name], artifactReplays)
 			} else {
 				err = insertBusinessImportRows(tx, tables[name])
 			}
 			if err != nil {
 				return err
+			}
+			if name == "inbox_items" {
+				if err := finalizeTaskArtifactImportReplays(
+					tx, tables["task_artifacts"], tables["inbox_items"], artifactReplays,
+				); err != nil {
+					return err
+				}
 			}
 		}
 		if applyMode == importModeReplaceEmpty {
