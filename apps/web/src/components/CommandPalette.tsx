@@ -1,6 +1,8 @@
 import {
+  AlertTriangle,
   BellRing,
   CalendarDays,
+  CheckCircle2,
   CheckSquare2,
   Clock3,
   FolderKanban,
@@ -9,6 +11,7 @@ import {
   Map as MapIcon,
   Plus,
   ReceiptText,
+  RefreshCw,
   Search,
   Settings2,
   Sun,
@@ -36,7 +39,7 @@ import {
   getRoadmapMilestone,
   getTask,
 } from "../api/client";
-import { useSearchQuery } from "../api/hooks";
+import { useHealthQuery, useSearchQuery } from "../api/hooks";
 import {
   loadCommandRecents,
   recordCommandRecent,
@@ -66,6 +69,10 @@ interface RecentResourceCommand {
   hint: string;
   icon: LucideIcon;
   route: string;
+}
+
+function displayVersion(value: string): string {
+  return value.startsWith("v") ? value : `v${value}`;
 }
 
 const focusableSelector = [
@@ -207,15 +214,22 @@ export function CommandPalette() {
   const [recentResources, setRecentResources] = useState<
     RecentResourceCommand[]
   >([]);
+  const [healthRecheckPending, setHealthRecheckPending] = useState(false);
+  const [healthActionsFocused, setHealthActionsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayId = useRef(Symbol("command-palette")).current;
+  const staleHealthFailureRef = useRef(false);
   const [isTopmost, setIsTopmost] = useState(false);
   const normalizedQuery = query.trim();
+  const healthQuery = useHealthQuery(open);
+  const hasHealthFacts = Boolean(healthQuery.data);
+  const canResolveRecentResources = hasHealthFacts && !healthQuery.isError;
+  const healthCheckBusy = healthQuery.isFetching || healthRecheckPending;
   const resourcesQuery = useSearchQuery(
     { q: searchQuery, page: 1, pageSize: 12 },
-    open && searchQuery.length > 0,
+    open && searchQuery.length > 0 && hasHealthFacts,
   );
 
   const recordRecentCommand = useCallback((commandId: string) => {
@@ -236,6 +250,49 @@ export function CommandPalette() {
     },
     [],
   );
+
+  const openDiagnostics = useCallback(() => {
+    recordRecentCommand("settings-diagnostics");
+    setOpen(false);
+    setSettingsOpen(true, "diagnostics");
+  }, [recordRecentCommand, setOpen, setSettingsOpen]);
+
+  const recheckHealth = useCallback(async () => {
+    setHealthRecheckPending(true);
+    inputRef.current?.focus();
+    try {
+      await healthQuery.refetch();
+    } finally {
+      inputRef.current?.focus();
+      setHealthRecheckPending(false);
+    }
+  }, [healthQuery.refetch]);
+
+  useEffect(() => {
+    const recoveredFromStaleFailure =
+      staleHealthFailureRef.current &&
+      !healthQuery.isError &&
+      Boolean(healthQuery.data);
+    staleHealthFailureRef.current =
+      healthQuery.isError && Boolean(healthQuery.data);
+    if (
+      recoveredFromStaleFailure &&
+      open &&
+      searchQuery &&
+      searchQuery === normalizedQuery &&
+      !resourcesQuery.isFetching
+    ) {
+      void resourcesQuery.refetch();
+    }
+  }, [
+    healthQuery.data,
+    healthQuery.isError,
+    normalizedQuery,
+    open,
+    resourcesQuery.isFetching,
+    resourcesQuery.refetch,
+    searchQuery,
+  ]);
 
   const closeAndNavigate = (to: string, commandId?: string) => {
     if (commandId) recordRecentCommand(commandId);
@@ -343,7 +400,9 @@ export function CommandPalette() {
   }, [navigate, recordRecentCommand, setNewTaskOpen, setOpen, setSettingsOpen]);
 
   const resourceCommands = useMemo<Command[]>(() => {
-    const resourceSource = resourcesQuery.data?.items ?? [];
+    const resourceSource = hasHealthFacts
+      ? (resourcesQuery.data?.items ?? [])
+      : [];
     return resourceSource.map((resource) => ({
       id: `${resource.resourceType}-${resource.resourceId}`,
       label: resource.title,
@@ -355,7 +414,13 @@ export function CommandPalette() {
         navigate(resource.route);
       },
     }));
-  }, [navigate, recordRecentResource, resourcesQuery.data, setOpen]);
+  }, [
+    hasHealthFacts,
+    navigate,
+    recordRecentResource,
+    resourcesQuery.data,
+    setOpen,
+  ]);
 
   const recentResourceRecords = useMemo(
     () =>
@@ -367,8 +432,12 @@ export function CommandPalette() {
   );
 
   useEffect(() => {
-    if (!open || recentResourceRecords.length === 0) {
-      if (!open) setRecentResources([]);
+    if (
+      !open ||
+      !canResolveRecentResources ||
+      recentResourceRecords.length === 0
+    ) {
+      if (!open || !hasHealthFacts) setRecentResources([]);
       return;
     }
     let current = true;
@@ -405,7 +474,7 @@ export function CommandPalette() {
     return () => {
       current = false;
     };
-  }, [open, recentResourceRecords]);
+  }, [canResolveRecentResources, hasHealthFacts, open, recentResourceRecords]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -422,10 +491,12 @@ export function CommandPalette() {
       commands.map((command) => [command.id, command]),
     );
     const resourcesByKey = new Map(
-      recentResources.map((resource) => [
-        `${resource.resourceType}:${resource.resourceId}`,
-        resource,
-      ]),
+      hasHealthFacts
+        ? recentResources.map((resource) => [
+            `${resource.resourceType}:${resource.resourceId}`,
+            resource,
+          ])
+        : [],
     );
     return recents.flatMap((recent) => {
       if (recent.kind === "command") {
@@ -460,6 +531,7 @@ export function CommandPalette() {
     });
   }, [
     commands,
+    hasHealthFacts,
     navigate,
     recentResources,
     recents,
@@ -502,6 +574,10 @@ export function CommandPalette() {
     const timer = window.setTimeout(() => setSearchQuery(normalizedQuery), 200);
     return () => window.clearTimeout(timer);
   }, [normalizedQuery, open]);
+
+  useEffect(() => {
+    if (!open) setHealthActionsFocused(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -560,6 +636,9 @@ export function CommandPalette() {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
       return;
     }
+    const runtimeActionHasFocus =
+      event.target instanceof HTMLElement &&
+      Boolean(event.target.closest(".command-runtime-actions"));
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -585,6 +664,8 @@ export function CommandPalette() {
         event.preventDefault();
         first.focus();
       }
+    } else if (runtimeActionHasFocus) {
+      return;
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex((index) =>
@@ -641,6 +722,87 @@ export function CommandPalette() {
           />
           <kbd>Esc</kbd>
         </div>
+        <div
+          aria-live="polite"
+          className="command-runtime-status"
+          data-state={
+            healthQuery.isError
+              ? hasHealthFacts
+                ? "stale"
+                : "unavailable"
+              : hasHealthFacts
+                ? "online"
+                : "pending"
+          }
+          role="status"
+        >
+          <span className="command-runtime-icon" aria-hidden="true">
+            {healthQuery.isError ? (
+              <AlertTriangle size={14} />
+            ) : hasHealthFacts ? (
+              <CheckCircle2 size={14} />
+            ) : (
+              <RefreshCw className="is-spinning" size={14} />
+            )}
+          </span>
+          <span className="command-runtime-copy">
+            {healthQuery.isError && !hasHealthFacts ? (
+              <>
+                <strong>本地服务不可用，业务搜索已暂停。</strong>
+                <small>页面与设置命令仍可使用。</small>
+              </>
+            ) : healthQuery.isError && healthQuery.data ? (
+              <>
+                <strong>本地服务状态可能已过期</strong>
+                <small>
+                  上次确认 {displayVersion(healthQuery.data.app.version)} · API{" "}
+                  {healthQuery.data.api.version} · Schema v
+                  {healthQuery.data.schema.version}
+                </small>
+              </>
+            ) : healthQuery.data ? (
+              <>
+                <strong>本地服务在线</strong>
+                <small>
+                  {displayVersion(healthQuery.data.app.version)} · API{" "}
+                  {healthQuery.data.api.version} · Schema v
+                  {healthQuery.data.schema.version}
+                </small>
+              </>
+            ) : (
+              <strong>正在检查本地服务状态…</strong>
+            )}
+          </span>
+          {healthQuery.isError ||
+          healthRecheckPending ||
+          healthActionsFocused ? (
+            <span
+              className="command-runtime-actions"
+              onBlurCapture={(event) => {
+                if (
+                  !(event.relatedTarget instanceof Node) ||
+                  !event.currentTarget.contains(event.relatedTarget)
+                ) {
+                  setHealthActionsFocused(false);
+                }
+              }}
+              onFocusCapture={() => setHealthActionsFocused(true)}
+            >
+              <button
+                aria-disabled={healthCheckBusy}
+                onClick={() => {
+                  if (!healthCheckBusy) void recheckHealth();
+                }}
+                type="button"
+              >
+                {healthCheckBusy ? "检查中…" : "重新检查"}
+              </button>
+              <button onClick={openDiagnostics} type="button">
+                打开运行诊断
+              </button>
+            </span>
+          ) : null}
+        </div>
         <div className="command-list" id="command-results" role="listbox">
           {!normalizedQuery && recentCommands.length ? (
             <div className="command-section-label">最近使用</div>
@@ -668,15 +830,24 @@ export function CommandPalette() {
                 </button>
               );
             })
-          ) : (normalizedQuery && !searchQuery) ||
-            (resourcesQuery.isPending && searchQuery) ? (
+          ) : normalizedQuery && !searchQuery ? (
+            <div aria-live="polite" className="command-empty">
+              正在准备本地搜索…
+            </div>
+          ) : searchQuery && !hasHealthFacts ? (
+            <div aria-live="polite" className="command-empty">
+              {healthQuery.isError
+                ? "本地业务搜索不可用；页面与设置命令仍可使用。"
+                : "等待本地服务状态…"}
+            </div>
+          ) : resourcesQuery.isPending && searchQuery ? (
             <div aria-live="polite" className="command-empty">
               正在搜索本地业务…
             </div>
           ) : !resourcesQuery.isError ? (
             <div className="command-empty">没有匹配结果</div>
           ) : null}
-          {resourcesQuery.isError && searchQuery ? (
+          {hasHealthFacts && resourcesQuery.isError && searchQuery ? (
             <div className="command-search-error" role="alert">
               <span>本地业务搜索暂时不可用。</span>
               <button

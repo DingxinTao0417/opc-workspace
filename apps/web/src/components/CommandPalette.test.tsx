@@ -7,7 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
@@ -20,6 +20,8 @@ import { CommandPalette } from "./CommandPalette";
 import { Modal } from "./Modal";
 
 const mocks = vi.hoisted(() => ({
+  healthQuery: vi.fn(),
+  healthRefetch: vi.fn(),
   searchQuery: vi.fn(),
   refetch: vi.fn(),
   getTask: vi.fn(),
@@ -46,8 +48,16 @@ vi.mock("../api/client", async (importActual) => {
 });
 
 vi.mock("../api/hooks", () => ({
+  useHealthQuery: mocks.healthQuery,
   useSearchQuery: mocks.searchQuery,
 }));
+
+const healthyRuntime = {
+  status: "ok",
+  app: { name: "opc-workspace", version: "0.1.7", commit: "abc123" },
+  api: { version: "v1" },
+  schema: { version: 43 },
+};
 
 const taskResult = {
   resourceType: "task" as const,
@@ -95,6 +105,16 @@ function PaletteOverModalHarness() {
 }
 
 describe("CommandPalette", () => {
+  beforeEach(() => {
+    mocks.healthQuery.mockReturnValue({
+      data: healthyRuntime,
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
@@ -133,7 +153,7 @@ describe("CommandPalette", () => {
         target: { value: "跨页" },
       },
     );
-    expect(screen.getByText("正在搜索本地业务…")).toBeVisible();
+    expect(screen.getByText("正在准备本地搜索…")).toBeVisible();
     act(() => vi.advanceTimersByTime(200));
 
     expect(mocks.searchQuery).toHaveBeenLastCalledWith(
@@ -170,6 +190,525 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /自动化设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
+  });
+
+  it("shows the actual local runtime versions while health is current", () => {
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("本地服务在线");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "v0.1.7 · API v1 · Schema v43",
+    );
+    expect(mocks.healthQuery).toHaveBeenLastCalledWith(true);
+  });
+
+  it("waits for initial health before searching and hides cached business results", () => {
+    vi.useFakeTimers();
+    mocks.healthQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isFetching: true,
+      isPending: true,
+      refetch: mocks.healthRefetch,
+    });
+    mocks.searchQuery.mockReturnValue({
+      data: {
+        items: [taskResult],
+        meta: { page: 1, pageSize: 12, total: 1 },
+      },
+      isError: false,
+      isPending: true,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "正在检查本地服务状态",
+    );
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "跨页" },
+    });
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(mocks.searchQuery).toHaveBeenLastCalledWith(
+      { q: "跨页", page: 1, pageSize: 12 },
+      false,
+    );
+    expect(screen.getByText("等待本地服务状态…")).toBeVisible();
+    expect(screen.queryByText(taskResult.title)).toBeNull();
+  });
+
+  it("keeps fixed recent commands and local keyboard navigation when initial health fails", () => {
+    recordCommandRecent([], { kind: "command", commandId: "today" });
+    recordCommandRecent(loadCommandRecents(), {
+      kind: "resource",
+      resourceType: "task",
+      resourceId: "cached-task",
+    });
+    mocks.healthQuery.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    });
+    mocks.searchQuery.mockReturnValue({
+      data: {
+        items: [taskResult],
+        meta: { page: 1, pageSize: 12, total: 1 },
+      },
+      isError: false,
+      isPending: true,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter initialEntries={["/projects"]}>
+        <CommandPalette />
+        <CurrentLocation />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("最近使用")).toBeVisible();
+    expect(mocks.getTask).not.toHaveBeenCalled();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "今日" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/today");
+  });
+
+  it("offers health recheck and opens runtime diagnostics after initial failure", () => {
+    vi.useFakeTimers();
+    mocks.healthQuery.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    });
+    mocks.searchQuery.mockReturnValue({
+      data: {
+        items: [taskResult],
+        meta: { page: 1, pageSize: 12, total: 1 },
+      },
+      isError: false,
+      isPending: true,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "本地服务不可用，业务搜索已暂停",
+    );
+    expect(screen.getByRole("option", { name: /今日/ })).toBeVisible();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "跨页" },
+    });
+    act(() => vi.advanceTimersByTime(200));
+    expect(
+      screen.getByText("本地业务搜索不可用；页面与设置命令仍可使用。"),
+    ).toBeVisible();
+    expect(screen.queryByText(taskResult.title)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重新检查" }));
+    expect(mocks.healthRefetch).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "打开运行诊断" }));
+    expect(useUiStore.getState()).toMatchObject({
+      commandPaletteOpen: false,
+      settingsModule: "diagnostics",
+      settingsOpen: true,
+    });
+  });
+
+  it("lets a focused health action handle Enter without running the active command", () => {
+    mocks.healthQuery.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    });
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter initialEntries={["/projects"]}>
+        <CommandPalette />
+        <CurrentLocation />
+      </MemoryRouter>,
+    );
+
+    const recheck = screen.getByRole("button", { name: "重新检查" });
+    recheck.focus();
+    expect(fireEvent.keyDown(recheck, { key: "Enter" })).toBe(true);
+    expect(screen.getByTestId("current-location")).toHaveTextContent(
+      "/projects",
+    );
+    expect(useUiStore.getState().commandPaletteOpen).toBe(true);
+
+    fireEvent.click(recheck);
+    expect(mocks.healthRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the recheck action mounted while pending and restores focus before removing it", async () => {
+    let finishRecheck: (() => void) | undefined;
+    const recheckResult = new Promise<void>((resolve) => {
+      finishRecheck = resolve;
+    });
+    let healthState = {
+      data: undefined as typeof healthyRuntime | undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthRefetch.mockReturnValue(recheckResult);
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const recheck = screen.getByRole("button", { name: "重新检查" });
+    recheck.focus();
+    fireEvent.click(recheck);
+
+    healthState = {
+      ...healthState,
+      isError: false,
+      isFetching: true,
+      isPending: true,
+    };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "检查中…" })).toBeVisible();
+    expect(screen.getByRole("combobox")).toHaveFocus();
+
+    healthState = {
+      ...healthState,
+      data: healthyRuntime,
+      isFetching: false,
+      isPending: false,
+    };
+    await act(async () => finishRecheck?.());
+
+    expect(screen.queryByRole("button", { name: "检查中…" })).toBeNull();
+    expect(screen.getByRole("combobox")).toHaveFocus();
+  });
+
+  it("keeps externally refreshed health actions mounted until focus leaves safely", async () => {
+    let healthState = {
+      data: healthyRuntime,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const recheck = screen.getByRole("button", { name: "重新检查" });
+    recheck.focus();
+
+    healthState = { ...healthState, isError: false, isFetching: true };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "检查中…" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "检查中…" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    healthState = { ...healthState, isFetching: false };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "重新检查" })).toHaveFocus();
+
+    const diagnostics = screen.getByRole("button", {
+      name: "打开运行诊断",
+    });
+    diagnostics.focus();
+    fireEvent.keyDown(diagnostics, { key: "Tab" });
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "打开运行诊断" })).toBeNull(),
+    );
+  });
+
+  it("retains cached health facts with a stale warning and refreshes the current search after recovery", () => {
+    vi.useFakeTimers();
+    let healthState = {
+      data: healthyRuntime,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockImplementation(
+      (input: { q?: string }, enabled: boolean) => ({
+        data:
+          enabled && input.q
+            ? {
+                items: [taskResult],
+                meta: { page: 1, pageSize: 12, total: 1 },
+              }
+            : undefined,
+        isError: false,
+        isPending: false,
+        refetch: mocks.refetch,
+      }),
+    );
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "本地服务状态可能已过期",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "上次确认 v0.1.7 · API v1 · Schema v43",
+    );
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "跨页" },
+    });
+    act(() => vi.advanceTimersByTime(200));
+    expect(screen.getByRole("option", { name: /跨页交付任务/ })).toBeVisible();
+    expect(mocks.searchQuery).toHaveBeenLastCalledWith(
+      { q: "跨页", page: 1, pageSize: 12 },
+      true,
+    );
+
+    healthState = { ...healthState, isError: false };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("本地服务在线");
+    expect(mocks.refetch).toHaveBeenCalledOnce();
+  });
+
+  it("does not duplicate or replay an obsolete search when stale health recovers", () => {
+    vi.useFakeTimers();
+    let searchFetching = false;
+    let healthState = {
+      data: healthyRuntime,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockImplementation(() => ({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      isFetching: searchFetching,
+      refetch: mocks.refetch,
+    }));
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "旧查询" } });
+    act(() => vi.advanceTimersByTime(200));
+    fireEvent.change(input, { target: { value: "当前查询" } });
+
+    healthState = { ...healthState, isError: false };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(mocks.refetch).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(200));
+    expect(mocks.searchQuery).toHaveBeenLastCalledWith(
+      { q: "当前查询", page: 1, pageSize: 12 },
+      true,
+    );
+
+    healthState = { ...healthState, isError: true };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    searchFetching = true;
+    healthState = { ...healthState, isError: false };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(mocks.refetch).not.toHaveBeenCalled();
+  });
+
+  it("waits for cached health to recover before resolving recent resources", async () => {
+    recordCommandRecent([], {
+      kind: "resource",
+      resourceType: "task",
+      resourceId: "recovered-task",
+    });
+    mocks.getTask.mockResolvedValue({
+      id: "recovered-task",
+      title: "恢复后的最近任务",
+      status: "in_progress",
+    });
+    let healthState = {
+      data: healthyRuntime,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      isFetching: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    expect(mocks.getTask).not.toHaveBeenCalled();
+
+    healthState = { ...healthState, isError: false };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("option", { name: /恢复后的最近任务/ }),
+    ).toBeVisible();
+    expect(mocks.getTask).toHaveBeenCalledOnce();
+  });
+
+  it("enables only the current search when initial health recovers", () => {
+    vi.useFakeTimers();
+    let healthState = {
+      data: undefined as typeof healthyRuntime | undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      refetch: mocks.healthRefetch,
+    };
+    mocks.healthQuery.mockImplementation(() => healthState);
+    mocks.searchQuery.mockImplementation(
+      (_input: { q?: string }, _enabled: boolean) => ({
+        data: undefined,
+        isError: false,
+        isPending: false,
+        refetch: mocks.refetch,
+      }),
+    );
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    const view = render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "旧查询" } });
+    act(() => vi.advanceTimersByTime(200));
+    fireEvent.change(input, { target: { value: "当前查询" } });
+    act(() => vi.advanceTimersByTime(200));
+
+    healthState = {
+      ...healthState,
+      data: healthyRuntime,
+      isError: false,
+    };
+    view.rerender(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    const enabledCalls = mocks.searchQuery.mock.calls.filter(
+      ([, enabled]) => enabled,
+    );
+    expect(enabledCalls).toEqual([
+      [{ q: "当前查询", page: 1, pageSize: 12 }, true],
+    ]);
+    expect(mocks.refetch).not.toHaveBeenCalled();
   });
 
   it("opens the scheduled local Reminder list through its fixed command", () => {

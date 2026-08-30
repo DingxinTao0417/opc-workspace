@@ -10968,6 +10968,74 @@ kbd {
   color: var(--text-dim);
 }
 
+.command-runtime-status {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+  color: var(--text-muted);
+}
+
+.command-runtime-status[data-state="online"] .command-runtime-icon {
+  color: var(--green-light);
+}
+
+.command-runtime-status[data-state="stale"],
+.command-runtime-status[data-state="unavailable"] {
+  background: color-mix(in srgb, var(--red) 7%, var(--panel));
+  color: var(--danger-text);
+}
+
+.command-runtime-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.command-runtime-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.command-runtime-copy strong {
+  color: inherit;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.command-runtime-copy small {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-runtime-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.command-runtime-actions button {
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, var(--border));
+  border-radius: 6px;
+  color: inherit;
+  font-size: 9px;
+}
+
+.command-runtime-actions button:disabled,
+.command-runtime-actions button[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .command-list {
   max-height: 380px;
   overflow-y: auto;

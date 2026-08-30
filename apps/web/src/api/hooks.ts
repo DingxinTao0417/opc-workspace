@@ -303,7 +303,7 @@ export const searchQueryKey = ["search"] as const;
 export function useSearchQuery(input: SearchListParams, enabled = true) {
   return useQuery({
     queryKey: [...searchQueryKey, input],
-    queryFn: () => getSearchResults(input),
+    queryFn: ({ signal }) => getSearchResults(input, signal),
     enabled,
     retry: 1,
     retryDelay: 500,

@@ -39,6 +39,7 @@ import {
   useTaskLifecycleCommand,
   useSubmitTaskOutput,
   useReviewTaskSubmission,
+  useSearchQuery,
   useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
@@ -69,6 +70,7 @@ const reviewTaskSubmissionMock = vi.hoisted(() => vi.fn());
 const deleteTaskArtifactMock = vi.hoisted(() => vi.fn());
 const deleteTaskMock = vi.hoisted(() => vi.fn());
 const getTaskPageMock = vi.hoisted(() => vi.fn());
+const getSearchResultsMock = vi.hoisted(() => vi.fn());
 const getTodayStatsMock = vi.hoisted(() => vi.fn());
 const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllTasksMock = vi.hoisted(() => vi.fn());
@@ -97,6 +99,7 @@ vi.mock("./client", async () => {
     deleteTaskArtifact: deleteTaskArtifactMock,
     deleteTask: deleteTaskMock,
     getTaskPage: getTaskPageMock,
+    getSearchResults: getSearchResultsMock,
     getTodayStats: getTodayStatsMock,
     getTask: getTaskMock,
     getTasks: getTasksMock,
@@ -283,6 +286,63 @@ function wrapperFor(queryClient: QueryClient) {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+});
+
+describe("search query", () => {
+  it("aborts the obsolete request and keeps the new query result isolated", async () => {
+    let firstSignal: AbortSignal | undefined;
+    let markFirstStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    getSearchResultsMock.mockImplementation(
+      (input: { q: string }, signal?: AbortSignal) => {
+        if (input.q === "旧查询") {
+          firstSignal = signal;
+          markFirstStarted?.();
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return Promise.resolve({
+          items: [],
+          meta: { page: 1, pageSize: 12, total: 0 },
+        });
+      },
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const hook = renderHook(
+      ({ q }) => useSearchQuery({ q, page: 1, pageSize: 12 }),
+      {
+        initialProps: { q: "旧查询" },
+        wrapper: wrapperFor(queryClient),
+      },
+    );
+    await firstStarted;
+
+    hook.rerender({ q: "当前查询" });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+
+    expect(firstSignal).toBeDefined();
+    expect(firstSignal?.aborted).toBe(true);
+    expect(getSearchResultsMock).toHaveBeenLastCalledWith(
+      { q: "当前查询", page: 1, pageSize: 12 },
+      expect.any(AbortSignal),
+    );
+    expect(hook.result.current.data).toEqual({
+      items: [],
+      meta: { page: 1, pageSize: 12, total: 0 },
+    });
+
+    hook.unmount();
+    queryClient.clear();
+  });
 });
 
 describe("useCreateProject", () => {

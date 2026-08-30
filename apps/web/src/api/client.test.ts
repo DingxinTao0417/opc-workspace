@@ -41,6 +41,7 @@ import {
   getContentItem,
   getContentItems,
   getRestoreDiagnostics,
+  getSearchResults,
   getTags,
   getTaskPage,
   getTaskSavedViews,
@@ -234,6 +235,51 @@ describe("health response normalization", () => {
       }),
     ).toThrow(ApiError);
     expect(() => normalizeHealthResponse({ status: "ok" })).toThrow(ApiError);
+  });
+});
+
+describe("search requests", () => {
+  it("forwards query cancellation to the active Sidecar request", async () => {
+    const upstreamController = new AbortController();
+    const observed: { signal?: AbortSignal; url?: string } = {};
+    let markFetchStarted: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(
+      (input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          observed.url = String(input);
+          observed.signal = init?.signal ?? undefined;
+          markFetchStarted?.();
+          observed.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = getSearchResults(
+      { q: " 当前查询 ", page: 1, pageSize: 12 },
+      upstreamController.signal,
+    );
+    await fetchStarted;
+
+    const fetchSignal = observed.signal;
+    expect(fetchSignal).toBeDefined();
+    if (!fetchSignal) throw new Error("fetch did not receive an AbortSignal");
+    expect(fetchSignal).not.toBe(upstreamController.signal);
+    expect(fetchSignal.aborted).toBe(false);
+    expect(
+      new URL(observed.url!, "http://local.test").searchParams.get("q"),
+    ).toBe("当前查询");
+
+    upstreamController.abort();
+    expect(fetchSignal.aborted).toBe(true);
+    await expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 

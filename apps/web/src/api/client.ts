@@ -5544,6 +5544,7 @@ export function normalizeSearchListResult(value: unknown): SearchListResult {
 
 export async function getSearchResults(
   input: SearchListParams,
+  signal?: AbortSignal,
 ): Promise<SearchListResult> {
   const params = new URLSearchParams({
     q: input.q.trim(),
@@ -5551,7 +5552,9 @@ export async function getSearchResults(
     page_size: String(input.pageSize ?? 20),
   });
   if (input.types?.length) params.set("types", input.types.join(","));
-  const payload = await apiRequest<unknown>(`/api/v1/search?${params}`);
+  const payload = await apiRequest<unknown>(`/api/v1/search?${params}`, {
+    signal,
+  });
   return normalizeSearchListResult(payload);
 }
 
