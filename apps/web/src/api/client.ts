@@ -20,6 +20,7 @@ import type {
   AutomationRunStatus,
   AutomationTriggerType,
   AgentAdapter,
+  BackupArchiveDownload,
   BackupSummary,
   BackupRestoreDrillResult,
   BackupVerificationStatus,
@@ -6834,6 +6835,41 @@ export async function deleteBackup(id: string): Promise<void> {
   await apiRequest<unknown>(
     `/api/v1/backups/${encodeURIComponent(id)}?confirm=true`,
     { method: "DELETE" },
+    BACKUP_OPERATION_TIMEOUT_MS,
+  );
+}
+
+export async function downloadBackupArchive(
+  id: string,
+): Promise<BackupArchiveDownload> {
+  return apiFetch(
+    `/api/v1/backups/${encodeURIComponent(id)}/archive`,
+    async (response) => {
+      const contentType = response.headers.get("Content-Type");
+      const mimeType = contentType?.split(";", 1)[0]?.trim().toLowerCase();
+      if (
+        mimeType !== "application/zip" ||
+        response.headers.get("X-Backup-Package-Format-Version") !== "1" ||
+        response.headers.get("X-Backup-ID") !== id
+      ) {
+        return invalidResponse("完整备份下载响应格式无效");
+      }
+      const blob = await response.blob();
+      if (blob.size === 0) {
+        return invalidResponse("完整备份下载响应格式无效");
+      }
+      return {
+        blob,
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          `opc-workspace-backup-${id}.zip`,
+        ),
+        backupId: id,
+        formatVersion: 1,
+      };
+    },
+    {},
+    "application/zip",
     BACKUP_OPERATION_TIMEOUT_MS,
   );
 }

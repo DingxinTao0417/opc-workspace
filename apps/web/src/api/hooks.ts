@@ -55,6 +55,7 @@ import {
   downloadProjectAttachment,
   downloadBusinessDataExport,
   downloadBusinessPackage,
+  downloadBackupArchive,
   downloadDiagnosticPackage,
   downloadFinancialEntriesCSV,
   downloadInvoicePdf,
@@ -448,6 +449,10 @@ export function useDeleteBackup() {
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
   });
+}
+
+export function useDownloadBackupArchive() {
+  return useMutation({ mutationFn: (id: string) => downloadBackupArchive(id) });
 }
 
 export function useExportBusinessData() {

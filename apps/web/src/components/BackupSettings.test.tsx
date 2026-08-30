@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
@@ -50,6 +51,7 @@ const scheduledPolicy: ScheduledBackupPolicy = {
 };
 
 const mocks = vi.hoisted(() => ({
+  backupItems: [] as BackupSummary[],
   create: vi.fn(),
   createError: null as Error | null,
   verify: vi.fn(),
@@ -57,6 +59,10 @@ const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
   restoreError: null as Error | null,
   deleteBackup: vi.fn(),
+  downloadArchive: vi.fn(),
+  downloadArchiveError: null as Error | null,
+  downloadArchivePending: false,
+  downloadArchiveReset: vi.fn(),
   exportData: vi.fn(),
   exportPackage: vi.fn(),
   previewImport: vi.fn(),
@@ -101,24 +107,7 @@ vi.mock("../api/hooks", () => ({
     refetch: mocks.refetch,
   }),
   useBackupsQuery: () => ({
-    data: [
-      {
-        id: "018f0000-0000-7000-8000-000000001701",
-        createdAt: "2026-08-28T12:00:00Z",
-        verifiedAt: "2026-08-28T12:00:02Z",
-        verificationStatus: "verified",
-        note: "提交前检查点",
-        appVersion: "0.1.0",
-        apiVersion: "v1",
-        schemaVersion: 18,
-        artifactCount: 2,
-        artifactBytes: 4096,
-        databaseBytes: 65536,
-        totalBytes: 69632,
-        error: null,
-        kind: "manual",
-      },
-    ],
+    data: mocks.backupItems,
     isPending: false,
     isFetching: false,
     isError: false,
@@ -169,6 +158,12 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
+  useDownloadBackupArchive: () => ({
+    mutate: mocks.downloadArchive,
+    reset: mocks.downloadArchiveReset,
+    isPending: mocks.downloadArchivePending,
+    error: mocks.downloadArchiveError,
+  }),
   useExportBusinessData: () => ({
     mutate: mocks.exportData,
     reset: mocks.reset,
@@ -210,9 +205,14 @@ vi.mock("../api/hooks", () => ({
 }));
 
 describe("BackupSettings", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
+    mocks.backupItems = [backup];
     Object.assign(mocks.restoreDiagnostics, {
       status: "idle",
       restartRequired: false,
@@ -266,6 +266,10 @@ describe("BackupSettings", () => {
     mocks.drill.mockClear();
     mocks.restore.mockClear();
     mocks.deleteBackup.mockClear();
+    mocks.downloadArchive.mockReset();
+    mocks.downloadArchiveReset.mockReset();
+    mocks.downloadArchiveError = null;
+    mocks.downloadArchivePending = false;
     mocks.exportData.mockClear();
     mocks.exportPackage.mockClear();
     mocks.previewImport.mockClear();
@@ -278,6 +282,222 @@ describe("BackupSettings", () => {
     mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
+  });
+
+  it("downloads a complete backup archive and revokes its object URL", async () => {
+    const createObjectURL = vi.fn(() => "blob:complete-backup");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    const blob = new Blob(["complete backup"], { type: "application/zip" });
+    mocks.downloadArchive.mockImplementationOnce(
+      (
+        id: string,
+        options: {
+          onSuccess: (result: {
+            blob: Blob;
+            fileName: string;
+            backupId: string;
+            formatVersion: number;
+          }) => void;
+          onSettled: () => void;
+        },
+      ) => {
+        options.onSuccess({
+          blob,
+          fileName: "opc-workspace-backup.zip",
+          backupId: id,
+          formatVersion: 1,
+        });
+        options.onSettled();
+      },
+    );
+
+    render(<BackupSettings />);
+    expect(
+      screen.getByText(/完整备份包含 SQLite、工作区身份、历史和受控文件/),
+    ).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: /下载完整备份 018f0000/ }),
+    );
+
+    expect(mocks.downloadArchive).toHaveBeenCalledWith(
+      backup.id,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onSettled: expect.any(Function),
+      }),
+    );
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick.mock.instances[0]).toMatchObject({
+      download: "opc-workspace-backup.zip",
+      href: "blob:complete-backup",
+    });
+    expect(
+      screen.getByText("敏感的完整本机备份已保存：opc-workspace-backup.zip"),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:complete-backup"),
+    );
+    expect(mocks.refetch).not.toHaveBeenCalled();
+  });
+
+  it("locks duplicate exports while showing progress only on the target card", () => {
+    const secondBackup: BackupSummary = {
+      ...backup,
+      id: "028f0000-0000-7000-8000-000000001702",
+      note: "未校验备份",
+      verifiedAt: null,
+      verificationStatus: "unverified",
+    };
+    mocks.backupItems = [backup, secondBackup];
+    mocks.downloadArchive.mockImplementationOnce(() => {
+      mocks.downloadArchivePending = true;
+    });
+
+    render(<BackupSettings />);
+    const firstCard = screen.getByText("提交前检查点").closest("article");
+    const secondCard = screen.getByText("未校验备份").closest("article");
+    expect(firstCard).not.toBeNull();
+    expect(secondCard).not.toBeNull();
+
+    fireEvent.click(
+      within(firstCard!).getByRole("button", { name: /下载完整备份/ }),
+    );
+
+    const activeButton = within(firstCard!).getByRole("button", {
+      name: /下载完整备份/,
+    });
+    const otherButton = within(secondCard!).getByRole("button", {
+      name: /下载完整备份/,
+    });
+    expect(activeButton).toBeDisabled();
+    expect(activeButton).toHaveTextContent("正在导出…");
+    expect(activeButton.querySelector(".animate-spin")).not.toBeNull();
+    expect(otherButton).toBeDisabled();
+    expect(otherButton).toHaveTextContent("下载完整备份");
+    expect(otherButton.querySelector(".animate-spin")).toBeNull();
+
+    fireEvent.click(otherButton);
+    expect(mocks.downloadArchive).toHaveBeenCalledOnce();
+  });
+
+  it("disables invalid backup exports while allowing unverified backups", () => {
+    mocks.backupItems = [
+      {
+        ...backup,
+        note: "损坏备份",
+        verificationStatus: "invalid",
+        error: "manifest mismatch",
+      },
+      {
+        ...backup,
+        id: "028f0000-0000-7000-8000-000000001702",
+        note: "尚未校验",
+        verifiedAt: null,
+        verificationStatus: "unverified",
+      },
+    ];
+
+    render(<BackupSettings />);
+
+    expect(
+      within(screen.getByText("损坏备份").closest("article")!).getByRole(
+        "button",
+        { name: /下载完整备份/ },
+      ),
+    ).toBeDisabled();
+    expect(
+      within(screen.getByText("尚未校验").closest("article")!).getByRole(
+        "button",
+        { name: /下载完整备份/ },
+      ),
+    ).toBeEnabled();
+  });
+
+  it("reports when the runtime cannot save a complete backup", () => {
+    vi.stubGlobal("URL", {});
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    mocks.downloadArchive.mockImplementationOnce(
+      (
+        id: string,
+        options: {
+          onSuccess: (result: {
+            blob: Blob;
+            fileName: string;
+            backupId: string;
+            formatVersion: number;
+          }) => void;
+          onSettled: () => void;
+        },
+      ) => {
+        options.onSuccess({
+          blob: new Blob(["backup"]),
+          fileName: "backup.zip",
+          backupId: id,
+          formatVersion: 1,
+        });
+        options.onSettled();
+      },
+    );
+
+    render(<BackupSettings />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /下载完整备份 018f0000/ }),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "当前运行环境不支持保存完整备份，请在桌面应用中重试。",
+    );
+    expect(anchorClick).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: "BACKUP_INVALID",
+      message: "备份完整性校验失败，请勿下载或用它恢复数据。",
+    },
+    {
+      code: "BACKUP_NOT_FOUND",
+      message: "备份不存在或已被删除，请刷新备份列表。",
+    },
+    {
+      code: "BACKUP_EXPORT_SPACE_INSUFFICIENT",
+      message: "导出完整备份所需的临时空间不足，请清理本地磁盘后重试。",
+    },
+    {
+      code: "BACKUP_EXPORT_CAPACITY_UNAVAILABLE",
+      message: "暂时无法确认完整备份导出容量，请检查本地存储后重试。",
+    },
+    {
+      code: "BACKUP_EXPORT_FAILED",
+      message: "无法生成完整备份 ZIP，请重新校验备份后重试。",
+    },
+    {
+      code: "RESTORE_RESTART_REQUIRED",
+      message: "恢复已经挂起，请关闭并重新打开应用后继续。",
+    },
+  ])("shows sanitized $code archive export feedback", ({ code, message }) => {
+    mocks.downloadArchiveError = new ApiError("private archive path", {
+      code,
+      status: 500,
+      requestId: "request-backup-archive",
+    });
+
+    render(<BackupSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "请求 request-backup-archive",
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent(
+      "private archive path",
+    );
   });
 
   it("previews scheduled backup changes immediately and restores the saved policy on cancel", () => {

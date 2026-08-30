@@ -22,6 +22,7 @@ import {
   useApplyBusinessPackageImport,
   useCreateBackup,
   useDeleteBackup,
+  useDownloadBackupArchive,
   useDrillBackupRestore,
   useExportBusinessData,
   useExportBusinessPackage,
@@ -158,6 +159,8 @@ function ImportAppendDetails({ preview }: { preview: ImportPreview }) {
 function backupErrorText(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof ApiError) {
+    const withRequest = (message: string) =>
+      error.requestId ? `${message} · 请求 ${error.requestId}` : message;
     if (error.code === "BACKUP_SPACE_INSUFFICIENT") {
       return "备份位置可用空间不足，请清理备份位置或旧备份后重试。";
     }
@@ -165,7 +168,23 @@ function backupErrorText(error: unknown): string {
       return "暂时无法确认备份容量，请刷新容量状态并确认本地存储可用后重试。";
     }
     if (error.code === "BACKUP_INVALID") {
-      return "备份完整性校验失败，请勿用它恢复数据。";
+      return withRequest("备份完整性校验失败，请勿下载或用它恢复数据。");
+    }
+    if (error.code === "BACKUP_NOT_FOUND") {
+      return withRequest("备份不存在或已被删除，请刷新备份列表。");
+    }
+    if (error.code === "BACKUP_EXPORT_SPACE_INSUFFICIENT") {
+      return withRequest(
+        "导出完整备份所需的临时空间不足，请清理本地磁盘后重试。",
+      );
+    }
+    if (error.code === "BACKUP_EXPORT_CAPACITY_UNAVAILABLE") {
+      return withRequest(
+        "暂时无法确认完整备份导出容量，请检查本地存储后重试。",
+      );
+    }
+    if (error.code === "BACKUP_EXPORT_FAILED") {
+      return withRequest("无法生成完整备份 ZIP，请重新校验备份后重试。");
     }
     if (error.code === "IDEMPOTENCY_CONFLICT") {
       return "这次创建请求与上一次内容不一致，请重新操作。";
@@ -195,7 +214,7 @@ function backupErrorText(error: unknown): string {
       return "已有另一个备份等待恢复，请先关闭并重新打开应用。";
     }
     if (error.code === "RESTORE_RESTART_REQUIRED") {
-      return "恢复已经挂起，请关闭并重新打开应用后继续。";
+      return withRequest("恢复已经挂起，请关闭并重新打开应用后继续。");
     }
     if (error.code === "BACKUP_DELETE_UNSAFE") {
       return "备份目录包含不安全的文件系统项，已拒绝删除。";
@@ -284,8 +303,10 @@ function BackupCard({
   backup,
   busy,
   drillingId,
+  exportingId,
   verifyingId,
   onDrill,
+  onExport,
   onDelete,
   onRestore,
   onVerify,
@@ -293,8 +314,10 @@ function BackupCard({
   backup: BackupSummary;
   busy: boolean;
   drillingId: string | null;
+  exportingId: string | null;
   verifyingId: string | null;
   onDrill: (id: string) => void;
+  onExport: (id: string) => void;
   onDelete: (backup: BackupSummary) => void;
   onRestore: (backup: BackupSummary) => void;
   onVerify: (id: string) => void;
@@ -302,6 +325,7 @@ function BackupCard({
   const invalid = backup.verificationStatus === "invalid";
   const verifying = verifyingId === backup.id;
   const drilling = drillingId === backup.id;
+  const exporting = exportingId === backup.id;
   return (
     <article
       className="settings-backup-card"
@@ -331,6 +355,20 @@ function BackupCard({
         <small title={backup.id}>ID {backup.id.slice(0, 8)}</small>
       </div>
       <div className="settings-backup-card-actions">
+        <button
+          aria-label={`下载完整备份 ${backup.id.slice(0, 8)}`}
+          className="button button-secondary"
+          disabled={busy || invalid}
+          onClick={() => onExport(backup.id)}
+          type="button"
+        >
+          {exporting ? (
+            <LoaderCircle className="animate-spin" size={13} />
+          ) : (
+            <Download size={13} />
+          )}
+          {exporting ? "正在导出…" : "下载完整备份"}
+        </button>
         <button
           aria-label={`重新校验备份 ${backup.id.slice(0, 8)}`}
           className="button button-secondary settings-backup-verify"
@@ -398,6 +436,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const drillMutation = useDrillBackupRestore();
   const restoreMutation = useScheduleBackupRestore();
   const deleteMutation = useDeleteBackup();
+  const backupArchiveMutation = useDownloadBackupArchive();
   const exportMutation = useExportBusinessData();
   const packageExportMutation = useExportBusinessPackage();
   const importPreviewMutation = usePreviewBusinessDataImport();
@@ -409,6 +448,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const [note, setNote] = useState("");
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [drillingId, setDrillingId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [restoreCandidate, setRestoreCandidate] =
     useState<BackupSummary | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<BackupSummary | null>(
@@ -437,6 +477,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     drillMutation.isPending ||
     restoreMutation.isPending ||
     deleteMutation.isPending ||
+    backupArchiveMutation.isPending ||
     exportMutation.isPending ||
     packageExportMutation.isPending ||
     importPreviewMutation.isPending ||
@@ -462,6 +503,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     drillMutation.error ??
     restoreMutation.error ??
     deleteMutation.error ??
+    backupArchiveMutation.error ??
     exportMutation.error ??
     packageExportMutation.error ??
     importPreviewMutation.error ??
@@ -518,6 +560,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
 
   const resetExportFeedback = () => {
     setDownloadError(null);
+    backupArchiveMutation.reset();
     exportMutation.reset();
     packageExportMutation.reset();
   };
@@ -627,6 +670,41 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
         setDeleteCandidate(null);
         setSuccess(`备份 ${id.slice(0, 8)} 已永久删除。`);
       },
+    });
+  };
+
+  const exportBackupArchive = (id: string) => {
+    setSuccess(null);
+    resetExportFeedback();
+    setExportingId(id);
+    createMutation.reset();
+    verifyMutation.reset();
+    drillMutation.reset();
+    restoreMutation.reset();
+    deleteMutation.reset();
+    backupArchiveMutation.mutate(id, {
+      onSuccess: (result) => {
+        if (
+          typeof URL === "undefined" ||
+          typeof URL.createObjectURL !== "function"
+        ) {
+          setDownloadError(
+            "当前运行环境不支持保存完整备份，请在桌面应用中重试。",
+          );
+          return;
+        }
+        const url = URL.createObjectURL(result.blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.fileName;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+        setSuccess(`敏感的完整本机备份已保存：${result.fileName}`);
+      },
+      onSettled: () => setExportingId(null),
     });
   };
 
@@ -1295,7 +1373,11 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       <div className="settings-backup-list-header">
         <div>
           <strong>本地备份</strong>
-          <span>列表展示上次成功校验记录，可随时重新进行完整校验。</span>
+          <span>
+            列表展示上次成功校验记录；下载的完整备份包含
+            SQLite、工作区身份、历史和受控文件，属于敏感本机数据，不适合作为普通业务
+            ZIP 分享。
+          </span>
         </div>
         <button
           aria-label="刷新备份列表"
@@ -1344,8 +1426,10 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
               backup={backup}
               busy={locked}
               drillingId={drillingId}
+              exportingId={exportingId}
               key={backup.id}
               onDrill={drill}
+              onExport={exportBackupArchive}
               onDelete={chooseDelete}
               onRestore={chooseRestore}
               onVerify={verify}

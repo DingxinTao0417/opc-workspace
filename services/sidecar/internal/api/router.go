@@ -279,6 +279,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/backups/policy", service.getScheduledBackupPolicy)
 		v1.PATCH("/backups/policy", service.updateScheduledBackupPolicy)
 		v1.POST("/backups", service.createBackup)
+		v1.GET("/backups/:id/archive", service.downloadBackupArchive)
 		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.POST("/backups/:id/drill", service.drillBackupRestore)
 		v1.POST("/backups/:id/restore", service.scheduleBackupRestore)

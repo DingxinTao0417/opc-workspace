@@ -23,6 +23,7 @@ import {
   drillBackupRestore,
   downloadBusinessDataExport,
   downloadBusinessPackage,
+  downloadBackupArchive,
   downloadDiagnosticPackage,
   endTaskAssignment,
   executeTaskLifecycleCommand,
@@ -1716,6 +1717,26 @@ const backupPayload = {
   kind: "manual",
 };
 
+function backupArchiveResponse({
+  contentType = "application/zip",
+  formatVersion = "1",
+  backupId = backupPayload.id,
+  body = new Uint8Array([80, 75, 3, 4]),
+}: {
+  contentType?: string | null;
+  formatVersion?: string | null;
+  backupId?: string | null;
+  body?: BodyInit | null;
+} = {}) {
+  const headers = new Headers();
+  if (contentType !== null) headers.set("Content-Type", contentType);
+  if (formatVersion !== null) {
+    headers.set("X-Backup-Package-Format-Version", formatVersion);
+  }
+  if (backupId !== null) headers.set("X-Backup-ID", backupId);
+  return new Response(body, { status: 200, headers });
+}
+
 describe("verified local backups", () => {
   it("strictly normalizes valid and invalid backup summaries", () => {
     expect(normalizeBackupSummary(backupPayload)).toEqual({
@@ -1848,6 +1869,50 @@ describe("verified local backups", () => {
       `/api/v1/backups/${backupPayload.id}?confirm=true`,
     );
     expect(fetchMock.mock.calls[5][1]?.method).toBe("DELETE");
+  });
+
+  it("downloads a non-empty versioned backup ZIP with encoded identity and a safe fallback name", async () => {
+    const id = "backup id";
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        backupArchiveResponse({ backupId: id }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await downloadBackupArchive(id);
+    expect(result).toMatchObject({
+      fileName: "opc-workspace-backup-backup id.zip",
+      backupId: id,
+      formatVersion: 1,
+    });
+    expect(result.blob).toBeInstanceOf(Blob);
+    expect(result.blob.size).toBe(4);
+    expect(result.blob.type).toBe("application/zip");
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(url.pathname).toBe("/api/v1/backups/backup%20id/archive");
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get("Accept")).toBe(
+      "application/zip",
+    );
+  });
+
+  it.each([
+    ["missing MIME", { contentType: null }],
+    ["non-ZIP MIME", { contentType: "application/zipper" }],
+    ["wrong format version", { formatVersion: "2" }],
+    ["wrong backup identity", { backupId: "different-backup" }],
+    ["empty Blob", { body: null }],
+  ])("rejects a backup archive with %s", async (_name, options) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => backupArchiveResponse(options)),
+    );
+
+    await expect(downloadBackupArchive(backupPayload.id)).rejects.toMatchObject(
+      { code: "INVALID_RESPONSE" },
+    );
   });
 
   it("downloads a versioned business JSON package with a safe filename", async () => {

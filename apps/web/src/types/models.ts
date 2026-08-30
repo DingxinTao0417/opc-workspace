@@ -2233,6 +2233,13 @@ export interface CreateBackupInput {
   note: string;
 }
 
+export interface BackupArchiveDownload {
+  blob: Blob;
+  fileName: string;
+  backupId: string;
+  formatVersion: 1;
+}
+
 export type ScheduledBackupStatus = "idle" | "succeeded" | "failed";
 
 export interface ScheduledBackupPolicy {
