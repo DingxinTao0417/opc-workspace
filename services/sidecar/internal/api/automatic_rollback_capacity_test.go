@@ -115,9 +115,7 @@ func TestBusinessImportRejectsUnavailableRollbackCapacity(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_CAPACITY_UNAVAILABLE" {
 		t.Fatalf("unavailable import capacity = %d: %s", response.Code, response.Body.String())
 	}
-	if stringBody := response.Body.String(); containsAny(stringBody, "private capacity failure", "123", "456", backupDir) {
-		t.Fatalf("capacity response leaked private details: %s", stringBody)
-	}
+	assertCapacityErrorDoesNotLeak(t, response.Body.Bytes(), "private capacity failure", "123", "456", backupDir)
 	assertBackupRootEmpty(t, backupDir)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM clients", 0)
 }
@@ -184,9 +182,7 @@ func TestRestoreRejectsUnavailableRollbackCapacityWithoutLeakingProbeError(t *te
 	if response.Code != http.StatusServiceUnavailable || responseErrorCode(t, response.Body.Bytes()) != "RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE" {
 		t.Fatalf("restore unavailable capacity = %d: %s", response.Code, response.Body.String())
 	}
-	if stringBody := response.Body.String(); containsAny(stringBody, "private restore capacity failure", "123", "456", backupDir) {
-		t.Fatalf("restore capacity response leaked private details: %s", stringBody)
-	}
+	assertCapacityErrorDoesNotLeak(t, response.Body.Bytes(), "private restore capacity failure", "123", "456", backupDir)
 	entries, err := os.ReadDir(backupDir)
 	if err != nil || len(entries) != 1 || entries[0].Name() != target.ID {
 		t.Fatalf("restore capacity refusal changed backup root entries=%v err=%v", entries, err)
@@ -204,4 +200,31 @@ func containsAny(value string, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+func assertCapacityErrorDoesNotLeak(t *testing.T, body []byte, needles ...string) {
+	t.Helper()
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatalf("decode capacity error response: %v", err)
+	}
+	for _, key := range []string{"code", "message", "request_id"} {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("capacity error response is missing %q: %s", key, body)
+		}
+	}
+	if len(fields) != 3 {
+		t.Fatalf("capacity error response exposed unexpected fields: %s", body)
+	}
+
+	var response errorResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatalf("decode typed capacity error response: %v", err)
+	}
+	if response.RequestID == "" {
+		t.Fatalf("capacity error response is missing a request ID: %s", body)
+	}
+	if publicError := response.Code + "\n" + response.Message; containsAny(publicError, needles...) {
+		t.Fatalf("capacity response leaked private details: %s", body)
+	}
 }
