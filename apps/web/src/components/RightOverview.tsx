@@ -11,6 +11,7 @@ import {
 import { Link } from "react-router-dom";
 import {
   useActiveFocusSessionQuery,
+  useIncomeStatsQuery,
   usePauseFocusSession,
   useRecentClientActivitiesQuery,
   useRoadmapMilestonesQuery,
@@ -31,6 +32,20 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function currentMonthBounds(date = new Date()) {
+  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { dateFrom: localDateKey(firstDay), dateTo: localDateKey(lastDay) };
+}
+
+function formatCny(amountMinor: number) {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: 2,
+  }).format(amountMinor / 100);
+}
+
 function milestoneDateLabel(targetDate: string) {
   if (targetDate < localDateKey()) return "已逾期";
   if (targetDate === localDateKey()) return "今天";
@@ -40,6 +55,10 @@ function milestoneDateLabel(targetDate: string) {
 
 export function RightOverview() {
   const focusQuery = useActiveFocusSessionQuery();
+  const incomeStatsQuery = useIncomeStatsQuery({
+    currency: "CNY",
+    ...currentMonthBounds(),
+  });
   const recentActivitiesQuery = useRecentClientActivitiesQuery(3);
   const plannedMilestonesQuery = useRoadmapMilestonesQuery({
     page: 1,
@@ -288,10 +307,30 @@ export function RightOverview() {
 
       <section className="overview-card">
         <div className="overview-label">本月收入</div>
-        <div className="income-number-row">
-          <strong>¥0</strong>
-        </div>
-        <div className="overview-footnote">暂无收入记录</div>
+        {incomeStatsQuery.isPending ? (
+          <div className="overview-footnote">正在读取本月收入…</div>
+        ) : incomeStatsQuery.isError ? (
+          <button
+            className="overview-activity-retry"
+            onClick={() => void incomeStatsQuery.refetch()}
+            type="button"
+          >
+            <RefreshCw size={12} /> 收入读取失败，重试
+          </button>
+        ) : (
+          <>
+            <div className="income-number-row">
+              <strong>
+                {formatCny(incomeStatsQuery.data.confirmedIncomeMinor)}
+              </strong>
+            </div>
+            <div className="overview-footnote">
+              {incomeStatsQuery.data.entryCount === 0
+                ? "暂无收入记录"
+                : `${incomeStatsQuery.data.confirmedIncomeCount} 笔已确认`}
+            </div>
+          </>
+        )}
         <Link className="overview-link" to="/income">
           查看收入 <ArrowUpRight size={13} />
         </Link>

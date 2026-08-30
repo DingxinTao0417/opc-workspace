@@ -6,6 +6,8 @@ import { RightOverview } from "./RightOverview";
 const mocks = vi.hoisted(() => ({
   recent: vi.fn(),
   refetch: vi.fn(),
+  income: vi.fn(),
+  incomeRefetch: vi.fn(),
   roadmap: vi.fn(),
   roadmapRefetch: vi.fn(),
 }));
@@ -18,6 +20,7 @@ vi.mock("../api/hooks", () => ({
   }),
   usePauseFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
   useResumeFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
+  useIncomeStatsQuery: mocks.income,
   useRecentClientActivitiesQuery: mocks.recent,
   useRoadmapMilestonesQuery: mocks.roadmap,
 }));
@@ -46,6 +49,25 @@ afterEach(() => cleanup());
 
 beforeEach(() => {
   mocks.refetch.mockReset();
+  mocks.income.mockReset();
+  mocks.incomeRefetch.mockReset();
+  mocks.income.mockReturnValue({
+    data: {
+      averageIncomeMinor: 0,
+      confirmedExpenseCount: 0,
+      confirmedExpenseMinor: 0,
+      confirmedIncomeCount: 0,
+      confirmedIncomeMinor: 0,
+      currency: "CNY",
+      entryCount: 0,
+      netCashFlowMinor: 0,
+      pendingExpenseMinor: 0,
+      pendingIncomeMinor: 0,
+    },
+    isError: false,
+    isPending: false,
+    refetch: mocks.incomeRefetch,
+  });
   mocks.recent.mockReset();
   mocks.recent.mockReturnValue({
     data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
@@ -91,6 +113,66 @@ function milestone(
     },
   };
 }
+
+describe("RightOverview monthly income", () => {
+  it("shows confirmed CNY income from the local ledger", () => {
+    mocks.income.mockReturnValue({
+      data: {
+        averageIncomeMinor: 123456,
+        confirmedExpenseCount: 0,
+        confirmedExpenseMinor: 0,
+        confirmedIncomeCount: 2,
+        confirmedIncomeMinor: 246912,
+        currency: "CNY",
+        entryCount: 3,
+        netCashFlowMinor: 246912,
+        pendingExpenseMinor: 0,
+        pendingIncomeMinor: 8000,
+      },
+      isError: false,
+      isPending: false,
+      refetch: mocks.incomeRefetch,
+    });
+
+    render(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("¥2,469.12")).toBeInTheDocument();
+    expect(screen.getByText("2 笔已确认")).toBeInTheDocument();
+  });
+
+  it("keeps explicit loading and retry states", () => {
+    mocks.income.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isPending: false,
+      refetch: mocks.incomeRefetch,
+    });
+    const { rerender } = render(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "收入读取失败，重试" }));
+    expect(mocks.incomeRefetch).toHaveBeenCalledTimes(1);
+
+    mocks.income.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: true,
+      refetch: mocks.incomeRefetch,
+    });
+    rerender(
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("正在读取本月收入…")).toBeInTheDocument();
+  });
+});
 
 describe("RightOverview recent client activities", () => {
   it("shows real local activity facts and links to the owning client", () => {

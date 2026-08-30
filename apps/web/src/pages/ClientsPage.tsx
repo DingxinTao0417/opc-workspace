@@ -195,7 +195,7 @@ export function ClientsPage() {
                     </td>
                     <td>{client.contactName ?? "—"}</td>
                     <td className="client-count-cell">{client.projectCount}</td>
-                    <td className="muted-cell">v0.4 后可用</td>
+                    <td className="muted-cell">待客户聚合</td>
                     <td>
                       <span
                         className={`status-badge client-status ${statusClass(client.status)}`}

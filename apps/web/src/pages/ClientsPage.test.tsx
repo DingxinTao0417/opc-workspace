@@ -56,7 +56,7 @@ describe("ClientsPage", () => {
 
     expect(screen.getByRole("columnheader", { name: "客户" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "累计收入" })).toBeTruthy();
-    expect(screen.getByText("v0.4 后可用")).toBeTruthy();
+    expect(screen.getByText("待客户聚合")).toBeTruthy();
     expect(screen.getByText("暂无本地活动")).toBeTruthy();
     expect(screen.getAllByText("潜在客户")).toHaveLength(2);
     expect(screen.getByRole("link", { name: "星河工作室" })).toHaveAttribute(

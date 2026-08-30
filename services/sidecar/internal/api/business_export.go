@@ -40,6 +40,7 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "tags", OrderBy: "id"},
 	{Name: "task_tags", OrderBy: "task_id, tag_id"},
 	{Name: "invoices", OrderBy: "id"},
+	{Name: "financial_entries", OrderBy: "occurred_on, created_at, id"},
 	{Name: "actors", OrderBy: "id"},
 	{Name: "task_assignments", OrderBy: "id"},
 	{Name: "workflow_events", OrderBy: "id"},
@@ -68,6 +69,7 @@ var businessExportExcludedTables = []string{
 	"workspace_avatar_deletion_tombstones",
 	"task_focus_totals",
 	"storage_capacity_samples",
+	"scheduled_backup_policy",
 }
 
 type businessExportTable struct {

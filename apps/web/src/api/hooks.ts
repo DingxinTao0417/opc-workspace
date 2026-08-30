@@ -26,6 +26,7 @@ import {
   createClientActivity,
   createClientAttachment,
   createClientActorLink,
+  createFinancialEntry,
   createFocusSession,
   createReminder,
   createPersonActor,
@@ -55,6 +56,7 @@ import {
   downloadBusinessDataExport,
   downloadBusinessPackage,
   downloadDiagnosticPackage,
+  downloadFinancialEntriesCSV,
   previewBusinessDataImport,
   previewBusinessPackageImport,
   endTaskAssignment,
@@ -68,6 +70,7 @@ import {
   getStorageCapacity,
   getStorageCapacityHistory,
   getInboxStats,
+  getIncomeStats,
   getActor,
   getActors,
   getClient,
@@ -78,6 +81,8 @@ import {
   getClientActorLinks,
   getClients,
   getActiveFocusSession,
+  getFinancialEntries,
+  getFinancialEntry,
   getFocusReport,
   getFocusSessions,
   getHealth,
@@ -151,6 +156,7 @@ import {
   updateClient,
   updateClientFollowup,
   updateClientActivity,
+  updateFinancialEntry,
   updateInboxItem,
   updateInboxItemTaskRequirement,
   updateTag,
@@ -166,6 +172,7 @@ import {
   updateScheduledBackupPolicy,
   unlinkInboxItemTask,
   verifyBackup,
+  voidFinancialEntry,
 } from "./client";
 import type {
   ActorListParams,
@@ -210,6 +217,8 @@ import type {
   FocusReportParams,
   FocusSessionListParams,
   FocusSessionSnapshot,
+  FinancialEntryInput,
+  FinancialEntryListParams,
   ForceResolveInboxItemInput,
   CreateInboxItemInput,
   InboxEventListParams,
@@ -217,6 +226,7 @@ import type {
   InboxItemCommandInput,
   InboxItemListParams,
   InboxItemTaskListParams,
+  IncomeStatsParams,
   LinkInboxItemTaskInput,
   MarkAllInboxReadInput,
   CancelReminderInput,
@@ -256,6 +266,7 @@ import type {
   SkipClientFollowupInput,
   UpdateClientFollowupInput,
   UpdateClientActivityInput,
+  UpdateFinancialEntryInput,
   UpdateInboxItemInput,
   UpdateInboxItemTaskRequirementInput,
   UpdateTagInput,
@@ -265,6 +276,7 @@ import type {
   UpdateScheduledBackupPolicyInput,
   UpdateTaskInput,
   UnlinkInboxItemTaskInput,
+  VoidFinancialEntryInput,
 } from "../types/models";
 
 export const settingsQueryKey = ["settings"] as const;
@@ -705,6 +717,124 @@ export function useDeleteClient() {
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       }
     },
+  });
+}
+
+export const financialEntryQueryKey = ["financial-entries"] as const;
+export const financialEntryDetailQueryKey = (id: string) =>
+  [...financialEntryQueryKey, "detail", id] as const;
+export const incomeStatsQueryKey = ["income-stats"] as const;
+
+export function useFinancialEntriesQuery(
+  input: FinancialEntryListParams = {},
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...financialEntryQueryKey, "list", input],
+    queryFn: () => getFinancialEntries(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useFinancialEntryQuery(id: string | null) {
+  return useQuery({
+    queryKey: financialEntryDetailQueryKey(id ?? "missing"),
+    queryFn: () => getFinancialEntry(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+export function useIncomeStatsQuery(input: IncomeStatsParams, enabled = true) {
+  return useQuery({
+    queryKey: [...incomeStatsQueryKey, input],
+    queryFn: () => getIncomeStats(input),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+async function invalidateFinancialReadModels(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
+    queryClient.invalidateQueries({ queryKey: incomeStatsQueryKey }),
+  ]);
+}
+
+export function useCreateFinancialEntry() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: FinancialEntryInput) => {
+      const fingerprint = JSON.stringify(input);
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return createFinancialEntry(input, attempt.current.key);
+    },
+    onSuccess: async (entry) => {
+      attempt.current = null;
+      queryClient.setQueryData(financialEntryDetailQueryKey(entry.id), entry);
+      await invalidateFinancialReadModels(queryClient);
+    },
+  });
+}
+
+export function useUpdateFinancialEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: UpdateFinancialEntryInput;
+    }) => updateFinancialEntry(id, input),
+    onSuccess: async (entry) => {
+      queryClient.setQueryData(financialEntryDetailQueryKey(entry.id), entry);
+      await invalidateFinancialReadModels(queryClient);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateFinancialReadModels(queryClient);
+      }
+    },
+  });
+}
+
+export function useVoidFinancialEntry() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: VoidFinancialEntryInput;
+    }) => voidFinancialEntry(id, input),
+    onSuccess: async (entry) => {
+      queryClient.setQueryData(financialEntryDetailQueryKey(entry.id), entry);
+      await invalidateFinancialReadModels(queryClient);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateFinancialReadModels(queryClient);
+      }
+    },
+  });
+}
+
+export function useExportFinancialEntries() {
+  return useMutation({
+    mutationFn: (input: FinancialEntryListParams) =>
+      downloadFinancialEntriesCSV(input),
   });
 }
 

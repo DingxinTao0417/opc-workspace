@@ -20,8 +20,8 @@ func TestClientFollowupMigrationCreatesAuditableLocalPlanningFacts(t *testing.T)
 		t.Fatalf("upgrade v34 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 44 {
-		t.Fatalf("SchemaVersion = %d, want 44", store.SchemaVersion)
+	if store.SchemaVersion != 45 {
+		t.Fatalf("SchemaVersion = %d, want 45", store.SchemaVersion)
 	}
 
 	const clientID = "018f0000-0000-7000-8000-000000003501"

@@ -11,8 +11,8 @@ func TestScheduledBackupPolicyMigrationCreatesDisabledConstrainedSingleton(t *te
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 44 {
-		t.Fatalf("schema version=%d, want 44", store.SchemaVersion)
+	if store.SchemaVersion != 45 {
+		t.Fatalf("schema version=%d, want 45", store.SchemaVersion)
 	}
 	var policy struct {
 		Enabled        bool

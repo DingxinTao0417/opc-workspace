@@ -5,6 +5,7 @@ import {
   applyBusinessPackageImport,
   batchUpdateTasks,
   createBackup,
+  createFinancialEntry,
   createPersonActor,
   createTag,
   createTask,
@@ -26,8 +27,10 @@ import {
   getProjects,
   getAllTasks,
   getBackups,
+  getFinancialEntries,
   getScheduledBackupPolicy,
   getHealth,
+  getIncomeStats,
   getContentItem,
   getRestoreDiagnostics,
   getTags,
@@ -44,6 +47,7 @@ import {
   previewBusinessPackageImport,
   normalizeActorSummary,
   normalizeBackupSummary,
+  normalizeFinancialEntry,
   normalizeScheduledBackupPolicy,
   normalizeHealthResponse,
   normalizeTaskAssignment,
@@ -68,8 +72,10 @@ import {
   updateTask,
   updateTaskSavedView,
   updateActor,
+  updateFinancialEntry,
   updateScheduledBackupPolicy,
   verifyBackup,
+  voidFinancialEntry,
 } from "./client";
 
 describe("content item detail request", () => {
@@ -2659,5 +2665,173 @@ describe("tag requests", () => {
     expect(
       new Headers(fetchMock.mock.calls[2][1]?.headers).get("If-Match"),
     ).toBe('"3"');
+  });
+});
+
+describe("financial entry requests", () => {
+  const entryPayload = {
+    id: "entry-1",
+    type: "income",
+    amount_minor: 12345,
+    currency: "CNY",
+    occurred_on: "2026-08-29",
+    status: "confirmed",
+    category: "项目回款",
+    client_id: "client-1",
+    client_name: "星河工作室",
+    project_id: "project-1",
+    project_name: "客户门户",
+    invoice_id: null,
+    invoice_number: null,
+    notes: "首付款",
+    created_by_actor_id: "actor-1",
+    voided_at: null,
+    void_reason: null,
+    version: 2,
+    created_at: "2026-08-29T00:00:00Z",
+    updated_at: "2026-08-29T01:00:00Z",
+  };
+
+  it("strictly normalizes financial entry audit fields", () => {
+    expect(normalizeFinancialEntry(entryPayload)).toMatchObject({
+      id: "entry-1",
+      amountMinor: 12345,
+      clientName: "星河工作室",
+      version: 2,
+    });
+    expect(() =>
+      normalizeFinancialEntry({ ...entryPayload, amount_minor: 12.5 }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeFinancialEntry({
+        ...entryPayload,
+        status: "voided",
+        voided_at: null,
+        void_reason: null,
+      }),
+    ).toThrow(ApiError);
+  });
+
+  it("maps filters, idempotent create, versioned update, and confirmed void", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        jsonResponse({
+          data:
+            init?.method === "DELETE"
+              ? {
+                  ...entryPayload,
+                  status: "voided",
+                  voided_at: "2026-08-29T02:00:00Z",
+                  void_reason: "重复录入",
+                  version: 3,
+                }
+              : entryPayload,
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createFinancialEntry(
+      {
+        type: "income",
+        amountMinor: 12345,
+        currency: "CNY",
+        occurredOn: "2026-08-29",
+        status: "confirmed",
+        category: "项目回款",
+        clientId: "client-1",
+        projectId: "project-1",
+        notes: "首付款",
+      },
+      "finance-key",
+    );
+    await updateFinancialEntry("entry-1", {
+      notes: "更新备注",
+      expectedVersion: 2,
+    });
+    await voidFinancialEntry("entry-1", {
+      reason: "重复录入",
+      expectedVersion: 2,
+    });
+
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("Idempotency-Key"),
+    ).toBe("finance-key");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      amount_minor: 12345,
+      occurred_on: "2026-08-29",
+      client_id: "client-1",
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get("If-Match"),
+    ).toBe('"2"');
+    expect(String(fetchMock.mock.calls[2][0])).toContain(
+      "/api/v1/financial-entries/entry-1?confirm=true",
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[2][1]?.body))).toEqual({
+      reason: "重复录入",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        data: [entryPayload],
+        meta: { page: 2, page_size: 20, total: 21 },
+      }),
+    );
+    await getFinancialEntries({
+      page: 2,
+      pageSize: 20,
+      currency: "CNY",
+      type: "income",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-31",
+    });
+    const url = new URL(
+      String(fetchMock.mock.calls[3][0]),
+      "http://local.test",
+    );
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({
+      page: "2",
+      page_size: "20",
+      currency: "CNY",
+      type: "income",
+      date_from: "2026-08-01",
+      date_to: "2026-08-31",
+    });
+  });
+
+  it("keeps income statistics scoped to one currency and date range", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: {
+          currency: "CNY",
+          date_from: "2026-08-01",
+          date_to: "2026-08-31",
+          confirmed_income_minor: 30000,
+          confirmed_expense_minor: 12000,
+          pending_income_minor: 5000,
+          pending_expense_minor: 2000,
+          net_cash_flow_minor: 18000,
+          confirmed_income_count: 2,
+          average_income_minor: 15000,
+          entry_count: 5,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getIncomeStats({
+        currency: "CNY",
+        dateFrom: "2026-08-01",
+        dateTo: "2026-08-31",
+      }),
+    ).resolves.toMatchObject({
+      currency: "CNY",
+      netCashFlowMinor: 18000,
+      entryCount: 5,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "currency=CNY&date_from=2026-08-01&date_to=2026-08-31",
+    );
   });
 });

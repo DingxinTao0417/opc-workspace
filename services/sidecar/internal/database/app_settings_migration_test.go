@@ -50,8 +50,8 @@ func TestAppSettingsMigrationPreservesV15FactsAndStartsEmpty(t *testing.T) {
 		t.Fatalf("upgrade v15 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 44 {
-		t.Fatalf("SchemaVersion = %d, want 44", store.SchemaVersion)
+	if store.SchemaVersion != 45 {
+		t.Fatalf("SchemaVersion = %d, want 45", store.SchemaVersion)
 	}
 	var preserved models.Task
 	if err := store.DB.First(&preserved, "id = ?", taskID).Error; err != nil {
