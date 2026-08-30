@@ -248,6 +248,9 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Agent Adapter manifest or diagnostic state is invalid"}
 		}
 	}
+	if !validAutomationImportGraph(packageData) {
+		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Automation import relationships are invalid"}
+	}
 
 	report, err := buildBusinessImportConflictReport(a.db.WithContext(c), packageData)
 	if err != nil {
