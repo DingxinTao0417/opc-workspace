@@ -204,7 +204,11 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 	if err != nil {
 		return businessImportPreview{}, err
 	}
-	if packageData.Source.SchemaVersion != a.options.SchemaVersion {
+	expectedExcludedTables, schemaCompatible := businessImportSchemaContract(
+		packageData.Source.SchemaVersion,
+		a.options.SchemaVersion,
+	)
+	if !schemaCompatible {
 		blocker := "source_schema_older"
 		if packageData.Source.SchemaVersion > a.options.SchemaVersion {
 			blocker = "source_schema_newer"
@@ -216,7 +220,7 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 			CanApply: false, Blocker: blocker,
 		}, nil
 	}
-	if !equalStrings(packageData.ExcludedOperationalTables, businessExportExcludedTables) {
+	if !equalStrings(packageData.ExcludedOperationalTables, expectedExcludedTables) {
 		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The operational-table exclusion manifest is invalid"}
 	}
 	if len(packageData.Tables) != len(businessExportTables) {
