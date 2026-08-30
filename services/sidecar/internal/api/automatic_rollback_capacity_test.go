@@ -58,7 +58,7 @@ func TestBusinessImportsRejectInsufficientRollbackCapacityWithoutSideEffects(t *
 		})
 		response := performRequest(
 			runtime.Engine, http.MethodPost, "/api/v1/imports/business-data", body,
-			map[string]string{"X-Import-Confirmation": importConfirmation},
+			map[string]string{"X-Import-Confirmation": importReplaceConfirmation},
 		)
 		if response.Code != http.StatusInsufficientStorage || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_SPACE_INSUFFICIENT" {
 			t.Fatalf("JSON import capacity refusal = %d: %s", response.Code, response.Body.String())
@@ -80,7 +80,7 @@ func TestBusinessImportsRejectInsufficientRollbackCapacityWithoutSideEffects(t *
 		})
 		response := performRequest(
 			runtime.Engine, http.MethodPost, "/api/v1/imports/business-package", payload,
-			map[string]string{"X-Import-Confirmation": packageImportConfirmation},
+			map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
 		)
 		if response.Code != http.StatusInsufficientStorage || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_SPACE_INSUFFICIENT" {
 			t.Fatalf("package import capacity refusal = %d: %s", response.Code, response.Body.String())
@@ -110,7 +110,7 @@ func TestBusinessImportRejectsUnavailableRollbackCapacity(t *testing.T) {
 	})
 	response := performRequest(
 		runtime.Engine, http.MethodPost, "/api/v1/imports/business-data", body,
-		map[string]string{"X-Import-Confirmation": importConfirmation},
+		map[string]string{"X-Import-Confirmation": importReplaceConfirmation},
 	)
 	if response.Code != http.StatusServiceUnavailable || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_CAPACITY_UNAVAILABLE" {
 		t.Fatalf("unavailable import capacity = %d: %s", response.Code, response.Body.String())

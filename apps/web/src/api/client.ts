@@ -30,6 +30,7 @@ import type {
   RestoreDiagnostics,
   BusinessImportPreview,
   BusinessImportResult,
+  BusinessImportApplyMode,
   DiagnosticPackageDownload,
   ScheduledBackupRestoreResult,
   SearchListParams,
@@ -6212,10 +6213,17 @@ export async function downloadBusinessPackage(): Promise<BusinessPackageDownload
 }
 
 const businessImportBlockers = new Set([
-  "target_not_empty",
+  "target_key_conflicts",
   "source_schema_older",
   "source_schema_newer",
 ]);
+
+const businessPackageImportBlockers = new Set([
+  ...businessImportBlockers,
+  "target_file_conflicts",
+]);
+
+const businessImportApplyModes = new Set(["replace_empty", "append"]);
 
 function normalizeBusinessImportConflictMetadata(
   body: JsonRecord,
@@ -6300,7 +6308,9 @@ function normalizeBusinessPackageImportPreview(
   const totalRows = numberField(body, "total_rows", "totalRows");
   const fileCount = numberField(body, "file_count", "fileCount");
   const fileBytes = numberField(body, "file_bytes", "fileBytes");
+  const fileConflicts = numberField(body, "file_conflicts", "fileConflicts");
   const canApply = fieldValue(body, "can_apply", "canApply");
+  const applyMode = fieldValue(body, "apply_mode", "applyMode");
   const blocker = fieldValue(body, "blocker");
   const rawCounts = fieldValue(body, "table_counts", "tableCounts");
   const conflict = normalizeBusinessImportConflictMetadata(
@@ -6322,13 +6332,22 @@ function normalizeBusinessPackageImportPreview(
     fileBytes === undefined ||
     !Number.isSafeInteger(fileBytes) ||
     fileBytes < 0 ||
+    fileConflicts === undefined ||
+    !Number.isInteger(fileConflicts) ||
+    fileConflicts < 0 ||
     typeof canApply !== "boolean" ||
     !isRecord(rawCounts) ||
     (blocker !== undefined &&
-      (typeof blocker !== "string" || !businessImportBlockers.has(blocker))) ||
+      (typeof blocker !== "string" ||
+        !businessPackageImportBlockers.has(blocker))) ||
     (canApply && blocker !== undefined) ||
+    (canApply &&
+      (typeof applyMode !== "string" ||
+        !businessImportApplyModes.has(applyMode))) ||
+    (!canApply && applyMode !== undefined) ||
     (!canApply &&
-      (typeof blocker !== "string" || !businessImportBlockers.has(blocker)))
+      (typeof blocker !== "string" ||
+        !businessPackageImportBlockers.has(blocker)))
   ) {
     return invalidResponse("含文件业务包预检响应格式无效");
   }
@@ -6344,12 +6363,18 @@ function normalizeBusinessPackageImportPreview(
       totalRows ||
     (canApply &&
       (schemaVersion !== conflict.targetSchemaVersion ||
-        conflict.targetRows !== 0 ||
         conflict.keyConflicts !== 0 ||
-        conflict.conflictTables.length !== 0)) ||
-    (blocker === "target_not_empty" &&
+        fileConflicts !== 0 ||
+        (applyMode === "replace_empty" && conflict.targetRows !== 0) ||
+        (applyMode === "append" && conflict.targetRows === 0))) ||
+    (blocker === "target_key_conflicts" &&
       (schemaVersion !== conflict.targetSchemaVersion ||
-        conflict.targetRows === 0)) ||
+        conflict.targetRows === 0 ||
+        conflict.keyConflicts === 0)) ||
+    (blocker === "target_file_conflicts" &&
+      (schemaVersion !== conflict.targetSchemaVersion ||
+        conflict.keyConflicts !== 0 ||
+        fileConflicts === 0)) ||
     (blocker === "source_schema_older" &&
       (schemaVersion >= conflict.targetSchemaVersion ||
         conflict.targetRows !== 0 ||
@@ -6375,7 +6400,12 @@ function normalizeBusinessPackageImportPreview(
     conflictTables: conflict.conflictTables,
     fileCount,
     fileBytes,
+    fileConflicts,
     canApply,
+    applyMode:
+      typeof applyMode === "string"
+        ? (applyMode as BusinessPackageImportPreview["applyMode"])
+        : null,
     blocker:
       typeof blocker === "string"
         ? (blocker as BusinessPackageImportPreview["blocker"])
@@ -6393,17 +6423,20 @@ export async function previewBusinessPackageImport(
   ).then(normalizeBusinessPackageImportPreview);
 }
 
-export async function applyBusinessPackageImport(
-  file: File,
-): Promise<BusinessPackageImportResult> {
+export async function applyBusinessPackageImport(input: {
+  file: File;
+  applyMode: BusinessImportApplyMode;
+}): Promise<BusinessPackageImportResult> {
   const payload = await apiRequest<unknown>(
     "/api/v1/imports/business-package",
     {
       method: "POST",
-      body: file,
+      body: input.file,
       headers: {
         "X-Import-Confirmation":
-          "replace-empty-workspace-with-controlled-files",
+          input.applyMode === "append"
+            ? "append-to-existing-workspace-with-controlled-files"
+            : "replace-empty-workspace-with-controlled-files",
       },
     },
     BACKUP_OPERATION_TIMEOUT_MS,
@@ -6413,6 +6446,7 @@ export async function applyBusinessPackageImport(
   const importedRows = numberField(body, "imported_rows", "importedRows");
   const importedFiles = numberField(body, "imported_files", "importedFiles");
   const backupId = stringField(body, "backup_id", "backupId");
+  const applyMode = stringField(body, "apply_mode", "applyMode");
   if (
     importedRows === undefined ||
     !Number.isInteger(importedRows) ||
@@ -6420,11 +6454,18 @@ export async function applyBusinessPackageImport(
     importedFiles === undefined ||
     !Number.isInteger(importedFiles) ||
     importedFiles < 0 ||
-    !backupId
+    !backupId ||
+    !applyMode ||
+    !businessImportApplyModes.has(applyMode)
   ) {
     return invalidResponse("含文件业务包导入响应格式无效");
   }
-  return { importedRows, importedFiles, backupId };
+  return {
+    importedRows,
+    importedFiles,
+    backupId,
+    applyMode: applyMode as BusinessImportApplyMode,
+  };
 }
 
 export async function getRestoreDiagnostics(): Promise<RestoreDiagnostics> {
@@ -6548,6 +6589,7 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
   const exportedAt = stringField(body, "exported_at", "exportedAt");
   const totalRows = numberField(body, "total_rows", "totalRows");
   const canApply = fieldValue(body, "can_apply", "canApply");
+  const applyMode = fieldValue(body, "apply_mode", "applyMode");
   const blocker = fieldValue(body, "blocker");
   const rawCounts = fieldValue(body, "table_counts", "tableCounts");
   const conflict = normalizeBusinessImportConflictMetadata(
@@ -6568,6 +6610,10 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
     (blocker !== undefined &&
       (typeof blocker !== "string" || !businessImportBlockers.has(blocker))) ||
     (canApply && blocker !== undefined) ||
+    (canApply &&
+      (typeof applyMode !== "string" ||
+        !businessImportApplyModes.has(applyMode))) ||
+    (!canApply && applyMode !== undefined) ||
     (!canApply &&
       (typeof blocker !== "string" || !businessImportBlockers.has(blocker)))
   ) {
@@ -6585,12 +6631,13 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
       totalRows ||
     (canApply &&
       (schemaVersion !== conflict.targetSchemaVersion ||
-        conflict.targetRows !== 0 ||
         conflict.keyConflicts !== 0 ||
-        conflict.conflictTables.length !== 0)) ||
-    (blocker === "target_not_empty" &&
+        (applyMode === "replace_empty" && conflict.targetRows !== 0) ||
+        (applyMode === "append" && conflict.targetRows === 0))) ||
+    (blocker === "target_key_conflicts" &&
       (schemaVersion !== conflict.targetSchemaVersion ||
-        conflict.targetRows === 0)) ||
+        conflict.targetRows === 0 ||
+        conflict.keyConflicts === 0)) ||
     (blocker === "source_schema_older" &&
       (schemaVersion >= conflict.targetSchemaVersion ||
         conflict.targetRows !== 0 ||
@@ -6615,6 +6662,10 @@ function normalizeBusinessImportPreview(value: unknown): BusinessImportPreview {
     keyConflicts: conflict.keyConflicts,
     conflictTables: conflict.conflictTables,
     canApply,
+    applyMode:
+      typeof applyMode === "string"
+        ? (applyMode as BusinessImportPreview["applyMode"])
+        : null,
     blocker:
       typeof blocker === "string"
         ? (blocker as BusinessImportPreview["blocker"])
@@ -6632,15 +6683,21 @@ export async function previewBusinessDataImport(
   ).then(normalizeBusinessImportPreview);
 }
 
-export async function applyBusinessDataImport(
-  file: File,
-): Promise<BusinessImportResult> {
+export async function applyBusinessDataImport(input: {
+  file: File;
+  applyMode: BusinessImportApplyMode;
+}): Promise<BusinessImportResult> {
   const payload = await apiRequest<unknown>(
     "/api/v1/imports/business-data",
     {
       method: "POST",
-      body: file,
-      headers: { "X-Import-Confirmation": "replace-empty-workspace" },
+      body: input.file,
+      headers: {
+        "X-Import-Confirmation":
+          input.applyMode === "append"
+            ? "append-to-existing-workspace"
+            : "replace-empty-workspace",
+      },
     },
     BACKUP_OPERATION_TIMEOUT_MS,
   );
@@ -6648,15 +6705,22 @@ export async function applyBusinessDataImport(
   if (!isRecord(body)) return invalidResponse("业务数据导入响应格式无效");
   const importedRows = numberField(body, "imported_rows", "importedRows");
   const backupId = stringField(body, "backup_id", "backupId");
+  const applyMode = stringField(body, "apply_mode", "applyMode");
   if (
     importedRows === undefined ||
     !Number.isInteger(importedRows) ||
     importedRows < 0 ||
-    !backupId
+    !backupId ||
+    !applyMode ||
+    !businessImportApplyModes.has(applyMode)
   ) {
     return invalidResponse("业务数据导入响应格式无效");
   }
-  return { importedRows, backupId };
+  return {
+    importedRows,
+    backupId,
+    applyMode: applyMode as BusinessImportApplyMode,
+  };
 }
 
 export async function downloadDiagnosticPackage(): Promise<DiagnosticPackageDownload> {

@@ -2083,12 +2083,19 @@ export interface BusinessPackageImportPreview {
   conflictTables: BusinessImportTableConflict[];
   fileCount: number;
   fileBytes: number;
+  fileConflicts: number;
   canApply: boolean;
+  applyMode: BusinessImportApplyMode | null;
   blocker: BusinessImportBlocker | null;
 }
 
 export type BusinessImportBlocker =
-  "target_not_empty" | "source_schema_older" | "source_schema_newer";
+  | "target_key_conflicts"
+  | "target_file_conflicts"
+  | "source_schema_older"
+  | "source_schema_newer";
+
+export type BusinessImportApplyMode = "replace_empty" | "append";
 
 export interface BusinessImportTableConflict {
   table: string;
@@ -2101,6 +2108,7 @@ export interface BusinessPackageImportResult {
   importedRows: number;
   importedFiles: number;
   backupId: string;
+  applyMode: BusinessImportApplyMode;
 }
 
 export interface RestoreDiagnostics {
@@ -2133,12 +2141,14 @@ export interface BusinessImportPreview {
   keyConflicts: number;
   conflictTables: BusinessImportTableConflict[];
   canApply: boolean;
+  applyMode: BusinessImportApplyMode | null;
   blocker: BusinessImportBlocker | null;
 }
 
 export interface BusinessImportResult {
   importedRows: number;
   backupId: string;
+  applyMode: BusinessImportApplyMode;
 }
 
 export interface DiagnosticPackageDownload {

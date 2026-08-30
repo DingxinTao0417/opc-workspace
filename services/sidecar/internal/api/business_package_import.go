@@ -20,10 +20,11 @@ import (
 )
 
 const (
-	maxBusinessPackageImportBytes   int64 = 2 * 1024 * 1024 * 1024
-	maxBusinessPackageManifestBytes       = 4 * 1024 * 1024
-	maxBusinessPackageFiles               = 10_000
-	packageImportConfirmation             = "replace-empty-workspace-with-controlled-files"
+	maxBusinessPackageImportBytes    int64 = 2 * 1024 * 1024 * 1024
+	maxBusinessPackageManifestBytes        = 4 * 1024 * 1024
+	maxBusinessPackageFiles                = 10_000
+	packageImportReplaceConfirmation       = "replace-empty-workspace-with-controlled-files"
+	packageImportAppendConfirmation        = "append-to-existing-workspace-with-controlled-files"
 )
 
 type businessPackageImportPreview struct {
@@ -38,7 +39,9 @@ type businessPackageImportPreview struct {
 	ConflictTables      []businessImportTableConflict `json:"conflict_tables"`
 	FileCount           int                           `json:"file_count"`
 	FileBytes           int64                         `json:"file_bytes"`
+	FileConflicts       int                           `json:"file_conflicts"`
 	CanApply            bool                          `json:"can_apply"`
+	ApplyMode           string                        `json:"apply_mode,omitempty"`
 	Blocker             string                        `json:"blocker,omitempty"`
 }
 
@@ -46,6 +49,7 @@ type businessPackageImportResult struct {
 	ImportedRows  int    `json:"imported_rows"`
 	ImportedFiles int    `json:"imported_files"`
 	BackupID      string `json:"backup_id"`
+	ApplyMode     string `json:"apply_mode"`
 }
 
 type businessPackageImportArchive struct {
@@ -83,7 +87,8 @@ func (a *API) previewBusinessPackageImport(c *gin.Context) {
 }
 
 func (a *API) applyBusinessPackageImport(c *gin.Context) {
-	if strings.TrimSpace(c.GetHeader("X-Import-Confirmation")) != packageImportConfirmation {
+	confirmation := strings.TrimSpace(c.GetHeader("X-Import-Confirmation"))
+	if confirmation != packageImportReplaceConfirmation && confirmation != packageImportAppendConfirmation {
 		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "Explicit controlled-file package import confirmation is required")
 		return
 	}
@@ -111,12 +116,19 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 		writeBusinessImportBlocker(c, preview.Blocker)
 		return
 	}
+	if !validBusinessImportConfirmation(confirmation, preview.ApplyMode, true) {
+		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "The confirmation does not match the current controlled-file import mode")
+		return
+	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
 		writeImportRollbackCapacityError(c, err)
 		return
 	}
 
 	note := "自动含文件导入前回滚备份"
+	if preview.ApplyMode == importModeAppend {
+		note = "自动含文件追加导入前回滚备份"
+	}
 	backup, err := a.backupStore.create(
 		a.db.WithContext(c.Request.Context()), a.options, note, "", sha256Hex([]byte(note)),
 	)
@@ -142,7 +154,7 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 			a.removeCommittedBusinessPackageFiles(committed)
 		}
 	}()
-	if err := a.replaceBusinessTablesWithValidation(c, packageArchive.business, func(tx *gorm.DB) error {
+	if err := a.applyBusinessTables(c, packageArchive.business, preview.ApplyMode, func(tx *gorm.DB) error {
 		return verifyArtifactObjects(tx, a.artifactStore, a.options.SchemaVersion, preview.FileCount)
 	}); err != nil {
 		if a.options.Logger != nil {
@@ -153,7 +165,7 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 	}
 	applied = true
 	c.JSON(http.StatusOK, gin.H{"data": businessPackageImportResult{
-		ImportedRows: preview.TotalRows, ImportedFiles: preview.FileCount, BackupID: backup.ID,
+		ImportedRows: preview.TotalRows, ImportedFiles: preview.FileCount, BackupID: backup.ID, ApplyMode: preview.ApplyMode,
 	}})
 }
 
@@ -376,14 +388,48 @@ func (a *API) validateBusinessPackageImport(c *gin.Context, packageArchive *busi
 	if fileBytes != packageArchive.business.ArtifactFiles.ActiveBytes || fileBytes != packageArchive.manifest.FileBytes {
 		return businessPackageImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "Controlled-file byte totals do not match business metadata"}
 	}
+	fileConflicts, err := a.countControlledImportFileConflicts(packageArchive.manifest.Files)
+	if err != nil {
+		return businessPackageImportPreview{}, nil, &businessImportError{http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The controlled-file target could not be checked"}
+	}
+	canApply := base.CanApply && fileConflicts == 0
+	blocker := base.Blocker
+	applyMode := base.ApplyMode
+	if base.CanApply && fileConflicts != 0 {
+		blocker = "target_file_conflicts"
+		applyMode = ""
+	}
 	return businessPackageImportPreview{
 		FormatVersion: base.FormatVersion, SchemaVersion: base.SchemaVersion,
 		TargetSchemaVersion: base.TargetSchemaVersion, ExportedAt: base.ExportedAt,
 		TableCounts: base.TableCounts, TotalRows: base.TotalRows,
 		TargetRows: base.TargetRows, KeyConflicts: base.KeyConflicts, ConflictTables: base.ConflictTables,
-		FileCount: packageArchive.manifest.FileCount, FileBytes: packageArchive.manifest.FileBytes,
-		CanApply: base.CanApply, Blocker: base.Blocker,
+		FileCount: packageArchive.manifest.FileCount, FileBytes: packageArchive.manifest.FileBytes, FileConflicts: fileConflicts,
+		CanApply: canApply, ApplyMode: applyMode, Blocker: blocker,
 	}, expected, nil
+}
+
+func (a *API) countControlledImportFileConflicts(files []businessPackageFile) (int, error) {
+	conflicts := 0
+	for _, descriptor := range files {
+		relative := strings.TrimPrefix(descriptor.Path, "files/")
+		var target string
+		var err error
+		if strings.HasPrefix(relative, "avatars/") {
+			target, err = a.artifactStore.resolveWorkspaceAvatar(relative)
+		} else {
+			target, err = a.artifactStore.resolveObject(relative)
+		}
+		if err != nil {
+			return 0, err
+		}
+		if _, err := os.Lstat(target); err == nil {
+			conflicts++
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return 0, err
+		}
+	}
+	return conflicts, nil
 }
 
 func controlledImportFiles(packageData businessExportPackage, schemaVersion int) (map[string]businessPackageImportFile, error) {

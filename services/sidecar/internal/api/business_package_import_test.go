@@ -78,7 +78,7 @@ func TestBusinessPackageImportPreviewsAndAtomicallyAppliesControlledFiles(t *tes
 	}
 	apply := performRequest(
 		targetRouter, http.MethodPost, "/api/v1/imports/business-package", exported.Body.Bytes(),
-		map[string]string{"X-Import-Confirmation": packageImportConfirmation},
+		map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
 	)
 	if apply.Code != http.StatusOK {
 		t.Fatalf("apply package = %d: %s", apply.Code, apply.Body.String())
@@ -143,7 +143,7 @@ func TestBusinessPackageImportRejectsTamperedFileAndExtraEntry(t *testing.T) {
 	}
 }
 
-func TestBusinessPackageImportRefusesNonEmptyTargetBeforeCreatingFilesOrBackup(t *testing.T) {
+func TestBusinessPackageImportAppendsToNonEmptyTargetWithoutOverwriting(t *testing.T) {
 	payload, artifactPath := businessPackageFixture(t)
 	targetRouter, targetStore, artifactDir, backupDir := newBackupTestAPI(t)
 	if err := targetStore.DB.Exec("INSERT INTO clients(id, name) VALUES ('018f0000-0000-7000-8000-000000008001', 'Existing')").Error; err != nil {
@@ -156,24 +156,60 @@ func TestBusinessPackageImportRefusesNonEmptyTargetBeforeCreatingFilesOrBackup(t
 	var envelope struct {
 		Data businessPackageImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" ||
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" ||
 		envelope.Data.TargetSchemaVersion != 43 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
 		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("non-empty package preview = %#v err=%v", envelope.Data, err)
 	}
 	apply := performRequest(
 		targetRouter, http.MethodPost, "/api/v1/imports/business-package", payload,
-		map[string]string{"X-Import-Confirmation": packageImportConfirmation},
+		map[string]string{"X-Import-Confirmation": packageImportAppendConfirmation},
 	)
-	if apply.Code != http.StatusConflict || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_TARGET_NOT_EMPTY" {
+	if apply.Code != http.StatusOK {
 		t.Fatalf("non-empty package apply = %d: %s", apply.Code, apply.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(artifactPath)))); !os.IsNotExist(err) {
-		t.Fatalf("blocked package created a controlled file: %v", err)
+	if _, err := os.Stat(filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(artifactPath)))); err != nil {
+		t.Fatalf("appended package file missing: %v", err)
 	}
-	entries, err := os.ReadDir(backupDir)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("blocked package created backup entries=%v err=%v", entries, err)
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 1 {
+		t.Fatalf("append rollback backups=%v", backups)
+	}
+	var existing int64
+	if err := targetStore.DB.Table("clients").Where("name = ?", "Existing").Count(&existing).Error; err != nil || existing != 1 {
+		t.Fatalf("existing target changed count=%d err=%v", existing, err)
+	}
+}
+
+func TestBusinessPackageImportBlocksExistingControlledFileBeforeBackup(t *testing.T) {
+	payload, artifactPath := businessPackageFixture(t)
+	targetRouter, _, artifactDir, backupDir := newBackupTestAPI(t)
+	targetPath := filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(artifactPath)))
+	if err := os.WriteFile(targetPath, []byte("orphan target object"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	preview := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-package/preview", payload, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("file-conflict preview = %d: %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessPackageImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_file_conflicts" || envelope.Data.FileConflicts != 1 || envelope.Data.ApplyMode != "" {
+		t.Fatalf("file-conflict preview = %#v err=%v", envelope.Data, err)
+	}
+	apply := performRequest(
+		targetRouter, http.MethodPost, "/api/v1/imports/business-package", payload,
+		map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
+	)
+	if apply.Code != http.StatusConflict || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_TARGET_FILE_CONFLICT" {
+		t.Fatalf("file-conflict apply = %d: %s", apply.Code, apply.Body.String())
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("file conflict created rollback backup: %v", backups)
+	}
+	body, err := os.ReadFile(targetPath)
+	if err != nil || string(body) != "orphan target object" {
+		t.Fatalf("existing object changed body=%q err=%v", body, err)
 	}
 }
 
@@ -218,7 +254,7 @@ func TestBusinessPackageImportCompensatesCommittedFilesWhenDatabaseApplyFails(t 
 	targetRouter, targetStore, artifactDir, backupDir := newBackupTestAPI(t)
 	response := performRequest(
 		targetRouter, http.MethodPost, "/api/v1/imports/business-package", tampered,
-		map[string]string{"X-Import-Confirmation": packageImportConfirmation},
+		map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
 	)
 	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_PACKAGE_APPLY_FAILED" {
 		t.Fatalf("invalid database package = %d: %s", response.Code, response.Body.String())

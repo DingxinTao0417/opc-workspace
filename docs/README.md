@@ -6,7 +6,7 @@
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.82）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.83）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -29,13 +29,13 @@
 
 ## 平台与共享能力
 
-| 模块                       | 当前状态                                                                                                                                                                                                   | 目标版本            | 文档                                               |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 已完成安全 ADR；Adapter、Run 与执行仍未实现                                                                                                                                                                | v0.2                | [local-agents.md](modules/local-agents.md)         |
-| 设置                       | 部分完成                                                                                                                                                                                                   | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
-| 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                                           | v0.1                | [command-search.md](modules/command-search.md)     |
-| 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、启动后恢复结果诊断、数据库打开前的白名单恢复进度、全局启动故障恢复页 v1、失败 Inbox、业务 JSON/含文件 ZIP 的空工作区安全导入导出已交付；启动前备份选择及高级合并待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
-| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown、托盘最小源码闭环和运行诊断能力快照已交付；托盘原生链接、真实父崩溃/进程树、三平台与安装包仍待验收）                                                | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
+| 模块                       | 当前状态                                                                                                                                                                                                                     | 目标版本            | 文档                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
+| 本地 Agent Runtime         | 已完成安全 ADR；Adapter、Run 与执行仍未实现                                                                                                                                                                                  | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 设置                       | 部分完成                                                                                                                                                                                                                     | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
+| 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                                                             | v0.1                | [command-search.md](modules/command-search.md)     |
+| 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份完整闭环、启动后恢复结果诊断、数据库打开前的白名单恢复进度、全局启动故障恢复页 v1、失败 Inbox、业务 JSON/含文件 ZIP 的空目标及同 schema 零主键冲突追加已交付；启动前备份选择、冲突合并及升级待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
+| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown、托盘最小源码闭环和运行诊断能力快照已交付；托盘原生链接、真实父崩溃/进程树、三平台与安装包仍待验收）                                                                  | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
 
@@ -56,7 +56,7 @@
 - v0.1 不调用 AI/LLM，不创建或运行 Agent；Project Artifact→Inbox→Task 只使用 owner/person 与 owner manual review。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
-- Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、Artifact root 锁、耐久同步与 quarantine 防止错库、双写和误删。数据库父目录另用固定 `.opc-sidecar-run.lock` 在任何恢复、迁移或打开前阻止第二个 Sidecar 接触同库。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空工作区安全导入导出；预检可只读列出非空目标表/主键重叠并分类跨 schema 方向，实际合并与版本升级仍未实现。
+- Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、Artifact root 锁、耐久同步与 quarantine 防止错库、双写和误删。数据库父目录另用固定 `.opc-sidecar-run.lock` 在任何恢复、迁移或打开前阻止第二个 Sidecar 接触同库。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空目标和同 schema 零主键冲突追加；预检可只读列出非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，真实冲突策略、UUID 重映射与版本升级仍未实现。
 - 实际 Agent 执行归入 v0.2，必须使用受控本地 Adapter、专用鉴权和可验证的隔离边界。
 - Agent Run 成功只表示产生了结果；高风险或要求审核的任务必须由 owner 验收后才完成。
 - 发票、客户沟通、付款确认、数据删除等高风险动作不得由 Agent 无审核完成。

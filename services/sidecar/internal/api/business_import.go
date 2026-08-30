@@ -15,8 +15,12 @@ import (
 )
 
 const (
-	maxBusinessImportBytes = 16 * 1024 * 1024
-	importConfirmation     = "replace-empty-workspace"
+	maxBusinessImportBytes       = 16 * 1024 * 1024
+	importReplaceConfirmation    = "replace-empty-workspace"
+	importAppendConfirmation     = "append-to-existing-workspace"
+	importModeReplaceEmpty       = "replace_empty"
+	importModeAppend             = "append"
+	importBlockerTargetConflicts = "target_key_conflicts"
 )
 
 type businessImportPreview struct {
@@ -30,6 +34,7 @@ type businessImportPreview struct {
 	KeyConflicts        int                           `json:"key_conflicts"`
 	ConflictTables      []businessImportTableConflict `json:"conflict_tables"`
 	CanApply            bool                          `json:"can_apply"`
+	ApplyMode           string                        `json:"apply_mode,omitempty"`
 	Blocker             string                        `json:"blocker,omitempty"`
 }
 
@@ -43,6 +48,7 @@ type businessImportTableConflict struct {
 type businessImportResult struct {
 	ImportedRows int    `json:"imported_rows"`
 	BackupID     string `json:"backup_id"`
+	ApplyMode    string `json:"apply_mode"`
 }
 
 type businessImportError struct {
@@ -68,7 +74,8 @@ func (a *API) previewBusinessImport(c *gin.Context) {
 }
 
 func (a *API) applyBusinessImport(c *gin.Context) {
-	if strings.TrimSpace(c.GetHeader("X-Import-Confirmation")) != importConfirmation {
+	confirmation := strings.TrimSpace(c.GetHeader("X-Import-Confirmation"))
+	if confirmation != importReplaceConfirmation && confirmation != importAppendConfirmation {
 		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "Explicit business import confirmation is required")
 		return
 	}
@@ -95,12 +102,19 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		writeBusinessImportBlocker(c, preview.Blocker)
 		return
 	}
+	if !validBusinessImportConfirmation(confirmation, preview.ApplyMode, false) {
+		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "The confirmation does not match the current import mode")
+		return
+	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
 		writeImportRollbackCapacityError(c, err)
 		return
 	}
 
 	note := "自动导入前回滚备份"
+	if preview.ApplyMode == importModeAppend {
+		note = "自动追加导入前回滚备份"
+	}
 	backup, err := a.backupStore.create(
 		a.db.WithContext(c.Request.Context()), a.options, note, "", sha256Hex([]byte(note)),
 	)
@@ -108,14 +122,23 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "IMPORT_BACKUP_FAILED", "A verified rollback backup could not be created; existing data was not changed")
 		return
 	}
-	if err := a.replaceBusinessTables(c, packageData); err != nil {
+	if err := a.applyBusinessTables(c, packageData, preview.ApplyMode, nil); err != nil {
 		if a.options.Logger != nil {
 			a.options.Logger.Printf("business import failed after rollback backup backup_id=%s: %v", backup.ID, err)
 		}
 		writeError(c, http.StatusUnprocessableEntity, "IMPORT_APPLY_FAILED", "Business data failed integrity validation and was not imported")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": businessImportResult{ImportedRows: preview.TotalRows, BackupID: backup.ID}})
+	c.JSON(http.StatusOK, gin.H{"data": businessImportResult{ImportedRows: preview.TotalRows, BackupID: backup.ID, ApplyMode: preview.ApplyMode}})
+}
+
+func validBusinessImportConfirmation(confirmation, applyMode string, withFiles bool) bool {
+	if withFiles {
+		return applyMode == importModeReplaceEmpty && confirmation == packageImportReplaceConfirmation ||
+			applyMode == importModeAppend && confirmation == packageImportAppendConfirmation
+	}
+	return applyMode == importModeReplaceEmpty && confirmation == importReplaceConfirmation ||
+		applyMode == importModeAppend && confirmation == importAppendConfirmation
 }
 
 func writeImportRollbackCapacityError(c *gin.Context, err error) {
@@ -130,8 +153,12 @@ func writeBusinessImportBlocker(c *gin.Context, blocker string) {
 	switch blocker {
 	case "source_schema_older", "source_schema_newer":
 		writeError(c, http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The source schema cannot be applied by this version")
+	case importBlockerTargetConflicts:
+		writeError(c, http.StatusConflict, "IMPORT_TARGET_CONFLICT", "Incoming business keys conflict with the current workspace")
+	case "target_file_conflicts":
+		writeError(c, http.StatusConflict, "IMPORT_TARGET_FILE_CONFLICT", "Incoming controlled files conflict with the current workspace")
 	default:
-		writeError(c, http.StatusConflict, "IMPORT_TARGET_NOT_EMPTY", "Business data can only be imported into an empty workspace")
+		writeError(c, http.StatusConflict, "IMPORT_TARGET_CONFLICT", "The business import cannot be safely appended to the current workspace")
 	}
 }
 
@@ -232,10 +259,16 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 		FormatVersion: packageData.FormatVersion, SchemaVersion: packageData.Source.SchemaVersion,
 		TargetSchemaVersion: a.options.SchemaVersion, ExportedAt: packageData.ExportedAt,
 		TableCounts: counts, TotalRows: total, TargetRows: report.TargetRows,
-		KeyConflicts: report.KeyConflicts, ConflictTables: report.Tables, CanApply: report.TargetRows == 0,
+		KeyConflicts: report.KeyConflicts, ConflictTables: report.Tables,
 	}
+	if report.KeyConflicts != 0 {
+		preview.Blocker = importBlockerTargetConflicts
+		return preview, nil
+	}
+	preview.CanApply = true
+	preview.ApplyMode = importModeReplaceEmpty
 	if report.TargetRows != 0 {
-		preview.Blocker = "target_not_empty"
+		preview.ApplyMode = importModeAppend
 	}
 	return preview, nil
 }
@@ -432,10 +465,17 @@ func businessImportTargetFilter(table string) string {
 }
 
 func (a *API) replaceBusinessTables(c *gin.Context, packageData businessExportPackage) error {
-	return a.replaceBusinessTablesWithValidation(c, packageData, nil)
+	return a.applyBusinessTables(c, packageData, importModeReplaceEmpty, nil)
 }
 
 func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData businessExportPackage, validate func(*gorm.DB) error) error {
+	return a.applyBusinessTables(c, packageData, importModeReplaceEmpty, validate)
+}
+
+func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPackage, applyMode string, validate func(*gorm.DB) error) error {
+	if applyMode != importModeReplaceEmpty && applyMode != importModeAppend {
+		return errors.New("business import apply mode is invalid")
+	}
 	return a.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("PRAGMA defer_foreign_keys = ON").Error; err != nil {
 			return err
@@ -444,10 +484,14 @@ func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData bu
 		for _, table := range packageData.Tables {
 			tables[table.Name] = table
 		}
-		if err := importActorRows(tx, tables["actors"]); err != nil {
+		if err := importActorRows(tx, tables["actors"], applyMode == importModeAppend); err != nil {
 			return err
 		}
-		if err := tx.Exec("DELETE FROM automation_rules").Error; err != nil {
+		if applyMode == importModeReplaceEmpty {
+			if err := tx.Exec("DELETE FROM automation_rules").Error; err != nil {
+				return err
+			}
+		} else if err := mergeAutomationImportRows(tx, tables["automation_rules"]); err != nil {
 			return err
 		}
 		order := []string{
@@ -455,7 +499,7 @@ func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData bu
 			"task_assignments", "task_artifacts", "workflow_events",
 			"client_activities", "client_attachments", "client_actor_links", "client_followups", "project_notes", "project_attachments",
 			"focus_sessions", "focus_session_intervals", "inbox_items", "inbox_item_tasks",
-			"reminders", "automation_rules", "automation_runs", "agent_adapters",
+			"reminders", "automation_runs", "agent_adapters",
 			"workspace_avatars", "app_settings", "task_saved_views",
 		}
 		for _, name := range order {
@@ -466,6 +510,11 @@ func (a *API) replaceBusinessTablesWithValidation(c *gin.Context, packageData bu
 				err = insertBusinessImportRows(tx, tables[name])
 			}
 			if err != nil {
+				return err
+			}
+		}
+		if applyMode == importModeReplaceEmpty {
+			if err := insertBusinessImportRows(tx, tables["automation_rules"]); err != nil {
 				return err
 			}
 		}
@@ -535,7 +584,7 @@ func insertTaskImportRows(tx *gorm.DB, table businessExportTable) error {
 	return nil
 }
 
-func importActorRows(tx *gorm.DB, table businessExportTable) error {
+func importActorRows(tx *gorm.DB, table businessExportTable, preserveTargetOwner bool) error {
 	isBuiltinIndex := columnIndex(table.Columns, "is_builtin")
 	idIndex := columnIndex(table.Columns, "id")
 	typeIndex := columnIndex(table.Columns, "type")
@@ -573,6 +622,9 @@ func importActorRows(tx *gorm.DB, table businessExportTable) error {
 	if err := insertBusinessImportRows(tx, table); err != nil {
 		return err
 	}
+	if preserveTargetOwner {
+		return nil
+	}
 	if ownerRow == nil {
 		return errors.New("owner actor manifest is missing")
 	}
@@ -583,6 +635,44 @@ func importActorRows(tx *gorm.DB, table businessExportTable) error {
 		UPDATE actors SET display_name = ?, version = ?, updated_at = ?
 		WHERE id = '00000000-0000-5000-8000-000000000001'
 	`, displayName, version, updatedAt).Error
+}
+
+func mergeAutomationImportRows(tx *gorm.DB, table businessExportTable) error {
+	if len(table.Rows) == 0 {
+		return nil
+	}
+	idIndex := columnIndex(table.Columns, "id")
+	if idIndex < 0 {
+		return errors.New("automation rule import columns are incomplete")
+	}
+	assignments := make([]string, 0, len(table.Columns)-1)
+	for _, column := range table.Columns {
+		if column != "id" && column != "preset_key" && column != "created_at" {
+			quoted := quoteIdentifier(column)
+			assignments = append(assignments, quoted+" = excluded."+quoted)
+		}
+	}
+	columns := make([]string, len(table.Columns))
+	placeholders := make([]string, len(table.Columns))
+	for index, column := range table.Columns {
+		columns[index] = quoteIdentifier(column)
+		placeholders[index] = "?"
+	}
+	statement := "INSERT INTO " + quoteIdentifier(table.Name) + " (" + strings.Join(columns, ",") + ") VALUES (" + strings.Join(placeholders, ",") + ") " +
+		"ON CONFLICT(id) DO UPDATE SET " + strings.Join(assignments, ",") + " WHERE automation_rules.enabled = 0 AND automation_rules.version = 1"
+	for _, row := range table.Rows {
+		if _, ok := row[idIndex].(string); !ok {
+			return errors.New("automation rule id is invalid")
+		}
+		result := tx.Exec(statement, normalizeImportValues(row)...)
+		if result.Error != nil {
+			return fmt.Errorf("merge import table %s: %w", table.Name, result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("automation rule changed after import preflight")
+		}
+	}
+	return nil
 }
 
 func columnIndex(columns []string, name string) int {

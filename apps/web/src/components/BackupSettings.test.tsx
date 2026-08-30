@@ -202,6 +202,7 @@ describe("BackupSettings", () => {
       keyConflicts: 0,
       conflictTables: [],
       canApply: true,
+      applyMode: "replace_empty",
       blocker: null,
     };
     mocks.packageImportPreviewData = {
@@ -216,7 +217,9 @@ describe("BackupSettings", () => {
       conflictTables: [],
       fileCount: 3,
       fileBytes: 4096,
+      fileConflicts: 0,
       canApply: true,
+      applyMode: "replace_empty",
       blocker: null,
     };
     mocks.create.mockClear();
@@ -314,7 +317,7 @@ describe("BackupSettings", () => {
     expect(mocks.previewImport).toHaveBeenCalledWith(importFile);
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(mocks.applyImport).toHaveBeenCalledWith(
-      importFile,
+      { file: importFile, applyMode: "replace_empty" },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
@@ -328,7 +331,7 @@ describe("BackupSettings", () => {
     expect(screen.getByText(/3 个受控文件/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "确认含文件导入" }));
     expect(mocks.applyPackageImport).toHaveBeenCalledWith(
-      packageFile,
+      { file: packageFile, applyMode: "replace_empty" },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
@@ -361,7 +364,8 @@ describe("BackupSettings", () => {
         },
       ],
       canApply: false,
-      blocker: "target_not_empty",
+      applyMode: null,
+      blocker: "target_key_conflicts",
     };
     render(<BackupSettings />);
     const file = new File(["{}"], "conflicts.json", {
@@ -383,6 +387,50 @@ describe("BackupSettings", () => {
     expect(mocks.applyImport).not.toHaveBeenCalled();
   });
 
+  it("previews and explicitly confirms a zero-conflict append", () => {
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 43,
+      targetSchemaVersion: 43,
+      exportedAt: "2026-08-29T12:00:00Z",
+      tableCounts: { clients: 1 },
+      totalRows: 1,
+      targetRows: 2,
+      keyConflicts: 0,
+      conflictTables: [
+        {
+          table: "clients",
+          incomingRows: 1,
+          targetRows: 2,
+          keyConflicts: 0,
+        },
+      ],
+      canApply: true,
+      applyMode: "append",
+      blocker: null,
+    };
+    render(<BackupSettings />);
+    const file = new File(["{}"], "append.json", {
+      type: "application/json",
+    });
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/当前工作区已有 2/)).toHaveTextContent(
+      "预检未发现主键重叠",
+    );
+    expect(
+      screen.getByRole("list", { name: "目标工作区数据清单" }),
+    ).toHaveTextContent("客户源 1 · 目标 2 · 重叠 0");
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    expect(mocks.applyImport).toHaveBeenCalledWith(
+      { file, applyMode: "append" },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
   it("classifies an older controlled-file package without enabling apply", () => {
     mocks.packageImportPreviewData = {
       formatVersion: 1,
@@ -396,7 +444,9 @@ describe("BackupSettings", () => {
       conflictTables: [],
       fileCount: 1,
       fileBytes: 1024,
+      fileConflicts: 0,
       canApply: false,
+      applyMode: null,
       blocker: "source_schema_older",
     };
     render(<BackupSettings />);
@@ -410,6 +460,41 @@ describe("BackupSettings", () => {
 
     expect(screen.getByText(/源数据为 schema v41/)).toHaveTextContent(
       "当前工作区为 v42",
+    );
+    expect(
+      screen.getByRole("button", { name: "确认含文件导入" }),
+    ).toBeDisabled();
+  });
+
+  it("blocks a controlled-file target collision without exposing paths", () => {
+    mocks.packageImportPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 43,
+      targetSchemaVersion: 43,
+      exportedAt: "2026-08-29T12:00:00Z",
+      tableCounts: { task_artifacts: 1 },
+      totalRows: 1,
+      targetRows: 0,
+      keyConflicts: 0,
+      conflictTables: [],
+      fileCount: 1,
+      fileBytes: 1024,
+      fileConflicts: 1,
+      canApply: false,
+      applyMode: null,
+      blocker: "target_file_conflicts",
+    };
+    render(<BackupSettings />);
+    const file = new File(["PK"], "collision.zip", {
+      type: "application/zip",
+    });
+
+    fireEvent.change(screen.getByLabelText("选择含文件业务 ZIP"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/受控存储中已有 1/)).toHaveTextContent(
+      "为避免覆盖",
     );
     expect(
       screen.getByRole("button", { name: "确认含文件导入" }),

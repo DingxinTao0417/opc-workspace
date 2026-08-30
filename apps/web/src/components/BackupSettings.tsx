@@ -97,13 +97,22 @@ function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
       </small>
     );
   }
-  if (preview.blocker !== "target_not_empty") return null;
+  if (preview.blocker === "target_file_conflicts") {
+    const fileConflicts =
+      "fileConflicts" in preview ? preview.fileConflicts : 0;
+    return (
+      <small className="settings-import-blocker">
+        受控存储中已有 {fileConflicts}
+        个同名对象；为避免覆盖，本次导入已在写入前阻断。
+      </small>
+    );
+  }
+  if (preview.blocker !== "target_key_conflicts") return null;
   return (
     <div className="settings-import-conflicts">
       <small className="settings-import-blocker">
         当前工作区已有 {preview.targetRows} 行业务事实；检测到{" "}
-        {preview.keyConflicts}{" "}
-        条主键重叠。当前仅提供只读冲突清单，不会覆盖或合并数据。
+        {preview.keyConflicts} 条主键重叠。冲突事实不会被覆盖、跳过或自动改名。
       </small>
       <ul aria-label="导入冲突清单">
         {preview.conflictTables.map((table) => (
@@ -112,6 +121,28 @@ function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
             <span>
               源 {table.incomingRows} · 目标 {table.targetRows} · 重叠{" "}
               {table.keyConflicts}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ImportAppendDetails({ preview }: { preview: ImportPreview }) {
+  if (!preview.canApply || preview.applyMode !== "append") return null;
+  return (
+    <div className="settings-import-conflicts">
+      <small>
+        当前工作区已有 {preview.targetRows}
+        行业务事实，预检未发现主键重叠。本次只追加源数据，并保留目标名称、头像和设置等既有事实；只有未修改的默认自动化会接收源配置。应用前仍会创建完整回滚备份。
+      </small>
+      <ul aria-label="目标工作区数据清单">
+        {preview.conflictTables.map((table) => (
+          <li key={table.table}>
+            <span>{importTableLabels[table.table] ?? table.table}</span>
+            <span>
+              源 {table.incomingRows} · 目标 {table.targetRows} · 重叠 0
             </span>
           </li>
         ))}
@@ -217,8 +248,14 @@ function backupErrorText(error: unknown): string {
     ) {
       return "导入文件结构不完整或已被修改，已拒绝应用。";
     }
-    if (error.code === "IMPORT_TARGET_NOT_EMPTY") {
-      return "当前工作区已有业务数据，安全导入不会覆盖它。";
+    if (error.code === "IMPORT_TARGET_CONFLICT") {
+      return "预检后目标数据发生变化或仍有主键冲突；没有覆盖或追加任何业务事实。";
+    }
+    if (error.code === "IMPORT_TARGET_FILE_CONFLICT") {
+      return "受控存储中已有同名对象；没有覆盖文件或追加业务事实。";
+    }
+    if (error.code === "IMPORT_CONFIRMATION_REQUIRED") {
+      return "导入模式已变化，请重新选择文件、检查最新预检结果后确认。";
     }
     if (error.code === "IMPORT_BACKUP_FAILED") {
       return "无法创建导入前回滚备份，现有数据没有改变。";
@@ -628,15 +665,18 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     if (!importFile || !importPreviewMutation.data?.canApply) return;
     setSuccess(null);
     importApplyMutation.reset();
-    importApplyMutation.mutate(importFile, {
-      onSuccess: (result) => {
-        setImportFile(null);
-        importPreviewMutation.reset();
-        setSuccess(
-          `已原子导入 ${result.importedRows} 行业务数据；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
-        );
+    importApplyMutation.mutate(
+      { file: importFile, applyMode: importPreviewMutation.data.applyMode! },
+      {
+        onSuccess: (result) => {
+          setImportFile(null);
+          importPreviewMutation.reset();
+          setSuccess(
+            `${result.applyMode === "append" ? "已完成追加导入，处理" : "已导入"} ${result.importedRows} 行源业务数据；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+          );
+        },
       },
-    });
+    );
   };
 
   const applyBusinessPackageImport = () => {
@@ -644,15 +684,21 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       return;
     setSuccess(null);
     packageImportApplyMutation.reset();
-    packageImportApplyMutation.mutate(packageImportFile, {
-      onSuccess: (result) => {
-        setPackageImportFile(null);
-        packageImportPreviewMutation.reset();
-        setSuccess(
-          `已原子导入 ${result.importedRows} 行业务数据和 ${result.importedFiles} 个受控文件；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
-        );
+    packageImportApplyMutation.mutate(
+      {
+        file: packageImportFile,
+        applyMode: packageImportPreviewMutation.data.applyMode!,
       },
-    });
+      {
+        onSuccess: (result) => {
+          setPackageImportFile(null);
+          packageImportPreviewMutation.reset();
+          setSuccess(
+            `${result.applyMode === "append" ? "已完成追加导入，处理" : "已导入"} ${result.importedRows} 行源业务数据和 ${result.importedFiles} 个受控文件；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+          );
+        },
+      },
+    );
   };
 
   const restartApplication = async () => {
@@ -841,8 +887,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
             <strong>导入业务数据 JSON</strong>
             <span>
               先预检官方导出文件；跨 schema
-              会标明升级方向，非空工作区会列出目标表和主键重叠，但当前只对同
-              schema 空工作区开放应用。
+              会标明升级方向，非空工作区会列出目标表和主键重叠；同 schema
+              且零主键冲突时可保留当前事实并安全追加。
             </span>
           </div>
         </div>
@@ -877,6 +923,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
               </p>
               {!importPreviewMutation.data.canApply ? (
                 <ImportBlockerDetails preview={importPreviewMutation.data} />
+              ) : importPreviewMutation.data.applyMode === "append" ? (
+                <ImportAppendDetails preview={importPreviewMutation.data} />
               ) : (
                 <small>
                   应用前会自动创建并校验回滚备份；任一行失败则整批回滚。
@@ -920,7 +968,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
             <strong>导入含文件业务包</strong>
             <span>
               选择官方 ZIP 后先校验清单、业务数据和全部文件；预检会分类 schema
-              方向与非空目标冲突，当前只对同 schema 空工作区开放应用。
+              方向、主键与文件冲突；同 schema 且零冲突时可安全追加。
             </span>
           </div>
         </div>
@@ -957,6 +1005,10 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
               </p>
               {!packageImportPreviewMutation.data.canApply ? (
                 <ImportBlockerDetails
+                  preview={packageImportPreviewMutation.data}
+                />
+              ) : packageImportPreviewMutation.data.applyMode === "append" ? (
+                <ImportAppendDetails
                   preview={packageImportPreviewMutation.data}
                 />
               ) : (
@@ -1194,7 +1246,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
 
       <p className="settings-inline-note">
         当前已开放版本化业务 JSON、含活动受控文件的 ZIP
-        导入导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；两类导入都只允许空工作区并先创建回滚备份。
+        导入导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；两类导入都支持同
+        schema 零主键冲突追加，并在应用前创建回滚备份。
       </p>
     </>
   );

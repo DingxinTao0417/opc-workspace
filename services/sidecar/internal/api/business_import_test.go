@@ -60,7 +60,7 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	if missingConfirmation.Code != http.StatusPreconditionRequired || responseErrorCode(t, missingConfirmation.Body.Bytes()) != "IMPORT_CONFIRMATION_REQUIRED" {
 		t.Fatalf("missing confirmation = %d: %s", missingConfirmation.Code, missingConfirmation.Body.String())
 	}
-	applyResponse := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", exported.Body.Bytes(), map[string]string{"X-Import-Confirmation": importConfirmation})
+	applyResponse := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", exported.Body.Bytes(), map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
 	if applyResponse.Code != http.StatusOK {
 		t.Fatalf("apply = %d: %s", applyResponse.Code, applyResponse.Body.String())
 	}
@@ -117,7 +117,7 @@ func TestBusinessImportRollsBackTamperedRelationships(t *testing.T) {
 	}
 	body, _ := json.Marshal(packageData)
 	targetRouter, targetStore, _, _ := newBackupTestAPI(t)
-	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
+	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
 	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_APPLY_FAILED" {
 		t.Fatalf("tampered import = %d: %s", response.Code, response.Body.String())
 	}
@@ -153,7 +153,7 @@ func TestBusinessImportPreservesManualReviewTextArtifacts(t *testing.T) {
 	packageData := emptyBusinessExportFixture(t, sourceRouter)
 	body, _ := json.Marshal(packageData)
 	targetRouter, targetStore, _, _ := newBackupTestAPI(t)
-	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
+	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
 	if response.Code != http.StatusOK {
 		context, _ := gin.CreateTestContext(httptest.NewRecorder())
 		context.Request = httptest.NewRequest(http.MethodPost, "/", nil)
@@ -172,13 +172,25 @@ func TestBusinessImportPreservesManualReviewTextArtifacts(t *testing.T) {
 	}
 }
 
-func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
-	router, store, _, _ := newBackupTestAPI(t)
-	packageData := emptyBusinessExportFixture(t, router)
-	if err := store.DB.Exec("INSERT INTO clients(id, name) VALUES ('018f0000-0000-7000-8000-000000002010', 'Existing Client')").Error; err != nil {
+func TestBusinessImportSafelyAppendsToNonEmptyTarget(t *testing.T) {
+	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t)
+	if err := sourceStore.DB.Exec("INSERT INTO clients(id, name) VALUES ('018f0000-0000-7000-8000-000000002011', 'Incoming Client')").Error; err != nil {
 		t.Fatal(err)
 	}
+	dailyRule := automationRuleByPreset(t, sourceRouter, automationPresetDailyToday)
+	enabled := performRequest(sourceRouter, http.MethodPost, "/api/v1/automations/rules/"+dailyRule.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable source automation = %d: %s", enabled.Code, enabled.Body.String())
+	}
+	packageData := emptyBusinessExportFixture(t, sourceRouter)
 	body, _ := json.Marshal(packageData)
+	router, store, _, backupDir := newBackupTestAPI(t)
+	if err := store.DB.Exec(`
+		UPDATE actors SET display_name = 'Existing Owner', version = 2 WHERE id = '00000000-0000-5000-8000-000000000001';
+		INSERT INTO clients(id, name) VALUES ('018f0000-0000-7000-8000-000000002010', 'Existing Client')
+	`).Error; err != nil {
+		t.Fatal(err)
+	}
 	preview := performRequest(router, http.MethodPost, "/api/v1/imports/business-data/preview", body, nil)
 	if preview.Code != http.StatusOK {
 		t.Fatalf("preview = %d: %s", preview.Code, preview.Body.String())
@@ -186,18 +198,39 @@ func TestBusinessImportRefusesNonEmptyTargetWithoutChangingIt(t *testing.T) {
 	var envelope struct {
 		Data businessImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" ||
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" ||
 		envelope.Data.TargetSchemaVersion != 43 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
-		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
+		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 1, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("preview = %#v err=%v", envelope.Data, err)
 	}
-	apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
-	if apply.Code != http.StatusConflict || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_TARGET_NOT_EMPTY" {
+	wrongMode := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+	if wrongMode.Code != http.StatusPreconditionRequired || responseErrorCode(t, wrongMode.Body.Bytes()) != "IMPORT_CONFIRMATION_REQUIRED" {
+		t.Fatalf("wrong-mode apply = %d: %s", wrongMode.Code, wrongMode.Body.String())
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("wrong confirmation created backups: %v", backups)
+	}
+	apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importAppendConfirmation})
+	if apply.Code != http.StatusOK {
 		t.Fatalf("apply = %d: %s", apply.Code, apply.Body.String())
 	}
-	var count int64
-	if err := store.DB.Table("clients").Where("name = ?", "Existing Client").Count(&count).Error; err != nil || count != 1 {
-		t.Fatalf("existing data changed count=%d err=%v", count, err)
+	var result struct {
+		Data businessImportResult `json:"data"`
+	}
+	if err := json.Unmarshal(apply.Body.Bytes(), &result); err != nil || result.Data.ApplyMode != importModeAppend || result.Data.BackupID == "" {
+		t.Fatalf("append result = %#v err=%v", result.Data, err)
+	}
+	var clients int64
+	if err := store.DB.Table("clients").Where("name IN ?", []string{"Existing Client", "Incoming Client"}).Count(&clients).Error; err != nil || clients != 2 {
+		t.Fatalf("appended clients=%d err=%v", clients, err)
+	}
+	var ownerName string
+	if err := store.DB.Table("actors").Where("id = ?", "00000000-0000-5000-8000-000000000001").Pluck("display_name", &ownerName).Error; err != nil || ownerName != "Existing Owner" {
+		t.Fatalf("target owner changed to %q err=%v", ownerName, err)
+	}
+	var automationEnabled bool
+	if err := store.DB.Table("automation_rules").Where("id = ?", dailyRule.ID).Pluck("enabled", &automationEnabled).Error; err != nil || !automationEnabled {
+		t.Fatalf("source automation was not merged enabled=%t err=%v", automationEnabled, err)
 	}
 }
 
@@ -238,6 +271,13 @@ func TestBusinessImportPreviewMapsTableAndPrimaryKeyConflictsWithoutChangingTarg
 	}
 	if envelope.Data.TargetRows != 3 || envelope.Data.KeyConflicts != 1 || len(envelope.Data.ConflictTables) != 2 {
 		t.Fatalf("conflict summary = %#v", envelope.Data)
+	}
+	if envelope.Data.CanApply || envelope.Data.Blocker != importBlockerTargetConflicts || envelope.Data.ApplyMode != "" {
+		t.Fatalf("conflicting import unexpectedly applies: %#v", envelope.Data)
+	}
+	apply := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", exported.Body.Bytes(), map[string]string{"X-Import-Confirmation": importAppendConfirmation})
+	if apply.Code != http.StatusConflict || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_TARGET_CONFLICT" {
+		t.Fatalf("conflicting apply = %d: %s", apply.Code, apply.Body.String())
 	}
 	if envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 2, TargetRows: 2, KeyConflicts: 1}) ||
 		envelope.Data.ConflictTables[1] != (businessImportTableConflict{Table: "projects", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
@@ -281,7 +321,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 				envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 0 {
 				t.Fatalf("schema preview = %#v err=%v", envelope.Data, err)
 			}
-			apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importConfirmation})
+			apply := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
 			if apply.Code != http.StatusUnprocessableEntity || responseErrorCode(t, apply.Body.Bytes()) != "IMPORT_VERSION_UNSUPPORTED" {
 				t.Fatalf("schema apply = %d: %s", apply.Code, apply.Body.String())
 			}
@@ -296,7 +336,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 	}
 }
 
-func TestBusinessImportTreatsRegisteredAgentAdapterAsNonEmpty(t *testing.T) {
+func TestBusinessImportAllowsTargetOnlyAgentAdapterDuringAppend(t *testing.T) {
 	router, _, _, _ := newBackupTestAPI(t)
 	packageData := emptyBusinessExportFixture(t, router)
 	registered := performRequest(router, http.MethodPost, "/api/v1/agent-adapters", []byte(`{"preset_key":"builtin-local-text-v1"}`), nil)
@@ -311,7 +351,7 @@ func TestBusinessImportTreatsRegisteredAgentAdapterAsNonEmpty(t *testing.T) {
 	var envelope struct {
 		Data businessImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != "target_not_empty" {
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" {
 		t.Fatalf("Agent Adapter target preview = %#v err=%v", envelope.Data, err)
 	}
 }

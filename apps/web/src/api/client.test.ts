@@ -1863,7 +1863,9 @@ describe("verified local backups", () => {
               conflict_tables: [],
               file_count: 1,
               file_bytes: 2048,
+              file_conflicts: 0,
               can_apply: true,
+              apply_mode: "replace_empty",
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1876,6 +1878,7 @@ describe("verified local backups", () => {
               imported_rows: 3,
               imported_files: 1,
               backup_id: "018f0000-0000-7000-8000-000000001798",
+              apply_mode: "replace_empty",
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1887,7 +1890,10 @@ describe("verified local backups", () => {
     });
 
     const preview = await previewBusinessPackageImport(file);
-    const result = await applyBusinessPackageImport(file);
+    const result = await applyBusinessPackageImport({
+      file,
+      applyMode: preview.applyMode!,
+    });
 
     expect(preview).toMatchObject({
       formatVersion: 1,
@@ -1898,13 +1904,16 @@ describe("verified local backups", () => {
       keyConflicts: 0,
       fileCount: 1,
       fileBytes: 2048,
+      fileConflicts: 0,
       canApply: true,
+      applyMode: "replace_empty",
       blocker: null,
     });
     expect(result).toEqual({
       importedRows: 3,
       importedFiles: 1,
       backupId: "018f0000-0000-7000-8000-000000001798",
+      applyMode: "replace_empty",
     });
     expect(fetchMock.mock.calls[0][1]?.body).toBe(file);
     expect(String(fetchMock.mock.calls[0][0])).toContain(
@@ -1969,6 +1978,7 @@ describe("verified local backups", () => {
               key_conflicts: 0,
               conflict_tables: [],
               can_apply: true,
+              apply_mode: "replace_empty",
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1980,6 +1990,7 @@ describe("verified local backups", () => {
             data: {
               imported_rows: 2,
               backup_id: "018f0000-0000-7000-8000-000000001799",
+              apply_mode: "replace_empty",
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1991,7 +2002,10 @@ describe("verified local backups", () => {
     });
 
     const preview = await previewBusinessDataImport(file);
-    const result = await applyBusinessDataImport(file);
+    const result = await applyBusinessDataImport({
+      file,
+      applyMode: preview.applyMode!,
+    });
 
     expect(preview).toMatchObject({
       formatVersion: 1,
@@ -2001,11 +2015,13 @@ describe("verified local backups", () => {
       targetRows: 0,
       keyConflicts: 0,
       canApply: true,
+      applyMode: "replace_empty",
       blocker: null,
     });
     expect(result).toEqual({
       importedRows: 2,
       backupId: "018f0000-0000-7000-8000-000000001799",
+      applyMode: "replace_empty",
     });
     expect(fetchMock.mock.calls[0][1]?.body).toBe(file);
     expect(
@@ -2046,7 +2062,7 @@ describe("verified local backups", () => {
                   },
                 ],
                 can_apply: false,
-                blocker: "target_not_empty",
+                blocker: "target_key_conflicts",
               },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -2062,12 +2078,79 @@ describe("verified local backups", () => {
       targetSchemaVersion: 42,
       targetRows: 5,
       keyConflicts: 2,
-      blocker: "target_not_empty",
+      blocker: "target_key_conflicts",
       conflictTables: [
         { table: "clients", targetRows: 2, keyConflicts: 1 },
         { table: "tasks", targetRows: 3, keyConflicts: 1 },
       ],
     });
+  });
+
+  it("uses a distinct confirmation for a zero-conflict append", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              format_version: 1,
+              schema_version: 43,
+              target_schema_version: 43,
+              exported_at: "2026-08-29T12:00:00Z",
+              table_counts: { clients: 1 },
+              total_rows: 1,
+              target_rows: 2,
+              key_conflicts: 0,
+              conflict_tables: [
+                {
+                  table: "clients",
+                  incoming_rows: 1,
+                  target_rows: 2,
+                  key_conflicts: 0,
+                },
+              ],
+              can_apply: true,
+              apply_mode: "append",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              imported_rows: 1,
+              backup_id: "018f0000-0000-7000-8000-000000001799",
+              apply_mode: "append",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["{}"], "append.json", {
+      type: "application/json",
+    });
+
+    const preview = await previewBusinessDataImport(file);
+    const result = await applyBusinessDataImport({
+      file,
+      applyMode: preview.applyMode!,
+    });
+
+    expect(preview).toMatchObject({
+      canApply: true,
+      applyMode: "append",
+      targetRows: 2,
+      keyConflicts: 0,
+    });
+    expect(result.applyMode).toBe("append");
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get(
+        "X-Import-Confirmation",
+      ),
+    ).toBe("append-to-existing-workspace");
   });
 
   it("classifies an older import schema and rejects inconsistent conflict totals", async () => {
@@ -2114,7 +2197,7 @@ describe("verified local backups", () => {
                 },
               ],
               can_apply: false,
-              blocker: "target_not_empty",
+              blocker: "target_key_conflicts",
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
