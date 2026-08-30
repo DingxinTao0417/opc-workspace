@@ -1699,11 +1699,18 @@ export interface ClientActorLink {
   clientVersion: number;
 }
 
-export interface ClientActorLinkListParams {
+export type ClientActorLinkListState = "active" | "unlinked" | "all";
+
+type ClientActorLinkListPageParams = {
   page?: number;
   pageSize?: number;
-  includeUnlinked?: boolean;
-}
+};
+
+export type ClientActorLinkListParams = ClientActorLinkListPageParams &
+  (
+    | { state?: ClientActorLinkListState; includeUnlinked?: never }
+    | { state?: never; includeUnlinked?: boolean }
+  );
 
 export interface ClientActorLinkListResult {
   items: ClientActorLink[];

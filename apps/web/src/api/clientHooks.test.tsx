@@ -9,6 +9,7 @@ import {
   inboxQueryKey,
   projectQueryKey,
   useClientOptionsQuery,
+  useClientActorLinksQuery,
   useCompleteClientFollowup,
   useCreateClient,
   useClientFollowupsQuery,
@@ -19,6 +20,7 @@ const calls = vi.hoisted(() => ({
   completeFollowup: vi.fn(),
   create: vi.fn(),
   listFollowups: vi.fn(),
+  listActorLinks: vi.fn(),
   list: vi.fn(),
   update: vi.fn(),
 }));
@@ -30,6 +32,7 @@ vi.mock("./client", async () => {
     createClient: calls.create,
     completeClientFollowup: calls.completeFollowup,
     getClientFollowups: calls.listFollowups,
+    getClientActorLinks: calls.listActorLinks,
     getClients: calls.list,
     updateClient: calls.update,
   };
@@ -103,6 +106,45 @@ afterEach(() => {
 });
 
 describe("client hooks", () => {
+  it("defers relationship history and forwards cancellation when enabled", async () => {
+    const signals: AbortSignal[] = [];
+    calls.listActorLinks.mockImplementation(
+      (_clientId, _input, signal?: AbortSignal) => {
+        if (signal) signals.push(signal);
+        return new Promise(() => undefined);
+      },
+    );
+    const queryClient = createQueryClient();
+    const hook = renderHook(
+      ({ enabled, page }) =>
+        useClientActorLinksQuery(
+          client.id,
+          { state: "unlinked", page, pageSize: 6 },
+          enabled,
+        ),
+      {
+        initialProps: { enabled: false, page: 1 },
+        wrapper: wrapperFor(queryClient),
+      },
+    );
+
+    expect(calls.listActorLinks).not.toHaveBeenCalled();
+    hook.rerender({ enabled: true, page: 1 });
+    await waitFor(() => expect(signals).toHaveLength(1));
+    expect(calls.listActorLinks).toHaveBeenLastCalledWith(
+      client.id,
+      { state: "unlinked", page: 1, pageSize: 6 },
+      signals[0],
+    );
+
+    hook.rerender({ enabled: true, page: 2 });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals[0].aborted).toBe(true);
+
+    hook.unmount();
+    await waitFor(() => expect(signals[1].aborted).toBe(true));
+  });
+
   it("refreshes followup lists containing planned facts at the Sidecar scheduler cadence", async () => {
     vi.useFakeTimers();
     calls.listFollowups.mockResolvedValue({

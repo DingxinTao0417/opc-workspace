@@ -9363,14 +9363,30 @@ export async function downloadClientAttachment(
 export async function getClientActorLinks(
   clientId: string,
   input: ClientActorLinkListParams = {},
+  signal?: AbortSignal,
 ): Promise<ClientActorLinkListResult> {
+  if (input.state !== undefined && input.includeUnlinked !== undefined) {
+    throw new ApiError("客户责任关联筛选条件不能同时使用", {
+      code: "INVALID_FILTER",
+    });
+  }
+  const state = input.state ?? (input.includeUnlinked ? "all" : "active");
+  if (state !== "active" && state !== "unlinked" && state !== "all") {
+    throw new ApiError("客户责任关联筛选条件无效", {
+      code: "INVALID_FILTER",
+    });
+  }
+  const requestedPage = input.page ?? 1;
+  const requestedPageSize = input.pageSize ?? 20;
   const params = new URLSearchParams({
-    page: String(input.page ?? 1),
-    page_size: String(input.pageSize ?? 20),
+    page: String(requestedPage),
+    page_size: String(requestedPageSize),
   });
+  if (input.state) params.set("state", input.state);
   if (input.includeUnlinked) params.set("include_unlinked", "true");
   const payload = await apiRequest<unknown>(
     `/api/v1/clients/${encodeURIComponent(clientId)}/actor-links?${params}`,
+    { signal },
   );
   if (
     !isRecord(payload) ||
@@ -9380,22 +9396,42 @@ export async function getClientActorLinks(
     return invalidResponse("客户责任关联列表响应格式无效");
   }
   const items = payload.data.map(normalizeClientActorLink);
-  if (items.some((link) => link.clientId !== clientId)) {
+  const page = positiveInteger(payload.meta.page, "客户责任关联页码");
+  const pageSize = positiveInteger(
+    fieldValue(payload.meta, "page_size", "pageSize"),
+    "客户责任关联每页数量",
+  );
+  const total = nonNegativeInteger(payload.meta.total, "客户责任关联总数");
+  const clientVersion = positiveInteger(
+    fieldValue(payload.meta, "client_version", "clientVersion"),
+    "客户责任关联对应客户版本",
+  );
+  const expectedItemCount = Math.min(
+    pageSize,
+    Math.max(0, total - (page - 1) * pageSize),
+  );
+  if (
+    page !== requestedPage ||
+    pageSize !== requestedPageSize ||
+    items.length !== expectedItemCount ||
+    new Set(items.map((link) => link.id)).size !== items.length ||
+    items.some(
+      (link) =>
+        link.clientId !== clientId || link.clientVersion !== clientVersion,
+    ) ||
+    (state === "active" &&
+      (total > 1 || items.some((link) => link.unlinkedAt !== null))) ||
+    (state === "unlinked" && items.some((link) => link.unlinkedAt === null))
+  ) {
     return invalidResponse("客户责任关联列表与请求不一致");
   }
   return {
     items,
     meta: {
-      page: positiveInteger(payload.meta.page, "客户责任关联页码"),
-      pageSize: positiveInteger(
-        fieldValue(payload.meta, "page_size", "pageSize"),
-        "客户责任关联每页数量",
-      ),
-      total: nonNegativeInteger(payload.meta.total, "客户责任关联总数"),
-      clientVersion: positiveInteger(
-        fieldValue(payload.meta, "client_version", "clientVersion"),
-        "客户责任关联对应客户版本",
-      ),
+      page,
+      pageSize,
+      total,
+      clientVersion,
     },
   };
 }

@@ -70,6 +70,14 @@ type normalizedClientActorLinkInput struct {
 	Role              string  `json:"role"`
 }
 
+type clientActorLinkListState string
+
+const (
+	clientActorLinkStateActive   clientActorLinkListState = "active"
+	clientActorLinkStateUnlinked clientActorLinkListState = "unlinked"
+	clientActorLinkStateAll      clientActorLinkListState = "all"
+)
+
 func (a *API) listClientActorLinks(c *gin.Context) {
 	clientIDValue, ok := clientID(c)
 	if !ok {
@@ -83,9 +91,9 @@ func (a *API) listClientActorLinks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	includeUnlinked, valid := parseClientActorLinksIncludeUnlinked(c.Query("include_unlinked"))
+	state, errorMessage, valid := parseClientActorLinkListState(c)
 	if !valid {
-		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "include_unlinked must be true or false")
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", errorMessage)
 		return
 	}
 
@@ -99,10 +107,10 @@ func (a *API) listClientActorLinks(c *gin.Context) {
 			}
 			return err
 		}
-		query := tx.Table("client_actor_links").Where("client_actor_links.client_id = ?", clientIDValue)
-		if !includeUnlinked {
-			query = query.Where("client_actor_links.unlinked_at IS NULL")
-		}
+		query := applyClientActorLinkListState(
+			tx.Table("client_actor_links").Where("client_actor_links.client_id = ?", clientIDValue),
+			state,
+		)
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
@@ -378,6 +386,47 @@ func parseClientActorLinksIncludeUnlinked(raw string) (bool, bool) {
 		return true, true
 	default:
 		return false, false
+	}
+}
+
+func parseClientActorLinkListState(c *gin.Context) (clientActorLinkListState, string, bool) {
+	query := c.Request.URL.Query()
+	_, statePresent := query["state"]
+	_, includeUnlinkedPresent := query["include_unlinked"]
+	if statePresent && includeUnlinkedPresent {
+		return "", "state and include_unlinked cannot be combined", false
+	}
+	if statePresent {
+		switch strings.TrimSpace(c.Query("state")) {
+		case string(clientActorLinkStateActive):
+			return clientActorLinkStateActive, "", true
+		case string(clientActorLinkStateUnlinked):
+			return clientActorLinkStateUnlinked, "", true
+		case string(clientActorLinkStateAll):
+			return clientActorLinkStateAll, "", true
+		default:
+			return "", "state must be active, unlinked, or all", false
+		}
+	}
+
+	includeUnlinked, valid := parseClientActorLinksIncludeUnlinked(c.Query("include_unlinked"))
+	if !valid {
+		return "", "include_unlinked must be true or false", false
+	}
+	if includeUnlinked {
+		return clientActorLinkStateAll, "", true
+	}
+	return clientActorLinkStateActive, "", true
+}
+
+func applyClientActorLinkListState(query *gorm.DB, state clientActorLinkListState) *gorm.DB {
+	switch state {
+	case clientActorLinkStateActive:
+		return query.Where("client_actor_links.unlinked_at IS NULL")
+	case clientActorLinkStateUnlinked:
+		return query.Where("client_actor_links.unlinked_at IS NOT NULL")
+	default:
+		return query
 	}
 }
 

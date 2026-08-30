@@ -1,5 +1,5 @@
 import { History, Link2, Plus, Unlink, UserRound } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   useClientActorLinksQuery,
@@ -14,6 +14,8 @@ interface ClientActorLinksSectionProps {
   clientVersion: number;
   contactName: string | null;
 }
+
+const HISTORY_PAGE_SIZE = 6;
 
 function formatDateTime(value: string): string {
   const date = new Date(value);
@@ -51,12 +53,27 @@ export function ClientActorLinksSection({
   clientVersion,
   contactName,
 }: ClientActorLinksSectionProps) {
-  const activeQuery = useClientActorLinksQuery(clientId, { pageSize: 20 });
-  const [showHistory, setShowHistory] = useState(false);
-  const historyQuery = useClientActorLinksQuery(clientId, {
-    pageSize: 100,
-    includeUnlinked: true,
+  const activeQuery = useClientActorLinksQuery(clientId, {
+    state: "active",
+    page: 1,
+    pageSize: 1,
   });
+  const [historyView, setHistoryView] = useState({
+    clientId,
+    expanded: false,
+    page: 1,
+  });
+  const showHistory = historyView.clientId === clientId && historyView.expanded;
+  const historyPage = historyView.clientId === clientId ? historyView.page : 1;
+  const historyQuery = useClientActorLinksQuery(
+    clientId,
+    {
+      state: "unlinked",
+      page: historyPage,
+      pageSize: HISTORY_PAGE_SIZE,
+    },
+    showHistory,
+  );
   const actorsQuery = useClientActorOptionsQuery(true);
   const createMutation = useCreateClientActorLink();
   const deleteMutation = useDeleteClientActorLink();
@@ -65,23 +82,113 @@ export function ClientActorLinksSection({
   const [displayName, setDisplayName] = useState(contactName ?? "");
   const [notes, setNotes] = useState("");
   const [unlinkReason, setUnlinkReason] = useState("");
-  const activeLink = activeQuery.data?.items[0] ?? null;
-  const history = useMemo(
-    () =>
-      (historyQuery.data?.items ?? []).filter(
-        (item) => item.unlinkedAt !== null,
-      ),
-    [historyQuery.data?.items],
+  const [confirmedClientVersions, setConfirmedClientVersions] = useState<
+    Record<string, number>
+  >(() => ({ [clientId]: clientVersion }));
+  const formClientIdRef = useRef(clientId);
+  const activeData = activeQuery.isPlaceholderData
+    ? undefined
+    : activeQuery.data;
+  const historyData = historyQuery.isPlaceholderData
+    ? undefined
+    : historyQuery.data;
+  const activeLink = activeData?.items[0] ?? null;
+  const history = historyData?.items ?? [];
+  const historyTotal = historyData?.meta.total ?? 0;
+  const historyTotalPages = Math.max(
+    1,
+    Math.ceil(historyTotal / HISTORY_PAGE_SIZE),
+  );
+  const activeInitialError = activeQuery.isError && !activeData;
+  const activeRefreshError = activeQuery.isError && Boolean(activeData);
+  const activeLoading =
+    !activeData &&
+    (activeQuery.isPending ||
+      activeQuery.isFetching ||
+      activeQuery.isPlaceholderData);
+  const historyInitialError = historyQuery.isError && !historyData;
+  const historyRefreshError = historyQuery.isError && Boolean(historyData);
+  const historyLoading =
+    !historyData &&
+    (historyQuery.isPending ||
+      historyQuery.isFetching ||
+      historyQuery.isPlaceholderData);
+  const observedClientVersion = Math.max(
+    clientVersion,
+    activeData?.meta.clientVersion ?? 0,
+    historyData?.meta.clientVersion ?? 0,
   );
   const effectiveVersion = Math.max(
-    clientVersion,
-    activeQuery.data?.meta.clientVersion ?? 0,
-    historyQuery.data?.meta.clientVersion ?? 0,
+    observedClientVersion,
+    confirmedClientVersions[clientId] ?? 0,
   );
   const busy = createMutation.isPending || deleteMutation.isPending;
   const error =
-    actorLinkError(createMutation.error) ??
-    actorLinkError(deleteMutation.error);
+    (createMutation.variables?.clientId === clientId
+      ? actorLinkError(createMutation.error)
+      : null) ??
+    (deleteMutation.variables?.clientId === clientId
+      ? actorLinkError(deleteMutation.error)
+      : null);
+
+  useEffect(() => {
+    setHistoryView((current) =>
+      current.clientId === clientId
+        ? current
+        : { clientId, expanded: false, page: 1 },
+    );
+  }, [clientId]);
+
+  useLayoutEffect(() => {
+    if (formClientIdRef.current === clientId) return;
+    formClientIdRef.current = clientId;
+    setMode("existing");
+    setActorId("");
+    setDisplayName(contactName ?? "");
+    setNotes("");
+    setUnlinkReason("");
+  }, [clientId, contactName]);
+
+  useLayoutEffect(() => {
+    setConfirmedClientVersions((current) => {
+      const nextVersion = Math.max(
+        current[clientId] ?? 0,
+        observedClientVersion,
+      );
+      return current[clientId] === nextVersion
+        ? current
+        : { ...current, [clientId]: nextVersion };
+    });
+  }, [clientId, observedClientVersion]);
+
+  useEffect(() => {
+    if (
+      !showHistory ||
+      !historyData ||
+      historyQuery.isPlaceholderData ||
+      historyQuery.isFetching ||
+      historyQuery.isError ||
+      historyPage <= historyTotalPages
+    ) {
+      return;
+    }
+    setHistoryView((current) =>
+      current.clientId === clientId &&
+      current.expanded &&
+      current.page > historyTotalPages
+        ? { ...current, page: historyTotalPages }
+        : current,
+    );
+  }, [
+    clientId,
+    historyData,
+    historyPage,
+    historyQuery.isError,
+    historyQuery.isFetching,
+    historyQuery.isPlaceholderData,
+    historyTotalPages,
+    showHistory,
+  ]);
 
   const createLink = async (event: FormEvent) => {
     event.preventDefault();
@@ -137,7 +244,13 @@ export function ClientActorLinksSection({
         </div>
         <button
           className="button button-secondary button-compact"
-          onClick={() => setShowHistory((value) => !value)}
+          onClick={() =>
+            setHistoryView((current) =>
+              current.clientId === clientId
+                ? { ...current, expanded: !current.expanded }
+                : { clientId, expanded: true, page: 1 },
+            )
+          }
           type="button"
         >
           <History size={13} />
@@ -145,8 +258,8 @@ export function ClientActorLinksSection({
         </button>
       </div>
 
-      {activeQuery.isPending ? <SkeletonRows count={2} /> : null}
-      {activeQuery.isError ? (
+      {activeLoading ? <SkeletonRows count={2} /> : null}
+      {activeInitialError ? (
         <ErrorState
           compact
           message="无法读取客户联系人关联。"
@@ -154,7 +267,16 @@ export function ClientActorLinksSection({
         />
       ) : null}
 
-      {activeQuery.isSuccess && activeLink ? (
+      {activeRefreshError ? (
+        <div className="inline-feedback error" role="alert">
+          联系人关联刷新失败，仍显示上次结果。
+          <button onClick={() => void activeQuery.refetch()} type="button">
+            重试
+          </button>
+        </div>
+      ) : null}
+
+      {activeData && activeLink ? (
         <div className="client-actor-current">
           <div className="client-actor-profile">
             <span aria-hidden="true" className="client-actor-avatar">
@@ -193,7 +315,7 @@ export function ClientActorLinksSection({
         </div>
       ) : null}
 
-      {activeQuery.isSuccess && !activeLink ? (
+      {activeData && !activeLink ? (
         <form className="client-actor-link-form" onSubmit={createLink}>
           <div
             className="client-actor-mode"
@@ -286,15 +408,35 @@ export function ClientActorLinksSection({
 
       {showHistory ? (
         <div className="client-actor-history">
-          {historyQuery.isPending ? <SkeletonRows count={2} /> : null}
-          {historyQuery.isError ? (
+          {historyLoading ? (
+            <>
+              <p className="client-actor-history-empty" role="status">
+                正在读取第 {historyPage} 页关联历史…
+              </p>
+              <SkeletonRows count={2} />
+            </>
+          ) : null}
+          {historyInitialError ? (
             <ErrorState
               compact
               message="无法读取联系人关联历史。"
               onRetry={() => void historyQuery.refetch()}
             />
           ) : null}
-          {historyQuery.isSuccess && history.length === 0 ? (
+          {historyRefreshError ? (
+            <div className="inline-feedback error" role="alert">
+              联系人关联历史刷新失败，仍显示上次结果。
+              <button onClick={() => void historyQuery.refetch()} type="button">
+                重试
+              </button>
+            </div>
+          ) : null}
+          {historyData && historyQuery.isFetching && !historyQuery.isError ? (
+            <p className="client-actor-history-empty" role="status">
+              正在刷新联系人关联历史…
+            </p>
+          ) : null}
+          {historyData && history.length === 0 ? (
             <p className="client-actor-history-empty">
               暂无已解除的联系人关联。
             </p>
@@ -313,6 +455,52 @@ export function ClientActorLinksSection({
               <p>{link.unlinkReason}</p>
             </article>
           ))}
+          {historyData ? (
+            <div aria-label="联系人关联历史分页" className="pagination">
+              <button
+                className="button button-secondary button-compact"
+                disabled={
+                  historyPage <= 1 ||
+                  historyQuery.isFetching ||
+                  historyQuery.isError
+                }
+                onClick={() =>
+                  setHistoryView((current) =>
+                    current.clientId === clientId
+                      ? { ...current, page: Math.max(1, current.page - 1) }
+                      : { clientId, expanded: true, page: 1 },
+                  )
+                }
+                type="button"
+              >
+                上一页
+              </button>
+              <span>
+                第 {historyPage} / {historyTotalPages} 页 · 共 {historyTotal} 条
+              </span>
+              <button
+                className="button button-secondary button-compact"
+                disabled={
+                  historyPage >= historyTotalPages ||
+                  historyQuery.isFetching ||
+                  historyQuery.isError
+                }
+                onClick={() =>
+                  setHistoryView((current) =>
+                    current.clientId === clientId
+                      ? {
+                          ...current,
+                          page: Math.min(historyTotalPages, current.page + 1),
+                        }
+                      : { clientId, expanded: true, page: 1 },
+                  )
+                }
+                type="button"
+              >
+                下一页
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

@@ -1416,6 +1416,7 @@ export const clientActorLinkQueryKey = (clientId: string) =>
 export function useClientActorLinksQuery(
   clientId: string | null,
   input: ClientActorLinkListParams = {},
+  enabled = true,
 ) {
   return useQuery({
     queryKey: [
@@ -1423,8 +1424,8 @@ export function useClientActorLinksQuery(
       "list",
       input,
     ],
-    queryFn: () => getClientActorLinks(clientId!, input),
-    enabled: Boolean(clientId),
+    queryFn: ({ signal }) => getClientActorLinks(clientId!, input, signal),
+    enabled: Boolean(clientId) && enabled,
     placeholderData: keepPreviousData,
     retry: 1,
   });
