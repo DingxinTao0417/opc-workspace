@@ -1123,6 +1123,7 @@ export interface ContentItemListParams {
   pageSize?: number;
   scheduledFrom?: string;
   scheduledTo?: string;
+  scheduleState?: "scheduled" | "unscheduled";
   platform?: string;
   status?: ContentItemStatus;
   projectId?: string;

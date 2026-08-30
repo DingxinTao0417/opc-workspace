@@ -19,6 +19,10 @@ var contentItemStatuses = map[string]struct{}{
 	"draft": {}, "in_review": {}, "scheduled": {}, "published": {}, "cancelled": {}, "archived": {},
 }
 
+var contentItemScheduleStates = map[string]struct{}{
+	"scheduled": {}, "unscheduled": {},
+}
+
 type createContentItemRequest struct {
 	Title             string  `json:"title"`
 	Platform          string  `json:"platform"`
@@ -91,14 +95,14 @@ func (a *API) listContentItems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	start, end, platform, status, projectID, includeArchived, ok := contentItemListFilters(c)
+	start, end, platform, status, projectID, scheduleState, includeArchived, ok := contentItemListFilters(c)
 	if !ok {
 		return
 	}
 	var total int64
 	var items []models.ContentItem
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		query := contentItemFilteredQuery(tx, start, end, platform, status, projectID, includeArchived)
+		query := contentItemFilteredQuery(tx, start, end, platform, status, projectID, scheduleState, includeArchived)
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
@@ -558,7 +562,7 @@ func (a *API) deleteContentItem(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted_id": id}})
 }
 
-func contentItemListFilters(c *gin.Context) (*string, *string, string, string, string, bool, bool) {
+func contentItemListFilters(c *gin.Context) (*string, *string, string, string, string, string, bool, bool) {
 	parseBound := func(key string) (*string, bool) {
 		raw := strings.TrimSpace(c.Query(key))
 		if raw == "" {
@@ -574,26 +578,42 @@ func contentItemListFilters(c *gin.Context) (*string, *string, string, string, s
 	}
 	start, ok := parseBound("scheduled_from")
 	if !ok {
-		return nil, nil, "", "", "", false, false
+		return nil, nil, "", "", "", "", false, false
 	}
 	end, ok := parseBound("scheduled_to")
 	if !ok {
-		return nil, nil, "", "", "", false, false
+		return nil, nil, "", "", "", "", false, false
 	}
 	if start != nil && end != nil && *start >= *end {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "scheduled_from must be before scheduled_to")
-		return nil, nil, "", "", "", false, false
+		return nil, nil, "", "", "", "", false, false
+	}
+	scheduleState := ""
+	if values, exists := c.Request.URL.Query()["schedule_state"]; exists {
+		if len(values) != 1 {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "schedule_state filter must be provided exactly once")
+			return nil, nil, "", "", "", "", false, false
+		}
+		scheduleState = values[0]
+		if _, exists := contentItemScheduleStates[scheduleState]; !exists {
+			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "schedule_state filter is invalid")
+			return nil, nil, "", "", "", "", false, false
+		}
+	}
+	if scheduleState == "unscheduled" && (c.Request.URL.Query().Has("scheduled_from") || c.Request.URL.Query().Has("scheduled_to")) {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "unscheduled schedule_state cannot be combined with scheduled_from or scheduled_to")
+		return nil, nil, "", "", "", "", false, false
 	}
 	platform := strings.TrimSpace(c.Query("platform"))
 	if utf8.RuneCountInString(platform) > 64 {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "platform filter is too long")
-		return nil, nil, "", "", "", false, false
+		return nil, nil, "", "", "", "", false, false
 	}
 	status := strings.TrimSpace(c.Query("status"))
 	if status != "" {
 		if _, exists := contentItemStatuses[status]; !exists {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
-			return nil, nil, "", "", "", false, false
+			return nil, nil, "", "", "", "", false, false
 		}
 	}
 	projectID := ""
@@ -601,20 +621,25 @@ func contentItemListFilters(c *gin.Context) (*string, *string, string, string, s
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
 			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "project_id filter must be a UUID")
-			return nil, nil, "", "", "", false, false
+			return nil, nil, "", "", "", "", false, false
 		}
 		projectID = parsed.String()
 	}
 	includeArchived, err := optionalBooleanQuery(c, "include_archived")
 	if err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
-		return nil, nil, "", "", "", false, false
+		return nil, nil, "", "", "", "", false, false
 	}
-	return start, end, platform, status, projectID, includeArchived, true
+	return start, end, platform, status, projectID, scheduleState, includeArchived, true
 }
 
-func contentItemFilteredQuery(tx *gorm.DB, start, end *string, platform, status, projectID string, includeArchived bool) *gorm.DB {
+func contentItemFilteredQuery(tx *gorm.DB, start, end *string, platform, status, projectID, scheduleState string, includeArchived bool) *gorm.DB {
 	query := tx.Model(&models.ContentItem{})
+	if scheduleState == "scheduled" {
+		query = query.Where("content_items.scheduled_at IS NOT NULL")
+	} else if scheduleState == "unscheduled" {
+		query = query.Where("content_items.scheduled_at IS NULL")
+	}
 	if start != nil {
 		query = query.Where("content_items.scheduled_at >= ?", *start)
 	}

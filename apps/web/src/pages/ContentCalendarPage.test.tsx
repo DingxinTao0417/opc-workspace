@@ -95,6 +95,80 @@ const item: ContentItem = {
   requiredTaskDone: 1,
 };
 
+const unscheduledItem: ContentItem = {
+  ...item,
+  id: "content-unscheduled",
+  title: "等待安排发布时间",
+  status: "draft",
+  scheduledAt: null,
+  scheduledTimezone: null,
+};
+
+const archivedUnscheduledItem: ContentItem = {
+  ...unscheduledItem,
+  id: "content-archived-unscheduled",
+  title: "已归档未排期内容",
+  status: "archived",
+  archivedFromStatus: "draft",
+};
+
+const archivedScheduledItem: ContentItem = {
+  ...item,
+  id: "content-archived-scheduled",
+  title: "去年已归档内容",
+  status: "archived",
+  scheduledAt: "2024-01-12T01:00:00Z",
+  archivedFromStatus: "scheduled",
+};
+
+function contentItemsResult(
+  items: ContentItem[],
+  options: {
+    hasData?: boolean;
+    hasNextPage?: boolean;
+    total?: number;
+    isError?: boolean;
+    isFetchNextPageError?: boolean;
+    isFetching?: boolean;
+    isFetchingNextPage?: boolean;
+    isPending?: boolean;
+    isPlaceholderData?: boolean;
+    isRefetchError?: boolean;
+    fetchNextPage?: ReturnType<typeof vi.fn>;
+    refetch?: ReturnType<typeof vi.fn>;
+  } = {},
+) {
+  const isPending = options.isPending ?? false;
+  const hasData = options.hasData ?? !isPending;
+  return {
+    data: hasData
+      ? {
+          pages: [
+            {
+              items,
+              meta: {
+                page: 1,
+                pageSize: 100,
+                total: options.total ?? items.length,
+              },
+            },
+          ],
+        }
+      : undefined,
+    isError: options.isError ?? false,
+    isFetchNextPageError: options.isFetchNextPageError ?? false,
+    isFetching: options.isFetching ?? false,
+    isFetchingNextPage: options.isFetchingNextPage ?? false,
+    isPlaceholderData: options.isPlaceholderData ?? false,
+    isRefetchError: options.isRefetchError ?? false,
+    hasNextPage: options.hasNextPage ?? false,
+    isPending,
+    isSuccess: !isPending && !options.isError,
+    fetchNextPage: options.fetchNextPage ?? vi.fn(),
+    refetch: options.refetch ?? vi.fn(),
+  };
+}
+
 function LocationProbe() {
   const location = useLocation();
   return (
@@ -154,6 +228,303 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByText("微信公众号")).toBeTruthy();
     expect(screen.getByText(/1\/2 项准备任务/)).toBeTruthy();
     expect(screen.queryByText("发布到平台")).toBeNull();
+  });
+
+  it("keeps the existing month range, status filter, and rescheduling affordances", () => {
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "月历", pressed: true }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "上个月" })).toBeTruthy();
+    const statusFilter = screen.getByRole("combobox", { name: "状态" });
+    expect(statusFilter).toBeTruthy();
+    expect(
+      within(statusFilter).getByRole("option", { name: "已归档（当前月）" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/键盘改期/)).toBeTruthy();
+    const input = hooks.items.mock.calls.at(-1)?.[0];
+    expect(input).toEqual(
+      expect.objectContaining({
+        pageSize: 100,
+        scheduledFrom: expect.any(String),
+        scheduledTo: expect.any(String),
+        includeArchived: false,
+      }),
+    );
+    expect(input).not.toHaveProperty("scheduleState");
+  });
+
+  it("discovers unscheduled active content and preserves unrelated URL state", () => {
+    hooks.items.mockImplementation((input) =>
+      contentItemsResult(
+        input.scheduleState === "unscheduled" ? [unscheduledItem] : [item],
+      ),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?source=inbox&campaign=launch"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "无排期" }));
+
+    const input = hooks.items.mock.calls.at(-1)?.[0];
+    expect(input).toEqual({
+      pageSize: 100,
+      scheduleState: "unscheduled",
+      includeArchived: false,
+    });
+    expect(input).not.toHaveProperty("scheduledFrom");
+    expect(input).not.toHaveProperty("scheduledTo");
+    expect(input).not.toHaveProperty("status");
+    expect(screen.getByText("等待安排发布时间")).toBeTruthy();
+    expect(screen.getByText("1 条未排期内容")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "上个月" })).toBeNull();
+    expect(screen.queryByText(/键盘改期/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "新建内容" })).toBeNull();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?source=inbox&campaign=launch&view=unscheduled",
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "查看内容 等待安排发布时间" }),
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith("content-unscheduled");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "source=inbox&campaign=launch&view=unscheduled&item=content-unscheduled",
+    );
+  });
+
+  it("discovers archived content across months and with or without a schedule", () => {
+    hooks.items.mockImplementation((input) =>
+      contentItemsResult(
+        input.status === "archived"
+          ? [archivedScheduledItem, archivedUnscheduledItem]
+          : [item],
+      ),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?view=archived&source=inbox"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    expect(hooks.items).toHaveBeenLastCalledWith({
+      pageSize: 100,
+      status: "archived",
+      includeArchived: true,
+    });
+    expect(screen.getByText("去年已归档内容")).toBeTruthy();
+    expect(screen.getByText("已归档未排期内容")).toBeTruthy();
+    expect(screen.getByText("未排期")).toBeTruthy();
+    expect(screen.getByText("2 条已归档内容")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "上个月" })).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "查看内容 去年已归档内容" }),
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith("content-archived-scheduled");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "view=archived&source=inbox&item=content-archived-scheduled",
+    );
+  });
+
+  it("changes only the view URL state while preserving an addressed item and source", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/content-calendar?item=content-1&source=inbox&campaign=launch",
+        ]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "已归档" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?item=content-1&source=inbox&campaign=launch&view=archived",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "月历" }));
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?item=content-1&source=inbox&campaign=launch",
+    );
+  });
+
+  it("keeps loaded unscheduled rows visible when a later page fails", () => {
+    const fetchNextPage = vi.fn();
+    hooks.items.mockReturnValue(
+      contentItemsResult([unscheduledItem], {
+        total: 140,
+        isError: true,
+        isFetchNextPageError: true,
+        fetchNextPage,
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("无排期内容未完整加载")).toBeTruthy();
+    expect(screen.queryByText(/无法读取无排期内容/)).toBeNull();
+    expect(
+      screen.getByText("已读取 1 / 140 条，后续页面暂时不可用。"),
+    ).toBeTruthy();
+    expect(screen.getByText("等待安排发布时间")).toBeTruthy();
+    expect(screen.getByText("已读取 1 / 140 条未排期内容")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads discovery history only when the user asks for another page", () => {
+    const fetchNextPage = vi.fn();
+    hooks.items.mockReturnValue(
+      contentItemsResult([archivedScheduledItem, archivedUnscheduledItem], {
+        total: 250,
+        hasNextPage: true,
+        fetchNextPage,
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?view=archived"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(fetchNextPage).not.toHaveBeenCalled();
+    expect(screen.getByText("已读取 2 / 250 条已归档内容")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps stale discovery facts visible and exposes a failed refresh", () => {
+    const refetch = vi.fn();
+    hooks.items.mockReturnValue(
+      contentItemsResult([archivedScheduledItem], {
+        isError: true,
+        isRefetchError: true,
+        refetch,
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?view=archived"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("去年已归档内容")).toBeTruthy();
+    expect(screen.getByText("已归档内容未能刷新")).toBeTruthy();
+    expect(
+      screen.getByText("正在显示上次读取的已归档内容，最新刷新失败。"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "unscheduled",
+      "暂无无排期内容",
+      "未设置计划发布时间且尚未归档的内容会显示在这里。",
+    ],
+    [
+      "archived",
+      "暂无已归档内容",
+      "归档内容会跨月份集中显示，包括未排期的归档内容。",
+    ],
+  ])("shows an accurate %s empty state", (view, title, message) => {
+    hooks.items.mockReturnValue(contentItemsResult([]));
+    render(
+      <MemoryRouter initialEntries={[`/content-calendar?view=${view}`]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText(title)).toBeTruthy();
+    expect(screen.getByText(message)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新建第一条内容" })).toBeNull();
+  });
+
+  it("announces the active discovery view while it is loading", () => {
+    hooks.items.mockReturnValue(contentItemsResult([], { isPending: true }));
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?view=archived"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("正在读取已归档内容…")).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.getByText("读取中")).toBeTruthy();
+  });
+
+  it("does not relabel placeholder rows and shows the new-view failure", () => {
+    let phase: "placeholder" | "error" = "placeholder";
+    hooks.items.mockImplementation(() =>
+      phase === "placeholder"
+        ? contentItemsResult([item], {
+            isFetching: true,
+            isPlaceholderData: true,
+          })
+        : contentItemsResult([], { hasData: false, isError: true }),
+    );
+    const view = render(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("正在读取无排期内容…")).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.queryByText("发布产品更新")).toBeNull();
+
+    phase = "error";
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByText("无法读取无排期内容，请确认本地服务已连接。"),
+    ).toBeTruthy();
+    expect(screen.queryByText("发布产品更新")).toBeNull();
+    expect(screen.getByText("数据不可用")).toBeTruthy();
+  });
+
+  it("normalizes an unknown view without dropping unrelated URL state", () => {
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?view=typo&source=inbox"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "月历", pressed: true }),
+    ).toBeTruthy();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      "/content-calendar?source=inbox",
+    );
   });
 
   it("follows the new local month at midnight and refreshes the visible range", () => {

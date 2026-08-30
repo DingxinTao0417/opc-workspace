@@ -7794,6 +7794,7 @@ export async function getContentItems(
   });
   if (input.scheduledFrom) params.set("scheduled_from", input.scheduledFrom);
   if (input.scheduledTo) params.set("scheduled_to", input.scheduledTo);
+  if (input.scheduleState) params.set("schedule_state", input.scheduleState);
   if (input.platform?.trim()) params.set("platform", input.platform.trim());
   if (input.status) params.set("status", input.status);
   if (input.projectId) params.set("project_id", input.projectId);

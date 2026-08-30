@@ -39,6 +39,7 @@ import {
   getInvoice,
   getInvoices,
   getContentItem,
+  getContentItems,
   getRestoreDiagnostics,
   getTags,
   getTaskPage,
@@ -88,7 +89,49 @@ import {
   voidFinancialEntry,
 } from "./client";
 
-describe("content item detail request", () => {
+describe("content item requests", () => {
+  it.each(["scheduled", "unscheduled"] as const)(
+    "serializes the %s content schedule state filter",
+    async (scheduleState) => {
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+        jsonResponse({
+          data: [],
+          meta: { page: 1, page_size: 50, total: 0 },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(getContentItems({ scheduleState })).resolves.toMatchObject({
+        items: [],
+        meta: { page: 1, pageSize: 50, total: 0 },
+      });
+      const url = new URL(
+        String(fetchMock.mock.calls[0][0]),
+        "http://local.test",
+      );
+      expect(url.pathname).toBe("/api/v1/content-items");
+      expect(url.searchParams.get("schedule_state")).toBe(scheduleState);
+    },
+  );
+
+  it("omits the content schedule state filter by default", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [],
+        meta: { page: 1, page_size: 50, total: 0 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getContentItems();
+
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(url.searchParams.has("schedule_state")).toBe(false);
+  });
+
   it("loads and normalizes one URL-addressed content item", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
       jsonResponse({

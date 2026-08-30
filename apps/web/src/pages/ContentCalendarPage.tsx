@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Archive,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,8 @@ import {
   localDateTimeToZonedISOString,
 } from "../lib/zonedDateTime";
 import type { ContentItem, ContentItemStatus } from "../types/models";
+
+type ContentCalendarView = "month" | "unscheduled" | "archived";
 
 const statusLabel: Record<ContentItemStatus, string> = {
   draft: "草稿",
@@ -135,6 +138,72 @@ function contentItemDeletionMessage(error: unknown) {
     if (error.requestId) message += ` · 请求 ID：${error.requestId}`;
   }
   return message;
+}
+
+function contentViewFromSearchParams(
+  searchParams: URLSearchParams,
+): ContentCalendarView {
+  const value = searchParams.get("view");
+  return value === "unscheduled" || value === "archived" ? value : "month";
+}
+
+function contentViewLabel(view: ContentCalendarView) {
+  if (view === "unscheduled") return "无排期内容";
+  if (view === "archived") return "已归档内容";
+  return "内容日历";
+}
+
+function ContentDiscoveryList({
+  items,
+  label,
+  onOpen,
+}: {
+  items: ContentItem[];
+  label: string;
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <section aria-label={label} className="content-calendar-list">
+      {items.map((item) => (
+        <article className="content-calendar-card" key={item.id}>
+          <button
+            aria-label={`查看内容 ${item.title}`}
+            className="content-calendar-card-open"
+            onClick={() => onOpen(item.id)}
+            type="button"
+          >
+            <span className="content-calendar-card-main">
+              {item.status === "archived" ? (
+                <Archive aria-hidden="true" size={17} />
+              ) : (
+                <Clock3 aria-hidden="true" size={17} />
+              )}
+              <span>
+                <strong className="content-calendar-card-title">
+                  {item.title}
+                </strong>
+                <span className="content-calendar-card-platform">
+                  {item.platform}
+                </span>
+              </span>
+            </span>
+            <span className="content-calendar-card-meta">
+              <span className={`status-badge ${statusClass[item.status]}`}>
+                {statusLabel[item.status]}
+              </span>
+              <span>
+                <CalendarDays aria-hidden="true" size={13} />
+                {displaySchedule(item.scheduledAt)}
+              </span>
+              <span>
+                {item.requiredTaskDone}/{item.requiredTaskTotal} 项准备任务
+              </span>
+            </span>
+          </button>
+        </article>
+      ))}
+    </section>
+  );
 }
 
 function CreateContentItemModal({
@@ -720,12 +789,39 @@ export function ContentCalendarPage() {
   );
   const [creating, setCreating] = useState(false);
   const detailId = searchParams.get("item")?.trim() || null;
+  const view = contentViewFromSearchParams(searchParams);
   const [status, setStatus] = useState<ContentItemStatus | "">("");
   const [moveError, setMoveError] = useState<string | null>(null);
   const [schedulePreviews, setSchedulePreviews] = useState<
     Record<string, string>
   >({});
   const schedule = useScheduleContentItem();
+  useEffect(() => {
+    const rawView = searchParams.get("view");
+    if (rawView === null || rawView === "unscheduled" || rawView === "archived")
+      return;
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("view");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+  const changeView = (nextView: ContentCalendarView) => {
+    const rawView = searchParams.get("view");
+    if (nextView === view && (nextView !== "month" || rawView === null)) return;
+    setMoveError(null);
+    setSchedulePreviews({});
+    schedule.reset();
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (nextView === "month") next.delete("view");
+      else next.set("view", nextView);
+      return next;
+    });
+  };
   const openDetail = (id: string) => {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -744,13 +840,29 @@ export function ContentCalendarPage() {
     );
   };
   const calendar = useMemo(() => calendarForMonth(month), [month]);
-  const query = useContentItemsInfiniteQuery({
-    pageSize: 100,
-    scheduledFrom: calendar.from,
-    scheduledTo: calendar.to,
-    status: status || undefined,
-    includeArchived: status === "archived",
-  });
+  const queryInput =
+    view === "month"
+      ? {
+          pageSize: 100,
+          scheduledFrom: calendar.from,
+          scheduledTo: calendar.to,
+          status: status || undefined,
+          includeArchived: status === "archived",
+        }
+      : view === "unscheduled"
+        ? {
+            pageSize: 100,
+            scheduleState: "unscheduled" as const,
+            includeArchived: false,
+          }
+        : {
+            pageSize: 100,
+            status: "archived" as const,
+            includeArchived: true,
+          };
+  const query = useContentItemsInfiniteQuery(queryInput);
+  const usingPlaceholderData = Boolean(query.isPlaceholderData);
+  const transitioning = usingPlaceholderData && query.isFetching;
   useEffect(() => {
     const previousMonthKey = previousCurrentMonthKey.current;
     if (currentMonthKey !== previousMonthKey) {
@@ -762,7 +874,9 @@ export function ContentCalendarPage() {
   }, [currentMonthKey, monthKey]);
   useEffect(() => {
     if (
+      view === "month" &&
       query.hasNextPage &&
+      !usingPlaceholderData &&
       !query.isFetchingNextPage &&
       !query.isFetchNextPageError
     ) {
@@ -773,11 +887,19 @@ export function ContentCalendarPage() {
     query.hasNextPage,
     query.isFetchNextPageError,
     query.isFetchingNextPage,
+    usingPlaceholderData,
+    view,
   ]);
-  const items = useMemo(
-    () => query.data?.pages.flatMap((page) => page.items) ?? [],
-    [query.data?.pages],
-  );
+  const loadedItems = useMemo(() => {
+    const unique = new Map<string, ContentItem>();
+    for (const page of query.data?.pages ?? []) {
+      for (const item of page.items) {
+        if (!unique.has(item.id)) unique.set(item.id, item);
+      }
+    }
+    return [...unique.values()];
+  }, [query.data?.pages]);
+  const items = usingPlaceholderData ? [] : loadedItems;
   useEffect(() => {
     setSchedulePreviews((current) => {
       let changed = false;
@@ -792,7 +914,31 @@ export function ContentCalendarPage() {
       return changed ? next : current;
     });
   }, [items]);
-  const total = query.data?.pages[0]?.meta.total ?? 0;
+  const total = usingPlaceholderData
+    ? 0
+    : (query.data?.pages[0]?.meta.total ?? 0);
+  const viewLabel = contentViewLabel(view);
+  const loading = query.isPending || transitioning;
+  const hasLoadedData = Boolean(query.data) && !usingPlaceholderData;
+  const countSuffix =
+    view === "month"
+      ? ""
+      : view === "unscheduled"
+        ? "未排期内容"
+        : "已归档内容";
+  const countText = loading
+    ? "读取中"
+    : hasLoadedData
+      ? query.hasNextPage ||
+        query.isFetchingNextPage ||
+        query.isFetchNextPageError
+        ? `已读取 ${items.length} / ${total} 条${countSuffix}`
+        : view === "month"
+          ? `${total} 条`
+          : view === "unscheduled"
+            ? `${total} 条未排期内容`
+            : `${total} 条已归档内容`
+      : "数据不可用";
   const itemsByDate = useMemo(() => {
     const groups = new Map<string, ContentItem[]>();
     for (const item of items) {
@@ -880,72 +1026,102 @@ export function ContentCalendarPage() {
     <div className="page">
       <PageHeader
         actions={
-          <button
-            className="button button-primary"
-            disabled={schedule.isPending}
-            onClick={() => setCreating(true)}
-            type="button"
-          >
-            <Plus size={15} />
-            新建内容
-          </button>
+          view === "month" ? (
+            <button
+              className="button button-primary"
+              disabled={schedule.isPending}
+              onClick={() => setCreating(true)}
+              type="button"
+            >
+              <Plus size={15} />
+              新建内容
+            </button>
+          ) : undefined
         }
-        meta={
-          <span className="page-count">
-            {query.isPending
-              ? "读取中"
-              : query.isSuccess
-                ? query.isFetchingNextPage
-                  ? `已读取 ${items.length} / ${total} 条`
-                  : `${total} 条`
-                : "数据不可用"}
-          </span>
-        }
+        meta={<span className="page-count">{countText}</span>}
         title="内容日历"
       />
-      <div className="toolbar content-calendar-toolbar">
+      <div
+        aria-label="内容日历视图"
+        className="content-calendar-view-switcher"
+        role="group"
+      >
         <button
-          aria-label="上个月"
-          className="button button-secondary button-icon"
+          aria-pressed={view === "month"}
+          className="button button-secondary"
           disabled={schedule.isPending}
-          onClick={() => shift(-1)}
+          onClick={() => changeView("month")}
           type="button"
         >
-          <ChevronLeft size={16} />
+          <CalendarDays size={14} />
+          月历
         </button>
-        <strong className="content-calendar-month">
-          {month.getFullYear()} 年 {month.getMonth() + 1} 月
-        </strong>
         <button
-          aria-label="下个月"
-          className="button button-secondary button-icon"
+          aria-pressed={view === "unscheduled"}
+          className="button button-secondary"
           disabled={schedule.isPending}
-          onClick={() => shift(1)}
+          onClick={() => changeView("unscheduled")}
           type="button"
         >
-          <ChevronRight size={16} />
+          <Clock3 size={14} />
+          无排期
         </button>
-        <label className="toolbar-select">
-          <span className="sr-only">状态</span>
-          <select
-            disabled={schedule.isPending}
-            onChange={(event) =>
-              setStatus(event.target.value as ContentItemStatus | "")
-            }
-            value={status}
-          >
-            <option value="">未归档</option>
-            {Object.entries(statusLabel).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <button
+          aria-pressed={view === "archived"}
+          className="button button-secondary"
+          disabled={schedule.isPending}
+          onClick={() => changeView("archived")}
+          type="button"
+        >
+          <Archive size={14} />
+          已归档
+        </button>
       </div>
-      {query.isError ? (
+      {view === "month" ? (
+        <div className="toolbar content-calendar-toolbar">
+          <button
+            aria-label="上个月"
+            className="button button-secondary button-icon"
+            disabled={schedule.isPending}
+            onClick={() => shift(-1)}
+            type="button"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <strong className="content-calendar-month">
+            {month.getFullYear()} 年 {month.getMonth() + 1} 月
+          </strong>
+          <button
+            aria-label="下个月"
+            className="button button-secondary button-icon"
+            disabled={schedule.isPending}
+            onClick={() => shift(1)}
+            type="button"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <label className="toolbar-select">
+            <span className="sr-only">状态</span>
+            <select
+              disabled={schedule.isPending}
+              onChange={(event) =>
+                setStatus(event.target.value as ContentItemStatus | "")
+              }
+              value={status}
+            >
+              <option value="">未归档</option>
+              {Object.entries(statusLabel).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {key === "archived" ? "已归档（当前月）" : label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+      {query.isError && !hasLoadedData ? (
         <ErrorState
-          message="无法读取内容日历，请确认本地服务已连接。"
+          message={`无法读取${viewLabel}，请确认本地服务已连接。`}
           onRetry={() => void query.refetch()}
         />
       ) : null}
@@ -953,27 +1129,41 @@ export function ContentCalendarPage() {
         <ErrorState
           message={`已读取 ${items.length} / ${total} 条，后续页面暂时不可用。`}
           onRetry={() => void query.fetchNextPage()}
-          title="内容日历未完整加载"
+          title={`${viewLabel}未完整加载`}
         />
       ) : null}
-      {query.isPending ? <SkeletonRows count={4} /> : null}
-      {moveError || schedule.isError ? (
+      {query.isRefetchError && hasLoadedData && !query.isFetchNextPageError ? (
+        <ErrorState
+          message={`正在显示上次读取的${viewLabel}，最新刷新失败。`}
+          onRetry={() => void query.refetch()}
+          title={`${viewLabel}未能刷新`}
+        />
+      ) : null}
+      {loading ? (
+        <div>
+          <span aria-live="polite" className="sr-only" role="status">
+            正在读取{viewLabel}…
+          </span>
+          <SkeletonRows count={4} />
+        </div>
+      ) : null}
+      {view === "month" && (moveError || schedule.isError) ? (
         <p className="form-field-error content-calendar-drag-error">
           {moveError ?? mutationMessage(schedule.error)}
         </p>
       ) : null}
-      {schedule.isPending ? (
+      {view === "month" && schedule.isPending ? (
         <p className="content-calendar-drag-status" role="status">
           正在保存排期调整…
         </p>
       ) : null}
-      {query.isSuccess && items.length > 0 ? (
+      {view === "month" && hasLoadedData && items.length > 0 ? (
         <p className="content-calendar-keyboard-note">
           键盘改期：聚焦可编辑卡片后按 Alt + ← / →
           移动一天；精确时间可在详情中调整。
         </p>
       ) : null}
-      {query.isSuccess ? (
+      {view === "month" && hasLoadedData ? (
         <section
           aria-label="内容月历"
           className="content-calendar-grid"
@@ -1074,20 +1264,56 @@ export function ContentCalendarPage() {
           })}
         </section>
       ) : null}
-      {query.isSuccess && items.length === 0 ? (
+      {view !== "month" && hasLoadedData && items.length > 0 ? (
+        <ContentDiscoveryList
+          items={items}
+          label={viewLabel}
+          onOpen={openDetail}
+        />
+      ) : null}
+      {view !== "month" &&
+      hasLoadedData &&
+      query.hasNextPage &&
+      !query.isFetchNextPageError ? (
+        <div className="content-calendar-load-more">
+          <button
+            className="button button-secondary"
+            disabled={query.isFetchingNextPage}
+            onClick={() => void query.fetchNextPage()}
+            type="button"
+          >
+            {query.isFetchingNextPage ? "正在加载更多…" : "加载更多"}
+          </button>
+        </div>
+      ) : null}
+      {hasLoadedData && items.length === 0 ? (
         <EmptyState
           action={
-            <button
-              className="button button-primary"
-              onClick={() => setCreating(true)}
-              type="button"
-            >
-              <Plus size={15} />
-              新建第一条内容
-            </button>
+            view === "month" ? (
+              <button
+                className="button button-primary"
+                onClick={() => setCreating(true)}
+                type="button"
+              >
+                <Plus size={15} />
+                新建第一条内容
+              </button>
+            ) : undefined
           }
-          message="内容排期保存在本机，不会连接或发布到外部平台。"
-          title="当前月格暂无内容排期"
+          message={
+            view === "month"
+              ? "内容排期保存在本机，不会连接或发布到外部平台。"
+              : view === "unscheduled"
+                ? "未设置计划发布时间且尚未归档的内容会显示在这里。"
+                : "归档内容会跨月份集中显示，包括未排期的归档内容。"
+          }
+          title={
+            view === "month"
+              ? "当前月格暂无内容排期"
+              : view === "unscheduled"
+                ? "暂无无排期内容"
+                : "暂无已归档内容"
+          }
         />
       ) : null}
       <CreateContentItemModal

@@ -3094,6 +3094,23 @@ kbd {
 .content-calendar-toolbar {
   align-items: center;
 }
+.content-calendar-view-switcher {
+  display: flex;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel);
+  gap: 3px;
+}
+.content-calendar-view-switcher .button {
+  border-color: transparent;
+}
+.content-calendar-view-switcher .button[aria-pressed="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
 .content-calendar-month {
   min-width: 120px;
   text-align: center;
@@ -3229,14 +3246,23 @@ kbd {
   align-items: center;
   gap: 10px;
 }
-.content-calendar-card h2 {
+.content-calendar-card-main > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.content-calendar-card-main > span {
+  min-width: 0;
+}
+.content-calendar-card-title {
+  display: block;
   margin: 0;
   font-size: 15px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.content-calendar-card p {
+.content-calendar-card-platform {
+  display: block;
   margin: 0;
   color: var(--text-secondary);
   font-size: 13px;
@@ -3253,6 +3279,12 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+.content-calendar-load-more {
+  display: flex;
+  justify-content: center;
+  max-width: 880px;
+  padding-top: 4px;
 }
 .content-calendar-edit-grid {
   display: grid;
@@ -3337,6 +3369,12 @@ kbd {
   }
   .content-calendar-card-meta {
     flex-wrap: wrap;
+  }
+  .content-calendar-view-switcher {
+    width: 100%;
+  }
+  .content-calendar-view-switcher .button {
+    flex: 1;
   }
   .content-calendar-grid {
     overflow-x: auto;
