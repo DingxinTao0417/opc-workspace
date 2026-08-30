@@ -4,6 +4,8 @@ import {
   loadCommandRecents,
   recordCommandRecent,
   removeCommandRecent,
+  saveCommandRecents,
+  type CommandRecent,
 } from "./commandRecents";
 
 afterEach(clearCommandRecentsForTests);
@@ -66,5 +68,82 @@ describe("command recents", () => {
         resourceId: "task-1",
       }),
     ).toEqual([]);
+  });
+
+  it("keeps all supported resource types and drops malformed stored identities", () => {
+    const now = Date.now();
+    expect(
+      saveCommandRecents([
+        {
+          kind: "resource",
+          resourceType: "invoice",
+          resourceId: "invoice-1",
+          usedAt: now,
+        },
+        {
+          kind: "resource",
+          resourceType: "roadmap_milestone",
+          resourceId: "milestone-1",
+          usedAt: now - 1,
+        },
+        {
+          kind: "resource",
+          resourceType: "content_item",
+          resourceId: "content-1",
+          usedAt: now - 2,
+        },
+        {
+          kind: "resource",
+          resourceType: "knowledge_item",
+          resourceId: "unsupported-1",
+          usedAt: now - 3,
+        },
+        {
+          kind: "resource",
+          resourceType: "invoice",
+          resourceId: "",
+          usedAt: now - 4,
+        },
+      ] as unknown as CommandRecent[]),
+    ).toEqual([
+      {
+        kind: "resource",
+        resourceType: "invoice",
+        resourceId: "invoice-1",
+        usedAt: now,
+      },
+      {
+        kind: "resource",
+        resourceType: "roadmap_milestone",
+        resourceId: "milestone-1",
+        usedAt: now - 1,
+      },
+      {
+        kind: "resource",
+        resourceType: "content_item",
+        resourceId: "content-1",
+        usedAt: now - 2,
+      },
+    ]);
+    expect(loadCommandRecents(now)).toEqual([
+      {
+        kind: "resource",
+        resourceType: "invoice",
+        resourceId: "invoice-1",
+        usedAt: now,
+      },
+      {
+        kind: "resource",
+        resourceType: "roadmap_milestone",
+        resourceId: "milestone-1",
+        usedAt: now - 1,
+      },
+      {
+        kind: "resource",
+        resourceType: "content_item",
+        resourceId: "content-1",
+        usedAt: now - 2,
+      },
+    ]);
   });
 });

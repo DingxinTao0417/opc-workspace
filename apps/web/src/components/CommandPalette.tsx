@@ -1,10 +1,13 @@
 import {
+  CalendarDays,
   CheckSquare2,
   Clock3,
   FolderKanban,
   Focus,
   Inbox,
+  Map as MapIcon,
   Plus,
+  ReceiptText,
   Search,
   Settings2,
   Sun,
@@ -25,8 +28,11 @@ import { useNavigate } from "react-router-dom";
 import {
   ApiError,
   getClient,
+  getContentItem,
   getInboxItem,
+  getInvoice,
   getProject,
+  getRoadmapMilestone,
   getTask,
 } from "../api/client";
 import { useSearchQuery } from "../api/hooks";
@@ -95,6 +101,9 @@ const searchResourcePresentation: Record<
   project: { label: "项目", icon: FolderKanban },
   client: { label: "客户", icon: Users },
   inbox_item: { label: "收件箱", icon: Inbox },
+  invoice: { label: "发票", icon: ReceiptText },
+  roadmap_milestone: { label: "路线图里程碑", icon: MapIcon },
+  content_item: { label: "内容项", icon: CalendarDays },
 };
 
 async function resolveRecentResource(
@@ -144,6 +153,39 @@ async function resolveRecentResource(
         hint: `本地${presentation.label} · ${item.status}`,
         icon: presentation.icon,
         route: `/inbox/${item.id}`,
+      };
+    }
+    case "invoice": {
+      const invoice = await getInvoice(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: invoice.invoiceNumber,
+        hint: `本地${presentation.label} · ${invoice.clientName || invoice.status}`,
+        icon: presentation.icon,
+        route: `/invoices/${invoice.id}`,
+      };
+    }
+    case "roadmap_milestone": {
+      const milestone = await getRoadmapMilestone(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: milestone.title,
+        hint: `本地${presentation.label} · ${milestone.status}`,
+        icon: presentation.icon,
+        route: `/roadmap?milestone=${milestone.id}`,
+      };
+    }
+    case "content_item": {
+      const item = await getContentItem(recent.resourceId);
+      return {
+        resourceType: recent.resourceType,
+        resourceId: recent.resourceId,
+        label: item.title,
+        hint: `本地${presentation.label} · ${item.platform || item.status}`,
+        icon: presentation.icon,
+        route: `/content-calendar?item=${item.id}`,
       };
     }
   }
@@ -238,11 +280,32 @@ export function CommandPalette() {
         run: () => closeAndNavigate("/clients", "clients"),
       },
       {
+        id: "invoices",
+        label: "发票",
+        hint: "页面",
+        icon: ReceiptText,
+        run: () => closeAndNavigate("/invoices", "invoices"),
+      },
+      {
         id: "focus",
         label: "专注",
         hint: "页面",
         icon: Focus,
         run: () => closeAndNavigate("/focus", "focus"),
+      },
+      {
+        id: "roadmap",
+        label: "路线图",
+        hint: "页面",
+        icon: MapIcon,
+        run: () => closeAndNavigate("/roadmap", "roadmap"),
+      },
+      {
+        id: "content-calendar",
+        label: "内容日历",
+        hint: "页面",
+        icon: CalendarDays,
+        run: () => closeAndNavigate("/content-calendar", "content-calendar"),
       },
       {
         id: "new-task",
@@ -562,7 +625,7 @@ export function CommandPalette() {
             aria-expanded="true"
             aria-label="搜索页面、业务或操作"
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索任务、项目、客户、收件箱或操作…"
+            placeholder="搜索任务、项目、客户、发票、路线图、内容或操作…"
             ref={inputRef}
             role="combobox"
             value={query}

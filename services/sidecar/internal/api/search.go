@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -14,7 +15,15 @@ const (
 	searchMaximumPageSize = 100
 )
 
-var searchResourceTypes = []string{"task", "project", "client", "inbox_item"}
+var searchResourceTypes = []string{
+	"task",
+	"project",
+	"client",
+	"inbox_item",
+	"invoice",
+	"roadmap_milestone",
+	"content_item",
+}
 
 type searchRow struct {
 	ResourceType string  `gorm:"column:resource_type"`
@@ -118,7 +127,7 @@ func parseSearchTypes(c *gin.Context) ([]string, bool) {
 		for _, value := range strings.Split(raw, ",") {
 			resourceType := strings.TrimSpace(value)
 			if _, exists := valid[resourceType]; !exists {
-				writeError(c, http.StatusBadRequest, "INVALID_TYPES", "types must contain only task, project, client, or inbox_item")
+				writeError(c, http.StatusBadRequest, "INVALID_TYPES", "types contains an unsupported resource type")
 				return nil, false
 			}
 			seen[resourceType] = struct{}{}
@@ -183,15 +192,71 @@ func searchSelects() map[string]searchSelect {
 				return []any{query, prefix, contains, contains, contains}
 			},
 		},
+		"invoice": {
+			statement: `SELECT 'invoice' AS resource_type, invoices.id AS resource_id, invoices.invoice_number AS title,
+				clients.name AS subtitle, invoices.status AS status, invoices.updated_at AS updated_at,
+				invoices.invoice_number AS primary_text, clients.name AS secondary_1, NULL AS secondary_2, NULL AS secondary_3,
+				CASE WHEN invoices.invoice_number = ? COLLATE NOCASE THEN 0 WHEN invoices.invoice_number LIKE ? ESCAPE '\' THEN 1 WHEN invoices.invoice_number LIKE ? ESCAPE '\' THEN 2 ELSE 3 END AS relevance_rank
+			 FROM invoices JOIN clients ON clients.id = invoices.client_id
+			 WHERE invoices.invoice_number LIKE ? ESCAPE '\' OR clients.name LIKE ? ESCAPE '\'`,
+			arguments: func(query, prefix, contains string) []any {
+				return []any{query, prefix, contains, contains, contains}
+			},
+		},
+		"roadmap_milestone": {
+			statement: `SELECT 'roadmap_milestone' AS resource_type, roadmap_milestones.id AS resource_id, roadmap_milestones.title AS title,
+				COALESCE(project_summary.project_names, '') AS subtitle, roadmap_milestones.status AS status, roadmap_milestones.updated_at AS updated_at,
+				roadmap_milestones.title AS primary_text, roadmap_milestones.description AS secondary_1, project_summary.project_names AS secondary_2, NULL AS secondary_3,
+				CASE WHEN roadmap_milestones.title = ? COLLATE NOCASE THEN 0 WHEN roadmap_milestones.title LIKE ? ESCAPE '\' THEN 1 WHEN roadmap_milestones.title LIKE ? ESCAPE '\' THEN 2 ELSE 3 END AS relevance_rank
+			 FROM roadmap_milestones
+			 LEFT JOIN (
+				SELECT linked.milestone_id, GROUP_CONCAT(linked.project_name, ' · ') AS project_names
+				FROM (
+					SELECT roadmap_milestone_projects.milestone_id, projects.name AS project_name
+					FROM roadmap_milestone_projects
+					JOIN projects ON projects.id = roadmap_milestone_projects.project_id
+					ORDER BY roadmap_milestone_projects.milestone_id ASC, projects.name COLLATE NOCASE ASC, projects.id ASC
+				) AS linked
+				GROUP BY linked.milestone_id
+			 ) AS project_summary ON project_summary.milestone_id = roadmap_milestones.id
+			 WHERE roadmap_milestones.status <> 'archived' AND (
+				roadmap_milestones.title LIKE ? ESCAPE '\'
+				OR roadmap_milestones.description LIKE ? ESCAPE '\'
+				OR EXISTS (
+					SELECT 1 FROM roadmap_milestone_projects AS matched_links
+					JOIN projects AS matched_projects ON matched_projects.id = matched_links.project_id
+					WHERE matched_links.milestone_id = roadmap_milestones.id AND matched_projects.name LIKE ? ESCAPE '\'
+				)
+			 )`,
+			arguments: func(query, prefix, contains string) []any {
+				return []any{query, prefix, contains, contains, contains, contains}
+			},
+		},
+		"content_item": {
+			statement: `SELECT 'content_item' AS resource_type, content_items.id AS resource_id, content_items.title AS title,
+				content_items.platform AS subtitle, content_items.status AS status, content_items.updated_at AS updated_at,
+				content_items.title AS primary_text, content_items.notes AS secondary_1, content_items.platform AS secondary_2, NULL AS secondary_3,
+				CASE WHEN content_items.title = ? COLLATE NOCASE THEN 0 WHEN content_items.title LIKE ? ESCAPE '\' THEN 1 WHEN content_items.title LIKE ? ESCAPE '\' THEN 2 ELSE 3 END AS relevance_rank
+			 FROM content_items
+			 WHERE content_items.status <> 'archived' AND (
+				content_items.title LIKE ? ESCAPE '\' OR content_items.notes LIKE ? ESCAPE '\' OR content_items.platform LIKE ? ESCAPE '\'
+			 )`,
+			arguments: func(query, prefix, contains string) []any {
+				return []any{query, prefix, contains, contains, contains, contains}
+			},
+		},
 	}
 }
 
 func searchResponse(row searchRow, query string) searchResultResponse {
 	fieldsByType := map[string][]string{
-		"task":       {"title", "description", "", ""},
-		"project":    {"name", "description", "", ""},
-		"client":     {"name", "contact_name", "email", "phone"},
-		"inbox_item": {"title", "summary", "", ""},
+		"task":              {"title", "description", "", ""},
+		"project":           {"name", "description", "", ""},
+		"client":            {"name", "contact_name", "email", "phone"},
+		"inbox_item":        {"title", "summary", "", ""},
+		"invoice":           {"invoice_number", "client_name", "", ""},
+		"roadmap_milestone": {"title", "description", "project_names", ""},
+		"content_item":      {"title", "notes", "platform", ""},
 	}
 	fields := fieldsByType[row.ResourceType]
 	values := []*string{&row.PrimaryText, row.Secondary1, row.Secondary2, row.Secondary3}
@@ -218,7 +283,13 @@ func containsFold(value, query string) bool {
 
 func searchRoute(resourceType, resourceID string) string {
 	prefixes := map[string]string{
-		"task": "/tasks/", "project": "/projects/", "client": "/clients/", "inbox_item": "/inbox/",
+		"task": "/tasks/", "project": "/projects/", "client": "/clients/", "inbox_item": "/inbox/", "invoice": "/invoices/",
+	}
+	if resourceType == "roadmap_milestone" {
+		return "/roadmap?milestone=" + url.QueryEscape(resourceID)
+	}
+	if resourceType == "content_item" {
+		return "/content-calendar?item=" + url.QueryEscape(resourceID)
 	}
 	return fmt.Sprintf("%s%s", prefixes[resourceType], resourceID)
 }

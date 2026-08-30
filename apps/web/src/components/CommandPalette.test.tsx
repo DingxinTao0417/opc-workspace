@@ -26,6 +26,9 @@ const mocks = vi.hoisted(() => ({
   getProject: vi.fn(),
   getClient: vi.fn(),
   getInboxItem: vi.fn(),
+  getInvoice: vi.fn(),
+  getRoadmapMilestone: vi.fn(),
+  getContentItem: vi.fn(),
 }));
 
 vi.mock("../api/client", async (importActual) => {
@@ -36,6 +39,9 @@ vi.mock("../api/client", async (importActual) => {
     getProject: mocks.getProject,
     getClient: mocks.getClient,
     getInboxItem: mocks.getInboxItem,
+    getInvoice: mocks.getInvoice,
+    getRoadmapMilestone: mocks.getRoadmapMilestone,
+    getContentItem: mocks.getContentItem,
   };
 });
 
@@ -55,8 +61,12 @@ const taskResult = {
 };
 
 function CurrentLocation() {
+  const location = useLocation();
   return (
-    <output data-testid="current-location">{useLocation().pathname}</output>
+    <output data-testid="current-location">
+      {location.pathname}
+      {location.search}
+    </output>
   );
 }
 
@@ -137,7 +147,7 @@ describe("CommandPalette", () => {
     expect(useUiStore.getState().commandPaletteOpen).toBe(false);
   });
 
-  it("keeps page navigation but removes unimplemented finance commands", () => {
+  it("includes commands for all searchable delivered pages", () => {
     mocks.searchQuery.mockReturnValue({
       data: undefined,
       isError: false,
@@ -153,12 +163,87 @@ describe("CommandPalette", () => {
     );
 
     expect(screen.getByRole("option", { name: /今日/ })).toBeVisible();
-    expect(screen.queryByRole("option", { name: /收入/ })).toBeNull();
-    expect(screen.queryByRole("option", { name: /发票/ })).toBeNull();
+    expect(screen.getByRole("option", { name: /发票/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /路线图/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /内容日历/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /自动化设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
   });
+
+  it.each([
+    {
+      result: {
+        resourceType: "invoice" as const,
+        resourceId: "invoice-search-result",
+        title: "INV-SEARCH-001",
+        subtitle: "检索客户",
+        matchedFields: ["invoice_number"],
+        route: "/invoices/invoice-search-result",
+        status: "sent",
+        updatedAt: "2026-08-28T01:00:00Z",
+      },
+      expected: "/invoices/invoice-search-result",
+    },
+    {
+      result: {
+        resourceType: "roadmap_milestone" as const,
+        resourceId: "milestone-search-result",
+        title: "唯一检索里程碑",
+        subtitle: "检索项目",
+        matchedFields: ["title"],
+        route: "/roadmap?milestone=milestone-search-result",
+        status: "active",
+        updatedAt: "2026-08-28T01:00:00Z",
+      },
+      expected: "/roadmap?milestone=milestone-search-result",
+    },
+    {
+      result: {
+        resourceType: "content_item" as const,
+        resourceId: "content-search-result",
+        title: "唯一检索内容项",
+        subtitle: "微信公众号",
+        matchedFields: ["title"],
+        route: "/content-calendar?item=content-search-result",
+        status: "scheduled",
+        updatedAt: "2026-08-28T01:00:00Z",
+      },
+      expected: "/content-calendar?item=content-search-result",
+    },
+  ])(
+    "opens $result.resourceType search results on their stable route",
+    ({ result, expected }) => {
+      vi.useFakeTimers();
+      mocks.searchQuery.mockImplementation((input: { q?: string }) => ({
+        data: input.q
+          ? { items: [result], meta: { page: 1, pageSize: 12, total: 1 } }
+          : undefined,
+        isError: false,
+        isPending: false,
+        refetch: mocks.refetch,
+      }));
+      useUiStore.setState({ commandPaletteOpen: true });
+
+      render(
+        <MemoryRouter>
+          <CommandPalette />
+          <CurrentLocation />
+        </MemoryRouter>,
+      );
+      fireEvent.change(screen.getByRole("combobox"), {
+        target: { value: "唯一检索" },
+      });
+      act(() => vi.advanceTimersByTime(200));
+      fireEvent.click(
+        screen.getByRole("option", { name: new RegExp(result.title) }),
+      );
+
+      expect(screen.getByTestId("current-location")).toHaveTextContent(
+        expected,
+      );
+    },
+  );
 
   it("shows and reruns bounded local recent commands before fixed commands", () => {
     recordCommandRecent([], { kind: "command", commandId: "today" });
@@ -207,6 +292,111 @@ describe("CommandPalette", () => {
 
     await waitFor(() =>
       expect(mocks.getTask).toHaveBeenCalledWith("deleted-task"),
+    );
+    await waitFor(() => expect(loadCommandRecents()).toEqual([]));
+  });
+
+  it("reloads new recent resource types from their local detail APIs", async () => {
+    const now = Date.now();
+    let recents = recordCommandRecent(
+      [],
+      {
+        kind: "resource",
+        resourceType: "invoice",
+        resourceId: "invoice-recent",
+      },
+      now - 2,
+    );
+    recents = recordCommandRecent(
+      recents,
+      {
+        kind: "resource",
+        resourceType: "roadmap_milestone",
+        resourceId: "milestone-recent",
+      },
+      now - 1,
+    );
+    recordCommandRecent(
+      recents,
+      {
+        kind: "resource",
+        resourceType: "content_item",
+        resourceId: "content-recent",
+      },
+      now,
+    );
+    mocks.getInvoice.mockResolvedValue({
+      id: "invoice-recent",
+      invoiceNumber: "INV-RECENT",
+      clientName: "最近客户",
+      status: "sent",
+    });
+    mocks.getRoadmapMilestone.mockResolvedValue({
+      id: "milestone-recent",
+      title: "最近里程碑",
+      status: "active",
+    });
+    mocks.getContentItem.mockResolvedValue({
+      id: "content-recent",
+      title: "最近内容项",
+      platform: "微信公众号",
+      status: "scheduled",
+    });
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+        <CurrentLocation />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("option", { name: /最近内容项/ }),
+    ).toBeVisible();
+    expect(mocks.getInvoice).toHaveBeenCalledWith("invoice-recent");
+    expect(mocks.getRoadmapMilestone).toHaveBeenCalledWith("milestone-recent");
+    expect(mocks.getContentItem).toHaveBeenCalledWith("content-recent");
+    fireEvent.click(screen.getByRole("option", { name: /最近里程碑/ }));
+    expect(screen.getByTestId("current-location")).toHaveTextContent(
+      "/roadmap?milestone=milestone-recent",
+    );
+  });
+
+  it("removes a stale recent content item after its detail API confirms 404", async () => {
+    recordCommandRecent([], {
+      kind: "resource",
+      resourceType: "content_item",
+      resourceId: "deleted-content",
+    });
+    mocks.getContentItem.mockRejectedValue(
+      new ApiError("内容项不存在", {
+        status: 404,
+        code: "CONTENT_ITEM_NOT_FOUND",
+      }),
+    );
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter>
+        <CommandPalette />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(mocks.getContentItem).toHaveBeenCalledWith("deleted-content"),
     );
     await waitFor(() => expect(loadCommandRecents()).toEqual([]));
   });

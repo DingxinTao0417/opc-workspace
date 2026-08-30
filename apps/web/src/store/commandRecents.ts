@@ -51,7 +51,10 @@ function isSearchResourceType(value: unknown): value is SearchResourceType {
     value === "task" ||
     value === "project" ||
     value === "client" ||
-    value === "inbox_item"
+    value === "inbox_item" ||
+    value === "invoice" ||
+    value === "roadmap_milestone" ||
+    value === "content_item"
   );
 }
 

@@ -688,7 +688,14 @@ export interface PageMeta {
   total: number;
 }
 
-export type SearchResourceType = "task" | "project" | "client" | "inbox_item";
+export type SearchResourceType =
+  | "task"
+  | "project"
+  | "client"
+  | "inbox_item"
+  | "invoice"
+  | "roadmap_milestone"
+  | "content_item";
 
 export interface SearchResult {
   resourceType: SearchResourceType;

@@ -5193,13 +5193,19 @@ const searchResourceTypes = new Set<SearchResourceType>([
   "project",
   "client",
   "inbox_item",
+  "invoice",
+  "roadmap_milestone",
+  "content_item",
 ]);
 
-const searchRoutePrefixes: Record<SearchResourceType, string> = {
-  task: "/tasks/",
-  project: "/projects/",
-  client: "/clients/",
-  inbox_item: "/inbox/",
+const searchRoutes: Record<SearchResourceType, (id: string) => string> = {
+  task: (id) => `/tasks/${id}`,
+  project: (id) => `/projects/${id}`,
+  client: (id) => `/clients/${id}`,
+  inbox_item: (id) => `/inbox/${id}`,
+  invoice: (id) => `/invoices/${id}`,
+  roadmap_milestone: (id) => `/roadmap?milestone=${id}`,
+  content_item: (id) => `/content-calendar?item=${id}`,
 };
 
 const searchMatchedFields: Record<SearchResourceType, Set<string>> = {
@@ -5207,6 +5213,9 @@ const searchMatchedFields: Record<SearchResourceType, Set<string>> = {
   project: new Set(["name", "description"]),
   client: new Set(["name", "contact_name", "email", "phone"]),
   inbox_item: new Set(["title", "summary"]),
+  invoice: new Set(["invoice_number", "client_name"]),
+  roadmap_milestone: new Set(["title", "description", "project_names"]),
+  content_item: new Set(["title", "notes", "platform"]),
 };
 
 const searchStatuses: Record<SearchResourceType, Set<string>> = {
@@ -5221,6 +5230,15 @@ const searchStatuses: Record<SearchResourceType, Set<string>> = {
   project: new Set(["planning", "in_progress", "paused", "completed"]),
   client: new Set(["active", "lead", "inactive"]),
   inbox_item: new Set(["open", "tracking"]),
+  invoice: new Set(["draft", "sent", "viewed", "paid", "overdue"]),
+  roadmap_milestone: new Set(["planned", "active", "achieved"]),
+  content_item: new Set([
+    "draft",
+    "in_review",
+    "scheduled",
+    "published",
+    "cancelled",
+  ]),
 };
 
 export function normalizeSearchListResult(value: unknown): SearchListResult {
@@ -5268,8 +5286,7 @@ export function normalizeSearchListResult(value: unknown): SearchListResult {
     }
     const resourceType = entry.resource_type as SearchResourceType;
     if (
-      entry.route !==
-        `${searchRoutePrefixes[resourceType]}${entry.resource_id}` ||
+      entry.route !== searchRoutes[resourceType](entry.resource_id) ||
       !searchStatuses[resourceType].has(entry.status) ||
       entry.matched_fields.length === 0 ||
       new Set(entry.matched_fields).size !== entry.matched_fields.length ||
