@@ -77,6 +77,8 @@ func (a *API) exportBusinessPackage(c *gin.Context) {
 func (a *API) buildBusinessPackageLocked(c *gin.Context) (string, time.Time, error) {
 	a.maintenance.Lock()
 	defer a.maintenance.Unlock()
+	unlockInvoicePDFs := a.lockInvoicePDFStore()
+	defer unlockInvoicePDFs()
 	return a.buildBusinessPackage(c)
 }
 
@@ -152,7 +154,7 @@ func (a *API) buildBusinessPackage(c *gin.Context) (string, time.Time, error) {
 		return "", exportedAt, err
 	}
 	for index, row := range rows {
-		source, err := a.artifactStore.resolveControlledFile(row.RelativePath)
+		source, err := resolveControlledFileForStores(a.artifactStore, a.invoicePDFStore, row)
 		if err != nil {
 			return "", exportedAt, fmt.Errorf("resolve controlled file: %w", err)
 		}

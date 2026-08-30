@@ -7,6 +7,7 @@ import type { Invoice } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { InvoiceActions } from "../components/InvoiceActions";
 import { InvoiceFormModal } from "../components/InvoiceFormModal";
+import { InvoicePdfSection } from "../components/InvoicePdfSection";
 import {
   formatInvoiceAmount,
   invoiceStatusClass,
@@ -262,6 +263,11 @@ export function InvoiceDetailPage() {
           </div>
         </dl>
       </section>
+
+      <InvoicePdfSection
+        invoice={invoice}
+        onInvoiceConflict={refreshAfterConflict}
+      />
 
       <section className="invoice-detail-panel invoice-detail-notes">
         <div className="invoice-detail-panel-heading">

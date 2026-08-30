@@ -93,6 +93,8 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 	defer a.maintenance.Unlock()
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
+	unlockInvoicePDFs := a.lockInvoicePDFStore()
+	defer unlockInvoicePDFs()
 	preview, err := a.validateBusinessImport(c, packageData)
 	if err != nil {
 		writeBusinessImportError(c, err)
@@ -495,7 +497,7 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 			return err
 		}
 		order := []string{
-			"clients", "projects", "roadmap_milestones", "roadmap_milestone_projects", "task_submissions", "tasks", "content_items", "content_item_tasks", "tags", "task_tags", "invoices", "financial_entries",
+			"clients", "projects", "roadmap_milestones", "roadmap_milestone_projects", "task_submissions", "tasks", "content_items", "content_item_tasks", "tags", "task_tags", "invoices", "invoice_pdf_assets", "financial_entries",
 			"task_assignments", "task_artifacts", "workflow_events",
 			"client_activities", "client_attachments", "client_actor_links", "client_followups", "project_notes", "project_attachments",
 			"focus_sessions", "focus_session_intervals", "inbox_items", "inbox_item_tasks",
@@ -805,7 +807,7 @@ func businessTargetEmpty(db *gorm.DB) (bool, error) {
 }
 
 func tableContainsControlledFiles(table businessExportTable) bool {
-	if table.Name == "client_attachments" || table.Name == "project_attachments" || table.Name == "workspace_avatars" {
+	if table.Name == "client_attachments" || table.Name == "project_attachments" || table.Name == "workspace_avatars" || table.Name == "invoice_pdf_assets" {
 		return len(table.Rows) != 0
 	}
 	if table.Name != "task_artifacts" {

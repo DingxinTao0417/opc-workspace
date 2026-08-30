@@ -157,7 +157,7 @@ func TestBusinessPackageImportAppendsToNonEmptyTargetWithoutOverwriting(t *testi
 		Data businessPackageImportPreview `json:"data"`
 	}
 	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" ||
-		envelope.Data.TargetSchemaVersion != 46 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
+		envelope.Data.TargetSchemaVersion != 47 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
 		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 0, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("non-empty package preview = %#v err=%v", envelope.Data, err)
 	}
@@ -177,6 +177,48 @@ func TestBusinessPackageImportAppendsToNonEmptyTargetWithoutOverwriting(t *testi
 	var existing int64
 	if err := targetStore.DB.Table("clients").Where("name = ?", "Existing").Count(&existing).Error; err != nil || existing != 1 {
 		t.Fatalf("existing target changed count=%d err=%v", existing, err)
+	}
+}
+
+func TestBusinessPackageImportAppendsWhenTargetAlreadyHasControlledFile(t *testing.T) {
+	payload, incomingArtifactPath := businessPackageFixture(t)
+	targetRouter, _, artifactDir, backupDir := newBackupTestAPI(t)
+	client := createClientForTest(t, targetRouter, `{"name":"Existing File Client"}`, nil)
+	existingBody := []byte("existing controlled attachment survives append")
+	uploaded := performClientAttachmentUpload(
+		t, targetRouter, "/api/v1/clients/"+client.ID+"/attachments",
+		`{"name":"existing.txt"}`, "existing.txt", existingBody, map[string]string{"If-Match": `"1"`},
+	)
+	if uploaded.Code != http.StatusCreated {
+		t.Fatalf("create existing controlled attachment = %d: %s", uploaded.Code, uploaded.Body.String())
+	}
+	existingID := decodeClientAttachmentResponse(t, uploaded.Body.Bytes()).ID
+
+	preview := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-package/preview", payload, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("controlled-file append preview = %d: %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessPackageImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.FileConflicts != 0 {
+		t.Fatalf("controlled-file append preview = %#v err=%v", envelope.Data, err)
+	}
+	apply := performRequest(
+		targetRouter, http.MethodPost, "/api/v1/imports/business-package", payload,
+		map[string]string{"X-Import-Confirmation": packageImportAppendConfirmation},
+	)
+	if apply.Code != http.StatusOK {
+		t.Fatalf("controlled-file append apply = %d: %s", apply.Code, apply.Body.String())
+	}
+	if body, err := os.ReadFile(filepath.Join(artifactDir, "objects", existingID)); err != nil || !bytes.Equal(body, existingBody) {
+		t.Fatalf("existing controlled attachment changed body=%q err=%v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(incomingArtifactPath)))); err != nil {
+		t.Fatalf("incoming controlled file missing after append: %v", err)
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 1 {
+		t.Fatalf("controlled-file append rollback backups=%v", backups)
 	}
 }
 

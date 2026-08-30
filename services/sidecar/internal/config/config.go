@@ -23,6 +23,7 @@ var defaultOrigins = []string{
 type Config struct {
 	DatabasePath     string
 	ArtifactDir      string
+	InvoicePDFDir    string
 	BackupDir        string
 	LogDir           string
 	Port             int
@@ -69,6 +70,8 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	databasePath := fs.String("db", strings.TrimSpace(databaseDefault), "SQLite database path")
 	artifactDefault := strings.TrimSpace(getenv("OPC_ARTIFACT_DIR"))
 	artifactDir := fs.String("artifacts", artifactDefault, "controlled Task Artifact directory")
+	invoiceDefault := strings.TrimSpace(getenv("OPC_INVOICE_DIR"))
+	invoicePDFDir := fs.String("invoices", invoiceDefault, "generated invoice PDF directory")
 	backupDefault := strings.TrimSpace(getenv("OPC_BACKUP_DIR"))
 	backupDir := fs.String("backups", backupDefault, "local verified backup package directory")
 	logDefault := strings.TrimSpace(getenv("OPC_LOG_DIR"))
@@ -119,6 +122,27 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 		return Config{}, errors.New("artifact directory must not be the database file")
 	}
 
+	invoices := strings.TrimSpace(*invoicePDFDir)
+	if invoices == "" {
+		if path == ":memory:" {
+			return Config{}, errors.New("invoice PDF directory is required with an in-memory database")
+		}
+		invoices = filepath.Join(filepath.Dir(path), "invoices")
+	}
+	invoices, err = filepath.Abs(invoices)
+	if err != nil {
+		return Config{}, fmt.Errorf("resolve invoice PDF directory: %w", err)
+	}
+	if path != ":memory:" && strings.EqualFold(filepath.Clean(invoices), filepath.Clean(path)) {
+		return Config{}, errors.New("invoice PDF directory must not be the database file")
+	}
+	if path != ":memory:" && pathsOverlap(invoices, path) {
+		return Config{}, errors.New("invoice PDF directory must not contain the database file")
+	}
+	if pathsOverlap(invoices, artifacts) {
+		return Config{}, errors.New("invoice PDF directory and artifact directory must not overlap")
+	}
+
 	backups := strings.TrimSpace(*backupDir)
 	if backups == "" {
 		if path == ":memory:" {
@@ -139,6 +163,9 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	if pathsOverlap(backups, artifacts) {
 		return Config{}, errors.New("backup directory and artifact directory must not overlap")
 	}
+	if pathsOverlap(backups, invoices) {
+		return Config{}, errors.New("backup directory and invoice PDF directory must not overlap")
+	}
 
 	logs := strings.TrimSpace(*logDir)
 	if logs == "" {
@@ -154,8 +181,8 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	if path != ":memory:" && strings.EqualFold(filepath.Clean(logs), filepath.Clean(path)) {
 		return Config{}, errors.New("log directory must not be the database file")
 	}
-	if pathsOverlap(logs, artifacts) || pathsOverlap(logs, backups) {
-		return Config{}, errors.New("log directory must not overlap artifact or backup directories")
+	if pathsOverlap(logs, artifacts) || pathsOverlap(logs, invoices) || pathsOverlap(logs, backups) {
+		return Config{}, errors.New("log directory must not overlap artifact, invoice PDF, or backup directories")
 	}
 
 	host := strings.TrimSpace(getenv("OPC_HOST"))
@@ -175,6 +202,7 @@ func Parse(args []string, getenv getenvFunc) (Config, error) {
 	return Config{
 		DatabasePath:     path,
 		ArtifactDir:      artifacts,
+		InvoicePDFDir:    invoices,
 		BackupDir:        backups,
 		LogDir:           logs,
 		Port:             *portFlag,

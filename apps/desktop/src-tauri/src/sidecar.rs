@@ -1006,6 +1006,7 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
 
     let database_path = app_data_dir.join("opc-workspace.db");
     let artifact_dir = app_data_dir.join("artifacts");
+    let invoice_pdf_dir = app_data_dir.join("invoices");
     let token = generate_session_token();
 
     let command = app
@@ -1017,6 +1018,7 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
         .env("OPC_SESSION_TOKEN", &token)
         .env("OPC_DB_PATH", &database_path)
         .env("OPC_ARTIFACT_DIR", &artifact_dir)
+        .env("OPC_INVOICE_DIR", &invoice_pdf_dir)
         .env("OPC_LOG_DIR", &app_log_dir)
         .env("OPC_EXIT_ON_STDIN_CLOSE", "true")
         .env(
@@ -1402,7 +1404,8 @@ fn base_url_from_host_port(host: &str, port: u16) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use std::{
-        future,
+        fs, future,
+        path::PathBuf,
         sync::{Arc, Mutex, mpsc},
         thread,
         time::{Duration, Instant},
@@ -1411,7 +1414,8 @@ mod tests {
     use super::{
         MAX_RESTART_ATTEMPTS, RESTART_BACKOFFS, SidecarChildControl, SidecarManager, SidecarPhase,
         SidecarRuntimeStatus, SidecarStdoutLine, StartupStage, handle_ready_handshake_timeout,
-        parse_ready_line, parse_sidecar_stdout_line, receive_before_ready_deadline,
+        parse_ready_line, parse_sidecar_stdout_line, prepare_runtime_directories,
+        receive_before_ready_deadline,
     };
 
     #[derive(Default)]
@@ -1481,6 +1485,45 @@ mod tests {
             predicate(),
             "condition was not reached before the test deadline"
         );
+    }
+
+    fn unique_runtime_test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "opc-workspace-{label}-{}",
+            uuid::Uuid::new_v4().simple()
+        ))
+    }
+
+    #[test]
+    fn runtime_directories_include_the_invoice_pdf_root() {
+        let root = unique_runtime_test_root("runtime-directories");
+        let app_data = root.join("data");
+        let app_logs = root.join("logs");
+
+        prepare_runtime_directories(&app_data, &app_logs)
+            .expect("runtime directories should be created");
+
+        assert!(app_data.join("invoices").is_dir());
+        assert!(app_data.join("artifacts").is_dir());
+        assert!(app_data.join("backups").is_dir());
+        assert!(app_logs.is_dir());
+        fs::remove_dir_all(&root).expect("remove runtime directory fixture");
+    }
+
+    #[test]
+    fn runtime_directory_preparation_fails_when_invoice_root_is_a_file() {
+        let root = unique_runtime_test_root("blocked-invoices");
+        let app_data = root.join("data");
+        let app_logs = root.join("logs");
+        fs::create_dir_all(&app_data).expect("create runtime fixture root");
+        fs::write(app_data.join("invoices"), b"fixture")
+            .expect("create blocked invoice directory fixture");
+
+        let error = prepare_runtime_directories(&app_data, &app_logs)
+            .expect_err("a file must block the invoice PDF directory");
+
+        assert!(error.contains("invoices"));
+        fs::remove_dir_all(&root).expect("remove blocked runtime fixture");
     }
 
     #[test]

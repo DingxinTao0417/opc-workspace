@@ -326,7 +326,13 @@ func (a *API) deleteInvoice(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "CONFIRMATION_REQUIRED", "Deleting an invoice requires confirm=true")
 		return
 	}
+	store := a.invoicePDFStore
+	if store != nil {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+	}
 
+	var movedPDF *trashedInvoicePDF
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var invoice models.Invoice
 		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
@@ -345,6 +351,19 @@ func (a *API) deleteInvoice(c *gin.Context) {
 		if entryCount > 0 {
 			return newInvoiceRequestError(http.StatusConflict, "INVOICE_FINANCIAL_ENTRY_EXISTS", "An invoice linked to a financial entry cannot be deleted")
 		}
+		asset, exists, err := invoicePDFAssetExists(tx, id)
+		if err != nil {
+			return err
+		}
+		if exists {
+			if store == nil {
+				return newInvoiceRequestError(http.StatusServiceUnavailable, "INVOICE_PDF_STORAGE_UNAVAILABLE", "Invoice PDF storage is unavailable")
+			}
+			movedPDF, err = store.moveToTrash(asset.RelativePath, asset.ID)
+			if err != nil {
+				return newInvoiceRequestError(http.StatusInternalServerError, "INVOICE_PDF_STORAGE_ERROR", "The invoice PDF could not be prepared for deletion safely")
+			}
+		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
 		if err := recordInvoiceWorkflowEvent(tx, id, "invoice_deleted", models.BuiltinOwnerActorID, invoiceEventState(invoice), nil, requestIDFromContext(c), now); err != nil {
 			return err
@@ -359,6 +378,11 @@ func (a *API) deleteInvoice(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if store != nil {
+			if restoreErr := store.restoreTrashed(movedPDF); restoreErr != nil && a.options.Logger != nil {
+				a.options.Logger.Printf("invoice PDF delete compensation failed invoice_id=%s error=%v", id, restoreErr)
+			}
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeError(c, http.StatusNotFound, "INVOICE_NOT_FOUND", "Invoice not found")
 			return
@@ -368,6 +392,9 @@ func (a *API) deleteInvoice(c *gin.Context) {
 		}
 		writeDatabaseError(c)
 		return
+	}
+	if store != nil {
+		store.purgeTrashed(movedPDF)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted_id": id}})
 }

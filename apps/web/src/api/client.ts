@@ -131,6 +131,8 @@ import type {
   Invoice,
   DeleteInvoiceResult,
   InvoiceInput,
+  InvoicePdfDownload,
+  InvoicePdfMetadata,
   InvoiceListParams,
   InvoiceListResult,
   InvoiceStatus,
@@ -1564,6 +1566,76 @@ function normalizeInvoiceResponse(value: unknown): Invoice {
     return invalidResponse("发票详情响应格式无效");
   }
   return normalizeInvoice(value.data);
+}
+
+const invoicePdfMetadataKeys = [
+  "invoice_id",
+  "file_name",
+  "mime_type",
+  "size_bytes",
+  "sha256",
+  "generated_from_version",
+  "generated_at",
+  "integrity_status",
+  "integrity_checked_at",
+] as const;
+
+export function normalizeInvoicePdfMetadata(
+  value: unknown,
+): InvoicePdfMetadata {
+  if (!isRecord(value) || !hasExactKeys(value, invoicePdfMetadataKeys)) {
+    return invalidResponse("发票 PDF 元数据响应格式无效");
+  }
+  const invoiceId = stringField(value, "invoice_id");
+  const fileName = stringField(value, "file_name");
+  const mimeType = stringField(value, "mime_type");
+  const sha256 = stringField(value, "sha256");
+  const generatedAt = stringField(value, "generated_at");
+  const integrityStatus = stringField(value, "integrity_status");
+  const integrityCheckedAt = stringField(value, "integrity_checked_at");
+  if (
+    !invoiceId ||
+    !fileName ||
+    mimeType !== "application/pdf" ||
+    !sha256?.match(/^[a-f0-9]{64}$/) ||
+    !generatedAt ||
+    Number.isNaN(Date.parse(generatedAt)) ||
+    (integrityStatus !== "verified" &&
+      integrityStatus !== "missing" &&
+      integrityStatus !== "mismatch") ||
+    !integrityCheckedAt ||
+    Number.isNaN(Date.parse(integrityCheckedAt))
+  ) {
+    return invalidResponse("发票 PDF 元数据响应字段无效");
+  }
+  return {
+    invoiceId,
+    fileName,
+    mimeType,
+    sizeBytes: positiveInteger(value.size_bytes, "发票 PDF 文件大小"),
+    sha256,
+    generatedFromVersion: positiveInteger(
+      value.generated_from_version,
+      "发票 PDF 来源版本",
+    ),
+    generatedAt,
+    integrityStatus,
+    integrityCheckedAt,
+  };
+}
+
+function normalizeInvoicePdfResponse(
+  value: unknown,
+  expectedInvoiceId: string,
+): InvoicePdfMetadata {
+  if (!isRecord(value) || !hasExactKeys(value, ["data"])) {
+    return invalidResponse("发票 PDF 响应格式无效");
+  }
+  const metadata = normalizeInvoicePdfMetadata(value.data);
+  if (metadata.invoiceId !== expectedInvoiceId) {
+    return invalidResponse("发票 PDF 响应与请求不一致");
+  }
+  return metadata;
 }
 
 export function normalizeIncomeStats(value: unknown): IncomeStats {
@@ -8158,6 +8230,70 @@ export async function getInvoice(id: string): Promise<Invoice> {
     `/api/v1/invoices/${encodeURIComponent(id)}`,
   );
   return normalizeInvoiceResponse(payload);
+}
+
+export async function getInvoicePdf(
+  id: string,
+): Promise<InvoicePdfMetadata | null> {
+  try {
+    const payload = await apiRequest<unknown>(
+      `/api/v1/invoices/${encodeURIComponent(id)}/pdf`,
+    );
+    return normalizeInvoicePdfResponse(payload, id);
+  } catch (error) {
+    if (error instanceof ApiError && error.code === "INVOICE_PDF_NOT_FOUND") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function generateInvoicePdf(
+  id: string,
+  expectedVersion: number,
+  idempotencyKey: string,
+): Promise<InvoicePdfMetadata> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/invoices/${encodeURIComponent(id)}/generate-pdf`,
+    {
+      method: "POST",
+      headers: {
+        ...expectedVersionHeader(expectedVersion),
+        "Idempotency-Key": idempotencyKey,
+      },
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  return normalizeInvoicePdfResponse(payload, id);
+}
+
+export async function downloadInvoicePdf(
+  id: string,
+  fallbackName: string,
+): Promise<InvoicePdfDownload> {
+  return apiFetch(
+    `/api/v1/invoices/${encodeURIComponent(id)}/pdf/download`,
+    async (response) => {
+      const contentType = response.headers.get("Content-Type");
+      if (!contentType?.toLowerCase().startsWith("application/pdf")) {
+        return invalidResponse("发票 PDF 下载响应格式无效");
+      }
+      const blob = await response.blob();
+      if (blob.size < 1) {
+        return invalidResponse("发票 PDF 文件为空");
+      }
+      return {
+        blob,
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          fallbackName,
+        ),
+      };
+    },
+    {},
+    "application/pdf",
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
 }
 
 function invoiceBody(input: Partial<InvoiceInput>) {

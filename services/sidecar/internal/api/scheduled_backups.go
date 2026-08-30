@@ -171,6 +171,8 @@ func (a *API) runDueScheduledBackup(ctx context.Context) error {
 	defer a.maintenance.Unlock()
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
+	unlockInvoicePDFs := a.lockInvoicePDFStore()
+	defer unlockInvoicePDFs()
 
 	policy, err := loadScheduledBackupPolicy(a.db.WithContext(ctx))
 	if err != nil {

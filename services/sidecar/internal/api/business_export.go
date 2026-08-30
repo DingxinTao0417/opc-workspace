@@ -40,6 +40,7 @@ var businessExportTables = []businessExportTableSpec{
 	{Name: "tags", OrderBy: "id"},
 	{Name: "task_tags", OrderBy: "task_id, tag_id"},
 	{Name: "invoices", OrderBy: "id"},
+	{Name: "invoice_pdf_assets", OrderBy: "invoice_id, id"},
 	{Name: "financial_entries", OrderBy: "occurred_on, created_at, id"},
 	{Name: "actors", OrderBy: "id"},
 	{Name: "task_assignments", OrderBy: "id"},
@@ -165,6 +166,9 @@ func (a *API) buildBusinessExport(c *gin.Context, exportedAt time.Time) (busines
 				SELECT size_bytes
 				FROM workspace_avatars
 				WHERE deleted_at IS NULL
+				UNION ALL
+				SELECT size_bytes
+				FROM invoice_pdf_assets
 			)
 		`).Row().Scan(&result.ArtifactFiles.ActiveCount, &result.ArtifactFiles.ActiveBytes); err != nil {
 			return fmt.Errorf("read export Artifact summary: %w", err)

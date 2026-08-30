@@ -27,6 +27,7 @@ type Options struct {
 	AllowedOrigins              []string
 	Logger                      *log.Logger
 	ArtifactDir                 string
+	InvoicePDFDir               string
 	DatabasePath                string
 	BackupDir                   string
 	LogDir                      string
@@ -44,6 +45,7 @@ type API struct {
 	db                    *gorm.DB
 	options               Options
 	artifactStore         *artifactStore
+	invoicePDFStore       *invoicePDFStore
 	backupStore           *backupStore
 	maintenance           *sync.RWMutex
 	restorePending        atomic.Bool
@@ -54,6 +56,7 @@ type API struct {
 type Router struct {
 	*gin.Engine
 	artifactStore             *artifactStore
+	invoicePDFStore           *invoicePDFStore
 	focusHeartbeatCancel      context.CancelFunc
 	focusHeartbeatDone        chan struct{}
 	reminderScanCancel        context.CancelFunc
@@ -87,9 +90,14 @@ func (r *Router) Close() error {
 			r.scheduledBackupScanCancel()
 			<-r.scheduledBackupScanDone
 		}
+		var artifactErr, invoicePDFErr error
 		if r.artifactStore != nil {
-			r.closeErr = r.artifactStore.close()
+			artifactErr = r.artifactStore.close()
 		}
+		if r.invoicePDFStore != nil {
+			invoicePDFErr = r.invoicePDFStore.close()
+		}
+		r.closeErr = errors.Join(artifactErr, invoicePDFErr)
 	})
 	return r.closeErr
 }
@@ -165,8 +173,25 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			return nil, err
 		}
 	}
+	var invoicePDFs *invoicePDFStore
+	keepInvoicePDFs := false
+	defer func() {
+		if !keepInvoicePDFs && invoicePDFs != nil {
+			_ = invoicePDFs.close()
+		}
+	}()
+	if options.InvoicePDFDir != "" {
+		var err error
+		invoicePDFs, err = openInvoicePDFStore(db, options.InvoicePDFDir)
+		if err != nil {
+			if artifacts != nil {
+				_ = artifacts.close()
+			}
+			return nil, err
+		}
+	}
 	service := &API{
-		db: db, options: options, artifactStore: artifacts, backupStore: backups,
+		db: db, options: options, artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
 		maintenance: &sync.RWMutex{},
 	}
 	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
@@ -341,6 +366,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.PATCH("/invoices/:id", service.updateInvoice)
 		v1.DELETE("/invoices/:id", service.deleteInvoice)
 		v1.POST("/invoices/:id/transition", service.transitionInvoice)
+		v1.POST("/invoices/:id/generate-pdf", service.generateInvoicePDF)
+		v1.GET("/invoices/:id/pdf", service.getInvoicePDF)
+		v1.GET("/invoices/:id/pdf/download", service.downloadInvoicePDF)
 		v1.GET("/stats/income", service.getIncomeStats)
 		v1.GET("/clients/:id/activities", service.listClientActivities)
 		v1.POST("/clients/:id/activities", service.createClientActivity)
@@ -409,7 +437,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/stats/focus", service.focusPeriodStats)
 		v1.GET("/stats/inbox", service.inboxStats)
 	}
-	result := &Router{Engine: router, artifactStore: artifacts}
+	result := &Router{Engine: router, artifactStore: artifacts, invoicePDFStore: invoicePDFs}
 	if options.FocusHeartbeatInterval > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
 		result.focusHeartbeatCancel = cancel
@@ -534,6 +562,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			}
 		}()
 	}
+	keepInvoicePDFs = true
 	return result, nil
 }
 

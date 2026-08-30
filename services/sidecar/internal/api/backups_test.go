@@ -32,6 +32,7 @@ func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, ui
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "workspace.db")
 	artifactDir := filepath.Join(root, "artifacts")
+	invoicePDFDir := filepath.Join(root, "invoices")
 	backupDir := filepath.Join(root, "backups")
 	store, err := database.Open(databasePath)
 	if err != nil {
@@ -41,7 +42,7 @@ func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, ui
 	router, err := NewRouter(store.DB, Options{
 		AppVersion: "0.1.0-test", Commit: "backup-test", SchemaVersion: store.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
-		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir, InvoicePDFDir: invoicePDFDir,
 		DatabasePath: databasePath, BackupDir: backupDir,
 		DiskSpaceCheck:         checker,
 		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
@@ -57,6 +58,7 @@ func newBackupRestoreTestRuntime(t *testing.T, root string) (*Router, *database.
 	t.Helper()
 	databasePath := filepath.Join(root, "workspace.db")
 	artifactDir := filepath.Join(root, "artifacts")
+	invoicePDFDir := filepath.Join(root, "invoices")
 	backupDir := filepath.Join(root, "backups")
 	store, err := database.Open(databasePath)
 	if err != nil {
@@ -65,7 +67,7 @@ func newBackupRestoreTestRuntime(t *testing.T, root string) (*Router, *database.
 	router, err := NewRouter(store.DB, Options{
 		AppVersion: "0.1.0-test", Commit: "restore-test", SchemaVersion: store.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
-		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir, InvoicePDFDir: invoicePDFDir,
 		DatabasePath: databasePath, BackupDir: backupDir,
 		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
 	})
@@ -891,17 +893,34 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	if err := store.Close(); err != nil {
 		t.Fatalf("close database before restore: %v", err)
 	}
+	invoicePDFDir := filepath.Join(root, "invoices")
+	staleOwnerID := "018f0000-0000-7000-8000-000000008901"
+	staleAssetID := "018f0000-0000-7000-8000-000000008902"
+	staleOwnerDir := filepath.Join(invoicePDFDir, staleOwnerID)
+	if err := os.MkdirAll(staleOwnerDir, 0o700); err != nil {
+		t.Fatalf("create stale invoice PDF owner fixture: %v", err)
+	}
+	staleInvoicePDF := filepath.Join(staleOwnerDir, staleAssetID+".pdf")
+	if err := os.WriteFile(staleInvoicePDF, []byte("stale invoice PDF outside restore target"), 0o600); err != nil {
+		t.Fatalf("create stale invoice PDF fixture: %v", err)
+	}
 
 	var restoreStages []StartupRestoreStage
 	latestSchemaVersion, err := database.LatestSchemaVersion()
 	if err != nil {
 		t.Fatalf("LatestSchemaVersion() error = %v", err)
 	}
-	result, err := ApplyPendingRestoreWithProgress(backupDir, databasePath, artifactDir, latestSchemaVersion, func(stage StartupRestoreStage) {
+	if _, err := ApplyPendingRestoreWithProgress(backupDir, databasePath, artifactDir, latestSchemaVersion, nil); err == nil || !strings.Contains(err.Error(), "invoice PDF restore root is required") {
+		t.Fatalf("legacy restore without invoice PDF root error = %v", err)
+	}
+	if _, err := os.Stat(staleInvoicePDF); err != nil {
+		t.Fatalf("rejected legacy restore changed live invoice PDF fixture: %v", err)
+	}
+	result, err := ApplyPendingRestoreWithInvoicePDFsAndProgress(backupDir, databasePath, artifactDir, invoicePDFDir, latestSchemaVersion, func(stage StartupRestoreStage) {
 		restoreStages = append(restoreStages, stage)
 	})
 	if err != nil {
-		t.Fatalf("ApplyPendingRestoreWithProgress() error = %v", err)
+		t.Fatalf("ApplyPendingRestoreWithInvoicePDFsAndProgress() error = %v", err)
 	}
 	wantRestoreStages := []StartupRestoreStage{
 		StartupRestoreCheckingPending,
@@ -919,6 +938,9 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	if result.CleanupWarning != "" {
 		t.Fatalf("startup restore cleanup warning = %q", result.CleanupWarning)
 	}
+	if _, err := os.Stat(staleInvoicePDF); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale invoice PDF survived empty-PDF restore: %v", err)
+	}
 	reopened, err := database.Open(databasePath)
 	if err != nil {
 		t.Fatalf("open restored database: %v", err)
@@ -926,7 +948,7 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	restoredRouter, err := NewRouter(reopened.DB, Options{
 		AppVersion: "0.1.0-test", Commit: "restore-test", SchemaVersion: reopened.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
-		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir,
+		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir, InvoicePDFDir: invoicePDFDir,
 		DatabasePath: databasePath, BackupDir: backupDir,
 		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
 	})

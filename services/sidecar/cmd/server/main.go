@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,8 +27,9 @@ import (
 )
 
 var (
-	appVersion = "0.1.0"
-	commit     = "unknown"
+	appVersion              = "0.1.0"
+	commit                  = "unknown"
+	syncInvoicePDFDirectory = syncStartupDirectory
 )
 
 type readyEvent struct {
@@ -75,6 +78,11 @@ func run(args []string) int {
 			}
 		}()
 	}
+	if err := prepareInvoicePDFDirectory(cfg.InvoicePDFDir); err != nil {
+		logger.Printf("invoice PDF directory initialization failed: %v", err)
+		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
+		return 1
+	}
 	if err := writeStartupStage(os.Stdout, "acquiring_workspace_lock"); err != nil {
 		logger.Printf("startup progress event failed: %v", err)
 		return 1
@@ -101,8 +109,8 @@ func run(args []string) int {
 		recordStartupFailure(cfg.LogDir, api.StartupIncidentSidecarStartup, logger)
 		return 1
 	}
-	restoreResult, err := api.ApplyPendingRestoreWithProgress(
-		cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, latestSchema,
+	restoreResult, err := api.ApplyPendingRestoreWithInvoicePDFsAndProgress(
+		cfg.BackupDir, cfg.DatabasePath, cfg.ArtifactDir, cfg.InvoicePDFDir, latestSchema,
 		func(stage api.StartupRestoreStage) {
 			if progressErr := writeStartupStage(os.Stdout, string(stage)); progressErr != nil {
 				logger.Printf("startup progress event failed: %v", progressErr)
@@ -146,6 +154,7 @@ func run(args []string) int {
 			Commit:        commit,
 			SchemaVersion: store.SchemaVersion,
 			ArtifactDir:   cfg.ArtifactDir,
+			InvoicePDFDir: cfg.InvoicePDFDir,
 			DatabasePath:  cfg.DatabasePath,
 			BackupDir:     cfg.BackupDir,
 		}, migrationGate.TargetVersion)
@@ -215,6 +224,7 @@ func run(args []string) int {
 		AllowedOrigins: cfg.AllowedOrigins,
 		Logger:         logger,
 		ArtifactDir:    cfg.ArtifactDir,
+		InvoicePDFDir:  cfg.InvoicePDFDir,
 		DatabasePath:   cfg.DatabasePath,
 		BackupDir:      cfg.BackupDir,
 		LogDir:         cfg.LogDir,
@@ -305,6 +315,132 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func prepareInvoicePDFDirectory(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("invoice PDF directory is required")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve invoice PDF directory: %w", err)
+	}
+	absolute = filepath.Clean(absolute)
+	if err := rejectInvoicePDFPathTraversal(absolute); err != nil {
+		return err
+	}
+	missing, err := missingInvoicePDFDirectories(absolute)
+	if err != nil {
+		return err
+	}
+	prepared := false
+	defer func() {
+		if prepared {
+			return
+		}
+		// Only remove directories this call observed as absent. os.Remove is
+		// deliberately non-recursive, so concurrent or user-created contents
+		// cannot be discarded during startup error compensation.
+		for _, directory := range missing {
+			if err := os.Remove(directory); err == nil {
+				_ = syncInvoicePDFDirectory(filepath.Dir(directory))
+			}
+		}
+	}()
+	if err := os.MkdirAll(absolute, 0o700); err != nil {
+		return fmt.Errorf("create invoice PDF directory: %w", err)
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		return fmt.Errorf("inspect invoice PDF directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("invoice PDF directory must not be a symbolic link")
+	}
+	if !info.IsDir() {
+		return errors.New("invoice PDF path is not a directory")
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return fmt.Errorf("resolve invoice PDF directory links: %w", err)
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return fmt.Errorf("resolve canonical invoice PDF directory: %w", err)
+	}
+	resolved = filepath.Clean(resolved)
+	if !sameFilesystemPath(absolute, resolved) {
+		return errors.New("invoice PDF directory must not traverse a symbolic link or directory junction")
+	}
+	// Persist every newly created directory entry from the nearest existing
+	// ancestor down to the invoice PDF root. The store later syncs the root
+	// itself when it creates its marker and internal directories.
+	for index := len(missing) - 1; index >= 0; index-- {
+		if err := syncInvoicePDFDirectory(filepath.Dir(missing[index])); err != nil {
+			return fmt.Errorf("sync invoice PDF directory parent: %w", err)
+		}
+	}
+	prepared = true
+	return nil
+}
+
+func missingInvoicePDFDirectories(path string) ([]string, error) {
+	missing := make([]string, 0, 1)
+	candidate := path
+	for {
+		if _, err := os.Lstat(candidate); err == nil {
+			return missing, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect invoice PDF directory ancestor: %w", err)
+		}
+		missing = append(missing, candidate)
+		parent := filepath.Dir(candidate)
+		if sameFilesystemPath(parent, candidate) {
+			return nil, errors.New("invoice PDF directory has no accessible parent")
+		}
+		candidate = parent
+	}
+}
+
+func rejectInvoicePDFPathTraversal(path string) error {
+	candidate := path
+	for {
+		info, err := os.Lstat(candidate)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return errors.New("invoice PDF directory must not traverse a symbolic link or directory junction")
+			}
+			resolved, err := filepath.EvalSymlinks(candidate)
+			if err != nil {
+				return fmt.Errorf("resolve existing invoice PDF directory ancestor: %w", err)
+			}
+			resolved, err = filepath.Abs(resolved)
+			if err != nil {
+				return fmt.Errorf("resolve canonical invoice PDF directory ancestor: %w", err)
+			}
+			if !sameFilesystemPath(candidate, resolved) {
+				return errors.New("invoice PDF directory must not traverse a symbolic link or directory junction")
+			}
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect invoice PDF directory ancestor: %w", err)
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			return errors.New("invoice PDF directory has no accessible existing ancestor")
+		}
+		candidate = parent
+	}
+}
+
+func sameFilesystemPath(left, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func recordStartupFailure(logDir string, kind api.StartupIncidentKind, logger *log.Logger) {

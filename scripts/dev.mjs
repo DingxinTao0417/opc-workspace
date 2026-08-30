@@ -11,6 +11,7 @@ const pnpmCli = process.env.npm_execpath;
 const devDataDir = join(repoRoot, ".local", "dev-data");
 const databasePath = join(devDataDir, "opc-workspace.db");
 const artifactDir = join(devDataDir, "artifacts");
+const invoiceDir = join(devDataDir, "invoices");
 const backupDir = join(devDataDir, "backups");
 const logDir = join(devDataDir, "logs");
 const apiBaseUrl = "http://127.0.0.1:9876";
@@ -21,6 +22,7 @@ let shuttingDown = false;
 
 mkdirSync(devDataDir, { recursive: true });
 mkdirSync(artifactDir, { recursive: true });
+mkdirSync(invoiceDir, { recursive: true });
 mkdirSync(backupDir, { recursive: true });
 mkdirSync(logDir, { recursive: true });
 
@@ -139,6 +141,8 @@ async function main() {
       databasePath,
       "--artifacts",
       artifactDir,
+      "--invoices",
+      invoiceDir,
       "--backups",
       backupDir,
       "--logs",

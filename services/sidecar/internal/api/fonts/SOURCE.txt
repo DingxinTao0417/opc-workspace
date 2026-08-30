@@ -1,0 +1,7 @@
+Noto Sans SC Variable
+
+Source: https://github.com/google/fonts/blob/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
+Retrieved: 2026-08-29
+Upstream project: https://github.com/notofonts/noto-cjk
+License: SIL Open Font License 1.1 (see OFL.txt)
+SHA-256: a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da

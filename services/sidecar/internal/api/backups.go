@@ -61,6 +61,8 @@ type controlledFileBackupRow struct {
 	SHA256       string `gorm:"column:sha256"`
 }
 
+const invoicePDFControlledPrefix = "invoices/"
+
 type backupManifest struct {
 	FormatVersion      int                      `json:"format_version"`
 	ID                 string                   `json:"id"`
@@ -199,6 +201,14 @@ func (a *API) listBackups(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": summaries})
 }
 
+func (a *API) lockInvoicePDFStore() func() {
+	if a.invoicePDFStore == nil {
+		return func() {}
+	}
+	a.invoicePDFStore.mu.Lock()
+	return a.invoicePDFStore.mu.Unlock
+}
+
 func (a *API) createBackup(c *gin.Context) {
 	if a.backupStore == nil {
 		writeError(c, http.StatusServiceUnavailable, "BACKUP_UNAVAILABLE", "Verified local backups are unavailable")
@@ -229,6 +239,8 @@ func (a *API) createBackup(c *gin.Context) {
 	defer a.maintenance.Unlock()
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
+	unlockInvoicePDFs := a.lockInvoicePDFStore()
+	defer unlockInvoicePDFs()
 	if keyHash != "" {
 		replayed, found, err := a.backupStore.findIdempotent(keyHash, requestHash, a.options.SchemaVersion)
 		if err != nil {
@@ -324,8 +336,8 @@ var (
 )
 
 func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options, additionalPayloadBytes uint64) error {
-	required, err := estimateBackupCreateCapacityWithAdditional(
-		db, s.databasePath, s.artifacts, options.SchemaVersion, additionalPayloadBytes,
+	required, err := estimateBackupCreateCapacityWithInvoicePDFs(
+		db, s.databasePath, s.artifacts, options.InvoicePDFDir, options.SchemaVersion, additionalPayloadBytes,
 	)
 	if err != nil {
 		return errBackupCapacityUnavailable
@@ -352,6 +364,17 @@ func estimateBackupCreateCapacityWithAdditional(
 	db *gorm.DB,
 	databasePath string,
 	artifacts *artifactStore,
+	schemaVersion int,
+	additionalPayloadBytes uint64,
+) (uint64, error) {
+	return estimateBackupCreateCapacityWithInvoicePDFs(db, databasePath, artifacts, "", schemaVersion, additionalPayloadBytes)
+}
+
+func estimateBackupCreateCapacityWithInvoicePDFs(
+	db *gorm.DB,
+	databasePath string,
+	artifacts *artifactStore,
+	invoicePDFRoot string,
 	schemaVersion int,
 	additionalPayloadBytes uint64,
 ) (uint64, error) {
@@ -386,7 +409,7 @@ func estimateBackupCreateCapacityWithAdditional(
 		if row.SizeBytes < 0 || !validControlledFileRelativePath(row.ID, row.RelativePath, schemaVersion) {
 			return 0, errBackupCapacityUnavailable
 		}
-		sourcePath, err := artifacts.resolveControlledFile(row.RelativePath)
+		sourcePath, err := resolveControlledFileForBackup(artifacts, invoicePDFRoot, row)
 		if err != nil {
 			return 0, errBackupCapacityUnavailable
 		}
@@ -581,12 +604,16 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 		if !validControlledFileRelativePath(row.ID, row.RelativePath, options.SchemaVersion) {
 			return backupSummary{}, fmt.Errorf("active controlled file %s has an invalid path", row.ID)
 		}
-		source, err := s.artifacts.resolveControlledFile(row.RelativePath)
+		source, err := resolveControlledFileForBackup(s.artifacts, options.InvoicePDFDir, row)
 		if err != nil {
-			return backupSummary{}, fmt.Errorf("resolve active Artifact %s: %w", row.ID, err)
+			return backupSummary{}, fmt.Errorf("resolve active controlled file %s: %w", row.ID, err)
 		}
-		relative := "artifacts/" + row.RelativePath
-		copied, err := copyVerifiedBackupFile(source, filepath.Join(stagingPath, filepath.FromSlash(relative)), row.SizeBytes, row.SHA256)
+		relative := backupControlledFilePath(row.RelativePath)
+		destination := filepath.Join(stagingPath, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return backupSummary{}, fmt.Errorf("create controlled-file backup directory: %w", err)
+		}
+		copied, err := copyVerifiedBackupFile(source, destination, row.SizeBytes, row.SHA256)
 		if err != nil {
 			return backupSummary{}, fmt.Errorf("copy active Artifact %s: %w", row.ID, err)
 		}
@@ -615,7 +642,7 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 	if err := writeBackupManifest(stagingPath, manifest); err != nil {
 		return backupSummary{}, err
 	}
-	for _, directory := range []string{objectDir, avatarDir, artifactDir, databaseDir, stagingPath} {
+	for _, directory := range backupPackageSyncDirectories(stagingPath, manifest) {
 		if err := syncArtifactDirectory(directory); err != nil {
 			return backupSummary{}, fmt.Errorf("sync backup package: %w", err)
 		}
@@ -833,7 +860,7 @@ func verifyBackupDatabase(path string, manifest backupManifest) error {
 		if err := sqlDB.QueryRow(lookupQuery, artifact.ID).Scan(&relativePath, &size, &hash); err != nil {
 			return fmt.Errorf("read backup Artifact %s: %w", artifact.ID, err)
 		}
-		if !validControlledFileRelativePath(artifact.ID, relativePath, manifest.SchemaVersion) || artifact.Path != "artifacts/"+relativePath || size != artifact.SizeBytes || hash != artifact.SHA256 {
+		if !validControlledFileRelativePath(artifact.ID, relativePath, manifest.SchemaVersion) || artifact.Path != backupControlledFilePath(relativePath) || size != artifact.SizeBytes || hash != artifact.SHA256 {
 			return fmt.Errorf("backup Artifact %s metadata does not match database", artifact.ID)
 		}
 	}
@@ -869,6 +896,13 @@ func listActiveControlledFiles(db *gorm.DB, schemaVersion int) ([]controlledFile
 			SELECT id, relative_path, size_bytes, sha256
 			FROM workspace_avatars
 			WHERE deleted_at IS NULL
+		`
+	}
+	if schemaVersion >= 47 {
+		query += `
+			UNION ALL
+			SELECT id, 'invoices/' || relative_path AS relative_path, size_bytes, sha256
+			FROM invoice_pdf_assets
 		`
 	}
 	query = "SELECT id, relative_path, size_bytes, sha256 FROM (" + query + ") ORDER BY id ASC"
@@ -908,6 +942,13 @@ func controlledFileVerificationQueries(schemaVersion int) (string, string) {
 			WHERE deleted_at IS NULL
 		`
 	}
+	if schemaVersion >= 47 {
+		union += `
+			UNION ALL
+			SELECT id, 'invoices/' || relative_path AS relative_path, size_bytes, sha256
+			FROM invoice_pdf_assets
+		`
+	}
 	return "SELECT COUNT(*) FROM (" + union + ")",
 		"SELECT relative_path, size_bytes, sha256 FROM (" + union + ") WHERE id = ?"
 }
@@ -915,6 +956,15 @@ func controlledFileVerificationQueries(schemaVersion int) (string, string) {
 func validControlledFileRelativePath(id, relative string, schemaVersion int) bool {
 	if relative == "objects/"+id {
 		return true
+	}
+	if schemaVersion >= 47 && strings.HasPrefix(relative, invoicePDFControlledPrefix) {
+		parts := strings.Split(strings.TrimPrefix(relative, invoicePDFControlledPrefix), "/")
+		if len(parts) != 2 || parts[1] != id+".pdf" {
+			return false
+		}
+		owner, ownerErr := uuid.Parse(parts[0])
+		asset, assetErr := uuid.Parse(id)
+		return ownerErr == nil && owner.String() == parts[0] && assetErr == nil && asset.String() == id
 	}
 	if schemaVersion < 27 || !strings.HasPrefix(relative, "avatars/"+id+".") {
 		return false
@@ -924,7 +974,61 @@ func validControlledFileRelativePath(id, relative string, schemaVersion int) boo
 }
 
 func validBackupControlledFilePath(id, path string, schemaVersion int) bool {
+	if strings.HasPrefix(path, invoicePDFControlledPrefix) {
+		return validControlledFileRelativePath(id, path, schemaVersion)
+	}
 	return strings.HasPrefix(path, "artifacts/") && validControlledFileRelativePath(id, strings.TrimPrefix(path, "artifacts/"), schemaVersion)
+}
+
+func backupControlledFilePath(relative string) string {
+	if strings.HasPrefix(relative, invoicePDFControlledPrefix) {
+		return relative
+	}
+	return "artifacts/" + relative
+}
+
+func resolveControlledFileForBackup(artifacts *artifactStore, invoicePDFRoot string, row controlledFileBackupRow) (string, error) {
+	if !strings.HasPrefix(row.RelativePath, invoicePDFControlledPrefix) {
+		if artifacts == nil {
+			return "", errors.New("controlled Artifact store is unavailable")
+		}
+		return artifacts.resolveControlledFile(row.RelativePath)
+	}
+	root := strings.TrimSpace(invoicePDFRoot)
+	if root == "" {
+		return "", errors.New("invoice PDF store is unavailable")
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	absolute = filepath.Clean(absolute)
+	if isFilesystemRoot(absolute) || requireSafeDirectory(absolute) != nil {
+		return "", errors.New("invoice PDF store is unsafe")
+	}
+	store := &invoicePDFStore{root: absolute}
+	return resolveControlledFileForStores(artifacts, store, row)
+}
+
+func resolveControlledFileForStores(artifacts *artifactStore, invoicePDFs *invoicePDFStore, row controlledFileBackupRow) (string, error) {
+	if !strings.HasPrefix(row.RelativePath, invoicePDFControlledPrefix) {
+		if artifacts == nil {
+			return "", errors.New("controlled Artifact store is unavailable")
+		}
+		return artifacts.resolveControlledFile(row.RelativePath)
+	}
+	if invoicePDFs == nil {
+		return "", errors.New("invoice PDF store is unavailable")
+	}
+	relative := strings.TrimPrefix(row.RelativePath, invoicePDFControlledPrefix)
+	path, err := invoicePDFs.resolve(relative, row.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := requireSafeDirectory(filepath.Dir(path)); err != nil {
+		return "", errors.New("invoice PDF owner directory is unsafe")
+	}
+	return path, nil
 }
 
 func readBackupManifest(packagePath string) (backupManifest, error) {
@@ -1088,6 +1192,16 @@ func inspectFile(path string) (backupManifestFile, error) {
 }
 
 func rejectUnexpectedBackupFiles(packagePath string, expected map[string]struct{}) error {
+	expectedDirectories := map[string]struct{}{
+		"database": {}, "artifacts": {}, "artifacts/objects": {}, "artifacts/avatars": {},
+	}
+	for relative := range expected {
+		parent := filepath.ToSlash(filepath.Dir(filepath.FromSlash(relative)))
+		for parent != "." && parent != "/" {
+			expectedDirectories[parent] = struct{}{}
+			parent = filepath.ToSlash(filepath.Dir(filepath.FromSlash(parent)))
+		}
+	}
 	return filepath.WalkDir(packagePath, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -1104,12 +1218,10 @@ func rejectUnexpectedBackupFiles(packagePath string, expected map[string]struct{
 		}
 		relative = filepath.ToSlash(relative)
 		if entry.IsDir() {
-			switch relative {
-			case "database", "artifacts", "artifacts/objects", "artifacts/avatars":
+			if _, ok := expectedDirectories[relative]; ok {
 				return nil
-			default:
-				return fmt.Errorf("backup package contains unexpected directory %s", relative)
 			}
+			return fmt.Errorf("backup package contains unexpected directory %s", relative)
 		}
 		info, err := entry.Info()
 		if err != nil || !info.Mode().IsRegular() {
@@ -1120,6 +1232,42 @@ func rejectUnexpectedBackupFiles(packagePath string, expected map[string]struct{
 		}
 		return nil
 	})
+}
+
+func backupPackageSyncDirectories(packagePath string, manifest backupManifest) []string {
+	seen := map[string]struct{}{
+		packagePath:                                        {},
+		filepath.Join(packagePath, "database"):             {},
+		filepath.Join(packagePath, "artifacts"):            {},
+		filepath.Join(packagePath, "artifacts", "objects"): {},
+		filepath.Join(packagePath, "artifacts", "avatars"): {},
+	}
+	for _, path := range []string{manifest.Database.Path, manifest.ArtifactMarker.Path} {
+		seen[filepath.Dir(filepath.Join(packagePath, filepath.FromSlash(path)))] = struct{}{}
+	}
+	for _, artifact := range manifest.Artifacts {
+		directory := filepath.Dir(filepath.Join(packagePath, filepath.FromSlash(artifact.Path)))
+		for pathContains(packagePath, directory) {
+			seen[directory] = struct{}{}
+			if sameFilesystemPath(directory, packagePath) {
+				break
+			}
+			directory = filepath.Dir(directory)
+		}
+	}
+	directories := make([]string, 0, len(seen))
+	for directory := range seen {
+		directories = append(directories, directory)
+	}
+	sort.Slice(directories, func(left, right int) bool {
+		leftDepth := strings.Count(filepath.Clean(directories[left]), string(filepath.Separator))
+		rightDepth := strings.Count(filepath.Clean(directories[right]), string(filepath.Separator))
+		if leftDepth == rightDepth {
+			return directories[left] < directories[right]
+		}
+		return leftDepth > rightDepth
+	})
+	return directories
 }
 
 func backupSummaryFromManifest(manifest backupManifest, status, message string) backupSummary {

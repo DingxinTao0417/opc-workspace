@@ -3,20 +3,31 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Invoice } from "../types/models";
+import { ApiError } from "./client";
 import {
   financialEntryQueryKey,
   incomeStatsQueryKey,
   invoiceDetailQueryKey,
+  invoicePdfQueryKey,
   invoiceQueryKey,
   projectQueryKey,
+  useDownloadInvoicePdf,
+  useGenerateInvoicePdf,
   useTransitionInvoice,
 } from "./hooks";
 
 const transitionInvoiceMock = vi.hoisted(() => vi.fn());
+const generateInvoicePdfMock = vi.hoisted(() => vi.fn());
+const downloadInvoicePdfMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
-  return { ...actual, transitionInvoice: transitionInvoiceMock };
+  return {
+    ...actual,
+    transitionInvoice: transitionInvoiceMock,
+    generateInvoicePdf: generateInvoicePdfMock,
+    downloadInvoicePdf: downloadInvoicePdfMock,
+  };
 });
 
 const paidInvoice: Invoice = {
@@ -109,5 +120,91 @@ describe("useTransitionInvoice", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: incomeStatsQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+  });
+});
+
+describe("invoice PDF hooks", () => {
+  const pdfMetadata = {
+    invoiceId: "invoice-1",
+    fileName: "INV-202608-001.pdf",
+    mimeType: "application/pdf" as const,
+    sizeBytes: 4096,
+    sha256: "a".repeat(64),
+    generatedFromVersion: 4,
+    generatedAt: "2026-09-03T00:00:00Z",
+    integrityStatus: "verified" as const,
+    integrityCheckedAt: "2026-09-03T00:00:01Z",
+  };
+
+  it("reuses an idempotency key for one failed generation attempt and caches success", async () => {
+    generateInvoicePdfMock
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValueOnce(pdfMetadata);
+    const queryClient = createQueryClient();
+    const { result } = renderHook(() => useGenerateInvoicePdf(), {
+      wrapper: wrapperFor(queryClient),
+    });
+    const command = { id: "invoice-1", expectedVersion: 4 };
+
+    act(() => result.current.mutate(command));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(command));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(generateInvoicePdfMock.mock.calls[0][2]).toBeTruthy();
+    expect(generateInvoicePdfMock.mock.calls[1][2]).toBe(
+      generateInvoicePdfMock.mock.calls[0][2],
+    );
+    expect(queryClient.getQueryData(invoicePdfQueryKey("invoice-1"))).toEqual(
+      pdfMetadata,
+    );
+  });
+
+  it("rotates the key after a stale idempotency replay is rejected", async () => {
+    generateInvoicePdfMock
+      .mockRejectedValueOnce(
+        new ApiError("stale replay", {
+          code: "IDEMPOTENCY_REPLAY_UNAVAILABLE",
+          status: 409,
+        }),
+      )
+      .mockResolvedValueOnce(pdfMetadata);
+    const { result } = renderHook(() => useGenerateInvoicePdf(), {
+      wrapper: wrapperFor(createQueryClient()),
+    });
+    const command = { id: "invoice-1", expectedVersion: 4 };
+
+    act(() => result.current.mutate(command));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    act(() => result.current.mutate(command));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(generateInvoicePdfMock.mock.calls[0][2]).toBeTruthy();
+    expect(generateInvoicePdfMock.mock.calls[1][2]).toBeTruthy();
+    expect(generateInvoicePdfMock.mock.calls[1][2]).not.toBe(
+      generateInvoicePdfMock.mock.calls[0][2],
+    );
+  });
+
+  it("invalidates PDF metadata after a failed download integrity check", async () => {
+    downloadInvoicePdfMock.mockRejectedValueOnce(new Error("mismatch"));
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useDownloadInvoicePdf(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: "invoice-1",
+        name: "INV-202608-001.pdf",
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: invoicePdfQueryKey("invoice-1"),
+      exact: true,
+    });
   });
 });

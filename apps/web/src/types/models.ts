@@ -1276,6 +1276,23 @@ export interface Invoice {
   updatedAt: string;
 }
 
+export interface InvoicePdfMetadata {
+  invoiceId: string;
+  fileName: string;
+  mimeType: "application/pdf";
+  sizeBytes: number;
+  sha256: string;
+  generatedFromVersion: number;
+  generatedAt: string;
+  integrityStatus: "verified" | "missing" | "mismatch";
+  integrityCheckedAt: string;
+}
+
+export interface InvoicePdfDownload {
+  blob: Blob;
+  fileName: string;
+}
+
 export interface InvoiceListParams {
   page?: number;
   pageSize?: number;

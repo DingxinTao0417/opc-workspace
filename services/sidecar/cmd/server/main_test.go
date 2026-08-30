@@ -127,6 +127,114 @@ func TestRunRejectsHeldDatabaseLeaseBeforeDatabaseOpen(t *testing.T) {
 	}
 }
 
+func TestRunRejectsBlockedInvoicePDFDirectoryBeforeDatabaseOpen(t *testing.T) {
+	root := t.TempDir()
+	databasePath := filepath.Join(root, "workspace.db")
+	blockedInvoicePath := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blockedInvoicePath, []byte("fixture"), 0o600); err != nil {
+		t.Fatalf("write blocked invoice fixture: %v", err)
+	}
+
+	code := run([]string{
+		"--dev",
+		"--db", databasePath,
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--invoices", blockedInvoicePath,
+		"--backups", filepath.Join(root, "backups"),
+		"--logs", filepath.Join(root, "logs"),
+	})
+	if code != 1 {
+		t.Fatalf("run exit code = %d, want 1", code)
+	}
+	if _, err := os.Stat(databasePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("database was touched before invoice PDF directory failure returned: Stat error = %v", err)
+	}
+}
+
+func TestPrepareInvoicePDFDirectoryRejectsSymbolicLink(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("create invoice target fixture: %v", err)
+	}
+	link := filepath.Join(root, "invoices-link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symbolic links are unavailable in this environment: %v", err)
+	}
+
+	if err := prepareInvoicePDFDirectory(link); err == nil {
+		t.Fatal("expected symbolic invoice PDF directory to be rejected")
+	}
+}
+
+func TestPrepareInvoicePDFDirectoryRejectsSymbolicParentBeforeCreation(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatalf("create invoice target fixture: %v", err)
+	}
+	link := filepath.Join(root, "linked-parent")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symbolic links are unavailable in this environment: %v", err)
+	}
+
+	if err := prepareInvoicePDFDirectory(filepath.Join(link, "invoices")); err == nil {
+		t.Fatal("expected symbolic invoice PDF parent to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(target, "invoices")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected path traversal created a directory in the symlink target: %v", err)
+	}
+}
+
+func TestPrepareInvoicePDFDirectoryDurablyCreatesDirectoryChain(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "level-one", "level-two", "invoices")
+	originalSync := syncInvoicePDFDirectory
+	t.Cleanup(func() { syncInvoicePDFDirectory = originalSync })
+
+	var synced []string
+	syncInvoicePDFDirectory = func(path string) error {
+		synced = append(synced, filepath.Clean(path))
+		return nil
+	}
+	if err := prepareInvoicePDFDirectory(target); err != nil {
+		t.Fatalf("prepare invoice PDF directory: %v", err)
+	}
+	want := []string{
+		filepath.Clean(root),
+		filepath.Join(root, "level-one"),
+		filepath.Join(root, "level-one", "level-two"),
+	}
+	if fmt.Sprint(synced) != fmt.Sprint(want) {
+		t.Fatalf("synced parents = %v, want %v", synced, want)
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("prepared invoice PDF path is not a directory: info=%v err=%v", info, err)
+	}
+}
+
+func TestPrepareInvoicePDFDirectoryCompensatesSyncFailure(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "level-one", "invoices")
+	originalSync := syncInvoicePDFDirectory
+	t.Cleanup(func() { syncInvoicePDFDirectory = originalSync })
+
+	syncCalls := 0
+	syncInvoicePDFDirectory = func(string) error {
+		syncCalls++
+		if syncCalls == 2 {
+			return errors.New("forced directory sync failure")
+		}
+		return nil
+	}
+	if err := prepareInvoicePDFDirectory(target); err == nil || !strings.Contains(err.Error(), "forced directory sync failure") {
+		t.Fatalf("prepare error = %v, want forced sync failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "level-one")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed durable creation was not compensated: %v", err)
+	}
+}
+
 func TestRunJournalsDatabaseStartupFailureForNextHealthyOpen(t *testing.T) {
 	root := t.TempDir()
 	blockedParent := filepath.Join(root, "not-a-directory")
@@ -138,6 +246,7 @@ func TestRunJournalsDatabaseStartupFailureForNextHealthyOpen(t *testing.T) {
 		"--dev",
 		"--db", filepath.Join(blockedParent, "workspace.db"),
 		"--artifacts", filepath.Join(root, "artifacts"),
+		"--invoices", filepath.Join(root, "invoices"),
 		"--backups", filepath.Join(root, "backups"),
 		"--logs", logDir,
 	})

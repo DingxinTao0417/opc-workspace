@@ -57,6 +57,7 @@ import {
   downloadBusinessPackage,
   downloadDiagnosticPackage,
   downloadFinancialEntriesCSV,
+  downloadInvoicePdf,
   previewBusinessDataImport,
   previewBusinessPackageImport,
   endTaskAssignment,
@@ -72,6 +73,7 @@ import {
   getInboxStats,
   getIncomeStats,
   getInvoice,
+  getInvoicePdf,
   getInvoices,
   getActor,
   getActors,
@@ -179,6 +181,7 @@ import {
   createInvoice,
   deleteInvoice,
   transitionInvoice,
+  generateInvoicePdf,
 } from "./client";
 import type {
   ActorListParams,
@@ -235,6 +238,7 @@ import type {
   IncomeStatsParams,
   InvoiceInput,
   InvoiceListParams,
+  InvoicePdfMetadata,
   TransitionInvoiceInput,
   UpdateInvoiceInput,
   LinkInboxItemTaskInput,
@@ -851,6 +855,8 @@ export function useExportFinancialEntries() {
 export const invoiceQueryKey = ["invoices"] as const;
 export const invoiceDetailQueryKey = (id: string) =>
   [...invoiceQueryKey, "detail", id] as const;
+export const invoicePdfQueryKey = (id: string) =>
+  [...invoiceDetailQueryKey(id), "pdf"] as const;
 
 export function useInvoicesQuery(
   input: InvoiceListParams = {},
@@ -873,6 +879,72 @@ export function useInvoiceQuery(id: string | null) {
     queryFn: () => getInvoice(id!),
     enabled: Boolean(id),
     retry: 1,
+  });
+}
+
+export function useInvoicePdfQuery(id: string | null) {
+  return useQuery<InvoicePdfMetadata | null>({
+    queryKey: invoicePdfQueryKey(id ?? "missing"),
+    queryFn: () => getInvoicePdf(id!),
+    enabled: Boolean(id),
+    retry: 1,
+  });
+}
+
+export function useGenerateInvoicePdf() {
+  const queryClient = useQueryClient();
+  const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => {
+      const fingerprint = JSON.stringify({ id, expectedVersion });
+      if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
+        attempt.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      return generateInvoicePdf(id, expectedVersion, attempt.current.key);
+    },
+    onSuccess: (metadata) => {
+      attempt.current = null;
+      queryClient.setQueryData(
+        invoicePdfQueryKey(metadata.invoiceId),
+        metadata,
+      );
+    },
+    onError: async (error, variables) => {
+      if (error instanceof ApiError) {
+        if (
+          error.code === "IDEMPOTENCY_REPLAY_UNAVAILABLE" ||
+          error.code === "IDEMPOTENCY_CONFLICT"
+        ) {
+          attempt.current = null;
+        }
+        if (error.code === "VERSION_CONFLICT") {
+          await queryClient.invalidateQueries({
+            queryKey: invoiceDetailQueryKey(variables.id),
+            exact: true,
+          });
+        }
+      }
+    },
+  });
+}
+
+export function useDownloadInvoicePdf() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      downloadInvoicePdf(id, name),
+    onError: async (_, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: invoicePdfQueryKey(variables.id),
+        exact: true,
+      });
+    },
   });
 }
 

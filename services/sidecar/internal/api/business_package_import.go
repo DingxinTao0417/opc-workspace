@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	pathpkg "path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -66,9 +67,10 @@ type businessPackageImportFile struct {
 }
 
 type stagedBusinessPackageFile struct {
-	file     stagedArtifactFile
-	relative string
-	avatar   bool
+	file       stagedArtifactFile
+	invoicePDF *stagedInvoicePDF
+	relative   string
+	avatar     bool
 }
 
 func (a *API) previewBusinessPackageImport(c *gin.Context) {
@@ -107,6 +109,8 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 	defer a.maintenance.Unlock()
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
+	unlockInvoicePDFs := a.lockInvoicePDFStore()
+	defer unlockInvoicePDFs()
 	preview, expected, err := a.validateBusinessPackageImport(c, packageArchive)
 	if err != nil {
 		writeBusinessImportError(c, err)
@@ -119,6 +123,15 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 	if !validBusinessImportConfirmation(confirmation, preview.ApplyMode, true) {
 		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "The confirmation does not match the current controlled-file import mode")
 		return
+	}
+	expectedControlledFileCount := preview.FileCount
+	if preview.ApplyMode == importModeAppend {
+		active, err := listActiveControlledFiles(a.db.WithContext(c.Request.Context()), a.options.SchemaVersion)
+		if err != nil {
+			writeError(c, http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The existing controlled-file facts could not be checked")
+			return
+		}
+		expectedControlledFileCount += len(active)
 	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
 		writeImportRollbackCapacityError(c, err)
@@ -155,7 +168,7 @@ func (a *API) applyBusinessPackageImport(c *gin.Context) {
 		}
 	}()
 	if err := a.applyBusinessTables(c, packageArchive.business, preview.ApplyMode, func(tx *gorm.DB) error {
-		return verifyArtifactObjects(tx, a.artifactStore, a.options.SchemaVersion, preview.FileCount)
+		return verifyArtifactObjects(tx, a.artifactStore, a.options.SchemaVersion, expectedControlledFileCount, a.invoicePDFStore)
 	}); err != nil {
 		if a.options.Logger != nil {
 			a.options.Logger.Printf("business package import failed after rollback backup backup_id=%s: %v", backup.ID, err)
@@ -275,7 +288,9 @@ func (p *businessPackageImportArchive) readAndVerify() error {
 		if parseErr != nil || parsed.String() != file.ID || file.Path != "files/"+relative || !validControlledFileRelativePath(file.ID, relative, p.business.Source.SchemaVersion) || file.SizeBytes < 1 || !validPackageSHA256(file.SHA256) || (previousID != "" && previousID >= file.ID) {
 			return &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "A controlled-file descriptor is invalid"}
 		}
-		if strings.HasPrefix(relative, "avatars/") && file.SizeBytes > maxWorkspaceAvatarBytes || strings.HasPrefix(relative, "objects/") && file.SizeBytes > maxArtifactFileBytes {
+		if strings.HasPrefix(relative, "avatars/") && file.SizeBytes > maxWorkspaceAvatarBytes ||
+			strings.HasPrefix(relative, "objects/") && file.SizeBytes > maxArtifactFileBytes ||
+			strings.HasPrefix(relative, invoicePDFControlledPrefix) && file.SizeBytes > maxInvoicePDFBytes {
 			return &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "A controlled file exceeds its allowed size"}
 		}
 		if _, exists := seenIDs[file.ID]; exists {
@@ -410,12 +425,31 @@ func (a *API) validateBusinessPackageImport(c *gin.Context, packageArchive *busi
 }
 
 func (a *API) countControlledImportFileConflicts(files []businessPackageFile) (int, error) {
+	active, err := listActiveControlledFiles(a.db, a.options.SchemaVersion)
+	if err != nil {
+		return 0, err
+	}
+	activeIDs := make(map[string]struct{}, len(active))
+	for _, file := range active {
+		activeIDs[file.ID] = struct{}{}
+	}
 	conflicts := 0
 	for _, descriptor := range files {
+		_, conflictsByID := activeIDs[descriptor.ID]
 		relative := strings.TrimPrefix(descriptor.Path, "files/")
 		var target string
 		var err error
-		if strings.HasPrefix(relative, "avatars/") {
+		if strings.HasPrefix(relative, invoicePDFControlledPrefix) {
+			if a.invoicePDFStore == nil {
+				return 0, errors.New("invoice PDF store is unavailable")
+			}
+			target, err = a.invoicePDFStore.resolve(strings.TrimPrefix(relative, invoicePDFControlledPrefix), descriptor.ID)
+			if err == nil {
+				if parentErr := requireSafeDirectory(filepath.Dir(target)); parentErr != nil && !errors.Is(parentErr, os.ErrNotExist) {
+					return 0, parentErr
+				}
+			}
+		} else if strings.HasPrefix(relative, "avatars/") {
 			target, err = a.artifactStore.resolveWorkspaceAvatar(relative)
 		} else {
 			target, err = a.artifactStore.resolveObject(relative)
@@ -423,10 +457,14 @@ func (a *API) countControlledImportFileConflicts(files []businessPackageFile) (i
 		if err != nil {
 			return 0, err
 		}
+		conflictsByPath := false
 		if _, err := os.Lstat(target); err == nil {
-			conflicts++
+			conflictsByPath = true
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return 0, err
+		}
+		if conflictsByID || conflictsByPath {
+			conflicts++
 		}
 	}
 	return conflicts, nil
@@ -480,6 +518,37 @@ func controlledImportFiles(packageData businessExportPackage, schemaVersion int)
 			}
 		}
 	}
+	invoiceTable := tables["invoice_pdf_assets"]
+	idIndex := columnIndex(invoiceTable.Columns, "id")
+	invoiceIndex := columnIndex(invoiceTable.Columns, "invoice_id")
+	relativeIndex := columnIndex(invoiceTable.Columns, "relative_path")
+	mimeIndex := columnIndex(invoiceTable.Columns, "mime_type")
+	sizeIndex := columnIndex(invoiceTable.Columns, "size_bytes")
+	hashIndex := columnIndex(invoiceTable.Columns, "sha256")
+	if idIndex < 0 || invoiceIndex < 0 || relativeIndex < 0 || mimeIndex < 0 || sizeIndex < 0 || hashIndex < 0 {
+		return nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "Invoice PDF table columns are incomplete"}
+	}
+	for _, row := range invoiceTable.Rows {
+		id, idOK := row[idIndex].(string)
+		invoiceID, invoiceOK := row[invoiceIndex].(string)
+		relative, relativeOK := row[relativeIndex].(string)
+		mimeType, mimeOK := row[mimeIndex].(string)
+		hash, hashOK := row[hashIndex].(string)
+		size, sizeOK := importInteger(row[sizeIndex])
+		logicalRelative := invoicePDFControlledPrefix + relative
+		if !idOK || !invoiceOK || !relativeOK || !mimeOK || !hashOK || !sizeOK || size < 1 || size > maxInvoicePDFBytes ||
+			mimeType != invoicePDFMimeType || relative != invoiceID+"/"+id+".pdf" ||
+			!validControlledFileRelativePath(id, logicalRelative, schemaVersion) || !validPackageSHA256(hash) {
+			return nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "Invoice PDF business metadata is invalid"}
+		}
+		path := "files/" + logicalRelative
+		if _, exists := result[path]; exists {
+			return nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "Controlled-file business paths are duplicated"}
+		}
+		result[path] = businessPackageImportFile{
+			manifest: businessPackageFile{ID: id, Path: path, SizeBytes: size, SHA256: hash}, mimeType: mimeType,
+		}
+	}
 	return result, nil
 }
 
@@ -493,7 +562,41 @@ func (a *API) stageBusinessPackageFiles(packageArchive *businessPackageImportArc
 			return nil, err
 		}
 		relative := strings.TrimPrefix(descriptor.Path, "files/")
+		invoicePDF := strings.HasPrefix(relative, invoicePDFControlledPrefix)
 		avatar := strings.HasPrefix(relative, "avatars/")
+		metadata := expected[descriptor.Path]
+		if invoicePDF {
+			if a.invoicePDFStore == nil || metadata.mimeType != invoicePDFMimeType {
+				_ = reader.Close()
+				a.discardStagedBusinessPackageFiles(staged)
+				return nil, errors.New("invoice PDF store is unavailable")
+			}
+			storageRelative := strings.TrimPrefix(relative, invoicePDFControlledPrefix)
+			parts := strings.Split(storageRelative, "/")
+			if len(parts) != 2 {
+				_ = reader.Close()
+				a.discardStagedBusinessPackageFiles(staged)
+				return nil, errors.New("invoice PDF package path is invalid")
+			}
+			file, stageErr := a.invoicePDFStore.stage(parts[0], func(destination io.Writer) error {
+				_, copyErr := io.Copy(destination, reader)
+				return copyErr
+			})
+			closeErr := reader.Close()
+			if stageErr != nil || closeErr != nil {
+				a.discardStagedBusinessPackageFiles(staged)
+				return nil, errors.Join(stageErr, closeErr)
+			}
+			file.assetID = descriptor.ID
+			file.relative = storageRelative
+			if file.sizeBytes != descriptor.SizeBytes || file.sha256 != descriptor.SHA256 {
+				a.invoicePDFStore.discardStaged(file)
+				a.discardStagedBusinessPackageFiles(staged)
+				return nil, errors.New("staged invoice PDF does not match package metadata")
+			}
+			staged = append(staged, stagedBusinessPackageFile{invoicePDF: &file, relative: relative})
+			continue
+		}
 		var file stagedArtifactFile
 		if avatar {
 			file, _, err = a.artifactStore.stageWorkspaceAvatar(reader, descriptor.ID)
@@ -505,7 +608,6 @@ func (a *API) stageBusinessPackageFiles(packageArchive *businessPackageImportArc
 			a.discardStagedBusinessPackageFiles(staged)
 			return nil, errors.Join(err, closeErr)
 		}
-		metadata := expected[descriptor.Path]
 		if file.relativePath != relative || file.sizeBytes != descriptor.SizeBytes || file.sha256 != descriptor.SHA256 || file.mimeType != metadata.mimeType {
 			a.artifactStore.discardStagedFile(file)
 			a.discardStagedBusinessPackageFiles(staged)
@@ -518,7 +620,11 @@ func (a *API) stageBusinessPackageFiles(packageArchive *businessPackageImportArc
 
 func (a *API) discardStagedBusinessPackageFiles(staged []stagedBusinessPackageFile) {
 	for _, item := range staged {
-		a.artifactStore.discardStagedFile(item.file)
+		if item.invoicePDF != nil {
+			a.invoicePDFStore.discardStaged(*item.invoicePDF)
+		} else {
+			a.artifactStore.discardStagedFile(item.file)
+		}
 	}
 }
 
@@ -526,7 +632,9 @@ func (a *API) commitBusinessPackageFiles(staged []stagedBusinessPackageFile) ([]
 	committed := make([]stagedBusinessPackageFile, 0, len(staged))
 	for _, item := range staged {
 		var err error
-		if item.avatar {
+		if item.invoicePDF != nil {
+			err = a.invoicePDFStore.commit(*item.invoicePDF)
+		} else if item.avatar {
 			err = a.artifactStore.commitStagedWorkspaceAvatar(item.file)
 		} else {
 			err = a.artifactStore.commitStagedFile(item.file)
@@ -543,7 +651,9 @@ func (a *API) removeCommittedBusinessPackageFiles(committed []stagedBusinessPack
 	for index := len(committed) - 1; index >= 0; index-- {
 		item := committed[index]
 		var err error
-		if item.avatar {
+		if item.invoicePDF != nil {
+			err = a.invoicePDFStore.remove(item.invoicePDF.relative, item.invoicePDF.assetID)
+		} else if item.avatar {
 			err = a.artifactStore.removeWorkspaceAvatar(item.relative)
 		} else {
 			err = a.artifactStore.discardCommittedFile(item.relative)

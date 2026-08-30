@@ -94,6 +94,7 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	artifactRoot := filepath.Join(temporaryRoot, "artifacts")
 	objectRoot := filepath.Join(artifactRoot, "objects")
 	avatarRoot := filepath.Join(artifactRoot, "avatars")
+	invoicePDFRoot := filepath.Join(temporaryRoot, "invoices")
 	for _, directory := range []string{objectRoot, avatarRoot} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return backupRestoreDrillResult{}, fmt.Errorf("create restore drill layout: %w", err)
@@ -115,11 +116,23 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	); err != nil {
 		return backupRestoreDrillResult{}, fmt.Errorf("copy restore drill marker: %w", err)
 	}
+	if err := initializeInvoicePDFRestoreRoot(invoicePDFRoot, manifest.DatabaseID); err != nil {
+		return backupRestoreDrillResult{}, fmt.Errorf("create restore drill invoice PDF store: %w", err)
+	}
 	for _, artifact := range manifest.Artifacts {
-		relative := strings.TrimPrefix(artifact.Path, "artifacts/")
+		var destination string
+		if strings.HasPrefix(artifact.Path, invoicePDFControlledPrefix) {
+			destination = filepath.Join(invoicePDFRoot, filepath.FromSlash(strings.TrimPrefix(artifact.Path, invoicePDFControlledPrefix)))
+		} else {
+			relative := strings.TrimPrefix(artifact.Path, "artifacts/")
+			destination = filepath.Join(artifactRoot, filepath.FromSlash(relative))
+		}
+		if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+			return backupRestoreDrillResult{}, fmt.Errorf("create restore drill controlled-file directory: %w", err)
+		}
 		if _, err := copyVerifiedBackupFile(
 			filepath.Join(packagePath, filepath.FromSlash(artifact.Path)),
-			filepath.Join(artifactRoot, filepath.FromSlash(relative)),
+			destination,
 			artifact.SizeBytes,
 			artifact.SHA256,
 		); err != nil {
@@ -152,35 +165,19 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 			err = errors.Join(err, fmt.Errorf("close restore drill Artifact store: %w", closeErr))
 		}
 	}()
-	rows, err := listActiveControlledFiles(store.DB, store.SchemaVersion)
-	if err != nil {
-		return backupRestoreDrillResult{}, fmt.Errorf("read restore drill Artifacts: %w", err)
+	invoicePDFs := &invoicePDFStore{
+		root: invoicePDFRoot, stagingDir: filepath.Join(invoicePDFRoot, ".staging"), trashDir: filepath.Join(invoicePDFRoot, ".trash"),
 	}
-	if len(rows) != manifest.ArtifactCount {
-		return backupRestoreDrillResult{}, errors.New("restore drill active Artifact count does not match backup")
+	if err := verifyInvoicePDFStoreMarker(invoicePDFRoot, manifest.DatabaseID); err != nil {
+		return backupRestoreDrillResult{}, err
 	}
-	expectedFiles := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if !validControlledFileRelativePath(row.ID, row.RelativePath, store.SchemaVersion) {
-			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s has invalid storage facts", row.ID)
-		}
-		objectPath, err := artifacts.resolveControlledFile(row.RelativePath)
-		if err != nil {
-			return backupRestoreDrillResult{}, err
-		}
-		matches, err := artifactFileMatches(objectPath, row.SizeBytes, row.SHA256)
-		if err != nil || !matches {
-			return backupRestoreDrillResult{}, fmt.Errorf("restore drill Artifact %s failed integrity verification", row.ID)
-		}
-		expectedFiles[row.RelativePath] = struct{}{}
-	}
-	if err := verifyControlledFileDirectories(artifacts, expectedFiles); err != nil {
+	if err := verifyArtifactObjects(store.DB, artifacts, store.SchemaVersion, manifest.ArtifactCount, invoicePDFs); err != nil {
 		return backupRestoreDrillResult{}, err
 	}
 
 	return backupRestoreDrillResult{
 		BackupID: manifest.ID, SourceSchema: manifest.SchemaVersion,
-		ResultSchema: store.SchemaVersion, ArtifactCount: len(rows),
+		ResultSchema: store.SchemaVersion, ArtifactCount: manifest.ArtifactCount,
 	}, nil
 }
 

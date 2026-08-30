@@ -27,6 +27,9 @@ func TestParseAllowsDynamicPortAndDevDatabase(t *testing.T) {
 	if cfg.ArtifactDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "artifacts") {
 		t.Fatalf("ArtifactDir = %q, want database sibling artifacts", cfg.ArtifactDir)
 	}
+	if cfg.InvoicePDFDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "invoices") {
+		t.Fatalf("InvoicePDFDir = %q, want database sibling invoices", cfg.InvoicePDFDir)
+	}
 	if cfg.BackupDir != filepath.Join(filepath.Dir(cfg.DatabasePath), "backups") {
 		t.Fatalf("BackupDir = %q, want database sibling backups", cfg.BackupDir)
 	}
@@ -114,6 +117,110 @@ func TestParseAcceptsExplicitArtifactDirectory(t *testing.T) {
 	want, _ := filepath.Abs(directory)
 	if cfg.ArtifactDir != want {
 		t.Fatalf("ArtifactDir = %q, want %q", cfg.ArtifactDir, want)
+	}
+}
+
+func TestParseAcceptsExplicitInvoicePDFDirectory(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "generated-invoices")
+	cfg, err := Parse([]string{"--dev", "--invoices", directory}, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	want, _ := filepath.Abs(directory)
+	if cfg.InvoicePDFDir != want {
+		t.Fatalf("InvoicePDFDir = %q, want %q", cfg.InvoicePDFDir, want)
+	}
+}
+
+func TestParseReadsInvoicePDFDirectoryEnvironment(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "invoices-from-env")
+	cfg, err := Parse([]string{"--dev"}, func(key string) string {
+		if key == "OPC_INVOICE_DIR" {
+			return directory
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	want, _ := filepath.Abs(directory)
+	if cfg.InvoicePDFDir != want {
+		t.Fatalf("InvoicePDFDir = %q, want %q", cfg.InvoicePDFDir, want)
+	}
+}
+
+func TestParseRejectsOverlappingInvoiceAndArtifactDirectories(t *testing.T) {
+	root := t.TempDir()
+	_, err := Parse([]string{
+		"--dev",
+		"--artifacts", filepath.Join(root, "assets"),
+		"--invoices", filepath.Join(root, "assets", "invoices"),
+	}, func(string) string { return "" })
+	if err == nil {
+		t.Fatal("expected overlapping invoice PDF and Artifact directories error")
+	}
+}
+
+func TestParseRejectsInvoiceDirectoryOverlappingBackupOrLogRoots(t *testing.T) {
+	root := t.TempDir()
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "backup",
+			args: []string{
+				"--backups", filepath.Join(root, "invoices", "backups"),
+				"--logs", filepath.Join(root, "logs"),
+			},
+		},
+		{
+			name: "log",
+			args: []string{
+				"--backups", filepath.Join(root, "backups"),
+				"--logs", filepath.Join(root, "invoices", "logs"),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := []string{
+				"--dev",
+				"--db", filepath.Join(root, test.name, "workspace.db"),
+				"--artifacts", filepath.Join(root, "artifacts"),
+				"--invoices", filepath.Join(root, "invoices"),
+			}
+			_, err := Parse(append(args, test.args...), func(string) string { return "" })
+			if err == nil {
+				t.Fatalf("expected invoice PDF directory overlapping %s root error", test.name)
+			}
+		})
+	}
+}
+
+func TestParseRejectsInvoiceDirectoryContainingDatabase(t *testing.T) {
+	root := t.TempDir()
+	_, err := Parse([]string{
+		"--dev",
+		"--db", filepath.Join(root, "data", "workspace.db"),
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--invoices", root,
+	}, func(string) string { return "" })
+	if err == nil {
+		t.Fatal("expected invoice PDF directory containing database error")
+	}
+}
+
+func TestParseRequiresInvoicePDFDirectoryForInMemoryDatabase(t *testing.T) {
+	root := t.TempDir()
+	_, err := Parse([]string{
+		"--dev",
+		"--db", ":memory:",
+		"--artifacts", filepath.Join(root, "artifacts"),
+		"--backups", filepath.Join(root, "backups"),
+		"--logs", filepath.Join(root, "logs"),
+	}, func(string) string { return "" })
+	if err == nil || !strings.Contains(err.Error(), "invoice PDF directory is required") {
+		t.Fatalf("Parse() error = %v, want required invoice PDF directory", err)
 	}
 }
 

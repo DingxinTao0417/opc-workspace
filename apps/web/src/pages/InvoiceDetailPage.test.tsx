@@ -53,6 +53,12 @@ vi.mock("../components/InvoiceFormModal", () => ({
     ) : null,
 }));
 
+vi.mock("../components/InvoicePdfSection", () => ({
+  InvoicePdfSection: ({ invoice }: { invoice: Invoice }) => (
+    <div>PDF 区块 {invoice.invoiceNumber}</div>
+  ),
+}));
+
 const paidInvoice: Invoice = {
   id: "invoice-1",
   invoiceNumber: "INV-202608-001",
@@ -150,6 +156,7 @@ describe("InvoiceDetailPage", () => {
     expect(screen.getByText("首付款")).toBeTruthy();
     expect(screen.getByText("4")).toBeTruthy();
     expect(screen.getAllByText("已付款").length).toBeGreaterThan(0);
+    expect(screen.getByText("PDF 区块 INV-202608-001")).toBeTruthy();
   });
 
   it("renders explicit empty values for every nullable relation", () => {
