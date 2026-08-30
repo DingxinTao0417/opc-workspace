@@ -49,6 +49,7 @@ import {
   useDeleteTaskArtifact,
   useDeleteTask,
   useTaskPageQuery,
+  useTaskOptionsQuery,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
   useTasksQuery,
@@ -385,11 +386,47 @@ describe("task queries", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(getTaskPageMock).toHaveBeenCalledWith(params);
+    expect(getTaskPageMock).toHaveBeenCalledWith(
+      params,
+      expect.any(AbortSignal),
+    );
     expect(result.current.data).toEqual({
       items: [task],
       meta: { page: 2, pageSize: 25, total: 51 },
     });
+  });
+
+  it("aborts an in-flight task page when its observer unmounts", async () => {
+    let requestSignal: AbortSignal | undefined;
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    getTaskPageMock.mockImplementation(
+      (_input: unknown, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          requestSignal = signal;
+          markStarted?.();
+          signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const hook = renderHook(() => useTaskPageQuery({ page: 1, pageSize: 20 }), {
+      wrapper: wrapperFor(queryClient),
+    });
+    await started;
+
+    expect(requestSignal).toBeDefined();
+    expect(requestSignal?.aborted).toBe(false);
+    hook.unmount();
+    expect(requestSignal?.aborted).toBe(true);
+    queryClient.clear();
   });
 
   it("polls only due-state task pages to keep deadline risk current", async () => {
@@ -469,6 +506,25 @@ describe("task queries", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([task]);
     expect(Array.isArray(result.current.data)).toBe(true);
+    expect(getTasksMock).toHaveBeenCalledWith(
+      { projectId: undefined },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("passes cancellation through the legacy complete task query", async () => {
+    getAllTasksMock.mockResolvedValue([task]);
+    const { result } = renderHook(
+      () => useTasksQuery({ projectId: "project-1", loadAll: true }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getAllTasksMock).toHaveBeenCalledWith(
+      { projectId: "project-1" },
+      expect.any(AbortSignal),
+    );
+    expect(result.current.data).toEqual([task]);
   });
 
   it("loads complete active Today groups with explicit date boundaries", async () => {
@@ -481,27 +537,114 @@ describe("task queries", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(getAllTasksMock).toHaveBeenCalledTimes(4);
-    expect(getAllTasksMock).toHaveBeenNthCalledWith(1, {
-      status: "active",
-      plannedTo: "2026-08-27",
-    });
-    expect(getAllTasksMock).toHaveBeenNthCalledWith(2, {
-      status: "active",
-      plannedDate: "2026-08-28",
-    });
-    expect(getAllTasksMock).toHaveBeenNthCalledWith(3, {
-      status: "active",
-      plannedFrom: "2026-08-29",
-      plannedTo: "2026-08-30",
-    });
-    expect(getAllTasksMock).toHaveBeenNthCalledWith(4, {
-      status: "active",
-      plannedState: "unscheduled",
-    });
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(
+      1,
+      {
+        status: "active",
+        plannedTo: "2026-08-27",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(
+      2,
+      {
+        status: "active",
+        plannedDate: "2026-08-28",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(
+      3,
+      {
+        status: "active",
+        plannedFrom: "2026-08-29",
+        plannedTo: "2026-08-30",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(getAllTasksMock).toHaveBeenNthCalledWith(
+      4,
+      {
+        status: "active",
+        plannedState: "unscheduled",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(
+      new Set(getAllTasksMock.mock.calls.map((call) => call[1])).size,
+    ).toBe(1);
     expect(result.current.data?.overdue).toHaveLength(1);
     expect(result.current.data?.today).toHaveLength(1);
     expect(result.current.data?.thisWeek).toHaveLength(1);
     expect(result.current.data?.unscheduled).toHaveLength(1);
+  });
+
+  it("rejects a task duplicated across Today groups", async () => {
+    getAllTasksMock.mockResolvedValue([task]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const hook = renderHook(() => useTodayTaskGroupsQuery("2026-08-28"), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    await waitFor(() => expect(hook.result.current.isError).toBe(true), {
+      timeout: 2_500,
+    });
+    expect(hook.result.current.error).toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+    hook.unmount();
+    queryClient.clear();
+  });
+
+  it("aborts every obsolete Today page when the selected date changes", async () => {
+    const obsoleteSignals: AbortSignal[] = [];
+    const callStart = getAllTasksMock.mock.calls.length;
+    let markObsoleteStarted: (() => void) | undefined;
+    const obsoleteStarted = new Promise<void>((resolve) => {
+      markObsoleteStarted = resolve;
+    });
+    getAllTasksMock.mockImplementation(
+      (_input: unknown, signal?: AbortSignal) => {
+        if (getAllTasksMock.mock.calls.length <= callStart + 4) {
+          if (!signal) throw new Error("Today query did not pass a signal");
+          obsoleteSignals.push(signal);
+          if (obsoleteSignals.length === 4) markObsoleteStarted?.();
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return Promise.resolve([]);
+      },
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const hook = renderHook(({ dateKey }) => useTodayTaskGroupsQuery(dateKey), {
+      initialProps: { dateKey: "2026-08-28" },
+      wrapper: wrapperFor(queryClient),
+    });
+    await obsoleteStarted;
+
+    hook.rerender({ dateKey: "2026-08-29" });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(new Set(obsoleteSignals).size).toBe(1);
+    expect(obsoleteSignals.every((signal) => signal.aborted)).toBe(true);
+    const currentSignals = getAllTasksMock.mock.calls
+      .slice(callStart + 4)
+      .map((call) => call[1] as AbortSignal);
+    expect(currentSignals).toHaveLength(4);
+    expect(new Set(currentSignals).size).toBe(1);
+    expect(currentSignals[0]).not.toBe(obsoleteSignals[0]);
+    expect(currentSignals[0].aborted).toBe(false);
+
+    hook.unmount();
+    queryClient.clear();
   });
 
   it("loads the complete Sidebar week and excludes cancelled Tasks from progress", async () => {
@@ -535,10 +678,13 @@ describe("task queries", () => {
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(getAllTasksMock).toHaveBeenCalledWith({
-      plannedFrom: "2026-02-23",
-      plannedTo: "2026-03-01",
-    });
+    expect(getAllTasksMock).toHaveBeenCalledWith(
+      {
+        plannedFrom: "2026-02-23",
+        plannedTo: "2026-03-01",
+      },
+      expect.any(AbortSignal),
+    );
     expect(result.current.data).toEqual({
       plannedFrom: "2026-02-23",
       plannedTo: "2026-03-01",
@@ -554,6 +700,19 @@ describe("task queries", () => {
         "2026-03-01",
       ]),
     ).toEqual(result.current.data);
+  });
+
+  it("passes cancellation through the complete task options query", async () => {
+    getAllTasksMock.mockResolvedValue([task]);
+    const { result } = renderHook(() => useTaskOptionsQuery(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getAllTasksMock).toHaveBeenCalledWith(
+      { sort: "title" },
+      expect.any(AbortSignal),
+    );
   });
 
   it("moves across active statuses while preserving terminal task slots", async () => {

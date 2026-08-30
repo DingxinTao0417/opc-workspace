@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TaskListParams } from "../types/models";
 import {
   ApiError,
   applyBusinessDataImport,
@@ -1796,9 +1797,102 @@ describe("paged option loaders", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(
-      getAllTasks({ projectId: "018f0000-0000-7000-8000-000000000001" }),
-    ).resolves.toHaveLength(101);
+    await expect(getAllTasks()).resolves.toHaveLength(101);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects task total drift between complete-list pages", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const page = Number(
+        new URL(String(input), "http://local.test").searchParams.get("page"),
+      );
+      return page === 1
+        ? jsonResponse({
+            data: Array.from({ length: 100 }, (_, index) =>
+              taskPayload({ id: `task-${index + 1}` }),
+            ),
+            meta: { page: 1, page_size: 100, total: 101 },
+          })
+        : jsonResponse({
+            data: [],
+            meta: { page: 2, page_size: 100, total: 100 },
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAllTasks()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects duplicate task ids across complete-list pages", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const page = Number(
+        new URL(String(input), "http://local.test").searchParams.get("page"),
+      );
+      return page === 1
+        ? jsonResponse({
+            data: Array.from({ length: 100 }, (_, index) =>
+              taskPayload({ id: `task-${index + 1}` }),
+            ),
+            meta: { page: 1, page_size: 100, total: 101 },
+          })
+        : jsonResponse({
+            data: [taskPayload({ id: "task-1" })],
+            meta: { page: 2, page_size: 100, total: 101 },
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAllTasks()).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses one upstream cancellation signal for every task page", async () => {
+    const upstreamController = new AbortController();
+    let secondFetchSignal: AbortSignal | undefined;
+    let markSecondFetchStarted: (() => void) | undefined;
+    const secondFetchStarted = new Promise<void>((resolve) => {
+      markSecondFetchStarted = resolve;
+    });
+    const fetchMock = vi.fn(
+      (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const page = Number(
+          new URL(String(input), "http://local.test").searchParams.get("page"),
+        );
+        if (page === 1) {
+          return Promise.resolve(
+            jsonResponse({
+              data: Array.from({ length: 100 }, (_, index) =>
+                taskPayload({ id: `task-${index + 1}` }),
+              ),
+              meta: { page: 1, page_size: 100, total: 101 },
+            }),
+          );
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          secondFetchSignal = init?.signal ?? undefined;
+          markSecondFetchStarted?.();
+          secondFetchSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const request = getAllTasks({}, upstreamController.signal);
+    await secondFetchStarted;
+    expect(secondFetchSignal).toBeDefined();
+    expect(secondFetchSignal).not.toBe(upstreamController.signal);
+    upstreamController.abort();
+    expect(secondFetchSignal?.aborted).toBe(true);
+    await expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -1881,8 +1975,28 @@ describe("task list requests", () => {
   it("serializes every supported server-side filter and repeated tag ids", async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
       jsonResponse({
-        data: [taskPayload()],
-        meta: { page: 3, page_size: 25, total: 61 },
+        data: [
+          taskPayload({
+            parent_task_id: "parent-1",
+            tags: [
+              {
+                id: "tag-1",
+                name: "交付",
+                color: "#6e7bf2",
+                version: 2,
+                created_at: "2026-08-20T00:00:00Z",
+              },
+              {
+                id: "tag-2",
+                name: "验收",
+                color: "#22c55e",
+                version: 1,
+                created_at: "2026-08-20T00:00:00Z",
+              },
+            ],
+          }),
+        ],
+        meta: { page: 3, page_size: 25, total: 51 },
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -1932,7 +2046,216 @@ describe("task list requests", () => {
       sort: "-updated_at,title",
     });
     expect(url.searchParams.getAll("tag_id")).toEqual(["tag-1", "tag-2"]);
-    expect(result.meta).toEqual({ page: 3, pageSize: 25, total: 61 });
+    expect(result.meta).toEqual({ page: 3, pageSize: 25, total: 51 });
+  });
+
+  it("validates filters against the same trimmed values sent to the server", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [taskPayload({ parent_task_id: "parent-1" })],
+        meta: { page: 1, page_size: 50, total: 1 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getTaskPage({
+        projectId: " project-1 ",
+        parentTaskId: " parent-1 ",
+        plannedFrom: " 2026-08-26 ",
+        dueTo: " 2026-08-26 ",
+      }),
+    ).resolves.toMatchObject({ meta: { total: 1 } });
+    const url = new URL(
+      String(fetchMock.mock.calls[0][0]),
+      "http://local.test",
+    );
+    expect(url.searchParams.get("project_id")).toBe("project-1");
+    expect(url.searchParams.get("parent_task_id")).toBe("parent-1");
+    expect(url.searchParams.get("planned_from")).toBe("2026-08-26");
+    expect(url.searchParams.get("due_to")).toBe("2026-08-26");
+  });
+
+  it("rejects unsafe task pagination before making a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const input of [
+      { page: 0 },
+      { page: 1.5 },
+      { page: 1_000_001 },
+      { pageSize: 0 },
+      { pageSize: 1.5 },
+      { pageSize: 101 },
+    ]) {
+      await expect(getTaskPage(input)).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        status: 422,
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires exact task page metadata and the calculated item count", async () => {
+    const invalidBodies = [
+      { data: [] },
+      { data: [], meta: { page: 2, page_size: 2, total: 0 } },
+      { data: [], meta: { page: 1, page_size: 3, total: 0 } },
+      { data: [], meta: { page: 1, page_size: 2 } },
+      {
+        data: [taskPayload()],
+        meta: { page: 1, page_size: 2, total: 2 },
+      },
+      {
+        data: [],
+        meta: {
+          page: 1,
+          page_size: 2,
+          total: Number.MAX_SAFE_INTEGER + 1,
+        },
+      },
+    ];
+
+    for (const body of invalidBodies) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(body)),
+      );
+      await expect(getTaskPage({ page: 1, pageSize: 2 })).rejects.toMatchObject(
+        { code: "INVALID_RESPONSE" },
+      );
+    }
+  });
+
+  it("accepts a calculated short tail and a legal page beyond the total", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const page = Number(
+        new URL(String(input), "http://local.test").searchParams.get("page"),
+      );
+      return page === 2
+        ? jsonResponse({
+            data: [taskPayload()],
+            meta: { page: 2, page_size: 2, total: 3 },
+          })
+        : jsonResponse({
+            data: [],
+            meta: { page: 3, page_size: 2, total: 3 },
+          });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getTaskPage({ page: 2, pageSize: 2 })).resolves.toMatchObject({
+      items: [{ id: "task-1" }],
+      meta: { page: 2, pageSize: 2, total: 3 },
+    });
+    await expect(getTaskPage({ page: 3, pageSize: 2 })).resolves.toEqual({
+      items: [],
+      meta: { page: 3, pageSize: 2, total: 3 },
+    });
+  });
+
+  it("does not reimplement search, client, sort, or due-state time matching", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      jsonResponse({
+        data: [taskPayload()],
+        meta: { page: 1, page_size: 50, total: 1 },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      getTaskPage({
+        q: "完全不匹配任务正文",
+        clientId: "client-not-in-task-response",
+        sort: "-title",
+        dueState: "due_soon",
+      }),
+    ).resolves.toMatchObject({ items: [{ id: "task-1" }] });
+  });
+
+  it("rejects duplicate task ids within a page", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: [taskPayload(), taskPayload()],
+          meta: { page: 1, page_size: 2, total: 2 },
+        }),
+      ),
+    );
+
+    await expect(getTaskPage({ page: 1, pageSize: 2 })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it.each([
+    ["kind", { kind: "review" }, {}],
+    ["exact status", { status: "waiting_review" }, {}],
+    ["active status", { status: "active" }, { status: "done" }],
+    ["priority", { priority: "P0" }, {}],
+    ["project", { projectId: "project-2" }, {}],
+    ["parent", { parentTaskId: "parent-1" }, {}],
+    ["root-only", { rootOnly: true }, { parent_task_id: "parent-1" }],
+    ["planned date", { plannedDate: "2026-08-27" }, {}],
+    ["planned from", { plannedFrom: "2026-08-27" }, {}],
+    ["planned to", { plannedTo: "2026-08-25" }, {}],
+    ["planned state", { plannedState: "unscheduled" }, {}],
+    ["due-state null date", { dueState: "overdue" }, { due_date: null }],
+    ["due-state terminal", { dueState: "overdue" }, { status: "done" }],
+    ["tag", { tagIds: ["tag-2"] }, {}],
+  ] satisfies Array<[string, TaskListParams, Record<string, unknown>]>)(
+    "rejects a task that violates the requested %s filter",
+    async (_, input, overrides) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse({
+            data: [taskPayload(overrides)],
+            meta: { page: 1, page_size: 50, total: 1 },
+          }),
+        ),
+      );
+
+      await expect(getTaskPage(input)).rejects.toMatchObject({
+        code: "INVALID_RESPONSE",
+      });
+    },
+  );
+
+  it("forwards task page cancellation to the fetch signal", async () => {
+    const upstreamController = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    let markFetchStarted: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            fetchSignal = init?.signal ?? undefined;
+            markFetchStarted?.();
+            fetchSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+      ),
+    );
+
+    const request = getTaskPage(
+      { page: 1, pageSize: 20 },
+      upstreamController.signal,
+    );
+    await fetchStarted;
+    expect(fetchSignal).toBeDefined();
+    expect(fetchSignal).not.toBe(upstreamController.signal);
+    upstreamController.abort();
+    expect(fetchSignal?.aborted).toBe(true);
+    await expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
   it("serializes the mutually exclusive due-state filter on its own", async () => {

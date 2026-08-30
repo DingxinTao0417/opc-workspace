@@ -2182,10 +2182,10 @@ export function useTasksQuery(
 ) {
   return useQuery({
     queryKey: [...taskQueryKey, "list", options],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       options.loadAll
-        ? getAllTasks({ projectId: options.projectId })
-        : getTasks({ projectId: options.projectId }),
+        ? getAllTasks({ projectId: options.projectId }, signal)
+        : getTasks({ projectId: options.projectId }, signal),
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
@@ -2209,8 +2209,8 @@ export function useSidebarWeekTasksQuery({
 }) {
   return useQuery({
     queryKey: [...taskQueryKey, "sidebar-week", plannedFrom, plannedTo],
-    queryFn: async (): Promise<SidebarWeekTasks> => {
-      const tasks = await getAllTasks({ plannedFrom, plannedTo });
+    queryFn: async ({ signal }): Promise<SidebarWeekTasks> => {
+      const tasks = await getAllTasks({ plannedFrom, plannedTo }, signal);
       const includedTasks = tasks.filter((task) => task.status !== "cancelled");
       const completedCount = includedTasks.filter(
         (task) => task.status === "done",
@@ -2254,21 +2254,36 @@ export interface TodayTaskGroups {
 export function useTodayTaskGroupsQuery(dateKey: string) {
   return useQuery({
     queryKey: [...taskQueryKey, "today-groups", dateKey],
-    queryFn: async (): Promise<TodayTaskGroups> => {
+    queryFn: async ({ signal }): Promise<TodayTaskGroups> => {
       const tomorrow = shiftDateKey(dateKey, 1);
       const endOfWeek = endOfWeekKey(dateKey);
       const [overdue, today, thisWeek, unscheduled] = await Promise.all([
-        getAllTasks({ status: "active", plannedTo: shiftDateKey(dateKey, -1) }),
-        getAllTasks({ status: "active", plannedDate: dateKey }),
+        getAllTasks(
+          { status: "active", plannedTo: shiftDateKey(dateKey, -1) },
+          signal,
+        ),
+        getAllTasks({ status: "active", plannedDate: dateKey }, signal),
         tomorrow <= endOfWeek
-          ? getAllTasks({
-              status: "active",
-              plannedFrom: tomorrow,
-              plannedTo: endOfWeek,
-            })
+          ? getAllTasks(
+              {
+                status: "active",
+                plannedFrom: tomorrow,
+                plannedTo: endOfWeek,
+              },
+              signal,
+            )
           : Promise.resolve([]),
-        getAllTasks({ status: "active", plannedState: "unscheduled" }),
+        getAllTasks({ status: "active", plannedState: "unscheduled" }, signal),
       ]);
+      const taskIds = new Set<string>();
+      for (const task of [...overdue, ...today, ...thisWeek, ...unscheduled]) {
+        if (taskIds.has(task.id)) {
+          throw new ApiError("今日任务分组响应包含重复任务", {
+            code: "INVALID_RESPONSE",
+          });
+        }
+        taskIds.add(task.id);
+      }
       return { overdue, today, thisWeek, unscheduled };
     },
     retry: 2,
@@ -2283,7 +2298,7 @@ export const taskPageQueryKey = (input: TaskListParams) =>
 export function useTaskPageQuery(input: TaskListParams = {}, enabled = true) {
   return useQuery({
     queryKey: taskPageQueryKey(input),
-    queryFn: () => getTaskPage(input),
+    queryFn: ({ signal }) => getTaskPage(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: input.dueState ? 60_000 : false,
@@ -2610,7 +2625,7 @@ export function useEndTaskAssignment() {
 export function useTaskOptionsQuery(enabled = true) {
   return useQuery({
     queryKey: [...taskQueryKey, "options"],
-    queryFn: () => getAllTasks({ sort: "title" }),
+    queryFn: ({ signal }) => getAllTasks({ sort: "title" }, signal),
     enabled,
     retry: 2,
     retryDelay: 500,

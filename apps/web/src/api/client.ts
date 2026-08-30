@@ -5600,72 +5600,179 @@ export async function getSearchResults(
 
 export async function getTaskPage(
   options: TaskListParams = {},
+  signal?: AbortSignal,
 ): Promise<TaskListResult> {
+  const requestedPage = options.page ?? 1;
+  const requestedPageSize = options.pageSize ?? 50;
+  if (
+    !Number.isSafeInteger(requestedPage) ||
+    requestedPage < 1 ||
+    requestedPage > 1_000_000 ||
+    !Number.isSafeInteger(requestedPageSize) ||
+    requestedPageSize < 1 ||
+    requestedPageSize > 100 ||
+    !Number.isSafeInteger((requestedPage - 1) * requestedPageSize)
+  ) {
+    throw new ApiError("任务分页参数无效", {
+      code: "VALIDATION_ERROR",
+      status: 422,
+    });
+  }
+  const requestedKind = (options.kind?.trim() || undefined) as
+    TaskKind | undefined;
+  const requestedStatus = (options.status?.trim() || undefined) as
+    TaskStatus | "active" | undefined;
+  const requestedPriority = (options.priority?.trim() || undefined) as
+    TaskPriority | undefined;
+  const requestedProjectId = options.projectId?.trim() || undefined;
+  const requestedClientId = options.clientId?.trim() || undefined;
+  const requestedPlannedDate = options.plannedDate?.trim() || undefined;
+  const requestedPlannedFrom = options.plannedFrom?.trim() || undefined;
+  const requestedPlannedTo = options.plannedTo?.trim() || undefined;
+  const requestedPlannedState = options.plannedState?.trim() || undefined;
+  const requestedDueFrom = options.dueFrom?.trim() || undefined;
+  const requestedDueTo = options.dueTo?.trim() || undefined;
+  const requestedDueState = options.dueState?.trim() || undefined;
+  const requestedParentTaskId = options.parentTaskId?.trim() || undefined;
   const params = new URLSearchParams({
-    page: String(options.page ?? 1),
-    page_size: String(options.pageSize ?? 50),
+    page: String(requestedPage),
+    page_size: String(requestedPageSize),
   });
   if (options.q?.trim()) params.set("q", options.q.trim());
-  if (options.kind) params.set("kind", options.kind);
-  if (options.status) params.set("status", options.status);
-  if (options.priority) params.set("priority", options.priority);
-  if (options.projectId) params.set("project_id", options.projectId);
-  if (options.clientId) params.set("client_id", options.clientId);
+  if (requestedKind) params.set("kind", requestedKind);
+  if (requestedStatus) params.set("status", requestedStatus);
+  if (requestedPriority) params.set("priority", requestedPriority);
+  if (requestedProjectId) params.set("project_id", requestedProjectId);
+  if (requestedClientId) params.set("client_id", requestedClientId);
   for (const tagId of new Set(options.tagIds?.map((id) => id.trim()))) {
     if (tagId) params.append("tag_id", tagId);
   }
-  if (options.plannedDate) params.set("planned_date", options.plannedDate);
-  if (options.plannedFrom) params.set("planned_from", options.plannedFrom);
-  if (options.plannedTo) params.set("planned_to", options.plannedTo);
-  if (options.plannedState) params.set("planned_state", options.plannedState);
-  if (options.dueFrom) params.set("due_from", options.dueFrom);
-  if (options.dueTo) params.set("due_to", options.dueTo);
-  if (options.dueState) params.set("due_state", options.dueState);
-  if (options.parentTaskId) params.set("parent_task_id", options.parentTaskId);
+  if (requestedPlannedDate) params.set("planned_date", requestedPlannedDate);
+  if (requestedPlannedFrom) params.set("planned_from", requestedPlannedFrom);
+  if (requestedPlannedTo) params.set("planned_to", requestedPlannedTo);
+  if (requestedPlannedState) params.set("planned_state", requestedPlannedState);
+  if (requestedDueFrom) params.set("due_from", requestedDueFrom);
+  if (requestedDueTo) params.set("due_to", requestedDueTo);
+  if (requestedDueState) params.set("due_state", requestedDueState);
+  if (requestedParentTaskId)
+    params.set("parent_task_id", requestedParentTaskId);
   if (options.rootOnly !== undefined)
     params.set("root_only", String(options.rootOnly));
   if (options.sort?.trim()) params.set("sort", options.sort.trim());
-  const payload = await apiRequest<unknown>(`/api/v1/tasks?${params}`);
-  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+  const payload = await apiRequest<unknown>(`/api/v1/tasks?${params}`, {
+    signal,
+  });
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
     return invalidResponse("任务列表响应格式无效");
   }
   const items = payload.data.map(normalizeTask);
-  const meta = isRecord(payload.meta) ? payload.meta : {};
+  const page = positiveInteger(payload.meta.page, "任务页码");
+  const pageSize = positiveInteger(payload.meta.page_size, "任务分页大小");
+  const total = nonNegativeInteger(payload.meta.total, "任务总数");
+  if (!Number.isSafeInteger(total)) {
+    return invalidResponse("任务总数响应无效");
+  }
+  const expectedItemCount = Math.min(
+    requestedPageSize,
+    Math.max(0, total - (requestedPage - 1) * requestedPageSize),
+  );
+  const requestedTagIds = new Set(
+    options.tagIds?.map((id) => id.trim()).filter(Boolean),
+  );
+  const mismatchedFilter = items.some((task) => {
+    const dueDate = task.dueDate?.slice(0, 10) ?? null;
+    const tagIds = new Set(task.tags.map((tag) => tag.id));
+    return (
+      (requestedKind !== undefined && task.kind !== requestedKind) ||
+      (requestedStatus === "active" &&
+        (task.status === "done" || task.status === "cancelled")) ||
+      (requestedStatus !== undefined &&
+        requestedStatus !== "active" &&
+        task.status !== requestedStatus) ||
+      (requestedPriority !== undefined &&
+        task.priority !== requestedPriority) ||
+      (requestedProjectId !== undefined &&
+        task.projectId !== requestedProjectId) ||
+      (requestedParentTaskId !== undefined &&
+        task.parentTaskId !== requestedParentTaskId) ||
+      (options.rootOnly === true && task.parentTaskId !== null) ||
+      (requestedPlannedDate !== undefined &&
+        task.plannedDate !== requestedPlannedDate) ||
+      (requestedPlannedFrom !== undefined &&
+        (task.plannedDate === null ||
+          task.plannedDate < requestedPlannedFrom)) ||
+      (requestedPlannedTo !== undefined &&
+        (task.plannedDate === null || task.plannedDate > requestedPlannedTo)) ||
+      (requestedPlannedState === "scheduled" && task.plannedDate === null) ||
+      (requestedPlannedState === "unscheduled" && task.plannedDate !== null) ||
+      (requestedDueState !== undefined &&
+        (dueDate === null ||
+          task.status === "done" ||
+          task.status === "cancelled")) ||
+      [...requestedTagIds].some((tagId) => !tagIds.has(tagId))
+    );
+  });
+  if (
+    page !== requestedPage ||
+    pageSize !== requestedPageSize ||
+    items.length !== expectedItemCount ||
+    new Set(items.map((task) => task.id)).size !== items.length ||
+    mismatchedFilter
+  ) {
+    return invalidResponse("任务列表分页响应无效");
+  }
   return {
     items,
-    meta: {
-      page: numeric(meta.page, options.page ?? 1),
-      pageSize: numeric(
-        meta.page_size ?? meta.pageSize,
-        options.pageSize ?? 50,
-      ),
-      total: numeric(meta.total, items.length),
-    },
+    meta: { page, pageSize, total },
   };
 }
 
-export async function getTasks(options: TaskListParams = {}): Promise<Task[]> {
+export async function getTasks(
+  options: TaskListParams = {},
+  signal?: AbortSignal,
+): Promise<Task[]> {
   return (
-    await getTaskPage({
-      ...options,
-      pageSize: options.pageSize ?? 100,
-    })
+    await getTaskPage(
+      {
+        ...options,
+        pageSize: options.pageSize ?? 100,
+      },
+      signal,
+    )
   ).items;
 }
 
 export async function getAllTasks(
   options: Omit<TaskListParams, "page" | "pageSize"> = {},
+  signal?: AbortSignal,
 ): Promise<Task[]> {
   const allTasks: Task[] = [];
+  const taskIds = new Set<string>();
   const pageSize = 100;
   let page = 1;
-  let total = Number.POSITIVE_INFINITY;
+  let total: number | null = null;
 
-  while (allTasks.length < total) {
-    const result = await getTaskPage({ ...options, page, pageSize });
-    allTasks.push(...result.items);
-    total = result.meta.total;
-    if (result.items.length === 0) break;
+  while (true) {
+    const result = await getTaskPage({ ...options, page, pageSize }, signal);
+    if (total === null) total = result.meta.total;
+    else if (result.meta.total !== total) {
+      return invalidResponse("任务列表分页总数不一致");
+    }
+    for (const task of result.items) {
+      if (taskIds.has(task.id)) {
+        return invalidResponse("任务列表包含重复记录");
+      }
+      taskIds.add(task.id);
+      allTasks.push(task);
+    }
+    if (allTasks.length === total) break;
+    if (page === 1_000_000) {
+      return invalidResponse("任务列表分页超出服务端上限");
+    }
     page += 1;
   }
   return allTasks;
