@@ -23,7 +23,17 @@ func (a *API) projectDueClientFollowups(ctx context.Context) error {
 	}
 	nowText := formatInboxTimestamp(a.options.Now().UTC())
 	var ids []string
-	if err := a.db.WithContext(ctx).Table("client_followups").Where("status = 'planned' AND scheduled_at <= ?", nowText).Order("scheduled_at ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
+	if err := a.db.WithContext(ctx).Table("client_followups").
+		Where(`status = 'planned'
+			AND scheduled_at <= ?
+			AND NOT EXISTS (
+				SELECT 1 FROM inbox_items
+				WHERE source_event_key = 'followup:' || client_followups.id || ':due:' || client_followups.version
+				  AND kind = 'event'
+				  AND source_entity_type = 'client_followup'
+				  AND source_entity_id = client_followups.id
+			)`, nowText).
+		Order("scheduled_at ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
 		return fmt.Errorf("list due client followups: %w", err)
 	}
 	for _, id := range ids {
