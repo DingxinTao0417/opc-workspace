@@ -64,11 +64,17 @@ function operationErrorMessage(error: unknown): string | null {
     if (error.code === "VERSION_CONFLICT") {
       return "客户资料已在其他窗口变化，已刷新最新版本，请重新确认操作。";
     }
-    if (
-      error.code === "CLIENT_HAS_INVOICES" ||
-      error.code === "CLIENT_DELETE_RESTRICTED"
-    ) {
-      return "该客户仍被发票引用，当前不能永久删除。可先停用客户。";
+    if (error.code === "CLIENT_HAS_INVOICES") {
+      return "该客户仍被发票引用，当前不能永久删除。可保留停用状态。";
+    }
+    if (error.code === "CLIENT_HAS_FINANCIAL_ENTRIES") {
+      return "该客户仍被本地账本记录引用，当前不能永久删除。可保留停用状态。";
+    }
+    if (error.code === "CLIENT_HAS_FOLLOWUPS") {
+      return "该客户仍有回访历史，当前不能永久删除。可保留停用状态。";
+    }
+    if (error.code === "CLIENT_DELETE_RESTRICTED") {
+      return "该客户仍被业务事实引用，当前不能永久删除。可保留停用状态。";
     }
     return error.requestId
       ? `${error.message} · 请求 ${error.requestId}`
@@ -412,7 +418,7 @@ export function ClientDetailPage() {
           <h2>永久删除</h2>
           <p>
             {client.status === "inactive"
-              ? `将解除 ${client.projectCount} 个项目的客户关联，但不会删除项目；若仍被发票引用，服务端会拒绝删除。`
+              ? `将解除 ${client.projectCount} 个项目的客户关联，但不会删除项目；若仍有发票、本地账本记录或回访历史，服务端会拒绝删除，也不会自动删除这些业务事实。`
               : "永久删除前必须先停用客户；停用不会解除或删除关联项目。"}
           </p>
         </div>

@@ -16,6 +16,7 @@ import {
   deleteBackup,
   deleteTag,
   deleteInvoice,
+  deleteProject,
   deleteTask,
   deleteTaskSavedView,
   drillBackupRestore,
@@ -1333,6 +1334,33 @@ describe("normalizeProject", () => {
 
   it("rejects invalid project payloads", () => {
     expect(() => normalizeProject(undefined)).toThrow(ApiError);
+  });
+});
+
+describe("project deletion", () => {
+  it("normalizes every detached reference count", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({
+          data: {
+            deleted_id: "project-1",
+            detached_tasks: 3,
+            detached_invoices: 2,
+            detached_financial_entries: 1,
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteProject("project-1", 4)).resolves.toEqual({
+      deletedId: "project-1",
+      detachedTasks: 3,
+      detachedInvoices: 2,
+      detachedFinancialEntries: 1,
+    });
+    expect(
+      new Headers(fetchMock.mock.calls[0][1]?.headers).get("If-Match"),
+    ).toBe('"4"');
   });
 });
 

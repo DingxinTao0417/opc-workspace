@@ -363,6 +363,28 @@ func (a *API) deleteClient(c *gin.Context) {
 				fmt.Sprintf("Client is referenced by %d invoice(s) and cannot be deleted", invoiceCount),
 			)
 		}
+		var financialEntryCount int64
+		if err := tx.Table("financial_entries").Where("client_id = ?", id).Count(&financialEntryCount).Error; err != nil {
+			return err
+		}
+		if financialEntryCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"CLIENT_HAS_FINANCIAL_ENTRIES",
+				fmt.Sprintf("Client is referenced by %d financial entry record(s) and cannot be deleted", financialEntryCount),
+			)
+		}
+		var followupCount int64
+		if err := tx.Table("client_followups").Where("client_id = ?", id).Count(&followupCount).Error; err != nil {
+			return err
+		}
+		if followupCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"CLIENT_HAS_FOLLOWUPS",
+				fmt.Sprintf("Client is referenced by %d follow-up(s) and cannot be deleted", followupCount),
+			)
+		}
 		if err := tx.Table("projects").Where("client_id = ?", id).Count(&deleted.DetachedProjects).Error; err != nil {
 			return err
 		}

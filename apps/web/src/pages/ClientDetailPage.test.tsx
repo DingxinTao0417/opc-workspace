@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type { Client, Project } from "../types/models";
 import { ClientDetailPage } from "./ClientDetailPage";
 
@@ -50,7 +51,7 @@ const state = vi.hoisted(() => ({
   client: null as Client | null,
   projectQueryInput: null as unknown,
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
-  remove: { error: null, isPending: false, mutate: vi.fn() },
+  remove: { error: null as unknown, isPending: false, mutate: vi.fn() },
   activityMutation: {
     error: null,
     isPending: false,
@@ -174,6 +175,7 @@ describe("ClientDetailPage", () => {
     state.client = activeClient;
     state.update.mutate.mockClear();
     state.remove.mutate.mockClear();
+    state.remove.error = null;
   });
 
   afterEach(cleanup);
@@ -222,6 +224,7 @@ describe("ClientDetailPage", () => {
         </Routes>
       </MemoryRouter>,
     );
+    expect(screen.getByText(/若仍有发票、本地账本记录或回访历史/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "永久删除客户" }));
     fireEvent.click(screen.getByRole("button", { name: "确认永久删除" }));
 
@@ -232,5 +235,23 @@ describe("ClientDetailPage", () => {
         onSuccess: expect.any(Function),
       }),
     );
+  });
+
+  it.each([
+    [
+      "CLIENT_HAS_FINANCIAL_ENTRIES",
+      "该客户仍被本地账本记录引用，当前不能永久删除。可保留停用状态。",
+    ],
+    [
+      "CLIENT_HAS_FOLLOWUPS",
+      "该客户仍有回访历史，当前不能永久删除。可保留停用状态。",
+    ],
+  ])("shows the %s deletion guard", (code, message) => {
+    state.client = { ...activeClient, status: "inactive", version: 4 };
+    state.remove.error = new ApiError("client delete restricted", { code });
+
+    renderDetail();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
   });
 });

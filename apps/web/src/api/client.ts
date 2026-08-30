@@ -8206,7 +8206,12 @@ export async function deleteProject(
     // response was lost (or another window already deleted the project), the
     // desired final state has still been reached.
     if (error instanceof ApiError && error.code === "PROJECT_NOT_FOUND") {
-      return { deletedId: id, detachedTasks: 0, detachedInvoices: 0 };
+      return {
+        deletedId: id,
+        detachedTasks: 0,
+        detachedInvoices: 0,
+        detachedFinancialEntries: 0,
+      };
     }
     throw error;
   }
@@ -8221,6 +8226,9 @@ export async function deleteProject(
     deletedId: String(body.deleted_id ?? body.deletedId ?? id),
     detachedTasks: numeric(body.detached_tasks ?? body.detachedTasks),
     detachedInvoices: numeric(body.detached_invoices ?? body.detachedInvoices),
+    detachedFinancialEntries: numeric(
+      body.detached_financial_entries ?? body.detachedFinancialEntries,
+    ),
   };
 }
 

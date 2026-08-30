@@ -1003,6 +1003,7 @@ export interface DeleteProjectResult {
   deletedId: string;
   detachedTasks: number;
   detachedInvoices: number;
+  detachedFinancialEntries: number;
 }
 
 export type RoadmapMilestoneStatus =

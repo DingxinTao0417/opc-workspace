@@ -1144,7 +1144,7 @@ func TestArchivedProjectsRejectNewTaskLinksButKeepExistingTaskEditable(t *testin
 	}
 }
 
-func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *testing.T) {
+func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesMutableReferences(t *testing.T) {
 	router, store := newProjectTestAPI(t)
 	clientID := uuid.NewString()
 	insertTestClient(t, store, clientID, "删除验证客户")
@@ -1169,15 +1169,18 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	if err := json.Unmarshal(task.Body.Bytes(), &taskEnvelope); err != nil {
 		t.Fatalf("decode referenced task: %v", err)
 	}
-	invoiceID := uuid.NewString()
-	if err := store.DB.Exec(`
-		INSERT INTO invoices(
-			id, invoice_number, client_id, project_id, amount_minor, currency,
-			status, issue_date, due_date, notes, created_at, updated_at
-		) VALUES (?, ?, ?, ?, 10000, 'CNY', 'draft', '2026-08-28', '2026-09-28', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, invoiceID, "INV-DELETE-001", clientID, project.ID).Error; err != nil {
-		t.Fatalf("insert referenced invoice: %v", err)
-	}
+	invoice := createInvoiceForTest(t, router, fmt.Sprintf(`{
+		"client_id":%q,"project_id":%q,"amount_minor":10000,"currency":"CNY",
+		"issue_date":"2026-08-28","due_date":"2026-09-28"
+	}`, clientID, project.ID), nil)
+	entry := createFinancialEntryForTest(t, router, fmt.Sprintf(`{
+		"type":"income","amount_minor":5000,"currency":"CNY","occurred_on":"2026-08-28",
+		"status":"pending","category":"待确认项目款","project_id":%q
+	}`, project.ID), nil)
+	confirmedEntry := createFinancialEntryForTest(t, router, fmt.Sprintf(`{
+		"type":"expense","amount_minor":2500,"currency":"CNY","occurred_on":"2026-08-28",
+		"status":"confirmed","category":"已确认项目支出","project_id":%q
+	}`, project.ID), nil)
 	currentRecorder := performRequest(router, http.MethodGet, "/api/v1/projects/"+project.ID, nil, nil)
 	current := decodeProjectResponse(t, currentRecorder.Body.Bytes())
 
@@ -1230,7 +1233,8 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	if err := json.Unmarshal(deleted.Body.Bytes(), &deletion); err != nil {
 		t.Fatalf("decode delete response: %v", err)
 	}
-	if deletion.Data.DeletedID != project.ID || deletion.Data.DetachedTasks != 1 || deletion.Data.DetachedInvoices != 1 {
+	if deletion.Data.DeletedID != project.ID || deletion.Data.DetachedTasks != 1 || deletion.Data.DetachedInvoices != 1 ||
+		deletion.Data.DetachedFinancialEntries != 2 {
 		t.Fatalf("delete response = %#v", deletion.Data)
 	}
 	var detachedTask struct {
@@ -1246,12 +1250,26 @@ func TestProjectHardDeleteRequiresArchiveConfirmationAndDetachesReferences(t *te
 	if detachedTask.Version != taskEnvelope.Data.Version+1 {
 		t.Fatalf("detached task version = %d, want %d", detachedTask.Version, taskEnvelope.Data.Version+1)
 	}
-	var detachedInvoiceProjectID *string
-	if err := store.DB.Table("invoices").Select("project_id").Where("id = ?", invoiceID).Scan(&detachedInvoiceProjectID).Error; err != nil {
-		t.Fatalf("read detached invoice: %v", err)
+	var detachedInvoice models.Invoice
+	if err := store.DB.First(&detachedInvoice, "id = ?", invoice.ID).Error; err != nil {
+		t.Fatalf("read detached Invoice: %v", err)
 	}
-	if detachedInvoiceProjectID != nil {
-		t.Fatalf("invoice project_id = %q, want null", *detachedInvoiceProjectID)
+	if detachedInvoice.ProjectID != nil {
+		t.Fatalf("detached Invoice = %#v, want project_id null", detachedInvoice)
+	}
+	var detachedEntry models.FinancialEntry
+	if err := store.DB.First(&detachedEntry, "id = ?", entry.ID).Error; err != nil {
+		t.Fatalf("read detached Financial Entry: %v", err)
+	}
+	if detachedEntry.ProjectID != nil {
+		t.Fatalf("detached Financial Entry = %#v, want project_id null", detachedEntry)
+	}
+	var detachedConfirmedEntry models.FinancialEntry
+	if err := store.DB.First(&detachedConfirmedEntry, "id = ?", confirmedEntry.ID).Error; err != nil {
+		t.Fatalf("read detached confirmed Financial Entry: %v", err)
+	}
+	if detachedConfirmedEntry.ProjectID != nil {
+		t.Fatalf("detached confirmed Financial Entry = %#v, want project_id null", detachedConfirmedEntry)
 	}
 	var deletedEvent struct {
 		PreviousJSON *string `gorm:"column:previous_json"`

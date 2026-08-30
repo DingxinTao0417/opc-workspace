@@ -112,9 +112,10 @@ type projectRow struct {
 }
 
 type deletedProjectResponse struct {
-	DeletedID        string `json:"deleted_id"`
-	DetachedTasks    int64  `json:"detached_tasks"`
-	DetachedInvoices int64  `json:"detached_invoices"`
+	DeletedID                string `json:"deleted_id"`
+	DetachedTasks            int64  `json:"detached_tasks"`
+	DetachedInvoices         int64  `json:"detached_invoices"`
+	DetachedFinancialEntries int64  `json:"detached_financial_entries"`
 }
 
 type projectWorkflowEventOutput struct {
@@ -707,6 +708,38 @@ func (a *API) deleteProject(c *gin.Context) {
 				"Remove the project's content item associations before permanently deleting it",
 			)
 		}
+		var invoiceCount int64
+		if err := tx.Table("invoices").Where("project_id = ? AND status <> 'draft'", id).Count(&invoiceCount).Error; err != nil {
+			return err
+		}
+		if invoiceCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"PROJECT_HAS_INVOICES",
+				fmt.Sprintf("Project is referenced by %d invoice(s) and cannot be deleted", invoiceCount),
+			)
+		}
+		var financialEntryCount int64
+		if err := tx.Table("financial_entries").
+			Where("project_id = ? AND (status = 'voided' OR invoice_id IS NOT NULL)", id).
+			Count(&financialEntryCount).Error; err != nil {
+			return err
+		}
+		if financialEntryCount > 0 {
+			return newProjectRequestError(
+				http.StatusConflict,
+				"PROJECT_HAS_FINANCIAL_ENTRIES",
+				fmt.Sprintf("Project is referenced by %d financial entry record(s) and cannot be deleted", financialEntryCount),
+			)
+		}
+		if err := tx.Table("invoices").Where("project_id = ? AND status = 'draft'", id).Count(&deleted.DetachedInvoices).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("financial_entries").
+			Where("project_id = ? AND invoice_id IS NULL AND status IN ('pending', 'confirmed')", id).
+			Count(&deleted.DetachedFinancialEntries).Error; err != nil {
+			return err
+		}
 		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
 		if err := coordinateProjectCompletionInboxSourceDeletion(
 			tx,
@@ -726,9 +759,6 @@ func (a *API) deleteProject(c *gin.Context) {
 			return err
 		}
 		deleted.DetachedTasks = detachedTasks
-		if err := tx.Table("invoices").Where("project_id = ?", id).Count(&deleted.DetachedInvoices).Error; err != nil {
-			return err
-		}
 		if err := recordProjectWorkflowEvent(
 			tx,
 			id,

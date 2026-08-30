@@ -413,7 +413,7 @@ describe("ProjectDetailPage", () => {
     );
   });
 
-  it("explains that linked Content Calendar items and Roadmap milestones block permanent deletion", () => {
+  it("explains which linked business facts block permanent deletion", () => {
     project.status = "archived";
     project.availableActions = ["restore"];
     renderPage();
@@ -422,10 +422,10 @@ describe("ProjectDetailPage", () => {
       .getByRole("heading", { name: "永久删除" })
       .closest("section");
     expect(dangerZone).toHaveTextContent(
-      /若仍有关联的内容日历条目或路线图里程碑，\s*删除会被阻止，需要先在对应模块解除项目关联/,
+      /若仍有关联的内容日历条目、路线图里程碑、\s*非草稿发票或不可变账本记录，删除会被阻止/,
     );
     expect(dangerZone).toHaveTextContent(
-      /系统不会自动解除这些\s*关联或级联删除相关条目/,
+      /将解除\s*3 项任务、草稿发票和可变手工账本的项目关联/,
     );
   });
 
@@ -440,6 +440,26 @@ describe("ProjectDetailPage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "该项目仍关联内容日历条目，当前不能永久删除。请先到内容日历解除项目关联后重试。",
     );
+  });
+
+  it.each([
+    [
+      "PROJECT_HAS_INVOICES",
+      "该项目仍被非草稿发票引用，当前不能永久删除。请保留归档项目以维持历史事实。",
+    ],
+    [
+      "PROJECT_HAS_FINANCIAL_ENTRIES",
+      "该项目仍被不可变的本地账本记录引用，当前不能永久删除。请保留归档项目以维持历史事实。",
+    ],
+  ])("shows the %s deletion guard", (code, message) => {
+    project.status = "archived";
+    project.availableActions = ["restore"];
+    deleteProjectState.error = new ApiError("project delete restricted", {
+      code,
+    });
+    renderPage();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
   });
 
   it("shows project tasks as a hierarchy and can switch to a flat list", () => {

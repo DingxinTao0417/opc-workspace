@@ -83,6 +83,12 @@ function errorMessage(error: unknown): string | null {
     if (error.code === "PROJECT_CONTENT_ITEMS_EXIST") {
       return "该项目仍关联内容日历条目，当前不能永久删除。请先到内容日历解除项目关联后重试。";
     }
+    if (error.code === "PROJECT_HAS_INVOICES") {
+      return "该项目仍被非草稿发票引用，当前不能永久删除。请保留归档项目以维持历史事实。";
+    }
+    if (error.code === "PROJECT_HAS_FINANCIAL_ENTRIES") {
+      return "该项目仍被不可变的本地账本记录引用，当前不能永久删除。请保留归档项目以维持历史事实。";
+    }
     return error.message;
   }
   return "项目操作失败，请重试。";
@@ -655,12 +661,12 @@ export function ProjectDetailPage() {
           <div>
             <h2>永久删除</h2>
             <p>
-              仅归档项目可永久删除；若仍有关联的内容日历条目或路线图里程碑，
-              删除会被阻止，需要先在对应模块解除项目关联。系统不会自动解除这些
-              关联或级联删除相关条目。删除成功后，将解除
-              {project.taskSummary.total} 项任务和 {project.invoiceCount}{" "}
-              张发票的项目关联；项目笔记、附件记录和附件文件将随项目永久删除，
-              任务和发票业务记录本身不会被删除。
+              仅归档项目可永久删除；若仍有关联的内容日历条目、路线图里程碑、
+              非草稿发票或不可变账本记录，删除会被阻止。删除成功后，将解除
+              {project.taskSummary.total}{" "}
+              项任务、草稿发票和可变手工账本的项目关联，
+              但不会删除这些业务记录；项目笔记、附件记录和附件文件将随项目永久
+              删除。当前项目关联 {project.invoiceCount} 张发票。
             </p>
           </div>
           {confirmingDelete ? (

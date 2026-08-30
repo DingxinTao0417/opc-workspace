@@ -4,8 +4,11 @@ import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, Task } from "../types/models";
 import {
+  financialEntryQueryKey,
   focusReportQueryKey,
   focusSessionHistoryQueryKey,
+  inboxQueryKey,
+  invoiceQueryKey,
   useBatchUpdateTasks,
   useDeleteProject,
   useDeleteTag,
@@ -307,6 +310,7 @@ describe("Focus query-time attribution invalidation", () => {
       deletedId: project.id,
       detachedTasks: 1,
       detachedInvoices: 0,
+      detachedFinancialEntries: 0,
     });
     const queryClient = createQueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -330,6 +334,11 @@ describe("Focus query-time attribution invalidation", () => {
     );
     await waitFor(() => expect(updateHook.result.current.isSuccess).toBe(true));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: focusReportQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: focusSessionHistoryQueryKey,
     });
@@ -347,6 +356,11 @@ describe("Focus query-time attribution invalidation", () => {
       queryKey: focusReportQueryKey,
       refetchType: "none",
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: focusSessionHistoryQueryKey,
     });

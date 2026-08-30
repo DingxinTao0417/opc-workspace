@@ -4425,6 +4425,8 @@ export function useUpdateProject() {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
+      await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
       await invalidateFocusReadModels(queryClient, { report: true });
     },
   });
@@ -4476,6 +4478,9 @@ export function useDeleteProject() {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: taskQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
+      await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
+      await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
       // The deleted project's report is still actively observed until the
       // detail page navigates away. Mark all derived reports stale without
       // refetching that now-invalid project id and delaying the navigation.
