@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,6 +100,161 @@ func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
 
 	unavailable := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+agent.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
 	assertAPIError(t, unavailable, http.StatusConflict, "AUTOMATION_DEPENDENCY_UNAVAILABLE")
+}
+
+func TestRepeatedScheduleAutomationCommandsAreIdempotent(t *testing.T) {
+	tests := []struct {
+		name           string
+		presetKey      string
+		initialNow     time.Time
+		initialNextRun string
+		staleNow       time.Time
+	}{
+		{
+			name: "daily", presetKey: automationPresetDailyToday,
+			initialNow:     time.Date(2026, 9, 2, 8, 0, 0, 0, time.UTC),
+			initialNextRun: "2026-09-02T09:00:00.000000000Z",
+			staleNow:       time.Date(2026, 9, 2, 9, 1, 0, 0, time.UTC),
+		},
+		{
+			name: "weekly", presetKey: automationPresetWeeklyReview,
+			initialNow:     time.Date(2026, 9, 3, 8, 0, 0, 0, time.UTC),
+			initialNextRun: "2026-09-04T17:00:00.000000000Z",
+			staleNow:       time.Date(2026, 9, 4, 17, 1, 0, 0, time.UTC),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := database.Open(filepath.Join(t.TempDir(), "automation-repeat-enable.db"))
+			if err != nil {
+				t.Fatalf("database.Open: %v", err)
+			}
+			defer store.Close()
+
+			now := test.initialNow
+			router, err := NewRouter(store.DB, Options{
+				AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
+				SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
+				Logger: log.New(io.Discard, "", 0), Now: func() time.Time { return now },
+				ReminderScanInterval: -1, AutomationDeliveryScanInterval: -1,
+			})
+			if err != nil {
+				t.Fatalf("NewRouter: %v", err)
+			}
+			defer router.Close()
+
+			rule := automationRuleByPreset(t, router, test.presetKey)
+			assertResponse := func(label string, response *httptest.ResponseRecorder, wantNextRun string) {
+				t.Helper()
+				if response.Code != http.StatusOK {
+					t.Fatalf("%s = %d: %s", label, response.Code, response.Body.String())
+				}
+				if etag := response.Header().Get("ETag"); etag != `"2"` {
+					t.Fatalf("%s ETag = %q, want %q", label, etag, `"2"`)
+				}
+				var envelope automationRuleEnvelope
+				if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+					t.Fatalf("decode %s: %v", label, err)
+				}
+				if envelope.Data.ID != rule.ID || envelope.Data.PresetKey != test.presetKey ||
+					envelope.Data.Status != "enabled" || envelope.Data.Version != 2 ||
+					envelope.Data.NextRunAt == nil || *envelope.Data.NextRunAt != wantNextRun {
+					t.Fatalf("%s response = %#v", label, envelope.Data)
+				}
+			}
+
+			first := performRequest(
+				router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil,
+				map[string]string{"If-Match": `"1"`},
+			)
+			assertResponse("first enable", first, test.initialNextRun)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ? AND action = 'automation_rule_enabled'", 1, rule.ID)
+			var enabledPersisted models.AutomationRule
+			if err := store.DB.First(&enabledPersisted, "id = ?", rule.ID).Error; err != nil {
+				t.Fatalf("load initially enabled schedule rule: %v", err)
+			}
+
+			consistent := performRequest(
+				router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil,
+				map[string]string{"If-Match": `"2"`},
+			)
+			assertResponse("consistent repeated enable", consistent, test.initialNextRun)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ?", 1, rule.ID)
+
+			now = test.staleNow
+			staleRepeat := performRequest(
+				router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/enable", nil,
+				map[string]string{"If-Match": `"2"`},
+			)
+			assertResponse("stale repeated enable", staleRepeat, test.initialNextRun)
+
+			var persisted models.AutomationRule
+			if err := store.DB.First(&persisted, "id = ?", rule.ID).Error; err != nil {
+				t.Fatalf("load idempotently enabled schedule rule: %v", err)
+			}
+			if persisted.Version != 2 || !persisted.Enabled || persisted.NextRunAt == nil ||
+				*persisted.NextRunAt != test.initialNextRun || persisted.UpdatedAt != enabledPersisted.UpdatedAt {
+				t.Fatalf("idempotently enabled schedule rule = %#v", persisted)
+			}
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ?", 1, rule.ID)
+
+			sameConfigBody, err := json.Marshal(map[string]any{"config": rule.Config})
+			if err != nil {
+				t.Fatalf("encode unchanged schedule config: %v", err)
+			}
+			sameConfig := performRequest(
+				router, http.MethodPatch, "/api/v1/automations/rules/"+rule.ID, sameConfigBody,
+				map[string]string{"If-Match": `"2"`},
+			)
+			assertResponse("unchanged config", sameConfig, test.initialNextRun)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ?", 1, rule.ID)
+
+			var enabledEvent models.WorkflowEvent
+			if err := store.DB.Where(
+				"aggregate_type = 'automation_rule' AND aggregate_id = ?", rule.ID,
+			).Take(&enabledEvent).Error; err != nil {
+				t.Fatalf("load immutable enable event: %v", err)
+			}
+			var eventCurrent map[string]any
+			if enabledEvent.Action != "automation_rule_enabled" || enabledEvent.CurrentJSON == nil ||
+				json.Unmarshal([]byte(*enabledEvent.CurrentJSON), &eventCurrent) != nil ||
+				eventCurrent["version"] != float64(2) || eventCurrent["next_run_at"] != test.initialNextRun {
+				t.Fatalf("immutable enable event = %#v current=%#v", enabledEvent, eventCurrent)
+			}
+
+			disabled := performRequest(
+				router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/disable", nil,
+				map[string]string{"If-Match": `"2"`},
+			)
+			if disabled.Code != http.StatusOK || disabled.Header().Get("ETag") != `"3"` {
+				t.Fatalf("first disable = %d ETag=%q: %s", disabled.Code, disabled.Header().Get("ETag"), disabled.Body.String())
+			}
+			var disabledEnvelope automationRuleEnvelope
+			if err := json.Unmarshal(disabled.Body.Bytes(), &disabledEnvelope); err != nil ||
+				disabledEnvelope.Data.Status != "disabled" || disabledEnvelope.Data.Version != 3 ||
+				disabledEnvelope.Data.NextRunAt != nil {
+				t.Fatalf("first disable response = %#v err=%v", disabledEnvelope.Data, err)
+			}
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ?", 2, rule.ID)
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ? AND action = 'automation_rule_disabled'", 1, rule.ID)
+
+			repeatedDisable := performRequest(
+				router, http.MethodPost, "/api/v1/automations/rules/"+rule.ID+"/disable", nil,
+				map[string]string{"If-Match": `"3"`},
+			)
+			if repeatedDisable.Code != http.StatusOK || repeatedDisable.Header().Get("ETag") != `"3"` {
+				t.Fatalf("repeated disable = %d ETag=%q: %s", repeatedDisable.Code, repeatedDisable.Header().Get("ETag"), repeatedDisable.Body.String())
+			}
+			var repeatedDisableEnvelope automationRuleEnvelope
+			if err := json.Unmarshal(repeatedDisable.Body.Bytes(), &repeatedDisableEnvelope); err != nil ||
+				repeatedDisableEnvelope.Data.Status != "disabled" || repeatedDisableEnvelope.Data.Version != 3 ||
+				repeatedDisableEnvelope.Data.NextRunAt != nil {
+				t.Fatalf("repeated disable response = %#v err=%v", repeatedDisableEnvelope.Data, err)
+			}
+			assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'automation_rule' AND aggregate_id = ?", 2, rule.ID)
+		})
+	}
 }
 
 func TestProjectCompletionAutomationCreatesOneAuditedInboxItem(t *testing.T) {

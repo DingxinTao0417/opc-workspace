@@ -288,6 +288,12 @@ func saveAutomationRule(
 	if err != nil {
 		return models.AutomationRule{}, err
 	}
+	// next_run_at is scheduler-owned runtime state. Replaying an enable,
+	// disable, or unchanged configuration command must preserve it and must
+	// not advance the user-facing version or append another audit event.
+	if current.Enabled == enabled && current.ConfigJSON == configJSON {
+		return current, nil
+	}
 	var nextRunAt *string
 	preset, exists := automationPresetByKey(current.PresetKey)
 	if !exists {
@@ -300,9 +306,6 @@ func saveAutomationRule(
 		}
 		value := formatInboxTimestamp(next.UTC())
 		nextRunAt = &value
-	}
-	if current.Enabled == enabled && current.ConfigJSON == configJSON && sameOptionalString(current.NextRunAt, nextRunAt) {
-		return current, nil
 	}
 	nowText := formatInboxTimestamp(now.UTC())
 	result := tx.Model(&models.AutomationRule{}).
