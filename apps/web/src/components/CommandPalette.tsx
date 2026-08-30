@@ -1,4 +1,5 @@
 import {
+  BellRing,
   CalendarDays,
   CheckSquare2,
   Clock3,
@@ -257,6 +258,14 @@ export function CommandPalette() {
         hint: "页面",
         icon: Inbox,
         run: () => closeAndNavigate("/inbox", "inbox"),
+      },
+      {
+        id: "local-reminders",
+        label: "本地提醒",
+        hint: "收件箱 · 待触发",
+        icon: BellRing,
+        run: () =>
+          closeAndNavigate("/inbox?reminders=scheduled", "local-reminders"),
       },
       {
         id: "tasks",

@@ -45,6 +45,22 @@ const sourceItem: InboxItem = {
   availableActions: ["edit", "read", "snooze", "resolve", "dismiss"],
 };
 
+const reminderId = "018f0000-0000-7000-8000-000000000828";
+const reminderTriggerAt = "2026-08-28T10:00:00Z";
+const reminderItem: InboxItem = {
+  ...sourceItem,
+  kind: "reminder",
+  title: "回访客户",
+  sourceEntityType: "reminder",
+  sourceEntityId: reminderId,
+  sourceEventKey: `reminder:${reminderId}:due`,
+  dueAt: reminderTriggerAt,
+  payloadJson: {
+    reminder_id: reminderId,
+    trigger_at: reminderTriggerAt,
+  },
+};
+
 afterEach(() => {
   cleanup();
   useUiStore.setState({ settingsOpen: false, settingsModule: "general" });
@@ -66,6 +82,74 @@ describe("InboxSourceContext", () => {
       "href",
       "/tasks/018f0000-0000-7000-8000-000000000803",
     );
+  });
+
+  it("links a strictly verified Reminder Inbox snapshot to its fired reminder", () => {
+    render(
+      <MemoryRouter initialEntries={["/inbox/item?risk=blocked&view=archive"]}>
+        <InboxSourceContext item={reminderItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("已触发并投递到收件箱")).toBeVisible();
+    expect(screen.getByRole("link", { name: /查看来源提醒/ })).toHaveAttribute(
+      "href",
+      `/inbox?risk=blocked&view=archive&reminders=fired&reminder=${reminderId}`,
+    );
+  });
+
+  it.each<[string, InboxItem]>([
+    [
+      "source event key",
+      { ...reminderItem, sourceEventKey: `reminder:${reminderId}:other` },
+    ],
+    [
+      "source entity id",
+      {
+        ...reminderItem,
+        sourceEntityId: "018f0000-0000-7000-8000-000000000829",
+      },
+    ],
+    ["due timestamp", { ...reminderItem, dueAt: "2026-08-28T10:01:00Z" }],
+    [
+      "payload shape",
+      {
+        ...reminderItem,
+        payloadJson: { ...reminderItem.payloadJson, unexpected: true },
+      },
+    ],
+    ["kind", { ...reminderItem, kind: "event" }],
+    [
+      "non-RFC3339 trigger timestamp",
+      {
+        ...reminderItem,
+        dueAt: "2026-08-28",
+        payloadJson: {
+          reminder_id: reminderId,
+          trigger_at: "2026-08-28",
+        },
+      },
+    ],
+    [
+      "normalized invalid trigger timestamp",
+      {
+        ...reminderItem,
+        dueAt: "2026-02-30T10:00:00Z",
+        payloadJson: {
+          reminder_id: reminderId,
+          trigger_at: "2026-02-30T10:00:00Z",
+        },
+      },
+    ],
+  ])("does not invent a Reminder link for a corrupt %s", (_name, corrupt) => {
+    render(
+      <MemoryRouter>
+        <InboxSourceContext item={corrupt} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("link", { name: /查看来源提醒/ })).toBeNull();
+    expect(screen.queryByText("已触发并投递到收件箱")).toBeNull();
   });
 
   it("shows a Roadmap Milestone snapshot and hides its link after deletion", () => {

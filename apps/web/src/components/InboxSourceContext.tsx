@@ -1,4 +1,5 @@
 import {
+  BellRing,
   CalendarClock,
   CheckCircle2,
   DatabaseBackup,
@@ -8,7 +9,7 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { InboxItem } from "../types/models";
 import { useUiStore } from "../store/ui";
 import { formatInvoiceAmount } from "./invoicePresentation";
@@ -126,6 +127,11 @@ interface SystemMaintenanceSourceSnapshot {
     | "sidecar_startup_failed";
   occurredAt: string;
   message: string;
+}
+
+interface ReminderSourceSnapshot {
+  reminderId: string;
+  triggerAt: string;
 }
 
 function stringValue(
@@ -361,6 +367,54 @@ function canonicalUUID(value: string | null): value is string {
   );
 }
 
+function validRFC3339Timestamp(value: string | null): value is string {
+  if (!value) return false;
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+  );
+  if (!match) return false;
+  const parsedDate = new Date(`${match[1]}T00:00:00.000Z`);
+  if (
+    Number.isNaN(parsedDate.getTime()) ||
+    parsedDate.toISOString().slice(0, 10) !== match[1]
+  ) {
+    return false;
+  }
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const second = Number(match[4]);
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  if (match[5] !== "Z") {
+    const [offsetHour, offsetMinute] = match[5].slice(1).split(":").map(Number);
+    if (offsetHour > 23 || offsetMinute > 59) return false;
+  }
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+function reminderSnapshot(item: InboxItem): ReminderSourceSnapshot | null {
+  if (
+    item.kind !== "reminder" ||
+    item.sourceEntityType !== "reminder" ||
+    item.sourceDeletedAt !== null ||
+    !canonicalUUID(item.sourceEntityId)
+  ) {
+    return null;
+  }
+  const payload = item.payloadJson;
+  const reminderId = stringValue(payload, "reminder_id");
+  const triggerAt = stringValue(payload, "trigger_at");
+  if (
+    Object.keys(payload).length !== 2 ||
+    reminderId !== item.sourceEntityId ||
+    !validRFC3339Timestamp(triggerAt) ||
+    item.dueAt !== triggerAt ||
+    item.sourceEventKey !== `reminder:${item.sourceEntityId}:due`
+  ) {
+    return null;
+  }
+  return { reminderId, triggerAt };
+}
+
 function automationSnapshot(item: InboxItem): AutomationSourceSnapshot | null {
   if (item.sourceEntityType !== "automation") return null;
   const payload = item.payloadJson;
@@ -510,8 +564,46 @@ const storageKindLabels: Record<string, string> = {
   file: "文件",
 };
 
+function ReminderSourceDetails({ source }: { source: ReminderSourceSnapshot }) {
+  const location = useLocation();
+  const reminderSearch = new URLSearchParams(location.search);
+  reminderSearch.set("reminders", "fired");
+  reminderSearch.set("reminder", source.reminderId);
+  return (
+    <section aria-label="来源上下文" className="inbox-source-context">
+      <div className="inbox-source-context-heading">
+        <span aria-hidden="true">
+          <BellRing size={15} />
+        </span>
+        <div>
+          <strong>本地提醒</strong>
+          <small>已触发并投递到收件箱</small>
+        </div>
+      </div>
+      <dl>
+        <div>
+          <dt>触发时间</dt>
+          <dd>{localTimestamp(source.triggerAt)}</dd>
+        </div>
+      </dl>
+      <Link
+        className="button button-secondary"
+        to={{ pathname: "/inbox", search: reminderSearch.toString() }}
+      >
+        查看来源提醒
+        <ExternalLink aria-hidden="true" size={13} />
+      </Link>
+    </section>
+  );
+}
+
 export function InboxSourceContext({ item }: { item: InboxItem }) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+
+  const reminderSource = reminderSnapshot(item);
+  if (reminderSource) {
+    return <ReminderSourceDetails source={reminderSource} />;
+  }
 
   const invoiceDueSource = invoiceDueSnapshot(item);
   if (invoiceDueSource) {

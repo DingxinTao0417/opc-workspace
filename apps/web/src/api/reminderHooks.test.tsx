@@ -8,11 +8,13 @@ import {
   reminderDetailQueryKey,
   useCancelReminder,
   useCreateReminder,
+  useReminderQuery,
   useRemindersQuery,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   list: vi.fn(),
+  detail: vi.fn(),
   create: vi.fn(),
   cancel: vi.fn(),
 }));
@@ -22,6 +24,7 @@ vi.mock("./client", async () => {
   return {
     ...actual,
     getReminders: calls.list,
+    getReminder: calls.detail,
     createReminder: calls.create,
     cancelReminder: calls.cancel,
   };
@@ -105,6 +108,43 @@ describe("Reminder hooks", () => {
         )),
     );
     expect(calls.list).toHaveBeenCalledTimes(2);
+    expect(calls.list).toHaveBeenLastCalledWith({}, expect.any(AbortSignal));
+  });
+
+  it("forwards cancellation to list and detail queries while null detail stays disabled", async () => {
+    const listInput = { status: "scheduled" as const, page: 2, pageSize: 20 };
+    calls.list.mockResolvedValue({
+      items: [],
+      meta: {
+        page: 2,
+        pageSize: 20,
+        total: 0,
+        serverNow: "2026-08-28T10:00:00Z",
+      },
+    });
+    calls.detail.mockResolvedValue(reminder());
+    const queryClient = createQueryClient();
+    const wrapper = wrapperFor(queryClient);
+
+    const disabled = renderHook(() => useReminderQuery(null), { wrapper });
+    expect(disabled.result.current.fetchStatus).toBe("idle");
+    expect(calls.detail).not.toHaveBeenCalled();
+
+    const list = renderHook(() => useRemindersQuery(listInput), { wrapper });
+    const detail = renderHook(() => useReminderQuery(reminder().id), {
+      wrapper,
+    });
+    await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+
+    expect(calls.list).toHaveBeenCalledWith(listInput, expect.any(AbortSignal));
+    expect(calls.detail).toHaveBeenCalledWith(
+      reminder().id,
+      expect.any(AbortSignal),
+    );
+    expect(
+      queryClient.getQueryData(reminderDetailQueryKey(reminder().id)),
+    ).toEqual(reminder());
   });
 
   it("reuses the create key after a lost response and caches the result", async () => {

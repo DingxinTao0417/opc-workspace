@@ -93,7 +93,11 @@ function invoiceRunPayload() {
   };
 }
 
-function renderSettings(onOpenTask = vi.fn(), onOpenInboxItem = vi.fn()) {
+function renderSettings(
+  onOpenTask = vi.fn(),
+  onOpenInboxItem = vi.fn(),
+  onOpenReminder = vi.fn(),
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -101,6 +105,7 @@ function renderSettings(onOpenTask = vi.fn(), onOpenInboxItem = vi.fn()) {
     <QueryClientProvider client={queryClient}>
       <AutomationSettings
         onOpenInboxItem={onOpenInboxItem}
+        onOpenReminder={onOpenReminder}
         onOpenTask={onOpenTask}
       />
     </QueryClientProvider>,
@@ -353,8 +358,9 @@ describe("AutomationSettings", () => {
     ).toBe("20");
   });
 
-  it("opens successful inbox results and keeps reminder results as facts", async () => {
+  it("opens successful inbox and reminder results", async () => {
     const onOpenInboxItem = vi.fn();
+    const onOpenReminder = vi.fn();
     const inboxRun = {
       ...invoiceRunPayload(),
       id: "018f0000-0000-7000-8000-000000001620",
@@ -396,14 +402,15 @@ describe("AutomationSettings", () => {
       }),
     );
 
-    renderSettings(vi.fn(), onOpenInboxItem);
+    renderSettings(vi.fn(), onOpenInboxItem, onOpenReminder);
 
     fireEvent.click(
       await screen.findByRole("button", { name: "打开收件箱事项" }),
     );
     expect(onOpenInboxItem).toHaveBeenCalledWith(inboxRun.result_id);
     expect(screen.getByText("已创建提醒")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "打开提醒" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "打开提醒" }));
+    expect(onOpenReminder).toHaveBeenCalledWith(reminderRun.result_id);
     expect(screen.getAllByRole("button", { name: "查看详情" })).toHaveLength(2);
   });
 

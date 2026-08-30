@@ -73,9 +73,11 @@ function ruleStatusLabel(rule: AutomationRule): string {
 
 export function AutomationSettings({
   onOpenInboxItem,
+  onOpenReminder,
   onOpenTask,
 }: {
   onOpenInboxItem: (inboxItemId: string) => void;
+  onOpenReminder: (reminderId: string) => void;
   onOpenTask: (taskId: string) => void;
 }) {
   const rulesQuery = useAutomationRulesQuery();
@@ -589,6 +591,16 @@ export function AutomationSettings({
                     >
                       打开收件箱事项
                     </button>
+                  ) : run.status === "succeeded" &&
+                    run.resultType === "reminder" &&
+                    run.resultId ? (
+                    <button
+                      className="button button-secondary"
+                      onClick={() => onOpenReminder(run.resultId!)}
+                      type="button"
+                    >
+                      打开提醒
+                    </button>
                   ) : null}
                   <button
                     className="button button-quiet"
@@ -647,6 +659,7 @@ export function AutomationSettings({
       <AutomationRunDetailModal
         onClose={() => setDetailRunId(null)}
         onOpenInboxItem={onOpenInboxItem}
+        onOpenReminder={onOpenReminder}
         onOpenTask={onOpenTask}
         runId={detailRunId}
       />

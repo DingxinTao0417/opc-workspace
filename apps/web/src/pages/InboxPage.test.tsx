@@ -6,8 +6,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import type { InboxItem } from "../types/models";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import type { InboxItem, ReminderStatus } from "../types/models";
 import { InboxPage } from "./InboxPage";
 
 const item: InboxItem = {
@@ -163,6 +169,98 @@ vi.mock("../api/hooks", () => ({
   useInboxItemCommand: () => hooks.command,
 }));
 
+vi.mock("../components/ReminderManagerModal", () => ({
+  ReminderManagerModal: ({
+    open,
+    status,
+    reminderId,
+    onStateChange,
+    onClose,
+    onOpenInboxItem,
+  }: {
+    open: boolean;
+    status: ReminderStatus;
+    reminderId: string | null;
+    onStateChange: (
+      next: { status: ReminderStatus; reminderId: string | null },
+      options?: { replace?: boolean },
+    ) => void;
+    onClose: () => void;
+    onOpenInboxItem?: (id: string) => void;
+  }) =>
+    open ? (
+      <section aria-label="本地提醒测试弹窗" role="dialog">
+        <output data-testid="reminder-status">{status}</output>
+        <output data-testid="reminder-id">{reminderId ?? "none"}</output>
+        <button
+          onClick={() => onStateChange({ status: "fired", reminderId: null })}
+          type="button"
+        >
+          显示已触发提醒
+        </button>
+        <button
+          onClick={() =>
+            onStateChange({
+              status: "fired",
+              reminderId: "018f0000-0000-7000-8000-000000001501",
+            })
+          }
+          type="button"
+        >
+          选择提醒
+        </button>
+        <button
+          onClick={() =>
+            onStateChange(
+              { status: "cancelled", reminderId: null },
+              { replace: true },
+            )
+          }
+          type="button"
+        >
+          替换为已取消
+        </button>
+        <button
+          onClick={() =>
+            onOpenInboxItem?.("018f0000-0000-7000-8000-000000000801")
+          }
+          type="button"
+        >
+          打开提醒收件箱
+        </button>
+        <button onClick={onClose} type="button">
+          关闭本地提醒
+        </button>
+      </section>
+    ) : null,
+}));
+
+function LocationHarness() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="inbox-location">
+        {location.pathname}
+        {location.search}
+      </output>
+      <button
+        aria-label="测试后退"
+        onClick={() => navigate(-1)}
+        type="button"
+      />
+      <button aria-label="测试前进" onClick={() => navigate(1)} type="button" />
+    </>
+  );
+}
+
+function currentInboxLocation(): URL {
+  return new URL(
+    screen.getByTestId("inbox-location").textContent ?? "/inbox",
+    "http://opc.local",
+  );
+}
+
 describe("InboxPage", () => {
   const renderInbox = (initialEntry = "/inbox") =>
     render(
@@ -171,6 +269,18 @@ describe("InboxPage", () => {
           <Route element={<InboxPage />} path="/inbox" />
           <Route element={<InboxPage />} path="/inbox/:inboxItemId" />
         </Routes>
+        <LocationHarness />
+      </MemoryRouter>,
+    );
+
+  const renderInboxHistory = (initialEntries: string[], initialIndex: number) =>
+    render(
+      <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+        <Routes>
+          <Route element={<InboxPage />} path="/inbox" />
+          <Route element={<InboxPage />} path="/inbox/:inboxItemId" />
+        </Routes>
+        <LocationHarness />
       </MemoryRouter>,
     );
 
@@ -366,6 +476,149 @@ describe("InboxPage", () => {
       ),
     );
     expect(screen.getByLabelText("跟进状态")).toHaveValue("blocked");
+  });
+
+  it("restores a direct Reminder detail URL and canonically adds its missing status", async () => {
+    const reminderId = "018f0000-0000-7000-8000-000000001501";
+    renderInbox(`/inbox?risk=blocked&reminder=${reminderId}`);
+
+    expect(
+      screen.getByRole("dialog", { name: "本地提醒测试弹窗" }),
+    ).toBeVisible();
+    expect(screen.getByTestId("reminder-status")).toHaveTextContent(
+      "scheduled",
+    );
+    expect(screen.getByTestId("reminder-id")).toHaveTextContent(reminderId);
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.searchParams.get("risk")).toBe("blocked");
+      expect(location.searchParams.get("reminder")).toBe(reminderId);
+      expect(location.searchParams.get("reminders")).toBe("scheduled");
+    });
+  });
+
+  it("replaces an invalid Reminder status without losing unrelated query state", async () => {
+    renderInboxHistory(
+      [
+        "/inbox?risk=tracking",
+        "/inbox?risk=blocked&reminders=unknown&reminder=018f0000-0000-7000-8000-000000001501",
+      ],
+      1,
+    );
+
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.searchParams.get("risk")).toBe("blocked");
+      expect(location.searchParams.get("reminders")).toBe("scheduled");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "测试后退" }));
+
+    await waitFor(() =>
+      expect(currentInboxLocation().search).toBe("?risk=tracking"),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: "本地提醒测试弹窗" }),
+    ).toBeNull();
+  });
+
+  it("updates and closes Reminder URL state atomically while preserving risk", async () => {
+    renderInbox(
+      "/inbox?risk=blocked&reminders=scheduled&reminder=018f0000-0000-7000-8000-000000001502",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示已触发提醒" }));
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.searchParams.get("risk")).toBe("blocked");
+      expect(location.searchParams.get("reminders")).toBe("fired");
+      expect(location.searchParams.has("reminder")).toBe(false);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "选择提醒" }));
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.searchParams.get("reminders")).toBe("fired");
+      expect(location.searchParams.get("reminder")).toBe(
+        "018f0000-0000-7000-8000-000000001501",
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭本地提醒" }));
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.searchParams.get("risk")).toBe("blocked");
+      expect(location.searchParams.has("reminders")).toBe(false);
+      expect(location.searchParams.has("reminder")).toBe(false);
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "本地提醒测试弹窗" }),
+    ).toBeNull();
+  });
+
+  it("restores Reminder list and detail state through browser back and forward", async () => {
+    renderInbox("/inbox?risk=blocked");
+
+    fireEvent.click(screen.getByRole("button", { name: "本地提醒" }));
+    await waitFor(() =>
+      expect(currentInboxLocation().searchParams.get("reminders")).toBe(
+        "scheduled",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "选择提醒" }));
+    await waitFor(() =>
+      expect(currentInboxLocation().searchParams.get("reminder")).toBe(
+        "018f0000-0000-7000-8000-000000001501",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "测试后退" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("reminder-status")).toHaveTextContent(
+        "scheduled",
+      );
+      expect(screen.getByTestId("reminder-id")).toHaveTextContent("none");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "测试前进" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("reminder-status")).toHaveTextContent("fired");
+      expect(screen.getByTestId("reminder-id")).toHaveTextContent(
+        "018f0000-0000-7000-8000-000000001501",
+      );
+    });
+  });
+
+  it("honors replace navigation requested by the Reminder manager", async () => {
+    renderInboxHistory(
+      ["/inbox?risk=tracking", "/inbox?risk=blocked&reminders=scheduled"],
+      1,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "替换为已取消" }));
+    await waitFor(() =>
+      expect(currentInboxLocation().searchParams.get("reminders")).toBe(
+        "cancelled",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "测试后退" }));
+
+    await waitFor(() =>
+      expect(currentInboxLocation().search).toBe("?risk=tracking"),
+    );
+  });
+
+  it("opens a Reminder result Inbox item without leaking modal params", async () => {
+    renderInbox(
+      "/inbox?risk=blocked&reminders=fired&reminder=018f0000-0000-7000-8000-000000001501",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "打开提醒收件箱" }));
+    await waitFor(() => {
+      const location = currentInboxLocation();
+      expect(location.pathname).toBe(`/inbox/${item.id}`);
+      expect(location.searchParams.get("risk")).toBe("blocked");
+      expect(location.searchParams.has("reminders")).toBe(false);
+      expect(location.searchParams.has("reminder")).toBe(false);
+    });
   });
 
   it("lists a backup-create maintenance item with its safe title", () => {

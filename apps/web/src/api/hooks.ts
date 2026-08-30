@@ -1529,7 +1529,7 @@ export function useRemindersQuery(
 ) {
   return useQuery({
     queryKey: [...reminderQueryKey, "list", input],
-    queryFn: () => getReminders(input),
+    queryFn: ({ signal }) => getReminders(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
@@ -1542,7 +1542,7 @@ export function useRemindersQuery(
 export function useReminderQuery(id: string | null) {
   return useQuery({
     queryKey: reminderDetailQueryKey(id ?? "closed"),
-    queryFn: () => getReminder(id!),
+    queryFn: ({ signal }) => getReminder(id!, signal),
     enabled: Boolean(id),
     retry: 1,
     refetchInterval: INBOX_LIST_REFRESH_INTERVAL_MS,

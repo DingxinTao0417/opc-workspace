@@ -90,11 +90,13 @@ function renderModal(
   runId = "run-1",
   onOpenTask = vi.fn(),
   onOpenInboxItem = vi.fn(),
+  onOpenReminder = vi.fn(),
 ) {
   return render(
     <AutomationRunDetailModal
       onClose={vi.fn()}
       onOpenInboxItem={onOpenInboxItem}
+      onOpenReminder={onOpenReminder}
       onOpenTask={onOpenTask}
       runId={runId}
     />,
@@ -159,7 +161,8 @@ describe("AutomationRunDetailModal", () => {
     expect(onOpenTask).toHaveBeenCalledWith("task/id ?#1");
   });
 
-  it("shows schedule and reminder facts without inventing reminder navigation", () => {
+  it("shows schedule facts and opens the exact reminder result", () => {
+    const onOpenReminder = vi.fn();
     hookMocks.details.set(
       "schedule-run",
       detail({
@@ -185,11 +188,12 @@ describe("AutomationRunDetailModal", () => {
       }),
     );
 
-    renderModal("schedule-run");
+    renderModal("schedule-run", vi.fn(), vi.fn(), onOpenReminder);
 
     expect(screen.getByText("计划触发")).toBeVisible();
     expect(screen.getAllByText("已创建提醒")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: /打开提醒/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "打开提醒" }));
+    expect(onOpenReminder).toHaveBeenCalledWith("reminder-1");
   });
 
   it("opens inbox results and selects the new attempt after retry succeeds", async () => {
@@ -255,6 +259,7 @@ describe("AutomationRunDetailModal", () => {
       <AutomationRunDetailModal
         onClose={vi.fn()}
         onOpenInboxItem={vi.fn()}
+        onOpenReminder={vi.fn()}
         onOpenTask={vi.fn()}
         runId={first.id}
       />,

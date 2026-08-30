@@ -1,4 +1,5 @@
 import {
+  AlarmClock,
   AlertCircle,
   ArrowUpRight,
   Clock3,
@@ -52,12 +53,14 @@ function ResultFact({
   resultSummary,
   resultType,
   onOpenInboxItem,
+  onOpenReminder,
   onOpenTask,
 }: {
   resultId: string | null;
   resultSummary: string;
   resultType: string | null;
   onOpenInboxItem: (inboxItemId: string) => void;
+  onOpenReminder: (reminderId: string) => void;
   onOpenTask: (taskId: string) => void;
 }) {
   if (!resultType && !resultId && !resultSummary)
@@ -94,6 +97,15 @@ function ResultFact({
         >
           <Inbox size={14} />
           打开收件箱事项
+        </button>
+      ) : resultId && resultType === "reminder" ? (
+        <button
+          className="button button-secondary"
+          onClick={() => onOpenReminder(resultId)}
+          type="button"
+        >
+          <AlarmClock size={14} />
+          打开提醒
         </button>
       ) : null}
     </div>
@@ -136,11 +148,13 @@ function AttemptButton({
 export function AutomationRunDetailModal({
   onClose,
   onOpenInboxItem,
+  onOpenReminder,
   onOpenTask,
   runId,
 }: {
   onClose: () => void;
   onOpenInboxItem: (inboxItemId: string) => void;
+  onOpenReminder: (reminderId: string) => void;
   onOpenTask: (taskId: string) => void;
   runId: string | null;
 }) {
@@ -342,6 +356,7 @@ export function AutomationRunDetailModal({
             <h4>执行结果</h4>
             <ResultFact
               onOpenInboxItem={onOpenInboxItem}
+              onOpenReminder={onOpenReminder}
               onOpenTask={onOpenTask}
               resultId={detail.resultId}
               resultSummary={detail.resultSummary}

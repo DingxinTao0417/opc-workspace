@@ -1018,6 +1018,11 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
           onOpenInboxItem={(inboxItemId) =>
             closeTo(`/inbox/${encodeURIComponent(inboxItemId)}`)
           }
+          onOpenReminder={(reminderId) =>
+            closeTo(
+              `/inbox?reminders=scheduled&reminder=${encodeURIComponent(reminderId)}`,
+            )
+          }
           onOpenTask={(taskId) =>
             closeTo(`/tasks/${encodeURIComponent(taskId)}`)
           }

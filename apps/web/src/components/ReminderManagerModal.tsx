@@ -25,7 +25,7 @@ import type {
   ReminderRecurrenceType,
   ReminderStatus,
 } from "../types/models";
-import { EmptyState, SkeletonRows } from "./feedback";
+import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 
 const statusLabels: Record<ReminderStatus, string> = {
@@ -150,17 +150,24 @@ function ReminderStatusIcon({ status }: { status: ReminderStatus }) {
 
 export function ReminderManagerModal({
   open,
+  status,
+  reminderId,
+  onStateChange,
   onClose,
   onOpenInboxItem,
 }: {
   open: boolean;
+  status: ReminderStatus;
+  reminderId: string | null;
+  onStateChange: (
+    next: { status: ReminderStatus; reminderId: string | null },
+    options?: { replace?: boolean },
+  ) => void;
   onClose: () => void;
   onOpenInboxItem?: (id: string) => void;
 }) {
-  const [status, setStatus] = useState<ReminderStatus>("scheduled");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<ReminderDraft>(emptyDraft);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -177,7 +184,7 @@ export function ReminderManagerModal({
     },
     open,
   );
-  const detailQuery = useReminderQuery(open ? selectedId : null);
+  const detailQuery = useReminderQuery(open ? reminderId : null);
   const createMutation = useCreateReminder();
   const updateMutation = useUpdateReminder();
   const cancelMutation = useCancelReminder();
@@ -189,15 +196,28 @@ export function ReminderManagerModal({
       (query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 20),
     ),
   );
-  const selected = detailQuery.data ?? null;
+  const selected =
+    detailQuery.data?.id === reminderId ? detailQuery.data : null;
   const busy =
     createMutation.isPending ||
     updateMutation.isPending ||
     cancelMutation.isPending;
+  const routeState = useRef({ open, status, reminderId });
+  const creatingState = useRef(creating);
+  const reconciledStatus = useRef<string | null>(null);
+  const mountedState = useRef(false);
+  routeState.current = { open, status, reminderId };
+  creatingState.current = creating;
+
+  useEffect(() => {
+    mountedState.current = true;
+    return () => {
+      mountedState.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) {
-      setSelectedId(null);
       setCreating(false);
       initializedEditor.current = null;
       return;
@@ -205,7 +225,28 @@ export function ReminderManagerModal({
   }, [open]);
 
   useEffect(() => {
-    if (!selected || creating || initializedEditor.current === selected.id) {
+    initializedEditor.current = null;
+    setValidationError(null);
+    setCancelReason("");
+    setConfirmingCancel(false);
+    createMutation.reset();
+    updateMutation.reset();
+    cancelMutation.reset();
+    if (reminderId) setCreating(false);
+  }, [reminderId]);
+
+  useEffect(() => {
+    setPage(1);
+    setCreating(false);
+  }, [status]);
+
+  useEffect(() => {
+    if (
+      !selected ||
+      selected.id !== reminderId ||
+      creating ||
+      initializedEditor.current === selected.id
+    ) {
       return;
     }
     initializedEditor.current = selected.id;
@@ -215,7 +256,7 @@ export function ReminderManagerModal({
     setConfirmingCancel(false);
     updateMutation.reset();
     cancelMutation.reset();
-  }, [creating, selected]);
+  }, [creating, reminderId, selected]);
 
   useEffect(() => {
     if (transitioning || !query.data || page <= totalPages) return;
@@ -223,18 +264,36 @@ export function ReminderManagerModal({
   }, [page, query.data, totalPages, transitioning]);
 
   useEffect(() => {
-    if (!selectedId || transitioning || query.isPending) return;
-    if (items.some((item) => item.id === selectedId)) return;
-    if (selected?.status === status) return;
-    setSelectedId(null);
-    initializedEditor.current = null;
+    if (
+      !selected ||
+      selected.id !== reminderId ||
+      !detailQuery.isSuccess ||
+      detailQuery.isFetching ||
+      detailQuery.isError
+    ) {
+      return;
+    }
+    if (busy) return;
+    if (selected.status === status) {
+      reconciledStatus.current = null;
+      return;
+    }
+    const reconciliationKey = `${selected.id}:${selected.status}`;
+    if (reconciledStatus.current === reconciliationKey) return;
+    reconciledStatus.current = reconciliationKey;
+    onStateChange(
+      { status: selected.status, reminderId: selected.id },
+      { replace: true },
+    );
   }, [
-    items,
-    query.isPending,
-    selected?.status,
-    selectedId,
+    busy,
+    detailQuery.isError,
+    detailQuery.isFetching,
+    detailQuery.isSuccess,
+    onStateChange,
+    reminderId,
+    selected,
     status,
-    transitioning,
   ]);
 
   const operationError = useMemo(
@@ -242,12 +301,10 @@ export function ReminderManagerModal({
       validationError ??
       errorMessage(createMutation.error) ??
       errorMessage(updateMutation.error) ??
-      errorMessage(cancelMutation.error) ??
-      errorMessage(detailQuery.error),
+      errorMessage(cancelMutation.error),
     [
       cancelMutation.error,
       createMutation.error,
-      detailQuery.error,
       updateMutation.error,
       validationError,
     ],
@@ -261,29 +318,33 @@ export function ReminderManagerModal({
   };
 
   const switchStatus = (next: ReminderStatus) => {
-    setStatus(next);
+    if (busy || next === status) return;
     setPage(1);
-    setSelectedId(null);
     setCreating(false);
     initializedEditor.current = null;
     resetMutations();
+    onStateChange({ status: next, reminderId: null });
   };
 
   const startCreating = () => {
+    if (busy) return;
     setCreating(true);
-    setSelectedId(null);
     initializedEditor.current = null;
     setDraft(emptyDraft());
     setCancelReason("");
     setConfirmingCancel(false);
     resetMutations();
+    if (reminderId) {
+      onStateChange({ status, reminderId: null });
+    }
   };
 
   const selectReminder = (reminder: Reminder) => {
+    if (busy) return;
     setCreating(false);
-    setSelectedId(reminder.id);
     initializedEditor.current = null;
     resetMutations();
+    onStateChange({ status, reminderId: reminder.id });
   };
 
   const validateDraft = (): {
@@ -341,12 +402,22 @@ export function ReminderManagerModal({
         },
         {
           onSuccess: (reminder) => {
+            if (!mountedState.current) return;
+            const shouldSelectCreated =
+              routeState.current.open &&
+              routeState.current.reminderId === null &&
+              creatingState.current;
             setCreating(false);
-            setStatus("scheduled");
+            creatingState.current = false;
             setPage(1);
-            setSelectedId(reminder.id);
             initializedEditor.current = reminder.id;
             setDraft(draftFromReminder(reminder));
+            if (shouldSelectCreated) {
+              onStateChange({
+                status: "scheduled",
+                reminderId: reminder.id,
+              });
+            }
           },
         },
       );
@@ -364,6 +435,8 @@ export function ReminderManagerModal({
       },
       {
         onSuccess: (reminder) => {
+          if (!mountedState.current) return;
+          if (routeState.current.reminderId !== reminder.id) return;
           initializedEditor.current = reminder.id;
           setDraft(draftFromReminder(reminder));
         },
@@ -393,14 +466,30 @@ export function ReminderManagerModal({
       { id: selected.id, reason, expectedVersion: selected.version },
       {
         onSuccess: (reminder) => {
+          if (!mountedState.current) return;
           setConfirmingCancel(false);
-          setStatus("cancelled");
           setPage(1);
           initializedEditor.current = reminder.id;
+          if (
+            routeState.current.open &&
+            routeState.current.reminderId === reminder.id
+          ) {
+            onStateChange({
+              status: "cancelled",
+              reminderId: reminder.id,
+            });
+          }
         },
       },
     );
   };
+
+  const requestClose = () => {
+    if (!busy) onClose();
+  };
+
+  const detailFailureMessage =
+    errorMessage(detailQuery.error) ?? "无法读取提醒详情，请重试。";
 
   return (
     <Modal
@@ -408,13 +497,13 @@ export function ReminderManagerModal({
         <button
           className="button button-secondary"
           disabled={busy}
-          onClick={onClose}
+          onClick={requestClose}
           type="button"
         >
           关闭
         </button>
       }
-      onClose={onClose}
+      onClose={requestClose}
       open={open}
       title="本地提醒"
       width="940px"
@@ -429,6 +518,7 @@ export function ReminderManagerModal({
             <button
               aria-current={status === key ? "page" : undefined}
               className={status === key ? "active" : undefined}
+              disabled={busy}
               key={key}
               onClick={() => switchStatus(key)}
               type="button"
@@ -461,6 +551,7 @@ export function ReminderManagerModal({
             <Search size={14} />
             <input
               aria-label="搜索提醒"
+              disabled={busy}
               maxLength={200}
               onChange={(event) => {
                 setSearch(event.target.value);
@@ -518,10 +609,11 @@ export function ReminderManagerModal({
                 <div className="reminder-manager-list">
                   {items.map((reminder) => (
                     <button
-                      aria-pressed={selectedId === reminder.id}
+                      aria-pressed={reminderId === reminder.id}
                       className={
-                        selectedId === reminder.id ? "active" : undefined
+                        reminderId === reminder.id ? "active" : undefined
                       }
+                      disabled={busy}
                       key={reminder.id}
                       onClick={() => selectReminder(reminder)}
                       type="button"
@@ -560,7 +652,7 @@ export function ReminderManagerModal({
                 >
                   <button
                     className="button button-secondary"
-                    disabled={page <= 1 || query.isFetching}
+                    disabled={page <= 1 || query.isFetching || busy}
                     onClick={() => setPage((value) => Math.max(1, value - 1))}
                     type="button"
                   >
@@ -571,7 +663,7 @@ export function ReminderManagerModal({
                   </span>
                   <button
                     className="button button-secondary"
-                    disabled={page >= totalPages || query.isFetching}
+                    disabled={page >= totalPages || query.isFetching || busy}
                     onClick={() => setPage((value) => value + 1)}
                     type="button"
                   >
@@ -582,6 +674,14 @@ export function ReminderManagerModal({
             </div>
 
             <div className="reminder-manager-editor-pane">
+              {selected && detailQuery.error ? (
+                <ErrorState
+                  compact
+                  message={`${detailFailureMessage} 当前仍显示上次成功读取的记录。`}
+                  onRetry={() => void detailQuery.refetch()}
+                  title="提醒详情刷新失败"
+                />
+              ) : null}
               {creating || (selected && selected.status === "scheduled") ? (
                 <form className="reminder-editor" onSubmit={save}>
                   <div className="reminder-editor-heading">
@@ -828,7 +928,15 @@ export function ReminderManagerModal({
                     occurrence。
                   </p>
                 </form>
-              ) : detailQuery.isPending && selectedId ? (
+              ) : reminderId && !selected && detailQuery.error ? (
+                <ErrorState
+                  message={detailFailureMessage}
+                  onRetry={() => void detailQuery.refetch()}
+                  title="无法读取提醒详情"
+                />
+              ) : reminderId &&
+                !selected &&
+                (detailQuery.isPending || detailQuery.isFetching) ? (
                 <SkeletonRows count={4} />
               ) : selected ? (
                 <div className="reminder-terminal-detail">

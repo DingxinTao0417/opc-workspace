@@ -9479,6 +9479,7 @@ export async function getInboxItem(id: string): Promise<InboxItem> {
 
 export async function getReminders(
   input: ReminderListParams = {},
+  signal?: AbortSignal,
 ): Promise<ReminderListResult> {
   const params = new URLSearchParams({
     page: String(input.page ?? 1),
@@ -9487,13 +9488,19 @@ export async function getReminders(
   if (input.status) params.set("status", input.status);
   if (input.q?.trim()) params.set("q", input.q.trim());
   if (input.sort) params.set("sort", input.sort);
-  const payload = await apiRequest<unknown>(`/api/v1/reminders?${params}`);
+  const payload = await apiRequest<unknown>(`/api/v1/reminders?${params}`, {
+    signal,
+  });
   return normalizeReminderListResult(payload);
 }
 
-export async function getReminder(id: string): Promise<Reminder> {
+export async function getReminder(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Reminder> {
   const payload = await apiRequest<unknown>(
     `/api/v1/reminders/${encodeURIComponent(id)}`,
+    { signal },
   );
   const body = isRecord(payload) && "data" in payload ? payload.data : payload;
   return normalizeReminder(body);

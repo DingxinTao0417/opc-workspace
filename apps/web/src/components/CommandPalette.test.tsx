@@ -166,9 +166,33 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("option", { name: /发票/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /路线图/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /内容日历/ })).toBeVisible();
+    expect(screen.getByRole("option", { name: /本地提醒/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /打开设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /自动化设置/ })).toBeVisible();
     expect(screen.getByRole("option", { name: /数据与备份/ })).toBeVisible();
+  });
+
+  it("opens the scheduled local Reminder list through its fixed command", () => {
+    mocks.searchQuery.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: mocks.refetch,
+    });
+    useUiStore.setState({ commandPaletteOpen: true });
+
+    render(
+      <MemoryRouter initialEntries={["/today"]}>
+        <CommandPalette />
+        <CurrentLocation />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("option", { name: /本地提醒/ }));
+
+    expect(screen.getByTestId("current-location")).toHaveTextContent(
+      "/inbox?reminders=scheduled",
+    );
+    expect(useUiStore.getState().commandPaletteOpen).toBe(false);
   });
 
   it.each([

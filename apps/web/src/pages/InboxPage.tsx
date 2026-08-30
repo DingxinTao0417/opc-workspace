@@ -13,7 +13,7 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useInboxItemsQuery, useMarkAllInboxItemsRead } from "../api/hooks";
@@ -27,6 +27,7 @@ import type {
   InboxItemPriority,
   InboxItemRisk,
   InboxItemView,
+  ReminderStatus,
 } from "../types/models";
 
 const viewLabels: Record<InboxItemView, string> = {
@@ -188,8 +189,15 @@ function mutationErrorMessage(error: unknown): string | null {
   return "全部已读操作失败，请重试。";
 }
 
+function reminderStatusFromSearchParams(
+  searchParams: URLSearchParams,
+): ReminderStatus {
+  const status = searchParams.get("reminders");
+  return status === "fired" || status === "cancelled" ? status : "scheduled";
+}
+
 export function InboxPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { inboxItemId } = useParams<{ inboxItemId: string }>();
   const navigate = useNavigate();
   const [view, setView] = useState<InboxItemView>("inbox");
@@ -198,8 +206,11 @@ export function InboxPage() {
   const [risk, setRisk] = useState<InboxItemRisk | "">("");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const [managingReminders, setManagingReminders] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const managingReminders =
+    searchParams.has("reminders") || searchParams.has("reminder");
+  const reminderStatus = reminderStatusFromSearchParams(searchParams);
+  const reminderId = searchParams.get("reminder")?.trim() || null;
   const query = useInboxItemsQuery({
     view,
     q: search,
@@ -237,6 +248,34 @@ export function InboxPage() {
       setRisk("");
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (
+      !managingReminders ||
+      searchParams.get("reminders") === reminderStatus
+    ) {
+      return;
+    }
+    setSearchParams(
+      (current) => {
+        if (!current.has("reminders") && !current.has("reminder")) {
+          return current;
+        }
+        const rawStatus = current.get("reminders");
+        if (
+          rawStatus === "scheduled" ||
+          rawStatus === "fired" ||
+          rawStatus === "cancelled"
+        ) {
+          return current;
+        }
+        const next = new URLSearchParams(current);
+        next.set("reminders", "scheduled");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [managingReminders, reminderStatus, searchParams, setSearchParams]);
   const groupedItems = useMemo(() => {
     const serverNow = query.data?.meta.serverNow ?? new Date().toISOString();
     return {
@@ -257,6 +296,37 @@ export function InboxPage() {
     markAllMutation.reset();
   };
 
+  const setReminderLocation = useCallback(
+    (
+      nextState: { status: ReminderStatus; reminderId: string | null },
+      options?: { replace?: boolean },
+    ) => {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set("reminders", nextState.status);
+          if (nextState.reminderId === null) next.delete("reminder");
+          else next.set("reminder", nextState.reminderId);
+          return next;
+        },
+        { replace: options?.replace },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const closeReminderManager = useCallback(() => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("reminders");
+        next.delete("reminder");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
   return (
     <div className="page inbox-page">
       <PageHeader
@@ -264,7 +334,9 @@ export function InboxPage() {
           <div className="inbox-header-actions">
             <button
               className="button button-secondary"
-              onClick={() => setManagingReminders(true)}
+              onClick={() =>
+                setReminderLocation({ status: "scheduled", reminderId: null })
+              }
               type="button"
             >
               <BellRing size={15} />
@@ -493,17 +565,32 @@ export function InboxPage() {
         itemId={selectedId}
         onClose={() => {
           setSelectedId(null);
-          if (inboxItemId) navigate("/inbox", { replace: true });
+          if (inboxItemId) {
+            const search = searchParams.toString();
+            navigate(
+              { pathname: "/inbox", search: search ? `?${search}` : "" },
+              { replace: true },
+            );
+          }
         }}
       />
       {managingReminders ? (
         <ReminderManagerModal
-          onClose={() => setManagingReminders(false)}
+          onClose={closeReminderManager}
           onOpenInboxItem={(id) => {
-            setManagingReminders(false);
-            navigate(`/inbox/${id}`);
+            const next = new URLSearchParams(searchParams);
+            next.delete("reminders");
+            next.delete("reminder");
+            const search = next.toString();
+            navigate({
+              pathname: `/inbox/${encodeURIComponent(id)}`,
+              search: search ? `?${search}` : "",
+            });
           }}
+          onStateChange={setReminderLocation}
           open
+          reminderId={reminderId}
+          status={reminderStatus}
         />
       ) : null}
     </div>

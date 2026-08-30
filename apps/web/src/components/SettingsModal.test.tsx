@@ -27,6 +27,7 @@ const desktopApi = vi.hoisted(() => ({
 }));
 const automationSettings = vi.hoisted(() => ({
   resultInboxItemId: "inbox/item ?#1",
+  resultReminderId: "reminder/item ?#1",
   resultTaskId: "task/item ?#1",
 }));
 
@@ -42,9 +43,11 @@ vi.mock("../api/desktop", async (importActual) => {
 vi.mock("./AutomationSettings", () => ({
   AutomationSettings: ({
     onOpenInboxItem,
+    onOpenReminder,
     onOpenTask,
   }: {
     onOpenInboxItem: (inboxItemId: string) => void;
+    onOpenReminder: (reminderId: string) => void;
     onOpenTask: (taskId: string) => void;
   }) => (
     <>
@@ -60,13 +63,23 @@ vi.mock("./AutomationSettings", () => ({
       >
         打开收件箱事项
       </button>
+      <button
+        onClick={() => onOpenReminder(automationSettings.resultReminderId)}
+        type="button"
+      >
+        打开提醒
+      </button>
     </>
   ),
 }));
 
 function LocationProbe() {
   const location = useLocation();
-  return <output data-testid="current-location">{location.pathname}</output>;
+  return (
+    <output data-testid="current-location">
+      {location.pathname + location.search}
+    </output>
+  );
 }
 
 const healthPayload = {
@@ -919,6 +932,20 @@ describe("SettingsModal", () => {
       expect(useUiStore.getState().settingsOpen).toBe(false);
       expect(screen.getByTestId("current-location")).toHaveTextContent(
         `/inbox/${encodeURIComponent(automationSettings.resultInboxItemId)}`,
+      );
+    });
+  });
+
+  it("closes settings and opens an encoded automation reminder result", async () => {
+    useUiStore.setState({ settingsOpen: true, settingsModule: "automation" });
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole("button", { name: "打开提醒" }));
+
+    await waitFor(() => {
+      expect(useUiStore.getState().settingsOpen).toBe(false);
+      expect(screen.getByTestId("current-location")).toHaveTextContent(
+        `/inbox?reminders=scheduled&reminder=${encodeURIComponent(automationSettings.resultReminderId)}`,
       );
     });
   });

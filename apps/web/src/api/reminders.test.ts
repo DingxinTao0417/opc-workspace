@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cancelReminder,
   createReminder,
+  getReminder,
   getReminders,
   normalizeReminder,
   normalizeReminderListResult,
@@ -114,9 +115,13 @@ describe("Reminder API contract", () => {
   });
 
   it("serializes filters and validates paging metadata", async () => {
+    const controller = new AbortController();
     const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        jsonResponse({
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        controller.abort();
+        expect(init?.signal?.aborted).toBe(true);
+        return jsonResponse({
           data: [reminderPayload()],
           meta: {
             page: 2,
@@ -124,17 +129,21 @@ describe("Reminder API contract", () => {
             total: 21,
             server_now: "2026-08-28T10:05:00Z",
           },
-        }),
+        });
+      },
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await getReminders({
-      status: "scheduled",
-      q: " 备份 ",
-      sort: "trigger_at",
-      page: 2,
-      pageSize: 20,
-    });
+    const result = await getReminders(
+      {
+        status: "scheduled",
+        q: " 备份 ",
+        sort: "trigger_at",
+        page: 2,
+        pageSize: 20,
+      },
+      controller.signal,
+    );
     const url = new URL(String(fetchMock.mock.calls[0][0]), "http://local");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       page: "2",
@@ -155,6 +164,27 @@ describe("Reminder API contract", () => {
         meta: { page: 1, page_size: 1, total: 2, server_now: "now" },
       }),
     ).toThrow();
+  });
+
+  it("encodes detail ids and forwards request cancellation", async () => {
+    const id = "reminder/id with space";
+    const controller = new AbortController();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        controller.abort();
+        expect(init?.signal?.aborted).toBe(true);
+        return jsonResponse({ data: reminderPayload({ id }) });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await getReminder(id, controller.signal);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/reminders/reminder%2Fid%20with%20space",
+    );
+    expect(result.id).toBe(id);
   });
 
   it("uses idempotency and optimistic-lock headers for writes", async () => {
