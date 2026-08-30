@@ -37,6 +37,7 @@ import {
 import type { ContentItem, ContentItemStatus } from "../types/models";
 
 type ContentCalendarView = "month" | "unscheduled" | "archived";
+type ContentCreationMode = "scheduled" | "unscheduled";
 
 const statusLabel: Record<ContentItemStatus, string> = {
   draft: "草稿",
@@ -209,11 +210,15 @@ function ContentDiscoveryList({
 function CreateContentItemModal({
   open,
   onClose,
+  onCreated,
   month,
+  mode,
 }: {
   open: boolean;
   onClose: () => void;
+  onCreated: (item: ContentItem) => void;
   month: Date;
+  mode: ContentCreationMode;
 }) {
   const create = useCreateContentItem();
   const projects = useProjectsQuery(
@@ -225,29 +230,53 @@ function CreateContentItemModal({
   const [projectId, setProjectId] = useState("");
   const [date, setDate] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const resetDraft = () => {
+    setTitle("");
+    setPlatform("");
+    setProjectId("");
+    setDate("");
+    setError(null);
+    create.reset();
+  };
+  const close = () => {
+    if (create.isPending) return;
+    resetDraft();
+    onClose();
+  };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!title.trim() || !platform.trim() || !date) {
-      setError("请填写内容标题、平台和计划日期。");
+    if (create.isPending) return;
+    if (!title.trim() || !platform.trim() || (mode === "scheduled" && !date)) {
+      setError(
+        mode === "scheduled"
+          ? "请填写内容标题、平台和计划日期。"
+          : "请填写内容标题和平台。",
+      );
       return;
     }
-    const scheduledAt = new Date(`${date}T09:00:00`).toISOString();
+    setError(null);
+    const scheduledAt =
+      mode === "scheduled"
+        ? new Date(`${date}T09:00:00`).toISOString()
+        : undefined;
     create.mutate(
       {
         title: title.trim(),
         platform: platform.trim(),
-        status: "scheduled",
+        status: mode === "scheduled" ? "scheduled" : "draft",
         projectId: projectId || null,
-        scheduledAt,
-        scheduledTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        ...(mode === "scheduled"
+          ? {
+              scheduledAt,
+              scheduledTimezone:
+                Intl.DateTimeFormat().resolvedOptions().timeZone,
+            }
+          : {}),
       },
       {
-        onSuccess: () => {
-          setTitle("");
-          setPlatform("");
-          setProjectId("");
-          setDate("");
-          onClose();
+        onSuccess: (item) => {
+          resetDraft();
+          onCreated(item);
         },
       },
     );
@@ -259,7 +288,7 @@ function CreateContentItemModal({
           <button
             className="button button-secondary"
             disabled={create.isPending}
-            onClick={onClose}
+            onClick={close}
             type="button"
           >
             取消
@@ -270,13 +299,22 @@ function CreateContentItemModal({
             form="content-item-form"
             type="submit"
           >
-            {create.isPending ? "正在创建…" : "创建内容"}
+            {create.isPending
+              ? "正在创建…"
+              : mode === "unscheduled"
+                ? "创建无排期内容"
+                : "创建内容"}
           </button>
         </>
       }
-      onClose={onClose}
+      dismissible={!create.isPending}
+      onClose={close}
       open={open}
-      title={`新建 ${month.getFullYear()}年${month.getMonth() + 1}月内容`}
+      title={
+        mode === "scheduled"
+          ? `新建 ${month.getFullYear()}年${month.getMonth() + 1}月内容`
+          : "新建无排期内容"
+      }
       width="560px"
     >
       <form id="content-item-form" onSubmit={submit}>
@@ -284,6 +322,7 @@ function CreateContentItemModal({
           <span>内容标题</span>
           <input
             autoFocus
+            disabled={create.isPending}
             maxLength={200}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="例如：发布本周产品更新"
@@ -293,24 +332,33 @@ function CreateContentItemModal({
         <label className="form-field">
           <span>发布平台</span>
           <input
+            disabled={create.isPending}
             maxLength={64}
             onChange={(event) => setPlatform(event.target.value)}
             placeholder="例如：微信公众号"
             value={platform}
           />
         </label>
-        <label className="form-field">
-          <span>计划日期</span>
-          <input
-            onChange={(event) => setDate(event.target.value)}
-            required
-            type="date"
-            value={date}
-          />
-        </label>
+        {mode === "scheduled" ? (
+          <label className="form-field">
+            <span>计划日期</span>
+            <input
+              disabled={create.isPending}
+              onChange={(event) => setDate(event.target.value)}
+              required
+              type="date"
+              value={date}
+            />
+          </label>
+        ) : (
+          <p className="form-note">
+            将创建为无排期草稿；稍后可在内容详情中设置计划发布时间。
+          </p>
+        )}
         <label className="form-field form-field-last">
           <span>关联项目（可选）</span>
           <select
+            disabled={create.isPending}
             onChange={(event) => setProjectId(event.target.value)}
             value={projectId}
           >
@@ -787,7 +835,9 @@ export function ContentCalendarPage() {
     () => localDateFromKey(`${monthKey}-01`),
     [monthKey, timeZone],
   );
-  const [creating, setCreating] = useState(false);
+  const [creatingMode, setCreatingMode] = useState<ContentCreationMode | null>(
+    null,
+  );
   const detailId = searchParams.get("item")?.trim() || null;
   const view = contentViewFromSearchParams(searchParams);
   const [status, setStatus] = useState<ContentItemStatus | "">("");
@@ -1026,15 +1076,19 @@ export function ContentCalendarPage() {
     <div className="page">
       <PageHeader
         actions={
-          view === "month" ? (
+          view !== "archived" ? (
             <button
               className="button button-primary"
               disabled={schedule.isPending}
-              onClick={() => setCreating(true)}
+              onClick={() =>
+                setCreatingMode(
+                  view === "unscheduled" ? "unscheduled" : "scheduled",
+                )
+              }
               type="button"
             >
               <Plus size={15} />
-              新建内容
+              {view === "unscheduled" ? "新建无排期内容" : "新建内容"}
             </button>
           ) : undefined
         }
@@ -1289,14 +1343,20 @@ export function ContentCalendarPage() {
       {hasLoadedData && items.length === 0 ? (
         <EmptyState
           action={
-            view === "month" ? (
+            view !== "archived" ? (
               <button
                 className="button button-primary"
-                onClick={() => setCreating(true)}
+                onClick={() =>
+                  setCreatingMode(
+                    view === "unscheduled" ? "unscheduled" : "scheduled",
+                  )
+                }
                 type="button"
               >
                 <Plus size={15} />
-                新建第一条内容
+                {view === "unscheduled"
+                  ? "新建第一条无排期内容"
+                  : "新建第一条内容"}
               </button>
             ) : undefined
           }
@@ -1318,8 +1378,13 @@ export function ContentCalendarPage() {
       ) : null}
       <CreateContentItemModal
         month={month}
-        onClose={() => setCreating(false)}
-        open={creating}
+        mode={creatingMode ?? "scheduled"}
+        onClose={() => setCreatingMode(null)}
+        onCreated={(item) => {
+          setCreatingMode(null);
+          openDetail(item.id);
+        }}
+        open={creatingMode !== null}
       />
       <ContentItemDetailModal contentItemId={detailId} onClose={closeDetail} />
     </div>

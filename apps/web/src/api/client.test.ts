@@ -5,6 +5,7 @@ import {
   applyBusinessPackageImport,
   batchUpdateTasks,
   createBackup,
+  createContentItem,
   createFinancialEntry,
   createInvoice,
   createPersonActor,
@@ -91,6 +92,112 @@ import {
 } from "./client";
 
 describe("content item requests", () => {
+  it("omits schedule fields when creating an unscheduled draft", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse(
+          {
+            data: {
+              id: "content-draft-1",
+              title: "稍后安排的内容",
+              platform: "Newsletter",
+              status: "draft",
+              scheduled_at: null,
+              scheduled_timezone: null,
+              published_at: null,
+              project_id: null,
+              notes: null,
+              external_link: null,
+              manual_order: 1024,
+              archived_from_status: null,
+              version: 1,
+              created_at: "2026-08-30T00:00:00Z",
+              updated_at: "2026-08-30T00:00:00Z",
+              tasks: [],
+              required_task_total: 0,
+              required_task_done: 0,
+            },
+          },
+          201,
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createContentItem({
+        title: "稍后安排的内容",
+        platform: "Newsletter",
+        status: "draft",
+        projectId: null,
+      }),
+    ).resolves.toMatchObject({
+      id: "content-draft-1",
+      status: "draft",
+      scheduledAt: null,
+      scheduledTimezone: null,
+    });
+
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "稍后安排的内容",
+      platform: "Newsletter",
+      status: "draft",
+      project_id: null,
+    });
+  });
+
+  it("includes both schedule fields when creating scheduled content", async () => {
+    const scheduledAt = "2026-09-05T01:00:00.000Z";
+    const scheduledTimezone = "Asia/Shanghai";
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse(
+          {
+            data: {
+              id: "content-scheduled-1",
+              title: "九月发布计划",
+              platform: "微信公众号",
+              status: "scheduled",
+              scheduled_at: scheduledAt,
+              scheduled_timezone: scheduledTimezone,
+              published_at: null,
+              project_id: null,
+              notes: null,
+              external_link: null,
+              manual_order: 1024,
+              archived_from_status: null,
+              version: 1,
+              created_at: "2026-08-30T00:00:00Z",
+              updated_at: "2026-08-30T00:00:00Z",
+              tasks: [],
+              required_task_total: 0,
+              required_task_done: 0,
+            },
+          },
+          201,
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createContentItem({
+      title: "九月发布计划",
+      platform: "微信公众号",
+      status: "scheduled",
+      scheduledAt,
+      scheduledTimezone,
+      projectId: null,
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      title: "九月发布计划",
+      platform: "微信公众号",
+      status: "scheduled",
+      scheduled_at: scheduledAt,
+      scheduled_timezone: scheduledTimezone,
+      project_id: null,
+    });
+  });
+
   it.each(["scheduled", "unscheduled"] as const)(
     "serializes the %s content schedule state filter",
     async (scheduleState) => {

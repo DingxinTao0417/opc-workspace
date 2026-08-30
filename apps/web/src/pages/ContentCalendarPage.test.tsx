@@ -18,6 +18,10 @@ const hooks = vi.hoisted(() => ({
   detail: vi.fn(),
   projects: vi.fn(),
   tasks: vi.fn(),
+  create: vi.fn(),
+  createError: null as Error | null,
+  createPending: false,
+  createReset: vi.fn(),
   update: vi.fn(),
   schedule: vi.fn(),
   scheduleReset: vi.fn(),
@@ -35,9 +39,11 @@ vi.mock("../api/hooks", () => ({
   useProjectsQuery: hooks.projects,
   useTasksQuery: hooks.tasks,
   useCreateContentItem: () => ({
-    isPending: false,
-    isError: false,
-    mutate: vi.fn(),
+    isPending: hooks.createPending,
+    isError: Boolean(hooks.createError),
+    error: hooks.createError,
+    mutate: hooks.create,
+    reset: hooks.createReset,
   }),
   useUpdateContentItem: () => ({
     isPending: false,
@@ -183,6 +189,13 @@ describe("ContentCalendarPage", () => {
     vi.useRealTimers();
   });
   beforeEach(() => {
+    hooks.create.mockReset();
+    hooks.createError = null;
+    hooks.createPending = false;
+    hooks.createReset.mockReset();
+    hooks.createReset.mockImplementation(() => {
+      hooks.createError = null;
+    });
     hooks.update.mockReset();
     hooks.schedule.mockReset();
     hooks.scheduleReset.mockReset();
@@ -289,7 +302,7 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByText("1 条未排期内容")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "上个月" })).toBeNull();
     expect(screen.queryByText(/键盘改期/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "新建内容" })).toBeNull();
+    expect(screen.getByRole("button", { name: "新建无排期内容" })).toBeTruthy();
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "/content-calendar?source=inbox&campaign=launch&view=unscheduled",
     );
@@ -301,6 +314,205 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByTestId("location-probe")).toHaveTextContent(
       "source=inbox&campaign=launch&view=unscheduled&item=content-unscheduled",
     );
+  });
+
+  it("creates an unscheduled draft without schedule fields and opens its addressed detail", () => {
+    const created = {
+      ...unscheduledItem,
+      id: "content-created-unscheduled",
+      title: "稍后安排的内容",
+    };
+    hooks.items.mockReturnValue(contentItemsResult([]));
+    hooks.create.mockImplementation((_input, options) =>
+      options.onSuccess(created),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/content-calendar?view=unscheduled&source=inbox&campaign=launch",
+        ]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "新建无排期内容" }));
+    expect(screen.getByRole("dialog", { name: "新建无排期内容" })).toBeTruthy();
+    expect(screen.queryByLabelText("计划日期")).toBeNull();
+    expect(
+      screen.getByText(
+        "将创建为无排期草稿；稍后可在内容详情中设置计划发布时间。",
+      ),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "  稍后安排的内容  " },
+    });
+    fireEvent.change(screen.getByLabelText("发布平台"), {
+      target: { value: "  Newsletter  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建无排期内容" }));
+
+    expect(hooks.create).toHaveBeenCalledWith(
+      {
+        title: "稍后安排的内容",
+        platform: "Newsletter",
+        status: "draft",
+        projectId: null,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith(created.id);
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/content-calendar?view=unscheduled&source=inbox&campaign=launch&item=${created.id}`,
+    );
+    expect(screen.queryByRole("dialog", { name: "新建无排期内容" })).toBeNull();
+  });
+
+  it("keeps the creation mode chosen at open time when the background view changes", () => {
+    hooks.items.mockReturnValue(contentItemsResult([]));
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "新建无排期内容" }));
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "锁定模式的内容" },
+    });
+    fireEvent.change(screen.getByLabelText("发布平台"), {
+      target: { value: "博客" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "月历" }));
+
+    expect(screen.getByRole("dialog", { name: "新建无排期内容" })).toBeTruthy();
+    expect(screen.queryByLabelText("计划日期")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "创建无排期内容" }));
+    expect(hooks.create).toHaveBeenCalledWith(
+      {
+        title: "锁定模式的内容",
+        platform: "博客",
+        status: "draft",
+        projectId: null,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("clears a cancelled draft and validation error before another creation mode opens", () => {
+    hooks.items.mockReturnValue(contentItemsResult([]));
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "新建内容" }));
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "不再保留的标题" },
+    });
+    fireEvent.change(screen.getByLabelText("发布平台"), {
+      target: { value: "博客" },
+    });
+    fireEvent.submit(document.getElementById("content-item-form")!);
+    expect(screen.getByText("请填写内容标题、平台和计划日期。")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(hooks.createReset).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "无排期" }));
+    fireEvent.click(screen.getByRole("button", { name: "新建无排期内容" }));
+    expect(screen.getByLabelText("内容标题")).toHaveValue("");
+    expect(screen.getByLabelText("发布平台")).toHaveValue("");
+    expect(screen.queryByText("请填写内容标题、平台和计划日期。")).toBeNull();
+  });
+
+  it("keeps month creation scheduled and opens the created detail", () => {
+    const created = {
+      ...item,
+      id: "content-created-scheduled",
+      title: "九月发布计划",
+    };
+    hooks.create.mockImplementation((_input, options) =>
+      options.onSuccess(created),
+    );
+    render(
+      <MemoryRouter initialEntries={["/content-calendar?source=toolbar"]}>
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "新建内容" }));
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "九月发布计划" },
+    });
+    fireEvent.change(screen.getByLabelText("发布平台"), {
+      target: { value: "微信公众号" },
+    });
+    fireEvent.change(screen.getByLabelText("计划日期"), {
+      target: { value: "2026-09-05" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建内容" }));
+
+    expect(hooks.create).toHaveBeenCalledWith(
+      {
+        title: "九月发布计划",
+        platform: "微信公众号",
+        status: "scheduled",
+        projectId: null,
+        scheduledAt: new Date("2026-09-05T09:00:00").toISOString(),
+        scheduledTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith(created.id);
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/content-calendar?source=toolbar&item=${created.id}`,
+    );
+  });
+
+  it("retains an unscheduled draft after failure and blocks duplicate pending submits", () => {
+    hooks.items.mockReturnValue(contentItemsResult([]));
+    const view = render(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "新建无排期内容" }));
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "保留的草稿" },
+    });
+    fireEvent.change(screen.getByLabelText("发布平台"), {
+      target: { value: "博客" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建无排期内容" }));
+    expect(hooks.create).toHaveBeenCalledTimes(1);
+
+    hooks.createError = new Error("本地服务暂不可用");
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("本地服务暂不可用")).toBeTruthy();
+    expect(screen.getByLabelText("内容标题")).toHaveValue("保留的草稿");
+    expect(screen.getByLabelText("发布平台")).toHaveValue("博客");
+
+    hooks.createError = null;
+    hooks.createPending = true;
+    view.rerender(
+      <MemoryRouter initialEntries={["/content-calendar?view=unscheduled"]}>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    const form = document.getElementById("content-item-form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    expect(hooks.create).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("内容标题")).toBeDisabled();
+    expect(screen.getByLabelText("发布平台")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "正在创建…" })).toBeDisabled();
   });
 
   it("discovers archived content across months and with or without a schedule", () => {
@@ -330,6 +542,7 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByText("未排期")).toBeTruthy();
     expect(screen.getByText("2 条已归档内容")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "上个月" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /新建/ })).toBeNull();
 
     fireEvent.click(
       screen.getByRole("button", { name: "查看内容 去年已归档内容" }),
@@ -456,7 +669,13 @@ describe("ContentCalendarPage", () => {
 
     expect(screen.getByText(title)).toBeTruthy();
     expect(screen.getByText(message)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "新建第一条内容" })).toBeNull();
+    if (view === "unscheduled") {
+      expect(
+        screen.getByRole("button", { name: "新建第一条无排期内容" }),
+      ).toBeTruthy();
+    } else {
+      expect(screen.queryByRole("button", { name: /新建第一条/ })).toBeNull();
+    }
   });
 
   it("announces the active discovery view while it is loading", () => {
