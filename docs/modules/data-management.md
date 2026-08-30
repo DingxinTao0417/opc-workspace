@@ -1,10 +1,10 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v44（2026-08-29）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出、冲突预检和同 schema 零主键冲突追加已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择、实际冲突合并/UUID 重映射、跨 schema 升级、计划备份和完整跨版本矩阵仍未实现。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出、冲突预检、同 schema 零主键冲突追加，以及每日计划备份/启动补偿/只清理自动包的保留策略已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天容量样本保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择、实际冲突合并/UUID 重映射、跨 schema 升级、外部目标和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.83](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.84](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -72,7 +72,7 @@
 - 非空目标存在主键/唯一语义冲突时的逐条策略、UUID 重映射、跨 schema 升级应用与兼容矩阵；零主键冲突追加、只读冲突清单和 schema 方向分类已经实现；
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 容量趋势的大数据量聚合与导出；物理卷身份/同卷去重、用户阈值配置、手动容量检查和 30 天本地历史已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
-- 计划备份、保留策略、增量备份、加密和云目标。
+- 计划备份的外部目标、周期恢复抽检、增量备份、加密和云目标；本地每日计划与自动包保留已交付。
 
 ## 当前应用数据布局
 
@@ -175,7 +175,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v43：
+当前 schema v44：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -184,7 +184,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22–v42 依次交付受控附件、来源保护、头像、Inbox 来源、storage 设置、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘。schema v43 加法新增 `storage_capacity_samples`，按无路径逻辑 scope 保存 15 分钟桶；迁移不创建样本或业务 demo 数据，后续从 `044_*` 继续。
+- schema v22–v42 依次交付受控附件、来源保护、头像、Inbox 来源、storage 设置、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘。schema v43 加法新增 `storage_capacity_samples`，按无路径逻辑 scope 保存 15 分钟桶；schema v44 加法新增默认关闭的 `scheduled_backup_policy` 单例，不创建备份或业务 demo 数据，后续从 `045_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -204,7 +204,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - 018：Client Activity 的人工 note/meeting 与预留 system reference 契约、版本化修改、带原因软删除、不可变身份/终态、时间线索引和父 Client 版本传播。
 - 019：Client Attachment 的受控文件事实、可选 Activity 关联、跨表 object ID 唯一、完整性观察、成组软删除、不可变 attachment/client tombstone、聚合删除保护和 Client 版本传播。
 
-新增 schema 只能从 `044_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖真实旧版本数据保留、约束、回滚和外键状态。schema v43 是加法迁移，不创建初始容量样本；样本只来自后续真实探测。
+新增 schema 只能从 `045_*` 继续追加，不修改已发布迁移。迁移文件头允许连续组合 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；普通注释或 SQL 出现后不再解析指令，避免正文误触发。迁移测试必须覆盖真实旧版本数据保留、约束、回滚和外键状态。schema v44 是加法迁移，只创建默认关闭的策略行，不创建备份、容量样本或业务 demo 数据。
 
 ## v0.1 备份/恢复目标与当前进度
 
@@ -240,7 +240,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v43 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。容量样本是本机运行诊断事实，不进入便携业务导入导出。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v44 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。容量样本与计划备份策略/运行结果是本机维护事实，不进入便携业务导入导出。
 
 正式 apply 根据 `replace_empty / append` 要求不同固定确认头，并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中写入业务白名单、重建排除于导出之外的 `task_focus_totals`，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。append 只接受同 schema 零主键重叠，保留目标 owner/system、设置与既有业务事实；源规则只可替换未修改默认 Automation。跨 schema、主键冲突逐条策略与 UUID 重映射仍待独立设计。
 
@@ -248,7 +248,16 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 计划备份（v0.3）
 
-后续再评审定时计划、备份保留数量、容量趋势聚合/导出、增量方式、加密和可选外部目标。不得在 v0.1 悄悄启用后台上传或付费云资源。
+schema v44 与 API v1 已交付本机计划首个纵切：
+
+1. `scheduled_backup_policy` 是默认关闭的单例机器维护事实，保存每日 `HH:MM`、IANA 时区、1–365 份保留数、当地日认领和最近成功/失败安全状态；不进入业务 JSON/ZIP。
+2. 保存使用 `If-Match` 乐观锁。设置页先在 draft 中即时预览启停、时间、时区和保留影响；保存后后台生效，取消恢复最近 committed。
+3. Sidecar ready 时先做一次错过计划补偿，之后默认每分钟扫描；到达或错过当地时间且当天未认领时，在维护写锁与备份互斥锁内原子认领，同一当地日最多尝试一次，避免持续低空间时刷屏。
+4. 计划执行复用现有容量准入、`VACUUM INTO`、受控文件复制、manifest/hash、quick/foreign-key/schema/identity 和原子发布链；manifest/list 用 `kind=scheduled` 区分计划包，旧包无 kind 时兼容解释为 manual。
+5. 成功发布后按 `created_at/id` 对 scheduled 包稳定排序，只删除超过 `retention_count` 的计划包；manual、导入/恢复/迁移回滚包永不参与。存在 pending restore 时，目标和回滚 ID 额外保护；安全路径验证或目录同步失败即停止清理并记录 `BACKUP_RETENTION_FAILED`，不会扩大删除范围。
+6. 最近失败只保存固定错误码（容量不足/无法确认、创建失败、保留失败），不保存路径、卷、容量或底层错误。计划失败不伪造成业务 Workflow Event。
+
+仍待评审：外部目录、周期恢复抽检、增量方式、加密、云目标和容量趋势导出。不得悄悄启用后台上传或付费云资源。
 
 ## 当前 API 与后续作业状态
 
@@ -257,6 +266,8 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 | 方法与路径                                      | 当前契约                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /api/v1/backups`                           | 列出内部备份根中的 UUID 包和上次成功校验事实；清单损坏项显示为 invalid，不暴露绝对路径                                                                                                                                                                                                                                                                                                                                                           |
+| `GET /api/v1/backups/policy`                    | 读取默认关闭的每日计划、IANA 时区、保留数、版本、下一次计划与最近安全执行状态；不返回路径/容量/底层错误                                                                                                                                                                                                                                                                                                                                          |
+| `PATCH /api/v1/backups/policy`                  | 要求 `If-Match` 并完整提交 enabled/time/timezone/retention；严格验证 24 小时时间、IANA 时区和 1–365 范围，版本冲突不覆盖                                                                                                                                                                                                                                                                                                                         |
 | `POST /api/v1/backups`                          | 可选 `note`（最多 200 字）和 `Idempotency-Key`；锁内先重放幂等结果，再按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量只探测 backup root。可用量小于需求返回 `507 BACKUP_SPACE_INSUFFICIENT`，无法确认返回 `503 BACKUP_CAPACITY_UNAVAILABLE`，恰好等于需求允许创建；两类拒绝无 staging/新包/业务变化且不投影 generic incident。通过后才创建、完整校验并原子发布；后续实际失败返回 `BACKUP_CREATE_FAILED` 并尽力投影安全 Inbox Item |
 | `POST /api/v1/backups/:id/verify`               | 对 canonical UUID 包重新校验 manifest、预期文件全集、hash/size、marker、数据库 quick/foreign-key/schema/identity/Artifact。操作失败返回 `BACKUP_VERIFY_FAILED` 并尽力投影安全 Inbox Item；包无效返回 `BACKUP_INVALID` 且不投影                                                                                                                                                                                                                   |
 | `POST /api/v1/backups/:id/drill`                | 在隔离临时数据根复制、打开/迁移数据库并声明 Artifact store，验证可恢复性后清理临时数据；不替换当前数据                                                                                                                                                                                                                                                                                                                                           |
@@ -344,12 +355,14 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [x] 鉴权手动容量检查：固定返回数据库/受控文件/备份逻辑位置、可用/总字节、已保存阈值和 `healthy/low/unavailable`，不返回路径或探测错误；部分失败可独立展示和重试。
 - [x] Windows 卷 GUID / Unix 设备号只在进程内用于同卷去重；API 仅返回 `shared_volume` 布尔值，设置页提示共享容量，不暴露卷 ID、路径或盘符；身份探测失败安全退回规范路径独立检查。
 - [x] schema v43 容量历史：物理卷按逻辑 scope 去重采样、15 分钟桶、30 天保留、1–30 天只读 API 与设置页 7 天趋势；不保存或返回路径、盘符、卷 ID。
+- [x] schema v44 计划备份：默认关闭策略、IANA 每日计划、启动/周期补偿、当地日单次认领、最近执行状态和版本化设置。
+- [x] 计划包复用容量与完整校验链；保留只删除超限 scheduled 包，manual/内部回滚/pending restore 均受保护。
 - [x] 真实浏览器已验证 schema v43 迁移后的设置页趋势、物理卷逻辑组合、首个样本和同桶手动刷新；本次验收后开发服务已停止。
 - [x] 空工作区同 schema 含文件 ZIP 预检/确认导入、自动回滚点、文件无覆盖发布和 DB 失败补偿。
 - [x] 非空目标只读冲突映射：逐表源/目标行数与主键重叠，不返回业务值，不创建备份或改变数据；跨 schema 包分类旧/新方向并保持 apply 禁用。
 - [x] 同 schema 非空目标零主键冲突追加：独立 apply mode/确认词、维护锁内复验、目标 owner/设置/业务事实保留、未修改默认 Automation 受控合并、回滚备份、事务完整性复验；ZIP 另在备份前阻断已有受控文件。
 - [x] 真实浏览器用当前非空工作区的含文件 ZIP 验证只读预检：显示 18 行目标事实、18 条主键重叠及 4 个逐表清单项，确认按钮禁用；未执行 apply，数据库无写入。
-- [ ] 非空目标主键/唯一语义冲突策略与 UUID 重映射、保留策略、计划备份和跨版本兼容矩阵。
+- [ ] 非空目标主键/唯一语义冲突策略与 UUID 重映射、外部备份目标、周期恢复抽检和跨版本兼容矩阵。
 
 ## 相关代码/PRD链接
 
@@ -383,6 +396,10 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - [schema v15 Inbox 编排迁移](../../services/sidecar/internal/database/migrations/015_inbox_task_orchestration.sql)
 - [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
 - [备份 API 与校验器](../../services/sidecar/internal/api/backups.go)
+- [计划备份与安全保留](../../services/sidecar/internal/api/scheduled_backups.go)
+- [计划备份 API/启动测试](../../services/sidecar/internal/api/scheduled_backups_test.go)
+- [schema v44 计划备份策略迁移](../../services/sidecar/internal/database/migrations/044_scheduled_backup_policy.sql)
+- [schema v44 迁移测试](../../services/sidecar/internal/database/scheduled_backup_policy_migration_test.go)
 - [备份 API 测试](../../services/sidecar/internal/api/backups_test.go)
 - [系统维护 Inbox 投影](../../services/sidecar/internal/api/system_maintenance_inbox.go)
 - [隔离恢复演练](../../services/sidecar/internal/api/backup_drill.go)

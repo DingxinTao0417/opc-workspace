@@ -13,6 +13,8 @@ import (
 
 const deletingBackupPrefix = ".deleting-"
 
+var errBackupDeleteUnsafe = errors.New("backup delete target is unsafe")
+
 func (a *API) deleteBackup(c *gin.Context) {
 	if a.backupStore == nil {
 		writeError(c, http.StatusServiceUnavailable, "BACKUP_UNAVAILABLE", "Verified local backups are unavailable")
@@ -30,48 +32,18 @@ func (a *API) deleteBackup(c *gin.Context) {
 
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
-	packagePath := filepath.Join(a.backupStore.root, id)
-	deletingPath := filepath.Join(a.backupStore.root, deletingBackupPrefix+id)
-	packageExists, err := safeBackupDeletionPath(packagePath)
-	if err != nil {
-		a.logBackupError("validate delete target", err)
-		writeError(c, http.StatusConflict, "BACKUP_DELETE_UNSAFE", "The backup package contains an unsafe filesystem entry and was not deleted")
-		return
-	}
-	deletingExists, err := safeBackupDeletionPath(deletingPath)
-	if err != nil {
-		a.logBackupError("validate pending delete", err)
-		writeError(c, http.StatusConflict, "BACKUP_DELETE_UNSAFE", "A pending backup deletion contains an unsafe filesystem entry")
-		return
-	}
-	if !packageExists && !deletingExists {
-		writeError(c, http.StatusNotFound, "BACKUP_NOT_FOUND", "Backup not found")
-		return
-	}
-	if packageExists {
-		if deletingExists {
-			writeError(c, http.StatusConflict, "BACKUP_DELETE_FAILED", "A previous deletion for this backup could not be completed")
+	if err := removeBackupPackageSafely(a.backupStore.root, id); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(c, http.StatusNotFound, "BACKUP_NOT_FOUND", "Backup not found")
 			return
 		}
-		if err := os.Rename(packagePath, deletingPath); err != nil {
-			a.logBackupError("stage delete", err)
-			writeError(c, http.StatusInternalServerError, "BACKUP_DELETE_FAILED", "The backup could not be staged for deletion")
+		if errors.Is(err, errBackupDeleteUnsafe) {
+			a.logBackupError("validate delete target", err)
+			writeError(c, http.StatusConflict, "BACKUP_DELETE_UNSAFE", "The backup package contains an unsafe filesystem entry and was not deleted")
 			return
 		}
-		if err := syncArtifactDirectory(a.backupStore.root); err != nil {
-			a.logBackupError("sync staged delete", err)
-			writeError(c, http.StatusInternalServerError, "BACKUP_DELETE_FAILED", "The backup deletion could not be committed safely")
-			return
-		}
-	}
-	if err := os.RemoveAll(deletingPath); err != nil {
-		a.logBackupError("remove staged delete", err)
-		writeError(c, http.StatusInternalServerError, "BACKUP_DELETE_FAILED", "The backup was hidden but its files could not be removed; retry the same deletion")
-		return
-	}
-	if err := syncArtifactDirectory(a.backupStore.root); err != nil {
-		a.logBackupError("sync delete", err)
-		writeError(c, http.StatusInternalServerError, "BACKUP_DELETE_FAILED", "The backup files were removed but the directory sync failed")
+		a.logBackupError("delete", err)
+		writeError(c, http.StatusInternalServerError, "BACKUP_DELETE_FAILED", "The backup could not be deleted safely; retry the same deletion")
 		return
 	}
 	c.Status(http.StatusNoContent)

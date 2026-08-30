@@ -728,6 +728,28 @@ describe("SettingsModal", () => {
             { headers: { "Content-Type": "application/json" } },
           );
         }
+        if (url.endsWith("/api/v1/backups/policy")) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                enabled: false,
+                local_time: "02:00",
+                timezone: "UTC",
+                retention_count: 30,
+                last_attempted_date: null,
+                last_attempt_at: null,
+                last_success_at: null,
+                last_backup_id: null,
+                last_status: "idle",
+                last_error_code: null,
+                version: 1,
+                updated_at: "2026-08-28T12:00:00Z",
+                next_run_at: null,
+              },
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
         if (url.includes("/api/v1/backups")) {
           return new Response(
             JSON.stringify({
@@ -745,6 +767,7 @@ describe("SettingsModal", () => {
                   artifact_bytes: 0,
                   database_bytes: 65536,
                   total_bytes: 65648,
+                  kind: "manual",
                 },
               ],
             }),

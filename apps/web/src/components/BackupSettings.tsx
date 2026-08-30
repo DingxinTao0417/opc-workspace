@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   Archive,
+  CalendarClock,
   DatabaseBackup,
   Download,
   FileJson,
@@ -12,7 +13,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import { requestApplicationRestart } from "../api/desktop";
 import {
@@ -27,13 +28,16 @@ import {
   usePreviewBusinessDataImport,
   usePreviewBusinessPackageImport,
   useRestoreDiagnosticsQuery,
+  useScheduledBackupPolicyQuery,
   useScheduleBackupRestore,
+  useUpdateScheduledBackupPolicy,
   useVerifyBackup,
 } from "../api/hooks";
 import type {
   BackupSummary,
   BusinessImportPreview,
   BusinessPackageImportPreview,
+  ScheduledBackupPolicy,
 } from "../types/models";
 
 function formatBytes(value: number): string {
@@ -308,7 +312,10 @@ function BackupCard({
       </div>
       <div className="settings-backup-card-body">
         <div className="settings-backup-card-title">
-          <strong>{backup.note || "手动备份"}</strong>
+          <strong>
+            {backup.note ||
+              (backup.kind === "scheduled" ? "计划备份" : "手动备份")}
+          </strong>
           <span>{formatLocalTime(backup.createdAt)}</span>
         </div>
         {invalid ? (
@@ -383,6 +390,8 @@ interface BackupSettingsProps {
 
 export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const backupsQuery = useBackupsQuery();
+  const scheduledPolicyQuery = useScheduledBackupPolicyQuery();
+  const updateScheduledPolicyMutation = useUpdateScheduledBackupPolicy();
   const restoreDiagnosticsQuery = useRestoreDiagnosticsQuery();
   const createMutation = useCreateBackup();
   const verifyMutation = useVerifyBackup();
@@ -413,6 +422,15 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<ScheduledBackupPolicy | null>(
+    null,
+  );
+  const [policyDirty, setPolicyDirty] = useState(false);
+  useEffect(() => {
+    if (scheduledPolicyQuery.data && !policyDirty) {
+      setPolicyDraft(scheduledPolicyQuery.data);
+    }
+  }, [policyDirty, scheduledPolicyQuery.data]);
   const pending =
     createMutation.isPending ||
     verifyMutation.isPending ||
@@ -424,7 +442,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     importPreviewMutation.isPending ||
     importApplyMutation.isPending ||
     packageImportPreviewMutation.isPending ||
-    packageImportApplyMutation.isPending;
+    packageImportApplyMutation.isPending ||
+    updateScheduledPolicyMutation.isPending;
   const restoreDiagnostics = restoreDiagnosticsQuery.data;
   const diagnosticRestore =
     restoreDiagnostics?.restartRequired &&
@@ -450,6 +469,52 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     packageImportPreviewMutation.error ??
     packageImportApplyMutation.error ??
     downloadError;
+
+  const changePolicyDraft = (
+    update: Partial<
+      Pick<
+        ScheduledBackupPolicy,
+        "enabled" | "localTime" | "timezone" | "retentionCount"
+      >
+    >,
+  ) => {
+    setPolicyDraft((current) =>
+      current ? { ...current, ...update } : current,
+    );
+    setPolicyDirty(true);
+    setSuccess(null);
+    updateScheduledPolicyMutation.reset();
+  };
+
+  const cancelPolicyDraft = () => {
+    setPolicyDraft(scheduledPolicyQuery.data ?? null);
+    setPolicyDirty(false);
+    updateScheduledPolicyMutation.reset();
+  };
+
+  const savePolicyDraft = () => {
+    if (!policyDraft || !policyDirty) return;
+    updateScheduledPolicyMutation.mutate(
+      {
+        enabled: policyDraft.enabled,
+        localTime: policyDraft.localTime,
+        timezone: policyDraft.timezone.trim(),
+        retentionCount: policyDraft.retentionCount,
+        expectedVersion: policyDraft.version,
+      },
+      {
+        onSuccess: (saved) => {
+          setPolicyDraft(saved);
+          setPolicyDirty(false);
+          setSuccess(
+            saved.enabled
+              ? `计划备份已启用：每天 ${saved.localTime}（${saved.timezone}），保留最近 ${saved.retentionCount} 份自动备份。`
+              : "计划备份已关闭；已有备份不会被删除。",
+          );
+        },
+      },
+    );
+  };
 
   const resetExportFeedback = () => {
     setDownloadError(null);
@@ -730,6 +795,172 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       </header>
 
       {storageSettings}
+
+      <div className="settings-group settings-backup-schedule">
+        <div className="settings-backup-intro">
+          <CalendarClock size={18} />
+          <div>
+            <strong>计划备份与自动保留</strong>
+            <span>
+              每个本地日期最多尝试一次；错过时间后会在下一次应用启动或后台扫描时补偿执行。
+            </span>
+          </div>
+        </div>
+        {scheduledPolicyQuery.isError ? (
+          <div className="settings-state settings-state-error" role="alert">
+            <AlertCircle size={16} />
+            <div>
+              <strong>无法读取计划备份策略</strong>
+              <span>{backupErrorText(scheduledPolicyQuery.error)}</span>
+            </div>
+            <button
+              className="button button-secondary"
+              onClick={() => void scheduledPolicyQuery.refetch()}
+              type="button"
+            >
+              重试
+            </button>
+          </div>
+        ) : scheduledPolicyQuery.isPending || !policyDraft ? (
+          <div aria-live="polite" className="settings-state" role="status">
+            <LoaderCircle className="animate-spin" size={16} />
+            正在读取计划备份策略…
+          </div>
+        ) : (
+          <>
+            <div className="settings-toggle-row">
+              <div>
+                <div className="settings-label settings-toggle-label">
+                  启用每日计划
+                </div>
+                <p>点击立即预览；只有保存后后台任务才会按新策略运行。</p>
+              </div>
+              <button
+                aria-checked={policyDraft.enabled}
+                aria-label="启用每日计划备份"
+                className="settings-toggle"
+                data-checked={policyDraft.enabled}
+                disabled={locked}
+                onClick={() =>
+                  changePolicyDraft({ enabled: !policyDraft.enabled })
+                }
+                role="switch"
+                type="button"
+              >
+                <span />
+              </button>
+            </div>
+            <div className="settings-backup-policy-grid">
+              <label>
+                <span className="settings-label">每日时间</span>
+                <input
+                  aria-label="每日备份时间"
+                  className="settings-text-input"
+                  disabled={locked}
+                  onInput={(event) =>
+                    changePolicyDraft({ localTime: event.currentTarget.value })
+                  }
+                  type="time"
+                  value={policyDraft.localTime}
+                />
+              </label>
+              <label>
+                <span className="settings-label">IANA 时区</span>
+                <input
+                  aria-label="计划备份时区"
+                  className="settings-text-input"
+                  disabled={locked}
+                  maxLength={100}
+                  onChange={(event) =>
+                    changePolicyDraft({ timezone: event.target.value })
+                  }
+                  placeholder="Asia/Shanghai"
+                  value={policyDraft.timezone}
+                />
+              </label>
+              <label>
+                <span className="settings-label">自动备份保留份数</span>
+                <input
+                  aria-label="自动备份保留份数"
+                  className="settings-text-input"
+                  disabled={locked}
+                  max={365}
+                  min={1}
+                  onChange={(event) =>
+                    changePolicyDraft({
+                      retentionCount: Number(event.target.value),
+                    })
+                  }
+                  type="number"
+                  value={policyDraft.retentionCount}
+                />
+              </label>
+            </div>
+            <p className="settings-backup-policy-preview" role="status">
+              {policyDraft.enabled
+                ? "预览：每天 " +
+                  (policyDraft.localTime || "--:--") +
+                  "（" +
+                  (policyDraft.timezone || "未设置时区") +
+                  "）创建完整校验备份，仅自动清理超过 " +
+                  (policyDraft.retentionCount || 0) +
+                  " 份的计划备份；手工及回滚备份不受影响。"
+                : "预览：关闭计划执行，不创建或自动清理任何备份。"}
+            </p>
+            {policyDraft.lastStatus === "succeeded" &&
+            policyDraft.lastSuccessAt ? (
+              <small>
+                最近成功：{formatLocalTime(policyDraft.lastSuccessAt)} · 备份{" "}
+                {policyDraft.lastBackupId?.slice(0, 8) ?? "未知"}
+              </small>
+            ) : policyDraft.lastStatus === "failed" ? (
+              <small className="settings-backup-error">
+                最近一次计划执行失败：
+                {policyDraft.lastErrorCode ?? "未知错误"}。现有备份未被覆盖。
+              </small>
+            ) : (
+              <small>尚无计划备份执行记录。</small>
+            )}
+            {updateScheduledPolicyMutation.error ? (
+              <p className="form-error settings-backup-feedback" role="alert">
+                {backupErrorText(updateScheduledPolicyMutation.error)}
+              </p>
+            ) : null}
+            <div className="settings-backup-policy-actions">
+              <button
+                className="button button-secondary"
+                disabled={
+                  !policyDirty || updateScheduledPolicyMutation.isPending
+                }
+                onClick={cancelPolicyDraft}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="button button-primary"
+                disabled={
+                  !policyDirty ||
+                  updateScheduledPolicyMutation.isPending ||
+                  !policyDraft.localTime ||
+                  !policyDraft.timezone.trim() ||
+                  policyDraft.retentionCount < 1 ||
+                  policyDraft.retentionCount > 365
+                }
+                onClick={savePolicyDraft}
+                type="button"
+              >
+                {updateScheduledPolicyMutation.isPending ? (
+                  <LoaderCircle className="animate-spin" size={13} />
+                ) : null}
+                {updateScheduledPolicyMutation.isPending
+                  ? "正在保存…"
+                  : "保存计划"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="settings-group settings-backup-export">
         <div className="settings-backup-intro">
@@ -1245,7 +1476,8 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       ) : null}
 
       <p className="settings-inline-note">
-        当前已开放版本化业务 JSON、含活动受控文件的 ZIP
+        当前已开放每日计划备份与只清理自动包的保留策略、版本化业务
+        JSON、含活动受控文件的 ZIP
         导入导出，以及备份的创建、查看、完整性校验、隔离演练、重启前安全恢复安排和确认删除；两类导入都支持同
         schema 零主键冲突追加，并在应用前创建回滚备份。
       </p>

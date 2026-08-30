@@ -27,8 +27,8 @@ func TestCloseToTraySettingMigrationUpgradesStoredSettingsWithoutCreatingDefault
 		t.Fatalf("upgrade v41 settings database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 43 {
-		t.Fatalf("SchemaVersion = %d, want 43", store.SchemaVersion)
+	if store.SchemaVersion != 44 {
+		t.Fatalf("SchemaVersion = %d, want 44", store.SchemaVersion)
 	}
 
 	var valueJSON string

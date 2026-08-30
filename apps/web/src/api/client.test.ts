@@ -26,6 +26,7 @@ import {
   getProjects,
   getAllTasks,
   getBackups,
+  getScheduledBackupPolicy,
   getHealth,
   getContentItem,
   getRestoreDiagnostics,
@@ -43,6 +44,7 @@ import {
   previewBusinessPackageImport,
   normalizeActorSummary,
   normalizeBackupSummary,
+  normalizeScheduledBackupPolicy,
   normalizeHealthResponse,
   normalizeTaskAssignment,
   normalizeTaskAssignmentListResult,
@@ -66,6 +68,7 @@ import {
   updateTask,
   updateTaskSavedView,
   updateActor,
+  updateScheduledBackupPolicy,
   verifyBackup,
 } from "./client";
 
@@ -1632,6 +1635,7 @@ const backupPayload = {
   artifact_bytes: 4096,
   database_bytes: 65536,
   total_bytes: 69720,
+  kind: "manual",
 };
 
 describe("verified local backups", () => {
@@ -1650,12 +1654,14 @@ describe("verified local backups", () => {
       databaseBytes: 65536,
       totalBytes: 69720,
       error: null,
+      kind: "manual",
     });
     expect(
       normalizeBackupSummary({
         id: backupPayload.id,
         verification_status: "invalid",
         error: "备份清单无效",
+        kind: "unknown",
       }),
     ).toMatchObject({
       id: backupPayload.id,
@@ -2242,6 +2248,70 @@ describe("verified local backups", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "/api/v1/diagnostics/package",
     );
+  });
+});
+
+describe("scheduled backup policy", () => {
+  const payload = {
+    enabled: true,
+    local_time: "02:30",
+    timezone: "Asia/Shanghai",
+    retention_count: 30,
+    last_attempted_date: "2026-08-29",
+    last_attempt_at: "2026-08-28T18:30:00Z",
+    last_success_at: "2026-08-28T18:30:02Z",
+    last_backup_id: backupPayload.id,
+    last_status: "succeeded",
+    last_error_code: null,
+    version: 4,
+    updated_at: "2026-08-28T18:30:02Z",
+    next_run_at: "2026-08-29T18:30:00Z",
+  };
+
+  it("strictly normalizes policy status and nullable run facts", () => {
+    expect(normalizeScheduledBackupPolicy(payload)).toMatchObject({
+      enabled: true,
+      localTime: "02:30",
+      timezone: "Asia/Shanghai",
+      retentionCount: 30,
+      lastStatus: "succeeded",
+      version: 4,
+      lastBackupId: backupPayload.id,
+    });
+    expect(() =>
+      normalizeScheduledBackupPolicy({ ...payload, retention_count: 0 }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeScheduledBackupPolicy({ ...payload, last_status: "running" }),
+    ).toThrow(ApiError);
+  });
+
+  it("loads and updates the policy with optimistic versioning", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ data: payload }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: { ...payload, enabled: false, version: 5, next_run_at: null },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await getScheduledBackupPolicy()).enabled).toBe(true);
+    expect(
+      (
+        await updateScheduledBackupPolicy({
+          enabled: false,
+          localTime: "02:30",
+          timezone: "Asia/Shanghai",
+          retentionCount: 30,
+          expectedVersion: 4,
+        })
+      ).enabled,
+    ).toBe(false);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/backups/policy");
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).get("If-Match"),
+    ).toBe('"4"');
   });
 });
 

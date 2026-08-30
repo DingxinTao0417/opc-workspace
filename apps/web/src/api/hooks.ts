@@ -63,6 +63,7 @@ import {
   getAllTags,
   getAllTasks,
   getBackups,
+  getScheduledBackupPolicy,
   getRestoreDiagnostics,
   getStorageCapacity,
   getStorageCapacityHistory,
@@ -162,6 +163,7 @@ import {
   updateProjectNote,
   updateReminder,
   updateAppSettings,
+  updateScheduledBackupPolicy,
   unlinkInboxItemTask,
   verifyBackup,
 } from "./client";
@@ -260,6 +262,7 @@ import type {
   UpdateProjectInput,
   UpdateProjectNoteInput,
   UpdateReminderInput,
+  UpdateScheduledBackupPolicyInput,
   UpdateTaskInput,
   UnlinkInboxItemTaskInput,
 } from "../types/models";
@@ -280,6 +283,7 @@ export function useSearchQuery(input: SearchListParams, enabled = true) {
 }
 
 export const backupQueryKey = ["backups"] as const;
+export const scheduledBackupPolicyQueryKey = ["backups", "policy"] as const;
 export const restoreDiagnosticsQueryKey = ["restore-diagnostics"] as const;
 export const storageCapacityQueryKey = ["diagnostics", "storage"] as const;
 export const storageCapacityHistoryQueryKey = [
@@ -295,6 +299,40 @@ export function useBackupsQuery(enabled = true) {
     retry: 1,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useScheduledBackupPolicyQuery(enabled = true) {
+  return useQuery({
+    queryKey: scheduledBackupPolicyQueryKey,
+    queryFn: getScheduledBackupPolicy,
+    enabled,
+    retry: 1,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useUpdateScheduledBackupPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateScheduledBackupPolicyInput) =>
+      updateScheduledBackupPolicy(input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: scheduledBackupPolicyQueryKey,
+        }),
+        queryClient.invalidateQueries({ queryKey: backupQueryKey }),
+      ]);
+    },
+    onError: async (error) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await queryClient.invalidateQueries({
+          queryKey: scheduledBackupPolicyQueryKey,
+        });
+      }
+    },
   });
 }
 

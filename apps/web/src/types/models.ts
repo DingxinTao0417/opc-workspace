@@ -2022,6 +2022,7 @@ export interface AgentAdapter {
 }
 
 export type BackupVerificationStatus = "verified" | "unverified" | "invalid";
+export type BackupKind = "manual" | "scheduled" | "unknown";
 
 export interface BackupSummary {
   id: string;
@@ -2037,10 +2038,37 @@ export interface BackupSummary {
   databaseBytes: number;
   totalBytes: number;
   error: string | null;
+  kind: BackupKind;
 }
 
 export interface CreateBackupInput {
   note: string;
+}
+
+export type ScheduledBackupStatus = "idle" | "succeeded" | "failed";
+
+export interface ScheduledBackupPolicy {
+  enabled: boolean;
+  localTime: string;
+  timezone: string;
+  retentionCount: number;
+  lastAttemptedDate: string | null;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastBackupId: string | null;
+  lastStatus: ScheduledBackupStatus;
+  lastErrorCode: string | null;
+  version: number;
+  updatedAt: string;
+  nextRunAt: string | null;
+}
+
+export interface UpdateScheduledBackupPolicyInput {
+  enabled: boolean;
+  localTime: string;
+  timezone: string;
+  retentionCount: number;
+  expectedVersion: number;
 }
 
 export interface BackupRestoreDrillResult {

@@ -11,7 +11,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期与白名单桌面能力、显示托盘运行时可用性、复制脱敏摘要并下载诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v43、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v42 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置、受控文件、来源保护、重复 Reminder、受限预设自动化、Agent Adapter、客户回访、路线图、内容日历、关闭到托盘及其 Inbox 来源；v43 新增不含路径/卷标识的本地容量历史
+- SQLite schema v44、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v42 交付核心业务与本地编排，v43 新增不含路径/卷标识的本地容量历史，v44 新增默认关闭的计划备份策略与运行状态
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
@@ -43,7 +43,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效、关闭到托盘偏好和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。数据设置另提供近 7 天物理卷容量趋势。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v43。T-02 仍部分完成。[PRD v9.83](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。数据设置提供近 7 天容量趋势，并已交付默认关闭的每日计划备份：按 IANA 时区启动/周期补偿，完整校验后只清理超限自动包，不触碰手工、回滚或 pending restore。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v44。T-02 仍部分完成。[PRD v9.84](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -67,7 +67,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.83）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.84）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -357,7 +357,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v43；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v42 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件、来源 guards、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap/Content 数据、关闭到托盘及其 Inbox 来源；schema v43 加法新增 15 分钟桶、30 天保留的容量样本表，不创建初始样本或业务 demo 数据；后续从 `044_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v44；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v42 交付核心业务与本地编排；schema v43 加法新增 15 分钟桶、30 天保留的容量样本表，不创建初始样本；schema v44 加法新增默认关闭的计划备份策略单例，不创建备份或业务 demo 数据；后续从 `045_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -367,4 +367,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.83](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。业务导入 preview 已能列出非空目标表/主键冲突、ZIP 目标文件碰撞并分类跨 schema 方向；同 schema 零冲突追加已开放，真实冲突策略/UUID 重映射与升级仍保持禁用。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。
+[PRD v9.84](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。业务导入 preview 已能列出非空目标表/主键冲突、ZIP 目标文件碰撞并分类跨 schema 方向；同 schema 零冲突追加已开放，真实冲突策略/UUID 重映射与升级仍保持禁用。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。

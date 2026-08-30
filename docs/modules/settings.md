@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v43。schema v42 将 `app_settings` 契约升为 v2 并增加关闭到托盘，schema v43 加法新增无路径容量历史。设置持久化、受控头像、低空间阈值/即时检查/7 天趋势、Actor、自动化、Adapter 诊断、备份/导入导出、同 schema 零主键冲突追加和脱敏运行诊断均已交付；实际冲突合并/UUID 重映射、跨 schema 升级、启动前备份选择和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema v44。schema v42 将 `app_settings` 契约升为 v2 并增加关闭到托盘，schema v43 加法新增无路径容量历史，schema v44 新增默认关闭的计划备份策略。设置持久化、受控头像、低空间阈值/即时检查/7 天趋势、计划备份与自动包保留、Actor、自动化、Adapter 诊断、备份/导入导出、同 schema 零主键冲突追加和脱敏运行诊断均已交付；实际冲突合并/UUID 重映射、跨 schema 升级、启动前备份选择、外部备份目录和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -28,7 +28,7 @@
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 自动化：从真实 `/api/v1/automations` 读取五个稳定预设；支持依赖状态、优先级或当地时间/IANA 时区即时服务端预览、规则配置独立保存、启停、下一次运行、最近 Run、空/加载/错误和失败手动重试。发票/Agent 预设明确 unavailable；该模块使用独立规则版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
 - 本地 Agent：从真实 `/api/v1/agent-adapters` 读取代码所有清单；支持空状态幂等登记、能力/安全闸门、手动诊断、加载/错误重试和未就绪启用禁用。当前诊断固定为隔离未验证，不启动进程、不创建 agent Actor/Assignment/Run；该模块使用 Adapter 自身版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
-- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。从真实 `/api/v1/backups` 读取本机备份并完成创建、校验、演练、恢复、删除；手工创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入，空间不足或容量无法确认时显示清理/刷新指引并保留未提交输入，不伪造成功或自动重试。恢复需求同时覆盖当前回滚点和 pending 目标副本。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录，并可重新检查。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP。两类导入都先预检再确认，仅允许当前 schema、终态 Focus 且目标为空；应用前通过容量准入并自动创建已校验回滚备份。
+- 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。可即时预览并版本化保存每日时间、IANA 时区和 1–365 份自动保留数；取消恢复 committed，默认关闭。从真实 `/api/v1/backups` 读取本机备份并完成创建、计划、校验、演练、恢复、删除；手工/计划创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入。计划保留只清理超限 scheduled 包，不清理手工/回滚/pending restore。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP；当前 schema 空目标或零主键冲突目标可安全应用。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health`、桌面 `sidecar_status` 与 `desktop_capabilities` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema、版本兼容和托盘运行时可用性；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，能力只接受 `available / unavailable / not_implemented`，`sessionToken`、`baseUrl`、原始 `message` 和底层平台错误不进入诊断对象、UI 或 ZIP；能力读取失败不阻断生命周期诊断。
 - 应用启动由 `SettingsBootstrap` 在渲染业务界面前读取五个服务端模块；加载失败展示可重试的全屏错误，不使用可能过期的默认值进入应用。
@@ -106,7 +106,7 @@
 - 显示数据目录、备份目录、最近成功时间和失败诊断。
 - 设置 1–100 GiB 低空间提醒阈值；修改时就地展示提醒口径，保存后由 Sidecar 下一轮扫描读取。
 - 手动容量检查只返回三个固定逻辑位置、状态与容量；阈值草稿不会伪装为本次检查口径，页面同时显示服务端实际使用的已保存阈值。
-- v0.3 增加外部备份目录、计划、保留策略和高级导入。
+- v0.3 的本地每日计划与自动包保留已交付；外部备份目录、恢复抽检和高级导入仍待。
 - 彻底删除数据属于独立危险操作，必须二次确认并与普通“恢复默认设置”分离。
 
 ### 关于与诊断
@@ -173,6 +173,14 @@
 14. owner 可选择业务 JSON 或含文件 ZIP；页面先上传预检并展示 schema/总行数，ZIP 额外展示文件数与字节数。当前 schema、终态 Focus 且空目标或非空零主键冲突时可确认：后者显示 `append` 策略、目标逐表清单，并使用不同确认词；目标 owner、设置和既有事实保留。主键/受控文件冲突或跨 schema 时按钮禁用。Sidecar 再次预检，通过只探测 backup root 的回滚包容量准入后创建已校验回滚包并原子应用，ZIP 还会无覆盖发布文件并在数据库提交前复验正文。容量不足或无法确认时页面显示专用提示且保留当前选择，业务事实不变。
 15. 页面读取启动恢复诊断；待重启计划即使关闭再打开设置也继续冻结备份写操作。已恢复、清理残留、失败隔离和无效记录只显示安全状态/计数，不显示路径或底层错误，也不提供未经确认的自动清理。
 
+### 配置每日计划与自动保留
+
+1. 页面读取 `GET /api/v1/backups/policy`；加载中、失败重试、默认关闭、最近成功/失败和下一次计划均来自服务端事实。
+2. 点击启停、修改 `HH:MM`、IANA 时区或保留数会立即更新卡片预览，但不写 SQLite；取消恢复 committed。
+3. 保存完整提交四个字段并携带当前 `If-Match`。服务端只接受有效 24 小时时间、可加载 IANA 时区和 1–365 整数；版本冲突刷新 Query，不覆盖另一窗口结果。
+4. 保存后 Sidecar 在启动及默认每分钟扫描中按当地日认领到期计划；错过时间会补偿，同一当地日最多尝试一次。执行复用完整备份容量/校验链。
+5. 成功后只清理超过上限的 `scheduled` 包；手工、导入/恢复/迁移回滚包不参与，pending restore 目标和回滚包受保护。保留失败显示固定 `BACKUP_RETENTION_FAILED`，不展示路径或底层错误。
+
 ### 数据恢复
 
 1. 用户在“数据与备份”选择已校验的本地包，先可运行无副作用的恢复演练。
@@ -210,6 +218,7 @@
 | GET / POST /api/v1/actors                     | **已实现**：分页/筛选 Actor 或幂等创建 person；创建返回 `ETag`                                                                                                                                                                                                           |
 | GET / PATCH /api/v1/actors/:id                | **已实现**：详情与 `If-Match` 更新；person 可改资料/状态，owner 只改展示名称，system 不可编辑，活动分派阻止停用                                                                                                                                                          |
 | GET / POST /api/v1/backups                    | **已实现**：列出本地包；手动创建在双锁内先重放幂等结果，否则按 SQLite/active 文件/marker/manifest + 20%（最低 64 MiB）余量仅探测 backup root。空间不足返回 507，容量无法确认返回 503，拒绝无副作用且不投影 generic incident；通过后才完整创建并校验 SQLite+Artifact 备份 |
+| GET / PATCH /api/v1/backups/policy            | **已实现**：读取/版本化保存默认关闭的每日计划、IANA 时区和 1–365 份保留数，并返回下一次计划和最近安全执行状态；不返回路径或底层错误                                                                                                                                      |
 | POST /api/v1/backups/:id/verify               | **已实现**：重新验证 UUID 包的 manifest、文件全集、哈希、marker 和临时数据库事实                                                                                                                                                                                         |
 | POST /api/v1/backups/:id/drill                | **已实现**：在隔离临时根复制并打开/迁移数据库、声明 Artifact store、逐文件验证后清理，不改当前数据                                                                                                                                                                       |
 | POST /api/v1/backups/:id/restore              | **已实现**：要求 `confirm=true`，重验目标，按回滚包+pending 目标副本执行容量准入后创建回滚包并挂起；空间不足/无法确认返回脱敏 507/503，下次 Sidecar 启动前原子替换和最终复验                                                                                             |
@@ -277,7 +286,7 @@
 ### v0.2 与 v0.3
 
 - [x] v0.2-A 增加本地 Agent Adapter 登记、健康诊断和能力/闸门设置；Runner 与 agent Actor 分派继续延期。
-- v0.3 增加备份计划、外部目录、高级导入和快捷键自定义。
+- v0.3 已增加本地计划与自动包保留；外部目录、高级导入和快捷键自定义仍待。
 - 任何远程 Provider、在线 Updater 或云同步设置都需要新的 ADR 与用户明确授权，不属于当前路线。
 
 ## 验收标准
@@ -296,6 +305,7 @@
 - “运行诊断”不展示、复制或打包会话令牌、监听地址、原始错误、本地路径和业务正文；桌面状态畸形时拒绝使用，浏览器开发模式不伪造 Tauri 事实。诊断包严格限制四个白名单 JSON，并明确不含原始日志。
 - “数据与备份”只在 Sidecar 完成 SQLite+Artifact 全量验证、隔离恢复演练、安全挂起恢复、永久删除、业务 JSON 或含文件 ZIP 完整导出/导入后显示相应成功；列表、空态、读取失败、创建中、创建失败、重新校验、演练中/失败、恢复/删除二次确认、两类导入导出中/失败、预检阻断、挂起提示和 invalid 包均有明确状态。
 - **已验证（API/组件定向）**：手动创建空间不足与容量无法确认分别显示清理备份位置/旧备份和刷新容量状态/确认本地存储可用的提示；失败保留 note 草稿，不显示成功、不自动重试，未知错误仍保留 request ID。后端覆盖锁/重放顺序、估算溢出、精确容量放行、只探测 backup root、507/503 脱敏响应，以及拒绝后无 staging/新包/业务变化/Inbox incident。
+- **已验证（迁移/API/组件定向）**：schema v44 默认关闭和字段约束、计划策略读取/验证/乐观锁、启动补偿、同当地日去重、跨日再次执行、只保留最新 scheduled 且 manual 不被删除；前端严格解析、即时预览、取消恢复和保存载荷均有覆盖。
 - **已验证（API/组件/真实浏览器）**：业务 JSON/含文件 ZIP 严格解析冲突聚合与跨 schema 方向；真实浏览器用当前非空工作区 ZIP 显示 18 行目标事实、18 条主键重叠和 4 项逐表清单，确认含文件导入按钮禁用，未执行 apply、未改写数据。
 - **已验证（API/组件）**：同 schema 非空目标在零主键冲突时返回 `append`，页面即时展示保留目标事实的追加说明与逐表清单，并以独立确认词提交；主键或受控文件碰撞保持禁用，错误确认不创建回滚包。
 - **已验证（迁移/API/组件）**：schema v43 空表与约束、同卷单样本、15 分钟桶更新、30 天清理、非法窗口拒绝、路径/卷标识不泄露、趋势严格解析及加载/空/错误状态均有覆盖。
@@ -335,6 +345,8 @@
 - [schema v16 设置迁移](../../services/sidecar/internal/database/migrations/016_app_settings.sql)
 - [设置 API 测试](../../services/sidecar/internal/api/settings_test.go)
 - [备份 API](../../services/sidecar/internal/api/backups.go)
+- [计划备份与保留 API](../../services/sidecar/internal/api/scheduled_backups.go)
+- [schema v44 计划备份策略迁移](../../services/sidecar/internal/database/migrations/044_scheduled_backup_policy.sql)
 - [含文件业务 ZIP API](../../services/sidecar/internal/api/business_package_export.go)
 - [含文件业务 ZIP 导入 API](../../services/sidecar/internal/api/business_package_import.go)
 - [含文件业务 ZIP 导入测试](../../services/sidecar/internal/api/business_package_import_test.go)

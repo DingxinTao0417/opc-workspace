@@ -6850,6 +6850,50 @@ kbd {
   padding: 16px;
 }
 
+.settings-backup-schedule {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.settings-backup-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-backup-policy-grid label {
+  min-width: 0;
+}
+
+.settings-backup-policy-grid .settings-text-input {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.settings-backup-policy-preview {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.settings-backup-policy-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .settings-backup-policy-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .settings-backup-intro {
   display: flex;
   align-items: flex-start;

@@ -1,13 +1,13 @@
 # opc-workspace 产品需求文档 (PRD)
 
-> **一人公司操作系统** · PRD v9.83
+> **一人公司操作系统** · PRD v9.84
 > 产品阶段：0 → 1 可运行基座（app v0.1.0）/ MVP 持续迭代
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-08-29
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v43
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v44
 
-> **v9.83 更新说明**：业务 JSON/含文件 ZIP 导入在既有只读冲突预检上开放同 schema 零主键冲突追加。preview 明确返回 `replace_empty / append`，append 使用独立确认词并保留目标 owner、设置和既有事实；仅未修改默认 Automation 可接收源配置。ZIP 在回滚备份前统计并阻断目标受控文件碰撞。主键冲突逐条策略、UUID 重映射和跨 schema 升级仍拒绝。app v0.1.0、API v1、schema v43 不变，无 AI/LLM。
+> **v9.84 更新说明**：交付 v0.3 计划备份首个完整纵切。schema v44 新增默认关闭的机器本地策略与运行结果；用户可在设置中即时预览每日时间、IANA 时区和 1–365 份保留数，保存后由 Sidecar 每日首次到期执行并在错过计划的启动/周期扫描中补偿。计划包复用完整容量准入、SQLite+受控文件校验链并写 `kind=scheduled`；保留清理只删除超限计划包，手工、导入/恢复/迁移回滚包及 pending restore 目标均不被误删。外部目录、加密、云目标、周期恢复抽检和高级冲突导入仍待开发。app v0.1.0、API v1 不变，无 AI/LLM。
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md)
 
@@ -1254,7 +1254,7 @@ schema v11 通过重建 `focus_sessions` 删除旧 `duration_minutes/completed`�
 
 #### 本地工作编排数据表（Task/Actor/D2、手工 Inbox、已有 Task 关系与一次性 Reminder 已实现；Agent 仍规划）
 
-schema v7 `007_actor_assignments.sql` 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填稳定责任；schema v8–v42 依次交付 Task、受控文件、Client、Focus、Inbox/Reminder、设置/保存视图、项目扩展、来源 guards、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘；schema v43 加法新增不含路径/卷标识的 `storage_capacity_samples`。各版本不创建 demo 数据；容量样本只由真实探测产生。Agent Run 仍是规划；后续只能从 `044_*` 追加迁移，不得回写已发布版本。
+schema v7 `007_actor_assignments.sql` 新增 `actors`、`task_assignments` 和 `workflow_events` 并回填稳定责任；schema v8–v42 依次交付 Task、受控文件、Client、Focus、Inbox/Reminder、设置/保存视图、项目扩展、来源 guards、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘；schema v43 加法新增不含路径/卷标识的 `storage_capacity_samples`，schema v44 新增默认关闭的 `scheduled_backup_policy` 单例维护状态。各版本不创建 demo 数据；容量样本只由真实探测产生。Agent Run 仍是规划；后续只能从 `045_*` 追加迁移，不得回写已发布版本。
 
 **client_activities** - 客户本地活动（schema v18 已实现）
 
@@ -1527,11 +1527,11 @@ schema v31 同样是普通非破坏性迁移：只为 `client_activities` 的 Pr
 
 ### 7.3 备份策略
 
-版本边界：手动一致性备份的创建/低空间准入、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除，以及业务 JSON/含文件业务 ZIP 的空目标与同 schema 零主键冲突追加已经交付；导入 preview 已提供非空目标只读冲突清单和跨 schema 方向分类，但不开放真实冲突合并、UUID 重映射或升级应用。容量准入现已覆盖手工 `POST /api/v1/backups` 与导入、恢复、迁移内部创建的全部当前自动回滚包。数据库打开前的实时进度/恢复页仍需桌面壳实现。v0.3 只增加可配置计划、外部目录、保留策略、CSV 映射和高级冲突导入工具。
+版本边界：手动一致性备份的创建/低空间准入、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除、每日计划/启动补偿/自动包保留，以及业务 JSON/含文件业务 ZIP 的空目标与同 schema 零主键冲突追加已经交付；导入 preview 已提供非空目标只读冲突清单和跨 schema 方向分类，但不开放真实冲突合并、UUID 重映射或升级应用。容量准入覆盖手工、计划及导入/恢复/迁移回滚包。数据库打开前的实时进度/恢复页仍需桌面壳实现。v0.3 后续只增加外部目录、加密/云目标、周期可恢复性抽检、CSV 映射和高级冲突导入工具。
 
 1. **v0.1 一致性快照基础**
    - **已实现（手动）**：在维护写锁中使用 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件；普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁
-   - **已实现**：用户可手动创建；已有工作区在首个显式 destructive 迁移前自动创建同规格回滚包，备份失败不执行破坏性 SQL；v0.1 不提供每日调度
+   - **已实现**：用户可手动创建；已有工作区在首个显式 destructive 迁移前自动创建同规格回滚包，备份失败不执行破坏性 SQL；v0.3 已在同一链上增加默认关闭的每日计划
    - **已实现（手工与内部自动回滚）**：手工请求在维护写锁与备份互斥锁内先处理同键同请求幂等重放；仅未命中时才在任何 staging/`VACUUM INTO` 前执行准入。破坏性迁移、JSON/ZIP 导入和恢复安排在各自预检/演练通过后、不可逆动作前调用同一准入。基础需求为 `max(PRAGMA page_count × page_size, 当前数据库文件大小)` + 全部 active Task/Client/Project/Avatar 受控文件 + marker 实际大小 + manifest 1 MiB 上界；恢复另加入目标 pending 副本 payload、第二份 manifest 1 MiB 与 plan 16 KiB 上界。合计载荷增加向上取整 20% 且最低 64 MiB 余量。每个 active 文件先经受控路径解析、Lstat/open 普通文件复核，实际大小必须与数据库登记一致；复制链另限制最多读取登记大小 + 1 字节。只对 backup root 探测可用/总字节，精确等于需求允许继续；估算溢出、PRAGMA/文件/list 无法确认、探测报错、总量为零或可用量大于总量均按无法确认拒绝
    - **已实现（门禁结果）**：可用空间小于需求返回 HTTP 507 `BACKUP_SPACE_INSUFFICIENT`，无法确认返回 HTTP 503 `BACKUP_CAPACITY_UNAVAILABLE`；统一错误响应和 Inbox 不含路径、盘符、精确容量、note 或底层错误。两类拒绝不创建 staging/新包、不改变业务数据，也不投影 generic `backup:create` incident；UI 分别提示清理备份位置/旧备份或刷新容量状态/确认本地存储可用，保留未成功提交的 note，不伪造成功、不自动重试
    - **已实现（内部门禁结果）**：JSON/ZIP 导入分别返回 507 `IMPORT_BACKUP_SPACE_INSUFFICIENT` 或 503 `IMPORT_BACKUP_CAPACITY_UNAVAILABLE`；恢复返回 507 `RESTORE_ROLLBACK_SPACE_INSUFFICIENT` 或 503 `RESTORE_ROLLBACK_CAPACITY_UNAVAILABLE`；破坏性迁移返回可识别容量 sentinel 并在 destructive SQL 前终止启动、释放 Artifact lease。拒绝不创建自动回滚包、不发布 pending、不改变业务事实，也不投影 generic `backup:create` / `backup:restore` incident；设置页提供对应清理或容量重查提示
@@ -1556,7 +1556,8 @@ schema v31 同样是普通非破坏性迁移：只为 `client_activities` 的 Pr
    - 数据库打开前的实时恢复进度页和脱敏错误日志入口仍待 Tauri 壳实现
 
 4. **v0.3 可配置备份与高级导入**
-   - 增加每日首次满足条件时执行、错过计划后的启动补偿、可配置保留策略和最近 30 份默认值
+   - **已实现**：每日首次满足条件时执行、错过计划后的启动/周期补偿、IANA 时区、可配置 1–365 份保留策略和最近 30 份默认值；同一当地日失败不会后台刷屏重试，最近状态与安全错误码可见
+   - **已实现**：计划包标记为 `scheduled`，保留只清理超限计划包；手工及内部回滚包不参与，pending restore 目标/回滚 ID 额外保护
    - 引导用户选择独立外部备份目录，用于防范应用数据目录或磁盘损坏
    - 增加任务、客户、财务等 CSV 导出/映射导入和冲突预览
    - 提供周期性可恢复性抽检、失败提醒和历史执行记录
@@ -1723,7 +1724,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-08-29。当前版本是可运行、可扩展的 v0.1 基座，并已前置交付 v0.2 首个受限预设自动化纵切。schema v43、容量历史、Project→Inbox、重复 Reminder、设置/关闭到托盘、自动化、Adapter 诊断及客户回访已接通；这不代表完整 v0.2、Agent Runtime、发票、Focus 原生反馈、数据库打开前备份选择或冲突合并导入已经交付。
+> 状态截止：2026-08-29。当前版本是可运行、可扩展的 v0.1 基座，并已前置交付 v0.2 首个受限预设自动化纵切和 v0.3 计划备份首个纵切。schema v44、容量历史、每日计划/安全保留、Project→Inbox、重复 Reminder、设置/关闭到托盘、自动化、Adapter 诊断及客户回访已接通；这不代表完整 v0.2、Agent Runtime、发票、Focus 原生反馈、数据库打开前备份选择、外部备份目录或冲突合并导入已经交付。
 
 ### 10.1 文档口径与状态定义
 
@@ -1889,6 +1890,15 @@ pnpm dev
 - **实现方法**：`--backups` / `OPC_BACKUP_DIR` 声明与数据库同级且不和受控文件 root 重叠的安全 root。所有普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁，创建备份、含文件导入导出和安排恢复取得写锁；手工 `POST /backups` 再持有备份互斥锁并先处理幂等重放，迁移/导入/恢复在各自预检后进入内部链。全部创建路径按 SQLite 分配/文件上界、active 受控文件、marker/manifest 及 20%（最低 64 MiB）余量估算，只探测 backup root，满足后才用 `VACUUM INTO` 创建 WAL 一致性 SQLite 快照并校验/原子发布完整包；恢复另预留目标 pending 副本与 plan。不足/不可确认以启动失败或专用 507/503 脱敏拒绝且不投影 generic incident，精确边界允许继续。业务 JSON 使用一个 SQLite 读事务和固定白名单；含文件 ZIP 在 backup root 私有临时文件中预检/生成，manifest 固定记录业务 JSON/活动文件的相对路径、size/SHA-256。ZIP 导入 preview 严格拒绝重复、额外、危险路径和 symlink，复验 format/API/schema、表列行、正文 hash/size 及数据库文件元数据；apply 强制确认并再次预检，通过容量准入后创建已校验回滚备份，再把文件按既有 store 规则 staging 和无覆盖发布，数据库事务写入业务行、重建 `task_focus_totals`，并在提交前执行 `foreign_key_check/quick_check` 与磁盘正文复验；数据库失败补偿本次发布文件。
 - **关键路径**：`services/sidecar/internal/api/backups.go`、`backup_restore.go`、`business_export.go`、`business_package_export.go`、`business_import.go`、`business_package_import.go`、相关 Go 测试、`apps/web/src/components/BackupSettings.tsx`、`api/client.ts`、`api/hooks.ts`。
 - **验证/剩余**：Go 集成测试覆盖备份恢复全链、容量需求的小载荷/溢出/额外 payload、手工空间差 1 字节拒绝、容量探测异常、只探测 backup root、响应脱敏、无 staging/包/业务/Inbox 副作用、精确边界放行与幂等重放绕过探测；新增覆盖迁移前拒绝与 Artifact lease 释放、JSON/ZIP 导入 507/503 拒绝、受控文件无残留，以及恢复只够单个回滚包但不足合计 pending 副本时拒绝且不发布计划/故障事项。导入预检另覆盖同表重叠/不重叠主键、目标多表计数、旧/新 schema blocker、无备份/无写入；Web 严格解析聚合值并展示禁用确认的表级清单。启动恢复诊断、业务导出隐私、ZIP 完整性与导入原子补偿回归继续通过。跨 schema 实际迁移、非空目标冲突合并、大数据量进度/取消、启动前备份选择和真实磁盘故障仍未实现。
+
+#### 10.4.4B T-04C 计划备份与安全保留
+
+- **需求映射**：7.3 v0.3 可配置备份、设置数据与备份。
+- **版本归属**：v0.3 首个数据安全纵切；app 仍为 v0.1.0、API 仍为 v1，SQLite 推进到 schema v44。默认关闭，不增加 Docker、网络、云存储或付费资源。
+- **用户流程**：设置 → 数据与备份读取 committed 策略；用户点击启停、每日时间、IANA 时区和 1–365 份保留数后立即看到计划与删除边界预览。取消恢复 committed；保存携带当前版本。页面展示最近成功短 ID/时间或固定失败码，不显示路径、卷、容量或底层错误。
+- **实现方法**：`scheduled_backup_policy` 单例持久化配置、当地日认领和最近结果。Sidecar ready 时先补偿，之后默认每分钟扫描；当地时间到期且当天未认领时，在维护写锁→备份互斥锁顺序内以策略 version 原子认领。创建调用既有容量估算、`VACUUM INTO`、受控文件 copy/hash、marker/manifest、quick/foreign-key/schema/identity 和原子发布流程，并标记 `kind=scheduled`。成功后只对有效 scheduled 包按 `created_at/id` 排序，保留前 N 份；manual、所有内部回滚及 pending restore 的目标/回滚 ID 不参与。安全路径校验、原子隐藏删除或目录同步失败立即停止并记录固定保留失败码。
+- **关键路径**：`services/sidecar/internal/database/migrations/044_scheduled_backup_policy.sql`、`internal/api/scheduled_backups.go`、`backups.go`、`backup_delete.go`、`router.go`、`apps/web/src/components/BackupSettings.tsx`、`api/client.ts`、`api/hooks.ts`、`styles.css`。
+- **验证/剩余**：迁移测试覆盖默认关闭、单例和范围约束；Go API/启动测试覆盖验证、乐观锁、错过计划补偿、同当地日去重、跨日再次执行和 manual 保留；Web 覆盖严格解析、即时预览、取消回退与保存载荷。外部目录、周期恢复抽检、休眠/系统时区变更真实桌面专项、加密/云目标和长期大量包性能仍待。
 
 #### 10.4.5 T-05 前端 AppShell、原型复刻与基础页面
 
@@ -2544,6 +2554,7 @@ pnpm build:desktop
 | v9.62    | 2026-08-29 | 路线图 R3 详情收口：卡片按 ID 读取最新里程碑，详情展示说明、派生 Task 进度、Project 深链、期间、版本和审计时间；加载、错误重试、归档只读提示与用详情最新版本进入编辑均已接通。Web API/组件测试覆盖，R3 基础界面完成；schema 保持 v38。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | v9.63    | 2026-08-29 | 路线图 R4 同季度安全排序首个纵切：仅在无细分筛选且完整未归档季度集合为 2–100 条时开放，进入模式读取全量、冻结其他写操作并隐藏分页；支持卡片拖拽和键盘可达的上移/下移预览，保存携带每条 `expected_version` 走现有单事务重排，失败恢复服务端顺序。超过 API 容量时不做局部分页保存；目标日期/跨季度拖拽仍待。Web API/组件测试覆盖，schema 保持 v38。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | v9.64    | 2026-08-29 | 路线图跨季度移动事实层修复：PATCH 改变年份或季度时，在同一事务读取目标季度顺序上界，将里程碑的 `manual_order` 追加到目标季度尾部并随当前更新递增版本；源季度不保留副本，避免源/目标季度顺序碰撞。Go API 回归覆盖目标季度次序与源季度移除；多季度拖拽界面仍待，schema 保持 v38。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| v9.84    | 2026-08-29 | 计划备份与安全保留：schema v44 新增默认关闭的机器本地单例策略，保存每日 `HH:MM`、IANA 时区、1–365 份保留数及最近尝试/成功/失败安全事实。Sidecar 启动和每分钟扫描在每个当地日首次到期时认领一次，错过窗口自动补偿；执行复用维护锁、备份锁、容量准入和完整校验链，manifest/列表增加 `manual / scheduled` 来源。成功后只按创建时间清理超过上限的 scheduled 包，手工、内部回滚和 pending restore 目标/回滚不删除。设置页点击即时预览，保存携带版本，取消恢复 committed；覆盖加载、错误、最近结果和严格 API 解析。外部目录、加密/云目标、周期恢复抽检仍待。app v0.1.0/API v1 不变，无 AI/LLM。                                                                                                                                                                                                                                                                                            |
 | v9.83    | 2026-08-29 | 同 schema 零主键冲突追加导入：JSON/ZIP preview 在逐表冲突事实之上返回 `replace_empty / append`；append 使用独立确认词并在维护锁内重验，保留目标 owner/system、设置与既有事实，只把源 Automation 配置合入未修改默认规则。应用前执行容量准入和完整回滚备份，普通行在单事务追加并复验外键/quick-check；ZIP 另在备份前只计数阻断目标受控文件碰撞，发布仍 no-replace 且 DB 失败补偿文件。主键冲突、UUID 重映射、唯一语义策略与跨 schema 升级继续拒绝。Web 严格解析模式与聚合，设置展示追加说明/目标清单或冲突 blocker。app v0.1.0/API v1/schema v43 不变，无迁移、无 AI/LLM。                                                                                                                                                                                                                                                                                                             |
 | v9.82    | 2026-08-29 | 容量历史纵切：schema v43 加法新增受约束样本表；后台扫描和显式 POST 检查按真实物理卷去重，但只保存逻辑 scope，15 分钟桶内更新、保留 30 天，失败探测不造样本且历史写入失败不阻断低空间提醒。GET history 支持 1–30 天；Web 严格解析并在设置展示默认 7 天折线、最新值、变化、加载/空/错误。路径、盘符和卷 ID 不进入数据库/API；容量样本不进入业务 JSON/ZIP。app v0.1.0/API v1 不变，无 AI/LLM。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | v9.81    | 2026-08-29 | 业务导入只读冲突预检：JSON/含文件 ZIP preview 固定返回源/目标 schema、目标业务行数、主键重叠总数及逐表源/目标/重叠计数；Sidecar 从真实复合主键流式扫描，排除 builtin Actor 与未修改默认 Automation，源重复主键拒绝。旧/新 schema 包在基础封装校验后分别返回方向 blocker，不声明列兼容；Web 严格复核聚合和版本方向，设置显示清单并禁用确认。apply 仍只接受同 schema 空目标，blocker 在容量探测/备份/写入前退出。app v0.1.0/API v1/schema v42 不变，无迁移、无业务正文泄露、无 AI/LLM。                                                                                                                                                                                                                                                                                                                                                                                                |

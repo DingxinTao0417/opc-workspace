@@ -12,6 +12,7 @@ import type {
   BusinessImportPreview,
   BusinessPackageImportPreview,
   ScheduledBackupRestoreResult,
+  ScheduledBackupPolicy,
 } from "../types/models";
 import { BackupSettings } from "./BackupSettings";
 
@@ -29,6 +30,23 @@ const backup: BackupSummary = {
   databaseBytes: 65536,
   totalBytes: 69632,
   error: null,
+  kind: "manual",
+};
+
+const scheduledPolicy: ScheduledBackupPolicy = {
+  enabled: false,
+  localTime: "02:00",
+  timezone: "UTC",
+  retentionCount: 30,
+  lastAttemptedDate: null,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  lastBackupId: null,
+  lastStatus: "idle",
+  lastErrorCode: null,
+  version: 1,
+  updatedAt: "2026-08-29T12:00:00Z",
+  nextRunAt: null,
 };
 
 const mocks = vi.hoisted(() => ({
@@ -52,6 +70,8 @@ const mocks = vi.hoisted(() => ({
   restartApplication: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
+  updateScheduledPolicy: vi.fn(),
+  updateScheduledPolicyError: null as Error | null,
   restoreDiagnostics: {
     status: "idle",
     restartRequired: false,
@@ -96,6 +116,7 @@ vi.mock("../api/hooks", () => ({
         databaseBytes: 65536,
         totalBytes: 69632,
         error: null,
+        kind: "manual",
       },
     ],
     isPending: false,
@@ -103,6 +124,20 @@ vi.mock("../api/hooks", () => ({
     isError: false,
     error: null,
     refetch: mocks.refetch,
+  }),
+  useScheduledBackupPolicyQuery: () => ({
+    data: scheduledPolicy,
+    isPending: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+    refetch: mocks.refetch,
+  }),
+  useUpdateScheduledBackupPolicy: () => ({
+    mutate: mocks.updateScheduledPolicy,
+    reset: mocks.reset,
+    isPending: false,
+    error: mocks.updateScheduledPolicyError,
   }),
   useCreateBackup: () => ({
     mutate: mocks.create,
@@ -238,9 +273,45 @@ describe("BackupSettings", () => {
     mocks.previewPackageImport.mockClear();
     mocks.applyPackageImport.mockClear();
     mocks.restartApplication.mockReset();
+    mocks.updateScheduledPolicy.mockReset();
+    mocks.updateScheduledPolicyError = null;
     mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
+  });
+
+  it("previews scheduled backup changes immediately and restores the saved policy on cancel", () => {
+    render(<BackupSettings />);
+    const toggle = screen.getByRole("switch", {
+      name: "启用每日计划备份",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/预览：每天 02:00/)).toBeInTheDocument();
+    fireEvent.input(screen.getByLabelText("每日备份时间"), {
+      target: { value: "04:30" },
+    });
+    fireEvent.change(screen.getByLabelText("自动备份保留份数"), {
+      target: { value: "12" },
+    });
+    expect(screen.getByText(/每天 04:30.*超过 12 份/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/关闭计划执行/)).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "保存计划" }));
+    expect(mocks.updateScheduledPolicy).toHaveBeenCalledWith(
+      {
+        enabled: true,
+        localTime: "02:00",
+        timezone: "UTC",
+        retentionCount: 30,
+        expectedVersion: 1,
+      },
+      expect.any(Object),
+    );
   });
 
   it("creates a noted backup and can explicitly reverify an existing package", () => {

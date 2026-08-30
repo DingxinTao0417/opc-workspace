@@ -39,8 +39,8 @@ func TestClientActorLinksMigrationUpgradesV19WithoutInventingFacts(t *testing.T)
 		t.Fatalf("upgrade v19 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 43 {
-		t.Fatalf("SchemaVersion = %d, want 43", store.SchemaVersion)
+	if store.SchemaVersion != 44 {
+		t.Fatalf("SchemaVersion = %d, want 44", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM client_actor_links"); got != 0 {
 		t.Fatalf("migration invented %d client actor links", got)

@@ -81,6 +81,7 @@ type backupManifest struct {
 	TotalBytes         int64                    `json:"total_bytes"`
 	IdempotencyKeyHash string                   `json:"idempotency_key_hash,omitempty"`
 	RequestHash        string                   `json:"request_hash,omitempty"`
+	Kind               string                   `json:"kind,omitempty"`
 }
 
 type backupSummary struct {
@@ -97,6 +98,7 @@ type backupSummary struct {
 	DatabaseBytes      int64  `json:"database_bytes"`
 	TotalBytes         int64  `json:"total_bytes"`
 	Error              string `json:"error,omitempty"`
+	Kind               string `json:"kind"`
 }
 
 type createBackupRequest struct {
@@ -489,6 +491,10 @@ func (s *backupStore) findIdempotent(keyHash, requestHash string, maxSchemaVersi
 }
 
 func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, requestHash string) (backupSummary, error) {
+	return s.createWithKind(db, options, note, keyHash, requestHash, "manual")
+}
+
+func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash, requestHash, kind string) (backupSummary, error) {
 	id := uuid.NewString()
 	createdAt := options.Now().UTC().Format(time.RFC3339Nano)
 	stagingPath := filepath.Join(s.root, ".staging-"+id)
@@ -597,6 +603,7 @@ func (s *backupStore) create(db *gorm.DB, options Options, note, keyHash, reques
 		ArtifactCount: len(artifacts), ArtifactBytes: artifactBytes,
 		TotalBytes:         databaseFile.SizeBytes + markerFile.SizeBytes + artifactBytes,
 		IdempotencyKeyHash: keyHash, RequestHash: requestHash,
+		Kind: kind,
 	}
 	if err := writeBackupManifest(stagingPath, manifest); err != nil {
 		return backupSummary{}, err
@@ -639,11 +646,11 @@ func (s *backupStore) list() ([]backupSummary, error) {
 		}
 		manifest, err := readBackupManifest(filepath.Join(s.root, entry.Name()))
 		if err != nil {
-			summaries = append(summaries, backupSummary{ID: id, VerificationStatus: "invalid", Error: "备份清单无法读取"})
+			summaries = append(summaries, backupSummary{ID: id, VerificationStatus: "invalid", Error: "备份清单无法读取", Kind: "unknown"})
 			continue
 		}
 		if err := validateBackupManifest(manifest, id, 0); err != nil {
-			summaries = append(summaries, backupSummary{ID: id, CreatedAt: manifest.CreatedAt, VerificationStatus: "invalid", Error: "备份清单无效"})
+			summaries = append(summaries, backupSummary{ID: id, CreatedAt: manifest.CreatedAt, VerificationStatus: "invalid", Error: "备份清单无效", Kind: "unknown"})
 			continue
 		}
 		status := "unverified"
@@ -724,6 +731,9 @@ func validateBackupManifest(manifest backupManifest, expectedID string, maxSchem
 	}
 	if utf8.RuneCountInString(manifest.Note) > maxBackupNoteRunes || manifest.APIVersion != Version || manifest.SchemaVersion < 1 {
 		return errors.New("backup version metadata is invalid")
+	}
+	if manifest.Kind != "" && manifest.Kind != "manual" && manifest.Kind != "scheduled" {
+		return errors.New("backup kind is invalid")
 	}
 	if maxSchemaVersion > 0 && manifest.SchemaVersion > maxSchemaVersion {
 		return errors.New("backup schema is newer than this Sidecar")
@@ -1113,12 +1123,16 @@ func rejectUnexpectedBackupFiles(packagePath string, expected map[string]struct{
 }
 
 func backupSummaryFromManifest(manifest backupManifest, status, message string) backupSummary {
+	kind := manifest.Kind
+	if kind == "" {
+		kind = "manual"
+	}
 	return backupSummary{
 		ID: manifest.ID, CreatedAt: manifest.CreatedAt, VerifiedAt: manifest.VerifiedAt,
 		VerificationStatus: status, Note: manifest.Note, AppVersion: manifest.AppVersion,
 		APIVersion: manifest.APIVersion, SchemaVersion: manifest.SchemaVersion,
 		ArtifactCount: manifest.ArtifactCount, ArtifactBytes: manifest.ArtifactBytes,
-		DatabaseBytes: manifest.Database.SizeBytes, TotalBytes: manifest.TotalBytes, Error: message,
+		DatabaseBytes: manifest.Database.SizeBytes, TotalBytes: manifest.TotalBytes, Error: message, Kind: kind,
 	}
 }
 

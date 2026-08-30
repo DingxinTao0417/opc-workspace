@@ -19,24 +19,25 @@ import (
 const Version = "v1"
 
 type Options struct {
-	AppVersion             string
-	Commit                 string
-	SchemaVersion          int
-	SessionToken           string
-	DevMode                bool
-	AllowedOrigins         []string
-	Logger                 *log.Logger
-	ArtifactDir            string
-	DatabasePath           string
-	BackupDir              string
-	LogDir                 string
-	DiskSpaceCheck         func(path string) (availableBytes uint64, totalBytes uint64, err error)
-	VolumeIdentityCheck    func(path string) (identity string, err error)
-	DiskSpaceScanInterval  time.Duration
-	Now                    func() time.Time
-	FocusHeartbeatInterval time.Duration
-	ReminderScanInterval   time.Duration
-	StartupRestore         StartupRestoreResult
+	AppVersion                  string
+	Commit                      string
+	SchemaVersion               int
+	SessionToken                string
+	DevMode                     bool
+	AllowedOrigins              []string
+	Logger                      *log.Logger
+	ArtifactDir                 string
+	DatabasePath                string
+	BackupDir                   string
+	LogDir                      string
+	DiskSpaceCheck              func(path string) (availableBytes uint64, totalBytes uint64, err error)
+	VolumeIdentityCheck         func(path string) (identity string, err error)
+	DiskSpaceScanInterval       time.Duration
+	Now                         func() time.Time
+	FocusHeartbeatInterval      time.Duration
+	ReminderScanInterval        time.Duration
+	ScheduledBackupScanInterval time.Duration
+	StartupRestore              StartupRestoreResult
 }
 
 type API struct {
@@ -52,15 +53,17 @@ type API struct {
 
 type Router struct {
 	*gin.Engine
-	artifactStore        *artifactStore
-	focusHeartbeatCancel context.CancelFunc
-	focusHeartbeatDone   chan struct{}
-	reminderScanCancel   context.CancelFunc
-	reminderScanDone     chan struct{}
-	diskSpaceScanCancel  context.CancelFunc
-	diskSpaceScanDone    chan struct{}
-	closeOnce            sync.Once
-	closeErr             error
+	artifactStore             *artifactStore
+	focusHeartbeatCancel      context.CancelFunc
+	focusHeartbeatDone        chan struct{}
+	reminderScanCancel        context.CancelFunc
+	reminderScanDone          chan struct{}
+	diskSpaceScanCancel       context.CancelFunc
+	diskSpaceScanDone         chan struct{}
+	scheduledBackupScanCancel context.CancelFunc
+	scheduledBackupScanDone   chan struct{}
+	closeOnce                 sync.Once
+	closeErr                  error
 }
 
 func (r *Router) Close() error {
@@ -79,6 +82,10 @@ func (r *Router) Close() error {
 		if r.diskSpaceScanCancel != nil {
 			r.diskSpaceScanCancel()
 			<-r.diskSpaceScanDone
+		}
+		if r.scheduledBackupScanCancel != nil {
+			r.scheduledBackupScanCancel()
+			<-r.scheduledBackupScanDone
 		}
 		if r.artifactStore != nil {
 			r.closeErr = r.artifactStore.close()
@@ -109,6 +116,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		} else {
 			options.DiskSpaceScanInterval = 5 * time.Minute
 		}
+	}
+	if options.ScheduledBackupScanInterval == 0 {
+		options.ScheduledBackupScanInterval = time.Minute
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -222,6 +232,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/imports/business-package", service.applyBusinessPackageImport)
 		v1.GET("/backups", service.listBackups)
 		v1.GET("/backups/restore-diagnostics", service.getRestoreDiagnostics)
+		v1.GET("/backups/policy", service.getScheduledBackupPolicy)
+		v1.PATCH("/backups/policy", service.updateScheduledBackupPolicy)
 		v1.POST("/backups", service.createBackup)
 		v1.POST("/backups/:id/verify", service.verifyBackup)
 		v1.POST("/backups/:id/drill", service.drillBackupRestore)
@@ -479,6 +491,31 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					service.maintenance.RUnlock()
 					if err != nil && options.Logger != nil {
 						options.Logger.Print("storage capacity check could not be completed safely")
+					}
+				}
+			}
+		}()
+	}
+	if backups != nil {
+		if err := service.runDueScheduledBackup(context.Background()); err != nil && options.Logger != nil {
+			options.Logger.Printf("scheduled backup startup compensation failed: %v", err)
+		}
+	}
+	if backups != nil && options.ScheduledBackupScanInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		result.scheduledBackupScanCancel = cancel
+		result.scheduledBackupScanDone = make(chan struct{})
+		go func() {
+			defer close(result.scheduledBackupScanDone)
+			ticker := time.NewTicker(options.ScheduledBackupScanInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := service.runDueScheduledBackup(ctx); err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {
+						options.Logger.Printf("scheduled backup scan failed: %v", err)
 					}
 				}
 			}

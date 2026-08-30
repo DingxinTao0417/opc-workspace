@@ -33,6 +33,8 @@ import type {
   BusinessImportApplyMode,
   DiagnosticPackageDownload,
   ScheduledBackupRestoreResult,
+  ScheduledBackupPolicy,
+  UpdateScheduledBackupPolicyInput,
   SearchListParams,
   SearchListResult,
   SearchResourceType,
@@ -5986,6 +5988,7 @@ export function normalizeBackupSummary(value: unknown): BackupSummary {
   const error = fieldValue(value, "error");
   const appVersion = fieldValue(value, "app_version", "appVersion");
   const apiVersion = fieldValue(value, "api_version", "apiVersion");
+  const kind = fieldValue(value, "kind");
   if (
     !id ||
     (createdAt === "" && verificationStatus !== "invalid") ||
@@ -5996,7 +5999,8 @@ export function normalizeBackupSummary(value: unknown): BackupSummary {
     (note !== undefined && typeof note !== "string") ||
     (error !== undefined && typeof error !== "string") ||
     (appVersion !== undefined && typeof appVersion !== "string") ||
-    (apiVersion !== undefined && typeof apiVersion !== "string")
+    (apiVersion !== undefined && typeof apiVersion !== "string") ||
+    !["manual", "scheduled", "unknown"].includes(String(kind))
   ) {
     return invalidResponse("本地备份响应格式无效");
   }
@@ -6030,7 +6034,85 @@ export function normalizeBackupSummary(value: unknown): BackupSummary {
     ),
     totalBytes: readCount("total_bytes", "totalBytes", "备份总大小"),
     error: typeof error === "string" && error ? error : null,
+    kind: kind as BackupSummary["kind"],
   };
+}
+
+export function normalizeScheduledBackupPolicy(
+  value: unknown,
+): ScheduledBackupPolicy {
+  if (!isRecord(value)) {
+    return invalidResponse("计划备份策略响应格式无效");
+  }
+  const enabled = fieldValue(value, "enabled");
+  const localTime = stringField(value, "local_time", "localTime");
+  const timezone = stringField(value, "timezone");
+  const retentionCount = positiveInteger(
+    fieldValue(value, "retention_count", "retentionCount"),
+    "计划备份保留数量",
+  );
+  const lastStatus = fieldValue(value, "last_status", "lastStatus");
+  const version = positiveInteger(fieldValue(value, "version"), "计划备份版本");
+  const updatedAt = stringField(value, "updated_at", "updatedAt");
+  const nullableString = (snake: string, camel: string): string | null => {
+    const raw = fieldValue(value, snake, camel);
+    if (raw === null || raw === undefined || raw === "") return null;
+    if (typeof raw !== "string")
+      return invalidResponse("计划备份策略响应格式无效");
+    return raw;
+  };
+  if (
+    typeof enabled !== "boolean" ||
+    !localTime ||
+    !/^\d{2}:\d{2}$/.test(localTime) ||
+    !timezone ||
+    retentionCount > 365 ||
+    !["idle", "succeeded", "failed"].includes(String(lastStatus)) ||
+    !updatedAt
+  ) {
+    return invalidResponse("计划备份策略响应格式无效");
+  }
+  return {
+    enabled,
+    localTime,
+    timezone,
+    retentionCount,
+    lastAttemptedDate: nullableString(
+      "last_attempted_date",
+      "lastAttemptedDate",
+    ),
+    lastAttemptAt: nullableString("last_attempt_at", "lastAttemptAt"),
+    lastSuccessAt: nullableString("last_success_at", "lastSuccessAt"),
+    lastBackupId: nullableString("last_backup_id", "lastBackupId"),
+    lastStatus: lastStatus as ScheduledBackupPolicy["lastStatus"],
+    lastErrorCode: nullableString("last_error_code", "lastErrorCode"),
+    version,
+    updatedAt,
+    nextRunAt: nullableString("next_run_at", "nextRunAt"),
+  };
+}
+
+export async function getScheduledBackupPolicy(): Promise<ScheduledBackupPolicy> {
+  const payload = await apiRequest<unknown>("/api/v1/backups/policy");
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeScheduledBackupPolicy(body);
+}
+
+export async function updateScheduledBackupPolicy(
+  input: UpdateScheduledBackupPolicyInput,
+): Promise<ScheduledBackupPolicy> {
+  const payload = await apiRequest<unknown>("/api/v1/backups/policy", {
+    method: "PATCH",
+    headers: expectedVersionHeader(input.expectedVersion),
+    body: JSON.stringify({
+      enabled: input.enabled,
+      local_time: input.localTime,
+      timezone: input.timezone,
+      retention_count: input.retentionCount,
+    }),
+  });
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return normalizeScheduledBackupPolicy(body);
 }
 
 export async function getBackups(): Promise<BackupSummary[]> {
