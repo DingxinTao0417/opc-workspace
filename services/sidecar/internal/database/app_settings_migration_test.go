@@ -50,8 +50,8 @@ func TestAppSettingsMigrationPreservesV15FactsAndStartsEmpty(t *testing.T) {
 		t.Fatalf("upgrade v15 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 41 {
-		t.Fatalf("SchemaVersion = %d, want 41", store.SchemaVersion)
+	if store.SchemaVersion != 42 {
+		t.Fatalf("SchemaVersion = %d, want 42", store.SchemaVersion)
 	}
 	var preserved models.Task
 	if err := store.DB.First(&preserved, "id = ?", taskID).Error; err != nil {
@@ -77,7 +77,7 @@ func TestAppSettingsMigrationEnforcesOwnershipAndImmutability(t *testing.T) {
 	defer store.Close()
 
 	setting := models.AppSetting{
-		Key: "appearance", ValueJSON: `{"theme":"dark"}`, SchemaVersion: 1, Version: 1,
+		Key: "appearance", ValueJSON: `{"theme":"dark"}`, SchemaVersion: 2, Version: 1,
 		UpdatedByActorID: models.BuiltinOwnerActorID, UpdatedAt: "2026-08-28T10:00:00Z",
 	}
 	if err := store.DB.Create(&setting).Error; err != nil {

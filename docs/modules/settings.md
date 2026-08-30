@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v41。schema v34 新增独立 Agent Adapter 诊断事实，schema v35 新增 Client Followup 计划/终态事实，后续迁移均不改变 `app_settings` 契约；设置左栏已接第 10 个“本地 Agent”模块。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、脱敏运行诊断与托盘能力快照、数据库打开前白名单启动进度和启动恢复均已交付。非空目标/跨 schema 高级导入、启动前备份选择和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema v42。schema v42 将 `app_settings` 契约升为 v2，并为既有通用设置补齐 `close_to_tray=true`；迁移保留模块值、乐观锁版本、Actor 与时间，空工作区仍不创建默认行。设置持久化、受控头像、Focus 解耦、低空间阈值、Actor、自动化、Adapter 登记/诊断、备份/导入导出、脱敏运行诊断、托盘能力快照和关闭到托盘偏好均已交付。非空目标/跨 schema 高级导入、启动前备份选择和可执行 Agent Runner 仍是后续范围。
 
 ## 定位与边界
 
@@ -22,7 +22,7 @@
 当前设置弹窗已实现：
 
 - “个人资料”控制侧栏工作区品牌名称与头像，不改写 owner Actor 身份；名称通过 `app_settings.workspace.display_name` 保存，头像经严格 multipart 导入 `artifacts/avatars/`，支持 PNG/JPG/WebP、2 MiB 限制、选择即预览、取消恢复、保存后鉴权读取和确认移除。
-- 通用：默认首页、右侧概览开关和减少动效。
+- 通用：默认首页、右侧概览、减少动效和“关闭窗口时隐藏到托盘”。托盘项点击即通过固定 Tauri command 预览；保存写入 SQLite，取消按顺序恢复 committed，浏览器开发模式只保存偏好。
 - 外观：亮色与暗色主题，支持保存前预览。
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
@@ -42,6 +42,7 @@
 
 - schema v16 新增空表 `app_settings`，迁移不写默认行、不改写既有业务事实，也不创建 demo 数据；GET 对缺失模块返回服务端默认值并显式标记 `stored=false / version=0`。
 - schema v29 通过破坏性迁移闸门在保留既有设置行、版本、Actor 和时间的前提下扩展 `storage` key，并重建 active Actor、key 不可变、硬删除保护和头像引用 triggers；迁移前由启动链创建已验证回滚包。
+- schema v42 通过同一破坏性迁移闸门把设置值 schema 从 1 升到 2；仅为既有 `general` JSON 缺失时补入 `close_to_tray=true`，其余模块正文与所有行版本保持不变，空库不写默认行，并恢复全部设置/头像 triggers。
 - 固定模块 key 为 `workspace / general / appearance / focus / storage`；每个值必须是完整 JSON object，服务端拒绝未知、缺失、null 非空字段、越界值和未受控头像引用。`storage.low_space_threshold_gib` 仅允许 1–100 的整数。
 - `PATCH /api/v1/settings` 可一次原子保存 1–5 个不同模块；每项携带 `expected_version`，缺失行要求 0，旧版本返回 `409 SETTINGS_VERSION_CONFLICT`，任一项失败整批回滚。
 - 写入者固定为当前内置 owner；数据库 trigger 要求 active Actor、禁止改变 key 和硬删除设置行。
@@ -56,7 +57,7 @@
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
 - 已有 Actor、自动化、Agent Adapter 诊断、低空间阈值、备份/导入导出、脱敏诊断和数据库打开前白名单启动进度；但仍没有通知、非空目标/跨 schema 冲突合并、快捷键自定义、启动前备份选择或可执行 Agent Runner。Adapter 设置只登记代码清单并显示 blocked，不等于 agent 身份、分派或执行能力。
-- 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；仍需补真实浏览器与窄屏验收。
+- 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；关闭到托盘开关已在真实浏览器验证预览、取消恢复与保存刷新持久化，完整键盘/焦点、窄屏和桌面 WebView 原生行为仍需专项验收。
 
 ## 目标功能
 
@@ -69,7 +70,7 @@
 
 ### 通用与外观
 
-- 默认首页、右侧概览、减少动效和主题。
+- 默认首页、右侧概览、减少动效、关闭窗口时隐藏到托盘和主题。
 - 草稿预览可取消；保存失败时恢复已提交值，不留下半保存状态。
 - 默认首页只影响下次进入根路由，不在编辑草稿时破坏当前页面上下文。
 - 后续可增加语言、日期格式和时区，但业务日期仍由统一 IANA 时区解释。
@@ -124,11 +125,11 @@
 当前实现流程：
 
 1. 应用启动先从 `GET /api/v1/settings` 读取服务端 committed；用户打开设置弹窗时据此建立独立 draft 和 preview。
-2. 用户修改可预览项；preview 只影响可逆界面，Focus Session 始终继续以服务端快照计时。
+2. 用户修改可预览项；preview 只影响可逆界面，`close_to_tray` 通过串行桌面命令立即改变下一次主窗口关闭行为，Focus Session 始终继续以服务端快照计时。
 3. 用户保存时，前端只提交发生变化的模块，每项携带当前 `expected_version`；若头像 replace/remove，则强制包含 workspace 更新并走 multipart 入口。
 4. Sidecar 先把新头像写入 staging/受控目录，再在一个 SQLite 事务中写头像身份/旧头像墓碑和全部设置；失败时补偿新文件，成功后清理旧文件。前端以返回快照更新 Query，并重新鉴权读取头像。
 5. 网络、超时、校验或版本冲突失败时弹窗保留 draft 和预览并展示错误，不把未确认值写成 committed。
-6. 用户取消或关闭，preview 被丢弃，committed 与活动 Session 保持不变。
+6. 用户取消或关闭，preview 被丢弃，桌面 `close_to_tray` 串行恢复 committed，其他 committed 与活动 Session 保持不变。
 
 ### 取消预览
 
@@ -188,12 +189,12 @@
 | ------------------- | -------------------------------------------------------------- |
 | key                 | 模块化稳定 key：workspace、general、appearance、focus、storage |
 | value_json          | 经服务端 schema 清洗的非敏感值                                 |
-| schema_version      | 当前固定为 1；未知版本不能被旧 Sidecar 覆盖                    |
+| schema_version      | 当前固定为 2；未知版本不能被旧 Sidecar 覆盖                    |
 | version             | 乐观并发版本                                                   |
 | updated_by_actor_id | 修改者；交互设置通常为 owner                                   |
 | updated_at          | UTC 更新时间                                                   |
 
-设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行；schema v29 只扩展允许的 storage key，不写默认行。缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
+设置 schema 由 Sidecar 按模块版本化。schema v16 不预置默认行；schema v29 只扩展允许的 storage key；schema v42 将完整值契约升为 v2 并增加 `general.close_to_tray`。缺失模块由 GET 返回默认值、`stored=false` 和 `version=0`，供一次性旧设置迁移判断；首次 PATCH 创建为 version 1。未知字段不能无条件回写，降级版本不得覆盖新版本设置。
 
 ### API
 
@@ -249,6 +250,7 @@
 - **后端已完成**：schema v16 `app_settings` 递增迁移、服务端 schema 清洗和 GET/PATCH API。
 - **后端已完成**：固定模块 key、完整值契约、默认值、原子批量保存、乐观锁、`SETTINGS_VERSION_CONFLICT` 和无敏感值审计。
 - **前端已完成**：启动门禁、严格响应校验、Query 缓存、按变化模块保存、版本冲突刷新、保存错误保留 draft，以及服务端响应驱动 committed。
+- **桌面偏好已完成**：启动时把 committed `close_to_tray` 同步到 Tauri；弹窗点击串行预览，保存维持新值，取消恢复旧值。Tauri 只接受固定布尔参数，托盘不可用时不拦截关闭。
 
 ### v0.1-B：兼容迁移与头像（已完成）
 
@@ -262,7 +264,7 @@
 - **已完成**：UI store、Focus 页入口和命令面板均支持指定 activeModule；命令面板注册全部当前设置模块的直达入口。
 - **已完成**：展示真实健康和版本信息，移除硬编码“关于”运行事实，并提供加载、失败重试、手动重新检查和只读页脚。
 - **已完成**：运行诊断区分浏览器/Tauri 环境，白名单化桌面 Sidecar 状态，对照 health 版本，可复制脱敏摘要并下载诊断包 v1；命令面板可精确直达。
-- **已完成（组件层）**：持久化设置加载、保存中、保存失败和冲突提示；仍需真实浏览器/窄屏的键盘、焦点和视觉验收。
+- **已完成（组件层）**：持久化设置加载、保存中、保存失败和冲突提示；关闭到托盘的真实浏览器保存/取消链路已验收，其他模块及窄屏的键盘、焦点和视觉仍需专项验收。
 
 ### v0.1-D：运行态解耦
 
@@ -283,6 +285,7 @@
 - **已验证（API/组件）**：选择头像立即预览但不写服务端；取消恢复原头像；保存通过 multipart 原子提交文件与设置；替换/移除保留不可变墓碑，内容端点复验完整性。
 - app_settings、日志和诊断信息中不包含会话令牌、Agent 能力令牌或持久敏感凭据。
 - **已验证（API）**：保存返回服务端规范化值；并发旧版本更新返回 409；批量中任一冲突会整批回滚。
+- **已验证（迁移/API/组件/Rust 源码）**：v41→v42 保留既有值与版本、补入默认关闭到托盘且不污染空库；设置开关点击即预览、保存持久化、取消恢复，浏览器安全降级；Rust 状态默认启用且只有托盘可用并启用偏好时才隐藏窗口。
 - 取消主题和布局预览能完整恢复；关闭后焦点返回触发元素。
 - 修改、保存或取消专注设置不重置活动 Session，也不丢失已消耗进度。
 - Focus 页齿轮和命令面板均可直接打开指定设置模块；关闭后焦点返回触发元素。

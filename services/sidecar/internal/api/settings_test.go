@@ -69,12 +69,12 @@ func TestSettingsGetReturnsUnstoredServiceDefaults(t *testing.T) {
 		t.Fatalf("GET settings status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	response := decodeSettingsResponseForTest(t, recorder.Body.Bytes())
-	if response.SchemaVersion != 1 || len(response.Items) != 5 {
+	if response.SchemaVersion != 2 || len(response.Items) != 5 {
 		t.Fatalf("settings response = %#v", response)
 	}
 	wantKeys := []string{"workspace", "general", "appearance", "focus", "storage"}
 	for index, item := range response.Items {
-		if item.Key != wantKeys[index] || item.SchemaVersion != 1 || item.Stored || item.Version != 0 || item.UpdatedByActorID != nil || item.UpdatedAt != nil {
+		if item.Key != wantKeys[index] || item.SchemaVersion != 2 || item.Stored || item.Version != 0 || item.UpdatedByActorID != nil || item.UpdatedAt != nil {
 			t.Fatalf("default item[%d] = %#v", index, item)
 		}
 	}
@@ -83,6 +83,9 @@ func TestSettingsGetReturnsUnstoredServiceDefaults(t *testing.T) {
 	}
 	if string(settingItemForTest(t, response, "appearance").Value) != `{"theme":"dark"}` {
 		t.Fatalf("appearance default = %s", settingItemForTest(t, response, "appearance").Value)
+	}
+	if string(settingItemForTest(t, response, "general").Value) != `{"default_route":"today","show_right_overview":true,"reduce_motion":false,"close_to_tray":true}` {
+		t.Fatalf("general default = %s", settingItemForTest(t, response, "general").Value)
 	}
 	if string(settingItemForTest(t, response, "storage").Value) != `{"low_space_threshold_gib":1}` {
 		t.Fatalf("storage default = %s", settingItemForTest(t, response, "storage").Value)
@@ -97,7 +100,7 @@ func TestSettingsPatchCreatesNormalizesAndAuditsWithoutValues(t *testing.T) {
 	router, store := newSettingsTestAPI(t)
 	body := []byte(`{"updates":[` +
 		`{"key":"workspace","expected_version":0,"value":{"display_name":"  My   Workspace  ","avatar_ref":null}},` +
-		`{"key":"general","expected_version":0,"value":{"default_route":"projects","show_right_overview":false,"reduce_motion":true}},` +
+		`{"key":"general","expected_version":0,"value":{"default_route":"projects","show_right_overview":false,"reduce_motion":true,"close_to_tray":false}},` +
 		`{"key":"storage","expected_version":0,"value":{"low_space_threshold_gib":5}}` +
 		`]}`)
 	recorder := performRequest(router, http.MethodPatch, "/api/v1/settings", body, nil)
@@ -113,7 +116,7 @@ func TestSettingsPatchCreatesNormalizesAndAuditsWithoutValues(t *testing.T) {
 		t.Fatalf("normalized workspace = %s", workspace.Value)
 	}
 	general := settingItemForTest(t, response, "general")
-	if !general.Stored || general.Version != 1 || string(general.Value) != `{"default_route":"projects","show_right_overview":false,"reduce_motion":true}` {
+	if !general.Stored || general.Version != 1 || string(general.Value) != `{"default_route":"projects","show_right_overview":false,"reduce_motion":true,"close_to_tray":false}` {
 		t.Fatalf("general response = %#v", general)
 	}
 	storage := settingItemForTest(t, response, "storage")
@@ -179,7 +182,7 @@ func TestSettingsPatchRollsBackWholeBatchOnConflict(t *testing.T) {
 	}
 	batch := performRequest(router, http.MethodPatch, "/api/v1/settings", []byte(`{"updates":[`+
 		`{"key":"focus","expected_version":1,"value":{"focus_minutes":25,"break_minutes":5,"cycles":4,"auto_start_break":true,"auto_start_focus":false,"sound_enabled":true}},`+
-		`{"key":"general","expected_version":99,"value":{"default_route":"today","show_right_overview":true,"reduce_motion":false}}`+
+		`{"key":"general","expected_version":99,"value":{"default_route":"today","show_right_overview":true,"reduce_motion":false,"close_to_tray":true}}`+
 		`]}`), nil)
 	if batch.Code != http.StatusConflict {
 		t.Fatalf("batch conflict status = %d: %s", batch.Code, batch.Body.String())
@@ -211,7 +214,9 @@ func TestSettingsPatchRejectsUnknownSensitiveAndInvalidValues(t *testing.T) {
 		{name: "duplicate key", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark"}},{"key":"appearance","expected_version":0,"value":{"theme":"light"}}]}`},
 		{name: "missing expected version", body: `{"updates":[{"key":"appearance","value":{"theme":"dark"}}]}`},
 		{name: "missing required boolean", body: `{"updates":[{"key":"general","expected_version":0,"value":{"default_route":"today","show_right_overview":true}}]}`},
-		{name: "null required boolean", body: `{"updates":[{"key":"general","expected_version":0,"value":{"default_route":"today","show_right_overview":null,"reduce_motion":false}}]}`},
+		{name: "null required boolean", body: `{"updates":[{"key":"general","expected_version":0,"value":{"default_route":"today","show_right_overview":null,"reduce_motion":false,"close_to_tray":true}}]}`},
+		{name: "missing close to tray", body: `{"updates":[{"key":"general","expected_version":0,"value":{"default_route":"today","show_right_overview":true,"reduce_motion":false}}]}`},
+		{name: "null close to tray", body: `{"updates":[{"key":"general","expected_version":0,"value":{"default_route":"today","show_right_overview":true,"reduce_motion":false,"close_to_tray":null}}]}`},
 		{name: "unknown sensitive field", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark","token":"secret"}}]}`},
 		{name: "data url avatar", body: `{"updates":[{"key":"workspace","expected_version":0,"value":{"display_name":"opc","avatar_ref":"data:image/png;base64,secret"}}]}`},
 		{name: "invalid focus bound", body: `{"updates":[{"key":"focus","expected_version":0,"value":{"focus_minutes":3,"break_minutes":5,"cycles":4,"auto_start_break":true,"auto_start_focus":false,"sound_enabled":true}}]}`},

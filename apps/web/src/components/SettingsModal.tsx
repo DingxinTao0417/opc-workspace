@@ -31,6 +31,7 @@ import { ApiError, getAppSetting } from "../api/client";
 import {
   getRuntimeDiagnostics,
   openDesktopLogDirectory,
+  setCloseToTrayEnabled,
   type RuntimeDiagnostics,
 } from "../api/desktop";
 import {
@@ -257,6 +258,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
   const replaceCommitted = useSettingsStore((state) => state.replaceCommitted);
   const cancelPreview = useSettingsStore((state) => state.cancelPreview);
   const initialLocation = useRef("/today");
+  const closeToTrayPreviewQueue = useRef<Promise<void>>(Promise.resolve());
   const activeModuleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeModule, setActiveModule] = useState<SettingsModule>("general");
   const [focusDraft, setFocusDraft] = useState<FocusSettings>(
@@ -393,6 +395,15 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     theme: AppearanceTheme,
   ) => setPreview({ focus, general, profile, theme });
 
+  const queueCloseToTrayPreview = (enabled: boolean) => {
+    closeToTrayPreviewQueue.current = closeToTrayPreviewQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        await setCloseToTrayEnabled(enabled);
+      })
+      .catch(() => undefined);
+  };
+
   const updateFocusDraft = <Key extends keyof FocusSettings>(
     key: Key,
     value: FocusSettings[Key],
@@ -412,6 +423,9 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
     if (key === "defaultRoute") {
       navigate(`/${String(value)}`);
+    }
+    if (key === "closeToTray") {
+      queueCloseToTrayPreview(Boolean(value));
     }
   };
 
@@ -532,6 +546,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
 
   const close = () => {
     if (saving) return;
+    queueCloseToTrayPreview(getGeneralSettings().closeToTray);
     cancelPreview();
     navigate(initialLocation.current);
     setOpen(false);
@@ -572,6 +587,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       DEFAULT_PROFILE_SETTINGS,
       DEFAULT_THEME,
     );
+    queueCloseToTrayPreview(DEFAULT_GENERAL_SETTINGS.closeToTray);
     navigate(`/${DEFAULT_GENERAL_SETTINGS.defaultRoute}`);
   };
 
@@ -659,6 +675,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         }
       }
       replaceCommitted(committedSettingsFromServer(saved, committedAvatarUrl));
+      queueCloseToTrayPreview(nextGeneral.closeToTray);
       onSettingsSaved?.(nextFocus, previousFocus);
       setOpen(false);
     } catch (error) {
@@ -810,7 +827,16 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
               label="减少动效"
               onChange={(value) => updateGeneralDraft("reduceMotion", value)}
             />
+            <Toggle
+              checked={generalDraft.closeToTray}
+              description="关闭主窗口时保留桌面进程，可从系统托盘重新打开"
+              label="关闭窗口时隐藏到托盘"
+              onChange={(value) => updateGeneralDraft("closeToTray", value)}
+            />
           </div>
+          <p className="settings-inline-note">
+            点击即预览桌面关闭行为；保存后持久生效，取消会恢复原设置。浏览器开发模式只保存偏好。
+          </p>
         </>
       );
     }

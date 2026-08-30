@@ -1,6 +1,6 @@
 # 本地提醒模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v40 增加每月规则与当地日锚点，schema v41 增加周一至周五工作日规则。
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）；schema v32 在既有一次性 Reminder 上追加每日/每周重复系列和 occurrence 事实，schema v40 增加每月规则与当地日锚点，schema v41 增加周一至周五工作日规则。
 >
 > 版本边界：T-11A3 一次性本地 Reminder 及每日/每周/工作日/每月重复规则已交付；预设“每日 Today 提醒”和“每周回顾提醒”仍只按 IANA 时区创建本地一次性 Reminder。法定节假日/自定义日历规则、系统原生通知、远程推送、邮件/短信、自由业务规则和用户可配置扫描频率仍未实现。
 
@@ -63,7 +63,7 @@ schema v14 的 `014_reminders.sql` 新增 `reminders`，schema v32 的 `032_recu
 - fired/cancelled 为不可变终态，Reminder 不允许硬删除；
 - 创建者和取消者必须是有效 Actor，当前公开 API 只使用内置 owner，触发事件由内置 system 记录。
 
-schema v32 为普通加法迁移。schema v40 与 v41 都是关闭外键并自检的受控表重建：v40 回填锚点，v41 原样保留包括 monthly 1–31 锚点在内的全部事实，只扩展 recurrence CHECK，并重建全部索引和保护 trigger。已有工作区在首个待执行破坏性迁移前生成覆盖目标 schema 的完整回滚包；失败时不应用破坏性 SQL。迁移不创建 demo Reminder；后续从 `042_*` 继续。
+schema v32 为普通加法迁移。schema v40 与 v41 都是关闭外键并自检的受控表重建：v40 回填锚点，v41 原样保留包括 monthly 1–31 锚点在内的全部事实，只扩展 recurrence CHECK，并重建全部索引和保护 trigger。schema v42 只改变 app settings，不改变 Reminder。已有工作区在首个待执行破坏性迁移前生成覆盖目标 schema 的完整回滚包；失败时不应用破坏性 SQL。迁移不创建 demo Reminder；后续从 `043_*` 继续。
 
 ## API 契约
 

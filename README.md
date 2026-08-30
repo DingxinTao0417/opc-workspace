@@ -11,7 +11,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期与白名单桌面能力、显示托盘运行时可用性、复制脱敏摘要并下载诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
-- SQLite schema v41、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v37 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置、受控文件、来源保护、重复 Reminder、受限预设自动化、Agent Adapter、客户回访、路线图与内容日历数据契约；v38 新增内容条目→Inbox 来源，v39 新增路线图里程碑→Inbox，v40 在回滚包保护下增加每月 Reminder 与当地日锚点，v41 增加周一至周五工作日 Reminder
+- SQLite schema v42、WAL、外键、busy timeout 和嵌入式版本化迁移；v3–v41 交付项目、Task/Actor/D2、Client、Focus、Inbox/Reminder/设置、受控文件、来源保护、重复 Reminder、受限预设自动化、Agent Adapter、客户回访、路线图、内容日历及其 Inbox 来源；v42 将设置值契约升为 v2 并增加持久化关闭到托盘偏好
 - 任务完整事实与受控生命周期纵切：快照式幂等新建、详情、`If-Match` 非状态编辑/删除、项目与父子关系、标签、完成标准、服务端分页/搜索/六状态筛选/稳定排序、事实及六命令生命周期原子批量操作、计划日期组按钮及同状态拖拽排序，以及开始/阻塞/解除阻塞/完成/取消/重新打开六个显式单任务命令；直属非取消子任务至少 1 个且全部完成、manual 策略和责任门禁齐全时，系统创建零 Artifact 的 `child_rollup` 并最多把父任务推进到待验收，失效时撤回或重开而不覆盖人工/返工决策；Today 已消费计划组排序并提供四组活动任务的版本化任意日期/未排期安排
 - 标签分页/搜索/排序、幂等新建、并发安全编辑和确认删除；标签嵌入或父子聚合变化会递增受影响任务版本
 - 项目 CRUD、服务端分页/搜索/状态筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档/恢复和确认后硬删除；项目卡片与详情从关联任务派生进度和 `actual_minutes`，项目任务浏览器支持树/平铺及搜索、状态、优先级、类型、标签和排期组合筛选；项目新建/编辑及项目列表客户筛选已接共享的服务端搜索 Client 选择器；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 Focus 趋势与终态 Session 历史
@@ -40,10 +40,10 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - Focus Core A+B+C+D1+D2a 和 D2b 日期范围回顾/项目/标签/小时/热力图：持久化 Session/interval、任务绑定、暂停/继续/停止/取消、服务端绝对时间、15 秒心跳、启动/刷新恢复、`If-Match`/幂等、精确秒数结转 Task 完整分钟、IANA 当地日 completed-only Today/周期统计、终态历史分页、7/30 天/本月/最多 93 天自定义趋势与 Streak、按 Task 当前归属的项目分布与非互斥当前标签分布、DST 安全 24 小时分布/最佳时段与周几×小时二维热力图、Task 详情按需专注记录、项目详情按当前 Task 项目归属查看报告与历史，以及共享前端循环/恢复 UI
 - 手工 Inbox 受理/分诊纵切：真实创建、三视图列表、搜索/优先级/分页、详情编辑、单条已读、按列表快照全部已读、稍后/恢复、带原因解决/忽略、重开、全局待处理未读数和追加式事件时间线；列表每 15 秒按服务端时钟刷新到期可见性
 - Inbox 已有 Task 关系纵切：详情查询活动/历史关系和服务端实时 required 进度，支持关联已有 Task、修改必需标记、带原因软解除、`open / tracking` 联动与按活动关系重开；关系写入使用 Inbox `If-Match`/幂等快照并追加事件，活动关系阻止 Task 硬删除，软解除后 Task 可删且历史 ID/标题快照保留。父子层级不会创建关系或继承/改写 required，Inbox 自动结清只看显式活动必需关系
-- SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
+- SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效、关闭到托盘偏好和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列，按月规则以当地日为锚点并在短月落到月末。右侧概览已读取真实本地客户动态和可直达详情的临近路线图节点，不伪造线上行为或复制项目进度。v0.2 首个受限预设自动化纵切也已接通，本地 Agent 已交付代码所有 Adapter 登记与安全诊断但 Runner/Run 尚未实现。客户回访已完成本地计划、终态、到期 Inbox 与跨时区/DST 边界；路线图已完成数据/API、R3 基础界面、R4 同季度/跨季度/跨年度/精确日期排期和 R5 本地到期/达成 Inbox 来源。内容日历已完成数据/API、六周月格、安全拖拽与即时预移/失败回滚、卡片键盘逐日改期、详情编辑、人工发布确认、准备 Task 关联、六周范围自动分页聚合，以及审核/发布到期的启动补偿、周期扫描、版本化去重、旧来源终结与 Inbox 指定详情直达。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小源码闭环、白名单桌面能力诊断和前端世代清理也已接通；设置运行诊断已完成 480 px 窄屏活动菜单可见性修复，托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v41。T-02 仍部分完成。[PRD v9.79](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v42。T-02 仍部分完成。[PRD v9.80](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -67,7 +67,7 @@ docs/                     PRD、整体功能架构和各模块功能文档
 ## 产品文档
 
 - [文档索引](docs/README.md)
-- [产品需求文档（PRD v9.79）](docs/opc-workspace-PRD.md)
+- [产品需求文档（PRD v9.80）](docs/opc-workspace-PRD.md)
 - [整体功能架构](docs/functional-architecture.md)
 
 ## 开发依赖
@@ -357,7 +357,7 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## SQLite 与迁移
 
-迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v41；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v37 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件、来源 guards、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap 与 Content Item 数据契约；schema v38 新增 Content Item→Inbox 来源，schema v39 新增 Roadmap Milestone→Inbox，schema v40 在自动回滚包保护下重建 Reminder 约束并新增 monthly 与 `recurrence_anchor_day`，已有事实原样保留且不创建 demo 数据；schema v41 保留全部既有事实并新增周一至周五 `weekdays` 规则；后续从 `042_*` 追加。每个连接启用：
+迁移 SQL 位于 `services/sidecar/internal/database/migrations/`，随 Sidecar 二进制嵌入。当前最新版本为 schema v42；启动时按文件版本顺序执行，并记录到 `schema_migrations`。v6–v41 交付 Task/Actor/D2、Client、Focus、Inbox/Reminder、设置、受控文件、来源 guards、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap/Content 数据及其 Inbox 来源；schema v42 在自动回滚包保护下把 `app_settings` 值契约升为 2，为旧 general 行补 `close_to_tray=true`，保留行版本且不向空库写默认数据；后续从 `043_*` 追加。每个连接启用：
 
 - `PRAGMA foreign_keys = ON`
 - `PRAGMA journal_mode = WAL`
@@ -367,4 +367,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.79](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小源码闭环和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。
+[PRD v9.80](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。

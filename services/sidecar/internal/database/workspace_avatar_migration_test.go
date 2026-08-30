@@ -25,8 +25,8 @@ func TestWorkspaceAvatarMigrationPreservesSettingsAndStartsEmpty(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 41 {
-		t.Fatalf("SchemaVersion = %d, want 41", store.SchemaVersion)
+	if store.SchemaVersion != 42 {
+		t.Fatalf("SchemaVersion = %d, want 42", store.SchemaVersion)
 	}
 	var value string
 	var version int
@@ -65,7 +65,7 @@ func TestWorkspaceAvatarMigrationGuardsControlledLifecycle(t *testing.T) {
 	}
 	if _, err := store.SQL.Exec(`
 		INSERT INTO app_settings(key, value_json, schema_version, version, updated_by_actor_id, updated_at)
-		VALUES ('workspace', ?, 1, 1, '00000000-0000-5000-8000-000000000001', CURRENT_TIMESTAMP)
+		VALUES ('workspace', ?, 2, 1, '00000000-0000-5000-8000-000000000001', CURRENT_TIMESTAMP)
 	`, `{"display_name":"Workspace","avatar_ref":"`+path+`"}`); err != nil {
 		t.Fatalf("reference active avatar: %v", err)
 	}

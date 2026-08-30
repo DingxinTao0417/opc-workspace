@@ -46,6 +46,7 @@ export interface GeneralSettings {
   defaultRoute: DefaultRoute;
   showRightOverview: boolean;
   reduceMotion: boolean;
+  closeToTray: boolean;
 }
 
 export interface ProfileSettings {
@@ -91,6 +92,7 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   defaultRoute: "today",
   showRightOverview: true,
   reduceMotion: false,
+  closeToTray: true,
 };
 
 export const DEFAULT_PROFILE_SETTINGS: ProfileSettings = {
@@ -157,6 +159,7 @@ export function sanitizeGeneralSettings(
       candidate.reduceMotion,
       fallback.reduceMotion,
     ),
+    closeToTray: normalizeBoolean(candidate.closeToTray, fallback.closeToTray),
   };
 }
 
@@ -466,6 +469,7 @@ function pickGeneralSettings(state: GeneralSettings): GeneralSettings {
     defaultRoute: state.defaultRoute,
     showRightOverview: state.showRightOverview,
     reduceMotion: state.reduceMotion,
+    closeToTray: state.closeToTray,
   };
 }
 

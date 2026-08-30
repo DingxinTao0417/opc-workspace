@@ -12,12 +12,12 @@ import {
 
 const validPayload = (): any => ({
   data: {
-    schema_version: 1,
+    schema_version: 2,
     items: [
       {
         key: "workspace",
         value: { display_name: "opc-workspace", avatar_ref: null },
-        schema_version: 1,
+        schema_version: 2,
         version: 0,
         stored: false,
         updated_by_actor_id: null,
@@ -29,8 +29,9 @@ const validPayload = (): any => ({
           default_route: "today",
           show_right_overview: true,
           reduce_motion: false,
+          close_to_tray: true,
         },
-        schema_version: 1,
+        schema_version: 2,
         version: 2,
         stored: true,
         updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -39,7 +40,7 @@ const validPayload = (): any => ({
       {
         key: "appearance",
         value: { theme: "dark" },
-        schema_version: 1,
+        schema_version: 2,
         version: 0,
         stored: false,
         updated_by_actor_id: null,
@@ -55,7 +56,7 @@ const validPayload = (): any => ({
           auto_start_focus: false,
           sound_enabled: true,
         },
-        schema_version: 1,
+        schema_version: 2,
         version: 1,
         stored: true,
         updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -64,7 +65,7 @@ const validPayload = (): any => ({
       {
         key: "storage",
         value: { low_space_threshold_gib: 1 },
-        schema_version: 1,
+        schema_version: 2,
         version: 0,
         stored: false,
         updated_by_actor_id: null,
@@ -146,7 +147,7 @@ describe("settings API", () => {
   it("strictly normalizes all five settings modules", () => {
     const settings = normalizeAppSettingsResponse(validPayload());
 
-    expect(settings.schemaVersion).toBe(1);
+    expect(settings.schemaVersion).toBe(2);
     expect(settings.items.map((item) => item.key)).toEqual([
       "workspace",
       "general",
@@ -161,6 +162,7 @@ describe("settings API", () => {
         defaultRoute: "today",
         showRightOverview: true,
         reduceMotion: false,
+        closeToTray: true,
       },
     });
     expect(getAppSetting(settings, "workspace")).toMatchObject({
@@ -258,7 +260,7 @@ describe("settings API", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getAppSettings()).resolves.toMatchObject({ schemaVersion: 1 });
+    await expect(getAppSettings()).resolves.toMatchObject({ schemaVersion: 2 });
     await expect(
       updateAppSettings([
         { key: "appearance", expectedVersion: 0, value: { theme: "light" } },
@@ -280,7 +282,7 @@ describe("settings API", () => {
           value: { lowSpaceThresholdGiB: 5 },
         },
       ]),
-    ).resolves.toMatchObject({ schemaVersion: 1 });
+    ).resolves.toMatchObject({ schemaVersion: 2 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -326,7 +328,7 @@ describe("settings API", () => {
         ],
         file,
       ),
-    ).resolves.toMatchObject({ schemaVersion: 1 });
+    ).resolves.toMatchObject({ schemaVersion: 2 });
     await expect(getWorkspaceAvatarBlob()).resolves.toMatchObject({
       type: "image/png",
       size: 4,

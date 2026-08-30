@@ -18,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const settingsSchemaVersion = 1
+const settingsSchemaVersion = 2
 
 var (
 	settingKeys      = []string{"workspace", "general", "appearance", "focus", "storage"}
@@ -35,6 +35,7 @@ type generalSettingValue struct {
 	DefaultRoute      string `json:"default_route"`
 	ShowRightOverview bool   `json:"show_right_overview"`
 	ReduceMotion      bool   `json:"reduce_motion"`
+	CloseToTray       bool   `json:"close_to_tray"`
 }
 
 type appearanceSettingValue struct {
@@ -303,10 +304,10 @@ func normalizeSettingValue(key string, raw json.RawMessage) (string, error) {
 		if err := decodeSettingObject(trimmed, &value); err != nil {
 			return "", err
 		}
-		if err := requireSettingFields(trimmed, "default_route", "show_right_overview", "reduce_motion"); err != nil {
+		if err := requireSettingFields(trimmed, "default_route", "show_right_overview", "reduce_motion", "close_to_tray"); err != nil {
 			return "", err
 		}
-		if err := requireNonNullSettingFields(trimmed, "default_route", "show_right_overview", "reduce_motion"); err != nil {
+		if err := requireNonNullSettingFields(trimmed, "default_route", "show_right_overview", "reduce_motion", "close_to_tray"); err != nil {
 			return "", err
 		}
 		switch value.DefaultRoute {
@@ -424,7 +425,7 @@ func defaultSettingValue(key string) string {
 	case "workspace":
 		value = workspaceSettingValue{DisplayName: "opc-workspace", AvatarRef: nil}
 	case "general":
-		value = generalSettingValue{DefaultRoute: "today", ShowRightOverview: true, ReduceMotion: false}
+		value = generalSettingValue{DefaultRoute: "today", ShowRightOverview: true, ReduceMotion: false, CloseToTray: true}
 	case "appearance":
 		value = appearanceSettingValue{Theme: "dark"}
 	case "focus":

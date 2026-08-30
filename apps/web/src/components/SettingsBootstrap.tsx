@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
+import { setCloseToTrayEnabled } from "../api/desktop";
 import { settingsQueryKey } from "../api/hooks";
 import { bootstrapAppSettings } from "../settings/bootstrap";
 import {
@@ -31,6 +32,9 @@ export function SettingsBootstrap({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     if (!query.data || query.dataUpdatedAt === appliedAt) return;
     replaceCommitted(query.data.committed);
+    void setCloseToTrayEnabled(query.data.committed.general.closeToTray).catch(
+      () => undefined,
+    );
     queryClient.setQueryData(settingsQueryKey, query.data.settings);
     if (query.data.legacyExists) clearLegacySettings();
     clearLocalAvatarSnapshot();

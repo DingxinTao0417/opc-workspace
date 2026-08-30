@@ -1,4 +1,7 @@
-type InvokeCommand = (command: string) => Promise<unknown>;
+type InvokeCommand = (
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<unknown>;
 
 export type StartupStage =
   | "waiting_for_sidecar"
@@ -70,6 +73,17 @@ export async function openDesktopLogDirectory(
   const invoke =
     invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
   await invoke("open_log_directory");
+  return true;
+}
+
+export async function setCloseToTrayEnabled(
+  enabled: boolean,
+  invokeCommand?: InvokeCommand,
+): Promise<boolean> {
+  if (!invokeCommand && !isDesktopRuntime()) return false;
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  await invoke("set_close_to_tray_enabled", { enabled });
   return true;
 }
 

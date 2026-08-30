@@ -1,8 +1,8 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29），本轮无桌面 migration。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出最小源码闭环，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.79](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.80](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -24,7 +24,7 @@
 
 - Tauri 2 桌面窗口、固定最小尺寸和内置 Web 前端。
 - single-instance 插件；再次启动时显示、取消最小化并聚焦主窗口。
-- Tauri `tray-icon` 已提供最小托盘：只有托盘构建成功才拦截主窗口关闭并隐藏；左键和固定“显示 opc-workspace”恢复窗口，固定“退出 opc-workspace”进入应用退出与 Sidecar 优雅关闭。构建失败时关闭请求按原路径继续，避免隐藏后无法恢复。无配置图标时使用代码内本地 RGBA fallback，不读取外部路径。
+- Tauri `tray-icon` 已提供最小托盘：只有托盘构建成功且 committed `close_to_tray` 启用时才拦截主窗口关闭并隐藏；左键和固定“显示 opc-workspace”恢复窗口，固定“退出 opc-workspace”进入应用退出与 Sidecar 优雅关闭。构建失败或偏好关闭时关闭请求按原路径继续。无配置图标时使用代码内本地 RGBA fallback，不读取外部路径。
 - 生产配置通过 externalBin 打包 opc-sidecar，开发可通过 OPC_SIDECAR_URL 连接外部 Sidecar。
 - Tauri 获取 appDataDir 和 appLogDir，创建数据库、附件、Artifact、发票、备份和配置目录。
 - 内置 Sidecar 每个 generation 都生成新的随机会话令牌，并以 `127.0.0.1:0` 重新请求 OS 分配动态端口；端口值允许被 OS 复用。
@@ -47,7 +47,7 @@
 - 真实 Tauri/Sidecar 父进程崩溃、进程树、Windows/macOS/Linux 和安装包生命周期验收；当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
 - 数据库打开前的备份选择与安全回滚交互；当前恢复页已显示白名单恢复/迁移进度，但不提供路径、备份 ID、原始错误或启动前选择器。
 - `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、托盘运行时可用性，复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。`desktop_capabilities` 对未接入集成只返回 `not_implemented`，读取失败不阻断生命周期诊断；诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
-- 托盘专注状态/快捷业务动作/设置开关、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；基础托盘源码已接但当前主机尚未完成原生链接与交互验收。
+- 托盘专注状态/快捷业务动作、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；关闭到托盘设置开关已接，基础托盘当前主机尚未完成原生链接与交互验收。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
 - Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
 - 当前主机上的 Rust 格式与静态单元测试不能替代真实 Sidecar 生命周期、安装包或三平台支持；当前环境缺少 MSVC `link.exe` 和 Windows SDK，`cargo check` / `cargo test` 的链接阶段受阻。
@@ -73,8 +73,8 @@
 
 ### 系统托盘
 
-- **当前已接源码**：托盘成功建立时关闭主窗口隐藏，左键/“显示”恢复，“退出”复用优雅关闭；失败时不拦截关闭。
-- **后续**：首次行为明确提示并提供设置开关。
+- **当前已接源码**：托盘成功建立且设置启用时关闭主窗口隐藏，左键/“显示”恢复，“退出”复用优雅关闭；托盘失败或设置关闭时不拦截关闭。
+- **当前已接设置**：通用设置点击后立即预览下一次关闭行为，保存写入 SQLite，取消恢复打开时 committed；首次提示仍待后续。
 - **后续**：菜单增加快速新建任务、开始/暂停专注和设置。
 - **后续**：图标区分空闲、专注、休息和本地服务故障。
 - 退出动作必须关闭 Sidecar 和数据库；隐藏窗口不得误触发退出。
@@ -150,7 +150,7 @@
 
 ### 关闭窗口与退出
 
-1. 当前托盘可用时，用户关闭主窗口会隐藏并保持 Sidecar；托盘不可用时不拦截关闭。根据设置切换该行为留到后续。
+1. 当前托盘可用且 `close_to_tray` 启用时，用户关闭主窗口会隐藏并保持 Sidecar；设置关闭或托盘不可用时不拦截关闭。设置页点击即预览，取消恢复 committed。
 2. 用户从托盘或菜单选择“退出”。
 3. 应用冻结新长任务，等待写事务并通知专注/Agent 模块处理运行态。
 4. 若数据恢复处于 applying/restarting，显示不可退出的维护状态，待完成或回滚；其他可取消任务按其协议结束。
@@ -202,6 +202,7 @@
 - open_log_directory：无业务参数，只打开应用自身日志目录。
 - desktop_shortcut_status：只返回两个固定原生快捷键的 `registered / unavailable` 状态。
 - desktop_capabilities：只返回托盘、原生通知、自启、原生文件对话框和离线更新的 `available / unavailable / not_implemented` 白名单枚举；当前只有托盘可在初始化成功后为 available。
+- set_close_to_tray_enabled：只接受 `enabled: bool`，更新当前进程内的关闭决策；持久事实仍由 SQLite `app_settings.general.close_to_tray` 拥有，启动与设置预览负责同步。
 
 规划 command 或事件职责：
 
@@ -279,7 +280,7 @@
 - [x] 内置 Sidecar 最多按 500 ms、2 s 自动重启两次，当前 generation 连续 Ready 30 秒重置预算；只有真实 `Terminated` 才为已启动代际重拉，外部/shutdown/无 Terminated 流关闭均不触发。
 - [x] 正常退出发送 shutdown，等待 drain/WAL checkpoint，超时只终止精确 child generation；并发调用共享一次 stop，ready 超时竞态不会伪造 exited，父管道 EOF 由 `OPC_EXIT_ON_STDIN_CLOSE=true` 触发 Go 优雅关闭。
 - [x] 恢复计划挂起后可从设置页请求安全重启；command 拒绝外部 Sidecar，受管 child 只接受 code 0/no signal，未创建 child 的 bundled 启动失败允许继续，延迟干净退出后可重试。
-- [x] 当前源码门禁通过 Web 全量 90 个文件 / 604 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘与能力快照新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
+- [x] 当前源码门禁通过 Web 全量 90 个文件 / 607 项、Go `go test ./... -count=1` 与 `go vet ./...`、Sidecar 构建、Rust 格式和锁定 Cargo metadata；托盘与能力快照新增单元测试源码已完成静态复核，但受工具链限制未执行 Rust 测试或原生链接。
 - [x] 在线 Updater 未启用，也不是启动依赖。
 
 ### 仍待验收
@@ -293,7 +294,7 @@
 - [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
 - [x] 全局服务恢复页 v1：starting/restarting/error 拦截业务页，ready 自动放行；generation、查询清理、状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
 - [ ] 数据库打开前备份选择与实时恢复进度。
-- [ ] 托盘源码已完成最小闭环；MSVC 工具链补齐后验证 Windows 链接、关闭/恢复/退出与 Sidecar 无残留，再补 macOS/Linux、设置开关、状态和业务动作。原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框仍待。
+- [ ] 托盘源码和关闭到托盘设置已完成最小闭环；MSVC 工具链补齐后验证 Windows 链接、偏好启停、关闭/恢复/退出与 Sidecar 无残留，再补 macOS/Linux、运行状态和业务动作。原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框仍待。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。
 - [ ] 当前主机补齐 MSVC `link.exe` 与 Windows SDK 后的 `cargo check` / `cargo test`、Tauri 链接与安装包检查。

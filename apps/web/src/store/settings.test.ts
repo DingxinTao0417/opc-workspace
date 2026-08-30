@@ -113,6 +113,7 @@ describe("focus settings", () => {
       defaultRoute: "today",
       showRightOverview: false,
       reduceMotion: false,
+      closeToTray: true,
     });
   });
 
@@ -198,6 +199,7 @@ describe("focus settings", () => {
         defaultRoute: "projects",
         showRightOverview: false,
         reduceMotion: true,
+        closeToTray: true,
       },
       profile: {
         displayName: "Legacy Workspace",

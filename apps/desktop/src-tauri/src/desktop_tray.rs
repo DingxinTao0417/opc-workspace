@@ -14,9 +14,18 @@ const MAIN_WINDOW_LABEL: &str = "main";
 const SHOW_MAIN_WINDOW_ID: &str = "tray_show_main_window";
 const EXIT_APPLICATION_ID: &str = "tray_exit_application";
 
-#[derive(Default)]
 pub struct DesktopTrayState {
     available: AtomicBool,
+    close_to_tray: AtomicBool,
+}
+
+impl Default for DesktopTrayState {
+    fn default() -> Self {
+        Self {
+            available: AtomicBool::new(false),
+            close_to_tray: AtomicBool::new(true),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -46,6 +55,14 @@ impl DesktopTrayState {
         self.available.load(Ordering::Acquire)
     }
 
+    fn set_close_to_tray_enabled(&self, enabled: bool) {
+        self.close_to_tray.store(enabled, Ordering::Release);
+    }
+
+    fn should_hide_on_close(&self) -> bool {
+        self.is_available() && self.close_to_tray.load(Ordering::Acquire)
+    }
+
     fn capabilities(&self) -> DesktopCapabilities {
         DesktopCapabilities {
             tray: if self.is_available() {
@@ -64,6 +81,11 @@ impl DesktopTrayState {
 #[tauri::command]
 pub fn desktop_capabilities(state: State<'_, DesktopTrayState>) -> DesktopCapabilities {
     state.capabilities()
+}
+
+#[tauri::command]
+pub fn set_close_to_tray_enabled(enabled: bool, state: State<'_, DesktopTrayState>) {
+    state.set_close_to_tray_enabled(enabled);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +124,7 @@ pub fn show_main_window(app: &AppHandle) -> bool {
 }
 
 pub fn hide_main_window_to_tray(app: &AppHandle) -> bool {
-    if !app.state::<DesktopTrayState>().is_available() {
+    if !app.state::<DesktopTrayState>().should_hide_on_close() {
         return false;
     }
     let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
@@ -249,8 +271,21 @@ mod tests {
     fn tray_availability_starts_disabled_and_can_be_published() {
         let state = DesktopTrayState::default();
         assert!(!state.is_available());
+        assert!(!state.should_hide_on_close());
         state.mark_available();
         assert!(state.is_available());
+        assert!(state.should_hide_on_close());
+    }
+
+    #[test]
+    fn close_to_tray_can_be_previewed_without_removing_the_tray() {
+        let state = DesktopTrayState::default();
+        state.mark_available();
+        state.set_close_to_tray_enabled(false);
+        assert!(state.is_available());
+        assert!(!state.should_hide_on_close());
+        state.set_close_to_tray_enabled(true);
+        assert!(state.should_hide_on_close());
     }
 
     #[test]

@@ -4,6 +4,7 @@ import {
   isDesktopRuntime,
   openDesktopLogDirectory,
   requestApplicationRestart,
+  setCloseToTrayEnabled,
 } from "./desktop";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -30,6 +31,20 @@ describe("desktop log directory", () => {
     const invoke = vi.fn(async () => undefined);
     await expect(openDesktopLogDirectory(invoke)).resolves.toBe(true);
     expect(invoke).toHaveBeenCalledWith("open_log_directory");
+  });
+});
+
+describe("close-to-tray runtime preview", () => {
+  it("degrades safely in browser development", async () => {
+    await expect(setCloseToTrayEnabled(false)).resolves.toBe(false);
+  });
+
+  it("invokes only the bounded boolean desktop command", async () => {
+    const invoke = vi.fn(async () => undefined);
+    await expect(setCloseToTrayEnabled(false, invoke)).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith("set_close_to_tray_enabled", {
+      enabled: false,
+    });
   });
 });
 

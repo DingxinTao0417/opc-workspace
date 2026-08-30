@@ -32,6 +32,7 @@ export interface GeneralSettingValue {
   defaultRoute: "today" | "tasks" | "projects" | "clients" | "focus";
   showRightOverview: boolean;
   reduceMotion: boolean;
+  closeToTray: boolean;
 }
 
 export interface AppearanceSettingValue {
@@ -52,7 +53,7 @@ export interface StorageSettingValue {
 }
 
 interface AppSettingItemBase {
-  schemaVersion: 1;
+  schemaVersion: 2;
   version: number;
   stored: boolean;
   updatedByActorId: string | null;
@@ -69,7 +70,7 @@ export type AppSettingItem = AppSettingItemBase &
   );
 
 export interface AppSettingsResult {
-  schemaVersion: 1;
+  schemaVersion: 2;
   items: AppSettingItem[];
 }
 

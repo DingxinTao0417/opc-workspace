@@ -1,6 +1,6 @@
 # 今日工作台模块
 
-> 实现状态截止：2026-08-29；当前数据库 schema v41。schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33–v41 的后续事实不改变 Today 原有 Task 字段、计划分组或统计 API 契约。T-06A–H、T-11F、截止风险快捷筛选和客户回访待办已交付；PRD v9.73–v9.75 进一步把未删除的本地客户活动和 planned/active 路线图节点聚合到右侧概览，并支持指定里程碑详情深链，不新增表或迁移。
+> 实现状态截止：2026-08-29；当前数据库 schema v42。schema v30/v31/v32 分别扩展 Task Submission、Client Activity 来源与 Reminder，schema v33–v42 的后续事实不改变 Today 原有 Task 字段、计划分组或统计 API 契约。T-06A–H、T-11F、截止风险快捷筛选和客户回访待办已交付；PRD v9.73–v9.75 进一步把未删除的本地客户活动和 planned/active 路线图节点聚合到右侧概览，并支持指定里程碑详情深链，不新增表或迁移。
 >
 > 版本边界：本文同时描述当前实现与目标规划；凡标注“规划”的内容均未在该基线交付。
 

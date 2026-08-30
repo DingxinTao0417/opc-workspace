@@ -4207,6 +4207,7 @@ function normalizeAppSettingValue(key: AppSettingKey, value: unknown) {
           "default_route",
           "show_right_overview",
           "reduce_motion",
+          "close_to_tray",
         ]) ||
         (value.default_route !== "today" &&
           value.default_route !== "tasks" &&
@@ -4214,7 +4215,8 @@ function normalizeAppSettingValue(key: AppSettingKey, value: unknown) {
           value.default_route !== "clients" &&
           value.default_route !== "focus") ||
         typeof value.show_right_overview !== "boolean" ||
-        typeof value.reduce_motion !== "boolean"
+        typeof value.reduce_motion !== "boolean" ||
+        typeof value.close_to_tray !== "boolean"
       ) {
         return invalidResponse("通用设置响应值无效");
       }
@@ -4222,6 +4224,7 @@ function normalizeAppSettingValue(key: AppSettingKey, value: unknown) {
         defaultRoute: value.default_route,
         showRightOverview: value.show_right_overview,
         reduceMotion: value.reduce_motion,
+        closeToTray: value.close_to_tray,
       };
     }
     case "appearance":
@@ -4302,7 +4305,7 @@ function normalizeAppSettingItem(
       "updated_at",
     ]) ||
     value.key !== expectedKey ||
-    value.schema_version !== 1 ||
+    value.schema_version !== 2 ||
     typeof value.stored !== "boolean"
   ) {
     return invalidResponse(`设置 ${expectedKey} 响应字段无效`);
@@ -4324,7 +4327,7 @@ function normalizeAppSettingItem(
   }
   const base = {
     key: expectedKey,
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     version,
     stored: value.stored,
     updatedByActorId: value.stored ? (actorID as string) : null,
@@ -4375,7 +4378,7 @@ export function normalizeAppSettingsResponse(
   if (
     !isRecord(data) ||
     !hasExactKeys(data, ["schema_version", "items"]) ||
-    data.schema_version !== 1 ||
+    data.schema_version !== 2 ||
     !Array.isArray(data.items) ||
     data.items.length !== appSettingKeys.length
   ) {
@@ -4383,7 +4386,7 @@ export function normalizeAppSettingsResponse(
   }
   const items = data.items;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     items: appSettingKeys.map((key, index) =>
       normalizeAppSettingItem(items[index], key),
     ),
@@ -4426,6 +4429,7 @@ function serializeAppSettingUpdate(update: AppSettingUpdate) {
           default_route: update.value.defaultRoute,
           show_right_overview: update.value.showRightOverview,
           reduce_motion: update.value.reduceMotion,
+          close_to_tray: update.value.closeToTray,
         },
       };
     case "appearance":

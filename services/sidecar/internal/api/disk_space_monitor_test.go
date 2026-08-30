@@ -190,7 +190,7 @@ func TestDiskSpaceMonitorUsesStoredThresholdOnTheNextScan(t *testing.T) {
 	}
 	defer store.Close()
 	setting := models.AppSetting{
-		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 1, Version: 1,
+		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 2, Version: 1,
 		UpdatedByActorID: models.BuiltinOwnerActorID, UpdatedAt: "2026-08-28T21:40:00Z",
 	}
 	if err := store.DB.Create(&setting).Error; err != nil {
@@ -227,7 +227,7 @@ func TestStorageCapacityEndpointReturnsSafeLogicalLocationStatus(t *testing.T) {
 	}
 	defer store.Close()
 	setting := models.AppSetting{
-		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 1, Version: 1,
+		Key: "storage", ValueJSON: `{"low_space_threshold_gib":5}`, SchemaVersion: 2, Version: 1,
 		UpdatedByActorID: models.BuiltinOwnerActorID, UpdatedAt: "2026-08-28T21:45:00Z",
 	}
 	if err := store.DB.Create(&setting).Error; err != nil {

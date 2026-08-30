@@ -47,12 +47,12 @@ function payload(storedKeys: string[] = []): any {
         };
   return {
     data: {
-      schema_version: 1,
+      schema_version: 2,
       items: [
         {
           key: "workspace",
           value: { display_name: "Server Workspace", avatar_ref: null },
-          schema_version: 1,
+          schema_version: 2,
           ...meta("workspace"),
         },
         {
@@ -61,14 +61,15 @@ function payload(storedKeys: string[] = []): any {
             default_route: "today",
             show_right_overview: true,
             reduce_motion: false,
+            close_to_tray: true,
           },
-          schema_version: 1,
+          schema_version: 2,
           ...meta("general"),
         },
         {
           key: "appearance",
           value: { theme: "dark" },
-          schema_version: 1,
+          schema_version: 2,
           ...meta("appearance"),
         },
         {
@@ -81,13 +82,13 @@ function payload(storedKeys: string[] = []): any {
             auto_start_focus: false,
             sound_enabled: true,
           },
-          schema_version: 1,
+          schema_version: 2,
           ...meta("focus"),
         },
         {
           key: "storage",
           value: { low_space_threshold_gib: 1 },
-          schema_version: 1,
+          schema_version: 2,
           ...meta("storage"),
         },
       ],
@@ -216,6 +217,7 @@ describe("settings bootstrap", () => {
           default_route: "projects",
           show_right_overview: true,
           reduce_motion: false,
+          close_to_tray: true,
         };
         migrated.data.items[2].value = { theme: "light" };
         migrated.data.items[3].value = {

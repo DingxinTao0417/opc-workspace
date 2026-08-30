@@ -23,6 +23,7 @@ import { applyTheme, ThemeController } from "./ThemeController";
 
 const desktopApi = vi.hoisted(() => ({
   getRuntimeDiagnostics: vi.fn(),
+  setCloseToTrayEnabled: vi.fn(),
 }));
 
 vi.mock("../api/desktop", async (importActual) => {
@@ -30,6 +31,7 @@ vi.mock("../api/desktop", async (importActual) => {
   return {
     ...actual,
     getRuntimeDiagnostics: desktopApi.getRuntimeDiagnostics,
+    setCloseToTrayEnabled: desktopApi.setCloseToTrayEnabled,
   };
 });
 
@@ -52,12 +54,12 @@ const healthPayload = {
 function settingsPayload(): any {
   return {
     data: {
-      schema_version: 1,
+      schema_version: 2,
       items: [
         {
           key: "workspace",
           value: { display_name: "opc-workspace", avatar_ref: null },
-          schema_version: 1,
+          schema_version: 2,
           version: 1,
           stored: true,
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -69,8 +71,9 @@ function settingsPayload(): any {
             default_route: "today",
             show_right_overview: true,
             reduce_motion: false,
+            close_to_tray: true,
           },
-          schema_version: 1,
+          schema_version: 2,
           version: 1,
           stored: true,
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -79,7 +82,7 @@ function settingsPayload(): any {
         {
           key: "appearance",
           value: { theme: "dark" },
-          schema_version: 1,
+          schema_version: 2,
           version: 1,
           stored: true,
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -95,7 +98,7 @@ function settingsPayload(): any {
             auto_start_focus: false,
             sound_enabled: true,
           },
-          schema_version: 1,
+          schema_version: 2,
           version: 1,
           stored: true,
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -104,7 +107,7 @@ function settingsPayload(): any {
         {
           key: "storage",
           value: { low_space_threshold_gib: 1 },
-          schema_version: 1,
+          schema_version: 2,
           version: 1,
           stored: true,
           updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -153,6 +156,8 @@ function renderSettings() {
 describe("SettingsModal", () => {
   beforeEach(() => {
     desktopApi.getRuntimeDiagnostics.mockReset();
+    desktopApi.setCloseToTrayEnabled.mockReset();
+    desktopApi.setCloseToTrayEnabled.mockResolvedValue(true);
     desktopApi.getRuntimeDiagnostics.mockResolvedValue({
       environment: "browser",
       phase: "external",
@@ -323,6 +328,9 @@ describe("SettingsModal", () => {
     });
     fireEvent.click(screen.getByRole("switch", { name: "显示右侧概览" }));
     fireEvent.click(screen.getByRole("switch", { name: "减少动效" }));
+    fireEvent.click(
+      screen.getByRole("switch", { name: "关闭窗口时隐藏到托盘" }),
+    );
 
     expect(screen.getByTestId("current-location").textContent).toBe("/tasks");
     expect(document.documentElement.dataset.reduceMotion).toBe("true");
@@ -330,11 +338,13 @@ describe("SettingsModal", () => {
       defaultRoute: "today",
       showRightOverview: true,
       reduceMotion: false,
+      closeToTray: true,
       preview: {
         general: {
           defaultRoute: "tasks",
           showRightOverview: false,
           reduceMotion: true,
+          closeToTray: false,
         },
       },
     });
@@ -346,9 +356,21 @@ describe("SettingsModal", () => {
         defaultRoute: "tasks",
         showRightOverview: false,
         reduceMotion: true,
+        closeToTray: false,
         preview: null,
       }),
     );
+    const settingsCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(settingsCall?.[1]?.body))).toMatchObject({
+      updates: [
+        {
+          key: "general",
+          value: { close_to_tray: false },
+        },
+      ],
+    });
   });
 
   it("previews and saves the profile name", async () => {
@@ -480,6 +502,31 @@ describe("SettingsModal", () => {
       showRightOverview: true,
       preview: null,
     });
+  });
+
+  it("previews close-to-tray immediately and restores it when cancelled", async () => {
+    renderSettings();
+
+    fireEvent.click(
+      screen.getByRole("switch", { name: "关闭窗口时隐藏到托盘" }),
+    );
+    await waitFor(() =>
+      expect(desktopApi.setCloseToTrayEnabled).toHaveBeenCalledWith(false),
+    );
+    expect(useSettingsStore.getState().preview?.general.closeToTray).toBe(
+      false,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    await waitFor(() =>
+      expect(desktopApi.setCloseToTrayEnabled.mock.calls).toEqual([
+        [false],
+        [true],
+      ]),
+    );
+    expect(useSettingsStore.getState().closeToTray).toBe(true);
+    expect(useSettingsStore.getState().preview).toBeNull();
   });
 
   it("shows real health and version facts in the read-only About module", async () => {
@@ -664,7 +711,7 @@ describe("SettingsModal", () => {
                   note: "发布前",
                   app_version: "0.1.0",
                   api_version: "v1",
-                  schema_version: 18,
+                  schema_version: 28,
                   artifact_count: 0,
                   artifact_bytes: 0,
                   database_bytes: 65536,

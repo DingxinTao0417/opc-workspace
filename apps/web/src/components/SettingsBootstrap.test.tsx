@@ -15,6 +15,18 @@ import {
 } from "../store/settings";
 import { SettingsBootstrap } from "./SettingsBootstrap";
 
+const desktopApi = vi.hoisted(() => ({
+  setCloseToTrayEnabled: vi.fn(),
+}));
+
+vi.mock("../api/desktop", async (importActual) => {
+  const actual = await importActual<typeof import("../api/desktop")>();
+  return {
+    ...actual,
+    setCloseToTrayEnabled: desktopApi.setCloseToTrayEnabled,
+  };
+});
+
 function testStorage(): Storage {
   const values = new Map<string, string>();
   return {
@@ -31,7 +43,7 @@ function testStorage(): Storage {
 
 function storedSettingsPayload() {
   const metadata = {
-    schema_version: 1,
+    schema_version: 2,
     version: 1,
     stored: true,
     updated_by_actor_id: "00000000-0000-5000-8000-000000000001",
@@ -39,7 +51,7 @@ function storedSettingsPayload() {
   };
   return {
     data: {
-      schema_version: 1,
+      schema_version: 2,
       items: [
         {
           key: "workspace",
@@ -52,6 +64,7 @@ function storedSettingsPayload() {
             default_route: "projects",
             show_right_overview: false,
             reduce_motion: true,
+            close_to_tray: false,
           },
           ...metadata,
         },
@@ -97,6 +110,8 @@ function renderBootstrap() {
 
 describe("SettingsBootstrap", () => {
   beforeEach(() => {
+    desktopApi.setCloseToTrayEnabled.mockReset();
+    desktopApi.setCloseToTrayEnabled.mockResolvedValue(true);
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: testStorage(),
@@ -141,10 +156,12 @@ describe("SettingsBootstrap", () => {
       defaultRoute: "projects",
       showRightOverview: false,
       reduceMotion: true,
+      closeToTray: false,
       focusMinutes: 25,
       cycles: 3,
       theme: "light",
     });
+    expect(desktopApi.setCloseToTrayEnabled).toHaveBeenCalledWith(false);
   });
 
   it("shows a retryable startup error without inventing settings", async () => {

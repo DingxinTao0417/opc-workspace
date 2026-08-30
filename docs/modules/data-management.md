@@ -1,6 +1,6 @@
 # 数据管理、受控文件、备份与恢复模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v41（2026-08-29）
+> 当前基线：app v0.1.0 / API v1 / SQLite schema v42（2026-08-29）
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、手工与内部自动回滚包的低空间准入、启动后恢复结果诊断，以及业务 JSON 与含文件业务 ZIP 的空工作区同 schema 安全导入导出已经实现；备份操作性失败、启动、运行期数据库操作失败和可配置低空间会投影安全的系统维护 Inbox Item，但可解释的容量准入拒绝不投影通用故障 incident。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、全局启动故障恢复页 v1 与数据库打开前的白名单恢复进度也已交付；启动前备份选择、卷级趋势、非空目标冲突合并、计划备份和完整跨版本矩阵仍未实现。
 
@@ -172,7 +172,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ## SQLite 迁移契约
 
-当前 schema v41：
+当前 schema v42：
 
 - schema v15 以加法迁移新增 required 关系查询索引与 automatic resolution 校验 trigger；升级不改写业务事实或创建 demo 数据。
 - schema v16 以加法迁移新增空的版本化 `app_settings`、active Actor 写入约束和不可变 key/硬删除保护；不插入服务端默认值、不改写 v15 事实或创建 demo 数据。
@@ -181,7 +181,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 - schema v19 以加法迁移新增 Client Attachment、活动同属校验、跨表 object ID 唯一、业务事实/成员硬删保护、不可变 tombstone、完整性索引和 Client 版本传播；不改写 v18 事实，也不创建附件/demo 数据。
 - schema v20 以加法迁移新增 Client–person contact 关联、单 active 约束、解除事实分组/不可变保护、Actor 停用保护和 Client 版本传播；不改写 v19 Client/Actor 事实，也不创建关联/demo 数据。
 - schema v21 以加法迁移新增版本化 Project Note、稳定时间线、软删除事实分组、身份/终态不可变保护和 Project 版本传播；不改写 v20 事实，也不创建笔记/demo 数据。
-- schema v22 以加法迁移新增受控 Project Attachment；schema v23–v26 增加来源保护；schema v27 增加工作区头像、删除墓碑、单 active/设置引用/跨领域 ID guards；schema v28 增加 Project 完成节点 Inbox 来源与删除协调；schema v29 在破坏性迁移闸门后重建 `app_settings` 允许 key 约束并保留全部既有设置事实；schema v30 以非破坏性迁移给 `task_submissions` 增加 `origin=manual/child_rollup`；schema v31 以非破坏性部分唯一索引约束 `project_workflow_event` Client Activity 来源；schema v32 为 Reminder 增加稳定系列、重复规则和 occurrence 约束；schema v33 新增 Automation Rule 与不可变 Automation Run/重试事实表；schema v34–v37 依次新增 Agent Adapter、Client Followup、Roadmap 和 Content Item 数据契约；schema v38 增加 Content Item→Inbox 来源，schema v39 增加 Roadmap Milestone→Inbox 的版本化来源、不可变快照与删除协调约束；schema v40 在破坏性迁移闸门和自动回滚包之后重建 Reminder 表约束，增加 monthly/当地日锚点，并在提交前执行外键自检。v34–v41 迁移均不创建业务 demo 数据；schema v41 保留既有 Reminder 事实并增加 weekdays；后续迁移从 `042_*` 继续。
+- schema v22–v41 依次交付受控 Project Attachment、来源保护、工作区头像、Project/Content/Roadmap Inbox 来源、storage 设置、父任务进度、Client Activity 来源、重复 Reminder、Automation、Agent Adapter、Client Followup、Roadmap 和 Content Item；schema v40/v41 重建 Reminder 约束并增加 monthly/weekdays。schema v42 在同一破坏性迁移闸门和自动回滚包之后重建 `app_settings`，把值契约升为 2，为既有 general JSON 补 `close_to_tray=true`，保留行版本、Actor 与时间并恢复全部 triggers。v34–v42 均不创建业务 demo 数据；后续迁移从 `043_*` 继续。
 
 - 001：核心业务表；
 - 002：删除旧固定 demo seed，不删除用户数据；
@@ -237,7 +237,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v41 的完整固定表/列清单与标量行；`task_submissions.origin`、Reminder 重复/当地日锚点字段、`automation_rules`、`automation_runs`、`agent_adapters`、`client_followups`、Roadmap 与 Content Item 都属于严格列契约，来源唯一索引也在导入事务中生效。导入会校验 Automation preset ID/trigger/action/config、依赖可用性、Run 的来源/重试关系、attempt 顺序和不可变历史；未修改且仍为默认禁用的内置规则不使目标成为非空，但任何已配置规则、Run 或 Client Followup 都会阻止覆盖。Agent Adapter 只接受代码所有身份、disabled/version=1、`execution_ready=false` 及 unknown 或固定 blocked 诊断。重复 Reminder 会在创建回滚包前校验规则、间隔、IANA 时区和类型一致的锚点，旧 schema 包不会伪装为同 schema 导入。`excluded_operational_tables` 必须完全一致。源包必须没有 active 受控文件，Client/Project Attachment 和 Workspace Avatar 表必须为空，Task Artifact 仅允许 text/link/structured；活动或暂停中的 Focus Session 必须先结束。目标只允许保留内置 Actor 与未修改默认 Automation Rule；任何已登记 Agent Adapter 或其他业务行都会使 preview 返回 `can_apply=false / blocker=target_not_empty`，不会覆盖。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v42 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。其他 Task/Reminder/Automation/Agent/Client/Roadmap/Content 严格契约和空目标门禁保持不变，旧 schema 包不会伪装为同 schema 导入。
 
 正式 apply 要求固定确认头并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中替换业务白名单、重建排除于导出之外的 `task_focus_totals`、恢复原 trigger，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。跨 schema 与非空目标 UUID/冲突映射仍待独立设计。
 

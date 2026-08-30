@@ -6,6 +6,7 @@ mod sidecar;
 use desktop_log::{DesktopEvent, DesktopLogger};
 use desktop_tray::{
     DesktopTrayState, desktop_capabilities, hide_main_window_to_tray, install_desktop_tray,
+    set_close_to_tray_enabled,
 };
 use global_shortcuts::{
     DesktopShortcutRegistry, desktop_shortcut_status, handle_global_shortcut,
@@ -43,7 +44,8 @@ pub fn run() {
             restart_application,
             open_log_directory,
             desktop_shortcut_status,
-            desktop_capabilities
+            desktop_capabilities,
+            set_close_to_tray_enabled
         ])
         .setup(move |app| {
             let logger = app
