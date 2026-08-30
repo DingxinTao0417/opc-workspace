@@ -643,7 +643,7 @@ describe("actor requests", () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         jsonResponse({
-          data: [actorPayload],
+          data: [{ ...actorPayload, status: "inactive" }],
           meta: { page: 2, page_size: 20, total: 21 },
         }),
     );
@@ -668,6 +668,135 @@ describe("actor requests", () => {
       sort: "display_name",
     });
     expect(result.meta).toEqual({ page: 2, pageSize: 20, total: 21 });
+  });
+
+  it.each([
+    {
+      name: "a mismatched page",
+      input: { page: 2, pageSize: 1 },
+      payload: {
+        data: [actorPayload],
+        meta: { page: 1, page_size: 1, total: 2 },
+      },
+    },
+    {
+      name: "a mismatched page size",
+      input: { page: 1, pageSize: 2 },
+      payload: {
+        data: [actorPayload],
+        meta: { page: 1, page_size: 1, total: 1 },
+      },
+    },
+    {
+      name: "missing metadata",
+      input: { page: 1, pageSize: 1 },
+      payload: { data: [actorPayload] },
+    },
+    {
+      name: "an underfilled non-final page",
+      input: { page: 1, pageSize: 2 },
+      payload: {
+        data: [actorPayload],
+        meta: { page: 1, page_size: 2, total: 3 },
+      },
+    },
+    {
+      name: "duplicate actor ids",
+      input: { page: 1, pageSize: 2 },
+      payload: {
+        data: [actorPayload, actorPayload],
+        meta: { page: 1, page_size: 2, total: 2 },
+      },
+    },
+    {
+      name: "a mismatched actor type filter",
+      input: { page: 1, pageSize: 1, type: "owner" as const },
+      payload: {
+        data: [actorPayload],
+        meta: { page: 1, page_size: 1, total: 1 },
+      },
+    },
+    {
+      name: "a mismatched actor status filter",
+      input: { page: 1, pageSize: 1, status: "inactive" as const },
+      payload: {
+        data: [actorPayload],
+        meta: { page: 1, page_size: 1, total: 1 },
+      },
+    },
+  ])("rejects $name in an actor list response", async ({ input, payload }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(payload)),
+    );
+
+    await expect(getActors(input)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it.each([
+    { page: 0 },
+    { page: 1.5 },
+    { page: Number.MAX_SAFE_INTEGER + 1 },
+    { page: Number.MAX_SAFE_INTEGER, pageSize: 100 },
+    { pageSize: 0 },
+    { pageSize: 1.5 },
+    { pageSize: 101 },
+  ])(
+    "rejects invalid actor pagination before requesting: %o",
+    async (input) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(getActors(input)).rejects.toMatchObject({
+        code: "VALIDATION_ERROR",
+        status: 422,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      name: "one actor page",
+      request: (signal: AbortSignal) =>
+        getActors({ page: 1, pageSize: 1 }, signal),
+    },
+    {
+      name: "all actor option pages",
+      request: (signal: AbortSignal) =>
+        getAllActors({ status: "active" }, signal),
+    },
+  ])("forwards cancellation while loading $name", async ({ request }) => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        markStarted?.();
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("Aborted", "AbortError")),
+            { once: true },
+          );
+        });
+      }),
+    );
+
+    const pending = request(controller.signal);
+    await started;
+    expect(requestSignal?.aborted).toBe(false);
+
+    controller.abort();
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
   it("creates only person actors and version-locks updates", async () => {
@@ -727,6 +856,51 @@ describe("actor requests", () => {
     await expect(getAllActors({ status: "active" })).resolves.toHaveLength(101);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(String(fetchMock.mock.calls[1][0])).toContain("page=2");
+  });
+
+  it("rejects actor ids repeated across option pages", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://local.test");
+      const page = Number(url.searchParams.get("page"));
+      const data = Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+        ...actorPayload,
+        id: page === 2 ? "actor-1-0" : `actor-1-${index}`,
+        display_name: `人员 ${index}`,
+      }));
+      return jsonResponse({
+        data,
+        meta: { page, page_size: 100, total: 101 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAllActors({ status: "active" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects actor option pages whose totals change mid-read", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://local.test");
+      const page = Number(url.searchParams.get("page"));
+      const total = page === 1 ? 101 : 102;
+      const data = Array.from({ length: page === 1 ? 100 : 2 }, (_, index) => ({
+        ...actorPayload,
+        id: `actor-${page}-${index}`,
+        display_name: `人员 ${page}-${index}`,
+      }));
+      return jsonResponse({
+        data,
+        meta: { page, page_size: 100, total },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getAllActors({ status: "active" })).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

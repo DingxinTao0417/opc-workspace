@@ -555,7 +555,7 @@ export const actorDetailQueryKey = (id: string) =>
 export function useActorsQuery(input: ActorListParams = {}, enabled = true) {
   return useQuery({
     queryKey: [...actorQueryKey, "list", input],
-    queryFn: () => getActors(input),
+    queryFn: ({ signal }) => getActors(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
@@ -567,7 +567,7 @@ export function useActorsQuery(input: ActorListParams = {}, enabled = true) {
 export function useAssignmentActorOptionsQuery(enabled = true) {
   return useQuery({
     queryKey: [...actorQueryKey, "assignment-options"],
-    queryFn: () => getAllActors({ status: "active" }),
+    queryFn: ({ signal }) => getAllActors({ status: "active" }, signal),
     enabled,
     retry: 2,
     retryDelay: 500,
@@ -578,7 +578,8 @@ export function useAssignmentActorOptionsQuery(enabled = true) {
 export function useClientActorOptionsQuery(enabled = true) {
   return useQuery({
     queryKey: [...actorQueryKey, "client-contact-options"],
-    queryFn: () => getAllActors({ type: "person", status: "active" }),
+    queryFn: ({ signal }) =>
+      getAllActors({ type: "person", status: "active" }, signal),
     enabled,
     retry: 2,
     retryDelay: 500,
@@ -623,9 +624,12 @@ export function useUpdateActor() {
       queryClient.setQueryData(actorDetailQueryKey(actor.id), actor);
       await queryClient.invalidateQueries({ queryKey: actorQueryKey });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: actorQueryKey });
+        await queryClient.invalidateQueries({
+          queryKey: actorDetailQueryKey(variables.id),
+          exact: true,
+        });
       }
     },
   });
@@ -1117,8 +1121,8 @@ export function useClientFollowupsQuery(
 export function useClientFollowupActorOptionsQuery(enabled = true) {
   return useQuery({
     queryKey: [...actorQueryKey, "client-followup-options"],
-    queryFn: async () => {
-      const actors = await getAllActors({ status: "active" });
+    queryFn: async ({ signal }) => {
+      const actors = await getAllActors({ status: "active" }, signal);
       return actors.filter(
         (actor) => actor.type === "owner" || actor.type === "person",
       );

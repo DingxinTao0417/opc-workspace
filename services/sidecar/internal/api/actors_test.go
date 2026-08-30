@@ -217,6 +217,72 @@ func TestActorCreateListDetailIdempotencyAndStableSort(t *testing.T) {
 	}
 }
 
+func TestActorListPaginationIsStableAcrossEqualNames(t *testing.T) {
+	router, _ := newActorTestAPI(t)
+
+	alice := createActorForTest(t, router, `{"type":"person","display_name":"Alice"}`, nil)
+	bobOne := createActorForTest(t, router, `{"type":"person","display_name":"bob"}`, nil)
+	bobTwo := createActorForTest(t, router, `{"type":"person","display_name":"bob"}`, nil)
+	wantFirstBob, wantSecondBob := bobOne.ID, bobTwo.ID
+	if wantFirstBob > wantSecondBob {
+		wantFirstBob, wantSecondBob = wantSecondBob, wantFirstBob
+	}
+
+	listPage := func(page int) ([]actorResponse, pageMeta) {
+		t.Helper()
+		path := fmt.Sprintf(
+			"/api/v1/actors?type=person&status=active&sort=display_name&page=%d&page_size=2",
+			page,
+		)
+		recorder := performRequest(router, http.MethodGet, path, nil, nil)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("actor page %d = %d: %s", page, recorder.Code, recorder.Body.String())
+		}
+		return decodeActorList(t, recorder.Body.Bytes())
+	}
+
+	pageOne, metaOne := listPage(1)
+	pageTwo, metaTwo := listPage(2)
+	beyond, metaBeyond := listPage(9)
+	if metaOne.Page != 1 || metaTwo.Page != 2 || metaBeyond.Page != 9 ||
+		metaOne.PageSize != 2 || metaTwo.PageSize != 2 || metaBeyond.PageSize != 2 ||
+		metaOne.Total != 3 || metaTwo.Total != metaOne.Total || metaBeyond.Total != metaOne.Total {
+		t.Fatalf("actor pagination metadata changed: page1=%#v page2=%#v beyond=%#v", metaOne, metaTwo, metaBeyond)
+	}
+	if len(pageOne) != 2 || pageOne[0].ID != alice.ID || pageOne[1].ID != wantFirstBob {
+		t.Fatalf("actor page 1 is unstable: %#v", pageOne)
+	}
+	if len(pageTwo) != 1 || pageTwo[0].ID != wantSecondBob {
+		t.Fatalf("actor page 2 is unstable: %#v", pageTwo)
+	}
+	if len(beyond) != 0 {
+		t.Fatalf("out-of-range actor page is not empty: %#v", beyond)
+	}
+	seen := map[string]struct{}{}
+	for _, actor := range pageOne {
+		seen[actor.ID] = struct{}{}
+	}
+	for _, actor := range pageTwo {
+		if _, exists := seen[actor.ID]; exists {
+			t.Fatalf("actor %s overlaps page 1 and page 2", actor.ID)
+		}
+		seen[actor.ID] = struct{}{}
+	}
+	if int64(len(seen)) != metaOne.Total {
+		t.Fatalf("paged actor set = %d, total = %d", len(seen), metaOne.Total)
+	}
+
+	repeatedPageOne, repeatedMetaOne := listPage(1)
+	if repeatedMetaOne.Total != metaOne.Total || len(repeatedPageOne) != len(pageOne) {
+		t.Fatalf("repeated actor page 1 changed: first=%#v/%#v repeated=%#v/%#v", pageOne, metaOne, repeatedPageOne, repeatedMetaOne)
+	}
+	for index := range pageOne {
+		if repeatedPageOne[index].ID != pageOne[index].ID {
+			t.Fatalf("repeated actor page 1 order changed: first=%#v repeated=%#v", pageOne, repeatedPageOne)
+		}
+	}
+}
+
 func TestActorCreateAndLookupValidation(t *testing.T) {
 	router, _ := newActorTestAPI(t)
 

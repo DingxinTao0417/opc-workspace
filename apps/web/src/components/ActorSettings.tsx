@@ -9,9 +9,12 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../api/client";
 import {
+  actorQueryKey,
+  useActorQuery,
   useActorsQuery,
   useCreatePersonActor,
   useUpdateActor,
@@ -32,6 +35,8 @@ const EMPTY_DRAFT: ActorDraft = {
   status: "active",
 };
 
+const PERSON_PAGE_SIZE = 20;
+
 const actorTypeLabels: Record<Actor["type"], string> = {
   owner: "所有者",
   person: "本地人员",
@@ -51,7 +56,7 @@ function actorDraft(actor: Actor): ActorDraft {
 function formatError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "VERSION_CONFLICT") {
-      return "该人员已在其他窗口修改。列表已刷新，请载入最新内容后再编辑。";
+      return "该人员已在其他窗口修改。请载入最新内容后再编辑。";
     }
     if (error.code === "ACTOR_HAS_ACTIVE_ASSIGNMENTS") {
       return "该人员仍有负责中的任务，请先改派这些任务，再停用人员。";
@@ -103,6 +108,8 @@ function ActorEditor({
   onCancel,
   onChange,
   onReload,
+  reloadPending,
+  saveDisabled,
   onSubmit,
 }: {
   actor: Actor;
@@ -112,6 +119,8 @@ function ActorEditor({
   onCancel: () => void;
   onChange: (draft: ActorDraft) => void;
   onReload: () => void;
+  reloadPending: boolean;
+  saveDisabled: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const person = actor.type === "person";
@@ -182,8 +191,8 @@ function ActorEditor({
           <AlertCircle size={14} />
           <span>{error}</span>
           {error.includes("载入最新内容") ? (
-            <button onClick={onReload} type="button">
-              载入最新内容
+            <button disabled={reloadPending} onClick={onReload} type="button">
+              {reloadPending ? "正在载入…" : "载入最新内容"}
             </button>
           ) : null}
         </div>
@@ -199,7 +208,7 @@ function ActorEditor({
         </button>
         <button
           className="button button-primary"
-          disabled={pending}
+          disabled={pending || saveDisabled}
           type="submit"
         >
           {pending ? <LoaderCircle className="is-spinning" size={14} /> : null}
@@ -211,7 +220,24 @@ function ActorEditor({
 }
 
 export function ActorSettings() {
-  const actorsQuery = useActorsQuery({ pageSize: 100 });
+  const queryClient = useQueryClient();
+  const [personPage, setPersonPage] = useState(1);
+  const ownerQuery = useActorsQuery({
+    page: 1,
+    pageSize: PERSON_PAGE_SIZE,
+    type: "owner",
+  });
+  const systemQuery = useActorsQuery({
+    page: 1,
+    pageSize: PERSON_PAGE_SIZE,
+    type: "system",
+  });
+  const peopleQuery = useActorsQuery({
+    page: personPage,
+    pageSize: PERSON_PAGE_SIZE,
+    type: "person",
+    sort: "display_name",
+  });
   const createActor = useCreatePersonActor();
   const updateActor = useUpdateActor();
   const [createOpen, setCreateOpen] = useState(false);
@@ -220,27 +246,159 @@ export function ActorSettings() {
   const [editingActor, setEditingActor] = useState<Actor | null>(null);
   const [editDraft, setEditDraft] = useState<ActorDraft>(EMPTY_DRAFT);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editVersionBlocked, setEditVersionBlocked] = useState(false);
+  const editingActorIdRef = useRef<string | null>(null);
+  const editHadVersionConflictRef = useRef(false);
+  const editingActorQuery = useActorQuery(editingActor?.id ?? null);
 
-  const actors = actorsQuery.data?.items ?? [];
   const builtinActors = useMemo(
-    () => actors.filter((actor) => actor.type !== "person"),
-    [actors],
+    () => [
+      ...(ownerQuery.data?.items.filter((actor) => actor.type === "owner") ??
+        []),
+      ...(systemQuery.data?.items.filter((actor) => actor.type === "system") ??
+        []),
+    ],
+    [ownerQuery.data, systemQuery.data],
+  );
+  const peopleDataVisible = Boolean(
+    peopleQuery.data &&
+    !peopleQuery.isPlaceholderData &&
+    peopleQuery.data.meta.page === personPage,
   );
   const people = useMemo(
-    () => actors.filter((actor) => actor.type === "person"),
-    [actors],
+    () =>
+      peopleDataVisible
+        ? (peopleQuery.data?.items.filter((actor) => actor.type === "person") ??
+          [])
+        : [],
+    [peopleDataVisible, peopleQuery.data],
   );
+  const displayedPeople = useMemo(() => {
+    if (editingActor?.type !== "person") {
+      return people;
+    }
+    if (people.some((actor) => actor.id === editingActor.id)) {
+      return people.map((actor) =>
+        actor.id === editingActor.id ? editingActor : actor,
+      );
+    }
+    return [editingActor, ...people];
+  }, [editingActor, people]);
+  const peopleTotal = peopleDataVisible
+    ? (peopleQuery.data?.meta.total ?? 0)
+    : 0;
+  const peoplePageSize = peopleDataVisible
+    ? (peopleQuery.data?.meta.pageSize ?? PERSON_PAGE_SIZE)
+    : PERSON_PAGE_SIZE;
+  const peopleTotalPages = Math.max(1, Math.ceil(peopleTotal / peoplePageSize));
+  const formOpen = createOpen || editingActor !== null;
+  const paginationLocked =
+    formOpen ||
+    createActor.isPending ||
+    updateActor.isPending ||
+    peopleQuery.isFetching ||
+    peopleQuery.isPlaceholderData ||
+    peopleQuery.isError;
+  const builtinInitialPending = ownerQuery.isPending || systemQuery.isPending;
+  const builtinInitialError =
+    (ownerQuery.isError && !ownerQuery.data) ||
+    (systemQuery.isError && !systemQuery.data);
+  const builtinRefreshError =
+    (ownerQuery.isError && Boolean(ownerQuery.data)) ||
+    (systemQuery.isError && Boolean(systemQuery.data));
+  const peoplePageError = peopleQuery.isError && !peopleDataVisible;
+  const peopleRefreshError = peopleQuery.isError && peopleDataVisible;
+  const changingPeoplePage =
+    peopleQuery.isPlaceholderData ||
+    (peopleQuery.isFetching &&
+      Boolean(peopleQuery.data) &&
+      peopleQuery.data?.meta.page !== personPage);
+  const refreshingPeople =
+    peopleQuery.isFetching &&
+    !peopleQuery.isPlaceholderData &&
+    Boolean(peopleQuery.data);
+  const pageOutOfRange =
+    !formOpen && peopleDataVisible && personPage > peopleTotalPages;
+
+  useEffect(() => {
+    if (
+      formOpen ||
+      !peopleQuery.data ||
+      !peopleQuery.isSuccess ||
+      peopleQuery.isError ||
+      peopleQuery.isFetching ||
+      peopleQuery.isPlaceholderData ||
+      personPage <= peopleTotalPages
+    ) {
+      return;
+    }
+    void queryClient.invalidateQueries({
+      exact: true,
+      queryKey: [
+        ...actorQueryKey,
+        "list",
+        {
+          page: peopleTotalPages,
+          pageSize: PERSON_PAGE_SIZE,
+          type: "person",
+          sort: "display_name",
+        },
+      ],
+      refetchType: "none",
+    });
+    setPersonPage(peopleTotalPages);
+  }, [
+    formOpen,
+    peopleQuery.data,
+    peopleQuery.isError,
+    peopleQuery.isFetching,
+    peopleQuery.isPlaceholderData,
+    peopleQuery.isSuccess,
+    peopleTotalPages,
+    personPage,
+    queryClient,
+  ]);
 
   const startEditing = (actor: Actor) => {
+    editingActorIdRef.current = actor.id;
+    editHadVersionConflictRef.current = false;
     setEditingActor(actor);
     setEditDraft(actorDraft(actor));
     setEditError(null);
+    setEditVersionBlocked(false);
   };
 
-  const reloadEditingActor = () => {
+  const cancelEditing = () => {
+    const conflictedActorType = editHadVersionConflictRef.current
+      ? editingActor?.type
+      : null;
+    editingActorIdRef.current = null;
+    editHadVersionConflictRef.current = false;
+    setEditingActor(null);
+    setEditError(null);
+    setEditVersionBlocked(false);
+    if (conflictedActorType === "person") {
+      void peopleQuery.refetch();
+    } else if (conflictedActorType === "owner") {
+      void ownerQuery.refetch();
+    }
+  };
+
+  const reloadEditingActor = async () => {
     if (!editingActor) return;
-    const latest = actors.find((actor) => actor.id === editingActor.id);
-    if (latest) startEditing(latest);
+    const actorId = editingActor.id;
+    const latest = await editingActorQuery.refetch();
+    if (editingActorIdRef.current !== actorId) return;
+    if (latest.isSuccess && latest.data) {
+      setEditingActor(latest.data);
+      setEditError(null);
+      setEditVersionBlocked(false);
+      return;
+    }
+    setEditVersionBlocked(true);
+    setEditError(
+      `无法载入最新内容。${formatError(latest.error ?? editingActorQuery.error)}`,
+    );
   };
 
   const submitCreate = async (event: FormEvent<HTMLFormElement>) => {
@@ -277,6 +435,10 @@ export function ActorSettings() {
   const submitEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingActor) return;
+    if (editVersionBlocked) {
+      setEditError("请先载入最新内容，再保存当前草稿。");
+      return;
+    }
     const displayName = editDraft.displayName.trim();
     if (!displayName) {
       setEditError("请输入人员名称。");
@@ -311,40 +473,16 @@ export function ActorSettings() {
                 expectedVersion: editingActor.version,
               },
       });
-      setEditingActor(null);
+      editHadVersionConflictRef.current = false;
+      cancelEditing();
     } catch (error) {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        editHadVersionConflictRef.current = true;
+        setEditVersionBlocked(true);
+      }
       setEditError(formatError(error));
     }
   };
-
-  if (actorsQuery.isPending) {
-    return (
-      <div className="settings-state" role="status">
-        <LoaderCircle className="is-spinning" size={18} />
-        正在读取本地责任主体…
-      </div>
-    );
-  }
-
-  if (actorsQuery.isError) {
-    return (
-      <div className="settings-state settings-state-error" role="alert">
-        <AlertCircle size={18} />
-        <div>
-          <strong>无法读取人员列表</strong>
-          <span>{formatError(actorsQuery.error)}</span>
-        </div>
-        <button
-          className="button button-secondary"
-          onClick={() => void actorsQuery.refetch()}
-          type="button"
-        >
-          <RefreshCw size={14} />
-          重试
-        </button>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -373,58 +511,109 @@ export function ActorSettings() {
             <p>所有者代表当前设备操作者；系统主体仅记录内部维护责任。</p>
           </div>
         </div>
-        <div className="actor-settings-list">
-          {builtinActors.map((actor) => (
-            <article className="actor-settings-card" key={actor.id}>
-              <div className="actor-settings-card-main">
-                <div className="actor-settings-avatar" data-type={actor.type}>
-                  {actor.type === "system" ? (
-                    <ShieldCheck size={17} />
-                  ) : (
-                    actorInitial(actor)
-                  )}
-                </div>
-                <div className="actor-settings-copy">
-                  <div className="actor-settings-title">
-                    <strong>{actor.displayName}</strong>
-                    <ActorBadge actor={actor} />
-                  </div>
-                  <p>
-                    {actor.type === "owner"
-                      ? "当前设备的唯一所有者，可修改展示名称。"
-                      : actor.type === "agent"
-                        ? "Agent 执行能力将在后续版本开放。"
-                        : "内置系统主体，不可编辑或删除。"}
-                  </p>
-                </div>
-                {actor.type === "owner" ? (
-                  <button
-                    aria-label={`编辑${actor.displayName}`}
-                    className="button button-quiet actor-settings-edit"
-                    disabled={updateActor.isPending}
-                    onClick={() => startEditing(actor)}
-                    type="button"
-                  >
-                    <Pencil size={14} />
-                    编辑
-                  </button>
-                ) : null}
+        {builtinInitialPending ? (
+          <div className="settings-state" role="status">
+            <LoaderCircle className="is-spinning" size={18} />
+            正在读取内置责任主体…
+          </div>
+        ) : null}
+        {!builtinInitialPending && builtinInitialError ? (
+          <div className="settings-state settings-state-error" role="alert">
+            <AlertCircle size={18} />
+            <div>
+              <strong>无法读取内置责任主体</strong>
+              <span>{formatError(ownerQuery.error ?? systemQuery.error)}</span>
+            </div>
+            <button
+              className="button button-secondary"
+              onClick={() => {
+                void ownerQuery.refetch();
+                void systemQuery.refetch();
+              }}
+              type="button"
+            >
+              <RefreshCw size={14} />
+              重试
+            </button>
+          </div>
+        ) : null}
+        {!builtinInitialPending && !builtinInitialError ? (
+          <>
+            {builtinRefreshError ? (
+              <div className="actor-settings-error" role="alert">
+                <AlertCircle size={14} />
+                <span>
+                  内置责任主体刷新失败，当前显示上次成功读取的结果。{" "}
+                  {formatError(ownerQuery.error ?? systemQuery.error)}
+                </span>
+                <button
+                  onClick={() => {
+                    void ownerQuery.refetch();
+                    void systemQuery.refetch();
+                  }}
+                  type="button"
+                >
+                  重试刷新
+                </button>
               </div>
-              {editingActor?.id === actor.id ? (
-                <ActorEditor
-                  actor={actor}
-                  draft={editDraft}
-                  error={editError}
-                  onCancel={() => setEditingActor(null)}
-                  onChange={setEditDraft}
-                  onReload={reloadEditingActor}
-                  onSubmit={(event) => void submitEdit(event)}
-                  pending={updateActor.isPending}
-                />
-              ) : null}
-            </article>
-          ))}
-        </div>
+            ) : null}
+            <div className="actor-settings-list">
+              {builtinActors.map((actor) => (
+                <article className="actor-settings-card" key={actor.id}>
+                  <div className="actor-settings-card-main">
+                    <div
+                      className="actor-settings-avatar"
+                      data-type={actor.type}
+                    >
+                      {actor.type === "system" ? (
+                        <ShieldCheck size={17} />
+                      ) : (
+                        actorInitial(actor)
+                      )}
+                    </div>
+                    <div className="actor-settings-copy">
+                      <div className="actor-settings-title">
+                        <strong>{actor.displayName}</strong>
+                        <ActorBadge actor={actor} />
+                      </div>
+                      <p>
+                        {actor.type === "owner"
+                          ? "当前设备的唯一所有者，可修改展示名称。"
+                          : "内置系统主体，不可编辑或删除。"}
+                      </p>
+                    </div>
+                    {actor.type === "owner" ? (
+                      <button
+                        aria-label={`编辑${actor.displayName}`}
+                        className="button button-quiet actor-settings-edit"
+                        disabled={updateActor.isPending}
+                        onClick={() => startEditing(actor)}
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                        编辑
+                      </button>
+                    ) : null}
+                  </div>
+                  {editingActor?.id === actor.id ? (
+                    <ActorEditor
+                      actor={actor}
+                      draft={editDraft}
+                      error={editError}
+                      onCancel={cancelEditing}
+                      onChange={setEditDraft}
+                      onReload={() => void reloadEditingActor()}
+                      onSubmit={(event) => void submitEdit(event)}
+                      pending={updateActor.isPending}
+                      reloadPending={editingActorQuery.isFetching}
+                      saveDisabled={editVersionBlocked}
+                    />
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </>
+        ) : null}
       </section>
 
       <section
@@ -436,17 +625,38 @@ export function ActorSettings() {
             <h4 id="person-actors-heading">本地人员</h4>
             <p>用于标记线下责任人；停用会保留历史记录。</p>
           </div>
-          <button
-            className="button button-secondary"
-            onClick={() => {
-              setCreateOpen(true);
-              setCreateError(null);
-            }}
-            type="button"
-          >
-            <Plus size={14} />
-            新建人员
-          </button>
+          <div className="actor-settings-badges">
+            <button
+              aria-label="刷新本地人员"
+              className="button button-quiet"
+              disabled={paginationLocked || peopleQuery.isPending}
+              onClick={() => void peopleQuery.refetch()}
+              type="button"
+            >
+              <RefreshCw
+                className={refreshingPeople ? "is-spinning" : undefined}
+                size={14}
+              />
+              刷新
+            </button>
+            <button
+              className="button button-secondary"
+              disabled={
+                peopleQuery.isPending ||
+                peoplePageError ||
+                createActor.isPending ||
+                updateActor.isPending
+              }
+              onClick={() => {
+                setCreateOpen(true);
+                setCreateError(null);
+              }}
+              type="button"
+            >
+              <Plus size={14} />
+              新建人员
+            </button>
+          </div>
         </div>
 
         {createOpen ? (
@@ -557,58 +767,182 @@ export function ActorSettings() {
           </form>
         ) : null}
 
-        {people.length === 0 && !createOpen ? (
-          <div className="actor-settings-empty">
-            <UsersRound size={20} />
-            <strong>还没有本地人员</strong>
-            <span>需要记录线下负责人时再创建，不会自动导入客户联系人。</span>
+        {peopleQuery.isPending ? (
+          <div className="settings-state" role="status">
+            <LoaderCircle className="is-spinning" size={18} />
+            正在读取本地人员…
           </div>
-        ) : (
-          <div className="actor-settings-list">
-            {people.map((actor) => (
-              <article
-                className="actor-settings-card"
-                data-inactive={actor.status === "inactive"}
-                key={actor.id}
+        ) : null}
+        {!peopleQuery.isPending && peoplePageError ? (
+          <div className="settings-state settings-state-error" role="alert">
+            <AlertCircle size={18} />
+            <div>
+              <strong>
+                {personPage === 1
+                  ? "无法读取本地人员"
+                  : `无法读取第 ${personPage} 页本地人员`}
+              </strong>
+              <span>{formatError(peopleQuery.error)}</span>
+            </div>
+            <button
+              className="button button-secondary"
+              onClick={() => void peopleQuery.refetch()}
+              type="button"
+            >
+              <RefreshCw size={14} />
+              {personPage === 1 ? "重试" : `重试第 ${personPage} 页`}
+            </button>
+            {personPage > 1 ? (
+              <button
+                className="button button-secondary"
+                onClick={() => setPersonPage((page) => Math.max(1, page - 1))}
+                type="button"
               >
-                <div className="actor-settings-card-main">
-                  <div className="actor-settings-avatar" data-type="person">
-                    <UserRound size={17} />
-                  </div>
-                  <div className="actor-settings-copy">
-                    <div className="actor-settings-title">
-                      <strong>{actor.displayName}</strong>
-                      <ActorBadge actor={actor} />
-                    </div>
-                    <p>{actor.notes || "暂无备注"}</p>
-                  </div>
-                  <button
-                    aria-label={`编辑${actor.displayName}`}
-                    className="button button-quiet actor-settings-edit"
-                    disabled={updateActor.isPending}
-                    onClick={() => startEditing(actor)}
-                    type="button"
-                  >
-                    <Pencil size={14} />
-                    编辑
-                  </button>
-                </div>
-                {editingActor?.id === actor.id ? (
-                  <ActorEditor
-                    actor={actor}
-                    draft={editDraft}
-                    error={editError}
-                    onCancel={() => setEditingActor(null)}
-                    onChange={setEditDraft}
-                    onReload={reloadEditingActor}
-                    onSubmit={(event) => void submitEdit(event)}
-                    pending={updateActor.isPending}
-                  />
-                ) : null}
-              </article>
-            ))}
+                返回上一页
+              </button>
+            ) : null}
           </div>
-        )}
+        ) : null}
+        {!peopleQuery.isPending && !peoplePageError && changingPeoplePage ? (
+          <>
+            <div className="settings-state" role="status">
+              <LoaderCircle className="is-spinning" size={18} />
+              正在读取第 {personPage} 页本地人员…
+            </div>
+            <nav aria-label="本地人员分页" className="pagination">
+              <button
+                className="button button-secondary"
+                disabled
+                type="button"
+              >
+                上一页
+              </button>
+              <span>第 {personPage} 页读取中</span>
+              <button
+                className="button button-secondary"
+                disabled
+                type="button"
+              >
+                下一页
+              </button>
+            </nav>
+          </>
+        ) : null}
+        {!peopleQuery.isPending &&
+        !peoplePageError &&
+        !changingPeoplePage &&
+        pageOutOfRange ? (
+          <div className="settings-state" role="status">
+            <LoaderCircle className="is-spinning" size={18} />
+            本页已无人员，正在返回第 {peopleTotalPages} 页…
+          </div>
+        ) : null}
+        {!peopleQuery.isPending &&
+        !peoplePageError &&
+        !changingPeoplePage &&
+        !pageOutOfRange &&
+        peopleDataVisible ? (
+          <>
+            {peopleRefreshError ? (
+              <div className="actor-settings-error" role="alert">
+                <AlertCircle size={14} />
+                <span>
+                  本地人员刷新失败，当前显示上次成功读取的结果。{" "}
+                  {formatError(peopleQuery.error)}
+                </span>
+                <button
+                  onClick={() => void peopleQuery.refetch()}
+                  type="button"
+                >
+                  重试刷新
+                </button>
+              </div>
+            ) : null}
+            {refreshingPeople ? (
+              <div className="settings-state" role="status">
+                <LoaderCircle className="is-spinning" size={18} />
+                正在刷新本地人员…
+              </div>
+            ) : null}
+            {displayedPeople.length === 0 && !createOpen ? (
+              <div className="actor-settings-empty">
+                <UsersRound size={20} />
+                <strong>还没有本地人员</strong>
+                <span>
+                  需要记录线下负责人时再创建，不会自动导入客户联系人。
+                </span>
+              </div>
+            ) : (
+              <div className="actor-settings-list">
+                {displayedPeople.map((actor) => (
+                  <article
+                    className="actor-settings-card"
+                    data-inactive={actor.status === "inactive"}
+                    key={actor.id}
+                  >
+                    <div className="actor-settings-card-main">
+                      <div className="actor-settings-avatar" data-type="person">
+                        <UserRound size={17} />
+                      </div>
+                      <div className="actor-settings-copy">
+                        <div className="actor-settings-title">
+                          <strong>{actor.displayName}</strong>
+                          <ActorBadge actor={actor} />
+                        </div>
+                        <p>{actor.notes || "暂无备注"}</p>
+                      </div>
+                      <button
+                        aria-label={`编辑${actor.displayName}`}
+                        className="button button-quiet actor-settings-edit"
+                        disabled={updateActor.isPending}
+                        onClick={() => startEditing(actor)}
+                        type="button"
+                      >
+                        <Pencil size={14} />
+                        编辑
+                      </button>
+                    </div>
+                    {editingActor?.id === actor.id ? (
+                      <ActorEditor
+                        actor={actor}
+                        draft={editDraft}
+                        error={editError}
+                        onCancel={cancelEditing}
+                        onChange={setEditDraft}
+                        onReload={() => void reloadEditingActor()}
+                        onSubmit={(event) => void submitEdit(event)}
+                        pending={updateActor.isPending}
+                        reloadPending={editingActorQuery.isFetching}
+                        saveDisabled={editVersionBlocked}
+                      />
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            )}
+            <nav aria-label="本地人员分页" className="pagination">
+              <button
+                className="button button-secondary"
+                disabled={paginationLocked || personPage <= 1}
+                onClick={() => setPersonPage((page) => Math.max(1, page - 1))}
+                type="button"
+              >
+                上一页
+              </button>
+              <span>
+                共 {peopleTotal} 人 · 第 {personPage} / {peopleTotalPages} 页
+              </span>
+              <button
+                className="button button-secondary"
+                disabled={paginationLocked || personPage >= peopleTotalPages}
+                onClick={() => setPersonPage((page) => page + 1)}
+                type="button"
+              >
+                下一页
+              </button>
+            </nav>
+          </>
+        ) : null}
       </section>
     </>
   );
