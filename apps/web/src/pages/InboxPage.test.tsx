@@ -221,6 +221,59 @@ describe("InboxPage", () => {
     expect(screen.getAllByText("整理需要人工确认的边界")).toHaveLength(2);
   });
 
+  it("uses the Invoice icon and stage summary when an Invoice event has no summary", () => {
+    const invoiceId = "018f0000-0000-7000-8000-000000000826";
+    const invoiceItem: InboxItem = {
+      ...item,
+      kind: "event",
+      title: "发票到期：INV-2026-0829",
+      summary: "",
+      sourceEntityType: "invoice_due",
+      sourceEntityId: invoiceId,
+      sourceEventKey: "invoice:" + invoiceId + ":due:2026-08-28",
+      dueAt: "2026-08-28T09:00:00+08:00",
+      payloadJson: {
+        invoice_id: invoiceId,
+        invoice_number: "INV-2026-0829",
+        client_id: "018f0000-0000-7000-8000-000000000827",
+        client_name: "星河设计事务所",
+        project_id: null,
+        project_name: null,
+        amount_minor: 128045,
+        currency: "CNY",
+        due_date: "2026-08-28",
+        due_state: "due",
+        occurrence_date: "2026-08-28",
+        invoice_version: 4,
+        projected_at: "2026-08-28T08:00:00Z",
+        lead_days: 3,
+      },
+    };
+    hooks.items.mockReturnValue({
+      data: {
+        items: [invoiceItem],
+        meta: {
+          page: 1,
+          pageSize: 30,
+          total: 1,
+          unreadTotal: 1,
+          snapshotAt: "2026-08-28T10:05:00.123456789Z",
+          serverNow: "2026-08-28T10:05:00.123456789Z",
+        },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    const { container } = renderInbox();
+
+    expect(screen.getByText("发票到期")).toBeTruthy();
+    expect(container.querySelector("svg.lucide-receipt-text")).toBeTruthy();
+  });
+
   it("opens the exact inbox item from a refreshable detail route", async () => {
     renderInbox(`/inbox/${item.id}`);
 

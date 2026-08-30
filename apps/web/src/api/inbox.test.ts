@@ -300,6 +300,152 @@ describe("inbox API contract", () => {
     ).toThrow(ApiError);
   });
 
+  it("strictly validates Invoice due snapshots, stages, and event keys", () => {
+    const invoiceId = "018f0000-0000-7000-8000-000000000826";
+    const clientId = "018f0000-0000-7000-8000-000000000827";
+    const projectId = "018f0000-0000-7000-8000-000000000828";
+    const payload = {
+      invoice_id: invoiceId,
+      invoice_number: "INV-2026-0829",
+      client_id: clientId,
+      client_name: "星河设计事务所",
+      project_id: projectId,
+      project_name: "品牌视觉升级",
+      amount_minor: 128045,
+      currency: "CNY",
+      due_date: "2026-09-01",
+      due_state: "due_soon",
+      occurrence_date: "2026-08-29",
+      invoice_version: 4,
+      projected_at: "2026-08-29T08:00:00.123456789Z",
+      lead_days: 3,
+    };
+    const dueSoon = inboxPayload({
+      kind: "event",
+      source_entity_type: "invoice_due",
+      source_entity_id: invoiceId,
+      source_event_key:
+        "invoice:" + invoiceId + ":due_soon:" + payload.due_date,
+      source_deleted_at: null,
+      due_at: "2026-08-29T09:00:00+08:00",
+      payload_json: payload,
+    });
+    expect(normalizeInboxItem(dueSoon)).toMatchObject({
+      kind: "event",
+      sourceEntityType: "invoice_due",
+      sourceEntityId: invoiceId,
+      dueAt: "2026-08-29T09:00:00+08:00",
+      payloadJson: {
+        invoice_number: "INV-2026-0829",
+        client_name: "星河设计事务所",
+        amount_minor: 128045,
+        currency: "CNY",
+        due_state: "due_soon",
+        lead_days: 3,
+      },
+    });
+
+    const duePayload = {
+      ...payload,
+      due_state: "due",
+      occurrence_date: payload.due_date,
+    };
+    expect(
+      normalizeInboxItem({
+        ...dueSoon,
+        source_event_key: "invoice:" + invoiceId + ":due:" + payload.due_date,
+        payload_json: duePayload,
+      }),
+    ).toMatchObject({ payloadJson: { due_state: "due" } });
+
+    const overduePayload = {
+      ...payload,
+      project_id: null,
+      project_name: null,
+      due_state: "overdue",
+      occurrence_date: "2026-09-02",
+    };
+    expect(
+      normalizeInboxItem({
+        ...dueSoon,
+        source_event_key:
+          "invoice:" + invoiceId + ":overdue:" + overduePayload.occurrence_date,
+        source_deleted_at: "2026-09-03T10:00:00Z",
+        payload_json: overduePayload,
+      }),
+    ).toMatchObject({
+      sourceDeletedAt: "2026-09-03T10:00:00Z",
+      payloadJson: {
+        due_state: "overdue",
+        project_id: null,
+        project_name: null,
+      },
+    });
+
+    const invalidPayloads = [
+      { ...payload, unexpected: true },
+      { ...payload, amount_minor: 0 },
+      { ...payload, amount_minor: 9_000_000_000_000_001 },
+      { ...payload, currency: "cny" },
+      { ...payload, due_date: "2026-02-30" },
+      { ...payload, occurrence_date: "2026-08-28" },
+      { ...payload, invoice_version: 0 },
+      { ...payload, projected_at: "2026-08-29 08:00:00Z" },
+      { ...payload, lead_days: 2 },
+      { ...payload, project_name: " " },
+      { ...payload, project_name: null },
+    ];
+    for (const invalidPayload of invalidPayloads) {
+      expect(() =>
+        normalizeInboxItem({
+          ...dueSoon,
+          source_event_key:
+            "invoice:" +
+            invoiceId +
+            ":due_soon:" +
+            String(invalidPayload.due_date),
+          payload_json: invalidPayload,
+        }),
+      ).toThrow(ApiError);
+    }
+    expect(() =>
+      normalizeInboxItem({
+        ...dueSoon,
+        source_entity_id: clientId,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...dueSoon,
+        source_event_key: "invoice:" + invoiceId + ":due_soon:2026-09-02",
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...dueSoon,
+        due_at: "2026-08-29",
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...dueSoon,
+        payload_json: { ...duePayload, occurrence_date: "2026-09-02" },
+        source_event_key: "invoice:" + invoiceId + ":due:" + payload.due_date,
+      }),
+    ).toThrow(ApiError);
+    expect(() =>
+      normalizeInboxItem({
+        ...dueSoon,
+        payload_json: {
+          ...overduePayload,
+          occurrence_date: overduePayload.due_date,
+        },
+        source_event_key:
+          "invoice:" + invoiceId + ":overdue:" + overduePayload.due_date,
+      }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly validates Client Follow-up due source snapshots and event keys", () => {
     const followupId = "018f0000-0000-7000-8000-000000000821";
     const clientId = "018f0000-0000-7000-8000-000000000822";

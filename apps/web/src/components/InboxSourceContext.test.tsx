@@ -214,6 +214,75 @@ describe("InboxSourceContext", () => {
     expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
   });
 
+  it("shows an Invoice due snapshot and hides its live link after deletion", () => {
+    const invoiceId = "018f0000-0000-7000-8000-000000000826";
+    const invoiceDueItem: InboxItem = {
+      ...sourceItem,
+      title: "发票临期：INV-2026-0829",
+      summary: "",
+      sourceEntityType: "invoice_due",
+      sourceEntityId: invoiceId,
+      sourceEventKey: "invoice:" + invoiceId + ":due_soon:2026-09-01",
+      dueAt: "2026-08-29T09:00:00+08:00",
+      payloadJson: {
+        invoice_id: invoiceId,
+        invoice_number: "INV-2026-0829",
+        client_id: "018f0000-0000-7000-8000-000000000827",
+        client_name: "星河设计事务所",
+        project_id: "018f0000-0000-7000-8000-000000000828",
+        project_name: "品牌视觉升级",
+        amount_minor: 128045,
+        currency: "CNY",
+        due_date: "2026-09-01",
+        due_state: "due_soon",
+        occurrence_date: "2026-08-29",
+        invoice_version: 4,
+        projected_at: "2026-08-29T08:00:00Z",
+        lead_days: 3,
+      },
+    };
+    const { rerender } = render(
+      <MemoryRouter>
+        <InboxSourceContext item={invoiceDueItem} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("发票临期")).toBeTruthy();
+    expect(screen.getByText("本地发票到期提醒")).toBeTruthy();
+    expect(screen.getByText("临期（提前 3 天）")).toBeTruthy();
+    expect(screen.getByText("INV-2026-0829")).toBeTruthy();
+    expect(screen.getByText("星河设计事务所")).toBeTruthy();
+    expect(screen.getByText("品牌视觉升级")).toBeTruthy();
+    expect(screen.getByText("2026-09-01")).toBeTruthy();
+    expect(screen.getByText("2026-08-29")).toBeTruthy();
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === "DD" &&
+          Boolean(element.textContent?.includes("1,280.45")) &&
+          Boolean(element.textContent?.includes("CNY")),
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: /查看来源发票/ })).toHaveAttribute(
+      "href",
+      "/invoices/" + invoiceId,
+    );
+
+    rerender(
+      <MemoryRouter>
+        <InboxSourceContext
+          item={{
+            ...invoiceDueItem,
+            sourceDeletedAt: "2026-09-03T10:00:00Z",
+          }}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("来源发票已删除");
+    expect(screen.getByText("INV-2026-0829")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /查看来源发票/ })).toBeNull();
+  });
+
   it("routes a due Client Follow-up to its client without inventing an external action", () => {
     const clientId = "018f0000-0000-7000-8000-000000000808";
     const followupId = "018f0000-0000-7000-8000-000000000809";

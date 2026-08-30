@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -162,6 +164,75 @@ func TestBusinessImportRollsBackTamperedRelationships(t *testing.T) {
 	}
 }
 
+func TestBusinessImportRollsBackPaidInvoiceWithoutMatchingEntry(t *testing.T) {
+	sourceRouter, _, _, _ := newBackupTestAPI(t)
+	client := createClientForTest(t, sourceRouter, `{"name":"付款一致性导入客户"}`, nil)
+	invoice := createInvoiceForTest(t, sourceRouter, fmt.Sprintf(
+		`{"client_id":%q,"amount_minor":12800,"currency":"CNY","issue_date":"2020-01-01","due_date":"2020-01-31"}`,
+		client.ID,
+	), nil)
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_sent"}`, "")
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_viewed"}`, "")
+	invoice = transitionInvoiceForTest(t, sourceRouter, invoice, `{"action":"mark_paid","paid_date":"2020-01-20"}`, "")
+	if invoice.FinancialEntryID == nil {
+		t.Fatal("source paid Invoice has no matching entry")
+	}
+	packageData := emptyBusinessExportFixture(t, sourceRouter)
+	for index := range packageData.Tables {
+		if packageData.Tables[index].Name == "financial_entries" {
+			packageData.Tables[index].Rows = nil
+		}
+	}
+	body, err := json.Marshal(packageData)
+	if err != nil {
+		t.Fatalf("encode inconsistent business package: %v", err)
+	}
+	targetRouter, targetStore, _, _ := newBackupTestAPI(t)
+	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_APPLY_FAILED" {
+		t.Fatalf("inconsistent payment import = %d: %s", response.Code, response.Body.String())
+	}
+	for _, table := range []string{"invoices", "financial_entries"} {
+		var count int64
+		if err := targetStore.DB.Table(table).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("failed payment import changed %s count=%d err=%v", table, count, err)
+		}
+	}
+}
+
+func TestRestoreVerificationRejectsPaidInvoiceWithoutMatchingEntry(t *testing.T) {
+	_, store, _, _ := newBackupTestAPI(t)
+	const (
+		clientID  = "018f0000-0000-7000-8000-000000002090"
+		invoiceID = "018f0000-0000-7000-8000-000000002091"
+	)
+	if err := store.DB.Exec(`
+		INSERT INTO clients(id, name, status, created_at, updated_at)
+		VALUES (?, '恢复校验客户', 'active', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')
+	`, clientID).Error; err != nil {
+		t.Fatalf("seed inconsistent restore client: %v", err)
+	}
+	if err := store.DB.Exec(`
+		INSERT INTO invoices(
+			id, invoice_number, client_id, amount_minor, currency, status,
+			issue_date, due_date, paid_date, notes, version, created_at, updated_at
+		) VALUES (
+			?, 'INV-2026-RESTORE', ?, 8800, 'CNY', 'paid',
+			'2026-08-01', '2026-08-20', '2026-08-18', '', 2,
+			'2026-08-01T00:00:00Z', '2026-08-18T00:00:00Z'
+		)
+	`, invoiceID, clientID).Error; err != nil {
+		t.Fatalf("seed inconsistent restore database: %v", err)
+	}
+	var databaseID, artifactStoreID string
+	if err := store.DB.Table("workspace_identity").Select("database_id, artifact_store_id").Where("singleton = 1").Row().Scan(&databaseID, &artifactStoreID); err != nil {
+		t.Fatalf("read restore identity: %v", err)
+	}
+	if err := verifyOpenDatabase(store, databaseID, artifactStoreID); err == nil || !strings.Contains(err.Error(), "invoice payment consistency") {
+		t.Fatalf("restore verification payment consistency error = %v", err)
+	}
+}
+
 func TestBusinessImportRejectsControlledFiles(t *testing.T) {
 	router, _, _, _ := newBackupTestAPI(t)
 	packageData := emptyBusinessExportFixture(t, router)
@@ -234,7 +305,7 @@ func TestBusinessImportSafelyAppendsToNonEmptyTarget(t *testing.T) {
 		Data businessImportPreview `json:"data"`
 	}
 	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.ApplyMode != importModeAppend || envelope.Data.Blocker != "" ||
-		envelope.Data.TargetSchemaVersion != 47 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
+		envelope.Data.TargetSchemaVersion != 48 || envelope.Data.TargetRows != 1 || envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 1 ||
 		envelope.Data.ConflictTables[0] != (businessImportTableConflict{Table: "clients", IncomingRows: 1, TargetRows: 1, KeyConflicts: 0}) {
 		t.Fatalf("preview = %#v err=%v", envelope.Data, err)
 	}
@@ -334,7 +405,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 		blocker string
 	}{
 		{name: "older", schema: 42, blocker: "source_schema_older"},
-		{name: "newer", schema: 48, blocker: "source_schema_newer"},
+		{name: "newer", schema: 49, blocker: "source_schema_newer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			router, store, _, backupDir := newBackupTestAPI(t)
@@ -352,7 +423,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 				Data businessImportPreview `json:"data"`
 			}
 			if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || envelope.Data.CanApply || envelope.Data.Blocker != test.blocker ||
-				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 47 || envelope.Data.TargetRows != 0 ||
+				envelope.Data.SchemaVersion != test.schema || envelope.Data.TargetSchemaVersion != 48 || envelope.Data.TargetRows != 0 ||
 				envelope.Data.KeyConflicts != 0 || len(envelope.Data.ConflictTables) != 0 {
 				t.Fatalf("schema preview = %#v err=%v", envelope.Data, err)
 			}

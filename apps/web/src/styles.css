@@ -5178,7 +5178,7 @@ kbd {
 
 .finance-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -5518,6 +5518,44 @@ kbd {
   font-size: 9px;
 }
 
+.invoice-payment-summary {
+  display: grid;
+  margin: 0 0 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.invoice-payment-summary > div {
+  min-width: 0;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.invoice-payment-summary > div:nth-child(odd) {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.invoice-payment-summary > div:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.invoice-payment-summary dt {
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.invoice-payment-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 550;
+}
+
 .invoice-detail-actions {
   display: flex;
   flex-wrap: wrap;
@@ -5827,6 +5865,18 @@ kbd {
 
   .invoice-detail-actions {
     justify-content: flex-start;
+  }
+
+  .invoice-payment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-payment-summary > div:nth-child(odd) {
+    border-right: 0;
+  }
+
+  .invoice-payment-summary > div:nth-last-child(2) {
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .invoice-pdf-panel .invoice-detail-panel-heading {

@@ -11,6 +11,7 @@ import { useDeleteInvoice, useTransitionInvoice } from "../api/hooks";
 import type { Invoice, InvoiceTransitionAction } from "../types/models";
 import { Modal } from "./Modal";
 import {
+  formatInvoiceAmount,
   invoiceErrorMessage,
   isInvoiceVersionConflict,
 } from "./invoicePresentation";
@@ -286,13 +287,36 @@ export function InvoiceActions({
         {command === "mark_paid" ? (
           <>
             <p className="modal-copy">
-              确认付款会生成关联收入记录，发票将变为只读。
+              请核对以下本地付款事实。确认后发票将变为只读。
             </p>
+            <dl aria-label="付款确认摘要" className="invoice-payment-summary">
+              <div>
+                <dt>发票</dt>
+                <dd className="invoice-detail-code">{invoice.invoiceNumber}</dd>
+              </div>
+              <div>
+                <dt>客户</dt>
+                <dd>{invoice.clientName}</dd>
+              </div>
+              <div>
+                <dt>付款金额</dt>
+                <dd>
+                  {formatInvoiceAmount(invoice.amountMinor, invoice.currency)} ·{" "}
+                  {invoice.currency}
+                </dd>
+              </div>
+              <div>
+                <dt>入账结果</dt>
+                <dd>将创建一条已确认收入记录</dd>
+              </div>
+            </dl>
             <label className="form-field form-field-last">
               <span>付款日期</span>
               <input
                 aria-label="付款日期"
                 autoFocus
+                disabled={commandBusy}
+                max={localDateValue()}
                 min={invoice.issueDate}
                 onChange={(event) => setPaidDate(event.target.value)}
                 type="date"

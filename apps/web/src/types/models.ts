@@ -1746,6 +1746,7 @@ export interface InboxItem {
     | "task_artifact"
     | "task"
     | "task_due"
+    | "invoice_due"
     | "client_followup"
     | "content_item"
     | "roadmap_milestone"

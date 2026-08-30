@@ -1016,8 +1016,16 @@ export function useTransitionInvoice() {
       await invalidateInvoiceReadModels(queryClient);
     },
     onError: async (error) => {
-      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await invalidateInvoiceReadModels(queryClient);
+      if (error instanceof ApiError) {
+        if (
+          error.code === "IDEMPOTENCY_REPLAY_UNAVAILABLE" ||
+          error.code === "IDEMPOTENCY_CONFLICT"
+        ) {
+          attempt.current = null;
+        }
+        if (error.code === "VERSION_CONFLICT") {
+          await invalidateInvoiceReadModels(queryClient);
+        }
       }
     },
   });

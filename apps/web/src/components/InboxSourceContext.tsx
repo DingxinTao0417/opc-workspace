@@ -4,11 +4,13 @@ import {
   DatabaseBackup,
   ExternalLink,
   FileCheck2,
+  ReceiptText,
   TriangleAlert,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { InboxItem } from "../types/models";
 import { useUiStore } from "../store/ui";
+import { formatInvoiceAmount } from "./invoicePresentation";
 
 interface TaskArtifactSourceSnapshot {
   artifactId: string;
@@ -41,6 +43,22 @@ interface TaskDueSourceSnapshot {
   dueState: "due_soon" | "overdue";
   projectId: string | null;
   projectName: string | null;
+}
+
+interface InvoiceDueSourceSnapshot {
+  invoiceId: string;
+  invoiceNumber: string;
+  clientId: string;
+  clientName: string;
+  projectId: string | null;
+  projectName: string | null;
+  amountMinor: number;
+  currency: string;
+  dueDate: string;
+  dueState: "due_soon" | "due" | "overdue";
+  occurrenceDate: string;
+  invoiceVersion: number;
+  projectedAt: string;
 }
 
 interface ClientFollowupSourceSnapshot {
@@ -208,6 +226,66 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
     dueState,
     projectId: stringValue(payload, "project_id"),
     projectName: stringValue(payload, "project_name"),
+  };
+}
+
+function invoiceDueSnapshot(item: InboxItem): InvoiceDueSourceSnapshot | null {
+  if (item.sourceEntityType !== "invoice_due") return null;
+  const payload = item.payloadJson;
+  const invoiceId = stringValue(payload, "invoice_id");
+  const invoiceNumber = stringValue(payload, "invoice_number");
+  const clientId = stringValue(payload, "client_id");
+  const clientName = stringValue(payload, "client_name");
+  const dueDate = stringValue(payload, "due_date");
+  const occurrenceDate = stringValue(payload, "occurrence_date");
+  const projectedAt = stringValue(payload, "projected_at");
+  const amountMinor = payload.amount_minor;
+  const currency = stringValue(payload, "currency");
+  const dueState = payload.due_state;
+  const invoiceVersion = payload.invoice_version;
+  const projectId = payload.project_id;
+  const projectName = payload.project_name;
+  const validProject =
+    (projectId === null && projectName === null) ||
+    (typeof projectId === "string" &&
+      projectId.trim().length > 0 &&
+      typeof projectName === "string" &&
+      projectName.trim().length > 0);
+  if (
+    !invoiceId ||
+    invoiceId !== item.sourceEntityId ||
+    !invoiceNumber ||
+    !clientId ||
+    !clientName ||
+    !dueDate ||
+    !occurrenceDate ||
+    !projectedAt ||
+    !Number.isSafeInteger(amountMinor) ||
+    (amountMinor as number) <= 0 ||
+    !currency ||
+    !/^[A-Z]{3}$/.test(currency) ||
+    (dueState !== "due_soon" && dueState !== "due" && dueState !== "overdue") ||
+    !Number.isSafeInteger(invoiceVersion) ||
+    (invoiceVersion as number) < 1 ||
+    payload.lead_days !== 3 ||
+    !validProject
+  ) {
+    return null;
+  }
+  return {
+    invoiceId,
+    invoiceNumber,
+    clientId,
+    clientName,
+    projectId: projectId as string | null,
+    projectName: projectName as string | null,
+    amountMinor: amountMinor as number,
+    currency,
+    dueDate,
+    dueState,
+    occurrenceDate,
+    invoiceVersion: invoiceVersion as number,
+    projectedAt,
   };
 }
 
@@ -381,6 +459,81 @@ const storageKindLabels: Record<string, string> = {
 
 export function InboxSourceContext({ item }: { item: InboxItem }) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+
+  const invoiceDueSource = invoiceDueSnapshot(item);
+  if (invoiceDueSource) {
+    const stage = {
+      due_soon: { title: "发票临期", label: "临期（提前 3 天）" },
+      due: { title: "发票到期", label: "到期" },
+      overdue: { title: "发票逾期", label: "逾期" },
+    }[invoiceDueSource.dueState];
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <ReceiptText size={15} />
+          </span>
+          <div>
+            <strong>{stage.title}</strong>
+            <small>本地发票到期提醒</small>
+          </div>
+        </div>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            <TriangleAlert aria-hidden="true" size={14} />
+            来源发票已删除；以下到期快照继续保留用于解释这项工作。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>阶段</dt>
+            <dd>{stage.label}</dd>
+          </div>
+          <div>
+            <dt>发票编号</dt>
+            <dd>{invoiceDueSource.invoiceNumber}</dd>
+          </div>
+          <div>
+            <dt>客户</dt>
+            <dd>{invoiceDueSource.clientName}</dd>
+          </div>
+          <div>
+            <dt>金额</dt>
+            <dd>
+              {formatInvoiceAmount(
+                invoiceDueSource.amountMinor,
+                invoiceDueSource.currency,
+              )}{" "}
+              · {invoiceDueSource.currency}
+            </dd>
+          </div>
+          <div>
+            <dt>到期日期</dt>
+            <dd>{invoiceDueSource.dueDate}</dd>
+          </div>
+          <div>
+            <dt>发生日期</dt>
+            <dd>{invoiceDueSource.occurrenceDate}</dd>
+          </div>
+          {invoiceDueSource.projectName ? (
+            <div>
+              <dt>所属项目</dt>
+              <dd>{invoiceDueSource.projectName}</dd>
+            </div>
+          ) : null}
+        </dl>
+        {item.sourceDeletedAt ? null : (
+          <Link
+            className="button button-secondary"
+            to={"/invoices/" + invoiceDueSource.invoiceId}
+          >
+            查看来源发票
+            <ExternalLink aria-hidden="true" size={13} />
+          </Link>
+        )}
+      </section>
+    );
+  }
 
   const roadmapSource = roadmapMilestoneSnapshot(item);
   if (roadmapSource) {

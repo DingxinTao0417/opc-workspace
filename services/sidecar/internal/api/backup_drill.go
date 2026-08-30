@@ -197,6 +197,9 @@ func verifyOpenDatabase(store *database.Store, databaseID, artifactStoreID strin
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if err := validateInvoicePaymentConsistency(store.DB); err != nil {
+		return fmt.Errorf("restore drill %w", err)
+	}
 	var actualDatabaseID, actualStoreID string
 	if err := store.SQL.QueryRow("SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1").Scan(&actualDatabaseID, &actualStoreID); err != nil {
 		return fmt.Errorf("read restore drill identity: %w", err)

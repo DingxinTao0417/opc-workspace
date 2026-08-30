@@ -236,6 +236,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("project due Roadmap Milestones: %w", err)
 	}
+	if err := service.projectDueInvoices(context.Background()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("project due Invoices: %w", err)
+	}
 	if options.DiskSpaceScanInterval > 0 {
 		if err := service.scanDiskSpace(); err != nil && options.Logger != nil {
 			options.Logger.Print("storage capacity check could not be completed safely")
@@ -499,6 +505,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 					}
 					if err == nil {
 						err = service.projectDueRoadmapMilestones(ctx)
+					}
+					if err == nil {
+						err = service.projectDueInvoices(ctx)
 					}
 					service.maintenance.RUnlock()
 					if err != nil && options.Logger != nil && !errors.Is(err, context.Canceled) {

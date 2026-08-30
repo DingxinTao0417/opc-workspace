@@ -1,6 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FinancialEntry } from "../types/models";
+import type { FinancialEntry, IncomeStatsParams } from "../types/models";
 import { IncomePage } from "./IncomePage";
 
 const entry: FinancialEntry = {
@@ -64,8 +70,31 @@ vi.mock("../components/FinancialEntryFormModal", () => ({
     open ? <div role="dialog">财务记录表单</div> : null,
 }));
 
+function statsResult(input: IncomeStatsParams, confirmedIncomeMinor: number) {
+  return {
+    data: {
+      ...input,
+      confirmedIncomeMinor,
+      confirmedExpenseMinor: 28000,
+      pendingIncomeMinor: 5000,
+      pendingExpenseMinor: 1000,
+      netCashFlowMinor: confirmedIncomeMinor - 28000,
+      confirmedIncomeCount: input.dateFrom.endsWith("-01-01") ? 8 : 1,
+      averageIncomeMinor: 128000,
+      entryCount: 3,
+    },
+    isError: false,
+    isFetching: false,
+    isPending: false,
+    isPlaceholderData: false,
+    refetch: vi.fn(),
+  };
+}
+
 describe("IncomePage", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-29T12:00:00"));
     hooks.entries.mockReturnValue({
       data: { items: [entry], meta: { page: 1, pageSize: 20, total: 1 } },
       isError: false,
@@ -74,28 +103,15 @@ describe("IncomePage", () => {
       isSuccess: true,
       refetch: vi.fn(),
     });
-    hooks.stats.mockReturnValue({
-      data: {
-        currency: "CNY",
-        dateFrom: "2026-08-01",
-        dateTo: "2026-08-31",
-        confirmedIncomeMinor: 128000,
-        confirmedExpenseMinor: 28000,
-        pendingIncomeMinor: 5000,
-        pendingExpenseMinor: 1000,
-        netCashFlowMinor: 100000,
-        confirmedIncomeCount: 1,
-        averageIncomeMinor: 128000,
-        entryCount: 3,
-      },
-      isError: false,
-      refetch: vi.fn(),
-    });
+    hooks.stats.mockImplementation((input: IncomeStatsParams) =>
+      statsResult(input, input.dateFrom === "2026-01-01" ? 888000 : 128000),
+    );
   });
 
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it("renders real currency-scoped statistics and the ledger hierarchy", () => {
@@ -103,6 +119,8 @@ describe("IncomePage", () => {
 
     expect(screen.getByRole("heading", { name: "收入与支出" })).toBeTruthy();
     expect(screen.getByText("¥1,280.00")).toBeTruthy();
+    expect(screen.getByText("¥8,880.00")).toBeTruthy();
+    expect(screen.getByText("截至 2026-08-29 · 8 笔")).toBeTruthy();
     expect(screen.getByText("¥280.00")).toBeTruthy();
     expect(screen.getByText("项目回款")).toBeTruthy();
     expect(screen.getByText("星河工作室")).toBeTruthy();
@@ -135,6 +153,93 @@ describe("IncomePage", () => {
     expect(hooks.stats).toHaveBeenLastCalledWith(
       expect.objectContaining({ currency: "USD" }),
     );
+    expect(hooks.stats).toHaveBeenCalledWith({
+      currency: "USD",
+      dateFrom: "2026-01-01",
+      dateTo: "2026-08-29",
+    });
+  });
+
+  it("falls back to the current local month when the month control is cleared", () => {
+    render(<IncomePage />);
+
+    fireEvent.change(screen.getByLabelText("月份"), {
+      target: { value: "" },
+    });
+
+    expect(screen.getByLabelText("月份")).toHaveValue("2026-08");
+    expect(hooks.entries).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-08-01",
+        dateTo: "2026-08-31",
+      }),
+    );
+    expect(hooks.stats).toHaveBeenCalledWith({
+      currency: "CNY",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-31",
+    });
+    expect(
+      hooks.stats.mock.calls.some((call: unknown[]) => {
+        const input = call[0] as IncomeStatsParams;
+        return input.dateFrom.includes("NaN") || input.dateTo.includes("NaN");
+      }),
+    ).toBe(false);
+  });
+
+  it("does not relabel placeholder statistics with a newly selected currency", () => {
+    hooks.stats.mockImplementation((input: IncomeStatsParams) => {
+      if (input.currency === "USD") {
+        return {
+          ...statsResult(
+            { ...input, currency: "CNY" },
+            input.dateFrom.endsWith("-01-01") ? 888000 : 128000,
+          ),
+          isFetching: true,
+          isPlaceholderData: true,
+        };
+      }
+      return statsResult(
+        input,
+        input.dateFrom.endsWith("-01-01") ? 888000 : 128000,
+      );
+    });
+    render(<IncomePage />);
+
+    fireEvent.change(screen.getByLabelText("币种筛选"), {
+      target: { value: "USD" },
+    });
+
+    const monthlyCard = screen.getByText("本月已确认收入").closest("article");
+    const yearlyCard = screen.getByText("本年度已确认收入").closest("article");
+    expect(monthlyCard).not.toBeNull();
+    expect(yearlyCard).not.toBeNull();
+    expect(within(monthlyCard!).getByText("—")).toBeTruthy();
+    expect(within(yearlyCard!).getByText("—")).toBeTruthy();
+    expect(screen.queryByText("$1,280.00")).toBeNull();
+    expect(screen.queryByText("$8,880.00")).toBeNull();
+  });
+
+  it("rejects a settled statistics response for another range", () => {
+    hooks.stats.mockImplementation((input: IncomeStatsParams) => {
+      if (input.dateFrom === "2026-08-01") {
+        return statsResult(
+          { ...input, dateFrom: "2026-07-01", dateTo: "2026-07-31" },
+          999900,
+        );
+      }
+      return statsResult(input, 888000);
+    });
+
+    render(<IncomePage />);
+
+    expect(
+      screen.getByText("统计响应与当前范围不一致，已停止显示可能过期的金额。"),
+    ).toBeTruthy();
+    const monthlyCard = screen.getByText("本月已确认收入").closest("article");
+    expect(monthlyCard).not.toBeNull();
+    expect(within(monthlyCard!).getByText("—")).toBeTruthy();
+    expect(screen.queryByText("¥9,999.00")).toBeNull();
   });
 
   it("exports the visible range and requires an explicit void reason", () => {

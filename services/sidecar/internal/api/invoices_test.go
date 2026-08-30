@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
@@ -282,4 +283,65 @@ func TestInvoiceOverdueAndPaidTransactionRollback(t *testing.T) {
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM financial_entries WHERE invoice_id=?", 0, invoice.ID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM idempotency_keys WHERE key='invoice-paid-fail'", 0)
+}
+
+func TestInvoicePaidRejectsFutureDateAndConcurrentDuplicates(t *testing.T) {
+	router, store := newProjectTestAPI(t)
+	client := createClientForTest(t, router, `{"name":"并发付款客户"}`, nil)
+	invoice := createInvoiceForTest(t, router, fmt.Sprintf(`{"client_id":%q,"amount_minor":16800,"currency":"CNY","issue_date":"2020-01-01","due_date":"2020-01-31"}`, client.ID), nil)
+	invoice = transitionInvoiceForTest(t, router, invoice, `{"action":"mark_sent"}`, "")
+	invoice = transitionInvoiceForTest(t, router, invoice, `{"action":"mark_viewed"}`, "")
+
+	futureDate := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	future := performRequest(
+		router, http.MethodPost, "/api/v1/invoices/"+invoice.ID+"/transition",
+		[]byte(fmt.Sprintf(`{"action":"mark_paid","paid_date":%q}`, futureDate)),
+		map[string]string{"If-Match": `"3"`},
+	)
+	if future.Code != http.StatusUnprocessableEntity || responseErrorCode(t, future.Body.Bytes()) != "VALIDATION_ERROR" {
+		t.Fatalf("future payment = %d: %s", future.Code, future.Body.String())
+	}
+
+	type result struct {
+		code int
+		body []byte
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for index := 0; index < 2; index++ {
+		index := index
+		go func() {
+			<-start
+			response := performRequest(
+				router, http.MethodPost, "/api/v1/invoices/"+invoice.ID+"/transition",
+				[]byte(`{"action":"mark_paid","paid_date":"2020-02-01"}`),
+				map[string]string{"If-Match": `"3"`, "Idempotency-Key": fmt.Sprintf("invoice-concurrent-paid-%d", index)},
+			)
+			results <- result{code: response.Code, body: response.Body.Bytes()}
+		}()
+	}
+	close(start)
+	succeeded := 0
+	conflicted := 0
+	for index := 0; index < 2; index++ {
+		result := <-results
+		switch result.code {
+		case http.StatusOK:
+			succeeded++
+		case http.StatusConflict:
+			code := responseErrorCode(t, result.body)
+			if code != "VERSION_CONFLICT" && code != "INVOICE_FINANCIAL_ENTRY_EXISTS" {
+				t.Fatalf("unexpected concurrent payment conflict = %s: %s", code, result.body)
+			}
+			conflicted++
+		default:
+			t.Fatalf("concurrent payment = %d: %s", result.code, result.body)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("concurrent payment results succeeded=%d conflicted=%d", succeeded, conflicted)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM financial_entries WHERE invoice_id=? AND status <> 'voided'", 1, invoice.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type='invoice' AND aggregate_id=? AND action='invoice_paid'", 1, invoice.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type='financial_entry' AND action='financial_entry_created' AND aggregate_id IN (SELECT id FROM financial_entries WHERE invoice_id=?)", 1, invoice.ID)
 }

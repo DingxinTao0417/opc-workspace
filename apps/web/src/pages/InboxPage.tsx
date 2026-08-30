@@ -8,6 +8,7 @@ import {
   FileCheck2,
   HardDrive,
   Plus,
+  ReceiptText,
   Search,
   TriangleAlert,
 } from "lucide-react";
@@ -88,6 +89,19 @@ function formatDateTime(value: string): string {
   }).format(date);
 }
 
+function defaultInboxSummary(item: InboxItem): string {
+  if (item.sourceEntityType === "invoice_due") {
+    if (item.payloadJson.due_state === "due_soon") return "发票临近到期";
+    if (item.payloadJson.due_state === "due") return "发票到期";
+    if (item.payloadJson.due_state === "overdue") return "发票已逾期";
+    return "发票到期提醒";
+  }
+  if (item.kind === "reminder") return "本地提醒";
+  if (item.sourceEntityType === "system_maintenance") return "系统维护";
+  if (item.kind === "event") return "任务产出跟进";
+  return "手工记录";
+}
+
 function InboxRow({
   item,
   serverNow,
@@ -106,14 +120,7 @@ function InboxRow({
         ? item.status === "resolved"
           ? `已解决${item.resolutionReason ? ` · ${item.resolutionReason}` : ""}`
           : `已忽略${item.dismissReason ? ` · ${item.dismissReason}` : ""}`
-        : item.summary ||
-          (item.kind === "reminder"
-            ? "本地提醒"
-            : item.sourceEntityType === "system_maintenance"
-              ? "系统维护"
-              : item.kind === "event"
-                ? "任务产出跟进"
-                : "手工记录");
+        : item.summary || defaultInboxSummary(item);
   return (
     <button
       aria-label={`查看 ${item.title}`}
@@ -133,6 +140,8 @@ function InboxRow({
           <Archive size={15} />
         ) : item.kind === "reminder" ? (
           <BellRing size={15} />
+        ) : item.sourceEntityType === "invoice_due" ? (
+          <ReceiptText size={15} />
         ) : item.sourceEntityType === "task_due" ? (
           <CalendarClock size={15} />
         ) : item.sourceEntityType === "content_item" ||

@@ -3248,6 +3248,57 @@ const systemMaintenanceDefinitions = {
   },
 } as const;
 
+const invoiceDuePayloadKeys = [
+  "invoice_id",
+  "invoice_number",
+  "client_id",
+  "client_name",
+  "project_id",
+  "project_name",
+  "amount_minor",
+  "currency",
+  "due_date",
+  "due_state",
+  "occurrence_date",
+  "invoice_version",
+  "projected_at",
+  "lead_days",
+] as const;
+
+function validRFC3339Timestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = value.match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+  );
+  if (!match || !validInvoiceDate(match[1])) return false;
+  const hour = Number(match[2]);
+  const minute = Number(match[3]);
+  const second = Number(match[4]);
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  if (match[5] !== "Z") {
+    const [offsetHour, offsetMinute] = match[5].slice(1).split(":").map(Number);
+    if (offsetHour > 23 || offsetMinute > 59) return false;
+  }
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+function validInvoiceDueStage(
+  dueDate: string,
+  occurrenceDate: string,
+  dueState: unknown,
+): boolean {
+  const dayMilliseconds = 24 * 60 * 60 * 1_000;
+  const dueDay = Date.parse(`${dueDate}T00:00:00.000Z`);
+  const occurrenceDay = Date.parse(`${occurrenceDate}T00:00:00.000Z`);
+  const daysBeforeDue = (dueDay - occurrenceDay) / dayMilliseconds;
+  if (dueState === "due_soon") {
+    return daysBeforeDue >= 1 && daysBeforeDue <= 3;
+  }
+  if (dueState === "due") return daysBeforeDue === 0;
+  if (dueState === "overdue") return daysBeforeDue < 0;
+  return false;
+}
+
 export function normalizeInboxItem(value: unknown): InboxItem {
   if (!isRecord(value)) return invalidResponse("收件箱条目响应格式无效");
   const id = stringField(value, "id");
@@ -3311,6 +3362,62 @@ export function normalizeInboxItem(value: unknown): InboxItem {
   const sourceDeletedAt = nullableString(
     fieldValue(value, "source_deleted_at", "sourceDeletedAt"),
   );
+  const invoiceDueDate =
+    isRecord(rawPayload) && typeof rawPayload.due_date === "string"
+      ? rawPayload.due_date
+      : "";
+  const invoiceOccurrenceDate =
+    isRecord(rawPayload) && typeof rawPayload.occurrence_date === "string"
+      ? rawPayload.occurrence_date
+      : "";
+  const invoiceDueProjectId = isRecord(rawPayload)
+    ? rawPayload.project_id
+    : undefined;
+  const invoiceDueProjectName = isRecord(rawPayload)
+    ? rawPayload.project_name
+    : undefined;
+  const invoiceDueExpectedKey =
+    isRecord(rawPayload) && typeof rawPayload.due_state === "string"
+      ? rawPayload.due_state === "overdue"
+        ? `invoice:${sourceEntityId}:overdue:${invoiceOccurrenceDate}`
+        : `invoice:${sourceEntityId}:${rawPayload.due_state}:${invoiceDueDate}`
+      : null;
+  const validInvoiceDueEvent =
+    sourceEntityType === "invoice_due" &&
+    !!sourceEntityId &&
+    !!dueAt &&
+    validRFC3339Timestamp(dueAt) &&
+    isRecord(rawPayload) &&
+    hasExactKeys(rawPayload, invoiceDuePayloadKeys) &&
+    rawPayload.invoice_id === sourceEntityId &&
+    typeof rawPayload.invoice_number === "string" &&
+    rawPayload.invoice_number.trim().length > 0 &&
+    typeof rawPayload.client_id === "string" &&
+    rawPayload.client_id.trim().length > 0 &&
+    typeof rawPayload.client_name === "string" &&
+    rawPayload.client_name.trim().length > 0 &&
+    ((invoiceDueProjectId === null && invoiceDueProjectName === null) ||
+      (typeof invoiceDueProjectId === "string" &&
+        invoiceDueProjectId.trim().length > 0 &&
+        typeof invoiceDueProjectName === "string" &&
+        invoiceDueProjectName.trim().length > 0)) &&
+    Number.isSafeInteger(rawPayload.amount_minor) &&
+    (rawPayload.amount_minor as number) > 0 &&
+    (rawPayload.amount_minor as number) <= 9_000_000_000_000_000 &&
+    typeof rawPayload.currency === "string" &&
+    /^[A-Z]{3}$/.test(rawPayload.currency) &&
+    validInvoiceDate(invoiceDueDate) &&
+    validInvoiceDate(invoiceOccurrenceDate) &&
+    validInvoiceDueStage(
+      invoiceDueDate,
+      invoiceOccurrenceDate,
+      rawPayload.due_state,
+    ) &&
+    Number.isSafeInteger(rawPayload.invoice_version) &&
+    (rawPayload.invoice_version as number) >= 1 &&
+    validRFC3339Timestamp(rawPayload.projected_at) &&
+    rawPayload.lead_days === 3 &&
+    sourceEventKey === invoiceDueExpectedKey;
   const validClientFollowupEvent =
     sourceEntityType === "client_followup" &&
     !!sourceEntityId &&
@@ -3424,6 +3531,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       sourceEntityType !== "task_artifact" &&
       sourceEntityType !== "task" &&
       sourceEntityType !== "task_due" &&
+      sourceEntityType !== "invoice_due" &&
       sourceEntityType !== "client_followup" &&
       sourceEntityType !== "content_item" &&
       sourceEntityType !== "roadmap_milestone" &&
@@ -3441,6 +3549,7 @@ export function normalizeInboxItem(value: unknown): InboxItem {
       !validTaskArtifactEvent &&
       !validTaskBlockedEvent &&
       !validTaskDueEvent &&
+      !validInvoiceDueEvent &&
       !validClientFollowupEvent &&
       !validContentItemEvent &&
       !validRoadmapMilestoneEvent &&

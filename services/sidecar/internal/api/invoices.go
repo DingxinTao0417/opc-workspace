@@ -828,6 +828,9 @@ func invoiceTransition(invoice models.Invoice, action string, paidDate *string, 
 		if paidDate == nil || *paidDate < invoice.IssueDate {
 			return "", "", "", newInvoiceRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "paid_date cannot be before issue_date")
 		}
+		if *paidDate > now.Format("2006-01-02") {
+			return "", "", "", newInvoiceRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "paid_date cannot be in the future")
+		}
 		return "paid", "invoice_paid", models.BuiltinOwnerActorID, nil
 	default:
 		return invalid()

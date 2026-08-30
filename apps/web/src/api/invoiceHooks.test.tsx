@@ -91,6 +91,39 @@ describe("useTransitionInvoice", () => {
     );
   });
 
+  it.each(["IDEMPOTENCY_REPLAY_UNAVAILABLE", "IDEMPOTENCY_CONFLICT"])(
+    "rotates the transition key after permanent idempotency error %s",
+    async (code) => {
+      transitionInvoiceMock
+        .mockRejectedValueOnce(
+          new ApiError("permanent idempotency error", {
+            code,
+            status: 409,
+          }),
+        )
+        .mockResolvedValueOnce(paidInvoice);
+      const input = {
+        action: "mark_paid" as const,
+        paidDate: "2026-09-03",
+        expectedVersion: 3,
+      };
+      const { result } = renderHook(() => useTransitionInvoice(), {
+        wrapper: wrapperFor(createQueryClient()),
+      });
+
+      act(() => result.current.mutate({ id: "invoice-1", input }));
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      act(() => result.current.mutate({ id: "invoice-1", input }));
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+      expect(transitionInvoiceMock.mock.calls[0][2]).toBeTruthy();
+      expect(transitionInvoiceMock.mock.calls[1][2]).toBeTruthy();
+      expect(transitionInvoiceMock.mock.calls[1][2]).not.toBe(
+        transitionInvoiceMock.mock.calls[0][2],
+      );
+    },
+  );
+
   it("refreshes invoice, ledger, income, and project facts after payment", async () => {
     transitionInvoiceMock.mockResolvedValue(paidInvoice);
     const queryClient = createQueryClient();

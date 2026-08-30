@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -189,6 +190,16 @@ describe("InvoicesPage", () => {
       screen.getByRole("button", { name: "打开 INV-VIEWED 操作" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "登记付款" }));
+    const dialog = screen.getByRole("dialog", { name: "登记付款" });
+    const amountSummary = within(dialog).getByText("付款金额").parentElement;
+    expect(within(dialog).getByText("INV-VIEWED")).toBeTruthy();
+    expect(within(dialog).getByText("星河工作室")).toBeTruthy();
+    expect(amountSummary).toHaveTextContent("¥1,280.45 · CNY");
+    expect(within(dialog).getByText("将创建一条已确认收入记录")).toBeTruthy();
+    const paymentDate = screen.getByLabelText("付款日期");
+    const now = new Date();
+    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    expect(paymentDate).toHaveAttribute("max", localToday);
     fireEvent.change(screen.getByLabelText("付款日期"), {
       target: { value: "2026-09-03" },
     });

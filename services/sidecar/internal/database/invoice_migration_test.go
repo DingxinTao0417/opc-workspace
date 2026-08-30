@@ -14,8 +14,8 @@ func TestInvoiceFactsMigrationOpensEmptyWorkspaceAtV46(t *testing.T) {
 		t.Fatalf("OpenBeforeDestructiveMigrations() error = %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 47 {
-		t.Fatalf("empty invoice workspace schema=%d gate=%#v, want schema 47 without a gate", store.SchemaVersion, gate)
+	if gate != nil || store.SchemaVersion != 48 {
+		t.Fatalf("empty invoice workspace schema=%d gate=%#v, want schema 48 without a gate", store.SchemaVersion, gate)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM invoices"); got != 0 {
 		t.Fatalf("empty invoice count = %d, want 0", got)
@@ -76,7 +76,7 @@ func TestInvoiceFactsMigrationGatesV45AndPreservesLegacyInvoices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open v45 invoice migration gate: %v", err)
 	}
-	if gated.SchemaVersion != 45 || gate == nil || gate.CurrentVersion != 45 || gate.TargetVersion != 47 || !reflect.DeepEqual(gate.PendingVersions, []int{46, 47}) {
+	if gated.SchemaVersion != 45 || gate == nil || gate.CurrentVersion != 45 || gate.TargetVersion != 48 || !reflect.DeepEqual(gate.PendingVersions, []int{46, 47, 48}) {
 		_ = gated.Close()
 		t.Fatalf("v45 invoice migration gate: store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
@@ -101,8 +101,8 @@ func TestInvoiceFactsMigrationGatesV45AndPreservesLegacyInvoices(t *testing.T) {
 		t.Fatalf("apply v46 invoice migration: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 47 {
-		t.Fatalf("invoice schema version = %d, want 47", store.SchemaVersion)
+	if store.SchemaVersion != 48 {
+		t.Fatalf("invoice schema version = %d, want 48", store.SchemaVersion)
 	}
 
 	var draft struct {
@@ -245,6 +245,22 @@ func TestInvoiceFactsMigrationEnforcesConstraintsForeignKeysAndTriggers(t *testi
 		{status: "overdue"},
 		{status: "paid", paidDate: "2026-09-02"},
 	} {
+		if transition.status == "paid" {
+			if _, err := store.SQL.Exec(`
+				INSERT INTO financial_entries(
+					id, type, amount_minor, currency, occurred_on, status, category,
+					client_id, project_id, invoice_id, notes, created_by_actor_id,
+					version, created_at, updated_at
+				) VALUES (
+					'018f0000-0000-7000-8000-000000004622', 'income', 128000, 'CNY',
+					'2026-09-02', 'confirmed', '发票回款', ?, ?, ?, '',
+					'00000000-0000-5000-8000-000000000001', 1,
+					'2026-09-02T00:00:00Z', '2026-09-02T00:00:00Z'
+				)
+			`, clientOne, projectOne, validID); err != nil {
+				t.Fatalf("seed matching paid financial entry: %v", err)
+			}
+		}
 		if _, err := store.SQL.Exec("UPDATE invoices SET status = ?, paid_date = ?, version = version + 1, updated_at = '2026-09-02T00:00:00Z' WHERE id = ?", transition.status, transition.paidDate, validID); err != nil {
 			t.Fatalf("transition invoice to %s: %v", transition.status, err)
 		}

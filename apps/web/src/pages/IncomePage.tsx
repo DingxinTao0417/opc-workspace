@@ -23,6 +23,8 @@ import type {
   FinancialEntry,
   FinancialEntryStatus,
   FinancialEntryType,
+  IncomeStats,
+  IncomeStatsParams,
 } from "../types/models";
 
 const currencySymbols: Record<string, string> = {
@@ -38,9 +40,19 @@ const statusLabels: Record<FinancialEntryStatus, string> = {
   voided: "已作废",
 };
 
+function localDateValue(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function currentMonthValue(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return localDateValue().slice(0, 7);
+}
+
+function validMonthValue(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 }
 
 function monthBounds(value: string) {
@@ -50,6 +62,25 @@ function monthBounds(value: string) {
     dateFrom: `${value}-01`,
     dateTo: `${value}-${String(lastDay).padStart(2, "0")}`,
   };
+}
+
+function currentYearBounds(date = new Date()) {
+  const dateTo = localDateValue(date);
+  return {
+    dateFrom: `${dateTo.slice(0, 4)}-01-01`,
+    dateTo,
+  };
+}
+
+function statsMatchRequest(
+  stats: IncomeStats | undefined,
+  request: IncomeStatsParams,
+): stats is IncomeStats {
+  return (
+    stats?.currency === request.currency &&
+    stats.dateFrom === request.dateFrom &&
+    stats.dateTo === request.dateTo
+  );
 }
 
 function formatAmount(amountMinor: number, currency: string): string {
@@ -77,7 +108,7 @@ function apiErrorMessage(error: unknown, fallback: string): string {
 }
 
 export function IncomePage() {
-  const [month, setMonth] = useState(currentMonthValue());
+  const [monthInput, setMonthInput] = useState(currentMonthValue());
   const [currency, setCurrency] = useState("CNY");
   const [type, setType] = useState<FinancialEntryType | "">("");
   const [status, setStatus] = useState<FinancialEntryStatus | "">("");
@@ -89,7 +120,9 @@ export function IncomePage() {
   const [voiding, setVoiding] = useState<FinancialEntry | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [actionMenu, setActionMenu] = useState<string | null>(null);
+  const month = validMonthValue(monthInput) ? monthInput : currentMonthValue();
   const bounds = useMemo(() => monthBounds(month), [month]);
+  const yearBounds = useMemo(() => currentYearBounds(), []);
   const listInput = {
     page,
     pageSize: 20,
@@ -102,7 +135,10 @@ export function IncomePage() {
     sort: "-occurred_on,-created_at",
   } as const;
   const entriesQuery = useFinancialEntriesQuery(listInput);
-  const statsQuery = useIncomeStatsQuery({ currency, ...bounds });
+  const monthlyStatsRequest = { currency, ...bounds };
+  const yearlyStatsRequest = { currency, ...yearBounds };
+  const statsQuery = useIncomeStatsQuery(monthlyStatsRequest);
+  const yearlyStatsQuery = useIncomeStatsQuery(yearlyStatsRequest);
   const exportMutation = useExportFinancialEntries();
   const voidMutation = useVoidFinancialEntry();
   const entries = entriesQuery.data?.items ?? [];
@@ -112,6 +148,33 @@ export function IncomePage() {
     Math.ceil(total / (entriesQuery.data?.meta.pageSize ?? 20)),
   );
   const hasFilters = Boolean(type || status);
+  const statsTransitioning = Boolean(statsQuery.isPlaceholderData);
+  const yearlyStatsTransitioning = Boolean(yearlyStatsQuery.isPlaceholderData);
+  const stats =
+    !statsTransitioning &&
+    statsMatchRequest(statsQuery.data, monthlyStatsRequest)
+      ? statsQuery.data
+      : null;
+  const yearlyStats =
+    !yearlyStatsTransitioning &&
+    statsMatchRequest(yearlyStatsQuery.data, yearlyStatsRequest)
+      ? yearlyStatsQuery.data
+      : null;
+  const statsResponseMismatch = Boolean(
+    !statsTransitioning &&
+    statsQuery.data &&
+    !statsMatchRequest(statsQuery.data, monthlyStatsRequest),
+  );
+  const yearlyStatsResponseMismatch = Boolean(
+    !yearlyStatsTransitioning &&
+    yearlyStatsQuery.data &&
+    !statsMatchRequest(yearlyStatsQuery.data, yearlyStatsRequest),
+  );
+  const statsUnavailable =
+    statsQuery.isError ||
+    yearlyStatsQuery.isError ||
+    statsResponseMismatch ||
+    yearlyStatsResponseMismatch;
 
   const exportCSV = () => {
     exportMutation.mutate(
@@ -186,7 +249,7 @@ export function IncomePage() {
           <input
             aria-label="月份"
             onChange={(event) => {
-              setMonth(event.target.value);
+              setMonthInput(event.target.value);
               setPage(1);
             }}
             type="month"
@@ -243,34 +306,61 @@ export function IncomePage() {
         </label>
       </div>
 
-      {statsQuery.isError ? (
+      {statsUnavailable ? (
         <ErrorState
           compact
-          message="财务统计暂时无法读取，记录列表仍可继续使用。"
-          onRetry={() => void statsQuery.refetch()}
+          message={
+            statsResponseMismatch || yearlyStatsResponseMismatch
+              ? "统计响应与当前范围不一致，已停止显示可能过期的金额。"
+              : "财务统计暂时无法读取，记录列表仍可继续使用。"
+          }
+          onRetry={() => {
+            void statsQuery.refetch();
+            void yearlyStatsQuery.refetch();
+          }}
           title="统计加载失败"
         />
       ) : null}
 
-      <section aria-label="本月收支概览" className="finance-kpi-grid">
+      <section aria-label="财务统计概览" className="finance-kpi-grid">
         <article className="kpi-card finance-kpi-card">
-          <span>已确认收入</span>
+          <span>本月已确认收入</span>
           <strong className="finance-positive">
-            {statsQuery.data
-              ? formatAmount(statsQuery.data.confirmedIncomeMinor, currency)
+            {stats
+              ? formatAmount(stats.confirmedIncomeMinor, stats.currency)
               : "—"}
           </strong>
           <small>
-            {statsQuery.data
-              ? `${statsQuery.data.confirmedIncomeCount} 笔 · 均值 ${formatAmount(statsQuery.data.averageIncomeMinor, currency)}`
-              : "正在计算本地数据"}
+            {stats
+              ? `${stats.confirmedIncomeCount} 笔 · 均值 ${formatAmount(stats.averageIncomeMinor, stats.currency)}`
+              : statsTransitioning || statsQuery.isPending
+                ? "正在更新本月统计"
+                : "当前范围暂无可用统计"}
+          </small>
+        </article>
+        <article className="kpi-card finance-kpi-card">
+          <span>本年度已确认收入</span>
+          <strong className="finance-positive">
+            {yearlyStats
+              ? formatAmount(
+                  yearlyStats.confirmedIncomeMinor,
+                  yearlyStats.currency,
+                )
+              : "—"}
+          </strong>
+          <small>
+            {yearlyStats
+              ? `截至 ${yearlyStats.dateTo} · ${yearlyStats.confirmedIncomeCount} 笔`
+              : yearlyStatsTransitioning || yearlyStatsQuery.isPending
+                ? "正在更新本年度统计"
+                : "本年度统计暂不可用"}
           </small>
         </article>
         <article className="kpi-card finance-kpi-card">
           <span>已确认支出</span>
           <strong className="finance-negative">
-            {statsQuery.data
-              ? formatAmount(statsQuery.data.confirmedExpenseMinor, currency)
+            {stats
+              ? formatAmount(stats.confirmedExpenseMinor, stats.currency)
               : "—"}
           </strong>
           <small>仅统计当前月份与币种</small>
@@ -278,26 +368,23 @@ export function IncomePage() {
         <article className="kpi-card finance-kpi-card">
           <span>净现金流</span>
           <strong>
-            {statsQuery.data
-              ? formatAmount(statsQuery.data.netCashFlowMinor, currency)
-              : "—"}
+            {stats ? formatAmount(stats.netCashFlowMinor, stats.currency) : "—"}
           </strong>
           <small>已确认收入减已确认支出</small>
         </article>
         <article className="kpi-card finance-kpi-card">
           <span>待确认金额</span>
           <strong>
-            {statsQuery.data
+            {stats
               ? formatAmount(
-                  statsQuery.data.pendingIncomeMinor +
-                    statsQuery.data.pendingExpenseMinor,
-                  currency,
+                  stats.pendingIncomeMinor + stats.pendingExpenseMinor,
+                  stats.currency,
                 )
               : "—"}
           </strong>
           <small>
-            {statsQuery.data
-              ? `收入 ${formatAmount(statsQuery.data.pendingIncomeMinor, currency)} · 支出 ${formatAmount(statsQuery.data.pendingExpenseMinor, currency)}`
+            {stats
+              ? `收入 ${formatAmount(stats.pendingIncomeMinor, stats.currency)} · 支出 ${formatAmount(stats.pendingExpenseMinor, stats.currency)}`
               : "正在计算本地数据"}
           </small>
         </article>

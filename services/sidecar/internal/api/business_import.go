@@ -543,6 +543,9 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		if err := tx.Raw("PRAGMA quick_check").Row().Scan(&quickCheck); err != nil || quickCheck != "ok" {
 			return fmt.Errorf("database quick check failed: result=%s err=%w", quickCheck, err)
 		}
+		if err := validateInvoicePaymentConsistency(tx); err != nil {
+			return err
+		}
 		if validate != nil {
 			if err := validate(tx); err != nil {
 				return err
@@ -550,6 +553,55 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		}
 		return nil
 	})
+}
+
+func validateInvoicePaymentConsistency(db *gorm.DB) error {
+	var failures int64
+	if err := db.Raw(`
+		SELECT
+			(
+				SELECT COUNT(*)
+				FROM invoices
+				WHERE invoices.status = 'paid'
+				  AND (
+					SELECT COUNT(*)
+					FROM financial_entries
+					WHERE financial_entries.invoice_id = invoices.id
+					  AND financial_entries.type = 'income'
+					  AND financial_entries.status = 'confirmed'
+					  AND financial_entries.amount_minor = invoices.amount_minor
+					  AND financial_entries.currency = invoices.currency
+					  AND financial_entries.occurred_on = invoices.paid_date
+					  AND financial_entries.client_id = invoices.client_id
+					  AND financial_entries.project_id IS invoices.project_id
+				  ) <> 1
+			)
+			+
+			(
+				SELECT COUNT(*)
+				FROM financial_entries
+				WHERE financial_entries.invoice_id IS NOT NULL
+				  AND NOT EXISTS (
+					SELECT 1
+					FROM invoices
+					WHERE invoices.id = financial_entries.invoice_id
+					  AND invoices.status = 'paid'
+					  AND financial_entries.type = 'income'
+					  AND financial_entries.status = 'confirmed'
+					  AND financial_entries.amount_minor = invoices.amount_minor
+					  AND financial_entries.currency = invoices.currency
+					  AND financial_entries.occurred_on = invoices.paid_date
+					  AND financial_entries.client_id = invoices.client_id
+					  AND financial_entries.project_id IS invoices.project_id
+				  )
+			)
+	`).Row().Scan(&failures); err != nil {
+		return fmt.Errorf("invoice payment consistency validation failed: %w", err)
+	}
+	if failures != 0 {
+		return fmt.Errorf("invoice payment consistency validation failed: %d inconsistent rows", failures)
+	}
+	return nil
 }
 
 func restoreImportedProjectVersions(tx *gorm.DB, table businessExportTable) error {

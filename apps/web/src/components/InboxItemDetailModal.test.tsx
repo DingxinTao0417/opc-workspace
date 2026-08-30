@@ -166,6 +166,26 @@ describe("InboxItemDetailModal", () => {
     hooks.command.isPending = false;
   });
 
+  it("labels an invoice due source as a local invoice reminder", () => {
+    hooks.detail.mockReturnValue({
+      data: {
+        ...baseItem,
+        kind: "event",
+        sourceEntityType: "invoice_due",
+        sourceEntityId: "invoice-1",
+        sourceEventKey: "invoice:invoice-1:due:2026-08-29",
+      },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(<InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />);
+
+    expect(screen.getByText("发票到期提醒 · 仅保存在本机")).toBeTruthy();
+    expect(screen.queryByText("任务产出跟进 · 仅保存在本机")).toBeNull();
+  });
+
   it("uses available actions when an expired snooze timestamp is retained", () => {
     hooks.detail.mockReturnValue({
       data: {
