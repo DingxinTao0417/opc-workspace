@@ -14,7 +14,13 @@ import {
   RotateCcw,
   Target,
 } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
@@ -78,6 +84,12 @@ function shiftLocalDateKey(dateKey: string, days: number): string {
   const date = dateFromKey(dateKey);
   date.setDate(date.getDate() + days);
   return localDateKey(date);
+}
+
+function isValidLocalDateKey(dateKey: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return false;
+  const date = dateFromKey(dateKey);
+  return !Number.isNaN(date.getTime()) && localDateKey(date) === dateKey;
 }
 
 function reorderErrorText(error: unknown): string | null {
@@ -229,13 +241,6 @@ export function TodayPage() {
   const focusPhase = useFocusCycleStore((state) => state.phase);
   const beginFocusWork = useFocusCycleStore((state) => state.beginWork);
 
-  useEffect(() => {
-    const previousToday = previousTodayKey.current;
-    if (todayKey !== previousToday) {
-      setDateKey((current) => (current === previousToday ? todayKey : current));
-    }
-    previousTodayKey.current = todayKey;
-  }, [todayKey]);
   const riskTotal = riskTasksQuery.data?.meta.total ?? 0;
   const effectiveRiskPageSize = Math.max(
     1,
@@ -273,8 +278,45 @@ export function TodayPage() {
     moveMutation.isPending ||
     crossPlanMutation.isPending ||
     resetOrderMutation.isPending;
-  const riskSwitchDisabled =
+  const dateNavigationLocked =
     orderMutationPending || sharedDraggingTask !== null;
+  const riskSwitchDisabled = dateNavigationLocked;
+  const changeDate = useCallback(
+    (nextDateKey: string): boolean => {
+      if (dateNavigationLocked || !isValidLocalDateKey(nextDateKey)) {
+        return false;
+      }
+      if (nextDateKey === dateKey) return true;
+      setRiskFilter(null);
+      setRiskPage(1);
+      setDragPreview(null);
+      setSharedDraggingTask(null);
+      moveMutation.reset();
+      crossPlanMutation.reset();
+      resetOrderMutation.reset();
+      setDateKey(nextDateKey);
+      return true;
+    },
+    [
+      crossPlanMutation.reset,
+      dateKey,
+      dateNavigationLocked,
+      moveMutation.reset,
+      resetOrderMutation.reset,
+    ],
+  );
+
+  useEffect(() => {
+    const previousToday = previousTodayKey.current;
+    if (todayKey === previousToday) return;
+    if (dateKey !== previousToday) {
+      previousTodayKey.current = todayKey;
+      return;
+    }
+    if (dateNavigationLocked) return;
+    if (changeDate(todayKey)) previousTodayKey.current = todayKey;
+  }, [changeDate, dateKey, dateNavigationLocked, todayKey]);
+
   const reorderReady =
     live && !taskGroupsQuery.isFetching && !orderMutationPending;
   const reorderError =
@@ -316,27 +358,30 @@ export function TodayPage() {
     ? Math.round((realStats.tasks.estimatedMinutes / 60) * 10) / 10
     : 0;
   const statsPending = statsQuery.isPending;
+  const statsUnavailable = statsQuery.isError && !realStats;
+  const statValue = (value: string | number) =>
+    statsPending ? "…" : statsUnavailable ? "—" : value;
   const stats = [
     {
       icon: Hourglass,
-      value: statsPending ? "…" : `${estimated}h`,
+      value: statValue(`${estimated}h`),
       label: "预计时长",
     },
     {
       icon: CheckCircle2,
-      value: statsPending ? "…" : (realStats?.tasks.remaining ?? 0),
+      value: statValue(realStats?.tasks.remaining ?? 0),
       label: "项待完成",
     },
     {
       icon: AlertTriangle,
-      value: statsPending ? "…" : (realStats?.tasks.overdue ?? 0),
+      value: statValue(realStats?.tasks.overdue ?? 0),
       label: "项已逾期",
       danger: true,
       risk: "overdue" as const,
     },
     {
       icon: Clock3,
-      value: statsPending ? "…" : (realStats?.tasks.dueSoon ?? 0),
+      value: statValue(realStats?.tasks.dueSoon ?? 0),
       label: "项临期",
       warning: true,
       risk: "due_soon" as const,
@@ -495,21 +540,37 @@ export function TodayPage() {
           <div aria-label="日期切换" className="date-switcher">
             <button
               aria-label="前一天"
-              onClick={() =>
-                setDateKey((value) => shiftLocalDateKey(value, -1))
-              }
+              disabled={dateNavigationLocked}
+              onClick={() => changeDate(shiftLocalDateKey(dateKey, -1))}
               type="button"
             >
               <ChevronLeft size={13} />
             </button>
-            <span className="date-pill">
+            <span
+              className={`date-pill date-picker-pill${dateNavigationLocked ? " date-picker-pill-disabled" : ""}`}
+            >
               <CalendarDays size={13} />
-              {isToday ? "今天 · " : null}
-              {formatToday(selectedDate)}
+              <span>
+                {isToday ? "今天 · " : null}
+                {formatToday(selectedDate)}
+              </span>
+              <input
+                aria-label="选择日期"
+                disabled={dateNavigationLocked}
+                onChange={(event) => changeDate(event.currentTarget.value)}
+                title={
+                  dateNavigationLocked
+                    ? "任务顺序保存或拖拽期间不能切换日期"
+                    : "选择日期"
+                }
+                type="date"
+                value={dateKey}
+              />
             </span>
             <button
               aria-label="后一天"
-              onClick={() => setDateKey((value) => shiftLocalDateKey(value, 1))}
+              disabled={dateNavigationLocked}
+              onClick={() => changeDate(shiftLocalDateKey(dateKey, 1))}
               type="button"
             >
               <ChevronRight size={13} />
@@ -517,7 +578,8 @@ export function TodayPage() {
             {!isToday ? (
               <button
                 className="date-today-button"
-                onClick={() => setDateKey(todayKey)}
+                disabled={dateNavigationLocked}
+                onClick={() => changeDate(todayKey)}
                 type="button"
               >
                 回到今天

@@ -1103,6 +1103,51 @@ kbd {
   gap: 3px;
 }
 
+.date-picker-pill {
+  position: relative;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.date-picker-pill:not(.date-picker-pill-disabled):hover,
+.date-picker-pill:not(.date-picker-pill-disabled):focus-within {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.date-picker-pill:focus-within {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 2px;
+}
+
+.date-picker-pill > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.date-picker-pill > input:focus-visible {
+  outline: 0;
+}
+
+.date-picker-pill-disabled,
+.date-picker-pill-disabled > input {
+  cursor: not-allowed;
+}
+
+.date-picker-pill-disabled {
+  opacity: 0.5;
+}
+
 .date-switcher > button {
   display: inline-grid;
   min-width: 25px;
@@ -12649,7 +12694,6 @@ kbd {
     padding: 18px 15px 40px;
   }
 
-  .date-pill,
   .streak-pill {
     display: none;
   }

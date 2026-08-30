@@ -472,6 +472,31 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.queryByRole("heading", { name: "今天" })).toBeNull();
   });
 
+  it("does not present zeroes as facts when the initial stats request fails", () => {
+    mockTodayShell();
+    mocks.stats.mockReturnValue({
+      data: undefined,
+      isError: true,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    for (const label of ["预计时长", "项待完成", "项已逾期", "项临期"]) {
+      const card = screen.getByText(label).closest<HTMLElement>(".stat-card");
+      expect(card).not.toBeNull();
+      expect(within(card!).getByText("—")).toBeVisible();
+    }
+    expect(
+      screen.getByText("无法读取今日统计；当前不显示估算数据。"),
+    ).toBeVisible();
+  });
+
   it("isolates a risk query error and retries only that query", () => {
     mockTodayShell();
     const refetch = vi.fn();
@@ -809,6 +834,203 @@ describe("TodayPage Inbox overview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("selects arbitrary local dates and shifts safely across calendar boundaries", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    mockTodayShell();
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    const dateInput = screen.getByLabelText("选择日期");
+    expect(dateInput).toHaveValue("2026-08-28");
+
+    fireEvent.change(dateInput, { target: { value: "2026-12-31" } });
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-12-31");
+    expect(mocks.stats).toHaveBeenLastCalledWith("2026-12-31");
+
+    fireEvent.click(screen.getByRole("button", { name: "后一天" }));
+    expect(dateInput).toHaveValue("2027-01-01");
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2027-01-01");
+
+    fireEvent.change(dateInput, { target: { value: "2026-03-08" } });
+    fireEvent.click(screen.getByRole("button", { name: "后一天" }));
+    expect(dateInput).toHaveValue("2026-03-09");
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-03-09");
+
+    fireEvent.change(dateInput, { target: { value: "" } });
+    expect(dateInput).toHaveValue("2026-03-09");
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-03-09");
+  });
+
+  it("leaves the global risk view and resets its page when a date is chosen", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    mockTodayShell();
+    mocks.riskTasks.mockImplementation(
+      (input: { page: number; dueState: "overdue" | "due_soon" }) =>
+        riskQueryResult(
+          [makeRiskTask(`risk-${input.page}`, `风险任务 ${input.page}`)],
+          25,
+        ),
+    );
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    const overdue = screen.getByRole("button", { name: /项已逾期/ });
+    fireEvent.click(overdue);
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(mocks.riskTasks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dueState: "overdue", page: 2 }),
+      true,
+    );
+
+    fireEvent.change(screen.getByLabelText("选择日期"), {
+      target: { value: "2026-08-28" },
+    });
+    expect(overdue).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "逾期任务" })).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("选择日期"), {
+      target: { value: "2026-09-02" },
+    });
+
+    expect(overdue).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("heading", { name: "逾期任务" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "所选日期" })).toBeVisible();
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-09-02");
+    expect(mocks.stats).toHaveBeenLastCalledWith("2026-09-02");
+
+    fireEvent.click(overdue);
+    expect(mocks.riskTasks).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dueState: "overdue", page: 1 }),
+      true,
+    );
+  });
+
+  it("locks every date entry at runtime while ordering or dragging is active", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    const draggableTask = {
+      ...makeRiskTask("drag-date-lock", "锁定日期导航"),
+      dueDate: null,
+      plannedDate: "2026-08-27",
+    };
+    mockTodayShell();
+    mocks.taskGroups.mockReturnValue({
+      data: {
+        overdue: [],
+        today: [draggableTask],
+        thisWeek: [],
+        unscheduled: [],
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    const view = render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "前一天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+
+    mocks.dragPending = true;
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    const dateInput = screen.getByLabelText("选择日期");
+    for (const name of ["前一天", "后一天", "回到今天"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    expect(dateInput).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "回到今天" }));
+    fireEvent.change(dateInput, { target: { value: "2026-09-02" } });
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+
+    mocks.dragPending = false;
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByTitle("拖动排序：锁定日期导航"), {
+      dataTransfer,
+    });
+
+    for (const name of ["前一天", "后一天", "回到今天"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    expect(dateInput).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "后一天" }));
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
+  });
+
+  it("clears date-scoped order errors and warnings after a valid date change", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 10, 0, 0));
+    mockTodayShell();
+    mocks.moveError = new ApiError("旧日期顺序保存失败", {
+      code: "TASK_REORDER_SET_CHANGED",
+    });
+    mocks.dragData = {
+      plannedDateChanged: true,
+      orderWarnings: ["旧日期顺序警告"],
+    };
+    mocks.resetMove.mockImplementationOnce(() => {
+      mocks.moveError = null;
+    });
+    mocks.resetDrag.mockImplementationOnce(() => {
+      mocks.dragData = undefined;
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("旧日期顺序保存失败");
+    expect(screen.getByRole("status")).toHaveTextContent("旧日期顺序警告");
+
+    fireEvent.change(screen.getByLabelText("选择日期"), {
+      target: { value: "2026-08-28" },
+    });
+    expect(mocks.resetMove).not.toHaveBeenCalled();
+    expect(mocks.resetDrag).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("旧日期顺序保存失败");
+    expect(screen.getByRole("status")).toHaveTextContent("旧日期顺序警告");
+
+    fireEvent.change(screen.getByLabelText("选择日期"), {
+      target: { value: "2026-08-29" },
+    });
+
+    expect(mocks.resetMove).toHaveBeenCalledTimes(1);
+    expect(mocks.resetDrag).toHaveBeenCalledTimes(1);
+    expect(mocks.resetResetOrder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("旧日期顺序保存失败")).toBeNull();
+    expect(screen.queryByText(/旧日期顺序警告/)).toBeNull();
+  });
+
   it("follows the new local day when the user is still viewing today", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 28, 23, 59, 59));
@@ -848,6 +1070,87 @@ describe("TodayPage Inbox overview", () => {
     expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-27");
     fireEvent.click(screen.getByRole("button", { name: "回到今天" }));
     expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-29");
+  });
+
+  it("defers the local-midnight rollover until an active drag is released", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 23, 59, 59));
+    const task = {
+      ...makeRiskTask("midnight-drag", "跨午夜拖拽"),
+      dueDate: null,
+      plannedDate: "2026-08-28",
+    };
+    mockTodayShell();
+    mocks.taskGroups.mockReturnValue({
+      data: { overdue: [], today: [task], thisWeek: [], unscheduled: [] },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    const handle = screen.getByTitle("拖动排序：跨午夜拖拽");
+    const dataTransfer = {
+      dropEffect: "none",
+      effectAllowed: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(handle, { dataTransfer });
+    mocks.resetDrag.mockClear();
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-28");
+    expect(screen.getByLabelText("选择日期")).toBeDisabled();
+
+    fireEvent.dragEnd(handle, { dataTransfer });
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-29");
+    expect(mocks.resetDrag).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers one local-midnight rollover until a cross-plan write settles", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 7, 28, 23, 59, 59));
+    mockTodayShell();
+    mocks.dragPending = true;
+    const view = render(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    act(() => vi.advanceTimersByTime(1_002));
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-28");
+    mocks.resetDrag.mockClear();
+    mocks.resetMove.mockClear();
+    mocks.resetResetOrder.mockClear();
+
+    mocks.dragPending = false;
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-08-29");
+    expect(mocks.resetDrag).toHaveBeenCalledTimes(1);
+    expect(mocks.resetMove).toHaveBeenCalledTimes(1);
+    expect(mocks.resetResetOrder).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <MemoryRouter>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    expect(mocks.resetDrag).toHaveBeenCalledTimes(1);
   });
 
   it("persists active ordering for the exact selected date and unscheduled group", () => {
