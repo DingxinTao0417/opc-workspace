@@ -15,6 +15,7 @@ import { ClientDetailPage } from "./pages/ClientDetailPage";
 import { FocusPage } from "./pages/FocusPage";
 import { InboxPage } from "./pages/InboxPage";
 import { IncomePage } from "./pages/IncomePage";
+import { InvoiceDetailPage } from "./pages/InvoiceDetailPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
 import { LaterPage } from "./pages/LaterPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -52,6 +53,7 @@ export default function App() {
             <Route element={<ClientDetailPage />} path="clients/:clientId" />
             <Route element={<IncomePage />} path="income" />
             <Route element={<InvoicesPage />} path="invoices" />
+            <Route element={<InvoiceDetailPage />} path="invoices/:invoiceId" />
             <Route element={<InboxPage />} path="inbox" />
             <Route element={<InboxPage />} path="inbox/:inboxItemId" />
             <Route element={<FocusPage />} path="focus" />

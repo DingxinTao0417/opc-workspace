@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ApiError } from "../api/client";
 import { useCreateInvoice, useUpdateInvoice } from "../api/hooks";
 import type { Invoice, InvoiceInput } from "../types/models";
 import {
@@ -9,6 +8,10 @@ import {
 import { ClientSelect } from "./ClientSelect";
 import { Modal } from "./Modal";
 import { ProjectSelect } from "./ProjectSelect";
+import {
+  invoiceErrorMessage,
+  isInvoiceVersionConflict,
+} from "./invoicePresentation";
 
 const currencies = ["CNY", "USD", "EUR", "HKD"] as const;
 
@@ -32,27 +35,25 @@ function validDate(value: string): boolean {
   );
 }
 
-function invoiceErrorMessage(error: unknown): string | null {
+function invoiceFormErrorMessage(error: unknown): string | null {
   if (!error) return null;
-  if (error instanceof ApiError) {
-    if (error.code === "VERSION_CONFLICT") {
-      return "该发票已在其他窗口修改，请关闭后重新打开再试。";
-    }
-    return error.requestId
-      ? `${error.message} · 请求 ${error.requestId}`
-      : error.message;
-  }
-  return "发票保存失败，请重试。";
+  return invoiceErrorMessage(
+    error,
+    "发票保存失败，请重试。",
+    "该发票已在其他窗口修改，请刷新后重新操作。",
+  );
 }
 
 export function InvoiceFormModal({
   open,
   invoice,
   onClose,
+  onVersionConflict,
 }: {
   open: boolean;
   invoice?: Invoice;
   onClose: () => void;
+  onVersionConflict?: () => void;
 }) {
   const createMutation = useCreateInvoice();
   const updateMutation = useUpdateInvoice();
@@ -76,18 +77,18 @@ export function InvoiceFormModal({
     setDueDate(invoice?.dueDate ?? defaultDueDate());
     setNotes(invoice?.notes ?? "");
     setValidationError(null);
-    createMutation.reset();
-    updateMutation.reset();
+    if (!createMutation.isPending) createMutation.reset();
+    if (!updateMutation.isPending) updateMutation.reset();
   }, [invoice, open]);
 
   const mutationError = useMemo(
     () =>
-      invoiceErrorMessage(createMutation.error) ??
-      invoiceErrorMessage(updateMutation.error),
+      invoiceFormErrorMessage(createMutation.error) ??
+      invoiceFormErrorMessage(updateMutation.error),
     [createMutation.error, updateMutation.error],
   );
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!clientId) {
       setValidationError("请选择客户。 ");
@@ -120,17 +121,20 @@ export function InvoiceFormModal({
       dueDate,
       notes,
     };
-    if (invoice) {
-      updateMutation.mutate(
-        {
+    try {
+      if (invoice) {
+        await updateMutation.mutateAsync({
           id: invoice.id,
           input: { ...input, expectedVersion: invoice.version },
-        },
-        { onSuccess: onClose },
-      );
-      return;
+        });
+        onClose();
+        return;
+      }
+      await createMutation.mutateAsync(input);
+      onClose();
+    } catch (error) {
+      if (isInvoiceVersionConflict(error)) onVersionConflict?.();
     }
-    createMutation.mutate(input, { onSuccess: onClose });
   };
 
   const close = () => {

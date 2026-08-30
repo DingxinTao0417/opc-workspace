@@ -1,11 +1,29 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type { Invoice } from "../types/models";
 import { InvoiceFormModal } from "./InvoiceFormModal";
 
 const mutations = vi.hoisted(() => ({
-  create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
-  update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
+  create: {
+    error: null,
+    isPending: false,
+    mutateAsync: vi.fn(),
+    reset: vi.fn(),
+  },
+  update: {
+    error: null,
+    isPending: false,
+    mutateAsync: vi.fn(),
+    reset: vi.fn(),
+  },
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -80,7 +98,13 @@ const invoice: Invoice = {
 };
 
 describe("InvoiceFormModal", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mutations.create.isPending = false;
+    mutations.update.isPending = false;
+    mutations.create.mutateAsync.mockResolvedValue(invoice);
+    mutations.update.mutateAsync.mockResolvedValue(invoice);
+  });
   afterEach(cleanup);
 
   it("creates a draft with exact minor units and client-scoped project", () => {
@@ -101,14 +125,13 @@ describe("InvoiceFormModal", () => {
     });
     fireEvent.submit(document.getElementById("invoice-form")!);
 
-    expect(mutations.create.mutate).toHaveBeenCalledWith(
+    expect(mutations.create.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: "client-1",
         projectId: "project-1",
         amountMinor: 128045,
         currency: "CNY",
       }),
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
 
@@ -127,24 +150,77 @@ describe("InvoiceFormModal", () => {
     );
   });
 
-  it("updates a draft with the observed version", () => {
-    render(<InvoiceFormModal invoice={invoice} onClose={vi.fn()} open />);
+  it("updates a draft with the observed version and closes after success", async () => {
+    const onClose = vi.fn();
+    render(<InvoiceFormModal invoice={invoice} onClose={onClose} open />);
     fireEvent.change(screen.getByLabelText("发票备注"), {
       target: { value: "调整付款条款" },
     });
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
 
-    expect(mutations.update.mutate).toHaveBeenCalledWith(
-      {
-        id: invoice.id,
-        input: expect.objectContaining({
-          amountMinor: 128045,
-          notes: "调整付款条款",
-          expectedVersion: 4,
-        }),
-      },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    expect(mutations.update.mutateAsync).toHaveBeenCalledWith({
+      id: invoice.id,
+      input: expect.objectContaining({
+        amountMinor: 128045,
+        notes: "调整付款条款",
+        expectedVersion: 4,
+      }),
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("still closes when the detail cache refreshes before the save settles", async () => {
+    let resolveUpdate: (value: Invoice) => void = () => undefined;
+    mutations.update.mutateAsync.mockReturnValueOnce(
+      new Promise<Invoice>((resolve) => {
+        resolveUpdate = resolve;
+      }),
     );
+    const onClose = vi.fn();
+    const view = render(
+      <InvoiceFormModal invoice={invoice} onClose={onClose} open />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    const resetCallsBeforeRefresh = mutations.update.reset.mock.calls.length;
+    mutations.update.isPending = true;
+    view.rerender(
+      <InvoiceFormModal
+        invoice={{ ...invoice, version: invoice.version + 1 }}
+        onClose={onClose}
+        open
+      />,
+    );
+    expect(mutations.update.reset).toHaveBeenCalledTimes(
+      resetCallsBeforeRefresh,
+    );
+    expect(screen.getByRole("button", { name: "正在保存…" })).toBeDisabled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    mutations.update.isPending = false;
+    await act(async () => resolveUpdate({ ...invoice, version: 5 }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("reports an edit version conflict to the detail owner", async () => {
+    const onVersionConflict = vi.fn();
+    mutations.update.mutateAsync.mockRejectedValueOnce(
+      new ApiError("conflict", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    render(
+      <InvoiceFormModal
+        invoice={invoice}
+        onClose={vi.fn()}
+        onVersionConflict={onVersionConflict}
+        open
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(onVersionConflict).toHaveBeenCalledTimes(1));
   });
 
   it("blocks a due date before the issue date", () => {
@@ -166,6 +242,6 @@ describe("InvoiceFormModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "到期日期不能早于开票日期",
     );
-    expect(mutations.create.mutate).not.toHaveBeenCalled();
+    expect(mutations.create.mutateAsync).not.toHaveBeenCalled();
   });
 });

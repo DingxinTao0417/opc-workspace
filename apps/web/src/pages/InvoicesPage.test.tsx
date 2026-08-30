@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Invoice, InvoiceStatus } from "../types/models";
 import { InvoicesPage } from "./InvoicesPage";
@@ -8,13 +15,13 @@ const hooks = vi.hoisted(() => ({
   transition: {
     error: null,
     isPending: false,
-    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
     reset: vi.fn(),
   },
   remove: {
     error: null,
     isPending: false,
-    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
     reset: vi.fn(),
   },
 }));
@@ -73,8 +80,21 @@ function list(items: Invoice[], total = items.length) {
   };
 }
 
+function renderInvoices() {
+  return render(
+    <MemoryRouter initialEntries={["/invoices"]}>
+      <Routes>
+        <Route element={<InvoicesPage />} path="/invoices" />
+        <Route element={<div>发票详情路由</div>} path="/invoices/:invoiceId" />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 describe("InvoicesPage", () => {
   beforeEach(() => {
+    hooks.transition.mutateAsync.mockResolvedValue(invoice("sent", "draft"));
+    hooks.remove.mutateAsync.mockResolvedValue(undefined);
     hooks.query.mockImplementation(
       (input: { pageSize?: number; status?: InvoiceStatus }) => {
         if (input.pageSize === 1) {
@@ -104,7 +124,7 @@ describe("InvoicesPage", () => {
   });
 
   it("renders the compact invoice table and real statuses", () => {
-    render(<InvoicesPage />);
+    renderInvoices();
 
     expect(screen.getByRole("heading", { name: "发票" })).toBeTruthy();
     expect(screen.getByText("INV-DRAFT")).toBeTruthy();
@@ -119,7 +139,7 @@ describe("InvoicesPage", () => {
   });
 
   it("passes search, status, and currency filters to the query", () => {
-    render(<InvoicesPage />);
+    renderInvoices();
 
     fireEvent.change(screen.getByLabelText("搜索发票"), {
       target: { value: "INV-001" },
@@ -142,8 +162,8 @@ describe("InvoicesPage", () => {
     );
   });
 
-  it("confirms sending with the observed version", () => {
-    render(<InvoicesPage />);
+  it("confirms sending with the observed version", async () => {
+    renderInvoices();
     fireEvent.click(
       screen.getByRole("button", { name: "打开 INV-DRAFT 操作" }),
     );
@@ -151,17 +171,20 @@ describe("InvoicesPage", () => {
     expect(screen.getByText(/不会替你发送邮件或生成 PDF/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "确认" }));
 
-    expect(hooks.transition.mutate).toHaveBeenCalledWith(
-      {
-        id: "draft",
-        input: { action: "mark_sent", expectedVersion: 3 },
-      },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    expect(hooks.transition.mutateAsync).toHaveBeenCalledWith({
+      id: "draft",
+      input: { action: "mark_sent", expectedVersion: 3 },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "确认已发送" })).toBeNull(),
     );
   });
 
-  it("requires and submits a paid date for viewed invoices", () => {
-    render(<InvoicesPage />);
+  it("requires and submits a paid date for viewed invoices", async () => {
+    hooks.transition.mutateAsync.mockResolvedValueOnce(
+      invoice("paid", "viewed"),
+    );
+    renderInvoices();
     fireEvent.click(
       screen.getByRole("button", { name: "打开 INV-VIEWED 操作" }),
     );
@@ -171,41 +194,52 @@ describe("InvoicesPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "确认付款" }));
 
-    expect(hooks.transition.mutate).toHaveBeenCalledWith(
-      {
-        id: "viewed",
-        input: {
-          action: "mark_paid",
-          expectedVersion: 3,
-          paidDate: "2026-09-03",
-        },
+    expect(hooks.transition.mutateAsync).toHaveBeenCalledWith({
+      id: "viewed",
+      input: {
+        action: "mark_paid",
+        expectedVersion: 3,
+        paidDate: "2026-09-03",
       },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "登记付款" })).toBeNull(),
     );
   });
 
-  it("deletes only after explicit draft confirmation", () => {
-    render(<InvoicesPage />);
+  it("deletes only after explicit draft confirmation", async () => {
+    renderInvoices();
     fireEvent.click(
       screen.getByRole("button", { name: "打开 INV-DRAFT 操作" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
-    expect(hooks.remove.mutate).toHaveBeenCalledWith(
-      { id: "draft", expectedVersion: 3 },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    expect(hooks.remove.mutateAsync).toHaveBeenCalledWith({
+      id: "draft",
+      expectedVersion: 3,
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "删除发票草稿" })).toBeNull(),
     );
   });
 
   it("renders the filtered empty state without demo totals", () => {
     hooks.query.mockReturnValue(list([]));
-    render(<InvoicesPage />);
+    renderInvoices();
     fireEvent.change(screen.getByLabelText("发票状态"), {
       target: { value: "overdue" },
     });
 
     expect(screen.getByText("没有匹配的发票")).toBeTruthy();
     expect(screen.getByRole("button", { name: "清除筛选" })).toBeTruthy();
+  });
+
+  it("links an invoice number to its refreshable detail route", () => {
+    renderInvoices();
+
+    fireEvent.click(screen.getByRole("link", { name: "查看发票 INV-DRAFT" }));
+
+    expect(screen.getByText("发票详情路由")).toBeTruthy();
   });
 });

@@ -1,83 +1,17 @@
-import {
-  CircleDollarSign,
-  Eye,
-  MoreHorizontal,
-  Pencil,
-  Plus,
-  Search,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { useDeferredValue, useState } from "react";
-import { ApiError } from "../api/client";
-import {
-  useDeleteInvoice,
-  useInvoicesQuery,
-  useTransitionInvoice,
-} from "../api/hooks";
+import { Link } from "react-router-dom";
+import { useInvoicesQuery } from "../api/hooks";
+import { InvoiceActions } from "../components/InvoiceActions";
 import { InvoiceFormModal } from "../components/InvoiceFormModal";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
-import { Modal } from "../components/Modal";
+import {
+  formatInvoiceAmount,
+  invoiceStatusClass,
+  invoiceStatusLabels,
+} from "../components/invoicePresentation";
 import { PageHeader } from "../components/PageHeader";
-import type {
-  Invoice,
-  InvoiceStatus,
-  InvoiceTransitionAction,
-} from "../types/models";
-
-const statusLabels: Record<InvoiceStatus, string> = {
-  draft: "草稿",
-  sent: "已发送",
-  viewed: "已查看",
-  paid: "已付款",
-  overdue: "已逾期",
-};
-
-type InvoiceCommand = {
-  invoice: Invoice;
-  action: InvoiceTransitionAction | "delete";
-};
-
-function localDateValue(date = new Date()): string {
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function formatAmount(amountMinor: number, currency: string): string {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency,
-    currencyDisplay: "narrowSymbol",
-    minimumFractionDigits: 2,
-  }).format(amountMinor / 100);
-}
-
-function statusClass(status: InvoiceStatus): string {
-  if (status === "paid") return "status-green";
-  if (status === "overdue") return "status-red";
-  if (status === "sent" || status === "viewed") return "status-purple";
-  return "status-neutral";
-}
-
-function apiErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.code === "VERSION_CONFLICT") {
-      return "该发票已在其他窗口更新，列表正在刷新，请重新确认后再试。";
-    }
-    return error.requestId
-      ? `${error.message} · 请求 ${error.requestId}`
-      : error.message;
-  }
-  return fallback;
-}
-
-function commandTitle(command: InvoiceCommand | null): string {
-  if (!command) return "确认发票操作";
-  if (command.action === "delete") return "删除发票草稿";
-  if (command.action === "mark_sent") return "确认已发送";
-  if (command.action === "mark_viewed") return "确认客户已查看";
-  return "登记付款";
-}
+import type { Invoice, InvoiceStatus } from "../types/models";
 
 export function InvoicesPage() {
   const [search, setSearch] = useState("");
@@ -89,8 +23,6 @@ export function InvoicesPage() {
     undefined,
   );
   const [actionMenu, setActionMenu] = useState<string | null>(null);
-  const [command, setCommand] = useState<InvoiceCommand | null>(null);
-  const [paidDate, setPaidDate] = useState(localDateValue());
   const invoicesQuery = useInvoicesQuery({
     page,
     pageSize: 20,
@@ -119,8 +51,6 @@ export function InvoicesPage() {
     pageSize: 1,
     status: "overdue",
   });
-  const transitionMutation = useTransitionInvoice();
-  const deleteMutation = useDeleteInvoice();
   const invoices = invoicesQuery.data?.items ?? [];
   const total = invoicesQuery.data?.meta.total ?? 0;
   const totalPages = Math.max(
@@ -136,49 +66,6 @@ export function InvoicesPage() {
       : sentCount + viewedCount;
   const receivableCountError =
     sentCountQuery.isError || viewedCountQuery.isError;
-  const commandBusy = transitionMutation.isPending || deleteMutation.isPending;
-  const commandError =
-    command?.action === "delete"
-      ? deleteMutation.error
-      : transitionMutation.error;
-
-  const openCommand = (invoice: Invoice, action: InvoiceCommand["action"]) => {
-    transitionMutation.reset();
-    deleteMutation.reset();
-    setPaidDate(localDateValue());
-    setCommand({ invoice, action });
-    setActionMenu(null);
-  };
-
-  const closeCommand = () => {
-    if (!commandBusy) setCommand(null);
-  };
-
-  const confirmCommand = () => {
-    if (!command) return;
-    if (command.action === "delete") {
-      deleteMutation.mutate(
-        {
-          id: command.invoice.id,
-          expectedVersion: command.invoice.version,
-        },
-        { onSuccess: () => setCommand(null) },
-      );
-      return;
-    }
-    transitionMutation.mutate(
-      {
-        id: command.invoice.id,
-        input: {
-          action: command.action,
-          expectedVersion: command.invoice.version,
-          ...(command.action === "mark_paid" ? { paidDate } : {}),
-        },
-      },
-      { onSuccess: () => setCommand(null) },
-    );
-  };
-
   const clearFilters = () => {
     setSearch("");
     setStatus("");
@@ -355,9 +242,13 @@ export function InvoicesPage() {
                 {invoices.map((invoice) => (
                   <tr key={invoice.id}>
                     <td>
-                      <strong className="invoice-number">
+                      <Link
+                        aria-label={`查看发票 ${invoice.invoiceNumber}`}
+                        className="invoice-number invoice-number-link"
+                        to={`/invoices/${invoice.id}`}
+                      >
                         {invoice.invoiceNumber}
-                      </strong>
+                      </Link>
                     </td>
                     <td>
                       <div className="invoice-client-cell">
@@ -366,13 +257,16 @@ export function InvoicesPage() {
                       </div>
                     </td>
                     <td className="invoice-amount-cell">
-                      {formatAmount(invoice.amountMinor, invoice.currency)}
+                      {formatInvoiceAmount(
+                        invoice.amountMinor,
+                        invoice.currency,
+                      )}
                     </td>
                     <td>
                       <span
-                        className={`status-badge ${statusClass(invoice.status)}`}
+                        className={`status-badge ${invoiceStatusClass(invoice.status)}`}
                       >
-                        {statusLabels[invoice.status]}
+                        {invoiceStatusLabels[invoice.status]}
                       </span>
                     </td>
                     <td>
@@ -390,79 +284,15 @@ export function InvoicesPage() {
                       </div>
                     </td>
                     <td className="invoice-table-action">
-                      {invoice.status !== "paid" ? (
-                        <div className="invoice-row-actions">
-                          <button
-                            aria-label={`打开 ${invoice.invoiceNumber} 操作`}
-                            className="icon-button"
-                            onClick={() =>
-                              setActionMenu((value) =>
-                                value === invoice.id ? null : invoice.id,
-                              )
-                            }
-                            type="button"
-                          >
-                            <MoreHorizontal size={15} />
-                          </button>
-                          {actionMenu === invoice.id ? (
-                            <div className="invoice-action-menu">
-                              {invoice.status === "draft" ? (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setFormInvoice(invoice);
-                                      setActionMenu(null);
-                                    }}
-                                    type="button"
-                                  >
-                                    <Pencil size={13} /> 编辑
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      openCommand(invoice, "mark_sent")
-                                    }
-                                    type="button"
-                                  >
-                                    <Send size={13} /> 确认已发送
-                                  </button>
-                                  <button
-                                    className="danger-text"
-                                    onClick={() =>
-                                      openCommand(invoice, "delete")
-                                    }
-                                    type="button"
-                                  >
-                                    <Trash2 size={13} /> 删除
-                                  </button>
-                                </>
-                              ) : null}
-                              {invoice.status === "sent" ? (
-                                <button
-                                  onClick={() =>
-                                    openCommand(invoice, "mark_viewed")
-                                  }
-                                  type="button"
-                                >
-                                  <Eye size={13} /> 确认已查看
-                                </button>
-                              ) : null}
-                              {invoice.status === "viewed" ||
-                              invoice.status === "overdue" ? (
-                                <button
-                                  onClick={() =>
-                                    openCommand(invoice, "mark_paid")
-                                  }
-                                  type="button"
-                                >
-                                  <CircleDollarSign size={13} /> 登记付款
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="invoice-readonly-mark">只读</span>
-                      )}
+                      <InvoiceActions
+                        invoice={invoice}
+                        menuOpen={actionMenu === invoice.id}
+                        onEdit={setFormInvoice}
+                        onMenuOpenChange={(open) =>
+                          setActionMenu(open ? invoice.id : null)
+                        }
+                        variant="menu"
+                      />
                     </td>
                   </tr>
                 ))}
@@ -501,84 +331,6 @@ export function InvoicesPage() {
         onClose={() => setFormInvoice(undefined)}
         open={formInvoice !== undefined}
       />
-
-      <Modal
-        footer={
-          <>
-            <button
-              className="button button-secondary"
-              disabled={commandBusy}
-              onClick={closeCommand}
-              type="button"
-            >
-              取消
-            </button>
-            <button
-              className={
-                command?.action === "delete"
-                  ? "button button-danger"
-                  : "button button-primary"
-              }
-              disabled={
-                commandBusy ||
-                (command?.action === "mark_paid" &&
-                  (!paidDate || paidDate < command.invoice.issueDate))
-              }
-              onClick={confirmCommand}
-              type="button"
-            >
-              {commandBusy
-                ? "正在处理…"
-                : command?.action === "delete"
-                  ? "确认删除"
-                  : command?.action === "mark_paid"
-                    ? "确认付款"
-                    : "确认"}
-            </button>
-          </>
-        }
-        onClose={closeCommand}
-        open={Boolean(command)}
-        title={commandTitle(command)}
-        width="480px"
-      >
-        {command?.action === "delete" ? (
-          <p className="modal-copy">
-            将永久删除草稿 {command.invoice.invoiceNumber}。此操作无法恢复。
-          </p>
-        ) : null}
-        {command?.action === "mark_sent" ? (
-          <p className="modal-copy">
-            确认后只记录“已发送”状态；应用不会替你发送邮件或生成 PDF。
-          </p>
-        ) : null}
-        {command?.action === "mark_viewed" ? (
-          <p className="modal-copy">请在已从客户处确认查看后再更新状态。</p>
-        ) : null}
-        {command?.action === "mark_paid" ? (
-          <>
-            <p className="modal-copy">
-              确认付款会生成关联收入记录，发票将变为只读。
-            </p>
-            <label className="form-field form-field-last">
-              <span>付款日期</span>
-              <input
-                aria-label="付款日期"
-                autoFocus
-                min={command.invoice.issueDate}
-                onChange={(event) => setPaidDate(event.target.value)}
-                type="date"
-                value={paidDate}
-              />
-            </label>
-          </>
-        ) : null}
-        {commandError ? (
-          <div className="form-error" role="alert">
-            {apiErrorMessage(commandError, "发票操作失败，请重试。")}
-          </div>
-        ) : null}
-      </Modal>
     </div>
   );
 }
