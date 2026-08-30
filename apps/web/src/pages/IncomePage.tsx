@@ -180,6 +180,24 @@ export function IncomePage() {
     previousCurrentMonth.current = currentMonth;
   }, [currentMonth, monthInput]);
 
+  useEffect(() => {
+    if (
+      !entriesQuery.isSuccess ||
+      entriesQuery.isFetching ||
+      entriesQuery.isPlaceholderData ||
+      page <= totalPages
+    ) {
+      return;
+    }
+    setPage(totalPages);
+  }, [
+    entriesQuery.isFetching,
+    entriesQuery.isPlaceholderData,
+    entriesQuery.isSuccess,
+    page,
+    totalPages,
+  ]);
+
   const exportCSV = () => {
     exportMutation.mutate(
       { ...listInput, page: undefined, pageSize: undefined },

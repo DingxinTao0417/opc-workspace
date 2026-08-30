@@ -161,6 +161,24 @@ export function ProjectDetailPage() {
     return () => window.clearTimeout(timer);
   }, [taskSearchInput]);
 
+  useEffect(() => {
+    if (
+      !tasksQuery.isSuccess ||
+      tasksQuery.isFetching ||
+      tasksQuery.isPlaceholderData ||
+      taskPage <= projectTaskPages
+    ) {
+      return;
+    }
+    setTaskPage(projectTaskPages);
+  }, [
+    projectTaskPages,
+    taskPage,
+    tasksQuery.isFetching,
+    tasksQuery.isPlaceholderData,
+    tasksQuery.isSuccess,
+  ]);
+
   const runTransition = (
     action: ProjectTransitionAction,
     confirmed = false,

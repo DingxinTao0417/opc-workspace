@@ -92,6 +92,7 @@ const childTask: Task = {
 };
 
 let projectTasks: Task[] = [];
+let taskPagePlaceholder = false;
 
 vi.mock("../api/hooks", () => ({
   useClientOptionsQuery: () => ({
@@ -245,6 +246,7 @@ vi.mock("../api/hooks", () => ({
     page?: number;
     pageSize?: number;
     parentTaskId?: string;
+    projectId?: string;
     q?: string;
     rootOnly?: boolean;
     status?: string;
@@ -284,7 +286,7 @@ vi.mock("../api/hooks", () => ({
       isError: false,
       isFetching: false,
       isPending: false,
-      isPlaceholderData: false,
+      isPlaceholderData: taskPagePlaceholder,
       isSuccess: true,
       refetch: vi.fn(),
     };
@@ -328,10 +330,12 @@ describe("ProjectDetailPage", () => {
     project.taskSummary.total = 3;
     project.invoiceCount = 0;
     projectTasks = [];
+    taskPagePlaceholder = false;
   });
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     useUiStore.setState({ newTaskOpen: false, newTaskProjectId: null });
   });
 
@@ -555,6 +559,65 @@ describe("ProjectDetailPage", () => {
         tagIds: ["tag-1"],
       }),
     );
+  });
+
+  it("waits for settled project-task data before clamping a stale page", () => {
+    project.taskSummary.total = 41;
+    projectTasks = Array.from({ length: 41 }, (_, index) => ({
+      ...rootTask,
+      id: `task-${index + 1}`,
+      title: `项目任务 ${index + 1}`,
+      subtaskTotal: 0,
+    }));
+    vi.useFakeTimers();
+    const view = renderPage();
+    act(() => vi.advanceTimersByTime(300));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(taskPageInput).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 2, projectId: project.id }),
+    );
+
+    taskPageInput.mockClear();
+    projectTasks = [rootTask];
+    taskPagePlaceholder = true;
+    view.rerender(
+      <MemoryRouter initialEntries={["/projects/project-1"]}>
+        <Routes>
+          <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const placeholderRootPages = taskPageInput.mock.calls
+      .map(
+        ([input]) =>
+          input as {
+            page?: number;
+            parentTaskId?: string;
+            projectId?: string;
+          },
+      )
+      .filter((input) => !input.parentTaskId && input.projectId === project.id)
+      .map((input) => input.page);
+    expect(placeholderRootPages.length).toBeGreaterThan(0);
+    expect(placeholderRootPages.every((queryPage) => queryPage === 2)).toBe(
+      true,
+    );
+
+    taskPageInput.mockClear();
+    taskPagePlaceholder = false;
+    view.rerender(
+      <MemoryRouter initialEntries={["/projects/project-1"]}>
+        <Routes>
+          <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(taskPageInput).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, projectId: project.id }),
+    );
+    vi.useRealTimers();
   });
 
   it("opens confirmation when the server detects newly added open tasks", () => {

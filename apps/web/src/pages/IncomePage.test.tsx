@@ -101,6 +101,7 @@ describe("IncomePage", () => {
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: vi.fn(),
     });
@@ -159,6 +160,79 @@ describe("IncomePage", () => {
       dateFrom: "2026-01-01",
       dateTo: "2026-08-29",
     });
+  });
+
+  it("clamps an out-of-range ledger page after a settled response shrinks", () => {
+    let total = 41;
+    hooks.entries.mockImplementation((input: { page?: number }) => {
+      const queryPage = input.page ?? 1;
+      return {
+        data: {
+          items: queryPage > Math.ceil(total / 20) ? [] : [entry],
+          meta: { page: queryPage, pageSize: 20, total },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isPlaceholderData: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      };
+    });
+    const view = render(<IncomePage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.entries).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 }),
+    );
+
+    hooks.entries.mockClear();
+    total = 1;
+    view.rerender(<IncomePage />);
+
+    expect(hooks.entries).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1 }),
+    );
+  });
+
+  it("does not clamp the ledger page from placeholder data", () => {
+    let total = 41;
+    let placeholder = false;
+    hooks.entries.mockImplementation((input: { page?: number }) => {
+      const queryPage = input.page ?? 1;
+      return {
+        data: {
+          items: queryPage > Math.ceil(total / 20) ? [] : [entry],
+          meta: { page: queryPage, pageSize: 20, total },
+        },
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isPlaceholderData: placeholder,
+        isSuccess: true,
+        refetch: vi.fn(),
+      };
+    });
+    const view = render(<IncomePage />);
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    hooks.entries.mockClear();
+    total = 1;
+    placeholder = true;
+    view.rerender(<IncomePage />);
+
+    const placeholderPages = hooks.entries.mock.calls.map(
+      ([input]) => (input as { page?: number }).page,
+    );
+    expect(placeholderPages.length).toBeGreaterThan(0);
+    expect(placeholderPages.every((queryPage) => queryPage === 2)).toBe(true);
+
+    hooks.entries.mockClear();
+    placeholder = false;
+    view.rerender(<IncomePage />);
+    expect(hooks.entries).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1 }),
+    );
   });
 
   it("falls back to the current local month when the month control is cleared", () => {

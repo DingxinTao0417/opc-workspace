@@ -48,7 +48,7 @@ vi.mock("../components/InvoiceFormModal", () => ({
     ) : null,
 }));
 
-function invoice(status: InvoiceStatus, id = status): Invoice {
+function invoice(status: InvoiceStatus, id: string = status): Invoice {
   return {
     id,
     invoiceNumber: `INV-${id.toUpperCase()}`,
@@ -70,12 +70,13 @@ function invoice(status: InvoiceStatus, id = status): Invoice {
   };
 }
 
-function list(items: Invoice[], total = items.length) {
+function list(items: Invoice[], total = items.length, page = 1) {
   return {
-    data: { items, meta: { page: 1, pageSize: 20, total } },
+    data: { items, meta: { page, pageSize: 20, total } },
     isError: false,
     isFetching: false,
     isPending: false,
+    isPlaceholderData: false,
     isSuccess: true,
     refetch: vi.fn(),
   };
@@ -160,6 +161,87 @@ describe("InvoicesPage", () => {
         page: 1,
         pageSize: 20,
       }),
+    );
+  });
+
+  it("clamps an out-of-range page after a settled response shrinks", async () => {
+    let total = 41;
+    hooks.query.mockImplementation(
+      (input: { page?: number; pageSize?: number }) => {
+        if (input.pageSize === 1) return list([], 0);
+        const queryPage = input.page ?? 1;
+        return list([invoice("sent", `page-${queryPage}`)], total, queryPage);
+      },
+    );
+    const view = renderInvoices();
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText("第 2 / 3 页")).toBeTruthy();
+
+    hooks.query.mockClear();
+    total = 1;
+    view.rerender(
+      <MemoryRouter initialEntries={["/invoices"]}>
+        <Routes>
+          <Route element={<InvoicesPage />} path="/invoices" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(hooks.query).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, pageSize: 20 }),
+      ),
+    );
+  });
+
+  it("keeps the requested page while a shrunken response is placeholder data", async () => {
+    let total = 41;
+    let placeholder = false;
+    hooks.query.mockImplementation(
+      (input: { page?: number; pageSize?: number }) => {
+        if (input.pageSize === 1) return list([], 0);
+        const queryPage = input.page ?? 1;
+        return {
+          ...list([invoice("sent", `page-${queryPage}`)], total, queryPage),
+          isPlaceholderData: placeholder,
+        };
+      },
+    );
+    const view = renderInvoices();
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    hooks.query.mockClear();
+    total = 1;
+    placeholder = true;
+    view.rerender(
+      <MemoryRouter initialEntries={["/invoices"]}>
+        <Routes>
+          <Route element={<InvoicesPage />} path="/invoices" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const placeholderMainCalls = hooks.query.mock.calls
+      .map(([input]) => input as { page?: number; pageSize?: number })
+      .filter((input) => input.pageSize === 20);
+    expect(placeholderMainCalls.length).toBeGreaterThan(0);
+    expect(placeholderMainCalls.every((input) => input.page === 2)).toBe(true);
+
+    hooks.query.mockClear();
+    placeholder = false;
+    view.rerender(
+      <MemoryRouter initialEntries={["/invoices"]}>
+        <Routes>
+          <Route element={<InvoicesPage />} path="/invoices" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(hooks.query).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, pageSize: 20 }),
+      ),
     );
   });
 

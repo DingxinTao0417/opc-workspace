@@ -1,5 +1,5 @@
 import { Plus, Search } from "lucide-react";
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInvoicesQuery } from "../api/hooks";
 import { InvoiceActions } from "../components/InvoiceActions";
@@ -66,6 +66,25 @@ export function InvoicesPage() {
       : sentCount + viewedCount;
   const receivableCountError =
     sentCountQuery.isError || viewedCountQuery.isError;
+
+  useEffect(() => {
+    if (
+      !invoicesQuery.isSuccess ||
+      invoicesQuery.isFetching ||
+      invoicesQuery.isPlaceholderData ||
+      page <= totalPages
+    ) {
+      return;
+    }
+    setPage(totalPages);
+  }, [
+    invoicesQuery.isFetching,
+    invoicesQuery.isPlaceholderData,
+    invoicesQuery.isSuccess,
+    page,
+    totalPages,
+  ]);
+
   const clearFilters = () => {
     setSearch("");
     setStatus("");
