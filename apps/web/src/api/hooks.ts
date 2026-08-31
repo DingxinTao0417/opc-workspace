@@ -700,6 +700,7 @@ export function useCreateClient() {
       attempt.current = null;
       queryClient.setQueryData(clientDetailQueryKey(client.id), client);
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await invalidateUnifiedSearch(queryClient);
     },
   });
 }
@@ -713,11 +714,13 @@ export function useUpdateClient() {
       queryClient.setQueryData(clientDetailQueryKey(client.id), client);
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      await invalidateUnifiedSearch(queryClient);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        await invalidateUnifiedSearch(queryClient);
       }
     },
   });
@@ -739,11 +742,13 @@ export function useDeleteClient() {
       });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+      await invalidateUnifiedSearch(queryClient);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        await invalidateUnifiedSearch(queryClient);
       }
     },
   });

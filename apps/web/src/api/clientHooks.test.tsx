@@ -8,6 +8,7 @@ import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxQueryKey,
   projectQueryKey,
+  searchQueryKey,
   useClientOptionsQuery,
   useClientActorLinksQuery,
   useCompleteClientFollowup,
@@ -271,6 +272,14 @@ describe("client hooks", () => {
   it("refreshes client and project aggregates after an update", async () => {
     calls.update.mockResolvedValue({ ...client, name: "星河设计", version: 3 });
     const queryClient = createQueryClient();
+    const searchKey = [
+      ...searchQueryKey,
+      { q: client.name, types: ["client"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useUpdateClient(), {
       wrapper: wrapperFor(queryClient),
@@ -286,6 +295,7 @@ describe("client hooks", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 
   it("refreshes Inbox projections after completing a client followup", async () => {
