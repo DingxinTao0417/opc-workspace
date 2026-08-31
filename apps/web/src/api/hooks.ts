@@ -4699,6 +4699,40 @@ export function useCreateProject() {
   });
 }
 
+async function invalidateProjectEditFacts(
+  queryClient: QueryClient,
+  preserveActiveDetailId?: string,
+): Promise<void> {
+  const projectQueries = preserveActiveDetailId
+    ? [
+        queryClient.invalidateQueries({
+          queryKey: projectQueryKey,
+          predicate: (query) =>
+            !(
+              query.queryKey.length === 3 &&
+              query.queryKey[1] === "detail" &&
+              query.queryKey[2] === preserveActiveDetailId
+            ),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: projectDetailQueryKey(preserveActiveDetailId),
+          exact: true,
+          refetchType: "none",
+        }),
+      ]
+    : [queryClient.invalidateQueries({ queryKey: projectQueryKey })];
+  await Promise.all([
+    ...projectQueries,
+    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({ queryKey: clientQueryKey }),
+    queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
+    queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
+    queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey }),
+    invalidateFocusReadModels(queryClient, { report: true }),
+    invalidateUnifiedSearch(queryClient),
+  ]);
+}
+
 export function useUpdateProject() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -4706,16 +4740,12 @@ export function useUpdateProject() {
       updateProject(id, input),
     onSuccess: async (project) => {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: taskQueryKey });
-      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
-      await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
-      await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
-      await invalidateFocusReadModels(queryClient, { report: true });
-      await invalidateUnifiedSearch(queryClient);
+      await invalidateProjectEditFacts(queryClient);
+    },
+    onError: async (error, variables) => {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateProjectEditFacts(queryClient, variables.id);
+      }
     },
   });
 }

@@ -7,16 +7,22 @@ import { ApiError } from "./client";
 import {
   automationQueryKey,
   clientQueryKey,
+  financialEntryQueryKey,
+  focusReportQueryKey,
   inboxQueryKey,
+  invoiceQueryKey,
   projectDetailQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
+  taskQueryKey,
   useProjectOptionsQuery,
   useTransitionProject,
+  useUpdateProject,
 } from "./hooks";
 
 const transitionProjectMock = vi.hoisted(() => vi.fn());
+const updateProjectMock = vi.hoisted(() => vi.fn());
 const getProjectsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
@@ -25,6 +31,7 @@ vi.mock("./client", async () => {
     ...actual,
     getProjects: getProjectsMock,
     transitionProject: transitionProjectMock,
+    updateProject: updateProjectMock,
   };
 });
 
@@ -144,6 +151,60 @@ describe("useTransitionProject", () => {
       });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
     });
+  });
+});
+
+describe("useUpdateProject", () => {
+  it("refreshes every derived project fact after a version conflict", async () => {
+    updateProjectMock.mockRejectedValue(
+      new ApiError("Project has changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateProject(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: completedProject.id,
+        input: {
+          name: "并发项目名称",
+          description: completedProject.description,
+          clientId: completedProject.clientId,
+          startDate: completedProject.startDate,
+          dueDate: completedProject.dueDate,
+          amountMinor: completedProject.amountMinor,
+          color: completedProject.color,
+          expectedVersion: completedProject.version,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectDetailQueryKey(completedProject.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: taskQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: roadmapMilestoneQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: focusReportQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
 });
 
