@@ -206,4 +206,33 @@ describe("automation hooks", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: reminderQueryKey });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: taskQueryKey });
   });
+
+  it("refreshes unified search when retry creates an Inbox item", async () => {
+    retryAutomationRunMock.mockResolvedValue({
+      ...taskRun,
+      resultType: "inbox_item",
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const searchKey = [
+      ...searchQueryKey,
+      { q: "自动化核对", types: ["inbox_item"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
+    const { result } = renderHook(() => useRetryAutomationRun(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() => result.current.mutate(taskRun.id));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+  });
 });

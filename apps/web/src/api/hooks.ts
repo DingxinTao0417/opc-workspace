@@ -1765,7 +1765,9 @@ export function useRetryAutomationRun() {
         invalidateAutomationFacts(queryClient),
         ...(run.resultType === "task"
           ? [invalidateTaskFacts(queryClient)]
-          : []),
+          : run.resultType === "inbox_item"
+            ? [invalidateInboxFacts(queryClient)]
+            : []),
       ]);
     },
     onError: async () => {
