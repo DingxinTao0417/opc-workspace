@@ -4039,6 +4039,7 @@ function useContentItemMutation<T>(
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+        queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
         invalidateUnifiedSearch(queryClient),
       ]);
     },
@@ -4046,6 +4047,7 @@ function useContentItemMutation<T>(
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+          queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
           invalidateUnifiedSearch(queryClient),
         ]);
       }

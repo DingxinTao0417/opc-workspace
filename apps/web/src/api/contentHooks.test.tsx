@@ -10,15 +10,18 @@ import {
   inboxQueryKey,
   searchQueryKey,
   useDeleteContentItem,
+  useUpdateContentItem,
 } from "./hooks";
 
 const deleteContentItemMock = vi.hoisted(() => vi.fn());
+const updateContentItemMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
   return {
     ...actual,
     deleteContentItem: deleteContentItemMock,
+    updateContentItem: updateContentItemMock,
   };
 });
 
@@ -37,6 +40,51 @@ function wrapperFor(queryClient: QueryClient) {
 }
 
 afterEach(() => vi.clearAllMocks());
+
+describe("content item mutations", () => {
+  it("refreshes Inbox facts when an update resolves prior source projections", async () => {
+    updateContentItemMock.mockResolvedValue({ id: "content-1" });
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateContentItem(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: "content-1",
+        input: { title: "更新后的内容", expectedVersion: 7 },
+      }),
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+  });
+
+  it("refreshes Inbox facts after a version conflict", async () => {
+    updateContentItemMock.mockRejectedValue(
+      new ApiError("Content item changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateContentItem(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: "content-1",
+        input: { title: "更新后的内容", expectedVersion: 7 },
+      }),
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+  });
+});
 
 describe("useDeleteContentItem", () => {
   it("removes the deleted detail and invalidates content lists and Inbox facts", async () => {
