@@ -4097,15 +4097,22 @@ export function useUnlinkContentItemTask() {
   );
 }
 
+async function invalidateRoadmapReadModels(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey }),
+    invalidateUnifiedSearch(queryClient),
+  ]);
+}
+
 export function useCreateRoadmapMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: CreateRoadmapMilestoneInput) =>
       createRoadmapMilestone(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
@@ -4121,9 +4128,7 @@ export function useUpdateRoadmapMilestone() {
       input: UpdateRoadmapMilestoneInput;
     }) => updateRoadmapMilestone(id, input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
@@ -4134,14 +4139,10 @@ export function useReorderRoadmapMilestones() {
     mutationFn: (input: ReorderRoadmapMilestonesInput) =>
       reorderRoadmapMilestones(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
     onError: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
@@ -4157,9 +4158,7 @@ export function useArchiveRoadmapMilestone() {
       expectedVersion: number;
     }) => archiveRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
@@ -4175,9 +4174,7 @@ export function useRestoreRoadmapMilestone() {
       expectedVersion: number;
     }) => restoreRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
@@ -4193,9 +4190,7 @@ export function useDeleteRoadmapMilestone() {
       expectedVersion: number;
     }) => deleteRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: roadmapMilestoneQueryKey,
-      });
+      await invalidateRoadmapReadModels(queryClient);
     },
   });
 }
