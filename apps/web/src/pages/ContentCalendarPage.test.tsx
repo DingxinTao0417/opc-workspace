@@ -1218,6 +1218,42 @@ describe("ContentCalendarPage", () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it("does not duplicate the hook-owned list refresh after a move conflict", () => {
+    const refetch = vi.fn();
+    hooks.items.mockReturnValue(
+      contentItemsResult([item], {
+        refetch,
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.drop(
+      screen.getByRole("gridcell", { name: "2026-09-05，0 条内容" }),
+      { dataTransfer: { getData: () => "content-1" } },
+    );
+    const [, options] = hooks.schedule.mock.calls[0] as [
+      unknown,
+      { onError: (error: Error) => void },
+    ];
+    act(() =>
+      options.onError(
+        new ApiError("Content item changed", {
+          code: "VERSION_CONFLICT",
+          status: 409,
+        }),
+      ),
+    );
+
+    expect(
+      screen.getByText("排期未保存，已恢复原日期。Content item changed"),
+    ).toBeTruthy();
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
   it("automatically advances through all visible-range pages", () => {
     const fetchNextPage = vi.fn();
     hooks.items.mockReturnValue({

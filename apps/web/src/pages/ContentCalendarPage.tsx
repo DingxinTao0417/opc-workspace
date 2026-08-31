@@ -1066,7 +1066,11 @@ export function ContentCalendarPage() {
             return next;
           });
           setMoveError(`排期未保存，已恢复原日期。${mutationMessage(error)}`);
-          void query.refetch();
+          if (!(
+            error instanceof ApiError && error.code === "VERSION_CONFLICT"
+          )) {
+            void query.refetch();
+          }
         },
       },
     );
