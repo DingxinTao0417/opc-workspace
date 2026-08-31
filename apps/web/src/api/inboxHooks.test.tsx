@@ -7,6 +7,7 @@ import { ApiError } from "./client";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxDetailQueryKey,
+  inboxEventQueryKey,
   inboxQueryKey,
   inboxTaskRelationQueryKey,
   searchQueryKey,
@@ -153,6 +154,7 @@ describe("inbox hooks", () => {
       dueAt: null,
     };
     const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const searchKey = [
       ...searchQueryKey,
       { q: input.title, types: ["inbox_item"] },
@@ -176,6 +178,13 @@ describe("inbox hooks", () => {
       queryClient.getQueryData(inboxDetailQueryKey(inboxItem().id)),
     ).toEqual(inboxItem());
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxEventQueryKey(inboxItem().id),
+    });
   });
 
   it("reuses the command key after a lost response and caches the returned version", async () => {
@@ -353,7 +362,13 @@ describe("inbox hooks", () => {
     );
     await waitFor(() => expect(result.current.isError).toBe(true));
 
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxEventQueryKey(inboxItem().id),
+    });
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: inboxDetailQueryKey(inboxItem().id),
       exact: true,

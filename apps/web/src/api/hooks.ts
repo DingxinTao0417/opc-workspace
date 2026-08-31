@@ -2135,7 +2135,10 @@ async function invalidateInboxFacts(
         sourceItem.sourceEntityType === "task" ||
         sourceItem.sourceEntityType === "task_due" ||
         sourceItem.sourceEntityType === "project_completion"));
-  const preserveActiveInboxQuery = (query: Query): boolean =>
+  const excludeFromInboxRootInvalidation = (query: Query): boolean =>
+    (Boolean(id) &&
+      query.queryKey[1] === "events" &&
+      query.queryKey[2] === id) ||
     (Boolean(options.preserveActiveDetailId) &&
       query.queryKey[1] === "detail" &&
       query.queryKey[2] === options.preserveActiveDetailId) ||
@@ -2143,10 +2146,12 @@ async function invalidateInboxFacts(
       query.queryKey[1] === "tasks" &&
       query.queryKey[2] === options.preserveActiveTaskRelationsItemId);
   const invalidations: Array<Promise<unknown>> = [
-    options.preserveActiveDetailId || options.preserveActiveTaskRelationsItemId
+    id ||
+    options.preserveActiveDetailId ||
+    options.preserveActiveTaskRelationsItemId
       ? queryClient.invalidateQueries({
           queryKey: inboxQueryKey,
-          predicate: (query) => !preserveActiveInboxQuery(query),
+          predicate: (query) => !excludeFromInboxRootInvalidation(query),
         })
       : queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
     invalidateUnifiedSearch(queryClient),
