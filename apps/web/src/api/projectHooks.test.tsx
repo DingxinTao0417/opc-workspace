@@ -8,6 +8,7 @@ import {
   clientQueryKey,
   projectDetailQueryKey,
   projectQueryKey,
+  searchQueryKey,
   useProjectOptionsQuery,
   useTransitionProject,
 } from "./hooks";
@@ -71,6 +72,14 @@ describe("useTransitionProject", () => {
   it("refreshes project facts and the client detail/activity prefix on success", async () => {
     transitionProjectMock.mockResolvedValue(completedProject);
     const queryClient = createQueryClient();
+    const searchKey = [
+      ...searchQueryKey,
+      { q: completedProject.name, types: ["project"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useTransitionProject(), {
       wrapper: wrapperFor(queryClient),
@@ -90,6 +99,7 @@ describe("useTransitionProject", () => {
     ).toEqual(completedProject);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 
   it("refreshes project and client facts after a version conflict", async () => {
@@ -117,6 +127,7 @@ describe("useTransitionProject", () => {
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
     });
   });
 });

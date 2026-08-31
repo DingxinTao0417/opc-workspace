@@ -300,6 +300,10 @@ export const settingsQueryKey = ["settings"] as const;
 
 export const searchQueryKey = ["search"] as const;
 
+function invalidateUnifiedSearch(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: searchQueryKey });
+}
+
 export function useSearchQuery(input: SearchListParams, enabled = true) {
   return useQuery({
     queryKey: [...searchQueryKey, input],
@@ -3193,7 +3197,7 @@ export function useDeleteTask() {
 async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
-    queryClient.invalidateQueries({ queryKey: searchQueryKey }),
+    invalidateUnifiedSearch(queryClient),
     refreshProjectFacts(queryClient),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
@@ -4483,6 +4487,7 @@ export function useCreateProject() {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await invalidateUnifiedSearch(queryClient);
     },
   });
 }
@@ -4500,6 +4505,7 @@ export function useUpdateProject() {
       await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
       await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
       await invalidateFocusReadModels(queryClient, { report: true });
+      await invalidateUnifiedSearch(queryClient);
     },
   });
 }
@@ -4523,11 +4529,13 @@ export function useTransitionProject() {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await invalidateUnifiedSearch(queryClient);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await invalidateUnifiedSearch(queryClient);
       }
     },
   });
@@ -4553,6 +4561,7 @@ export function useDeleteProject() {
       await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
       await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
       await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+      await invalidateUnifiedSearch(queryClient);
       // The deleted project's report is still actively observed until the
       // detail page navigates away. Mark all derived reports stale without
       // refetching that now-invalid project id and delaying the navigation.
