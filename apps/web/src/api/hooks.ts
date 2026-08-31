@@ -324,6 +324,29 @@ export const storageCapacityHistoryQueryKey = [
   "storage-history",
 ] as const;
 
+const backupIncidentErrorCodes = new Set([
+  "BACKUP_CREATE_FAILED",
+  "BACKUP_VERIFY_FAILED",
+  "BACKUP_DRILL_FAILED",
+  "BACKUP_NOT_RESTORABLE",
+  "RESTORE_PENDING_INVALID",
+  "RESTORE_SCHEDULE_FAILED",
+  "RESTORE_ROLLBACK_BACKUP_FAILED",
+]);
+
+function backupErrorMayProjectInbox(error: unknown): boolean {
+  return error instanceof ApiError && backupIncidentErrorCodes.has(error.code);
+}
+
+async function invalidateBackupIncident(
+  queryClient: QueryClient,
+  error: unknown,
+): Promise<void> {
+  if (backupErrorMayProjectInbox(error)) {
+    await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+  }
+}
+
 export function useBackupsQuery(enabled = true) {
   return useQuery({
     queryKey: backupQueryKey,
@@ -414,6 +437,7 @@ export function useCreateBackup() {
       attempt.current = null;
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
+    onError: async (error) => invalidateBackupIncident(queryClient, error),
   });
 }
 
@@ -424,12 +448,15 @@ export function useVerifyBackup() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
+    onError: async (error) => invalidateBackupIncident(queryClient, error),
   });
 }
 
 export function useDrillBackupRestore() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => drillBackupRestore(id),
+    onError: async (error) => invalidateBackupIncident(queryClient, error),
   });
 }
 
@@ -443,6 +470,7 @@ export function useScheduleBackupRestore() {
         queryClient.invalidateQueries({ queryKey: restoreDiagnosticsQueryKey }),
       ]);
     },
+    onError: async (error) => invalidateBackupIncident(queryClient, error),
   });
 }
 
