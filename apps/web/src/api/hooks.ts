@@ -1156,6 +1156,7 @@ function useInvalidateClientFollowups() {
       }),
       queryClient.invalidateQueries({ queryKey: clientQueryKey }),
       queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+      invalidateUnifiedSearch(queryClient),
     ]);
   };
 }

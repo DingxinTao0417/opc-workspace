@@ -301,6 +301,14 @@ describe("client hooks", () => {
   it("refreshes Inbox projections after completing a client followup", async () => {
     calls.completeFollowup.mockResolvedValue(clientFollowup);
     const queryClient = createQueryClient();
+    const searchKey = [
+      ...searchQueryKey,
+      { q: clientFollowup.purpose, types: ["inbox_item"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useCompleteClientFollowup(), {
       wrapper: wrapperFor(queryClient),
@@ -321,5 +329,6 @@ describe("client hooks", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 });
