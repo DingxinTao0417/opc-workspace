@@ -44,6 +44,34 @@ vi.mock("../api/client", async () => {
   return { ...actual, ...apiMocks };
 });
 
+vi.mock("./TaskSelect", () => ({
+  TaskSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    selectedTitle,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    selectedTitle?: string | null;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      {value && value !== "task-parent" ? (
+        <option value={value}>{selectedTitle ?? "当前父任务"}</option>
+      ) : null}
+      <option value="task-parent">父任务候选</option>
+    </select>
+  ),
+}));
+
 const task: Task = {
   id: "task-1",
   title: "整理项目简报",
@@ -177,6 +205,9 @@ describe("TaskDetailModal", () => {
     fireEvent.change(screen.getByLabelText("预计时长"), {
       target: { value: "90" },
     });
+    fireEvent.change(screen.getByLabelText("父任务"), {
+      target: { value: "task-parent" },
+    });
     await waitFor(() =>
       expect(screen.getByLabelText("验收策略")).toBeEnabled(),
     );
@@ -193,6 +224,7 @@ describe("TaskDetailModal", () => {
           title: "整理最终项目简报",
           description: "核对范围与交付时间",
           priority: "P1",
+          parentTaskId: "task-parent",
           projectId: "project-1",
           reviewPolicy: "manual",
           plannedDate: "2026-08-30",

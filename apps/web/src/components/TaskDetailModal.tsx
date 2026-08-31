@@ -2,12 +2,7 @@ import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
-import {
-  useDeleteTask,
-  useTaskOptionsQuery,
-  useTaskQuery,
-  useUpdateTask,
-} from "../api/hooks";
+import { useDeleteTask, useTaskQuery, useUpdateTask } from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type {
   Task,
@@ -24,6 +19,7 @@ import { TaskEventsSection } from "./TaskEventsSection";
 import { TaskFocusHistorySection } from "./TaskFocusHistorySection";
 import { TaskLifecycleSection } from "./TaskLifecycleSection";
 import { TaskOutputsSection } from "./TaskOutputsSection";
+import { TaskSelect } from "./TaskSelect";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -133,7 +129,6 @@ export function TaskDetailModal() {
     total: number | null;
   }>({ loading: true, error: false, total: null });
   const task = query.data;
-  const tasksQuery = useTaskOptionsQuery(Boolean(taskId));
   const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
   const busy = taskWriteBusy || assignmentBusy || workflowBusy || outputBusy;
   const skipNextHydrate = useRef(false);
@@ -649,38 +644,22 @@ export function TaskDetailModal() {
                 variant="form"
               />
             </div>
-            <label className="form-field">
+            <div className="form-field">
               <span>父任务</span>
-              <select
-                disabled={tasksQuery.isPending || tasksQuery.isError}
-                onChange={(event) => setParentTaskId(event.target.value)}
+              <TaskSelect
+                ariaLabel="父任务"
+                emptyLabel="无父任务"
+                excludeIds={[task.id]}
+                onChange={setParentTaskId}
+                selectedTitle={
+                  parentTaskId === task.parentTaskId
+                    ? task.parentTaskTitle
+                    : undefined
+                }
                 value={parentTaskId}
-              >
-                <option value="">
-                  {tasksQuery.isPending
-                    ? "正在读取任务…"
-                    : tasksQuery.isError
-                      ? "任务暂不可用"
-                      : "无父任务"}
-                </option>
-                {task.parentTaskId &&
-                !(tasksQuery.data ?? []).some(
-                  (candidate) => candidate.id === task.parentTaskId,
-                ) ? (
-                  <option value={task.parentTaskId}>
-                    {task.parentTaskTitle ??
-                      `父任务 ${task.parentTaskId.slice(0, 8)}…`}
-                  </option>
-                ) : null}
-                {(tasksQuery.data ?? [])
-                  .filter((candidate) => candidate.id !== task.id)
-                  .map((candidate) => (
-                    <option key={candidate.id} value={candidate.id}>
-                      {candidate.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                variant="form"
+              />
+            </div>
           </div>
 
           <div className="form-grid">

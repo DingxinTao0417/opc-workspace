@@ -93,7 +93,6 @@ function mutation(mutate: ReturnType<typeof vi.fn>) {
 
 vi.mock("../api/hooks", () => ({
   useActiveFocusSessionQuery: () => mocks.focusQuery,
-  useTaskOptionsQuery: () => mocks.taskQuery,
   useCreateFocusSession: () => mutation(mocks.create),
   usePauseFocusSession: () => mutation(mocks.pause),
   useResumeFocusSession: () => mutation(mocks.resume),
@@ -108,6 +107,49 @@ vi.mock("../api/hooks", () => ({
     mocks.reportHook(...args);
     return mocks.reportQuery;
   },
+}));
+
+vi.mock("../components/TaskSelect", () => ({
+  TaskSelect: ({
+    ariaLabel,
+    disabled,
+    emptyLabel,
+    inputId,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    disabled?: boolean;
+    emptyLabel: string;
+    inputId?: string;
+    onChange: (
+      value: string,
+      task: { id: string; title: string; status: string } | null,
+    ) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      disabled={disabled}
+      id={inputId}
+      onChange={(event) => {
+        const selected = mocks.taskQuery.data.find(
+          (task) => task.id === event.target.value,
+        );
+        onChange(event.target.value, selected ?? null);
+      }}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      {mocks.taskQuery.data
+        .filter((task) => task.status !== "cancelled")
+        .map((task) => (
+          <option key={task.id} value={task.id}>
+            {task.title}
+          </option>
+        ))}
+    </select>
+  ),
 }));
 
 beforeEach(() => {

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { useCreateTask, useTaskOptionsQuery } from "../api/hooks";
+import { useCreateTask } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
 import type { TaskKind, TaskPriority, TaskReviewPolicy } from "../types/models";
 import { Modal } from "./Modal";
 import { ProjectSelect } from "./ProjectSelect";
+import { TaskSelect } from "./TaskSelect";
 import { TaskTagPicker } from "./TaskTagPicker";
 
 const priorities: { value: TaskPriority; label: string }[] = [
@@ -45,7 +46,6 @@ export function NewTaskModal() {
   const [reviewPolicy, setReviewPolicy] = useState<TaskReviewPolicy>("none");
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const tasksQuery = useTaskOptionsQuery(open);
 
   useEffect(() => {
     if (open) setProjectId(preselectedProjectId ?? "");
@@ -175,27 +175,16 @@ export function NewTaskModal() {
               variant="form"
             />
           </div>
-          <label className="form-field">
+          <div className="form-field">
             <span>父任务</span>
-            <select
-              disabled={tasksQuery.isPending || tasksQuery.isError}
-              onChange={(event) => setParentTaskId(event.target.value)}
+            <TaskSelect
+              ariaLabel="父任务"
+              emptyLabel="无父任务"
+              onChange={setParentTaskId}
               value={parentTaskId}
-            >
-              <option value="">
-                {tasksQuery.isPending
-                  ? "正在读取任务…"
-                  : tasksQuery.isError
-                    ? "任务暂不可用"
-                    : "无父任务"}
-              </option>
-              {(tasksQuery.data ?? []).map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </select>
-          </label>
+              variant="form"
+            />
+          </div>
         </div>
 
         <div className="form-grid">

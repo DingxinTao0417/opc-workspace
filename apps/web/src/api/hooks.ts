@@ -2622,17 +2622,6 @@ export function useEndTaskAssignment() {
   });
 }
 
-export function useTaskOptionsQuery(enabled = true) {
-  return useQuery({
-    queryKey: [...taskQueryKey, "options"],
-    queryFn: ({ signal }) => getAllTasks({ sort: "title" }, signal),
-    enabled,
-    retry: 2,
-    retryDelay: 500,
-    staleTime: 10_000,
-  });
-}
-
 export const focusSessionQueryKey = ["focus-sessions", "active"] as const;
 export const focusSessionHistoryQueryKey = [
   "focus-sessions",

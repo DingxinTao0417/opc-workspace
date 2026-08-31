@@ -2425,6 +2425,21 @@ kbd {
   color: var(--accent-light);
 }
 
+.client-select__selected-status[data-status="todo"] {
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+}
+
+.client-select__selected-status[data-status="blocked"] {
+  background: color-mix(in srgb, var(--red) 11%, transparent);
+  color: var(--red);
+}
+
+.client-select__selected-status[data-status="waiting_review"] {
+  background: color-mix(in srgb, var(--orange) 11%, transparent);
+  color: var(--orange);
+}
+
 .client-select__selected-status[data-status="paused"] {
   background: color-mix(in srgb, var(--orange) 11%, transparent);
   color: var(--orange);
@@ -2435,7 +2450,13 @@ kbd {
   color: var(--green-light);
 }
 
-.client-select__selected-status[data-status="archived"] {
+.client-select__selected-status[data-status="done"] {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green-light);
+}
+
+.client-select__selected-status[data-status="archived"],
+.client-select__selected-status[data-status="cancelled"] {
   background: var(--panel-hover);
   color: var(--text-muted);
 }

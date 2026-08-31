@@ -26,10 +26,10 @@ import {
   usePauseFocusSession,
   useResumeFocusSession,
   useStopFocusSession,
-  useTaskOptionsQuery,
   useTodayStatsQuery,
 } from "../api/hooks";
 import { PageHeader } from "../components/PageHeader";
+import { TaskSelect } from "../components/TaskSelect";
 import { ErrorState, LoadingState } from "../components/feedback";
 import {
   localDateFromKey,
@@ -49,6 +49,8 @@ function focusHourLabel(hour: number): string {
   const nextHour = (hour + 1) % 24;
   return `${String(hour).padStart(2, "0")}:00–${String(nextHour).padStart(2, "0")}:00`;
 }
+
+const focusExcludedTaskStatuses = ["cancelled"] as const;
 
 function bestFocusHour(hours: FocusReportHour[]): FocusReportHour | null {
   return hours.reduce<FocusReportHour | null>(
@@ -177,7 +179,6 @@ export function FocusPage() {
   const committedFocusMinutes = useSettingsStore((state) => state.focusMinutes);
   const committedCycles = useSettingsStore((state) => state.cycles);
   const focusQuery = useActiveFocusSessionQuery();
-  const taskOptions = useTaskOptionsQuery();
   const createFocus = useCreateFocusSession();
   const pauseFocus = usePauseFocusSession();
   const resumeFocus = useResumeFocusSession();
@@ -224,6 +225,7 @@ export function FocusPage() {
   });
   const cyclePhase = useFocusCycleStore((state) => state.phase);
   const cycleTaskId = useFocusCycleStore((state) => state.taskId);
+  const cycleTaskTitle = useFocusCycleStore((state) => state.taskTitle);
   const completedCycles = useFocusCycleStore((state) => state.completedCycles);
   const targetCycles = useFocusCycleStore((state) => state.targetCycles);
   const breakEndsAtMs = useFocusCycleStore((state) => state.breakEndsAtMs);
@@ -234,17 +236,14 @@ export function FocusPage() {
   const resetCycle = useFocusCycleStore((state) => state.resetCycle);
   const breakClock = useBreakClock();
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [selectedTaskTitle, setSelectedTaskTitle] = useState<string | null>(
+    null,
+  );
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmUnbound, setConfirmUnbound] = useState(false);
   const snapshot = focusQuery.data;
   const session = snapshot?.session;
   const clock = useFocusClock(snapshot);
-  const availableTasks = useMemo(
-    () =>
-      (taskOptions.data ?? []).filter((task) => task.status !== "cancelled"),
-    [taskOptions.data],
-  );
-  const cycleTask = availableTasks.find((task) => task.id === cycleTaskId);
   const inBreak = !session && cyclePhase === "break";
   const readyForNext = !session && cyclePhase === "ready";
   const sequenceComplete = !session && cyclePhase === "complete";
@@ -278,8 +277,9 @@ export function FocusPage() {
     }
     const cycles = continuing ? targetCycles : committedCycles;
     const taskTitle = taskId
-      ? (availableTasks.find((task) => task.id === taskId)?.title ??
-        (continuing ? cycleTask?.title : null))
+      ? continuing
+        ? cycleTaskTitle
+        : selectedTaskTitle
       : null;
     setConfirmCancel(false);
     createFocus.mutate(
@@ -445,7 +445,7 @@ export function FocusPage() {
               <>
                 <span className="focus-project">休息阶段 · 不计入工时</span>
                 <h2>第 {completedCycles} 个专注块已完成</h2>
-                <p>下一块仍关联：{cycleTask?.title ?? "未绑定任务的专注"}</p>
+                <p>下一块仍关联：{cycleTaskTitle ?? "未绑定任务的专注"}</p>
                 <div className="focus-controls">
                   <button
                     className="button button-primary focus-primary"
@@ -473,7 +473,7 @@ export function FocusPage() {
             ) : readyForNext ? (
               <>
                 <span className="focus-project">下一次专注</span>
-                <h2>{cycleTask?.title ?? "未绑定任务的专注"}</h2>
+                <h2>{cycleTaskTitle ?? "未绑定任务的专注"}</h2>
                 <p>
                   已完成 {completedCycles} / {targetCycles}{" "}
                   个专注块；下一块使用已保存的 {committedFocusMinutes}{" "}
@@ -518,35 +518,27 @@ export function FocusPage() {
                 <h2>选择任务后开始</h2>
                 <div className="focus-start-form">
                   <label htmlFor="focus-task">关联任务</label>
-                  <select
-                    disabled={taskOptions.isPending || busy}
-                    id="focus-task"
-                    onChange={(event) => {
-                      setSelectedTaskId(event.target.value);
+                  <TaskSelect
+                    ariaLabel="关联任务"
+                    disabled={busy}
+                    emptyLabel="不绑定任务"
+                    excludeStatuses={focusExcludedTaskStatuses}
+                    inputId="focus-task"
+                    onChange={(id, task) => {
+                      setSelectedTaskId(id);
+                      setSelectedTaskTitle(task?.title ?? null);
                       setConfirmUnbound(false);
                     }}
+                    selectedTitle={selectedTaskTitle}
                     value={selectedTaskId}
-                  >
-                    <option value="">不绑定任务</option>
-                    {availableTasks.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.title}
-                      </option>
-                    ))}
-                  </select>
+                    variant="form"
+                  />
                   <span>
                     当前预览 {previewFocusMinutes}{" "}
                     分钟；真正开始时只读取已保存的 {committedFocusMinutes}{" "}
                     分钟设置。
                   </span>
                 </div>
-                {taskOptions.isError ? (
-                  <ErrorState
-                    compact
-                    message="任务列表读取失败；仍可确认后开始不绑定任务的专注。"
-                    onRetry={() => void taskOptions.refetch()}
-                  />
-                ) : null}
                 <div className="focus-controls">
                   <button
                     className="button button-primary focus-primary"

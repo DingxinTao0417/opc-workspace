@@ -49,7 +49,6 @@ import {
   useDeleteTaskArtifact,
   useDeleteTask,
   useTaskPageQuery,
-  useTaskOptionsQuery,
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
   useTasksQuery,
@@ -700,19 +699,6 @@ describe("task queries", () => {
         "2026-03-01",
       ]),
     ).toEqual(result.current.data);
-  });
-
-  it("passes cancellation through the complete task options query", async () => {
-    getAllTasksMock.mockResolvedValue([task]);
-    const { result } = renderHook(() => useTaskOptionsQuery(), {
-      wrapper: createWrapper(),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(getAllTasksMock).toHaveBeenCalledWith(
-      { sort: "title" },
-      expect.any(AbortSignal),
-    );
   });
 
   it("moves across active statuses while preserving terminal task slots", async () => {

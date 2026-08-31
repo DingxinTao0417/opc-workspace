@@ -28,18 +28,35 @@ vi.mock("./ProjectSelect", () => ({
   ),
 }));
 
+vi.mock("./TaskSelect", () => ({
+  TaskSelect: ({
+    ariaLabel,
+    emptyLabel,
+    onChange,
+    value,
+  }: {
+    ariaLabel: string;
+    emptyLabel: string;
+    onChange: (value: string) => void;
+    value: string;
+  }) => (
+    <select
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+      value={value}
+    >
+      <option value="">{emptyLabel}</option>
+      <option value="task-parent">父任务候选</option>
+    </select>
+  ),
+}));
+
 vi.mock("../api/hooks", () => ({
   useCreateTask: () => ({
     error: null,
     isPending: false,
     mutate: createTask,
     reset: vi.fn(),
-  }),
-  useTaskOptionsQuery: () => ({
-    data: [],
-    isError: false,
-    isPending: false,
-    refetch: vi.fn(),
   }),
   useTagOptionsQuery: () => ({
     data: [],
@@ -80,6 +97,9 @@ describe("NewTaskModal", () => {
     fireEvent.change(screen.getByLabelText("项目"), {
       target: { value: "project-1" },
     });
+    fireEvent.change(screen.getByLabelText("父任务"), {
+      target: { value: "task-parent" },
+    });
     fireEvent.change(screen.getByLabelText("任务名称"), {
       target: { value: "确认交付范围" },
     });
@@ -91,6 +111,7 @@ describe("NewTaskModal", () => {
     expect(createTask).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "确认交付范围",
+        parentTaskId: "task-parent",
         projectId: "project-1",
         reviewPolicy: "manual",
       }),
