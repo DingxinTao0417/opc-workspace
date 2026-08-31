@@ -2705,8 +2705,17 @@ function setTaskDetailIfNotOlder(queryClient: QueryClient, task: Task): void {
 
 async function invalidateTaskAssignments(
   queryClient: QueryClient,
+  preserveConflictTaskId?: string,
 ): Promise<void> {
-  await invalidateTaskAggregates(queryClient);
+  await invalidateTaskAggregates(
+    queryClient,
+    preserveConflictTaskId
+      ? {
+          preserveActiveAssignmentTaskId: preserveConflictTaskId,
+          preserveActiveDetailId: preserveConflictTaskId,
+        }
+      : undefined,
+  );
 }
 
 function assignmentErrorNeedsRefresh(error: unknown): boolean {
@@ -2715,6 +2724,20 @@ function assignmentErrorNeedsRefresh(error: unknown): boolean {
     (error.status === 404 ||
       error.status === 409 ||
       error.code === "ASSIGNMENT_ACTOR_NOT_ACTIVE")
+  );
+}
+
+async function refreshTaskAssignmentsAfterError(
+  queryClient: QueryClient,
+  error: unknown,
+  taskId: string,
+): Promise<void> {
+  if (!assignmentErrorNeedsRefresh(error)) return;
+  await invalidateTaskAssignments(
+    queryClient,
+    error instanceof ApiError && error.code === "VERSION_CONFLICT"
+      ? taskId
+      : undefined,
   );
 }
 
@@ -2740,11 +2763,8 @@ export function useCreateTaskAssignment() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error) => {
-      if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient);
-      }
-    },
+    onError: (error, variables) =>
+      refreshTaskAssignmentsAfterError(queryClient, error, variables.taskId),
   });
 }
 
@@ -2770,11 +2790,8 @@ export function useReassignTaskAssignment() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error) => {
-      if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient);
-      }
-    },
+    onError: (error, variables) =>
+      refreshTaskAssignmentsAfterError(queryClient, error, variables.taskId),
   });
 }
 
@@ -2802,11 +2819,8 @@ export function useEndTaskAssignment() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAssignments(queryClient);
     },
-    onError: async (error) => {
-      if (assignmentErrorNeedsRefresh(error)) {
-        await invalidateTaskAssignments(queryClient);
-      }
-    },
+    onError: (error, variables) =>
+      refreshTaskAssignmentsAfterError(queryClient, error, variables.taskId),
   });
 }
 
@@ -3178,13 +3192,38 @@ function submitOutputFingerprint(
 
 async function invalidateTaskAggregates(
   queryClient: QueryClient,
-  options: { preserveActiveDetailId?: string } = {},
+  options: {
+    preserveActiveAssignmentTaskId?: string;
+    preserveActiveDetailId?: string;
+  } = {},
 ): Promise<void> {
+  const assignmentQueries = options.preserveActiveAssignmentTaskId
+    ? [
+        queryClient.invalidateQueries({
+          queryKey: taskAssignmentQueryRootKey,
+          predicate: (query) =>
+            !(
+              query.queryKey.length >= 2 &&
+              query.queryKey[1] === options.preserveActiveAssignmentTaskId
+            ),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: taskAssignmentQueryKey(
+            options.preserveActiveAssignmentTaskId,
+          ),
+          refetchType: "none",
+        }),
+      ]
+    : [
+        queryClient.invalidateQueries({
+          queryKey: taskAssignmentQueryRootKey,
+        }),
+      ];
   await Promise.all([
     invalidateTaskFacts(queryClient, options),
     queryClient.invalidateQueries({ queryKey: taskSubmissionQueryRootKey }),
     queryClient.invalidateQueries({ queryKey: taskArtifactQueryRootKey }),
-    queryClient.invalidateQueries({ queryKey: taskAssignmentQueryRootKey }),
+    ...assignmentQueries,
     queryClient.invalidateQueries({ queryKey: taskEventQueryRootKey }),
   ]);
 }

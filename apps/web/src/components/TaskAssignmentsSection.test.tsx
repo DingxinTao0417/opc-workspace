@@ -362,6 +362,7 @@ describe("TaskAssignmentsSection", () => {
     expect(
       await screen.findByText(/已读取最新版 v4，你的选择和原因仍保留/),
     ).toBeInTheDocument();
+    expect(apiMocks.getTaskAssignments).toHaveBeenCalledTimes(2);
     expect(apiMocks.reassignTaskAssignment).toHaveBeenCalledTimes(1);
     expect(apiMocks.reassignTaskAssignment).toHaveBeenLastCalledWith(
       task.id,

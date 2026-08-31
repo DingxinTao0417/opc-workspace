@@ -1831,6 +1831,55 @@ describe("task output mutations", () => {
 });
 
 describe("assignment mutations", () => {
+  it("leaves one version-conflict refresh to the active assignment editor", async () => {
+    createTaskAssignmentMock.mockRejectedValue(
+      new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useCreateTaskAssignment(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        taskId: task.id,
+        input: {
+          role: "assignee",
+          actorId: owner.id,
+          expectedVersion: task.version,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskDetailQueryKey(task.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskAssignmentQueryRootKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskAssignmentQueryKey(task.id),
+      refetchType: "none",
+    });
+  });
+
   it("reuses the same idempotency key when a failed assignment is retried", async () => {
     createTaskAssignmentMock
       .mockRejectedValueOnce(new Error("response lost"))
