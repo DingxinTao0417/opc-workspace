@@ -6,6 +6,7 @@ import { ClientSelect } from "../components/ClientSelect";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { Project, ProjectStatus } from "../types/models";
 
 const statusLabels: Record<ProjectStatus, string> = {
@@ -95,6 +96,15 @@ export function ProjectsPage() {
     ),
   );
   const hasFilters = Boolean(search.trim() || status || clientId);
+
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   return (
     <div className="page">
@@ -218,7 +228,7 @@ export function ProjectsPage() {
             <nav aria-label="项目分页" className="pagination">
               <button
                 className="button button-secondary"
-                disabled={page <= 1}
+                disabled={page <= 1 || query.isFetching}
                 onClick={() => setPage((value) => Math.max(1, value - 1))}
                 type="button"
               >
@@ -229,7 +239,7 @@ export function ProjectsPage() {
               </span>
               <button
                 className="button button-secondary"
-                disabled={page >= totalPages}
+                disabled={page >= totalPages || query.isFetching}
                 onClick={() => setPage((value) => value + 1)}
                 type="button"
               >

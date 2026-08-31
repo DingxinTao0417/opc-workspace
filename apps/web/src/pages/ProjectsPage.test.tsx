@@ -1,10 +1,20 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Project } from "../types/models";
+import type { Project, ProjectListParams } from "../types/models";
 import { ProjectsPage } from "./ProjectsPage";
 
-const hooks = vi.hoisted(() => ({ projects: vi.fn() }));
+const hooks = vi.hoisted(() => ({
+  projects: vi.fn(),
+  responsePage: null as number | null,
+  total: 1,
+}));
 
 vi.mock("../components/ClientSelect", () => ({
   ClientSelect: ({
@@ -76,14 +86,24 @@ describe("ProjectsPage", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
-    hooks.projects.mockReturnValue({
-      data: { items: [project], meta: { page: 1, pageSize: 12, total: 1 } },
+    hooks.responsePage = null;
+    hooks.total = 1;
+    hooks.projects.mockImplementation((input: ProjectListParams) => ({
+      data: {
+        items: [project],
+        meta: {
+          page: hooks.responsePage ?? input.page ?? 1,
+          pageSize: 12,
+          total: hooks.total,
+        },
+      },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: vi.fn(),
-    });
+    }));
   });
 
   it("renders real project progress and links to the detail route", () => {
@@ -117,6 +137,34 @@ describe("ProjectsPage", () => {
     });
     expect(hooks.projects).toHaveBeenLastCalledWith(
       expect.objectContaining({ clientId: "client-inactive" }),
+    );
+  });
+
+  it("settles directly on the last valid project page after totals shrink", async () => {
+    hooks.total = 25;
+    const view = render(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.projects).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 3 }),
+    );
+
+    hooks.total = 0;
+    view.rerender(
+      <MemoryRouter>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(hooks.projects).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1 }),
+      ),
     );
   });
 });

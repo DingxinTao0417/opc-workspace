@@ -33,6 +33,7 @@ import {
 } from "../components/TaskBoardTransitionModal";
 import { TaskList } from "../components/TaskList";
 import { TaskSavedViewsControl } from "../components/TaskSavedViewsControl";
+import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type {
   BatchUpdateTasksInput,
@@ -296,6 +297,15 @@ export function TasksPage() {
     moveMutation.isPending ||
     resetOrderMutation.isPending;
 
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
+
   useEffect(() => {
     setSelectedTasks({});
     setBatchConfirmationPending(false);
@@ -321,17 +331,6 @@ export function TasksPage() {
     sort,
     view,
   ]);
-
-  useEffect(() => {
-    if (
-      query.isSuccess &&
-      page > 1 &&
-      query.data.items.length === 0 &&
-      query.data.meta.total > 0
-    ) {
-      setPage((value) => Math.max(1, value - 1));
-    }
-  }, [page, query.data, query.isSuccess]);
 
   const clearFilters = () => {
     setStatus("");

@@ -1,7 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Client } from "../types/models";
+import type { Client, ClientListParams } from "../types/models";
 import { ClientsPage } from "./ClientsPage";
 
 const client: Client = {
@@ -22,6 +28,8 @@ const client: Client = {
 const hooks = vi.hoisted(() => ({
   clients: vi.fn(),
   mutation: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
+  responsePage: null as number | null,
+  total: 1,
 }));
 
 vi.mock("../api/hooks", () => ({
@@ -32,14 +40,24 @@ vi.mock("../api/hooks", () => ({
 
 describe("ClientsPage", () => {
   beforeEach(() => {
-    hooks.clients.mockReturnValue({
-      data: { items: [client], meta: { page: 1, pageSize: 20, total: 1 } },
+    hooks.responsePage = null;
+    hooks.total = 1;
+    hooks.clients.mockImplementation((input: ClientListParams) => ({
+      data: {
+        items: [client],
+        meta: {
+          page: hooks.responsePage ?? input.page ?? 1,
+          pageSize: 20,
+          total: hooks.total,
+        },
+      },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: vi.fn(),
-    });
+    }));
   });
 
   afterEach(() => {
@@ -85,6 +103,34 @@ describe("ClientsPage", () => {
         q: "星河",
         status: "inactive",
       }),
+    );
+  });
+
+  it("settles directly on the last valid client page after totals shrink", async () => {
+    hooks.total = 41;
+    const view = render(
+      <MemoryRouter>
+        <ClientsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(hooks.clients).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 3 }),
+    );
+
+    hooks.total = 0;
+    view.rerender(
+      <MemoryRouter>
+        <ClientsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(hooks.clients).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1 }),
+      ),
     );
   });
 });

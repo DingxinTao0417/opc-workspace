@@ -5,6 +5,7 @@ import { useClientsQuery } from "../api/hooks";
 import { ClientFormModal } from "../components/ClientFormModal";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { ClientStatus } from "../types/models";
 
 const statusLabels: Record<ClientStatus, string> = {
@@ -58,6 +59,15 @@ export function ClientsPage() {
     typeof location.state.clientDeletion === "number"
       ? `客户已永久删除，已解除 ${location.state.clientDeletion} 个项目关联。`
       : null;
+
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   return (
     <div className="page clients-page">

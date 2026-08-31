@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
@@ -30,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   taskQueries: [] as TaskListParams[],
   taskQueryEnabled: [] as boolean[],
   taskItems: null as Task[] | null,
+  taskResponsePage: null as number | null,
+  taskTotal: 101,
+  fetching: false,
   savedViews: [] as TaskSavedView[],
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
@@ -120,11 +124,15 @@ vi.mock("../api/hooks", () => ({
     return {
       data: {
         items: mocks.taskItems ?? [{ ...task, status: mocks.taskStatus }],
-        meta: { page: input.page ?? 1, pageSize: 50, total: 101 },
+        meta: {
+          page: mocks.taskResponsePage ?? input.page ?? 1,
+          pageSize: 50,
+          total: mocks.taskTotal,
+        },
       },
       error: null,
       isError: false,
-      isFetching: mocks.placeholder,
+      isFetching: mocks.placeholder || mocks.fetching,
       isPending: false,
       isPlaceholderData: mocks.placeholder,
       isSuccess: true,
@@ -242,8 +250,11 @@ describe("TasksPage", () => {
     mocks.lifecycle.mockClear();
     mocks.resetLifecycle.mockClear();
     mocks.placeholder = false;
+    mocks.fetching = false;
     mocks.taskStatus = "todo";
     mocks.taskItems = null;
+    mocks.taskResponsePage = null;
+    mocks.taskTotal = 101;
     mocks.savedViews = [];
     useUiStore.setState({ taskDetailId: null });
   });
@@ -286,6 +297,21 @@ describe("TasksPage", () => {
         clientId: "client-1",
         projectId: "project-1",
       }),
+    );
+  });
+
+  it("settles directly on the last valid task page after totals shrink", async () => {
+    const view = render(<TasksPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(lastPageQuery()).toEqual(expect.objectContaining({ page: 3 }));
+
+    mocks.taskTotal = 0;
+    view.rerender(<TasksPage />);
+
+    await waitFor(() =>
+      expect(lastPageQuery()).toEqual(expect.objectContaining({ page: 1 })),
     );
   });
 
