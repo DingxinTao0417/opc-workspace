@@ -1275,7 +1275,15 @@ describe("task deletion mutation", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(deleteTaskMock).toHaveBeenCalledWith(task.id, task.version);
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: taskQueryKey });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskDetailQueryKey(task.id),
+      exact: true,
+      refetchType: "none",
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: projectQueryKey,
     });
@@ -1407,6 +1415,15 @@ describe("controlled task lifecycle mutations", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["stats", "today"],
     });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: taskDetailQueryKey(task.id),
+      exact: true,
+      refetchType: "none",
+    });
   });
 });
 
@@ -1531,6 +1548,81 @@ describe("task update mutation", () => {
 });
 
 describe("task output mutations", () => {
+  it.each(["submit", "review", "delete"] as const)(
+    "preserves the active task detail after a %s version conflict",
+    async (operation) => {
+      const conflict = new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      });
+      const queryClient = new QueryClient({
+        defaultOptions: {
+          mutations: { retry: false },
+          queries: { retry: false },
+        },
+      });
+      const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+      const wrapper = wrapperFor(queryClient);
+
+      if (operation === "submit") {
+        submitTaskOutputMock.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useSubmitTaskOutput(), { wrapper });
+        act(() =>
+          result.current.mutate({
+            taskId: task.id,
+            input: {
+              summary: "请验收",
+              artifacts: [],
+              expectedVersion: task.version,
+            },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      } else if (operation === "review") {
+        reviewTaskSubmissionMock.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useReviewTaskSubmission(), {
+          wrapper,
+        });
+        act(() =>
+          result.current.mutate({
+            taskId: task.id,
+            input: { decision: "accept", expectedVersion: task.version },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      } else {
+        deleteTaskArtifactMock.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useDeleteTaskArtifact(), {
+          wrapper,
+        });
+        act(() =>
+          result.current.mutate({
+            taskId: task.id,
+            artifactId: artifact.id,
+            input: { reason: "重复产出", expectedVersion: task.version },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      }
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: taskQueryKey,
+        predicate: expect.any(Function),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: taskDetailQueryKey(task.id),
+        exact: true,
+        refetchType: "none",
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: taskSubmissionQueryRootKey,
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: taskArtifactQueryRootKey,
+      });
+    },
+  );
+
   it.each([
     { outcome: "成功", error: null },
     {

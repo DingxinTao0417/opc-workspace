@@ -3124,12 +3124,14 @@ export function useTaskLifecycleCommand() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (
         error instanceof ApiError &&
         (error.status === 404 || error.status === 409)
       ) {
-        await invalidateTaskAggregates(queryClient);
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: variables.id,
+        });
       }
     },
   });
@@ -3223,9 +3225,11 @@ export function useSubmitTaskOutput() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskAggregates(queryClient);
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: variables.taskId,
+        });
       }
     },
   });
@@ -3253,9 +3257,11 @@ export function useReviewTaskSubmission() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskAggregates(queryClient);
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: variables.taskId,
+        });
       }
     },
   });
@@ -3288,9 +3294,11 @@ export function useDeleteTaskArtifact() {
       setTaskDetailIfNotOlder(queryClient, result.task);
       await invalidateTaskAggregates(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (outputErrorNeedsRefresh(error)) {
-        await invalidateTaskAggregates(queryClient);
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: variables.taskId,
+        });
       }
     },
   });
@@ -3378,9 +3386,12 @@ export function useDeleteTask() {
         report: true,
       });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (isTaskFactsStale(error)) {
-        await invalidateTaskAggregates(queryClient);
+        const id = typeof variables === "string" ? variables : variables.id;
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: id,
+        });
         await invalidateFocusReadModels(queryClient, {
           history: true,
           report: true,
