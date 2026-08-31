@@ -7,7 +7,9 @@ import {
   automationRunDetailQueryKey,
   automationQueryKey,
   inboxQueryKey,
+  projectQueryKey,
   reminderQueryKey,
+  searchQueryKey,
   taskQueryKey,
   useAutomationRunQuery,
   useAutomationRunsQuery,
@@ -151,6 +153,14 @@ describe("automation hooks", () => {
       automationRunDetailQueryKey(taskRun.id),
       taskRunDetail,
     );
+    const searchKey = [
+      ...searchQueryKey,
+      { q: "跟进逾期发票", types: ["task"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useRetryAutomationRun(), {
       wrapper: wrapperFor(queryClient),
@@ -163,6 +173,9 @@ describe("automation hooks", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: reminderQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: taskQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["stats", "today"] });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
     expect(
       queryClient.getQueryState(automationRunDetailQueryKey(taskRun.id))
         ?.isInvalidated,

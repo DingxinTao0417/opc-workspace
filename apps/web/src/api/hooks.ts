@@ -1764,7 +1764,7 @@ export function useRetryAutomationRun() {
       await Promise.all([
         invalidateAutomationFacts(queryClient),
         ...(run.resultType === "task"
-          ? [queryClient.invalidateQueries({ queryKey: taskQueryKey })]
+          ? [invalidateTaskFacts(queryClient)]
           : []),
       ]);
     },
