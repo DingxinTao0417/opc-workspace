@@ -3242,6 +3242,7 @@ async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
     invalidateUnifiedSearch(queryClient),
     refreshProjectFacts(queryClient),
     queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey }),
+    queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
   ]);

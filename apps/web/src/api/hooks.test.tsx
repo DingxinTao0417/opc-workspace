@@ -16,6 +16,7 @@ import type {
 } from "../types/models";
 import { ApiError } from "./client";
 import {
+  contentItemQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
@@ -1434,6 +1435,10 @@ describe("task update mutation", () => {
       items: [],
       meta: { page: 1, pageSize: 20, total: 0 },
     });
+    queryClient.setQueryData(contentItemQueryKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const { result } = renderHook(() => useUpdateTask(), {
       wrapper: wrapperFor(queryClient),
     });
@@ -1465,6 +1470,9 @@ describe("task update mutation", () => {
       version: task.version + 3,
     });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+    expect(
+      queryClient.getQueryState(contentItemQueryKey)?.isInvalidated,
+    ).toBe(true);
   });
 });
 
