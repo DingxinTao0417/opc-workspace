@@ -764,6 +764,37 @@ export function useCreateClient() {
   });
 }
 
+async function invalidateClientEditFacts(
+  queryClient: QueryClient,
+  preserveActiveDetailId?: string,
+): Promise<void> {
+  const clientQueries = preserveActiveDetailId
+    ? [
+        queryClient.invalidateQueries({
+          queryKey: clientQueryKey,
+          predicate: (query) =>
+            !(
+              query.queryKey.length === 3 &&
+              query.queryKey[1] === "detail" &&
+              query.queryKey[2] === preserveActiveDetailId
+            ),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: clientDetailQueryKey(preserveActiveDetailId),
+          exact: true,
+          refetchType: "none",
+        }),
+      ]
+    : [queryClient.invalidateQueries({ queryKey: clientQueryKey })];
+  await Promise.all([
+    ...clientQueries,
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
+    queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
+    invalidateUnifiedSearch(queryClient),
+  ]);
+}
+
 export function useUpdateClient() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -771,21 +802,11 @@ export function useUpdateClient() {
       updateClient(id, input),
     onSuccess: async (client) => {
       queryClient.setQueryData(clientDetailQueryKey(client.id), client);
-      await queryClient.invalidateQueries({ queryKey: clientQueryKey });
-      await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-      await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
-      await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
-      await invalidateUnifiedSearch(queryClient);
+      await invalidateClientEditFacts(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
-        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-        await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
-        await queryClient.invalidateQueries({
-          queryKey: financialEntryQueryKey,
-        });
-        await invalidateUnifiedSearch(queryClient);
+        await invalidateClientEditFacts(queryClient, variables.id);
       }
     },
   });

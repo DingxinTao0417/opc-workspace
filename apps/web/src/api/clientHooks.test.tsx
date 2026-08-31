@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientFollowup, ClientInput } from "../types/models";
 import { ApiError } from "./client";
 import {
+  clientDetailQueryKey,
   clientQueryKey,
   financialEntryQueryKey,
   INBOX_LIST_REFRESH_INTERVAL_MS,
@@ -303,6 +304,44 @@ describe("client hooks", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+  });
+
+  it("refreshes derived facts without auto-refetching the conflicted client detail", async () => {
+    calls.update.mockRejectedValue(
+      new ApiError("Client changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateClient(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: client.id,
+        input: { name: "并发客户名称", expectedVersion: client.version },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: clientQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: clientDetailQueryKey(client.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
 
   it("refreshes Inbox projections after completing a client followup", async () => {
