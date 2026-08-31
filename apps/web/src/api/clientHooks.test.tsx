@@ -18,12 +18,14 @@ import {
   useCompleteClientFollowup,
   useCreateClient,
   useClientFollowupsQuery,
+  useDeleteClient,
   useUpdateClient,
 } from "./hooks";
 
 const calls = vi.hoisted(() => ({
   completeFollowup: vi.fn(),
   create: vi.fn(),
+  delete: vi.fn(),
   listFollowups: vi.fn(),
   listActorLinks: vi.fn(),
   list: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock("./client", async () => {
   return {
     ...actual,
     createClient: calls.create,
+    deleteClient: calls.delete,
     completeClientFollowup: calls.completeFollowup,
     getClientFollowups: calls.listFollowups,
     getClientActorLinks: calls.listActorLinks,
@@ -341,6 +344,40 @@ describe("client hooks", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: financialEntryQueryKey,
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
+  });
+
+  it("leaves the conflicted client detail refresh to the delete confirmation", async () => {
+    calls.delete.mockRejectedValue(
+      new ApiError("Client changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useDeleteClient(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: client.id,
+        expectedVersion: client.version,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: clientQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: clientDetailQueryKey(client.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
 

@@ -764,11 +764,11 @@ export function useCreateClient() {
   });
 }
 
-async function invalidateClientEditFacts(
+function invalidateClientQueries(
   queryClient: QueryClient,
   preserveActiveDetailId?: string,
-): Promise<void> {
-  const clientQueries = preserveActiveDetailId
+): Array<Promise<unknown>> {
+  return preserveActiveDetailId
     ? [
         queryClient.invalidateQueries({
           queryKey: clientQueryKey,
@@ -786,8 +786,14 @@ async function invalidateClientEditFacts(
         }),
       ]
     : [queryClient.invalidateQueries({ queryKey: clientQueryKey })];
+}
+
+async function invalidateClientEditFacts(
+  queryClient: QueryClient,
+  preserveActiveDetailId?: string,
+): Promise<void> {
   await Promise.all([
-    ...clientQueries,
+    ...invalidateClientQueries(queryClient, preserveActiveDetailId),
     queryClient.invalidateQueries({ queryKey: projectQueryKey }),
     queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
     queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
@@ -830,11 +836,13 @@ export function useDeleteClient() {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await invalidateUnifiedSearch(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
-        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-        await invalidateUnifiedSearch(queryClient);
+        await Promise.all([
+          ...invalidateClientQueries(queryClient, variables.id),
+          queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+          invalidateUnifiedSearch(queryClient),
+        ]);
       }
     },
   });
