@@ -10,6 +10,7 @@ import {
 import { useEffect, useState } from "react";
 import { ApiError } from "../api/client";
 import { useFocusSessionHistoryQuery } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import { formatFocusTime } from "../store/focus";
 import type { FocusSessionStatus } from "../types/models";
 
@@ -59,6 +60,15 @@ export function TaskFocusHistorySection({
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   useEffect(() => setPage(1), [taskId]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isBlocked: !expanded,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   return (
     <section

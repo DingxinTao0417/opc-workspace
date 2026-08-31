@@ -43,6 +43,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
 import { TaskList } from "../components/TaskList";
 import { TaskPlanModal } from "../components/TaskPlanModal";
+import { useSettledPage } from "../lib/useSettledPage";
 import {
   localDateFromKey,
   localDateKey,
@@ -257,22 +258,15 @@ export function TodayPage() {
     !riskTasksQuery.isFetching &&
     !riskTasksQuery.isPlaceholderData;
 
-  useEffect(() => {
-    if (
-      riskFilter !== null &&
-      riskTasksQuery.isSuccess &&
-      !riskTasksQuery.isPlaceholderData &&
-      riskPage > riskPageCount
-    ) {
-      setRiskPage(riskPageCount);
-    }
-  }, [
-    riskFilter,
-    riskPage,
-    riskPageCount,
-    riskTasksQuery.isPlaceholderData,
-    riskTasksQuery.isSuccess,
-  ]);
+  useSettledPage({
+    page: riskPage,
+    meta: riskTasksQuery.data?.meta,
+    isBlocked: riskFilter === null,
+    isFetching: riskTasksQuery.isFetching,
+    isPlaceholderData: riskTasksQuery.isPlaceholderData,
+    isSuccess: riskTasksQuery.isSuccess,
+    setPage: setRiskPage,
+  });
   const live = taskGroupsQuery.isSuccess;
   const orderMutationPending =
     moveMutation.isPending ||

@@ -36,6 +36,7 @@ import {
   localDateKey,
   useLocalCalendar,
 } from "../lib/localCalendar";
+import { useSettledPage } from "../lib/useSettledPage";
 import {
   formatFocusTime,
   useBreakClock,
@@ -222,6 +223,21 @@ export function FocusPage() {
     page: historyPage,
     pageSize: 6,
     status: "terminal",
+  });
+  const focusHistoryPages = Math.max(
+    1,
+    Math.ceil(
+      (focusHistory.data?.meta.total ?? 0) /
+        (focusHistory.data?.meta.pageSize ?? 6),
+    ),
+  );
+  useSettledPage({
+    page: historyPage,
+    meta: focusHistory.data?.meta,
+    isFetching: focusHistory.isFetching,
+    isPlaceholderData: focusHistory.isPlaceholderData,
+    isSuccess: focusHistory.isSuccess,
+    setPage: setHistoryPage,
   });
   const cyclePhase = useFocusCycleStore((state) => state.phase);
   const cycleTaskId = useFocusCycleStore((state) => state.taskId);
@@ -954,28 +970,21 @@ export function FocusPage() {
                       <button
                         aria-label="上一页专注历史"
                         className="icon-button"
-                        disabled={historyPage === 1}
+                        disabled={historyPage === 1 || focusHistory.isFetching}
                         onClick={() => setHistoryPage((page) => page - 1)}
                         type="button"
                       >
                         <ChevronLeft size={15} />
                       </button>
                       <span>
-                        {historyPage} /{" "}
-                        {Math.ceil(
-                          focusHistory.data.meta.total /
-                            focusHistory.data.meta.pageSize,
-                        )}
+                        {historyPage} / {focusHistoryPages}
                       </span>
                       <button
                         aria-label="下一页专注历史"
                         className="icon-button"
                         disabled={
-                          historyPage >=
-                          Math.ceil(
-                            focusHistory.data.meta.total /
-                              focusHistory.data.meta.pageSize,
-                          )
+                          historyPage >= focusHistoryPages ||
+                          focusHistory.isFetching
                         }
                         onClick={() => setHistoryPage((page) => page + 1)}
                         type="button"

@@ -14,6 +14,7 @@ import {
   localDateKey,
   useLocalCalendar,
 } from "../lib/localCalendar";
+import { useSettledPage } from "../lib/useSettledPage";
 import { formatFocusTime } from "../store/focus";
 import type { FocusSessionStatus } from "../types/models";
 import { ErrorState, LoadingState } from "./feedback";
@@ -138,11 +139,14 @@ export function ProjectFocusSection({ projectId }: ProjectFocusSectionProps) {
 
   useEffect(() => setHistoryPage(1), [projectId]);
 
-  useEffect(() => {
-    if (history.data && historyPage > historyPageCount) {
-      setHistoryPage(historyPageCount);
-    }
-  }, [history.data, historyPage, historyPageCount]);
+  useSettledPage({
+    page: historyPage,
+    meta: history.data?.meta,
+    isFetching: history.isFetching,
+    isPlaceholderData: history.isPlaceholderData,
+    isSuccess: history.isSuccess,
+    setPage: setHistoryPage,
+  });
 
   return (
     <section

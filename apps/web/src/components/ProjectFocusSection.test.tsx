@@ -77,6 +77,8 @@ function historyResult(overrides: Record<string, unknown> = {}) {
     isError: false,
     isFetching: false,
     isPending: false,
+    isPlaceholderData: false,
+    isSuccess: true,
     refetch: hookMocks.historyRefetch,
     ...overrides,
   };

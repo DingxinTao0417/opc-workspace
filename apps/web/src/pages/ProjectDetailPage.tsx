@@ -29,6 +29,7 @@ import { ProjectArtifactsSection } from "../components/ProjectArtifactsSection";
 import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSection";
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
 import { TaskList } from "../components/TaskList";
+import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type {
   ProjectStatus,
@@ -161,23 +162,14 @@ export function ProjectDetailPage() {
     return () => window.clearTimeout(timer);
   }, [taskSearchInput]);
 
-  useEffect(() => {
-    if (
-      !tasksQuery.isSuccess ||
-      tasksQuery.isFetching ||
-      tasksQuery.isPlaceholderData ||
-      taskPage <= projectTaskPages
-    ) {
-      return;
-    }
-    setTaskPage(projectTaskPages);
-  }, [
-    projectTaskPages,
-    taskPage,
-    tasksQuery.isFetching,
-    tasksQuery.isPlaceholderData,
-    tasksQuery.isSuccess,
-  ]);
+  useSettledPage({
+    page: taskPage,
+    meta: tasksQuery.data?.meta,
+    isFetching: tasksQuery.isFetching,
+    isPlaceholderData: tasksQuery.isPlaceholderData,
+    isSuccess: tasksQuery.isSuccess,
+    setPage: setTaskPage,
+  });
 
   const runTransition = (
     action: ProjectTransitionAction,

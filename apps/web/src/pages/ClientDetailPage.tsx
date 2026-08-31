@@ -24,6 +24,7 @@ import { ClientActorLinksSection } from "../components/ClientActorLinksSection";
 import { ClientFollowupsSection } from "../components/ClientFollowupsSection";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { ClientStatus, ProjectStatus } from "../types/models";
 
 const clientStatusLabels: Record<ClientStatus, string> = {
@@ -116,6 +117,16 @@ export function ClientDetailPage() {
   const operationError =
     operationErrorMessage(updateMutation.error) ??
     operationErrorMessage(deleteMutation.error);
+
+  useSettledPage({
+    page: projectPage,
+    meta: projectsQuery.data?.meta,
+    isBlocked: !clientId,
+    isFetching: projectsQuery.isFetching,
+    isPlaceholderData: projectsQuery.isPlaceholderData,
+    isSuccess: projectsQuery.isSuccess,
+    setPage: setProjectPage,
+  });
 
   const refreshAfterConflict = async () => {
     const result = await clientQuery.refetch();

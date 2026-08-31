@@ -21,6 +21,7 @@ import {
   useSetAutomationRuleEnabled,
   useUpdateAutomationRule,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   AutomationConfig,
   AutomationRule,
@@ -137,10 +138,14 @@ export function AutomationSettings({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, draft]);
 
-  useEffect(() => {
-    if (!runsQuery.data || runsQuery.isPlaceholderData) return;
-    if (runPage > runTotalPages) setRunPage(runTotalPages);
-  }, [runPage, runTotalPages, runsQuery.data, runsQuery.isPlaceholderData]);
+  useSettledPage({
+    page: runPage,
+    meta: runsQuery.data?.meta,
+    isFetching: runsQuery.isFetching,
+    isPlaceholderData: runsQuery.isPlaceholderData,
+    isSuccess: runsQuery.isSuccess,
+    setPage: setRunPage,
+  });
 
   const pending = updateRule.isPending || setEnabled.isPending;
   const dirty = selected ? !sameConfig(selected.config, draft) : false;
