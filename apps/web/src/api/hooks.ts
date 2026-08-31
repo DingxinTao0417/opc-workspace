@@ -975,6 +975,7 @@ async function invalidateInvoiceReadModels(queryClient: QueryClient) {
     queryClient.invalidateQueries({ queryKey: incomeStatsQueryKey }),
     queryClient.invalidateQueries({ queryKey: projectQueryKey }),
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    invalidateUnifiedSearch(queryClient),
   ]);
 }
 

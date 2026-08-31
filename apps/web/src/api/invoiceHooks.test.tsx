@@ -12,6 +12,7 @@ import {
   invoicePdfQueryKey,
   invoiceQueryKey,
   projectQueryKey,
+  searchQueryKey,
   useDownloadInvoicePdf,
   useGenerateInvoicePdf,
   useTransitionInvoice,
@@ -128,6 +129,14 @@ describe("useTransitionInvoice", () => {
   it("refreshes invoice, ledger, income, project, and inbox facts after payment", async () => {
     transitionInvoiceMock.mockResolvedValue(paidInvoice);
     const queryClient = createQueryClient();
+    const searchKey = [
+      ...searchQueryKey,
+      { q: paidInvoice.invoiceNumber, types: ["invoice"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useTransitionInvoice(), {
       wrapper: wrapperFor(queryClient),
@@ -155,6 +164,7 @@ describe("useTransitionInvoice", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: incomeStatsQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 });
 
