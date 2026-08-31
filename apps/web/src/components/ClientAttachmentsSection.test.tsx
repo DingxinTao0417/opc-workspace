@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientAttachment } from "../types/models";
 import { ClientAttachmentsSection } from "./ClientAttachmentsSection";
@@ -24,27 +30,32 @@ const attachment: ClientAttachment = {
 const state = vi.hoisted(() => ({
   items: [] as ClientAttachment[],
   queryInput: null as unknown,
+  total: null as number | null,
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   remove: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   download: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
 }));
 
 vi.mock("../api/hooks", () => ({
-  useClientAttachmentsQuery: (_id: string, input: unknown) => {
+  useClientAttachmentsQuery: (
+    _id: string,
+    input: { page?: number; pageSize?: number },
+  ) => {
     state.queryInput = input;
     return {
       data: {
         items: state.items,
         meta: {
-          page: 1,
+          page: input.page ?? 1,
           pageSize: 10,
-          total: state.items.length,
+          total: state.total ?? state.items.length,
           clientVersion: 4,
         },
       },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: vi.fn(),
     };
@@ -57,6 +68,7 @@ vi.mock("../api/hooks", () => ({
 describe("ClientAttachmentsSection", () => {
   beforeEach(() => {
     state.items = [];
+    state.total = null;
     state.create.mutate.mockClear();
     state.remove.mutate.mockClear();
     state.download.mutate.mockClear();
@@ -116,6 +128,25 @@ describe("ClientAttachmentsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除历史" }));
     expect(state.queryInput).toEqual(
       expect.objectContaining({ includeDeleted: true, page: 1 }),
+    );
+  });
+
+  it("settles on the last valid client attachment page", async () => {
+    state.items = [attachment];
+    state.total = 11;
+    const view = render(
+      <ClientAttachmentsSection clientId="client-1" clientVersion={4} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(state.queryInput).toEqual(expect.objectContaining({ page: 2 }));
+
+    state.total = 0;
+    view.rerender(
+      <ClientAttachmentsSection clientId="client-1" clientVersion={4} />,
+    );
+    await waitFor(() =>
+      expect(state.queryInput).toEqual(expect.objectContaining({ page: 1 })),
     );
   });
 });

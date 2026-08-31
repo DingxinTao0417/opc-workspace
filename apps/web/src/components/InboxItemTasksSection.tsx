@@ -22,6 +22,7 @@ import {
   useUnlinkInboxItemTask,
   useUpdateInboxItemTaskRequirement,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   InboxItem,
   InboxItemTaskRelation,
@@ -307,6 +308,15 @@ export function InboxItemTasksSection({
   );
   const candidateResultsCurrent =
     search.trim() === debouncedSearch && !candidateQuery.isPlaceholderData;
+  useSettledPage({
+    page: candidatePage,
+    meta: candidateQuery.data?.meta,
+    isBlocked: editor?.type !== "link" || search.trim() !== debouncedSearch,
+    isFetching: candidateQuery.isFetching,
+    isPlaceholderData: candidateQuery.isPlaceholderData,
+    isSuccess: candidateQuery.isSuccess,
+    setPage: setCandidatePage,
+  });
   const selectedTaskVisible =
     candidateResultsCurrent &&
     selectedTaskId !== null &&

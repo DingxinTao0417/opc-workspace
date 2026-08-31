@@ -17,6 +17,7 @@ import {
   useDownloadProjectAttachment,
   useProjectAttachmentsQuery,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
 function formatSize(bytes: number): string {
@@ -115,6 +116,15 @@ export function ProjectAttachmentsSection({
     attachmentError(createMutation.error) ??
     attachmentError(deleteMutation.error) ??
     attachmentError(downloadMutation.error);
+
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   const resetUpload = () => {
     setSelectedFile(null);

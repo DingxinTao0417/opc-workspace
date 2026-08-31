@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useUiStore } from "../store/ui";
 import type { Task } from "../types/models";
@@ -282,6 +288,27 @@ describe("TaskList", () => {
 
     expect(screen.getByText(secondPageChild.title)).toBeInTheDocument();
     expect(screen.getByText("2 / 2 · 共 101 项")).toBeInTheDocument();
+  });
+
+  it("settles on the last valid child task page", async () => {
+    mocks.childTotal = 101;
+    const view = render(
+      <TaskList hierarchical live tasks={[{ ...task, subtaskTotal: 101 }]} />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: `展开子任务：${task.title}` }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByText(secondPageChild.title)).toBeInTheDocument();
+
+    mocks.childTotal = 1;
+    view.rerender(
+      <TaskList hierarchical live tasks={[{ ...task, subtaskTotal: 1 }]} />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(childTask.title)).toBeInTheDocument(),
+    );
   });
 
   it("offers pointer drag sorting alongside the keyboard-friendly move buttons", () => {

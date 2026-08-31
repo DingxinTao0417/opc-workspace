@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useState, type DragEvent } from "react";
 import { useTaskPageQuery } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
 
@@ -161,6 +162,15 @@ function TaskRow({
     !childrenQuery.isFetching;
   const childTotal = childrenQuery.data?.meta.total ?? 0;
   const childPages = Math.max(1, Math.ceil(childTotal / 100));
+  useSettledPage({
+    page: childPage,
+    meta: childrenQuery.data?.meta,
+    isBlocked: !canExpand || !expanded,
+    isFetching: childrenQuery.isFetching,
+    isPlaceholderData: childrenQuery.isPlaceholderData,
+    isSuccess: childrenQuery.isSuccess,
+    setPage: setChildPage,
+  });
   const canQuickStart = task.status === "todo" && Boolean(onStartTask);
   const canQuickComplete =
     task.status === "in_progress" &&
