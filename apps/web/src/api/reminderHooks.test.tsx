@@ -8,6 +8,7 @@ import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxQueryKey,
   reminderDetailQueryKey,
+  reminderQueryKey,
   useCancelReminder,
   useCreateReminder,
   useReminderQuery,
@@ -154,6 +155,7 @@ describe("Reminder hooks", () => {
       .mockRejectedValueOnce(new Error("response lost"))
       .mockResolvedValueOnce(reminder());
     const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const { result } = renderHook(() => useCreateReminder(), {
       wrapper: wrapperFor(queryClient),
     });
@@ -174,6 +176,15 @@ describe("Reminder hooks", () => {
     expect(
       queryClient.getQueryData(reminderDetailQueryKey(reminder().id)),
     ).toEqual(reminder());
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: reminderQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: reminderDetailQueryKey(reminder().id),
+      exact: true,
+    });
   });
 
   it("reuses the cancel key and stores the terminal version", async () => {

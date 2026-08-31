@@ -1754,12 +1754,21 @@ async function invalidateReminderFacts(
   queryClient: QueryClient,
   id?: string,
 ): Promise<void> {
-  await queryClient.invalidateQueries({ queryKey: reminderQueryKey });
-  if (id) {
-    await queryClient.invalidateQueries({
-      queryKey: reminderDetailQueryKey(id),
-    });
+  if (!id) {
+    await queryClient.invalidateQueries({ queryKey: reminderQueryKey });
+    return;
   }
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: reminderQueryKey,
+      predicate: (query) =>
+        !(query.queryKey[1] === "detail" && query.queryKey[2] === id),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: reminderDetailQueryKey(id),
+      exact: true,
+    }),
+  ]);
 }
 
 function reminderFactsNeedRefresh(error: unknown): boolean {
