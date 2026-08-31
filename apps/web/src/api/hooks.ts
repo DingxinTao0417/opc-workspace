@@ -4105,6 +4105,7 @@ export function useDeleteContentItem() {
           queryClient.invalidateQueries({
             queryKey: contentItemDetailQueryKey(variables.id),
           }),
+          queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
           invalidateUnifiedSearch(queryClient),
         ]);
       } else if (

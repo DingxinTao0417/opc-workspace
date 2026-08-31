@@ -154,7 +154,7 @@ describe("useDeleteContentItem", () => {
       queryKey: contentItemDetailQueryKey("content-1"),
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(remove).not.toHaveBeenCalled();
   });
 
