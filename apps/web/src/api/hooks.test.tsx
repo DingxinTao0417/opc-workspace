@@ -1470,9 +1470,9 @@ describe("task update mutation", () => {
       version: task.version + 3,
     });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
-    expect(
-      queryClient.getQueryState(contentItemQueryKey)?.isInvalidated,
-    ).toBe(true);
+    expect(queryClient.getQueryState(contentItemQueryKey)?.isInvalidated).toBe(
+      true,
+    );
   });
 });
 
