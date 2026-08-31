@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectNote } from "../types/models";
 import { ProjectNotesSection } from "./ProjectNotesSection";
@@ -21,6 +27,8 @@ const note: ProjectNote = {
 
 const state = vi.hoisted(() => ({
   queryInput: {} as Record<string, unknown>,
+  responsePage: null as number | null,
+  total: 1,
   create: { mutate: vi.fn(), reset: vi.fn() },
   update: { mutate: vi.fn(), reset: vi.fn() },
   remove: { mutate: vi.fn(), reset: vi.fn() },
@@ -36,11 +44,17 @@ vi.mock("../api/hooks", () => ({
     return {
       data: {
         items: [note],
-        meta: { page: 1, pageSize: 6, total: 1, projectVersion: 4 },
+        meta: {
+          page: state.responsePage ?? Number(input.page ?? 1),
+          pageSize: 6,
+          total: state.total,
+          projectVersion: 4,
+        },
       },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: state.refetch,
     };
@@ -64,6 +78,8 @@ vi.mock("../api/hooks", () => ({
 
 describe("ProjectNotesSection", () => {
   beforeEach(() => {
+    state.responsePage = null;
+    state.total = 1;
     state.create.mutate.mockReset();
     state.update.mutate.mockReset();
     state.remove.mutate.mockReset();
@@ -142,5 +158,24 @@ describe("ProjectNotesSection", () => {
     expect(
       screen.queryByRole("button", { name: "编辑笔记 交付范围" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("settles on the last valid note page after the history shrinks", async () => {
+    state.total = 7;
+    const view = render(
+      <ProjectNotesSection archived={false} projectId="project-1" />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(state.queryInput).toEqual(expect.objectContaining({ page: 2 }));
+
+    state.total = 0;
+    view.rerender(
+      <ProjectNotesSection archived={false} projectId="project-1" />,
+    );
+
+    await waitFor(() =>
+      expect(state.queryInput).toEqual(expect.objectContaining({ page: 1 })),
+    );
   });
 });

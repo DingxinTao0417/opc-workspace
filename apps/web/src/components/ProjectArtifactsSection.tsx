@@ -1,7 +1,8 @@
 import { ArrowUpRight, FileOutput, History, Paperclip } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useProjectArtifactsQuery } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type {
   InboxItemStatus,
@@ -76,9 +77,14 @@ export function ProjectArtifactsSection({ projectId }: { projectId: string }) {
     Math.ceil(total / (query.data?.meta.pageSize ?? 6)),
   );
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   return (
     <section className="project-detail-section project-artifacts-section">

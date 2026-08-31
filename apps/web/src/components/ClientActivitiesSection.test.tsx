@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClientActivity } from "../types/models";
 import { ClientActivitiesSection } from "./ClientActivitiesSection";
@@ -25,6 +31,8 @@ const activity: ClientActivity = {
 const state = vi.hoisted(() => ({
   items: [] as ClientActivity[],
   queryInput: null as unknown,
+  responsePage: null as number | null,
+  total: null as number | null,
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   remove: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
@@ -32,21 +40,25 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/hooks", () => ({
-  useClientActivitiesQuery: (_id: string, input: unknown) => {
+  useClientActivitiesQuery: (
+    _id: string,
+    input: { page?: number; pageSize?: number },
+  ) => {
     state.queryInput = input;
     return {
       data: {
         items: state.items,
         meta: {
-          page: 1,
+          page: state.responsePage ?? input.page ?? 1,
           pageSize: 6,
-          total: state.items.length,
+          total: state.total ?? state.items.length,
           clientVersion: 4,
         },
       },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: state.refetch,
     };
@@ -59,6 +71,8 @@ vi.mock("../api/hooks", () => ({
 describe("ClientActivitiesSection", () => {
   beforeEach(() => {
     state.items = [];
+    state.responsePage = null;
+    state.total = null;
     state.create.mutate.mockClear();
     state.update.mutate.mockClear();
     state.remove.mutate.mockClear();
@@ -141,6 +155,22 @@ describe("ClientActivitiesSection", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "显示已删除记录" }));
     expect(state.queryInput).toEqual(
       expect.objectContaining({ includeDeleted: true, page: 1 }),
+    );
+  });
+
+  it("settles on the last valid activity page after the timeline shrinks", async () => {
+    state.items = [activity];
+    state.total = 7;
+    const view = render(<ClientActivitiesSection clientId="client-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(state.queryInput).toEqual(expect.objectContaining({ page: 2 }));
+
+    state.total = 0;
+    view.rerender(<ClientActivitiesSection clientId="client-1" />);
+
+    await waitFor(() =>
+      expect(state.queryInput).toEqual(expect.objectContaining({ page: 1 })),
     );
   });
 

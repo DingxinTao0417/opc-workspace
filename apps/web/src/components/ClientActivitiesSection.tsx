@@ -8,7 +8,7 @@ import {
   Trash2,
   UsersRound,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   useClientActivitiesQuery,
@@ -16,6 +16,7 @@ import {
   useDeleteClientActivity,
   useUpdateClientActivity,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { ClientActivity, ClientActivityKind } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
@@ -116,9 +117,14 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
     activityError(updateMutation.error) ??
     activityError(deleteMutation.error);
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   const resetFeedback = () => {
     setLocalError(null);

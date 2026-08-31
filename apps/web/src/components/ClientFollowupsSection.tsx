@@ -21,6 +21,7 @@ import {
   useSkipClientFollowup,
   useUpdateClientFollowup,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   Actor,
   ClientFollowup,
@@ -392,9 +393,14 @@ export function ClientFollowupsSection({
     followupError(cancelMutation.error) ??
     followupError(rescheduleMutation.error);
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   useEffect(() => {
     if (editing === "new" && !planDraft.assignedActorId && actors[0]) {

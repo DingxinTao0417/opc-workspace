@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor, ClientFollowup } from "../types/models";
 import { ClientFollowupsSection } from "./ClientFollowupsSection";
@@ -47,6 +53,8 @@ const followup: ClientFollowup = {
 
 const state = vi.hoisted(() => ({
   query: vi.fn(),
+  responsePage: null as number | null,
+  total: 1,
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   update: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
   complete: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
@@ -78,22 +86,27 @@ vi.mock("../api/hooks", () => ({
 
 describe("ClientFollowupsSection", () => {
   beforeEach(() => {
-    state.query.mockReturnValue({
-      data: {
-        items: [followup],
-        meta: {
-          page: 1,
-          pageSize: 6,
-          total: 1,
-          serverNow: "2026-08-29T12:00:00Z",
+    state.responsePage = null;
+    state.total = 1;
+    state.query.mockImplementation(
+      (_clientId: string, input: { page?: number }) => ({
+        data: {
+          items: [followup],
+          meta: {
+            page: state.responsePage ?? input.page ?? 1,
+            pageSize: 6,
+            total: state.total,
+            serverNow: "2026-08-29T12:00:00Z",
+          },
         },
-      },
-      isError: false,
-      isFetching: false,
-      isPending: false,
-      isSuccess: true,
-      refetch: vi.fn(),
-    });
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isPlaceholderData: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
     for (const mutation of [
       state.create,
       state.update,
@@ -148,6 +161,27 @@ describe("ClientFollowupsSection", () => {
       status: "completed",
     });
     expect(screen.getByText("已完成 1 条")).toBeTruthy();
+  });
+
+  it("settles on the last valid followup page after the timeline shrinks", async () => {
+    state.total = 7;
+    const view = render(<ClientFollowupsSection clientId="client-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(state.query).toHaveBeenLastCalledWith(
+      "client-1",
+      expect.objectContaining({ page: 2 }),
+    );
+
+    state.total = 0;
+    view.rerender(<ClientFollowupsSection clientId="client-1" />);
+
+    await waitFor(() =>
+      expect(state.query).toHaveBeenLastCalledWith(
+        "client-1",
+        expect.objectContaining({ page: 1 }),
+      ),
+    );
   });
 
   it("filters the client timeline through the service-derived overdue query", () => {

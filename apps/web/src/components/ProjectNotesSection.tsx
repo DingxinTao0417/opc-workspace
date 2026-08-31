@@ -7,6 +7,7 @@ import {
   useProjectNotesQuery,
   useUpdateProjectNote,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { ProjectNote } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
@@ -106,9 +107,14 @@ export function ProjectNotesSection({
     noteError(updateMutation.error) ??
     noteError(deleteMutation.error);
 
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   useEffect(() => {
     if (!archived) return;

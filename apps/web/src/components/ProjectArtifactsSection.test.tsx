@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useUiStore } from "../store/ui";
@@ -69,6 +75,8 @@ const item: ProjectArtifactItem = {
 const state = vi.hoisted(() => ({
   input: {} as Record<string, unknown>,
   items: [] as ProjectArtifactItem[],
+  responsePage: null as number | null,
+  total: null as number | null,
   refetch: vi.fn(),
 }));
 
@@ -82,15 +90,16 @@ vi.mock("../api/hooks", () => ({
       data: {
         items: state.items,
         meta: {
-          page: 1,
+          page: state.responsePage ?? Number(input.page ?? 1),
           pageSize: 6,
-          total: state.items.length,
+          total: state.total ?? state.items.length,
           projectVersion: 9,
         },
       },
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
       isSuccess: true,
       refetch: state.refetch,
     };
@@ -101,6 +110,8 @@ describe("ProjectArtifactsSection", () => {
   beforeEach(() => {
     state.refetch.mockReset();
     state.items = [item];
+    state.responsePage = null;
+    state.total = null;
     useUiStore.setState({ taskDetailId: null });
   });
 
@@ -140,6 +151,29 @@ describe("ProjectArtifactsSection", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /打开跟进/ }));
     expect(screen.getByText("已打开产出跟进详情")).toBeVisible();
+  });
+
+  it("settles on the last valid artifact page after outputs shrink", async () => {
+    state.total = 7;
+    const view = render(
+      <MemoryRouter>
+        <ProjectArtifactsSection projectId="project-1" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(state.input).toEqual(expect.objectContaining({ page: 2 }));
+
+    state.total = 0;
+    view.rerender(
+      <MemoryRouter>
+        <ProjectArtifactsSection projectId="project-1" />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() =>
+      expect(state.input).toEqual(expect.objectContaining({ page: 1 })),
+    );
   });
 
   it.each([
