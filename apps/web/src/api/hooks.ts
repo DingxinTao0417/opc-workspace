@@ -4550,6 +4550,13 @@ export function useUpdateProject() {
   });
 }
 
+async function invalidateProjectCompletionFacts(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    queryClient.invalidateQueries({ queryKey: automationQueryKey }),
+  ]);
+}
+
 export function useTransitionProject() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -4565,13 +4572,16 @@ export function useTransitionProject() {
       confirmIncompleteTasks?: boolean;
     }) =>
       transitionProject(id, action, expectedVersion, confirmIncompleteTasks),
-    onSuccess: async (project) => {
+    onSuccess: async (project, variables) => {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({
         queryKey: roadmapMilestoneQueryKey,
       });
+      if (variables.action === "complete") {
+        await invalidateProjectCompletionFacts(queryClient);
+      }
       await invalidateUnifiedSearch(queryClient);
     },
     onError: async (error) => {
@@ -4581,6 +4591,7 @@ export function useTransitionProject() {
         await queryClient.invalidateQueries({
           queryKey: roadmapMilestoneQueryKey,
         });
+        await invalidateProjectCompletionFacts(queryClient);
         await invalidateUnifiedSearch(queryClient);
       }
     },

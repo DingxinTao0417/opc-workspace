@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../types/models";
 import { ApiError } from "./client";
 import {
+  automationQueryKey,
   clientQueryKey,
+  inboxQueryKey,
   projectDetailQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
@@ -100,6 +102,8 @@ describe("useTransitionProject", () => {
     ).toEqual(completedProject);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: automationQueryKey });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: roadmapMilestoneQueryKey,
     });
@@ -131,6 +135,10 @@ describe("useTransitionProject", () => {
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: automationQueryKey,
+      });
       expect(invalidate).toHaveBeenCalledWith({
         queryKey: roadmapMilestoneQueryKey,
       });
