@@ -7,6 +7,13 @@ import { ApiError } from "./client";
 import {
   actorDetailQueryKey,
   actorQueryKey,
+  clientQueryKey,
+  inboxQueryKey,
+  projectQueryKey,
+  taskArtifactQueryRootKey,
+  taskAssignmentQueryRootKey,
+  taskEventQueryRootKey,
+  taskSubmissionQueryRootKey,
   useActorQuery,
   useActorsQuery,
   useAssignmentActorOptionsQuery,
@@ -218,6 +225,21 @@ describe("actor queries", () => {
     expect(invalidate).toHaveBeenLastCalledWith({
       queryKey: actorDetailQueryKey(actor.id),
       exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskAssignmentQueryRootKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskEventQueryRootKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskSubmissionQueryRootKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskArtifactQueryRootKey,
     });
 
     await act(async () => {

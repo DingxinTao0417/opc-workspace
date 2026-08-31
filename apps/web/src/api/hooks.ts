@@ -619,6 +619,18 @@ export function useCreatePersonActor() {
   });
 }
 
+async function invalidateActorReferences(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: clientQueryKey }),
+    queryClient.invalidateQueries({ queryKey: projectQueryKey }),
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    queryClient.invalidateQueries({ queryKey: taskAssignmentQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskEventQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskSubmissionQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: taskArtifactQueryRootKey }),
+  ]);
+}
+
 export function useUpdateActor() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -626,10 +638,12 @@ export function useUpdateActor() {
       updateActor(id, input),
     onSuccess: async (actor) => {
       queryClient.setQueryData(actorDetailQueryKey(actor.id), actor);
+      await invalidateActorReferences(queryClient);
       await queryClient.invalidateQueries({ queryKey: actorQueryKey });
     },
     onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        await invalidateActorReferences(queryClient);
         await queryClient.invalidateQueries({
           queryKey: actorDetailQueryKey(variables.id),
           exact: true,
