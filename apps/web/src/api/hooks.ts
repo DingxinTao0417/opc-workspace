@@ -1502,9 +1502,21 @@ export function useDeleteClientAttachment() {
 }
 
 export function useDownloadClientAttachment() {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      downloadClientAttachment(id, name),
+    mutationFn: ({
+      id,
+      name,
+    }: {
+      clientId: string;
+      id: string;
+      name: string;
+    }) => downloadClientAttachment(id, name),
+    onSettled: async (_data, _error, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: clientAttachmentQueryKey(variables.clientId),
+      });
+    },
   });
 }
 
@@ -4535,9 +4547,21 @@ export function useDeleteProjectAttachment() {
 }
 
 export function useDownloadProjectAttachment() {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      downloadProjectAttachment(id, name),
+    mutationFn: ({
+      id,
+      name,
+    }: {
+      projectId: string;
+      id: string;
+      name: string;
+    }) => downloadProjectAttachment(id, name),
+    onSettled: async (_data, _error, variables) => {
+      await queryClient.invalidateQueries({
+        queryKey: projectAttachmentQueryKey(variables.projectId),
+      });
+    },
   });
 }
 

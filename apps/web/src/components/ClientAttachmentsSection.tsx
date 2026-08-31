@@ -157,7 +157,7 @@ export function ClientAttachmentsSection({
 
   const download = (id: string, name: string) => {
     downloadMutation.mutate(
-      { id, name },
+      { clientId, id, name },
       {
         onSuccess: (result) => saveDownloadedFile(result.blob, result.fileName),
       },
