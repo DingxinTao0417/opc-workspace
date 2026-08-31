@@ -4149,10 +4149,14 @@ export function useUnlinkContentItemTask() {
 
 async function invalidateRoadmapReadModels(
   queryClient: QueryClient,
+  inboxMayChange = false,
 ): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey }),
     invalidateUnifiedSearch(queryClient),
+    ...(inboxMayChange
+      ? [queryClient.invalidateQueries({ queryKey: inboxQueryKey })]
+      : []),
   ]);
 }
 
@@ -4162,7 +4166,7 @@ export function useCreateRoadmapMilestone() {
     mutationFn: (input: CreateRoadmapMilestoneInput) =>
       createRoadmapMilestone(input),
     onSuccess: async () => {
-      await invalidateRoadmapReadModels(queryClient);
+      await invalidateRoadmapReadModels(queryClient, true);
     },
   });
 }
@@ -4178,7 +4182,7 @@ export function useUpdateRoadmapMilestone() {
       input: UpdateRoadmapMilestoneInput;
     }) => updateRoadmapMilestone(id, input),
     onSuccess: async () => {
-      await invalidateRoadmapReadModels(queryClient);
+      await invalidateRoadmapReadModels(queryClient, true);
     },
   });
 }
@@ -4208,7 +4212,7 @@ export function useArchiveRoadmapMilestone() {
       expectedVersion: number;
     }) => archiveRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await invalidateRoadmapReadModels(queryClient);
+      await invalidateRoadmapReadModels(queryClient, true);
     },
   });
 }
@@ -4224,7 +4228,7 @@ export function useRestoreRoadmapMilestone() {
       expectedVersion: number;
     }) => restoreRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await invalidateRoadmapReadModels(queryClient);
+      await invalidateRoadmapReadModels(queryClient, true);
     },
   });
 }
@@ -4240,7 +4244,7 @@ export function useDeleteRoadmapMilestone() {
       expectedVersion: number;
     }) => deleteRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
-      await invalidateRoadmapReadModels(queryClient);
+      await invalidateRoadmapReadModels(queryClient, true);
     },
   });
 }

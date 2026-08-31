@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  inboxQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
   useUpdateRoadmapMilestone,
@@ -55,6 +56,7 @@ describe("roadmap milestone mutations", () => {
     const { result } = renderHook(() => useUpdateRoadmapMilestone(), {
       wrapper: wrapperFor(queryClient),
     });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     act(() =>
       result.current.mutate({
@@ -66,5 +68,6 @@ describe("roadmap milestone mutations", () => {
 
     expect(queryClient.getQueryState(milestoneKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
   });
 });
