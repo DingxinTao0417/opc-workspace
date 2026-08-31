@@ -4735,11 +4735,8 @@ export function useCreateProjectAttachment() {
       }
       return createProjectAttachment(projectId, input, attempt.current.key);
     },
-    onSuccess: async (attachment) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: projectAttachmentQueryKey(attachment.projectId),
-      });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
     },
     onError: async (error) => {
@@ -4769,11 +4766,8 @@ export function useDeleteProjectAttachment() {
       }
       return deleteProjectAttachment(id, input, attempt.current.key);
     },
-    onSuccess: async (attachment) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: projectAttachmentQueryKey(attachment.projectId),
-      });
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
     },
     onError: async (error) => {
