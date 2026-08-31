@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   resetLifecycle: vi.fn(),
   taskQueries: [] as TaskListParams[],
   taskQueryEnabled: [] as boolean[],
+  taskRefetch: vi.fn(),
   taskItems: null as Task[] | null,
   taskResponsePage: null as number | null,
   taskTotal: 101,
@@ -136,7 +137,7 @@ vi.mock("../api/hooks", () => ({
       isPending: false,
       isPlaceholderData: mocks.placeholder,
       isSuccess: true,
-      refetch: vi.fn(),
+      refetch: mocks.taskRefetch,
     };
   },
   useTaskSavedViewsQuery: () => ({
@@ -239,6 +240,7 @@ describe("TasksPage", () => {
   beforeEach(() => {
     mocks.taskQueries.length = 0;
     mocks.taskQueryEnabled.length = 0;
+    mocks.taskRefetch.mockClear();
     mocks.batch.mockClear();
     mocks.move.mockClear();
     mocks.resetMove.mockClear();
@@ -388,6 +390,21 @@ describe("TasksPage", () => {
         onSuccess: expect.any(Function),
       }),
     );
+    const callbacks = mocks.lifecycle.mock.calls[0][1] as {
+      onError: (error: unknown) => void;
+    };
+    act(() =>
+      callbacks.onError(
+        new ApiError("任务已变化", {
+          code: "VERSION_CONFLICT",
+          status: 409,
+        }),
+      ),
+    );
+    expect(
+      screen.getByText("任务已被其他操作更新，列表已刷新，请重新拖动。"),
+    ).toBeVisible();
+    expect(mocks.taskRefetch).not.toHaveBeenCalled();
   });
 
   it("keeps manual review acceptance out of board dragging", () => {
@@ -542,6 +559,7 @@ describe("TasksPage", () => {
 
     expect(checkbox).not.toBeChecked();
     expect(screen.queryByLabelText("批量操作")).not.toBeInTheDocument();
+    expect(mocks.taskRefetch).not.toHaveBeenCalled();
   });
 
   it("only enables persisted reordering for one exact plan date", () => {

@@ -420,7 +420,6 @@ export function TasksPage() {
         ) {
           setSelectedTasks({});
           setBatchConfirmationPending(false);
-          void query.refetch();
         }
       },
       onSuccess: () => {
@@ -1155,7 +1154,6 @@ export function TasksPage() {
             "任务已被其他操作更新，列表已刷新，请重新拖动。",
           );
           setBoardTransition(null);
-          void query.refetch();
         }}
         transition={boardTransition}
       />
