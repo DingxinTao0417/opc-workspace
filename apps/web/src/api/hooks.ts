@@ -3193,6 +3193,7 @@ export function useDeleteTask() {
 async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    queryClient.invalidateQueries({ queryKey: searchQueryKey }),
     refreshProjectFacts(queryClient),
     queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),

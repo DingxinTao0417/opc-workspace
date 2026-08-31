@@ -17,6 +17,7 @@ import type {
 import { ApiError } from "./client";
 import {
   projectQueryKey,
+  searchQueryKey,
   taskQueryKey,
   taskAssignmentQueryKey,
   taskAssignmentQueryRootKey,
@@ -1404,7 +1405,7 @@ describe("controlled task lifecycle mutations", () => {
 });
 
 describe("task update mutation", () => {
-  it("does not replace a newer detail cache with an older replay response", async () => {
+  it("does not replace a newer detail cache and invalidates unified search", async () => {
     updateTaskMock.mockResolvedValue({
       ...task,
       title: "较早的重放响应",
@@ -1420,6 +1421,14 @@ describe("task update mutation", () => {
       ...task,
       title: "缓存中的更新版本",
       version: task.version + 3,
+    });
+    const searchKey = [
+      ...searchQueryKey,
+      { q: task.title, types: ["task"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
     });
     const { result } = renderHook(() => useUpdateTask(), {
       wrapper: wrapperFor(queryClient),
@@ -1451,6 +1460,7 @@ describe("task update mutation", () => {
       title: "缓存中的更新版本",
       version: task.version + 3,
     });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 });
 
