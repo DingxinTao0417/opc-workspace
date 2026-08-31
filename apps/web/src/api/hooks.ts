@@ -1937,6 +1937,7 @@ async function invalidateInboxFacts(
         sourceItem.sourceEntityType === "project_completion"));
   const invalidations: Array<Promise<unknown>> = [
     queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    invalidateUnifiedSearch(queryClient),
   ];
   if (id) {
     invalidations.push(

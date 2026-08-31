@@ -6,6 +6,7 @@ import type { InboxItem } from "../types/models";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxDetailQueryKey,
+  searchQueryKey,
   useCreateInboxItem,
   useInboxItemCommand,
   useInboxItemsQuery,
@@ -142,16 +143,24 @@ describe("inbox hooks", () => {
     calls.create
       .mockRejectedValueOnce(new Error("response lost"))
       .mockResolvedValueOnce(inboxItem());
-    const queryClient = createQueryClient();
-    const { result } = renderHook(() => useCreateInboxItem(), {
-      wrapper: wrapperFor(queryClient),
-    });
     const input = {
       title: "确认本周交付范围",
       summary: "",
       priority: "P2" as const,
       dueAt: null,
     };
+    const queryClient = createQueryClient();
+    const searchKey = [
+      ...searchQueryKey,
+      { q: input.title, types: ["inbox_item"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
+    const { result } = renderHook(() => useCreateInboxItem(), {
+      wrapper: wrapperFor(queryClient),
+    });
 
     act(() => result.current.mutate(input));
     await waitFor(() => expect(result.current.isError).toBe(true));
@@ -163,6 +172,7 @@ describe("inbox hooks", () => {
     expect(
       queryClient.getQueryData(inboxDetailQueryKey(inboxItem().id)),
     ).toEqual(inboxItem());
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 
   it("reuses the command key after a lost response and caches the returned version", async () => {
