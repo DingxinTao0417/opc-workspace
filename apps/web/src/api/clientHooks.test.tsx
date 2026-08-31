@@ -437,6 +437,27 @@ describe("client hooks", () => {
     },
   );
 
+  it("refreshes a successful activity mutation through the Client tree once", async () => {
+    calls.updateActivity.mockResolvedValue({ clientId: client.id });
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateClientActivity(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        clientId: client.id,
+        id: "activity-1",
+        input: { title: "确认交付反馈", expectedVersion: 2 },
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+  });
+
   it("refreshes Inbox projections after completing a client followup", async () => {
     calls.completeFollowup.mockResolvedValue(clientFollowup);
     const queryClient = createQueryClient();

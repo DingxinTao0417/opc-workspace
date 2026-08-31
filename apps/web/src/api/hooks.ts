@@ -1417,11 +1417,8 @@ export function useCreateClientActivity() {
       }
       return createClientActivity(clientId, input, attempt.current.key);
     },
-    onSuccess: async (activity) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: clientActivityQueryKey(activity.clientId),
-      });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
   });
@@ -1439,10 +1436,7 @@ export function useUpdateClientActivity() {
       id: string;
       input: UpdateClientActivityInput;
     }) => updateClientActivity(id, input),
-    onSuccess: async (activity) => {
-      await queryClient.invalidateQueries({
-        queryKey: clientActivityQueryKey(activity.clientId),
-      });
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
     onError: async (error, variables) => {
@@ -1465,10 +1459,7 @@ export function useDeleteClientActivity() {
       id: string;
       input: DeleteClientActivityInput;
     }) => deleteClientActivity(id, input),
-    onSuccess: async (activity) => {
-      await queryClient.invalidateQueries({
-        queryKey: clientActivityQueryKey(activity.clientId),
-      });
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
     onError: async (error, variables) => {
@@ -1542,11 +1533,8 @@ export function useCreateClientAttachment() {
       }
       return createClientAttachment(clientId, input, attempt.current.key);
     },
-    onSuccess: async (attachment) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: clientAttachmentQueryKey(attachment.clientId),
-      });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
     onError: async (error) => {
@@ -1576,11 +1564,8 @@ export function useDeleteClientAttachment() {
       }
       return deleteClientAttachment(id, input, attempt.current.key);
     },
-    onSuccess: async (attachment) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: clientAttachmentQueryKey(attachment.clientId),
-      });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
     onError: async (error) => {
@@ -1648,11 +1633,8 @@ export function useCreateClientActorLink() {
       }
       return createClientActorLink(clientId, input, attempt.current.key);
     },
-    onSuccess: async (link) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: clientActorLinkQueryKey(link.clientId),
-      });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({ queryKey: actorQueryKey });
     },
@@ -1683,11 +1665,8 @@ export function useDeleteClientActorLink() {
       }
       return deleteClientActorLink(id, input, attempt.current.key);
     },
-    onSuccess: async (link) => {
+    onSuccess: async () => {
       attempt.current = null;
-      await queryClient.invalidateQueries({
-        queryKey: clientActorLinkQueryKey(link.clientId),
-      });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({ queryKey: actorQueryKey });
     },
