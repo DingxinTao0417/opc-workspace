@@ -4770,23 +4770,29 @@ export function useUpdateProjectNote() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
+      projectId: _projectId,
       id,
       input,
     }: {
+      projectId: string;
       id: string;
       input: UpdateProjectNoteInput;
     }) => updateProjectNote(id, input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (
         error instanceof ApiError &&
         (error.code === "VERSION_CONFLICT" ||
           error.code === "PROJECT_NOTE_DELETED" ||
           error.code === "PROJECT_ARCHIVED")
       ) {
-        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        if (error.code === "VERSION_CONFLICT") {
+          await invalidateProjectNoteConflict(queryClient, variables.projectId);
+        } else {
+          await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        }
       }
     },
   });
@@ -4796,26 +4802,50 @@ export function useDeleteProjectNote() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
+      projectId: _projectId,
       id,
       input,
     }: {
+      projectId: string;
       id: string;
       input: DeleteProjectNoteInput;
     }) => deleteProjectNote(id, input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (
         error instanceof ApiError &&
         (error.code === "VERSION_CONFLICT" ||
           error.code === "PROJECT_NOTE_DELETED" ||
           error.code === "PROJECT_ARCHIVED")
       ) {
-        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        if (error.code === "VERSION_CONFLICT") {
+          await invalidateProjectNoteConflict(queryClient, variables.projectId);
+        } else {
+          await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+        }
       }
     },
   });
+}
+
+async function invalidateProjectNoteConflict(
+  queryClient: QueryClient,
+  projectId: string,
+): Promise<void> {
+  const noteKey = projectNoteQueryKey(projectId);
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: projectQueryKey,
+      predicate: (query) =>
+        !noteKey.every((part, index) => query.queryKey[index] === part),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: noteKey,
+      refetchType: "none",
+    }),
+  ]);
 }
 
 export function useCreateProject() {

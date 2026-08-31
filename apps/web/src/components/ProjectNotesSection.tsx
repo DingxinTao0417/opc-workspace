@@ -185,6 +185,7 @@ export function ProjectNotesSection({
     if (!editing) return;
     updateMutation.mutate(
       {
+        projectId,
         id: editing.id,
         input: {
           title,
@@ -214,6 +215,7 @@ export function ProjectNotesSection({
     resetFeedback();
     deleteMutation.mutate(
       {
+        projectId,
         id: deleteCandidate.id,
         input: { reason, expectedVersion: deleteCandidate.version },
       },

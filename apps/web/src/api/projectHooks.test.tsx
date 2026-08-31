@@ -12,26 +12,33 @@ import {
   inboxQueryKey,
   invoiceQueryKey,
   projectDetailQueryKey,
+  projectNoteQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
   taskQueryKey,
+  useDeleteProjectNote,
   useProjectOptionsQuery,
   useTransitionProject,
+  useUpdateProjectNote,
   useUpdateProject,
 } from "./hooks";
 
+const deleteProjectNoteMock = vi.hoisted(() => vi.fn());
 const transitionProjectMock = vi.hoisted(() => vi.fn());
 const updateProjectMock = vi.hoisted(() => vi.fn());
+const updateProjectNoteMock = vi.hoisted(() => vi.fn());
 const getProjectsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
   const actual = await vi.importActual<typeof import("./client")>("./client");
   return {
     ...actual,
+    deleteProjectNote: deleteProjectNoteMock,
     getProjects: getProjectsMock,
     transitionProject: transitionProjectMock,
     updateProject: updateProjectMock,
+    updateProjectNote: updateProjectNoteMock,
   };
 });
 
@@ -214,6 +221,57 @@ describe("useUpdateProject", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: focusReportQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
+});
+
+describe("project note conflicts", () => {
+  it.each(["update", "delete"] as const)(
+    "leaves the active note list refresh to the %s editor",
+    async (operation) => {
+      const conflict = new ApiError("Project note changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      });
+      const queryClient = createQueryClient();
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+      if (operation === "update") {
+        updateProjectNoteMock.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useUpdateProjectNote(), {
+          wrapper: wrapperFor(queryClient),
+        });
+        act(() =>
+          result.current.mutate({
+            projectId: completedProject.id,
+            id: "note-1",
+            input: { title: "并发笔记", expectedVersion: 2 },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      } else {
+        deleteProjectNoteMock.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useDeleteProjectNote(), {
+          wrapper: wrapperFor(queryClient),
+        });
+        act(() =>
+          result.current.mutate({
+            projectId: completedProject.id,
+            id: "note-1",
+            input: { reason: "重复记录", expectedVersion: 2 },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      }
+
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: projectQueryKey,
+        predicate: expect.any(Function),
+      });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: projectNoteQueryKey(completedProject.id),
+        refetchType: "none",
+      });
+    },
+  );
 });
 
 describe("useProjectOptionsQuery", () => {

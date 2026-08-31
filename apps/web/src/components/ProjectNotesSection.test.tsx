@@ -119,6 +119,7 @@ describe("ProjectNotesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
     expect(state.update.mutate).toHaveBeenCalledWith(
       {
+        projectId: "project-1",
         id: "note-1",
         input: expect.objectContaining({
           title: "更新后的范围",
@@ -138,6 +139,7 @@ describe("ProjectNotesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认删除笔记" }));
     expect(state.remove.mutate).toHaveBeenCalledWith(
       {
+        projectId: "project-1",
         id: "note-1",
         input: { reason: "重复记录", expectedVersion: 2 },
       },
