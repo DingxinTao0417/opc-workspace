@@ -4,11 +4,13 @@ import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import {
+  backupQueryKey,
   inboxQueryKey,
   useCreateBackup,
   useDownloadBackupArchive,
   useDrillBackupRestore,
   useScheduleBackupRestore,
+  useUpdateScheduledBackupPolicy,
   useVerifyBackup,
 } from "./hooks";
 
@@ -16,6 +18,7 @@ const createBackupMock = vi.hoisted(() => vi.fn());
 const downloadBackupArchiveMock = vi.hoisted(() => vi.fn());
 const drillBackupRestoreMock = vi.hoisted(() => vi.fn());
 const scheduleBackupRestoreMock = vi.hoisted(() => vi.fn());
+const updateScheduledBackupPolicyMock = vi.hoisted(() => vi.fn());
 const verifyBackupMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./client", async () => {
@@ -26,6 +29,7 @@ vi.mock("./client", async () => {
     downloadBackupArchive: downloadBackupArchiveMock,
     drillBackupRestore: drillBackupRestoreMock,
     scheduleBackupRestore: scheduleBackupRestoreMock,
+    updateScheduledBackupPolicy: updateScheduledBackupPolicyMock,
     verifyBackup: verifyBackupMock,
   };
 });
@@ -146,5 +150,30 @@ describe("useDownloadBackupArchive", () => {
     expect(result.current.data).toEqual(archive);
     expect(invalidate).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+describe("backup hooks", () => {
+  it("refreshes a saved schedule through the Backup tree once", async () => {
+    updateScheduledBackupPolicyMock.mockResolvedValue({});
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateScheduledBackupPolicy(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        enabled: true,
+        localTime: "02:00",
+        timezone: "UTC",
+        retentionCount: 30,
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: backupQueryKey });
   });
 });

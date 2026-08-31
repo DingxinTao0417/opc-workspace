@@ -375,12 +375,7 @@ export function useUpdateScheduledBackupPolicy() {
     mutationFn: (input: UpdateScheduledBackupPolicyInput) =>
       updateScheduledBackupPolicy(input),
     onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: scheduledBackupPolicyQueryKey,
-        }),
-        queryClient.invalidateQueries({ queryKey: backupQueryKey }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: backupQueryKey });
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
