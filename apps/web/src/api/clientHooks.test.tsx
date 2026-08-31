@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientFollowup, ClientInput } from "../types/models";
 import {
   clientQueryKey,
+  financialEntryQueryKey,
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxQueryKey,
+  invoiceQueryKey,
   projectQueryKey,
   searchQueryKey,
   useClientOptionsQuery,
@@ -295,6 +297,10 @@ describe("client hooks", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: invoiceQueryKey });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 
