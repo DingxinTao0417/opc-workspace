@@ -3985,7 +3985,10 @@ export function useCreateContentItem() {
   return useMutation({
     mutationFn: (input: CreateContentItemInput) => createContentItem(input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+        invalidateUnifiedSearch(queryClient),
+      ]);
     },
   });
 }
@@ -3997,11 +4000,17 @@ function useContentItemMutation<T>(
   return useMutation({
     mutationFn,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+        invalidateUnifiedSearch(queryClient),
+      ]);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: contentItemQueryKey });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+          invalidateUnifiedSearch(queryClient),
+        ]);
       }
     },
   });
@@ -4047,6 +4056,7 @@ export function useDeleteContentItem() {
           queryKey: contentItemListQueryKey,
         }),
         queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+        invalidateUnifiedSearch(queryClient),
       ]);
     },
     onError: async (error, variables) => {
@@ -4056,6 +4066,7 @@ export function useDeleteContentItem() {
           queryClient.invalidateQueries({
             queryKey: contentItemDetailQueryKey(variables.id),
           }),
+          invalidateUnifiedSearch(queryClient),
         ]);
       } else if (
         error instanceof ApiError &&

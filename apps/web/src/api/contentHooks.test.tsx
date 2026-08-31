@@ -8,6 +8,7 @@ import {
   contentItemListQueryKey,
   contentItemQueryKey,
   inboxQueryKey,
+  searchQueryKey,
   useDeleteContentItem,
 } from "./hooks";
 
@@ -44,6 +45,14 @@ describe("useDeleteContentItem", () => {
     queryClient.setQueryData(contentItemDetailQueryKey("content-1"), {
       id: "content-1",
     });
+    const searchKey = [
+      ...searchQueryKey,
+      { q: "内容发布", types: ["content_item"] },
+    ] as const;
+    queryClient.setQueryData(searchKey, {
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0 },
+    });
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     const remove = vi.spyOn(queryClient, "removeQueries");
     const { result } = renderHook(() => useDeleteContentItem(), {
@@ -67,6 +76,7 @@ describe("useDeleteContentItem", () => {
       queryKey: contentItemQueryKey,
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: contentItemDetailQueryKey("content-1"),
     });
@@ -95,6 +105,7 @@ describe("useDeleteContentItem", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: contentItemDetailQueryKey("content-1"),
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(remove).not.toHaveBeenCalled();
   });
