@@ -17,6 +17,7 @@ import type {
 import { ApiError } from "./client";
 import {
   projectQueryKey,
+  roadmapMilestoneQueryKey,
   searchQueryKey,
   taskQueryKey,
   taskAssignmentQueryKey,
@@ -1278,6 +1279,9 @@ describe("task deletion mutation", () => {
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ["stats", "today"],
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: roadmapMilestoneQueryKey,
     });
   });
 });
