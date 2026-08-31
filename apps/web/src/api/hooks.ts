@@ -1052,12 +1052,18 @@ export function useTransitionInvoice() {
       }
       return transitionInvoice(id, input, attempt.current.key);
     },
-    onSuccess: async (invoice) => {
+    onSuccess: async (invoice, variables) => {
       attempt.current = null;
       queryClient.setQueryData(invoiceDetailQueryKey(invoice.id), invoice);
       await invalidateInvoiceReadModels(queryClient);
+      if (variables.input.action === "mark_overdue") {
+        await Promise.all([
+          invalidateTaskFacts(queryClient),
+          queryClient.invalidateQueries({ queryKey: automationQueryKey }),
+        ]);
+      }
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError) {
         if (
           error.code === "IDEMPOTENCY_REPLAY_UNAVAILABLE" ||
@@ -1067,6 +1073,12 @@ export function useTransitionInvoice() {
         }
         if (error.code === "VERSION_CONFLICT") {
           await invalidateInvoiceReadModels(queryClient);
+          if (variables.input.action === "mark_overdue") {
+            await Promise.all([
+              invalidateTaskFacts(queryClient),
+              queryClient.invalidateQueries({ queryKey: automationQueryKey }),
+            ]);
+          }
         }
       }
     },

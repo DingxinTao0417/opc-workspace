@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Invoice } from "../types/models";
 import { ApiError } from "./client";
 import {
+  automationQueryKey,
   financialEntryQueryKey,
   incomeStatsQueryKey,
   inboxQueryKey,
@@ -12,7 +13,9 @@ import {
   invoicePdfQueryKey,
   invoiceQueryKey,
   projectQueryKey,
+  roadmapMilestoneQueryKey,
   searchQueryKey,
+  taskQueryKey,
   useDownloadInvoicePdf,
   useGenerateInvoicePdf,
   useTransitionInvoice,
@@ -50,6 +53,13 @@ const paidInvoice: Invoice = {
   version: 4,
   createdAt: "2026-08-29T00:00:00Z",
   updatedAt: "2026-09-03T00:00:00Z",
+};
+
+const overdueInvoice: Invoice = {
+  ...paidInvoice,
+  status: "overdue",
+  paidDate: null,
+  financialEntryId: null,
 };
 
 function createQueryClient() {
@@ -165,6 +175,29 @@ describe("useTransitionInvoice", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+  });
+
+  it("refreshes automation-created task facts after marking an invoice overdue", async () => {
+    transitionInvoiceMock.mockResolvedValue(overdueInvoice);
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useTransitionInvoice(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: overdueInvoice.id,
+        input: { action: "mark_overdue", expectedVersion: 3 },
+      }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: automationQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: taskQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: roadmapMilestoneQueryKey,
+    });
   });
 });
 
