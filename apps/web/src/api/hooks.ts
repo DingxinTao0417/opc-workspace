@@ -1007,7 +1007,7 @@ export function useDownloadInvoicePdf() {
   return useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       downloadInvoicePdf(id, name),
-    onError: async (_, variables) => {
+    onSettled: async (_data, _error, variables) => {
       await queryClient.invalidateQueries({
         queryKey: invoicePdfQueryKey(variables.id),
         exact: true,

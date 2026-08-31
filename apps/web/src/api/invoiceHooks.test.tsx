@@ -264,25 +264,42 @@ describe("invoice PDF hooks", () => {
     );
   });
 
-  it("invalidates PDF metadata after a failed download integrity check", async () => {
-    downloadInvoicePdfMock.mockRejectedValueOnce(new Error("mismatch"));
-    const queryClient = createQueryClient();
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useDownloadInvoicePdf(), {
-      wrapper: wrapperFor(queryClient),
-    });
+  it.each(["success", "failure"] as const)(
+    "invalidates PDF metadata after download %s",
+    async (outcome) => {
+      if (outcome === "success") {
+        downloadInvoicePdfMock.mockResolvedValueOnce({
+          blob: new Blob(["pdf"]),
+          fileName: "INV-202608-001.pdf",
+          mimeType: "application/pdf",
+        });
+      } else {
+        downloadInvoicePdfMock.mockRejectedValueOnce(new Error("mismatch"));
+      }
+      const queryClient = createQueryClient();
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+      const { result } = renderHook(() => useDownloadInvoicePdf(), {
+        wrapper: wrapperFor(queryClient),
+      });
 
-    act(() =>
-      result.current.mutate({
-        id: "invoice-1",
-        name: "INV-202608-001.pdf",
-      }),
-    );
-    await waitFor(() => expect(result.current.isError).toBe(true));
+      act(() =>
+        result.current.mutate({
+          id: "invoice-1",
+          name: "INV-202608-001.pdf",
+        }),
+      );
+      await waitFor(() =>
+        expect(
+          outcome === "success"
+            ? result.current.isSuccess
+            : result.current.isError,
+        ).toBe(true),
+      );
 
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: invoicePdfQueryKey("invoice-1"),
-      exact: true,
-    });
-  });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: invoicePdfQueryKey("invoice-1"),
+        exact: true,
+      });
+    },
+  );
 });
