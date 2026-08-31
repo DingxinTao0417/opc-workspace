@@ -19,6 +19,7 @@ import {
   useRemindersQuery,
   useUpdateReminder,
 } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   InboxItemPriority,
   Reminder,
@@ -258,10 +259,14 @@ export function ReminderManagerModal({
     cancelMutation.reset();
   }, [creating, reminderId, selected]);
 
-  useEffect(() => {
-    if (transitioning || !query.data || page <= totalPages) return;
-    setPage(totalPages);
-  }, [page, query.data, totalPages, transitioning]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   useEffect(() => {
     if (

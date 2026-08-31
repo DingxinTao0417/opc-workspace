@@ -22,6 +22,7 @@ import { InboxItemDetailModal } from "../components/InboxItemDetailModal";
 import { InboxItemFormModal } from "../components/InboxItemFormModal";
 import { PageHeader } from "../components/PageHeader";
 import { ReminderManagerModal } from "../components/ReminderManagerModal";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   InboxItem,
   InboxItemPriority,
@@ -285,10 +286,14 @@ export function InboxPage() {
   }, [items, query.data?.meta.serverNow]);
   const markAllError = mutationErrorMessage(markAllMutation.error);
 
-  useEffect(() => {
-    if (transitioning || !query.data || page <= totalPages) return;
-    setPage(totalPages);
-  }, [page, query.data, totalPages, transitioning]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   const switchView = (nextView: InboxItemView) => {
     setView(nextView);

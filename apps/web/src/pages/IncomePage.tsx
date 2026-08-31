@@ -20,6 +20,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { useLocalCalendar } from "../lib/localCalendar";
+import { useSettledPage } from "../lib/useSettledPage";
 import type {
   FinancialEntry,
   FinancialEntryStatus,
@@ -180,23 +181,14 @@ export function IncomePage() {
     previousCurrentMonth.current = currentMonth;
   }, [currentMonth, monthInput]);
 
-  useEffect(() => {
-    if (
-      !entriesQuery.isSuccess ||
-      entriesQuery.isFetching ||
-      entriesQuery.isPlaceholderData ||
-      page <= totalPages
-    ) {
-      return;
-    }
-    setPage(totalPages);
-  }, [
-    entriesQuery.isFetching,
-    entriesQuery.isPlaceholderData,
-    entriesQuery.isSuccess,
+  useSettledPage({
     page,
-    totalPages,
-  ]);
+    meta: entriesQuery.data?.meta,
+    isFetching: entriesQuery.isFetching,
+    isPlaceholderData: entriesQuery.isPlaceholderData,
+    isSuccess: entriesQuery.isSuccess,
+    setPage,
+  });
 
   const exportCSV = () => {
     exportMutation.mutate(

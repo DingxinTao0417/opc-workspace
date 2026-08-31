@@ -5,6 +5,7 @@ import type { PageMeta } from "../types/models";
 import { useSettledPage } from "./useSettledPage";
 
 interface HarnessProps {
+  isBlocked?: boolean;
   isFetching?: boolean;
   isPlaceholderData?: boolean;
   isSuccess?: boolean;
@@ -12,6 +13,7 @@ interface HarnessProps {
 }
 
 function Harness({
+  isBlocked = false,
   isFetching = false,
   isPlaceholderData = false,
   isSuccess = true,
@@ -21,6 +23,7 @@ function Harness({
   useSettledPage({
     page,
     meta,
+    isBlocked,
     isFetching,
     isPlaceholderData,
     isSuccess,
@@ -53,6 +56,9 @@ describe("useSettledPage", () => {
     rerender(
       <Harness isSuccess={false} meta={{ page: 3, pageSize: 10, total: 0 }} />,
     );
+    expect(screen.getByLabelText("当前页")).toHaveTextContent("3");
+
+    rerender(<Harness isBlocked meta={{ page: 3, pageSize: 10, total: 0 }} />);
     expect(screen.getByLabelText("当前页")).toHaveTextContent("3");
 
     rerender(<Harness meta={{ page: 2, pageSize: 10, total: 0 }} />);

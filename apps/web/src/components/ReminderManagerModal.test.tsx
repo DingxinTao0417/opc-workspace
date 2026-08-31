@@ -87,10 +87,13 @@ function mutation(
 }
 
 vi.mock("../api/hooks", () => ({
-  useRemindersQuery: (input: unknown, enabled: boolean) => {
+  useRemindersQuery: (input: { page?: number }, enabled: boolean) => {
     mocks.listHook(input, enabled);
     return {
-      data: { items: mocks.listItems, meta: mocks.listMeta },
+      data: {
+        items: mocks.listItems,
+        meta: { ...mocks.listMeta, page: input.page ?? 1 },
+      },
       isPending: mocks.listPending,
       isFetching: mocks.listFetching,
       isPlaceholderData: mocks.listPlaceholder,
@@ -601,6 +604,29 @@ describe("ReminderManagerModal", () => {
     await waitFor(() =>
       expect(mocks.listHook).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: "scheduled", page: 2, pageSize: 20 }),
+        true,
+      ),
+    );
+  });
+
+  it("settles on the last valid reminder page after the list shrinks", async () => {
+    mocks.listMeta = { ...mocks.listMeta, total: 21 };
+    const view = renderManager();
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    await waitFor(() =>
+      expect(mocks.listHook).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2, pageSize: 20 }),
+        true,
+      ),
+    );
+
+    mocks.listMeta = { ...mocks.listMeta, total: 0 };
+    view.rerender(<ReminderManagerModal {...baseProps} />);
+
+    await waitFor(() =>
+      expect(mocks.listHook).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, pageSize: 20 }),
         true,
       ),
     );

@@ -4,6 +4,7 @@ import type { PageMeta } from "../types/models";
 interface UseSettledPageOptions {
   page: number;
   meta: PageMeta | undefined;
+  isBlocked?: boolean;
   isFetching: boolean;
   isPlaceholderData: boolean;
   isSuccess: boolean;
@@ -13,6 +14,7 @@ interface UseSettledPageOptions {
 export function useSettledPage({
   page,
   meta,
+  isBlocked = false,
   isFetching,
   isPlaceholderData,
   isSuccess,
@@ -21,6 +23,7 @@ export function useSettledPage({
   useEffect(() => {
     if (
       !isSuccess ||
+      isBlocked ||
       isFetching ||
       isPlaceholderData ||
       !meta ||
@@ -42,5 +45,13 @@ export function useSettledPage({
     setPage((currentPage) =>
       currentPage === page && currentPage > lastPage ? lastPage : currentPage,
     );
-  }, [isFetching, isPlaceholderData, isSuccess, meta, page, setPage]);
+  }, [
+    isBlocked,
+    isFetching,
+    isPlaceholderData,
+    isSuccess,
+    meta,
+    page,
+    setPage,
+  ]);
 }

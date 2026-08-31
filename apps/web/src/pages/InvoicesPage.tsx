@@ -1,5 +1,5 @@
 import { Plus, Search } from "lucide-react";
-import { useDeferredValue, useEffect, useState } from "react";
+import { useDeferredValue, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInvoicesQuery } from "../api/hooks";
 import { InvoiceActions } from "../components/InvoiceActions";
@@ -11,6 +11,7 @@ import {
   invoiceStatusLabels,
 } from "../components/invoicePresentation";
 import { PageHeader } from "../components/PageHeader";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { Invoice, InvoiceStatus } from "../types/models";
 
 export function InvoicesPage() {
@@ -67,23 +68,14 @@ export function InvoicesPage() {
   const receivableCountError =
     sentCountQuery.isError || viewedCountQuery.isError;
 
-  useEffect(() => {
-    if (
-      !invoicesQuery.isSuccess ||
-      invoicesQuery.isFetching ||
-      invoicesQuery.isPlaceholderData ||
-      page <= totalPages
-    ) {
-      return;
-    }
-    setPage(totalPages);
-  }, [
-    invoicesQuery.isFetching,
-    invoicesQuery.isPlaceholderData,
-    invoicesQuery.isSuccess,
+  useSettledPage({
     page,
-    totalPages,
-  ]);
+    meta: invoicesQuery.data?.meta,
+    isFetching: invoicesQuery.isFetching,
+    isPlaceholderData: invoicesQuery.isPlaceholderData,
+    isSuccess: invoicesQuery.isSuccess,
+    setPage,
+  });
 
   const clearFilters = () => {
     setSearch("");

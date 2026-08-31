@@ -33,6 +33,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { RoadmapMilestoneDetailModal } from "../components/RoadmapMilestoneDetailModal";
 import { useLocalCalendar } from "../lib/localCalendar";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
 
 const statusLabels: Record<RoadmapMilestoneStatus, string> = {
@@ -921,17 +922,15 @@ export function RoadmapPage() {
     }
   }, [current, quarter, year]);
 
-  useEffect(() => {
-    if (
-      reordering ||
-      dateMoving ||
-      !query.data ||
-      query.isFetching ||
-      page <= totalPages
-    )
-      return;
-    setPage(totalPages);
-  }, [dateMoving, page, query.data, query.isFetching, reordering, totalPages]);
+  useSettledPage({
+    page,
+    meta: query.data?.meta,
+    isBlocked: reordering || dateMoving,
+    isFetching: query.isFetching,
+    isPlaceholderData: query.isPlaceholderData,
+    isSuccess: query.isSuccess,
+    setPage,
+  });
 
   useEffect(() => {
     if (!reorderReady || reorderInitialized) return;
