@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import type { RoadmapMilestone } from "../types/models";
 import { RoadmapPage } from "./RoadmapPage";
 
@@ -633,6 +634,7 @@ describe("RoadmapPage", () => {
   });
 
   it("loads an annual timeline and moves with the keyboard alternative", async () => {
+    const refetch = vi.fn();
     hooks.milestones.mockImplementation(
       (input: { page: number; pageSize: number }) => ({
         data: {
@@ -643,7 +645,7 @@ describe("RoadmapPage", () => {
         isFetching: false,
         isPending: false,
         isSuccess: true,
-        refetch: vi.fn(),
+        refetch,
       }),
     );
     render(
@@ -676,6 +678,20 @@ describe("RoadmapPage", () => {
       },
       expect.objectContaining({ onError: expect.any(Function) }),
     );
+    const callbacks = hooks.update.mock.calls[0][1] as {
+      onError: (error: unknown) => void;
+    };
+    act(() =>
+      callbacks.onError(
+        new ApiError("Milestone changed", {
+          code: "VERSION_CONFLICT",
+          status: 409,
+        }),
+      ),
+    );
+    expect(refetch).not.toHaveBeenCalled();
+    act(() => callbacks.onError(new Error("network failed")));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it("moves a dragged annual milestone to the dropped quarter", async () => {

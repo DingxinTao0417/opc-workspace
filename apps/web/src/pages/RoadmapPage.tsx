@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ApiError } from "../api/client";
 import {
   useArchiveRoadmapMilestone,
   useCreateRoadmapMilestone,
@@ -1000,6 +1001,11 @@ export function RoadmapPage() {
       },
     );
   };
+  const refreshAfterUnhandledMoveError = (error: unknown) => {
+    if (!(error instanceof ApiError && error.code === "VERSION_CONFLICT")) {
+      void query.refetch();
+    }
+  };
   const moveToQuarter = (
     milestone: RoadmapMilestone,
     nextYear: number,
@@ -1023,7 +1029,7 @@ export function RoadmapPage() {
           expectedVersion: milestone.version,
         },
       },
-      { onError: () => void query.refetch() },
+      { onError: refreshAfterUnhandledMoveError },
     );
   };
   const moveToDate = (milestone: RoadmapMilestone, targetDate: string) => {
@@ -1045,10 +1051,10 @@ export function RoadmapPage() {
           setDraggedId(null);
           setDateDraftInitialized(false);
         },
-        onError: () => {
+        onError: (error) => {
           setDraggedId(null);
           setDateDraftInitialized(false);
-          void query.refetch();
+          refreshAfterUnhandledMoveError(error);
         },
       },
     );
