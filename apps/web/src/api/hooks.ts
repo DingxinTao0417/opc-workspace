@@ -4160,6 +4160,10 @@ async function invalidateRoadmapReadModels(
   ]);
 }
 
+function isRoadmapFactsStale(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "VERSION_CONFLICT";
+}
+
 export function useCreateRoadmapMilestone() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -4183,6 +4187,11 @@ export function useUpdateRoadmapMilestone() {
     }) => updateRoadmapMilestone(id, input),
     onSuccess: async () => {
       await invalidateRoadmapReadModels(queryClient, true);
+    },
+    onError: async (error) => {
+      if (isRoadmapFactsStale(error)) {
+        await invalidateRoadmapReadModels(queryClient, true);
+      }
     },
   });
 }
@@ -4214,6 +4223,11 @@ export function useArchiveRoadmapMilestone() {
     onSuccess: async () => {
       await invalidateRoadmapReadModels(queryClient, true);
     },
+    onError: async (error) => {
+      if (isRoadmapFactsStale(error)) {
+        await invalidateRoadmapReadModels(queryClient, true);
+      }
+    },
   });
 }
 
@@ -4230,6 +4244,11 @@ export function useRestoreRoadmapMilestone() {
     onSuccess: async () => {
       await invalidateRoadmapReadModels(queryClient, true);
     },
+    onError: async (error) => {
+      if (isRoadmapFactsStale(error)) {
+        await invalidateRoadmapReadModels(queryClient, true);
+      }
+    },
   });
 }
 
@@ -4245,6 +4264,11 @@ export function useDeleteRoadmapMilestone() {
     }) => deleteRoadmapMilestone(id, expectedVersion),
     onSuccess: async () => {
       await invalidateRoadmapReadModels(queryClient, true);
+    },
+    onError: async (error) => {
+      if (isRoadmapFactsStale(error)) {
+        await invalidateRoadmapReadModels(queryClient, true);
+      }
     },
   });
 }
