@@ -659,6 +659,20 @@ async function invalidateActorReferences(queryClient: QueryClient) {
   ]);
 }
 
+async function invalidateActorOptions(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: [...actorQueryKey, "assignment-options"],
+    }),
+    queryClient.invalidateQueries({
+      queryKey: [...actorQueryKey, "client-contact-options"],
+    }),
+    queryClient.invalidateQueries({
+      queryKey: [...actorQueryKey, "client-followup-options"],
+    }),
+  ]);
+}
+
 export function useUpdateActor() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -671,7 +685,10 @@ export function useUpdateActor() {
     },
     onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await invalidateActorReferences(queryClient);
+        await Promise.all([
+          invalidateActorReferences(queryClient),
+          invalidateActorOptions(queryClient),
+        ]);
         await queryClient.invalidateQueries({
           queryKey: actorDetailQueryKey(variables.id),
           exact: true,

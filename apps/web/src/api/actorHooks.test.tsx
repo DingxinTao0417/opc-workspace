@@ -230,6 +230,15 @@ describe("actor queries", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(invalidate).toHaveBeenCalledWith({
+      queryKey: [...actorQueryKey, "assignment-options"],
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: [...actorQueryKey, "client-contact-options"],
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: [...actorQueryKey, "client-followup-options"],
+    });
+    expect(invalidate).toHaveBeenCalledWith({
       queryKey: taskAssignmentQueryRootKey,
     });
     expect(invalidate).toHaveBeenCalledWith({
