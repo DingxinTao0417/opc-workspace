@@ -8,6 +8,7 @@ import {
   clientQueryKey,
   projectDetailQueryKey,
   projectQueryKey,
+  roadmapMilestoneQueryKey,
   searchQueryKey,
   useProjectOptionsQuery,
   useTransitionProject,
@@ -99,6 +100,9 @@ describe("useTransitionProject", () => {
     ).toEqual(completedProject);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: roadmapMilestoneQueryKey,
+    });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
   });
 
@@ -127,6 +131,9 @@ describe("useTransitionProject", () => {
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: roadmapMilestoneQueryKey,
+      });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
     });
   });

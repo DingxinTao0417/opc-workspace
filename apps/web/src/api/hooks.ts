@@ -4540,6 +4540,9 @@ export function useUpdateProject() {
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
       await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
       await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
       await invalidateFocusReadModels(queryClient, { report: true });
       await invalidateUnifiedSearch(queryClient);
     },
@@ -4565,12 +4568,18 @@ export function useTransitionProject() {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
       await queryClient.invalidateQueries({ queryKey: projectQueryKey });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
       await invalidateUnifiedSearch(queryClient);
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         await queryClient.invalidateQueries({ queryKey: projectQueryKey });
         await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await queryClient.invalidateQueries({
+          queryKey: roadmapMilestoneQueryKey,
+        });
         await invalidateUnifiedSearch(queryClient);
       }
     },
@@ -4597,6 +4606,9 @@ export function useDeleteProject() {
       await queryClient.invalidateQueries({ queryKey: invoiceQueryKey });
       await queryClient.invalidateQueries({ queryKey: financialEntryQueryKey });
       await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: roadmapMilestoneQueryKey,
+      });
       await invalidateUnifiedSearch(queryClient);
       // The deleted project's report is still actively observed until the
       // detail page navigates away. Mark all derived reports stale without
