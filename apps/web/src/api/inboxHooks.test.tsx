@@ -3,9 +3,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "../types/models";
+import { ApiError } from "./client";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxDetailQueryKey,
+  inboxQueryKey,
+  inboxTaskRelationQueryKey,
   searchQueryKey,
   useCreateInboxItem,
   useInboxItemCommand,
@@ -200,6 +203,39 @@ describe("inbox hooks", () => {
     ).toEqual(inboxItem(2));
   });
 
+  it("leaves one conflict refresh to the active Inbox detail editor", async () => {
+    calls.command.mockRejectedValue(
+      new ApiError("条目版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useInboxItemCommand(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        action: "read",
+        id: inboxItem().id,
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxDetailQueryKey(inboxItem().id),
+      exact: true,
+      refetchType: "none",
+    });
+  });
+
   it("reuses the relation key and invalidates Projects even when the source snapshot predates Project assignment", async () => {
     const mutationResult = {
       inboxItem: projectFollowupItem(2, false),
@@ -257,6 +293,72 @@ describe("inbox hooks", () => {
     expect(queryClient.getQueryState(projectCacheKey)?.isInvalidated).toBe(
       true,
     );
+  });
+
+  it("leaves one conflict refresh to the active Inbox task relation editor", async () => {
+    calls.linkTask.mockRejectedValue(
+      new ApiError("条目版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useLinkInboxItemTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        inboxItemId: inboxItem().id,
+        taskId: "task-1",
+        isRequired: true,
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxDetailQueryKey(inboxItem().id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxTaskRelationQueryKey(inboxItem().id),
+      refetchType: "none",
+    });
+  });
+
+  it("still refreshes the whole Inbox tree after a missing relation target", async () => {
+    calls.linkTask.mockRejectedValue(
+      new ApiError("条目不存在", { code: "NOT_FOUND", status: 404 }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useLinkInboxItemTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        inboxItemId: inboxItem().id,
+        taskId: "task-1",
+        isRequired: true,
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: inboxDetailQueryKey(inboxItem().id),
+      exact: true,
+      refetchType: "none",
+    });
   });
 
   it("invalidates Task, Today, and Project read models after an atomic split", async () => {

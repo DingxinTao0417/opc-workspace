@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { QueryClient } from "@tanstack/react-query";
+import type { Query, QueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import {
   ApiError,
@@ -2129,7 +2129,11 @@ async function invalidateInboxFacts(
   queryClient: QueryClient,
   id?: string,
   item?: InboxItem,
-  projectsMayChange = false,
+  options: {
+    projectsMayChange?: boolean;
+    preserveActiveDetailId?: string;
+    preserveActiveTaskRelationsItemId?: string;
+  } = {},
 ): Promise<void> {
   const sourceItem =
     item ??
@@ -2137,16 +2141,47 @@ async function invalidateInboxFacts(
       ? queryClient.getQueryData<InboxItem>(inboxDetailQueryKey(id))
       : undefined);
   const projectFactsMayChange =
-    projectsMayChange ||
+    options.projectsMayChange ||
     (sourceItem &&
       (sourceItem.sourceEntityType === "task_artifact" ||
         sourceItem.sourceEntityType === "task" ||
         sourceItem.sourceEntityType === "task_due" ||
         sourceItem.sourceEntityType === "project_completion"));
+  const preserveActiveInboxQuery = (query: Query): boolean =>
+    (Boolean(options.preserveActiveDetailId) &&
+      query.queryKey[1] === "detail" &&
+      query.queryKey[2] === options.preserveActiveDetailId) ||
+    (Boolean(options.preserveActiveTaskRelationsItemId) &&
+      query.queryKey[1] === "tasks" &&
+      query.queryKey[2] === options.preserveActiveTaskRelationsItemId);
   const invalidations: Array<Promise<unknown>> = [
-    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    options.preserveActiveDetailId || options.preserveActiveTaskRelationsItemId
+      ? queryClient.invalidateQueries({
+          queryKey: inboxQueryKey,
+          predicate: (query) => !preserveActiveInboxQuery(query),
+        })
+      : queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
     invalidateUnifiedSearch(queryClient),
   ];
+  if (options.preserveActiveDetailId) {
+    invalidations.push(
+      queryClient.invalidateQueries({
+        queryKey: inboxDetailQueryKey(options.preserveActiveDetailId),
+        exact: true,
+        refetchType: "none",
+      }),
+    );
+  }
+  if (options.preserveActiveTaskRelationsItemId) {
+    invalidations.push(
+      queryClient.invalidateQueries({
+        queryKey: inboxTaskRelationQueryKey(
+          options.preserveActiveTaskRelationsItemId,
+        ),
+        refetchType: "none",
+      }),
+    );
+  }
   if (id) {
     invalidations.push(
       queryClient.invalidateQueries({ queryKey: inboxEventQueryKey(id) }),
@@ -2164,6 +2199,13 @@ function inboxFactsNeedRefresh(error: unknown): boolean {
     (error.status === 404 ||
       error.status === 409 ||
       error.code === "VERSION_CONFLICT")
+  );
+}
+
+function inboxConflictOwnsRefresh(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 409 || error.code === "VERSION_CONFLICT")
   );
 }
 
@@ -2197,7 +2239,11 @@ export function useUpdateInboxItem() {
     },
     onError: async (error, variables) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, variables.id);
+        await invalidateInboxFacts(queryClient, variables.id, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? variables.id
+            : undefined,
+        });
       }
     },
   });
@@ -2221,7 +2267,11 @@ export function useInboxItemCommand() {
     },
     onError: async (error, variables) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, variables.id);
+        await invalidateInboxFacts(queryClient, variables.id, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? variables.id
+            : undefined,
+        });
       }
     },
   });
@@ -2288,7 +2338,14 @@ export function useLinkInboxItemTask() {
     },
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, input.inboxItemId);
+        await invalidateInboxFacts(queryClient, input.inboxItemId, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+          preserveActiveTaskRelationsItemId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+        });
       }
     },
   });
@@ -2307,7 +2364,14 @@ export function useUpdateInboxItemTaskRequirement() {
     },
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, input.inboxItemId);
+        await invalidateInboxFacts(queryClient, input.inboxItemId, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+          preserveActiveTaskRelationsItemId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+        });
       }
     },
   });
@@ -2325,7 +2389,14 @@ export function useUnlinkInboxItemTask() {
     },
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, input.inboxItemId);
+        await invalidateInboxFacts(queryClient, input.inboxItemId, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+          preserveActiveTaskRelationsItemId: inboxConflictOwnsRefresh(error)
+            ? input.inboxItemId
+            : undefined,
+        });
       }
     },
   });
@@ -2348,7 +2419,7 @@ export function useSplitInboxItem() {
           queryClient,
           result.inboxItem.id,
           result.inboxItem,
-          true,
+          { projectsMayChange: true },
         ),
         queryClient.invalidateQueries({ queryKey: taskQueryKey }),
         queryClient.invalidateQueries({ queryKey: ["stats", "today"] }),
@@ -2375,7 +2446,14 @@ export function useForceResolveInboxItem() {
     },
     onError: async (error, input) => {
       if (inboxFactsNeedRefresh(error)) {
-        await invalidateInboxFacts(queryClient, input.id);
+        await invalidateInboxFacts(queryClient, input.id, undefined, {
+          preserveActiveDetailId: inboxConflictOwnsRefresh(error)
+            ? input.id
+            : undefined,
+          preserveActiveTaskRelationsItemId: inboxConflictOwnsRefresh(error)
+            ? input.id
+            : undefined,
+        });
       }
     },
   });
