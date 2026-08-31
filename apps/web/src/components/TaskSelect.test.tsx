@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task, TaskStatus } from "../types/models";
@@ -110,6 +111,8 @@ describe("TaskSelect", () => {
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
       refetch: vi.fn(),
     };
     hooks.selected = {
@@ -273,6 +276,48 @@ describe("TaskSelect", () => {
     expect(hooks.optionsHook).toHaveBeenLastCalledWith(
       { page: 1, pageSize: 20, q: undefined, sort: "title" },
       true,
+    );
+  });
+
+  it("settles on the last valid page when task options shrink", async () => {
+    let total = 21;
+    hooks.optionsHook.mockImplementation((input: { page: number }) => ({
+      data: list(input.page === 1 ? tasks.slice(0, 2) : [], {
+        page: input.page,
+        pageSize: 20,
+        total,
+      }),
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    }));
+    const view = renderSelect();
+    fireEvent.focus(screen.getByRole("combobox", { name: "父任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页任务" }));
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      { page: 2, pageSize: 20, q: undefined, sort: "title" },
+      true,
+    );
+
+    total = 0;
+    view.rerender(
+      <TaskSelect
+        ariaLabel="父任务"
+        emptyLabel="无父任务"
+        onChange={view.onChange}
+        value=""
+        variant="form"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+        { page: 1, pageSize: 20, q: undefined, sort: "title" },
+        true,
+      ),
     );
   });
 

@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, ProjectStatus } from "../types/models";
@@ -111,6 +112,8 @@ describe("ProjectSelect", () => {
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
       refetch: vi.fn(),
     };
     hooks.selected = {
@@ -474,6 +477,56 @@ describe("ProjectSelect", () => {
       true,
       false,
       undefined,
+    );
+  });
+
+  it("settles on the last valid page when project options shrink", async () => {
+    let total = 3;
+    hooks.optionsHook.mockImplementation(
+      (_search: string, requestedPage: number) => ({
+        data: list(requestedPage === 1 ? projects.slice(0, 2) : [], {
+          page: requestedPage,
+          pageSize: 2,
+          total,
+        }),
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isPlaceholderData: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    const view = renderSelect();
+    fireEvent.focus(screen.getByRole("combobox", { name: "项目" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页项目" }));
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+      "",
+      2,
+      true,
+      false,
+      undefined,
+    );
+
+    total = 0;
+    view.rerender(
+      <ProjectSelect
+        ariaLabel="项目"
+        emptyLabel="未归项目"
+        onChange={view.onChange}
+        value=""
+        variant="form"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(hooks.optionsHook).toHaveBeenLastCalledWith(
+        "",
+        1,
+        true,
+        false,
+        undefined,
+      ),
     );
   });
 

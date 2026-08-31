@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientStatus } from "../types/models";
@@ -86,6 +87,8 @@ describe("ClientSelect", () => {
       isError: false,
       isFetching: false,
       isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
       refetch: vi.fn(),
     };
     hooks.selected = {
@@ -337,6 +340,44 @@ describe("ClientSelect", () => {
     expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true);
     fireEvent.keyDown(combobox, { key: "PageDown" });
     expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 2, true);
+  });
+
+  it("settles on the last valid page when client options shrink", async () => {
+    let total = 3;
+    hooks.optionsHook.mockImplementation(
+      (_search: string, requestedPage: number) => ({
+        data: list(requestedPage === 1 ? firstPage.slice(0, 2) : [], {
+          page: requestedPage,
+          pageSize: 2,
+          total,
+        }),
+        isError: false,
+        isFetching: false,
+        isPending: false,
+        isPlaceholderData: false,
+        isSuccess: true,
+        refetch: vi.fn(),
+      }),
+    );
+    const view = renderSelect();
+    fireEvent.focus(screen.getByRole("combobox", { name: "客户" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一页客户" }));
+    expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 2, true);
+
+    total = 0;
+    view.rerender(
+      <ClientSelect
+        ariaLabel="客户"
+        emptyLabel="全部客户"
+        onChange={view.onChange}
+        value=""
+        variant="form"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(hooks.optionsHook).toHaveBeenLastCalledWith("", 1, true),
+    );
   });
 
   it("closes on Escape without bubbling to an outer modal handler", () => {

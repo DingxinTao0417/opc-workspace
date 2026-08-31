@@ -20,6 +20,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTaskPageQuery, useTaskQuery } from "../api/hooks";
+import { useSettledPage } from "../lib/useSettledPage";
 import type { Task, TaskStatus } from "../types/models";
 
 const debounceMilliseconds = 250;
@@ -287,10 +288,15 @@ export function TaskSelect({
     });
   }, [menuOptions, open]);
 
-  useEffect(() => {
-    if (!open || optionsQuery.isFetching || page <= totalPages) return;
-    setPage(totalPages);
-  }, [open, optionsQuery.isFetching, page, totalPages]);
+  useSettledPage({
+    page,
+    meta,
+    isBlocked: !open,
+    isFetching: optionsQuery.isFetching,
+    isPlaceholderData: optionsQuery.isPlaceholderData,
+    isSuccess: optionsQuery.isSuccess,
+    setPage,
+  });
 
   useEffect(() => {
     if (!open || disabled) return;
