@@ -1206,19 +1206,27 @@ export function useClientFollowupActorOptionsQuery(enabled = true) {
 
 function useInvalidateClientFollowups() {
   const queryClient = useQueryClient();
-  return async (clientId: string) => {
+  return async (clientId?: string) => {
     await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: clientFollowupQueryKey(clientId),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: clientDetailQueryKey(clientId),
-      }),
+      ...(clientId
+        ? [
+            queryClient.invalidateQueries({
+              queryKey: clientFollowupQueryKey(clientId),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: clientDetailQueryKey(clientId),
+            }),
+          ]
+        : []),
       queryClient.invalidateQueries({ queryKey: clientQueryKey }),
       queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
       invalidateUnifiedSearch(queryClient),
     ]);
   };
+}
+
+function isClientFollowupFactsStale(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "VERSION_CONFLICT";
 }
 
 export function useCreateClientFollowup() {
@@ -1250,6 +1258,9 @@ export function useUpdateClientFollowup() {
       input: UpdateClientFollowupInput;
     }) => updateClientFollowup(id, input),
     onSuccess: async (followup) => invalidate(followup.clientId),
+    onError: async (error) => {
+      if (isClientFollowupFactsStale(error)) await invalidate();
+    },
   });
 }
 
@@ -1264,6 +1275,9 @@ export function useCompleteClientFollowup() {
       input: CompleteClientFollowupInput;
     }) => completeClientFollowup(id, input),
     onSuccess: async (followup) => invalidate(followup.clientId),
+    onError: async (error) => {
+      if (isClientFollowupFactsStale(error)) await invalidate();
+    },
   });
 }
 
@@ -1278,6 +1292,9 @@ export function useSkipClientFollowup() {
       input: SkipClientFollowupInput;
     }) => skipClientFollowup(id, input),
     onSuccess: async (followup) => invalidate(followup.clientId),
+    onError: async (error) => {
+      if (isClientFollowupFactsStale(error)) await invalidate();
+    },
   });
 }
 
@@ -1292,6 +1309,9 @@ export function useCancelClientFollowup() {
       input: CancelClientFollowupInput;
     }) => cancelClientFollowup(id, input),
     onSuccess: async (followup) => invalidate(followup.clientId),
+    onError: async (error) => {
+      if (isClientFollowupFactsStale(error)) await invalidate();
+    },
   });
 }
 
@@ -1306,6 +1326,9 @@ export function useRescheduleClientFollowup() {
       input: RescheduleClientFollowupInput;
     }) => rescheduleClientFollowup(id, input),
     onSuccess: async (result) => invalidate(result.next.clientId),
+    onError: async (error) => {
+      if (isClientFollowupFactsStale(error)) await invalidate();
+    },
   });
 }
 

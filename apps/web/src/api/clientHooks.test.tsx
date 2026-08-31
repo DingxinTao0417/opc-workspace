@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientFollowup, ClientInput } from "../types/models";
+import { ApiError } from "./client";
 import {
   clientQueryKey,
   financialEntryQueryKey,
@@ -336,5 +337,37 @@ describe("client hooks", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
     expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+  });
+
+  it("refreshes client, Inbox, and search facts after a followup conflict", async () => {
+    calls.completeFollowup.mockRejectedValue(
+      new ApiError("Followup changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useCompleteClientFollowup(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: clientFollowup.id,
+        input: {
+          result: "已确认",
+          nextStep: null,
+          completedAt: null,
+          nextFollowup: null,
+          expectedVersion: 1,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
 });
