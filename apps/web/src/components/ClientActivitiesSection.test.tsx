@@ -124,6 +124,7 @@ describe("ClientActivitiesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
     expect(state.update.mutate).toHaveBeenCalledWith(
       {
+        clientId: "client-1",
         id: activity.id,
         input: expect.objectContaining({
           title: "更新沟通",
@@ -143,6 +144,7 @@ describe("ClientActivitiesSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "确认删除活动" }));
     expect(state.remove.mutate).toHaveBeenCalledWith(
       {
+        clientId: "client-1",
         id: activity.id,
         input: { reason: "重复记录", expectedVersion: 2 },
       },

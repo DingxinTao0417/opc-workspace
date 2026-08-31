@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Client, ClientFollowup, ClientInput } from "../types/models";
 import { ApiError } from "./client";
 import {
+  clientActivityQueryKey,
   clientDetailQueryKey,
   clientQueryKey,
   financialEntryQueryKey,
@@ -18,7 +19,9 @@ import {
   useCompleteClientFollowup,
   useCreateClient,
   useClientFollowupsQuery,
+  useDeleteClientActivity,
   useDeleteClient,
+  useUpdateClientActivity,
   useUpdateClient,
 } from "./hooks";
 
@@ -26,10 +29,12 @@ const calls = vi.hoisted(() => ({
   completeFollowup: vi.fn(),
   create: vi.fn(),
   delete: vi.fn(),
+  deleteActivity: vi.fn(),
   listFollowups: vi.fn(),
   listActorLinks: vi.fn(),
   list: vi.fn(),
   update: vi.fn(),
+  updateActivity: vi.fn(),
 }));
 
 vi.mock("./client", async () => {
@@ -38,11 +43,13 @@ vi.mock("./client", async () => {
     ...actual,
     createClient: calls.create,
     deleteClient: calls.delete,
+    deleteClientActivity: calls.deleteActivity,
     completeClientFollowup: calls.completeFollowup,
     getClientFollowups: calls.listFollowups,
     getClientActorLinks: calls.listActorLinks,
     getClients: calls.list,
     updateClient: calls.update,
+    updateClientActivity: calls.updateActivity,
   };
 });
 
@@ -380,6 +387,55 @@ describe("client hooks", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
+
+  it.each(["update", "delete"] as const)(
+    "leaves the active activity list refresh to the %s editor after a conflict",
+    async (operation) => {
+      const conflict = new ApiError("Activity changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      });
+      const queryClient = createQueryClient();
+      const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+      if (operation === "update") {
+        calls.updateActivity.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useUpdateClientActivity(), {
+          wrapper: wrapperFor(queryClient),
+        });
+        act(() =>
+          result.current.mutate({
+            clientId: client.id,
+            id: "activity-1",
+            input: { title: "并发活动", expectedVersion: 2 },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      } else {
+        calls.deleteActivity.mockRejectedValue(conflict);
+        const { result } = renderHook(() => useDeleteClientActivity(), {
+          wrapper: wrapperFor(queryClient),
+        });
+        act(() =>
+          result.current.mutate({
+            clientId: client.id,
+            id: "activity-1",
+            input: { reason: "重复记录", expectedVersion: 2 },
+          }),
+        );
+        await waitFor(() => expect(result.current.isError).toBe(true));
+      }
+
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: clientQueryKey,
+        predicate: expect.any(Function),
+      });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: clientActivityQueryKey(client.id),
+        refetchType: "none",
+      });
+    },
+  );
 
   it("refreshes Inbox projections after completing a client followup", async () => {
     calls.completeFollowup.mockResolvedValue(clientFollowup);

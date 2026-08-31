@@ -197,6 +197,7 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
     if (!editing) return;
     updateMutation.mutate(
       {
+        clientId,
         id: editing.id,
         input: {
           kind: draft.kind,
@@ -227,6 +228,7 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
     resetFeedback();
     deleteMutation.mutate(
       {
+        clientId,
         id: deleteCandidate.id,
         input: { reason, expectedVersion: deleteCandidate.version },
       },

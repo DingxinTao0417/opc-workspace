@@ -1431,9 +1431,11 @@ export function useUpdateClientActivity() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
+      clientId: _clientId,
       id,
       input,
     }: {
+      clientId: string;
       id: string;
       input: UpdateClientActivityInput;
     }) => updateClientActivity(id, input),
@@ -1443,9 +1445,9 @@ export function useUpdateClientActivity() {
       });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await invalidateClientActivityConflict(queryClient, variables.clientId);
       }
     },
   });
@@ -1455,9 +1457,11 @@ export function useDeleteClientActivity() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
+      clientId: _clientId,
       id,
       input,
     }: {
+      clientId: string;
       id: string;
       input: DeleteClientActivityInput;
     }) => deleteClientActivity(id, input),
@@ -1467,12 +1471,30 @@ export function useDeleteClientActivity() {
       });
       await queryClient.invalidateQueries({ queryKey: clientQueryKey });
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
+        await invalidateClientActivityConflict(queryClient, variables.clientId);
       }
     },
   });
+}
+
+async function invalidateClientActivityConflict(
+  queryClient: QueryClient,
+  clientId: string,
+): Promise<void> {
+  const activityKey = clientActivityQueryKey(clientId);
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: clientQueryKey,
+      predicate: (query) =>
+        !activityKey.every((part, index) => query.queryKey[index] === part),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: activityKey,
+      refetchType: "none",
+    }),
+  ]);
 }
 
 export const clientAttachmentQueryKey = (clientId: string) =>
