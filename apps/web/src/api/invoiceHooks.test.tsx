@@ -199,6 +199,45 @@ describe("useTransitionInvoice", () => {
       queryKey: roadmapMilestoneQueryKey,
     });
   });
+
+  it("refreshes derived facts without auto-refetching the conflicted invoice detail", async () => {
+    transitionInvoiceMock.mockRejectedValue(
+      new ApiError("Invoice changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useTransitionInvoice(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: paidInvoice.id,
+        input: { action: "mark_paid", expectedVersion: 3 },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: invoiceQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: invoiceDetailQueryKey(paidInvoice.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: financialEntryQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: incomeStatsQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
+  });
 });
 
 describe("invoice PDF hooks", () => {
@@ -262,6 +301,29 @@ describe("invoice PDF hooks", () => {
     expect(generateInvoicePdfMock.mock.calls[1][2]).not.toBe(
       generateInvoicePdfMock.mock.calls[0][2],
     );
+  });
+
+  it("marks a conflicted invoice detail stale without racing the explicit refresh", async () => {
+    generateInvoicePdfMock.mockRejectedValue(
+      new ApiError("Invoice changed", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useGenerateInvoicePdf(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() => result.current.mutate({ id: "invoice-1", expectedVersion: 4 }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: invoiceDetailQueryKey("invoice-1"),
+      exact: true,
+      refetchType: "none",
+    });
   });
 
   it.each(["success", "failure"] as const)(

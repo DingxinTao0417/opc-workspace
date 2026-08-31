@@ -1033,6 +1033,7 @@ export function useGenerateInvoicePdf() {
           await queryClient.invalidateQueries({
             queryKey: invoiceDetailQueryKey(variables.id),
             exact: true,
+            refetchType: "none",
           });
         }
       }
@@ -1054,9 +1055,30 @@ export function useDownloadInvoicePdf() {
   });
 }
 
-async function invalidateInvoiceReadModels(queryClient: QueryClient) {
+async function invalidateInvoiceReadModels(
+  queryClient: QueryClient,
+  preserveActiveDetailId?: string,
+) {
+  const invoiceQueries = preserveActiveDetailId
+    ? [
+        queryClient.invalidateQueries({
+          queryKey: invoiceQueryKey,
+          predicate: (query) =>
+            !(
+              query.queryKey.length === 3 &&
+              query.queryKey[1] === "detail" &&
+              query.queryKey[2] === preserveActiveDetailId
+            ),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: invoiceDetailQueryKey(preserveActiveDetailId),
+          exact: true,
+          refetchType: "none",
+        }),
+      ]
+    : [queryClient.invalidateQueries({ queryKey: invoiceQueryKey })];
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
+    ...invoiceQueries,
     queryClient.invalidateQueries({ queryKey: financialEntryQueryKey }),
     queryClient.invalidateQueries({ queryKey: incomeStatsQueryKey }),
     queryClient.invalidateQueries({ queryKey: projectQueryKey }),
@@ -1093,9 +1115,9 @@ export function useUpdateInvoice() {
       queryClient.setQueryData(invoiceDetailQueryKey(invoice.id), invoice);
       await invalidateInvoiceReadModels(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await invalidateInvoiceReadModels(queryClient);
+        await invalidateInvoiceReadModels(queryClient, variables.id);
       }
     },
   });
@@ -1138,7 +1160,7 @@ export function useTransitionInvoice() {
           attempt.current = null;
         }
         if (error.code === "VERSION_CONFLICT") {
-          await invalidateInvoiceReadModels(queryClient);
+          await invalidateInvoiceReadModels(queryClient, variables.id);
           if (variables.input.action === "mark_overdue") {
             await Promise.all([
               invalidateTaskFacts(queryClient),
@@ -1167,9 +1189,9 @@ export function useDeleteInvoice() {
       });
       await invalidateInvoiceReadModels(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await invalidateInvoiceReadModels(queryClient);
+        await invalidateInvoiceReadModels(queryClient, variables.id);
       }
     },
   });
