@@ -3116,9 +3116,10 @@ function submitOutputFingerprint(
 
 async function invalidateTaskAggregates(
   queryClient: QueryClient,
+  options: { preserveActiveDetailId?: string } = {},
 ): Promise<void> {
   await Promise.all([
-    invalidateTaskFacts(queryClient),
+    invalidateTaskFacts(queryClient, options),
     queryClient.invalidateQueries({ queryKey: taskSubmissionQueryRootKey }),
     queryClient.invalidateQueries({ queryKey: taskArtifactQueryRootKey }),
     queryClient.invalidateQueries({ queryKey: taskAssignmentQueryRootKey }),
@@ -3276,6 +3277,17 @@ export function useUpdateTask() {
         report: true,
       });
     },
+    onError: async (error, variables) => {
+      if (isTaskFactsStale(error)) {
+        await invalidateTaskAggregates(queryClient, {
+          preserveActiveDetailId: variables.id,
+        });
+        await invalidateFocusReadModels(queryClient, {
+          history: true,
+          report: true,
+        });
+      }
+    },
   });
 }
 
@@ -3318,9 +3330,29 @@ export function useDeleteTask() {
   });
 }
 
-async function invalidateTaskFacts(queryClient: QueryClient): Promise<void> {
+async function invalidateTaskFacts(
+  queryClient: QueryClient,
+  options: { preserveActiveDetailId?: string } = {},
+): Promise<void> {
+  const taskQueries = options.preserveActiveDetailId
+    ? [
+        queryClient.invalidateQueries({
+          queryKey: taskQueryKey,
+          predicate: (query) =>
+            !(
+              query.queryKey.length === 2 &&
+              query.queryKey[1] === options.preserveActiveDetailId
+            ),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: taskDetailQueryKey(options.preserveActiveDetailId),
+          exact: true,
+          refetchType: "none",
+        }),
+      ]
+    : [queryClient.invalidateQueries({ queryKey: taskQueryKey })];
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: taskQueryKey }),
+    ...taskQueries,
     invalidateUnifiedSearch(queryClient),
     refreshProjectFacts(queryClient),
     queryClient.invalidateQueries({ queryKey: roadmapMilestoneQueryKey }),

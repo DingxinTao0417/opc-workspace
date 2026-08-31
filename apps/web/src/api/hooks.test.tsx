@@ -17,6 +17,7 @@ import type {
 import { ApiError } from "./client";
 import {
   contentItemQueryKey,
+  inboxQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
@@ -1473,6 +1474,59 @@ describe("task update mutation", () => {
     expect(queryClient.getQueryState(contentItemQueryKey)?.isInvalidated).toBe(
       true,
     );
+  });
+
+  it("refreshes every derived task fact after a version conflict", async () => {
+    updateTaskMock.mockRejectedValue(
+      new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: task.id,
+        input: {
+          title: "并发编辑",
+          description: task.description,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          plannedDate: task.plannedDate,
+          estimatedMinutes: task.estimatedMinutes,
+          expectedVersion: task.version,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskQueryKey,
+      predicate: expect.any(Function),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: taskDetailQueryKey(task.id),
+      exact: true,
+      refetchType: "none",
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: roadmapMilestoneQueryKey,
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: contentItemQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["stats", "today"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: searchQueryKey });
   });
 });
 

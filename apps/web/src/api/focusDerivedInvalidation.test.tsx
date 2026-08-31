@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project, Task } from "../types/models";
+import { ApiError } from "./client";
 import {
   financialEntryQueryKey,
   focusReportQueryKey,
@@ -148,6 +149,41 @@ describe("Focus query-time attribution invalidation", () => {
       }),
     );
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: focusReportQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: focusSessionHistoryQueryKey,
+    });
+  });
+
+  it("refreshes report and history after a Task edit conflict", async () => {
+    clientMocks.updateTask.mockRejectedValue(
+      new ApiError("任务版本冲突", {
+        code: "VERSION_CONFLICT",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useUpdateTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: task.id,
+        input: {
+          title: "并发编辑",
+          description: task.description,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          plannedDate: task.plannedDate,
+          estimatedMinutes: task.estimatedMinutes,
+          expectedVersion: task.version,
+        },
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: focusReportQueryKey });
     expect(invalidate).toHaveBeenCalledWith({
