@@ -4809,11 +4809,11 @@ export function useCreateProject() {
   });
 }
 
-async function invalidateProjectEditFacts(
+function invalidateProjectQueries(
   queryClient: QueryClient,
   preserveActiveDetailId?: string,
-): Promise<void> {
-  const projectQueries = preserveActiveDetailId
+): Array<Promise<unknown>> {
+  return preserveActiveDetailId
     ? [
         queryClient.invalidateQueries({
           queryKey: projectQueryKey,
@@ -4831,8 +4831,14 @@ async function invalidateProjectEditFacts(
         }),
       ]
     : [queryClient.invalidateQueries({ queryKey: projectQueryKey })];
+}
+
+async function invalidateProjectEditFacts(
+  queryClient: QueryClient,
+  preserveActiveDetailId?: string,
+): Promise<void> {
   await Promise.all([
-    ...projectQueries,
+    ...invalidateProjectQueries(queryClient, preserveActiveDetailId),
     queryClient.invalidateQueries({ queryKey: taskQueryKey }),
     queryClient.invalidateQueries({ queryKey: clientQueryKey }),
     queryClient.invalidateQueries({ queryKey: invoiceQueryKey }),
@@ -4894,15 +4900,17 @@ export function useTransitionProject() {
       }
       await invalidateUnifiedSearch(queryClient);
     },
-    onError: async (error) => {
+    onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        await queryClient.invalidateQueries({ queryKey: projectQueryKey });
-        await queryClient.invalidateQueries({ queryKey: clientQueryKey });
-        await queryClient.invalidateQueries({
-          queryKey: roadmapMilestoneQueryKey,
-        });
-        await invalidateProjectCompletionFacts(queryClient);
-        await invalidateUnifiedSearch(queryClient);
+        await Promise.all([
+          ...invalidateProjectQueries(queryClient, variables.id),
+          queryClient.invalidateQueries({ queryKey: clientQueryKey }),
+          queryClient.invalidateQueries({
+            queryKey: roadmapMilestoneQueryKey,
+          }),
+          invalidateProjectCompletionFacts(queryClient),
+          invalidateUnifiedSearch(queryClient),
+        ]);
       }
     },
   });

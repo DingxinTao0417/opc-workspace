@@ -140,7 +140,15 @@ describe("useTransitionProject", () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     await waitFor(() => {
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: projectQueryKey });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: projectQueryKey,
+        predicate: expect.any(Function),
+      });
+      expect(invalidate).toHaveBeenCalledWith({
+        queryKey: projectDetailQueryKey(completedProject.id),
+        exact: true,
+        refetchType: "none",
+      });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: clientQueryKey });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
       expect(invalidate).toHaveBeenCalledWith({
