@@ -78,6 +78,10 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
+# Local AI assistant workspace metadata
+.trae/
+.remember/
+
 # Temporary files
 *.tmp
 *.temp
