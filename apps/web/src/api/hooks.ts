@@ -1669,6 +1669,29 @@ function reminderFactsNeedRefresh(error: unknown): boolean {
   );
 }
 
+function reminderMayHaveProjectedInbox(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.code === "VERSION_CONFLICT" ||
+      error.code === "REMINDER_NOT_SCHEDULED" ||
+      error.code === "REMINDER_INBOX_MISMATCH")
+  );
+}
+
+async function refreshReminderAfterError(
+  queryClient: QueryClient,
+  id: string,
+  error: unknown,
+): Promise<void> {
+  if (!reminderFactsNeedRefresh(error)) return;
+  await Promise.all([
+    invalidateReminderFacts(queryClient, id),
+    ...(reminderMayHaveProjectedInbox(error)
+      ? [queryClient.invalidateQueries({ queryKey: inboxQueryKey })]
+      : []),
+  ]);
+}
+
 export function useCreateReminder() {
   const queryClient = useQueryClient();
   const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -1698,9 +1721,7 @@ export function useUpdateReminder() {
       await invalidateReminderFacts(queryClient, reminder.id);
     },
     onError: async (error, variables) => {
-      if (reminderFactsNeedRefresh(error)) {
-        await invalidateReminderFacts(queryClient, variables.id);
-      }
+      await refreshReminderAfterError(queryClient, variables.id, error);
     },
   });
 }
@@ -1722,9 +1743,7 @@ export function useCancelReminder() {
       await invalidateReminderFacts(queryClient, reminder.id);
     },
     onError: async (error, variables) => {
-      if (reminderFactsNeedRefresh(error)) {
-        await invalidateReminderFacts(queryClient, variables.id);
-      }
+      await refreshReminderAfterError(queryClient, variables.id, error);
     },
   });
 }

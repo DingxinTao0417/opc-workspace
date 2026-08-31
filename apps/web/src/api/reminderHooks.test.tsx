@@ -3,8 +3,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Reminder } from "../types/models";
+import { ApiError } from "./client";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
+  inboxQueryKey,
   reminderDetailQueryKey,
   useCancelReminder,
   useCreateReminder,
@@ -192,5 +194,30 @@ describe("Reminder hooks", () => {
     expect(
       queryClient.getQueryData(reminderDetailQueryKey(reminder().id)),
     ).toEqual(cancelled);
+  });
+
+  it("refreshes Inbox when the scheduler fires before cancellation", async () => {
+    calls.cancel.mockRejectedValue(
+      new ApiError("Reminder is no longer scheduled", {
+        code: "REMINDER_NOT_SCHEDULED",
+        status: 409,
+      }),
+    );
+    const queryClient = createQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useCancelReminder(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({
+        id: reminder().id,
+        reason: "计划取消",
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
   });
 });
