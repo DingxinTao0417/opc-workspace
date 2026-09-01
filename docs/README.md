@@ -76,6 +76,10 @@
 
 代码交付一个纵向切片时，应同时更新对应模块文档的当前状态、PRD 的实现追踪和实际验证证据。只有页面、按钮外观、静态样式或数据库预留表时，不得将模块标记为“已完成”。
 
+## 规划草稿（待评审）
+
+- [AI 助手 MVP 实施计划（草稿，待确认，未实施）](plans/ai-assistant-mvp.md)
+
 ## 架构决策
 
 - [ADR-003：本地 Agent Runtime 安全与传输边界](adr/003-local-agent-runtime-security.md)
