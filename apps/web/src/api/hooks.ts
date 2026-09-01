@@ -4974,9 +4974,12 @@ export function useUpdateProject() {
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: UpdateProjectInput }) =>
       updateProject(id, input),
-    onSuccess: async (project) => {
+    onSuccess: (project) => {
       queryClient.setQueryData(projectDetailQueryKey(project.id), project);
-      await invalidateProjectEditFacts(queryClient);
+      // Closing an edit modal is a direct acknowledgement of a successful write.
+      // Keep the wider derived-read-model refresh asynchronous so a slow refetch
+      // cannot leave that modal appearing to be unsaved.
+      void invalidateProjectEditFacts(queryClient);
     },
     onError: async (error, variables) => {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
