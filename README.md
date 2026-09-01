@@ -43,7 +43,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效、关闭到托盘偏好和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。数据设置提供近 7 天容量趋势，并已交付默认关闭的每日计划备份：按 IANA 时区启动/周期补偿，完整校验后只清理超限自动包，不触碰手工、回滚或 pending restore。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。Windows x64 已完成 Tauri 原生编译、Rust 测试与本地 NSIS/MSI 打包；实际安装后交互、干净系统、签名和其他平台仍待验收。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v44。T-02 仍部分完成。[PRD v9.84](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。数据设置提供近 7 天容量趋势，并已交付默认关闭的每日计划备份：按 IANA 时区启动/周期补偿，完整校验后只清理超限自动包，不触碰手工、回滚或 pending restore。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。Windows x64 已完成 Tauri 原生编译、Rust 测试与本地 NSIS/MSI 打包；实际安装后交互、干净系统、签名和其他平台仍待验收。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.1 / API v1 不变，SQLite 当前为 schema v44。T-02 仍部分完成。[PRD v9.84](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -147,7 +147,7 @@ pnpm build:desktop
 pnpm build
 ```
 
-`pnpm build:desktop` 会由 Tauri Bundler 把 `apps/web/dist` 与对应架构的 Sidecar 一并打包。Windows x64 的当前 `targets: "all"` 配置会生成 `target/release/bundle/nsis/opc-workspace_0.1.0_x64-setup.exe` 与 `target/release/bundle/msi/opc-workspace_0.1.0_x64_en-US.msi`。两者目前为未签名的本地测试包；跨平台发布应在各目标平台或相应 CI runner 上构建，并在无开发工具的干净系统中完成安装、启动、卸载和数据保留验证。
+`pnpm build:desktop` 会由 Tauri Bundler 把 `apps/web/dist` 与对应架构的 Sidecar 一并打包。Windows x64 的当前 `targets: "all"` 配置会生成 `target/release/bundle/nsis/opc-workspace_0.1.1_x64-setup.exe` 与 `target/release/bundle/msi/opc-workspace_0.1.1_x64_zh-CN.msi`。NSIS 仅内置简体中文，MSI 使用 `zh-CN`；两者目前为未签名的本地测试包。跨平台发布应在各目标平台或相应 CI runner 上构建，并在无开发工具的干净系统中完成安装、启动、卸载和数据保留验证。
 
 ## 数据目录
 

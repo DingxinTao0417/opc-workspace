@@ -1,6 +1,6 @@
 {
   "name": "opc-workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Local-first workspace for one-person companies",
   "packageManager": "pnpm@11.21.0",

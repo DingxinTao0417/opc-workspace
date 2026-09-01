@@ -1,6 +1,6 @@
 [package]
 name = "opc-workspace-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Native desktop shell for opc-workspace"
 authors = ["opc-workspace contributors"]
 edition = "2024"
