@@ -233,7 +233,8 @@ mod tests {
 
         let current = fs::read_to_string(dir.join(DESKTOP_LOG_NAME)).unwrap();
         let archived = fs::read_to_string(dir.join("opc-workspace.log.1")).unwrap();
-        let joined = format!("{archived}{current}");
+        let oldest = fs::read_to_string(dir.join("opc-workspace.log.2")).unwrap();
+        let joined = format!("{oldest}{archived}{current}");
         assert!(joined.contains("\"component\":\"desktop\""));
         assert!(joined.contains("sidecar_ready"));
         assert!(joined.contains("tray_ready"));

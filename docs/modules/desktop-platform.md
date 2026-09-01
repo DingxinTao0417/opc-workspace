@@ -1,6 +1,6 @@
 # 桌面平台、可靠性与发布模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；T-02 仍部分完成，托盘原生链接/三平台交互、真实父崩溃/进程树与安装包尚未验收。当前阶段只规划签名离线更新，不启用在线 Updater。
+> 实现基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；Windows x64 已完成原生链接、38 项 Rust 测试和未签名 NSIS/MSI 本地打包。T-02 仍部分完成，安装后托盘交互、真实父崩溃/进程树、签名、干净系统与其他平台验收仍待完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
 导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.83](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
@@ -24,8 +24,10 @@
 
 - Tauri 2 桌面窗口、固定最小尺寸和内置 Web 前端。
 - single-instance 插件；再次启动时显示、取消最小化并聚焦主窗口。
-- Tauri `tray-icon` 已提供最小托盘：只有托盘构建成功且 committed `close_to_tray` 启用时才拦截主窗口关闭并隐藏；左键和固定“显示 opc-workspace”恢复窗口，固定“退出 opc-workspace”进入应用退出与 Sidecar 优雅关闭。构建失败或偏好关闭时关闭请求按原路径继续。无配置图标时使用代码内本地 RGBA fallback，不读取外部路径。
+- Tauri `tray-icon` 已提供最小托盘：只有托盘构建成功且 committed `close_to_tray` 启用时才拦截主窗口关闭并隐藏；左键和固定“显示 opc-workspace”恢复窗口，固定“退出 opc-workspace”进入应用退出与 Sidecar 优雅关闭。构建失败或偏好关闭时关闭请求按原路径继续。配置的应用图标不可用时使用代码内本地 RGBA fallback，不读取外部路径。
 - 生产配置通过 externalBin 打包 opc-sidecar，开发可通过 OPC_SIDECAR_URL 连接外部 Sidecar。
+- `src-tauri/icon.svg` 作为可维护图标源，已生成 Windows `icons/icon.ico`、macOS `icons/icon.icns` 与所需 PNG 尺寸；`bundle.icon` 显式声明跨平台图标列表。
+- 当前 Windows x64 已补齐 Visual Studio C++ Build Tools 与 Windows SDK，`cargo check`、`cargo test` 和 Tauri 的 `targets: "all"` 均通过，产出未签名的 NSIS `.exe` 与 MSI 本地测试包。
 - Tauri 获取 appDataDir 和 appLogDir，创建数据库、附件、Artifact、发票、备份和配置目录。
 - 内置 Sidecar 每个 generation 都生成新的随机会话令牌，并以 `127.0.0.1:0` 重新请求 OS 分配动态端口；端口值允许被 OS 复用。
 - Tauri 将 `appDataDir/opc-workspace.db` 作为 `OPC_DB_PATH`，将 `appDataDir/artifacts/` 作为 `OPC_ARTIFACT_DIR` 传给 Sidecar；Sidecar 默认从数据库父目录解析已由 Tauri 创建的 `appDataDir/backups/`。生产路径不出现在命令行，也不写入持久前端配置。
@@ -44,13 +46,13 @@
 
 尚未实现或仍待真实验收：
 
-- 真实 Tauri/Sidecar 父进程崩溃、进程树、Windows/macOS/Linux 和安装包生命周期验收；当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
+- 真实 Tauri/Sidecar 父进程崩溃、进程树和安装包生命周期验收；Windows x64 本地包已生成，但尚未在干净系统完成安装、启动、卸载与数据保留验证，macOS/Linux 也尚未构建。当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
 - 数据库打开前的备份选择与安全回滚交互；当前恢复页已显示白名单恢复/迁移进度，但不提供路径、备份 ID、原始错误或启动前选择器。
 - `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、托盘运行时可用性，复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。`desktop_capabilities` 对未接入集成只返回 `not_implemented`，读取失败不阻断生命周期诊断；诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
-- 托盘专注状态/快捷业务动作、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；关闭到托盘设置开关已接，基础托盘当前主机尚未完成原生链接与交互验收。
+- 托盘专注状态/快捷业务动作、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；关闭到托盘设置开关已接，基础托盘已在当前主机完成原生编译，实际关闭/恢复/退出交互与 Sidecar 无残留仍待验收。
 - 签名离线更新包的选择、验签、迁移前备份、安装与回退。
-- Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收。
-- 当前主机上的 Rust 格式与静态单元测试不能替代真实 Sidecar 生命周期、安装包或三平台支持；当前环境缺少 MSVC `link.exe` 和 Windows SDK，`cargo check` / `cargo test` 的链接阶段受阻。
+- Windows/macOS/Linux CI 构建、代码签名、公证、安装包和干净系统验收；当前仅完成 Windows x64 的未签名本地包。
+- 当前主机上的 Rust 格式、`cargo check`、38 项 Rust 单元测试与 Windows x64 Tauri 打包已经通过，但仍不能替代真实 Sidecar 生命周期、安装后交互、干净系统或三平台支持。
 
 ## 目标功能
 
@@ -294,10 +296,10 @@
 - [x] WebView→Sidecar request ID：每次请求使用 UUID v4，响应头、错误体、前端错误和访问日志可关联；非法客户端值由 Sidecar 替换为规范 UUID。
 - [x] 全局服务恢复页 v1：starting/restarting/error 拦截业务页，ready 自动放行；generation、查询清理、状态重查、脱敏日志入口、安全重启、版本白名单与原始错误排除。
 - [ ] 数据库打开前备份选择与实时恢复进度。
-- [ ] 托盘源码和关闭到托盘设置已完成最小闭环；MSVC 工具链补齐后验证 Windows 链接、偏好启停、关闭/恢复/退出与 Sidecar 无残留，再补 macOS/Linux、运行状态和业务动作。原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框仍待。
+- [ ] 托盘源码和关闭到托盘设置已完成最小闭环；当前 Windows x64 已完成 MSVC 链接、Rust 测试与安装包生成，仍需验证偏好启停、关闭/恢复/退出与 Sidecar 无残留，再补 macOS/Linux、运行状态和业务动作。原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框仍待。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
-- [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据。
-- [ ] 当前主机补齐 MSVC `link.exe` 与 Windows SDK 后的 `cargo check` / `cargo test`、Tauri 链接与安装包检查。
+- [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据；当前仅有 Windows x64 未签名本地 NSIS/MSI 包。
+- [x] 当前主机已补齐 MSVC `link.exe` 与 Windows SDK，`cargo check` / 38 项 `cargo test`、Tauri 链接以及 Windows x64 NSIS/MSI 安装包生成通过。
 
 ## 相关代码/PRD链接
 

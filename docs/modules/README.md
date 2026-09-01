@@ -17,7 +17,7 @@
 - [设置](settings.md)（SQLite 设置 schema v2、草稿预览、受控头像、关闭到托盘、Actor、备份导入、无路径容量检查/7 天趋势、每日计划/自动包保留、脱敏诊断与关于入口）
 - [命令面板与搜索](command-search.md)（Task/Project/Client/活动 Inbox 统一本地搜索、可刷新详情直达、本地最近使用、运行诊断直达、全局渲染错误恢复及命令面板/新建任务 OS 快捷键已交付）
 - [数据、受控文件、备份与恢复](data-management.md)（一致性备份恢复、业务 JSON/ZIP、同 schema 零冲突追加、schema v43 容量历史及 schema v44 每日计划/启动补偿/只清理自动包的保留已交付；启动前备份选择、外部目录、真实冲突策略/UUID 重映射与版本升级仍待开发）
-- [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界恢复、父管道 EOF、前端世代清理、并发 shutdown、托盘最小闭环、持久化关闭偏好和运行诊断能力快照已交付；T-02 仍部分完成，托盘原生链接/实机交互、真实父崩溃/进程树、三平台与安装包待验收）
+- [桌面平台与发布](desktop-platform.md)（内置 Sidecar generation-aware 有界恢复、父管道 EOF、前端世代清理、并发 shutdown、托盘最小闭环、持久化关闭偏好、运行诊断能力快照，以及 Windows x64 原生链接/Rust 测试/未签名 NSIS+MSI 打包已交付；T-02 仍部分完成，安装后托盘交互、真实父崩溃/进程树、签名、干净系统和其他平台待验收）
 
 ## v0.2 本地编排
 

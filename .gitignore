@@ -22,6 +22,7 @@ services/sidecar/coverage.out
 # Rust / Tauri outputs
 **/target/
 **/.tauri/
+apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/.gitkeep
 

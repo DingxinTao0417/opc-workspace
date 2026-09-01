@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">opc-workspace</title>
+  <desc id="desc">A dark workspace tile with an indigo O monogram.</desc>
+  <defs>
+    <linearGradient id="background" x1="76" y1="56" x2="440" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1a1b1f"/>
+      <stop offset="1" stop-color="#0a0b0e"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="136" y1="118" x2="382" y2="396" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#828fff"/>
+      <stop offset="1" stop-color="#4f5bb8"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="28" width="456" height="456" rx="112" fill="url(#background)"/>
+  <rect x="29" y="29" width="454" height="454" rx="111" fill="none" stroke="#30323a" stroke-width="2"/>
+  <path d="M256 118c76.2 0 138 61.8 138 138s-61.8 138-138 138-138-61.8-138-138 61.8-138 138-138Zm0 70c-37.6 0-68 30.4-68 68s30.4 68 68 68 68-30.4 68-68-30.4-68-68-68Z" fill="url(#mark)"/>
+  <circle cx="362" cy="362" r="28" fill="#f5a623"/>
+</svg>

@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v44。v9.84 新增默认关闭的本地每日计划、启动/周期补偿和只清理超限自动包的安全保留；实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前主机托盘原生链接、实际关闭交互、专注状态/动作和三平台仍待验收。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v44。v9.84 新增默认关闭的本地每日计划、启动/周期补偿和只清理超限自动包的安全保留；实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名 NSIS/MSI 本地打包；实际关闭交互、安装/干净系统、签名及 macOS/Linux 验收仍待完成。
 
 ## 阅读顺序与事实优先级
 
@@ -35,7 +35,7 @@
 | 设置                       | 部分完成                                                                                                                                                                               | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                       | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份/恢复完整闭环、每日计划/启动补偿/自动包安全保留、业务 JSON/含文件 ZIP 空目标及同 schema 零主键冲突追加已交付；启动前备份选择、外部目录、冲突合并及升级待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
-| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown、托盘最小源码闭环和运行诊断能力快照已交付；托盘原生链接、真实父崩溃/进程树、三平台与安装包仍待验收）                            | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
+| 桌面平台与发布             | 部分完成（Sidecar 有界恢复/父管道/运行锁/并发 shutdown、托盘最小源码闭环、运行诊断能力快照，以及 Windows x64 原生链接/Rust 测试/未签名 NSIS+MSI 打包已交付；安装后交互、真实父崩溃/进程树、签名、干净系统和其他平台仍待验收） | v0.1 发布闸门       | [desktop-platform.md](modules/desktop-platform.md) |
 
 ## 后续业务与规划模块
 

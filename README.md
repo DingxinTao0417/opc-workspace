@@ -7,7 +7,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 ## 当前完成范围
 
 - Tauri 2 桌面窗口、单实例保护、应用数据目录初始化和 generation-aware Go Sidecar 生命周期；恢复计划挂起后可从设置页安全关闭受管 Sidecar 并重启桌面应用，受管 child 必须以 code 0 且无 signal 退出；内置 Sidecar 在 HTTP 就绪前通过固定启动阶段显示恢复、迁移与数据库打开进度，且不传递路径、备份 ID、令牌或原始错误；尚未创建 child 的启动失败仍允许重启应用，延迟到达的干净退出确认后可再次请求
-- Tauri 系统托盘最小源码闭环：托盘可恢复并聚焦主窗口，主窗口关闭时在托盘可用的前提下隐藏，显式“退出 opc-workspace”沿既有退出事件正常关闭 Sidecar；托盘创建失败会安全降级为正常关闭窗口。本机缺少 Windows linker/SDK，原生编译与交互验收仍待具备 Tauri 工具链的环境完成
+- Tauri 系统托盘最小源码闭环：托盘可恢复并聚焦主窗口，主窗口关闭时在托盘可用的前提下隐藏，显式“退出 opc-workspace”沿既有退出事件正常关闭 Sidecar；托盘创建失败会安全降级为正常关闭窗口。Windows x64 已完成原生链接、Rust 测试和本地 NSIS/MSI 打包；实际安装后交互、干净系统、签名与其他平台验收仍待完成
 - 生产内置 Sidecar 每代生成新的随机会话令牌，并通过端口 `0` 重新请求 OS 分配动态端口（端口值允许被 OS 复用）；只有真实 `Terminated` 才会为已启动 generation 安排下一代，最多自动重启 2 次（500 ms、2 s），当前 generation 连续 `ready` 30 秒后重置预算。外部开发 Sidecar、显式 shutdown、事件流关闭但没有 `Terminated` 都不会自动重拉；并发 shutdown 调用共享同一次 stop
 - Go `/health` 与版本化 `/api/v1`，统一请求 ID、错误响应、Bearer 鉴权和 Origin 白名单；设置“关于”展示真实 app/commit/API/schema/SQLite 状态，“运行诊断”对照 Tauri Sidecar 生命周期与白名单桌面能力、显示托盘运行时可用性、复制脱敏摘要并下载诊断包 v1
 - React 路由级全局错误边界：渲染异常时显示不含原始错误的恢复页，可重新渲染、返回今日或打开运行诊断，不让页面直接白屏
@@ -43,7 +43,7 @@ opc-workspace 是面向一人公司的本地优先桌面工作台。本仓库当
 - SQLite 持久化的工作区名称、默认首页、右侧概览开关、亮/暗主题、减少动效、关闭到托盘偏好和专注参数设置；工作区头像通过严格 multipart 导入受控 `avatars/`，选择后即时预览，保存时与变化设置原子提交，取消恢复已提交头像；旧 localStorage Data URL 在服务端无头像时一次性迁移并在验证后清理
 - 一次性与重复本地提醒：创建、分页/搜索/状态列表、并发安全编辑、带原因取消、启动补偿及 15 秒到期扫描；daily/weekly/weekdays/monthly 规则按 IANA 当地日历在同一事务中生成独立下一 occurrence，跨 DST 保持当地钟点，工作日跳过周末但不识别法定节假日，按月在短月夹到月末并在长月恢复锚点，离线积压只补当前一条。到期以 occurrence 稳定事件键生成 Reminder Inbox Item，重复扫描和重启不会重复投影
 
-受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。数据设置提供近 7 天容量趋势，并已交付默认关闭的每日计划备份：按 IANA 时区启动/周期补偿，完整校验后只清理超限自动包，不触碰手工、回滚或 pending restore。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。托盘原生编译/交互仍受当前 Windows linker/SDK 缺失限制。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v44。T-02 仍部分完成。[PRD v9.84](docs/opc-workspace-PRD.md) 记录了完整边界。
+受控任务 D1/D2、父任务有门禁自动待验收、Project/Client、Focus、Today、搜索、设置/诊断、数据安全，以及 Inbox/Reminder/Task 编排已经交付；Reminder 已支持一次性与 daily/weekly/weekdays/monthly 本地重复系列。内置 Sidecar 的有界重启、数据库运行锁、父管道 EOF、启动进度、原生全局快捷键、系统托盘最小闭环、持久化关闭到托盘偏好、白名单桌面能力诊断和前端世代清理已接通；设置点击即时预览，保存写入 SQLite，取消恢复 committed。数据设置提供近 7 天容量趋势，并已交付默认关闭的每日计划备份：按 IANA 时区启动/周期补偿，完整校验后只清理超限自动包，不触碰手工、回滚或 pending restore。业务导入预检已能只读盘点非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，同 schema 零冲突追加已开放；真实冲突/UUID 重映射与升级仍保持禁用。Windows x64 已完成 Tauri 原生编译、Rust 测试与本地 NSIS/MSI 打包；实际安装后交互、干净系统、签名和其他平台仍待验收。v0.1 不调用 AI/LLM，也不创建 Agent Run；自动化没有 Shell/SQL/HTTP、外发或自由规则。app v0.1.0 / API v1 不变，SQLite 当前为 schema v44。T-02 仍部分完成。[PRD v9.84](docs/opc-workspace-PRD.md) 记录了完整边界。
 
 ## 目录结构
 
@@ -147,7 +147,7 @@ pnpm build:desktop
 pnpm build
 ```
 
-`pnpm build:desktop` 会由 Tauri Bundler 把 `apps/web/dist` 与对应架构的 Sidecar 一并打包。跨平台发布应在各目标平台或相应 CI runner 上构建，并在无开发工具的干净系统中验证。
+`pnpm build:desktop` 会由 Tauri Bundler 把 `apps/web/dist` 与对应架构的 Sidecar 一并打包。Windows x64 的当前 `targets: "all"` 配置会生成 `target/release/bundle/nsis/opc-workspace_0.1.0_x64-setup.exe` 与 `target/release/bundle/msi/opc-workspace_0.1.0_x64_en-US.msi`。两者目前为未签名的本地测试包；跨平台发布应在各目标平台或相应 CI runner 上构建，并在无开发工具的干净系统中完成安装、启动、卸载和数据保留验证。
 
 ## 数据目录
 
@@ -367,4 +367,4 @@ Focus API 快照统一返回 `session / server_now / elapsed_seconds / remaining
 
 ## 产品边界
 
-[PRD v9.84](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；托盘的原生编译/交互仍待具备 Windows linker/SDK 的环境验收。业务导入 preview 已能列出非空目标表/主键冲突、ZIP 目标文件碰撞并分类跨 schema 方向；同 schema 零冲突追加已开放，真实冲突策略/UUID 重映射与升级仍保持禁用。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台安装包、外部客户来源与财务仍未完成。
+[PRD v9.84](docs/opc-workspace-PRD.md) 是范围、目标契约与当前实施状态依据。v0.1 基座已交付核心人工闭环、数据安全、启动恢复基座、命令面板/新建任务的原生快捷键、系统托盘最小闭环、关闭到托盘设置和白名单桌面能力诊断；Windows x64 已通过 Tauri 原生链接、Rust 测试并生成本地 NSIS/MSI 包，实际安装后交互、签名、干净系统与其他平台验收仍待完成。业务导入 preview 已能列出非空目标表/主键冲突、ZIP 目标文件碰撞并分类跨 schema 方向；同 schema 零冲突追加已开放，真实冲突策略/UUID 重映射与升级仍保持禁用。Reminder 已含一次性与 daily/weekly/weekdays/monthly 系列，右侧概览已接真实本地客户动态和可直达详情的临近路线图节点。客户回访 C2–C6 已完成本地计划、执行、到期入口与时区边界。v0.2 首个受限预设自动化纵切已交付本地 Inbox/Reminder 动作，本地 Agent 已完成 Adapter 登记/诊断但尚无 Runner/Run。路线图 R4/R5 与内容日历本地排期、Inbox 指定详情协同已接入。明确无 AI/LLM、可执行 Agent Runtime、外发和自由规则；真实 WebView、父崩溃/进程树、三平台完整安装包验收、外部客户来源与财务仍未完成。
