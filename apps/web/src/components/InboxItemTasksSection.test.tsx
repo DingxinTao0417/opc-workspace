@@ -270,6 +270,36 @@ describe("InboxItemTasksSection", () => {
     expect(useUiStore.getState().taskDetailId).toBe(candidate.id);
   });
 
+  it("renders linked-task actions as compact buttons", () => {
+    mocks.relations.mockReturnValue({
+      data: relationPages(2, [taskRelation()]),
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isError: false,
+      isFetchingNextPage: false,
+      isPending: false,
+      isPlaceholderData: false,
+      refetch: vi.fn(),
+    });
+
+    render(<InboxItemTasksSection item={item} />);
+
+    expect(
+      screen.getByRole("button", { name: `打开任务“${candidate.title}”` }),
+    ).toHaveClass("button", "button-secondary", "inbox-task-row-action");
+    expect(screen.getByRole("button", { name: "改为可选" })).toHaveClass(
+      "button",
+      "button-secondary",
+      "inbox-task-row-action",
+    );
+    expect(
+      screen.getByRole("button", {
+        name: `解除与任务“${candidate.title}”的关联`,
+      }),
+    ).toHaveClass("button", "button-danger", "inbox-task-row-action");
+    expect(screen.getByText("解除关联")).toBeVisible();
+  });
+
   it("preserves the selected task after conflict and retries with the refreshed version", async () => {
     mocks.link.mutate
       .mockImplementationOnce((_input, options) => {

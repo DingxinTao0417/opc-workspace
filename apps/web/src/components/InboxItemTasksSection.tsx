@@ -127,7 +127,7 @@ function TaskRelationRow({
         <div className="inbox-task-row-actions">
           <button
             aria-label={`打开任务“${task?.title ?? relation.taskTitleSnapshot}”`}
-            className="form-inline-action"
+            className="button button-secondary inbox-task-row-action"
             disabled={disabled}
             onClick={onOpen}
             type="button"
@@ -138,7 +138,7 @@ function TaskRelationRow({
           {!readOnly ? (
             <>
               <button
-                className="form-inline-action"
+                className="button button-secondary inbox-task-row-action"
                 disabled={disabled}
                 onClick={onRequirement}
                 type="button"
@@ -147,13 +147,13 @@ function TaskRelationRow({
               </button>
               <button
                 aria-label={`解除与任务“${task?.title ?? relation.taskTitleSnapshot}”的关联`}
-                className="form-inline-action danger"
+                className="button button-danger inbox-task-row-action"
                 disabled={disabled}
                 onClick={onUnlink}
                 type="button"
               >
                 <Unlink2 size={12} />
-                解除
+                解除关联
               </button>
             </>
           ) : null}
