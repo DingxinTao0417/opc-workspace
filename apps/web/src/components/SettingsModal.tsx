@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCcw,
   Settings2,
+  Sparkles,
   Sun,
   Trash2,
   UserRound,
@@ -74,6 +75,7 @@ import type {
 } from "../types/models";
 import { ActorSettings } from "./ActorSettings";
 import { AgentAdapterSettings } from "./AgentAdapterSettings";
+import { AiProviderSettings } from "./AiProviderSettings";
 import { AutomationSettings } from "./AutomationSettings";
 import { BackupSettings } from "./BackupSettings";
 import { Modal } from "./Modal";
@@ -89,6 +91,7 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "focus", label: "专注", icon: Focus },
   { id: "actors", label: "人员与责任", icon: UsersRound },
   { id: "agent", label: "本地 Agent", icon: Bot },
+  { id: "ai", label: "AI 助手", icon: Sparkles },
   { id: "automation", label: "自动化", icon: Zap },
   { id: "data", label: "数据与备份", icon: DatabaseBackup },
   { id: "diagnostics", label: "运行诊断", icon: Activity },
@@ -1012,6 +1015,10 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       return <AgentAdapterSettings />;
     }
 
+    if (activeModule === "ai") {
+      return <AiProviderSettings />;
+    }
+
     if (activeModule === "automation") {
       return (
         <AutomationSettings
@@ -1585,6 +1592,8 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     <Modal
       footer={
         activeModule === "actors" ||
+        activeModule === "agent" ||
+        activeModule === "ai" ||
         activeModule === "automation" ||
         activeModule === "diagnostics" ||
         activeModule === "about" ? (

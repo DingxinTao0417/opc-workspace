@@ -27,8 +27,8 @@ func TestSystemMaintenanceInboxProjectionMigrationGuardsIncidentSnapshots(t *tes
 		t.Fatalf("upgrade v25 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 51 {
-		t.Fatalf("SchemaVersion = %d, want 51", store.SchemaVersion)
+	if store.SchemaVersion != 54 {
+		t.Fatalf("SchemaVersion = %d, want 54", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM inbox_items"); got != 1 {
 		t.Fatalf("migration changed Inbox count = %d, want 1", got)

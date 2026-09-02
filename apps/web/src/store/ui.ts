@@ -7,6 +7,7 @@ export type SettingsModule =
   | "focus"
   | "actors"
   | "agent"
+  | "ai"
   | "automation"
   | "data"
   | "diagnostics"

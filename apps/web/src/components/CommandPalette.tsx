@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Settings2,
+  Sparkles,
   Sun,
   Users,
   Zap,
@@ -358,6 +359,13 @@ export function CommandPalette() {
         hint: "页面",
         icon: Focus,
         run: () => closeAndNavigate("/focus", "focus"),
+      },
+      {
+        id: "ai-assistant",
+        label: "AI 助手",
+        hint: "页面",
+        icon: Sparkles,
+        run: () => closeAndNavigate("/ai", "ai-assistant"),
       },
       {
         id: "roadmap",

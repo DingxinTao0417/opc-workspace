@@ -2458,3 +2458,90 @@ export interface StorageCapacityHistoryResult {
   to: string;
   points: StorageCapacityHistoryPoint[];
 }
+
+export type AiProviderProtocol = "openai_chat" | "anthropic_messages";
+
+export type AiProviderStatus =
+  "unconfigured" | "checking" | "ready" | "unavailable" | "disabled";
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  protocol: AiProviderProtocol;
+  base_url: string;
+  model: string;
+  status: AiProviderStatus;
+  health_status: "unknown" | "healthy" | "unhealthy";
+  health_error_code: string | null;
+  has_key: boolean;
+  last_health_at: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAiProviderInput {
+  name: string;
+  protocol: AiProviderProtocol;
+  base_url: string;
+  model: string;
+}
+
+export interface UpdateAiProviderInput {
+  name?: string;
+  protocol?: AiProviderProtocol;
+  base_url?: string;
+  model?: string;
+}
+
+export interface AiSession {
+  id: string;
+  title: string;
+  persist: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AiMessageTaskRef {
+  task_id: string;
+  task_title_snapshot: string;
+}
+
+export interface AiMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant";
+  status: "completed" | "cancelled" | "failed";
+  content: string;
+  reasoning: string | null;
+  task_id: string | null;
+  task_title_snapshot: string | null;
+  created_at: string;
+}
+
+export interface AiMessageListResult {
+  data: AiMessage[];
+  meta: {
+    has_more: boolean;
+    oldest_created_at?: string;
+    oldest_id?: string;
+  };
+}
+
+export interface AiChatStreamMeta {
+  protocol: string;
+  generation_id: string;
+  session_id: string;
+  model: string;
+  provider_id: string;
+  sse_protocol: string;
+}
+
+export type AiChatStreamEvent =
+  | { type: "meta"; meta: AiChatStreamMeta }
+  | { type: "delta"; generationId: string; text: string }
+  | { type: "reasoning"; generationId: string; text: string }
+  | { type: "done"; generationId: string }
+  | { type: "cancelled"; generationId: string; partialText: string }
+  | { type: "error"; generationId: string; error: string; detail?: string };

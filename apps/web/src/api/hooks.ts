@@ -6,8 +6,21 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { Query, QueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
+import { streamAiChat } from "./ai";
 import {
+  attachTaskToAiMessage,
+  checkAiProviderHealth,
+  createAiProvider,
+  createAiSession,
+  deleteAiProvider,
+  deleteAiSession,
+  getAiMessages,
+  getAiProvider,
+  getAiProviders,
+  getAiSessions,
+  setAiProviderKey,
+  updateAiProvider,
   ApiError,
   applyBusinessDataImport,
   applyBusinessPackageImport,
@@ -5074,4 +5087,321 @@ export function useDeleteProject() {
 export function resetApiAndRefetch(refetch: () => Promise<unknown>): void {
   resetRuntimeConnection();
   void refetch();
+}
+
+export const aiProvidersQueryKey = ["ai", "providers"] as const;
+export const aiSessionsQueryKey = ["ai", "sessions"] as const;
+export const aiMessagesQueryKey = (sessionId: string) =>
+  ["ai", "messages", sessionId] as const;
+
+export function useAiProvidersQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiProvidersQueryKey,
+    queryFn: getAiProviders,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateAiProvider() {
+  const queryClient = useQueryClient();
+  const idempotencyKey = useRef<string | null>(null);
+  return useMutation({
+    mutationFn: (input: {
+      name: string;
+      protocol: "openai_chat" | "anthropic_messages";
+      base_url: string;
+      model: string;
+    }) => {
+      idempotencyKey.current ??= crypto.randomUUID();
+      return createAiProvider(input, idempotencyKey.current);
+    },
+    onSuccess: async () => {
+      idempotencyKey.current = null;
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+  });
+}
+
+export function useUpdateAiProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+      input,
+    }: {
+      id: string;
+      expectedVersion: number;
+      input: {
+        name?: string;
+        protocol?: "openai_chat" | "anthropic_messages";
+        base_url?: string;
+        model?: string;
+      };
+    }) => updateAiProvider(id, input, expectedVersion),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+  });
+}
+
+export function useDeleteAiProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteAiProvider(id, expectedVersion),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+  });
+}
+
+export function useCheckAiProviderHealth() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => checkAiProviderHealth(id, expectedVersion),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+  });
+}
+
+export function useSetAiProviderKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      apiKey,
+      expectedVersion,
+    }: {
+      id: string;
+      apiKey: string;
+      expectedVersion: number;
+    }) => setAiProviderKey(id, apiKey, expectedVersion),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+    },
+  });
+}
+
+export function useAiSessionsQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiSessionsQueryKey,
+    queryFn: getAiSessions,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateAiSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => createAiSession(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey });
+    },
+  });
+}
+
+export function useDeleteAiSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      expectedVersion,
+    }: {
+      id: string;
+      expectedVersion: number;
+    }) => deleteAiSession(id, expectedVersion),
+    onSuccess: async (_result, variables) => {
+      await queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey });
+      await queryClient.removeQueries({
+        queryKey: aiMessagesQueryKey(variables.id),
+      });
+    },
+  });
+}
+
+export function useAiMessagesInfiniteQuery(sessionId: string, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: [...aiMessagesQueryKey(sessionId), "infinite"],
+    queryFn: ({ pageParam }) => getAiMessages(sessionId, pageParam),
+    initialPageParam: undefined as
+      { oldestCreatedAt?: string; oldestId?: string } | undefined,
+    getNextPageParam: (lastPage) =>
+      lastPage.meta.has_more &&
+      lastPage.meta.oldest_created_at &&
+      lastPage.meta.oldest_id
+        ? {
+            oldestCreatedAt: lastPage.meta.oldest_created_at,
+            oldestId: lastPage.meta.oldest_id,
+          }
+        : undefined,
+    enabled: enabled && sessionId !== "",
+    retry: 2,
+    retryDelay: 500,
+  });
+}
+
+export function useAttachTaskToAiMessage(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      messageId,
+      taskId,
+    }: {
+      messageId: string;
+      taskId: string;
+    }) => attachTaskToAiMessage(messageId, taskId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: aiMessagesQueryKey(sessionId),
+      });
+    },
+  });
+}
+
+export interface AiChatStreamState {
+  sessionId: string;
+  text: string;
+  reasoning: string;
+}
+
+export interface AiChatStreamOutcome {
+  sessionId: string;
+  cancelled: boolean;
+  error: string | null;
+}
+
+const AI_STREAM_ERROR_HINTS: Record<string, string> = {
+  AI_KEY_INVALID: "API 密钥被上游拒绝，请到 设置 → AI 助手 重新保存密钥",
+  AI_ENDPOINT_INVALID: "端点路径不存在（404），请确认 Base URL 指向 OpenAI 兼容的 chat/completions 接口",
+  AI_PROVIDER_ERROR: "上游服务返回错误，请稍后重试或更换模型",
+  AI_STREAM_ERROR: "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
+  AI_ENDPOINT_UNREACHABLE: "无法连接上游端点，请检查网络或代理",
+  AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
+};
+
+function aiStreamErrorText(code: string, detail?: string): string {
+  const hint = AI_STREAM_ERROR_HINTS[code] ?? `AI 生成失败（${code}）`;
+  return detail ? `${hint}（${detail}）` : hint;
+}
+
+// useAiChatStream drives one streamed generation at a time. Aborting the
+// request is the cancel path: the Sidecar keeps the partial content and the
+// message queries are refreshed with the persisted turn.
+export function useAiChatStream() {
+  const queryClient = useQueryClient();
+  const [streaming, setStreaming] = useState<AiChatStreamState | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [sentMessage, setSentMessage] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  const send = useCallback(
+    async (input: {
+      providerId: string;
+      sessionId?: string;
+      message: string;
+    }): Promise<AiChatStreamOutcome> => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setStreamError(null);
+      setSentMessage(input.message);
+      setStreaming({ sessionId: input.sessionId ?? "", text: "", reasoning: "" });
+      let sessionId = input.sessionId ?? "";
+      let failure: string | null = null;
+      try {
+        await streamAiChat({
+          providerId: input.providerId,
+          sessionId: input.sessionId,
+          message: input.message,
+          signal: controller.signal,
+          onEvent: (event) => {
+            switch (event.type) {
+              case "meta":
+                sessionId = event.meta.session_id || sessionId;
+                setStreaming({ sessionId, text: "", reasoning: "" });
+                break;
+              case "reasoning":
+                setStreaming((previous) => ({
+                  sessionId: previous?.sessionId || sessionId,
+                  text: previous?.text ?? "",
+                  reasoning: (previous?.reasoning ?? "") + event.text,
+                }));
+                break;
+              case "delta":
+                setStreaming((previous) => ({
+                  sessionId: previous?.sessionId || sessionId,
+                  text: (previous?.text ?? "") + event.text,
+                  reasoning: previous?.reasoning ?? "",
+                }));
+                break;
+              case "error":
+                failure = aiStreamErrorText(event.error, event.detail);
+                controller.abort();
+                break;
+              default:
+                break;
+            }
+          },
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          failure = error instanceof ApiError ? error.message : "AI 回答流中断";
+        }
+      } finally {
+        abortRef.current = null;
+        setStreaming(null);
+        setSentMessage(null);
+        if (sessionId) {
+          await Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: aiMessagesQueryKey(sessionId),
+            }),
+            queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey }),
+          ]);
+        }
+      }
+      if (failure) setStreamError(failure);
+      return {
+        sessionId,
+        cancelled: controller.signal.aborted,
+        error: failure,
+      };
+    },
+    [queryClient],
+  );
+
+  return {
+    streaming,
+    isStreaming: streaming !== null,
+    streamError,
+    sentMessage,
+    send,
+    stop,
+  };
 }

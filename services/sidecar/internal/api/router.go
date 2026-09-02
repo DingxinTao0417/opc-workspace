@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"gorm.io/gorm"
 )
 
@@ -35,6 +36,7 @@ type Options struct {
 	VolumeIdentityCheck            func(path string) (identity string, err error)
 	DiskSpaceScanInterval          time.Duration
 	Now                            func() time.Time
+	KeyStore                       keystore.Store
 	FocusHeartbeatInterval         time.Duration
 	ReminderScanInterval           time.Duration
 	AutomationDeliveryScanInterval time.Duration
@@ -45,6 +47,8 @@ type Options struct {
 type API struct {
 	db                        *gorm.DB
 	options                   Options
+	keyStore                  keystore.Store
+	aiGenerations             *aiGenerationRegistry
 	artifactStore             *artifactStore
 	invoicePDFStore           *invoicePDFStore
 	backupStore               *backupStore
@@ -119,6 +123,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.Now == nil {
 		options.Now = time.Now
+	}
+	if options.KeyStore == nil {
+		options.KeyStore = keystore.NewOSStore()
 	}
 	if options.FocusHeartbeatInterval == 0 {
 		options.FocusHeartbeatInterval = 15 * time.Second
@@ -202,8 +209,15 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 	}
 	service := &API{
-		db: db, options: options, artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
+		db: db, options: options, keyStore: options.KeyStore, aiGenerations: newAIGenerationRegistry(),
+		artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
 		maintenance: &sync.RWMutex{},
+	}
+	if err := recoverAIGenerationsOnStartup(db, options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover AI generations: %w", err)
 	}
 	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
 		if artifacts != nil {
@@ -298,6 +312,21 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/agent-adapters/:id/check", service.checkAgentAdapter)
 		v1.POST("/agent-adapters/:id/enable", service.enableAgentAdapter)
 		v1.POST("/agent-adapters/:id/disable", service.disableAgentAdapter)
+		v1.GET("/ai/providers", service.listAIProviders)
+		v1.POST("/ai/providers", service.createAIProvider)
+		v1.GET("/ai/providers/:id", service.getAIProvider)
+		v1.PATCH("/ai/providers/:id", service.patchAIProvider)
+		v1.DELETE("/ai/providers/:id", service.deleteAIProvider)
+		v1.POST("/ai/providers/:id/health", service.checkAIProviderHealth)
+		v1.POST("/ai/providers/:id/key", service.setAIProviderKey)
+		v1.GET("/ai/sessions", service.listAISessions)
+		v1.POST("/ai/sessions", service.createAISession)
+		v1.GET("/ai/sessions/:id", service.getAISession)
+		v1.DELETE("/ai/sessions/:id", service.deleteAISession)
+		v1.GET("/ai/sessions/:id/messages", service.listAIMessages)
+		v1.POST("/ai/chat", service.chatAI)
+		v1.POST("/ai/generations/:id/cancel", service.cancelAIGeneration)
+		v1.POST("/ai/messages/:id/task", service.attachTaskToAIMessage)
 		v1.GET("/search", service.search)
 		v1.GET("/tasks", service.listTasks)
 		v1.POST("/tasks", service.createTask)

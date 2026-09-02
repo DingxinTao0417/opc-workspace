@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
+	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
@@ -30,7 +31,7 @@ func newTestAPI(t *testing.T) *gin.Engine {
 	router, err := NewRouter(store.DB, Options{
 		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
-		Logger: log.New(io.Discard, "", 0),
+		Logger: log.New(io.Discard, "", 0), KeyStore: keystore.NewMemoryStore(),
 	})
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)

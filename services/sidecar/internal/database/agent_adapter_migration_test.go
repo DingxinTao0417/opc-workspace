@@ -26,8 +26,8 @@ func TestAgentAdapterMigrationUpgradesV33WithoutCreatingAdapters(t *testing.T) {
 		t.Fatalf("upgrade v33 agent adapter database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 51 {
-		t.Fatalf("SchemaVersion = %d, want 51", store.SchemaVersion)
+	if store.SchemaVersion != 54 {
+		t.Fatalf("SchemaVersion = %d, want 54", store.SchemaVersion)
 	}
 	var adapterCount, ruleCount int64
 	if err := store.DB.Raw("SELECT COUNT(*) FROM agent_adapters").Row().Scan(&adapterCount); err != nil {

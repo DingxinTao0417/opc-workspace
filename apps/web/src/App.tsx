@@ -12,6 +12,7 @@ import { ThemeController } from "./components/ThemeController";
 import { ClientsPage } from "./pages/ClientsPage";
 import { ContentCalendarPage } from "./pages/ContentCalendarPage";
 import { ClientDetailPage } from "./pages/ClientDetailPage";
+import { AiAssistantPage } from "./pages/AiAssistantPage";
 import { FocusPage } from "./pages/FocusPage";
 import { InboxPage } from "./pages/InboxPage";
 import { IncomePage } from "./pages/IncomePage";
@@ -56,6 +57,7 @@ export default function App() {
             <Route element={<InboxPage />} path="inbox" />
             <Route element={<InboxPage />} path="inbox/:inboxItemId" />
             <Route element={<FocusPage />} path="focus" />
+            <Route element={<AiAssistantPage />} path="ai" />
             <Route element={<RoadmapPage />} path="roadmap" />
             <Route element={<ContentCalendarPage />} path="content-calendar" />
             <Route element={<NotFoundPage />} path="*" />

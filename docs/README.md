@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema v44。v9.84 新增默认关闭的本地每日计划、启动/周期补偿和只清理超限自动包的安全保留；实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前主机托盘原生链接、实际关闭交互、专注状态/动作和三平台仍待验收。
+> 当前代码基线为 app v0.1.0 / API v1 / SQLite schema 53（052/053 为 AI 助手远程 Provider 与会话表；此前的 v44 基线声明已过期）。v9.84 新增默认关闭的本地每日计划、启动/周期补偿和只清理超限自动包的安全保留；实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前主机托盘原生链接、实际关闭交互、专注状态/动作和三平台仍待验收。
 
 ## 阅读顺序与事实优先级
 
@@ -39,21 +39,21 @@
 
 ## 后续业务与规划模块
 
-| 模块             | 当前状态                                                                                                                      | 目标版本 | 文档                                               |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------- |
-| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                         | v0.4     | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                              | v0.4     | [client-followups.md](modules/client-followups.md) |
-| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                     | v0.3     | [roadmap.md](modules/roadmap.md)                   |
-| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发 | v0.3     | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 首个纵向切片完成                                                                                                              | v0.2     | [automation.md](modules/automation.md)             |
-| 本地知识库       | 未开始                                                                                                                        | 待定     | [knowledge-base.md](modules/knowledge-base.md)     |
-| AI 助手          | 未开始                                                                                                                        | 待定     | [ai-assistant.md](modules/ai-assistant.md)         |
+| 模块             | 当前状态                                                                                                                      | 目标版本         | 文档                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------- |
+| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                         | v0.4             | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                              | v0.4             | [client-followups.md](modules/client-followups.md) |
+| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                     | v0.3             | [roadmap.md](modules/roadmap.md)                   |
+| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发 | v0.3             | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化       | 首个纵向切片完成                                                                                                              | v0.2             | [automation.md](modules/automation.md)             |
+| 本地知识库       | 未开始                                                                                                                        | 待定             | [knowledge-base.md](modules/knowledge-base.md)     |
+| AI 助手          | 首个纵向切片完成（远程 Provider 配置式接入、流式只读会话、语义建任务建议卡片；ADR-004）                                       | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
 
 - 所有核心业务、Actor、任务、收件箱、提醒、产出和运行记录默认只保存在本机。
 - v0.1 不引入账号、多人登录、远程任务领取、云同步或线上工作流。
-- v0.1 不调用 AI/LLM，不创建或运行 Agent；Project Artifact→Inbox→Task 只使用 owner/person 与 owner manual review。
+- v0.1 不调用 AI/LLM，不创建或运行 Agent；Project Artifact→Inbox→Task 只使用 owner/person 与 owner manual review。AI 助手按 ADR-004 在独立轨道交付（远程 Provider + 只读会话 + 语义建任务确认卡片），不并入 v0.1–v0.4。
 - `person` Actor 只记录线下责任，不会向对方发送任务或授予应用权限。
 - manual Artifact 的 producer 由当前 active assignee 派生；内置 owner 负责代录、提交、审核、撤回和删除，不能由客户端伪造 Actor ID。
 - Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar 只保存在 Sidecar 声明的同一受控目录并经鉴权 API 下载；受控根通过身份 marker、Artifact root 锁、耐久同步与 quarantine 防止错库、双写和误删。数据库父目录另用固定 `.opc-sidecar-run.lock` 在任何恢复、迁移或打开前阻止第二个 Sidecar 接触同库。应用已能管理 SQLite+active files 内部备份，以及业务 JSON/含文件业务 ZIP 的空目标和同 schema 零主键冲突追加；预检可只读列出非空目标表/主键重叠、目标文件碰撞并分类跨 schema 方向，真实冲突策略、UUID 重映射与版本升级仍未实现。
@@ -78,7 +78,7 @@
 
 ## 规划草稿（待评审）
 
-- [AI 助手 MVP 实施计划（草稿，待确认，未实施）](plans/ai-assistant-mvp.md)
+- [AI 助手 MVP 实施计划（已评审并实施；实现状态以 [模块文档](modules/ai-assistant.md) 为准）](plans/ai-assistant-mvp.md)
 
 ## 架构决策
 

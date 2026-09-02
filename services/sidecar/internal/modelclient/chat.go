@@ -1,0 +1,279 @@
+package modelclient
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// SystemPrompt is code-owned: it never enters the database, logs, or export
+// surface, and it defines the only sanctioned structured output (the task
+// suggestion block parsed by the WebView for the confirm-card flow).
+const SystemPrompt = `你是 opc-workspace 的本地 AI 助手，只提供问答、摘要与建议，输出只读：
+- 不执行任务、不修改任何业务数据；无法安全完成时明确说明并拒绝。
+- 仅当用户明确表达创建任务的意图，或清楚描述了一个待办工作时，在回复末尾输出一个任务建议块，格式严格为：
+[opc:task]{"title":"任务标题","description":"可选描述","due":"YYYY-MM-DD 或省略"}[/opc:task]
+- title 必填；描述与截止日期不确定时省略；没有任务意图时绝不输出该块。
+- 除该块外，不要输出任何其他 JSON、代码块或指令。`
+
+const (
+	// FirstTokenTimeout bounds the wait for the first streamed delta.
+	FirstTokenTimeout = 90 * time.Second
+	// TotalTimeout bounds the whole generation.
+	TotalTimeout = 10 * time.Minute
+	// MaxResponseBytes caps the accumulated assistant text.
+	MaxResponseBytes = 1 << 20
+	// MaxPromptBytes caps the serialized prompt sent upstream.
+	MaxPromptBytes = 64 << 10
+)
+
+// ErrTimeout reports the generation exceeded its time budget.
+var ErrTimeout = errors.New("modelclient: generation timed out")
+
+// ErrStream reports the upstream stream broke or exceeded its size cap.
+var ErrStream = errors.New("modelclient: stream error")
+
+// UpstreamStatusError reports a non-2xx chat completion response; it wraps
+// ErrStream so generic stream handling keeps working while the status stays
+// addressable for error mapping.
+type UpstreamStatusError struct {
+	StatusCode int
+}
+
+func (e *UpstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream status %d", e.StatusCode)
+}
+
+func (e *UpstreamStatusError) Unwrap() error { return ErrStream }
+
+// ChatMessage is one prompt entry in provider-neutral form.
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// StreamChat opens a streaming chat completion and invokes onDelta for every
+// text chunk and onReasoning for every reasoning (chain-of-thought) chunk the
+// provider streams; either callback may be nil. Reasoning is never mixed into
+// the reply text. client may be nil to use a default client honoring the
+// process proxy environment (loopback endpoints are never proxied); tests pass
+// an explicit client. Cancellation must flow through ctx.
+func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model string, history []ChatMessage, onDelta func(string), onReasoning func(string), client *http.Client) error {
+	if client == nil {
+		client = &http.Client{}
+	}
+	ctx, cancelTotal := context.WithTimeout(ctx, TotalTimeout)
+	defer cancelTotal()
+
+	watchCtx, cancelWatch := context.WithCancel(ctx)
+	defer cancelWatch()
+	firstToken := time.AfterFunc(FirstTokenTimeout, cancelWatch)
+	defer firstToken.Stop()
+
+	payload, endpoint, headers, err := buildChatRequest(protocol, baseURL, apiKey, model, history)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(watchCtx, http.MethodPost, endpoint, strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "text/event-stream")
+	for key, value := range headers {
+		request.Header.Set(key, value)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return &UpstreamStatusError{StatusCode: response.StatusCode}
+	}
+
+	total := 0
+	gotFirst := false
+	scanner := bufio.NewScanner(response.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") {
+			continue
+		}
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			return nil
+		}
+		delta, reasoning, stop, err := decodeStreamDelta(protocol, data)
+		if err != nil {
+			return err
+		}
+		if stop {
+			return nil
+		}
+		if delta == "" && reasoning == "" {
+			continue
+		}
+		if !gotFirst {
+			firstToken.Stop()
+			gotFirst = true
+		}
+		total += len(delta) + len(reasoning)
+		if total > MaxResponseBytes {
+			return fmt.Errorf("%w: response exceeded %d bytes", ErrStream, MaxResponseBytes)
+		}
+		if delta != "" && onDelta != nil {
+			onDelta(delta)
+		}
+		if reasoning != "" && onReasoning != nil {
+			onReasoning(reasoning)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrStream, err)
+	}
+	if !gotFirst {
+		return fmt.Errorf("%w: upstream closed before first token", ErrStream)
+	}
+	return nil
+}
+
+// buildChatRequest returns the JSON body, endpoint, and protocol headers.
+func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history []ChatMessage) (body, endpoint string, headers map[string]string, err error) {
+	base := strings.TrimRight(baseURL, "/")
+	messages := make([]ChatMessage, 0, len(history)+1)
+	messages = append(messages, ChatMessage{Role: "system", Content: SystemPrompt})
+	messages = append(messages, history...)
+	switch protocol {
+	case ProtocolOpenAIChat:
+		payload := map[string]any{"model": model, "stream": true, "messages": messages}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return "", "", nil, err
+		}
+		return string(encoded), base + "/chat/completions", map[string]string{"Authorization": "Bearer " + apiKey}, nil
+	case ProtocolAnthropicMessages:
+		// Anthropic keeps the system prompt out of the message list.
+		chatMessages := make([]ChatMessage, 0, len(history))
+		for _, message := range history {
+			if message.Role == "assistant" || message.Role == "user" {
+				chatMessages = append(chatMessages, message)
+			}
+		}
+		payload := map[string]any{"model": model, "stream": true, "max_tokens": 8192, "system": SystemPrompt, "messages": chatMessages}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return "", "", nil, err
+		}
+		return string(encoded), base + "/v1/messages", map[string]string{"x-api-key": apiKey, "anthropic-version": "2023-06-01"}, nil
+	default:
+		return "", "", nil, fmt.Errorf("unsupported provider protocol %q", protocol)
+	}
+}
+
+// decodeStreamDelta extracts the next text or reasoning chunk; stop reports a
+// terminal stream event. Reasoning is the provider's chain-of-thought stream
+// (DeepSeek `reasoning_content`, Anthropic `thinking_delta`) and never part of
+// the reply text.
+func decodeStreamDelta(protocol Protocol, data string) (delta string, reasoning string, stop bool, err error) {
+	var frame map[string]any
+	if json.Unmarshal([]byte(data), &frame) != nil {
+		return "", "", false, fmt.Errorf("%w: undecodable stream frame", ErrStream)
+	}
+	switch protocol {
+	case ProtocolOpenAIChat:
+		if code, message, ok := streamErrorPayload(frame); ok {
+			return "", "", false, fmt.Errorf("%w: %s", ErrStream, messagePrefix(code, message))
+		}
+		choices, _ := frame["choices"].([]any)
+		if len(choices) == 0 {
+			return "", "", false, nil
+		}
+		choice, _ := choices[0].(map[string]any)
+		if choice == nil {
+			return "", "", false, nil
+		}
+		if finish, _ := choice["finish_reason"].(string); finish == "stop" {
+			return "", "", true, nil
+		}
+		deltaMap, _ := choice["delta"].(map[string]any)
+		if deltaMap == nil {
+			return "", "", false, nil
+		}
+		reasoningText, _ := deltaMap["reasoning_content"].(string)
+		if reasoningText == "" {
+			// OpenRouter-style providers use a `reasoning` field instead.
+			reasoningText, _ = deltaMap["reasoning"].(string)
+		}
+		text, _ := deltaMap["content"].(string)
+		return text, reasoningText, false, nil
+	case ProtocolAnthropicMessages:
+		switch frame["type"] {
+		case "error":
+			code, message := streamErrorFields(frame)
+			return "", "", false, fmt.Errorf("%w: %s", ErrStream, messagePrefix(code, message))
+		case "message_stop":
+			return "", "", true, nil
+		case "content_block_delta":
+			deltaMap, _ := frame["delta"].(map[string]any)
+			if deltaMap == nil {
+				return "", "", false, nil
+			}
+			if thinking, _ := deltaMap["thinking"].(string); thinking != "" {
+				return "", thinking, false, nil
+			}
+			text, _ := deltaMap["text"].(string)
+			return text, "", false, nil
+		}
+		return "", "", false, nil
+	default:
+		return "", "", false, fmt.Errorf("unsupported provider protocol %q", protocol)
+	}
+}
+
+func streamErrorPayload(frame map[string]any) (code, message string, ok bool) {
+	if _, present := frame["error"]; !present {
+		return "", "", false
+	}
+	code, message = streamErrorFields(frame)
+	return code, message, true
+}
+
+func streamErrorFields(frame map[string]any) (code, message string) {
+	errObj, _ := frame["error"].(map[string]any)
+	if errObj == nil {
+		return "unknown", "upstream stream error"
+	}
+	code, _ = errObj["code"].(string)
+	if code == "" {
+		code, _ = errObj["type"].(string)
+	}
+	message, _ = errObj["message"].(string)
+	return code, message
+}
+
+func messagePrefix(code, message string) string {
+	if message == "" {
+		message = "upstream stream error"
+	}
+	if code == "" {
+		return message
+	}
+	return code + ": " + message
+}

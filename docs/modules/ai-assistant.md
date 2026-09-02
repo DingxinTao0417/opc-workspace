@@ -1,114 +1,93 @@
 # AI 助手模块
 
-> 目标版本：待定。当前阶段只评估用户主动配置的本地模型和本地运行时，不接入线上模型服务。
+> 目标版本：待定（独立于 v0.1–v0.4 的独立轨道）。首个纵向切片已交付：远程 Provider 配置式接入 + 只读会话（含推理模型思考过程展示）+ 语义建任务建议卡片。远程 Provider 接入经用户 2026-09-01 明确授权并固化于 [ADR-004](../adr/004-ai-assistant-provider-access.md)；本地部署模型适配由用户显式延后，仍属后续评审范围。
 
 ## 定位与边界
 
-AI 助手是面向用户的本地问答、摘要和建议入口。它帮助理解用户明确选择的本地上下文，但不是自主代理、任务执行器或业务事实写入通道。
+AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理解与组织工作，输出只读；任务创建必须经用户确认并通过既有任务领域 API 落地。
 
-- 当前评估范围仅限本地模型；不接入远程 Provider、云 API、远程 embedding 或在线遥测。
-- 模型、提示、上下文、响应和会话默认只在本机处理。
-- 第一阶段输出只读，不直接创建、修改或删除任务、项目、客户、发票、收入、回访或内容条目。
-- 不执行 Shell、SQL、HTTP、文件写入或任意工具调用；自主代理和自然语言写操作必须另行立项。
-- 用户可复制建议或以后通过明确确认进入正常业务表单，但模型输出本身不是事实。
-- AI 未配置、模型不可用、资源不足或功能关闭时，所有核心模块必须正常工作。
+- 首版以 API key 配置式接入远程大模型；协议注册表首批支持 `openai_chat`（OpenAI chat/completions 流式）与 `anthropic_messages`（Anthropic messages 流式）。
+- API 密钥只保存在操作系统安全存储（首版 Windows 凭据管理器，`zalando/go-keyring`）；不进 SQLite、`localStorage`、日志、命令行、诊断包或前端持久化。无可用安全存储的平台明确 503 拒绝，不落盘退化。
+- 本版仅外发该次用户输入；不读取业务数据作上下文、不外发整库、无知识库、无遥测。任务正文不经模型外发。
+- 助手回复只读，不直接创建、修改或删除任何业务数据；模型输出视为不可信预览。
+- 语义建任务：识别到任务意图时回复末尾输出 `[opc:task]{...}[/opc:task]` 结构化块（系统提示词为 Sidecar 代码常量）；前端解析为**可编辑待确认建议卡片**（标题必填、描述/截止可改、项目可选），用户确认后经既有 `POST /api/v1/tasks` 创建（新建固定 `todo`），创建成功后消息挂静态引用（task_id + task_title_snapshot，不可改绑）；点击卡片跳转 `tasks/:taskId`。块缺失/非法时降级纯文本，不出现卡片。
+- 不做：任务/项目/客户上下文读取、知识库检索、工具调用、Shell/SQL/任意写、自主代理、Inbox 投影、自动建任务（必须先确认）、本地部署模型适配（显式延后）。
+- AI 未配置、密钥无效或端点不可达时，所有既有核心模块完全可用；AI 失败不投影 Inbox。
 
 ## 当前实现状态
 
-- 当前仓库没有 AI 路由、页面、模型依赖、本地运行时 Adapter、会话表、API 或占位按钮。
-- 没有本地模型发现、下载、启动、健康检查、资源预算、流式协议或取消机制。
-- 知识库也未实现，因此目前没有受控检索与来源引用能力。
-- 现有本地 Agent 仍在规划；引入 Actor/Assignment 不等于已经接入 AI。
+首个纵向切片已交付（代码与测试为据）：
 
-## 目标功能
+- **Provider 管理**：`ai_providers` 表（schema 052，身份/协议/端点/模型/健康/has_key，version 乐观锁与触发器）；`GET/POST /api/v1/ai/providers`、`GET/PATCH/DELETE /api/v1/ai/providers/:id`（Idempotency-Key 幂等、`ETag`/`If-Match` 并发、`ai_adapter_registered / ai_adapter_health_checked / ai_adapter_removed` 事件）；`POST /api/v1/ai/providers/:id/health` 真实连通性探测（密钥缺失 `AI_KEY_UNAVAILABLE`、401/403 映射 `AI_KEY_INVALID`、不可达 `AI_ENDPOINT_UNREACHABLE`，成功置 `ready`）；`POST /api/v1/ai/providers/:id/key` 写入 OS 安全存储（安全存储不可用 503 `AI_KEY_STORE_UNAVAILABLE`，DB 更新失败即回滚删除密钥）。
+- **会话与消息**：`ai_sessions / ai_generations / ai_messages` 表（schema 053）；`GET/POST /api/v1/ai/sessions`、`GET/DELETE /api/v1/ai/sessions/:id`（删除即联取删除消息与生成并先取消活动生成）、`GET /api/v1/ai/sessions/:id/messages`（稳定倒序分页，`before_created_at + before_id` 游标）。
+- **流式聊天**：`POST /api/v1/ai/chat` 以 `opc-ai-sse-v1` SSE 返回 `meta / delta / reasoning / done / error / cancelled` 事件；推理类模型（DeepSeek `reasoning_content`、OpenRouter `reasoning`、Anthropic `thinking_delta`）的思考流被单独捕获为 `reasoning` 事件并持久化到 `ai_messages.reasoning`（schema 054），前端以可折叠「思考过程」区展示，绝不混入回答正文；完成时用户消息与助手回复（原样含结构化块）同事务持久化并递增会话版本；`POST /api/v1/ai/generations/:id/cancel` 与 WebView 断连均终止上游，取消保留已生成部分（assistant 消息 `status=cancelled`）；预算：首 token 90s、总时长 10min、响应 1 MiB、提示 64 KiB；每 Provider/每会话并发 1，忙时 409 `AI_PROVIDER_BUSY`；未就绪 Provider 409 `AI_PROVIDER_NOT_READY`；Sidecar 启动把遗留 queued/streaming 标 `cancelled/AI_GENERATION_INTERRUPTED`；`ai_generation_started/completed/failed/cancelled` 事件只记脱敏元数据。
+- **任务引用**：`POST /api/v1/ai/messages/:id/task` 只做静态引用落地（消息与任务存在性校验、`AI_MESSAGE_TASK_ALREADY_LINKED` 禁止改绑）；任务创建本身走既有任务 API（`task_created` 事件不重复写）。
+- **前端**：`/ai` 独立页（导航「执行 → AI 助手」、命令面板入口）；会话列表/新建/删除确认、流式逐字渲染与停止按钮、输入框未就绪禁用、加载/空/错误态；语义建议卡片（可编辑标题/描述/截止/项目，缺标题禁用确认）→ 确认创建 → 已创建任务卡片（静态快照）→ 点击跳任务详情；设置「AI 助手」区（协议下拉、Base URL、模型名、API key 保存到安全存储、测试连接、删除含密钥清理）。
+- **业务导出边界**：`ai_providers / ai_sessions / ai_generations / ai_messages` 明确排除出业务 JSON/ZIP 导出面（ADR-004 密钥与隐私边界），导入兼容契约覆盖 v49→53。
 
-- 用户显式登记或选择已经安装的本地模型运行时，不自动下载大型模型。
-- 显示运行时和模型的健康状态、版本、上下文窗口、预计内存/磁盘要求及当前可用性。
-- 本地连通性测试、模型选择、超时、取消、资源限制和清晰错误提示。
-- 独立会话入口，支持用户显式发起问答、摘要和建议。
-- 用户主动选择任务、项目、客户或知识库检索结果作为本次上下文，并在发送前预览范围。
-- 接入知识库后，答案展示可定位来源；没有可靠依据时明确返回“未检索到可靠来源”。
-- 用户可以清空会话、关闭历史持久化和删除本地配置。
-
-不在首版范围：
-
-- 云模型、在线 Provider、模型市场、后台自动下载或自动更新模型。
-- 自主规划、持续运行、工具调用、自动改写业务数据和未经确认的 Task Artifact 提交。
-- 以模型回答替代客户沟通、财务确认、验收或发布决策。
+多供应商支持（已交付）：可登记多个 Provider（名称唯一），设置区渲染全部供应商卡片并可逐个保存密钥/测试连接/删除；聊天页在多个就绪供应商之间手动切换（输入区下拉，占位符随所选供应商变化）。尚未实现（规划，非当前能力）：任务/项目/客户上下文选择与发送前预览、知识库检索与来源引用、多 Provider 自动路由与并存并发生成（当前每 Provider 并发仍为 1）、用量统计、本地部署模型适配、非 Windows 平台安全存储验证。
 
 ## 关键用户流程
 
-1. **配置本地运行时**：用户在设置中明确选择本地可执行入口或受支持 Adapter，查看权限和资源说明后保存。
-2. **健康检查**：Sidecar 验证进程、协议、模型和资源；检查不读取业务上下文，也不产生网络请求。
-3. **发起会话**：用户输入问题，并显式选择允许读取的本地任务、项目、客户或知识片段。
-4. **上下文预览**：界面列出将发送给本地模型的对象和来源；用户确认后启动可取消的本地推理。
-5. **流式回答**：界面展示生成状态、停止按钮、耗时和来源；取消后保留已生成内容并标记不完整。
-6. **使用建议**：用户复制文本或打开预填表单；保存业务数据仍需用户在正常模块中明确确认。
-7. **清理**：用户删除会话、模型配置或缓存，系统显示清理范围并验证本地删除结果。
+1. **配置供应商**：设置 → AI 助手 → 「添加供应商」填名称/协议/Base URL/模型名登记（可添加多个）→ 逐个保存 API key（进系统安全存储）→ 测试连接至「已就绪」。
+2. **发起会话**：进入 `/ai`，多个就绪供应商时在输入区下拉选择本次使用的供应商，输入问题（Enter 发送）；回答流式逐字显示，可点「停止」，取消保留已生成部分。
+3. **语义建任务**：回复中出现「建议任务」chip → 点击展开待确认卡片（标题必填可改）→「确认创建」→ 经任务 API 创建（`todo`）→ 消息显示已创建任务卡片 → 点击跳转任务详情。
+4. **清理**：会话删除（级联删除消息与生成）；供应商删除（同删安全存储密钥）。
 
 ## 数据、API、状态与事件
 
 ### 数据
 
-- `local_model_adapters` 或等价注册：稳定 adapter key、运行时类型、受控可执行引用、协议版本、模型列表、能力声明、资源预算和健康状态。
-- `ai_sessions`：本地会话元数据、标题、创建/更新时间和保留策略；用户可选择不持久化。
-- `ai_messages`：角色、状态、正文或受控内容引用、来源清单、模型与参数快照、时间和错误；不写入普通运行日志。
-- 敏感启动配置不得进入 `localStorage`、命令行或普通日志；按桌面安全存储/受控配置 ADR 处理。
-- 上下文引用保存最小本地 ID 和版本，不能暗中缓存整库数据。
+- `ai_providers`：id、name（唯一）、protocol（`openai_chat / anthropic_messages`）、base_url（https 或回环 http）、model、status（`unconfigured / checking / ready / unavailable / disabled`）、health_status（`unknown / healthy / unhealthy`）、health_error_code、has_key、last_health_at、version、时间戳；version 步进触发器。
+- `ai_sessions`：id、title、persist、version、时间戳。
+- `ai_generations`：id、session_id、provider_id、status（`queued / streaming / completed / failed / cancelled`）、error_code、content（≤1 MiB）、时间戳。
+- `ai_messages`：id、session_id、role（`user / assistant`）、status（`completed / cancelled / failed`）、content、reasoning（可空，仅推理模型产生；不进入业务导出）、model_snapshot（JSON，不导出）、task_id + task_title_snapshot（成对可空，落定后不可改绑）、时间戳。
+- API 密钥：仅 OS 安全存储（服务名 `opc-workspace-ai`，账户 `ai:<provider-id>:api_key`）。
+- 四张表均不进入业务 JSON/ZIP 导出（操作态与隐私边界，同 ADR-004）。
 
 ### API
 
-- `GET /api/v1/ai/local-adapters`
-- `POST /api/v1/ai/local-adapters/:id/health`
-- `GET / POST /api/v1/ai/sessions`
-- `GET / DELETE /api/v1/ai/sessions/:id`
-- `POST /api/v1/ai/chat`
-- `POST /api/v1/ai/generations/:id/cancel`
-
-流式传输、进程协议、超时、并发和崩溃恢复必须先由 ADR 固化。AI 路由使用独立的本地能力边界，不能绕过业务 API 状态机。
+- `GET / POST /api/v1/ai/providers`、`GET / PATCH / DELETE /api/v1/ai/providers/:id`、`POST /api/v1/ai/providers/:id/health`、`POST /api/v1/ai/providers/:id/key`
+- `GET / POST /api/v1/ai/sessions`、`GET / DELETE /api/v1/ai/sessions/:id`、`GET /api/v1/ai/sessions/:id/messages`
+- `POST /api/v1/ai/chat`（SSE `opc-ai-sse-v1`）、`POST /api/v1/ai/generations/:id/cancel`、`POST /api/v1/ai/messages/:id/task`
 
 ### 状态与事件
 
-- Adapter 状态：`unconfigured / checking / ready / unavailable / disabled`。
-- Generation 状态：`queued / loading / streaming / completed / failed / cancelled`。
-- 事件示例：`ai.adapter_checked`、`ai.generation_started`、`ai.generation_completed`、`ai.generation_failed`、`ai.generation_cancelled`。
-- Workflow Event 只记录脱敏元数据、状态和耗时，不记录提示、客户正文或完整回答。
+- Generation 状态链：`queued / streaming → completed | failed | cancelled`；终态不可改（仅启动恢复把遗留活跃态标 cancelled）。
+- Workflow Event（脱敏，不含提示/回答/任务正文）：`ai_adapter_registered / ai_adapter_health_checked / ai_adapter_removed`（aggregate `ai_provider`）、`ai_generation_started / ai_generation_completed / ai_generation_failed / ai_generation_cancelled`（aggregate `ai_generation`）。
+- 主要错误码：`AI_PROVIDER_NOT_FOUND / AI_PROVIDER_NAME_TAKEN / AI_PROTOCOL_INVALID / AI_ENDPOINT_INVALID / AI_MODEL_INVALID / AI_PROVIDER_NOT_READY / AI_PROVIDER_DISABLED / AI_PROVIDER_BUSY / AI_KEY_UNAVAILABLE / AI_KEY_INVALID / AI_KEY_STORE_UNAVAILABLE / AI_KEY_MALFORMED / AI_STREAM_ERROR / AI_GENERATION_TIMEOUT / AI_GENERATION_NOT_ACTIVE / AI_GENERATION_ALREADY_TERMINAL / AI_MESSAGE_TASK_ALREADY_LINKED`。
 
 ## 与其他模块协作
 
-- **知识库**：AI 只能通过受控 search API 读取用户选定片段；引用必须回到来源，不允许直接扫描索引表。
-- **任务/项目/客户**：上下文按对象和版本显式选择；默认不加载整表，敏感字段在预览中可见。
-- **财务/回访/内容日历**：只提供解释或草稿建议，不能确认事实、联系客户、付款或发布。
-- **本地 Agent**：AI 助手负责对话建议；Agent Run 负责受能力、任务和人工验收约束的执行。两者不得共享隐式高权限。
-- **Task Artifact**：未来如允许把回答提交为产物，必须由用户明确确认并进入人工验收，不直接完成任务。
-- **设置与诊断**：提供本地运行时、资源限制、历史保留和删除入口；错误日志保持脱敏。
+- **任务**：任务创建一律经既有 `POST /api/v1/tasks` 门禁（用户在建议卡片显式确认）；消息仅保存静态快照引用，不跟踪任务状态，不触碰任务状态机；取消误建任务须在任务模块操作。
+- **设置**：Provider 配置区挂在设置「AI 助手」模块，独立自持保存（不走共享 draft/preview）。
+- **数据管理**：AI 四表为操作态/隐私边界，排除出业务导出；一致性备份（SQLite 快照）仍覆盖它们。
+- **诊断/日志**：普通日志只记 provider/generation ID、阶段与错误码；密钥由 operationlog 的 secrets 机制脱敏。
+- **本地 Agent（v0.2）**：互不共享能力。Agent Adapter 是受控执行器（ADR-003 匿名管道）；AI 助手是远程只读对话，不获得任何执行能力。
 
 ## 分阶段实施
 
-1. **AI1 前置条件**：完成备份恢复、桌面安全存储、受控文件权限和知识库本地检索基线。
-2. **AI2 本地模型 ADR**：评估支持的本地运行时、进程隔离、协议、资源上限、取消和零网络验证。
-3. **AI3 Adapter 基线**：实现手动注册、健康检查、模型枚举和明确的不可用状态，不自动下载模型。
-4. **AI4 只读会话**：实现本地聊天、流式响应、取消、错误处理、会话保留与彻底删除。
-5. **AI5 显式上下文**：接入对象选择、上下文预览、知识库来源与无答案处理。
-6. **AI6 质量闸门**：建立固定问题集、来源准确性、提示注入、越权、资源耗尽、崩溃和离线测试。
-7. **AI7 后续评审**：任何写入、工具调用或远程 Provider 都必须新增独立 ADR 和用户授权，不由本模块计划默认包含。
+1. **AI2 评审**（已完成）：ADR-004 固化远程 Provider 授权、密钥与数据外发边界、语义建任务机制。
+2. **AI3 Adapter 基线**（已完成）：Provider 登记/健康/密钥 API 与设置区、schema 052。
+3. **AI4 只读会话**（已完成）：schema 053、SSE 流式聊天、取消/断连/超时/并发闸门、启动清理、会话与消息 API、`/ai` 页面。
+4. **AI4.5 语义建任务**（已完成）：代码所有系统提示词、结构化块解析、待确认卡片、既有任务 API 落地与静态引用。
+5. **AI5 显式上下文**（规划）：任务/项目/客户上下文选择、发送前范围预览、最小快照。
+6. **AI6 知识库与来源**（规划）：依赖本地知识库；引用可定位与“未检索到可靠来源”处理。
+7. **AI7 质量闸门与扩展**（规划）：提示注入/越权/资源耗尽测试集、多 Provider、本地部署适配（需新 ADR 与授权）。
 
-## 验收标准
+## 验收标准（当前切片已覆盖项）
 
-- 在网络完全禁用的环境中，本地配置、健康检查、推理、取消、引用和会话删除均可工作。
-- 网络监测和集成测试证明不会连接线上模型、遥测、远程 embedding 或模型下载端点。
-- 每次调用前用户能看到并确认上下文范围；未选择的数据不会进入提示或缓存。
-- 取消、超时、模型崩溃和资源不足能终止对应进程/请求，不影响 Sidecar 和其他模块。
-- 模型回答不能调用业务写 API、Shell、文件或网络；提示注入不能扩大权限。
-- 接入知识库后引用可定位；无可靠来源时明确说明，不生成伪造引用。
-- 提示、上下文和回答不进入普通日志；会话及缓存可完整删除并验证。
-- 关闭 AI、未配置 Adapter 或删除本地模型后，核心产品完全可用。
-- 跨平台资源占用、首 token 时间、长输出、并发限制和本地运行时兼容性达到 ADR 设定预算。
+- 未配置/密钥无效/端点不可达时：健康检查给出可读错误码，聊天 4xx/5xx 稳定错误，核心模块完全可用（Web 全量 1033 测试、Go 全量套件通过）。
+- 密钥不进 SQLite/日志/响应/导出：key 端点响应断言不含密钥原文；删除供应商清理安全存储（Go 测试覆盖）。
+- 结构化块缺失/非法不建任务；确认创建只经既有任务 API 且新建为 `todo`（解析器与页面测试覆盖）。
+- 取消/断连终止上游并保留部分内容；并发 409；启动恢复遗留生成（Go 测试覆盖）。
+- 流式帧序 meta/delta/done 与 openai/anthropic 双协议映射（mock 上游 Go 测试 + 前端 SSE 解析测试覆盖）。
 
 ## 相关 PRD 与代码链接
 
-- [产品 PRD](../opc-workspace-PRD.md)（§5.10、§10.4.15、§10.7、附录 C）
-- [前端路由](../../apps/web/src/App.tsx)
-- [Sidecar 路由](../../services/sidecar/internal/api/router.go)
-- [Sidecar 配置](../../services/sidecar/internal/config/config.go)
-- [任务类型契约](../../apps/web/src/types/models.ts)
+- [产品 PRD](../opc-workspace-PRD.md)（§5.10）
+- [ADR-004：远程 Provider 接入与安全边界](../adr/004-ai-assistant-provider-access.md)
+- [MVP 计划草稿](../plans/ai-assistant-mvp.md)
+- Sidecar：`services/sidecar/internal/api/ai_providers.go`、`ai_sessions.go`、`ai_chat.go`、`ai_messages.go`、`internal/modelclient/`、`internal/keystore/`
+- 前端：`apps/web/src/pages/AiAssistantPage.tsx`、`apps/web/src/components/AiProviderSettings.tsx`、`apps/web/src/api/ai.ts`、`apps/web/src/lib/aiTaskCard.ts`
+- 迁移：`services/sidecar/internal/database/migrations/052_ai_providers.sql`、`053_ai_sessions.sql`

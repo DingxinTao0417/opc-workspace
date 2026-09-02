@@ -23,6 +23,14 @@ import type {
   AutomationRunStatus,
   AutomationTriggerType,
   AgentAdapter,
+  AiProvider,
+  AiProviderProtocol,
+  AiProviderStatus,
+  AiSession,
+  AiMessage,
+  AiMessageListResult,
+  CreateAiProviderInput,
+  UpdateAiProviderInput,
   BackupArchiveDownload,
   BackupSummary,
   BackupRestoreDrillResult,
@@ -10416,4 +10424,228 @@ export async function getInboxStats(): Promise<InboxStats> {
     return invalidResponse("收件箱统计响应格式无效");
   }
   return { serverNow, ...counts };
+}
+
+export async function getAiProviders(): Promise<AiProvider[]> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/providers");
+  return aiProviderList(payload);
+}
+
+function aiProviderList(body: unknown): AiProvider[] {
+  if (!isRecord(body) || !Array.isArray(body.data)) {
+    return invalidResponse("AI 供应商列表响应格式无效");
+  }
+  return body.data.map((row) => aiProviderFromRecord(row));
+}
+
+function aiProviderFromRecord(row: unknown): AiProvider {
+  if (!isRecord(row)) return invalidResponse("AI 供应商响应格式无效");
+  const protocol = stringField(row, "protocol");
+  const status = stringField(row, "status");
+  const healthStatus = stringField(row, "health_status");
+  if (!protocol || !status || !healthStatus) {
+    return invalidResponse("AI 供应商响应格式无效");
+  }
+  return {
+    id: stringField(row, "id") ?? "",
+    name: stringField(row, "name") ?? "",
+    protocol: protocol as AiProvider["protocol"],
+    base_url: stringField(row, "base_url") ?? "",
+    model: stringField(row, "model") ?? "",
+    status: status as AiProvider["status"],
+    health_status: healthStatus as AiProvider["health_status"],
+    health_error_code: stringField(row, "health_error_code") ?? null,
+    has_key: row.has_key === true,
+    last_health_at: stringField(row, "last_health_at") ?? null,
+    version: numeric(row.version, 0),
+    created_at: stringField(row, "created_at") ?? "",
+    updated_at: stringField(row, "updated_at") ?? "",
+  };
+}
+
+export async function createAiProvider(
+  input: CreateAiProviderInput,
+  idempotencyKey: string,
+): Promise<AiProvider> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/providers", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+  return aiProviderFromEnvelope(payload);
+}
+
+export async function getAiProvider(id: string): Promise<AiProvider> {
+  const payload = await apiRequest<unknown>(`/api/v1/ai/providers/${id}`);
+  return aiProviderFromEnvelope(payload);
+}
+
+export async function updateAiProvider(
+  id: string,
+  input: UpdateAiProviderInput,
+  expectedVersion: number,
+): Promise<AiProvider> {
+  const payload = await apiRequest<unknown>(`/api/v1/ai/providers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+    headers: { "If-Match": `"${expectedVersion}"` },
+  });
+  return aiProviderFromEnvelope(payload);
+}
+
+export async function deleteAiProvider(
+  id: string,
+  expectedVersion: number,
+): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/ai/providers/${id}`, {
+    method: "DELETE",
+    headers: { "If-Match": `"${expectedVersion}"` },
+  });
+}
+
+export async function checkAiProviderHealth(
+  id: string,
+  expectedVersion: number,
+): Promise<AiProvider> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/providers/${id}/health`,
+    { method: "POST", headers: { "If-Match": `"${expectedVersion}"` } },
+  );
+  return aiProviderFromEnvelope(payload);
+}
+
+export async function setAiProviderKey(
+  id: string,
+  apiKey: string,
+  expectedVersion: number,
+): Promise<AiProvider> {
+  const payload = await apiRequest<unknown>(`/api/v1/ai/providers/${id}/key`, {
+    method: "POST",
+    body: JSON.stringify({ api_key: apiKey }),
+    headers: { "If-Match": `"${expectedVersion}"` },
+  });
+  return aiProviderFromEnvelope(payload);
+}
+
+function aiProviderFromEnvelope(payload: unknown): AiProvider {
+  if (!isRecord(payload)) return invalidResponse("AI 供应商响应格式无效");
+  return aiProviderFromRecord(payload.data);
+}
+
+export async function getAiSessions(): Promise<AiSession[]> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/sessions");
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("AI 会话列表响应格式无效");
+  }
+  return payload.data.map((row) => {
+    if (!isRecord(row)) return invalidResponse("AI 会话响应格式无效");
+    return {
+      id: stringField(row, "id") ?? "",
+      title: stringField(row, "title") ?? "",
+      persist: row.persist !== false,
+      version: numeric(row.version, 0),
+      created_at: stringField(row, "created_at") ?? "",
+      updated_at: stringField(row, "updated_at") ?? "",
+    };
+  });
+}
+
+export async function createAiSession(): Promise<AiSession> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/sessions", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 会话响应格式无效");
+  }
+  const row = payload.data;
+  return {
+    id: stringField(row, "id") ?? "",
+    title: stringField(row, "title") ?? "",
+    persist: row.persist !== false,
+    version: numeric(row.version, 0),
+    created_at: stringField(row, "created_at") ?? "",
+    updated_at: stringField(row, "updated_at") ?? "",
+  };
+}
+
+export async function deleteAiSession(
+  id: string,
+  expectedVersion: number,
+): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/ai/sessions/${id}`, {
+    method: "DELETE",
+    headers: { "If-Match": `"${expectedVersion}"` },
+  });
+}
+
+export async function getAiMessages(
+  sessionId: string,
+  cursor?: { oldestCreatedAt?: string; oldestId?: string },
+): Promise<AiMessageListResult> {
+  const params = new URLSearchParams();
+  params.set("limit", "100");
+  if (cursor?.oldestCreatedAt && cursor?.oldestId) {
+    params.set("before_created_at", cursor.oldestCreatedAt);
+    params.set("before_id", cursor.oldestId);
+  }
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/sessions/${sessionId}/messages?${params.toString()}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("AI 消息列表响应格式无效");
+  }
+  const data = payload.data.map((row) => {
+    if (!isRecord(row)) return invalidResponse("AI 消息响应格式无效");
+    const role = stringField(row, "role");
+    const status = stringField(row, "status");
+    return {
+      id: stringField(row, "id") ?? "",
+      session_id: stringField(row, "session_id") ?? "",
+      role: (role === "assistant" ? "assistant" : "user") as AiMessage["role"],
+      status: (status ?? "completed") as AiMessage["status"],
+      content: stringField(row, "content") ?? "",
+      reasoning: stringField(row, "reasoning") ?? null,
+      task_id: stringField(row, "task_id") ?? null,
+      task_title_snapshot: stringField(row, "task_title_snapshot") ?? null,
+      created_at: stringField(row, "created_at") ?? "",
+    } satisfies AiMessage;
+  });
+  return {
+    data,
+    meta: {
+      has_more: payload.meta.has_more === true,
+      oldest_created_at: stringField(payload.meta, "oldest_created_at"),
+      oldest_id: stringField(payload.meta, "oldest_id"),
+    },
+  };
+}
+
+export async function attachTaskToAiMessage(
+  messageId: string,
+  taskId: string,
+): Promise<AiMessage> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/messages/${messageId}/task`,
+    { method: "POST", body: JSON.stringify({ task_id: taskId }) },
+  );
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 消息响应格式无效");
+  }
+  const row = payload.data;
+  return {
+    id: stringField(row, "id") ?? "",
+    session_id: stringField(row, "session_id") ?? "",
+    role: "assistant",
+    status: "completed",
+    content: stringField(row, "content") ?? "",
+    reasoning: stringField(row, "reasoning") ?? null,
+    task_id: stringField(row, "task_id") ?? null,
+    task_title_snapshot: stringField(row, "task_title_snapshot") ?? null,
+    created_at: stringField(row, "created_at") ?? "",
+  };
 }

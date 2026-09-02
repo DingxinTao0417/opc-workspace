@@ -13428,3 +13428,5 @@ kbd {
     grid-template-columns: repeat(6, minmax(210px, 76vw));
   }
 }
+
+@import "./ai-page.css";

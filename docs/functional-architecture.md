@@ -3,7 +3,7 @@
 > 文档版本：2.89
 > 日期：2026-08-29
 > 依据：[PRD v9.84](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.0 / API v1 / SQLite schema v44
+> 当前实现基线：app v0.1.0 / API v1 / SQLite schema 53（052/053 为 AI 助手远程 Provider 与会话表，独立轨道交付；此前的 v44 基线声明已过期）
 
 > 2.89 说明：关闭到托盘偏好形成 SQLite→设置启动/预览→Tauri 运行态的单向链；设置 schema v2 严格保存 `close_to_tray`，v42 迁移保留旧事实且不向空库写默认行。点击即时预览、取消串行恢复 committed，桌面仅在托盘可用且偏好启用时拦截关闭。
 
@@ -75,7 +75,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly/weekdays/monthly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema v44：schema v11–v42 交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client、附件、来源 guards、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘；schema v43 加法新增容量历史表，schema v44 加法新增默认关闭的计划备份策略。v30–v44 都不创建业务 demo 数据或自动备份；容量样本只由真实探测产生，计划只在用户保存启用后执行。
+- SQLite 当前为 schema 53：schema v11–v42 交付 Focus、Inbox/Reminder/编排、设置/保存视图、Client、附件、来源 guards、Automation、Agent Adapter、Client Followup、Roadmap/Content 与关闭到托盘；schema v43 加法新增容量历史表，schema v44 加法新增默认关闭的计划备份策略；schema v52/53 按独立轨道加法新增 AI 供应商与会话/生成/消息表（业务导出明确排除，密钥只存 OS 安全存储，见 ADR-004）。v30–v44 都不创建业务 demo 数据或自动备份；容量样本只由真实探测产生，计划只在用户保存启用后执行。
 - Client Activity 继续以 `client_activities` 为唯一事实；`GET /api/v1/client-activities` 只读分页聚合所有客户未删除的 note/meeting/system_reference，按规范 UTC 纳秒键和 ID 稳定排序，并附带当前客户名称/状态。RightOverview 只取最近 3 条并深链客户详情，不复制活动、不生成 Inbox，也不推断邮件或提案下载等线上行为。
 - Roadmap Milestone 继续以 `roadmap_milestones`、关联 Project 与派生 Task 汇总为唯一事实；列表白名单 `sort=target_date` 在分页前按纯日期和 ID 稳定排序，缺省仍保留季度手工顺序。RightOverview 分别读取 planned/active 各 3 条，再按目标日期/ID 合并取最近 3 条，显示 Project 与已完成/总 Task 数；任一路失败整体显示重试，不把局部结果当完整概览，也不写 Today 副本。每条和路线图卡片都以 `?milestone=<id>` 打开同一个最新详情读模型，关闭/编辑只清理该参数并保留其他 URL 上下文。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
@@ -158,7 +158,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、拖拽/卡片键盘逐日改期即时预移与失败回滚、准备 Task 关系、本地发布确认；指定详情由 `?item=<id>` 和单条读取承载；CC2–CC5-B 已交付               | 准备 Task（读写已交付）；审核/发布时间到期事实投影到 Inbox，Inbox 通过内容 ID 精确回到最新详情（已交付）                                                         |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                               | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                     |
 | [知识库](modules/knowledge-base.md)        | 本地文件                                                                                                                | 导入、FTS 索引、来源定位和删除                                                                                                                                                       | 搜索结果、可选 AI 上下文                                                                                                                                         |
-| [AI 助手](modules/ai-assistant.md)         | 用户显式选择的本地上下文                                                                                                | 本地问答、摘要和建议                                                                                                                                                                 | 建议或待验收 Task Artifact                                                                                                                                       |
+| [AI 助手](modules/ai-assistant.md)         | 用户显式输入与用户配置的远程 Provider（API key 存 OS 安全存储）                                                         | 流式只读问答、语义建任务建议卡片（确认后经既有任务 API 创建）                                                                                                                        | 会话/消息本地事实、已创建任务静态引用卡片（点击跳任务详情）；AI 失败不投影 Inbox                                                                                 |
 
 ## 6. 跨模块主流程
 
@@ -491,7 +491,8 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 - Artifact producer 由 Sidecar 从 active assignee 派生，客户端不能上传 Actor ID 冒充产出者；manual Submission submitter 与 Artifact recorder 固定 owner，零 Artifact 的 child_rollup Submission submitter 固定内置 system。
 - 文件 Artifact 只允许上传到带数据库绑定 JSON marker 且由 Sidecar 进程独占锁定的受控 root，数据库仅保存 `objects/<artifact-id>` 相对路径；multipart 的 manifest 必须是首个 part，之后只接受被它精确且唯一引用的文件 part。严格 JSON body、manifest 与单个 structured object 各限 1 MiB，单文件限 50 MiB、完整 multipart 限 100 MiB，服务端 HTTP read/write timeout 为 180 秒、客户端上传/下载端到端超时 120 秒。下载通过鉴权 API 重新校验大小和 SHA-256，并强制 attachment/nosniff/no-store；关键文件与目录项在成功前做耐久同步。
 - Artifact 软删除需要确认、Task `If-Match` 和原因；pending-review 批次禁止删除。Task 聚合硬删除和文件软删除都通过 `.trash/` 做数据库事务补偿，并在同一事务留下不可变 tombstone；物理文件已经缺失时仍允许删除，软删记录 missing 完整性事实。
-- 当前阶段不提供线上更新、云同步、远程模型或自动对外发送。
+- AI 助手是唯一例外并经明确授权（ADR-004）：Sidecar 以用户配置的远程 Provider 出站，仅外发该次用户输入；API 密钥仅存 OS 安全存储，不进 SQLite/日志/导出。其余边界不变。
+- 当前阶段不提供线上更新、云同步或自动对外发送。
 
 ## 10. 故障与恢复协作
 
@@ -533,7 +534,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → v0.3 路线图 / 内容日历 / 高级数据管理
   → v0.4 财务 / 发票 / 客户回访
   → 本地知识库
-  → AI 助手
+  → AI 助手（首个远程只读会话纵切已按独立轨道先行交付，无知识库检索能力；上下文读取与来源引用仍依赖上述顺序）
 ```
 
 在前置事实层未完成时，下游模块只能展示明确的占位或禁用态，不能以静态数据、无行为按钮或预留表冒充可用功能。
