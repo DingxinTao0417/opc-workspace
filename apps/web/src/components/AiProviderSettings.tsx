@@ -118,8 +118,7 @@ function AiProviderCard({ provider }: { provider: AiProvider }) {
   const [apiKey, setApiKey] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const actionError =
-    setKey.error ?? checkHealth.error ?? deleteProvider.error;
+  const actionError = setKey.error ?? checkHealth.error ?? deleteProvider.error;
 
   async function saveKey() {
     try {

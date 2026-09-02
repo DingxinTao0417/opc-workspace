@@ -297,9 +297,7 @@ export function AiAssistantPage() {
     const all = sessions.data ?? [];
     const keyword = sessionFilter.trim().toLowerCase();
     const filtered = keyword
-      ? all.filter((session) =>
-          session.title.toLowerCase().includes(keyword),
-        )
+      ? all.filter((session) => session.title.toLowerCase().includes(keyword))
       : all;
     const buckets: Record<string, AiSession[]> = {
       today: [],
@@ -326,8 +324,7 @@ export function AiAssistantPage() {
     (session) => session.id === activeSessionId,
   );
   const hasMessages =
-    !!messages.data &&
-    messages.data.pages.some((page) => page.data.length > 0);
+    !!messages.data && messages.data.pages.some((page) => page.data.length > 0);
 
   function openTaskCard(message: AiMessage) {
     if (message.role !== "assistant") return;
@@ -456,7 +453,9 @@ export function AiAssistantPage() {
             />
           ) : sessionList.length === 0 ? (
             <p className="ai-session-empty">
-              {sessionFilter ? "没有匹配的会话。" : "还没有会话，发送第一条消息开始。"}
+              {sessionFilter
+                ? "没有匹配的会话。"
+                : "还没有会话，发送第一条消息开始。"}
             </p>
           ) : (
             sessionList.map((group) => (
@@ -649,9 +648,7 @@ export function AiAssistantPage() {
                   <ProjectSelect
                     ariaLabel="选择任务所属项目"
                     emptyLabel="不关联项目"
-                    onChange={(projectId) =>
-                      setDraft({ ...draft, projectId })
-                    }
+                    onChange={(projectId) => setDraft({ ...draft, projectId })}
                     value={draft.projectId ?? ""}
                     variant="form"
                   />
@@ -758,7 +755,8 @@ export function AiAssistantPage() {
                 </div>
               </div>
               <div className="ai-composer-hint">
-                AI 生成内容仅供参考 · 回答只读，创建任务需你确认 · 对话数据仅保存在本机
+                AI 生成内容仅供参考 · 回答只读，创建任务需你确认 ·
+                对话数据仅保存在本机
               </div>
             </div>
           </div>
@@ -879,11 +877,9 @@ function AiMessageBlock({
           <AiThinkingProcess reasoning={reasoning} live={false} />
         ) : null}
         <div className="ai-msg-text" data-status={status}>
-          {status === "cancelled" && display === "" ? (
-            "（已停止生成）"
-          ) : (
-            renderAiRichText(display)
-          )}
+          {status === "cancelled" && display === ""
+            ? "（已停止生成）"
+            : renderAiRichText(display)}
           {status === "cancelled" && display !== ""
             ? "（已停止生成，内容不完整）"
             : null}

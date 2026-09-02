@@ -227,7 +227,10 @@
   display: inline-flex;
   flex-shrink: 0;
   margin-right: 2px;
-  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    opacity 0.15s;
 }
 
 .ai-session-delete:hover {
@@ -550,7 +553,10 @@
   font-family: inherit;
   color: var(--accent-text);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    background 0.15s;
 }
 
 .ai-action-chip:hover {
@@ -722,7 +728,9 @@
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 .ai-composer-box:focus-within {
@@ -778,7 +786,9 @@
   font-family: inherit;
   padding: 0 6px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .ai-model-select:hover {

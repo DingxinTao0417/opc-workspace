@@ -971,12 +971,13 @@ v0.1 第一版可配置：
 
 ### 5.10 AI 助手（首个纵向切片已交付；独立轨道排期）
 
-> **状态**：首个纵向切片已交付（schema 052/053）。用户 2026-09-01 明确授权以 API key 配置式接入远程大模型并固化于 [ADR-004](adr/004-ai-assistant-provider-access.md)；排期为独立轨道，不并入 v0.1–v0.4。已交付：Provider 登记/健康/密钥（OS 安全存储）、SSE 流式只读会话、取消/断连/超时/并发闸门、语义建任务建议卡片（确认后经既有任务 API 创建并跳转）。本地部署模型适配由用户显式延后；上下文选择、知识库来源、多 Provider 路由与用量统计为后续纵切。
+> **状态**：首个纵向切片已交付（schema 052–054）。用户 2026-09-01 明确授权以 API key 配置式接入远程大模型并固化于 [ADR-004](adr/004-ai-assistant-provider-access.md)；排期为独立轨道，不并入 v0.1–v0.4。已交付：Provider 登记/健康/密钥（OS 安全存储）、多 Provider 管理与会话内切换、SSE 流式只读会话（含推理模型思考过程独立展示，schema 054）、取消/断连/超时/并发闸门、语义建任务建议卡片（确认后经既有任务 API 创建并跳转）。本地部署模型适配由用户显式延后；上下文选择、知识库来源、多 Provider 自动路由与用量统计为后续纵切。
 
 #### 已交付能力
 
 - 独立 `/ai` 会话入口：流式问答、停止与取消（保留部分内容）、会话管理与删除。
-- 远程 Provider 配置：`openai_chat` / `anthropic_messages` 双协议、连通性测试、状态展示；API key 只存操作系统安全存储，不进 SQLite/日志/导出/前端。
+- 远程 Provider 配置：`openai_chat` / `anthropic_messages` 双协议、连通性测试、状态展示；可登记多个 Provider 并在聊天输入区手动切换（每 Provider/每会话并发仍为 1）；API key 只存操作系统安全存储，不进 SQLite/日志/导出/前端。
+- 推理模型思考过程：DeepSeek `reasoning_content` / OpenRouter `reasoning` / Anthropic `thinking_delta` 被单独捕获为 `reasoning` SSE 事件并持久化到 `ai_messages.reasoning`（schema 054），前端以可折叠「思考过程」区展示，绝不混入回答正文。
 - 语义建任务（Linear 式建议卡片）：回复末尾结构化块 → 可编辑待确认卡片（标题必填）→ 用户确认后经既有 `POST /api/v1/tasks` 创建（固定 `todo`）→ 消息挂静态引用卡片 → 点击跳转任务详情；块缺失/非法降级纯文本，不自动创建。
 - 失败边界：稳定错误码族（`AI_*`）；AI 不可用时核心模块完全可用，AI 失败不投影 Inbox。
 

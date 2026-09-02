@@ -24,10 +24,14 @@ const mockState = vi.hoisted(() => {
     providers: [] as unknown[],
     sessions: [] as unknown[],
     messagesPages: [] as { data: unknown[]; meta: { has_more: boolean } }[],
-  streaming: null as { sessionId: string; text: string } | null,
-  isStreaming: false,
-  sentMessage: null as string | null,
-  taskDetail: null as { title: string; status: string; dueDate: string | null } | null,
+    streaming: null as { sessionId: string; text: string } | null,
+    isStreaming: false,
+    sentMessage: null as string | null,
+    taskDetail: null as {
+      title: string;
+      status: string;
+      dueDate: string | null;
+    } | null,
     send: vi.fn(
       async (): Promise<{
         sessionId: string;
@@ -308,9 +312,7 @@ describe("AiAssistantPage", () => {
     );
     renderPage();
 
-    const select = screen.getByLabelText(
-      "选择 AI 供应商",
-    ) as HTMLSelectElement;
+    const select = screen.getByLabelText("选择 AI 供应商") as HTMLSelectElement;
     expect(select.options.length).toBe(2);
     fireEvent.change(select, { target: { value: "provider-2" } });
 

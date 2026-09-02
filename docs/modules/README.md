@@ -45,7 +45,7 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 ## 版本待定（独立轨道）
 
 - [本地知识库](knowledge-base.md)
-- [AI 助手](ai-assistant.md)（首个纵向切片已交付：远程 Provider 配置式接入（双协议 API key + OS 安全存储）、`opc-ai-sse-v1` 流式只读会话与取消/并发闸门、语义建任务建议卡片经既有任务 API 确认落地与静态引用跳转；上下文读取、知识库来源、多 Provider 路由与本地部署适配待后续，见 ADR-004）
+- [AI 助手](ai-assistant.md)（首个纵向切片已交付：远程 Provider 配置式接入（双协议 API key + OS 安全存储、多 Provider 管理与会话内切换）、`opc-ai-sse-v1` 流式只读会话（含推理思考过程独立捕获与折叠展示，schema 054）与取消/并发闸门、语义建任务建议卡片经既有任务 API 确认落地与静态引用跳转；上下文读取、知识库来源、多 Provider 自动路由与本地部署适配待后续，见 ADR-004）
 
 ## 维护规则
 

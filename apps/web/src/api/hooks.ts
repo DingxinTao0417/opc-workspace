@@ -5294,9 +5294,11 @@ export interface AiChatStreamOutcome {
 
 const AI_STREAM_ERROR_HINTS: Record<string, string> = {
   AI_KEY_INVALID: "API 密钥被上游拒绝，请到 设置 → AI 助手 重新保存密钥",
-  AI_ENDPOINT_INVALID: "端点路径不存在（404），请确认 Base URL 指向 OpenAI 兼容的 chat/completions 接口",
+  AI_ENDPOINT_INVALID:
+    "端点路径不存在（404），请确认 Base URL 指向 OpenAI 兼容的 chat/completions 接口",
   AI_PROVIDER_ERROR: "上游服务返回错误，请稍后重试或更换模型",
-  AI_STREAM_ERROR: "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
+  AI_STREAM_ERROR:
+    "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
   AI_ENDPOINT_UNREACHABLE: "无法连接上游端点，请检查网络或代理",
   AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
 };
@@ -5331,7 +5333,11 @@ export function useAiChatStream() {
       abortRef.current = controller;
       setStreamError(null);
       setSentMessage(input.message);
-      setStreaming({ sessionId: input.sessionId ?? "", text: "", reasoning: "" });
+      setStreaming({
+        sessionId: input.sessionId ?? "",
+        text: "",
+        reasoning: "",
+      });
       let sessionId = input.sessionId ?? "";
       let failure: string | null = null;
       try {
