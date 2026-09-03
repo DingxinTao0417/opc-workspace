@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "opc-workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.opcworkspace.desktop",
   "build": {
     "devUrl": "http://127.0.0.1:1420",
@@ -31,8 +31,23 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "externalBin": ["binaries/opc-sidecar"],
     "category": "Productivity",
-    "shortDescription": "Local-first workspace for one-person companies"
+    "shortDescription": "Local-first workspace for one-person companies",
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"]
+      },
+      "wix": {
+        "language": "zh-CN"
+      }
+    }
   }
 }

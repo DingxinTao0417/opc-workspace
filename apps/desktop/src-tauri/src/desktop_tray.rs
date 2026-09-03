@@ -162,9 +162,9 @@ fn try_install_desktop_tray(app: &mut App) -> tauri::Result<()> {
         None::<&str>,
     )?;
     let menu = Menu::with_items(app, &[&show, &exit])?;
-    let default_icon = app
+    let default_icon: Image<'static> = app
         .default_window_icon()
-        .cloned()
+        .map(|icon| Image::new_owned(icon.rgba().to_vec(), icon.width(), icon.height()))
         .unwrap_or_else(fallback_tray_icon);
 
     TrayIconBuilder::with_id("opc-workspace-main")

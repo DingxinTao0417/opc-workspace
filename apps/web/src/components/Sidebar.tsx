@@ -133,7 +133,7 @@ export function Sidebar() {
           <div className="brand-name" title={displayName}>
             {displayName}
           </div>
-          <span className="local-pill">v0.1.0</span>
+          <span className="local-pill">v0.1.1</span>
         </div>
       </div>
 

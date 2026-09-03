@@ -347,8 +347,7 @@ describe("AiAssistantPage memory suggestion", () => {
               '已了解你的偏好。[opc:memory]{"content":"回答保持简洁"}[/opc:memory]',
           }),
         ],
-        next_before_created_at: null,
-        next_before_id: null,
+        meta: { has_more: false },
       },
     ];
     renderPage();

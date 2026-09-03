@@ -1,6 +1,6 @@
 {
   "name": "opc-workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Local-first workspace for one-person companies",
   "packageManager": "pnpm@11.21.0",
@@ -28,8 +28,8 @@
     "check:rust": "pnpm check:tauri && pnpm test:rust",
     "check:source": "pnpm format:check && pnpm check:docs && pnpm check:web && pnpm check:go",
     "check": "pnpm check:source && pnpm check:rust",
-    "format": "prettier --write package.json pnpm-workspace.yaml README.md docs scripts apps/web apps/desktop/package.json && pnpm format:go && pnpm format:rust",
-    "format:check": "prettier --check package.json pnpm-workspace.yaml README.md docs scripts apps/web apps/desktop/package.json && pnpm format:go:check && pnpm format:rust:check",
+    "format": "prettier --write package.json pnpm-workspace.yaml README.md README.en.md docs scripts apps/web apps/desktop/package.json && pnpm format:go && pnpm format:rust",
+    "format:check": "prettier --check package.json pnpm-workspace.yaml README.md README.en.md docs scripts apps/web apps/desktop/package.json && pnpm format:go:check && pnpm format:rust:check",
     "format:go": "node scripts/gofmt.mjs --write",
     "format:go:check": "node scripts/gofmt.mjs",
     "format:rust": "cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml",

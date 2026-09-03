@@ -12227,11 +12227,17 @@ kbd {
 .inbox-task-row-actions {
   display: flex;
   align-items: center;
-  gap: 7px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
-.form-inline-action.danger {
-  color: var(--danger-text);
+.inbox-task-row-action {
+  min-height: 24px;
+  gap: 4px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 9px;
 }
 
 .inbox-task-empty,

@@ -45,7 +45,11 @@ function resolveLocalTarget(sourceFile, rawTarget) {
     : resolve(dirname(sourceFile), decodedPath);
 }
 
-const files = [join(repoRoot, "README.md"), ...collectMarkdownFiles(docsRoot)];
+const files = [
+  join(repoRoot, "README.md"),
+  join(repoRoot, "README.en.md"),
+  ...collectMarkdownFiles(docsRoot),
+];
 const errors = [];
 
 for (const file of files) {

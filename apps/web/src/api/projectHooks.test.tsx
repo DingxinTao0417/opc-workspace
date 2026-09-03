@@ -170,6 +170,51 @@ describe("useTransitionProject", () => {
 });
 
 describe("useUpdateProject", () => {
+  it("reports persistence before slow derived-fact refreshes complete", async () => {
+    updateProjectMock.mockResolvedValue({
+      ...completedProject,
+      version: completedProject.version + 1,
+    });
+    const queryClient = createQueryClient();
+    let releaseInvalidations: (() => void) | undefined;
+    const pendingInvalidation = new Promise<void>((resolve) => {
+      releaseInvalidations = resolve;
+    });
+    vi.spyOn(queryClient, "invalidateQueries").mockImplementation(
+      () => pendingInvalidation,
+    );
+    const saved = vi.fn();
+    const { result } = renderHook(() => useUpdateProject(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate(
+        {
+          id: completedProject.id,
+          input: {
+            name: completedProject.name,
+            description: completedProject.description,
+            clientId: completedProject.clientId,
+            startDate: completedProject.startDate,
+            dueDate: completedProject.dueDate,
+            amountMinor: completedProject.amountMinor,
+            color: completedProject.color,
+            expectedVersion: completedProject.version,
+          },
+        },
+        { onSuccess: saved },
+      ),
+    );
+
+    try {
+      await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+      expect(result.current.isSuccess).toBe(true);
+    } finally {
+      releaseInvalidations?.();
+    }
+  });
+
   it("refreshes every derived project fact after a version conflict", async () => {
     updateProjectMock.mockRejectedValue(
       new ApiError("Project has changed", {
