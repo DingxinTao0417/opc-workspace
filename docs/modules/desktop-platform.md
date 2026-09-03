@@ -2,7 +2,7 @@
 
 > 实现基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）。桌面基座、数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；Windows x64 已完成原生链接、38 项 Rust 测试和未签名 NSIS/MSI 本地打包。T-02 仍部分完成，安装后托盘交互、真实父崩溃/进程树、签名、干净系统与其他平台验收仍待完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.83](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.86](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -22,6 +22,7 @@
 
 已实现：
 
+- React `AppShell` 宽屏左侧主导航可通过品牌区右侧按钮在 220 px 展开态与 64 px 图标态间切换；收起态保留搜索、全部模块、设置与原位展开入口的可访问名称/悬浮提示。窄屏继续自动使用 64 px 图标栏并隐藏重复按钮；该状态为当前运行期短期 UI 状态，不进入业务数据库。
 - Tauri 2 桌面窗口、固定最小尺寸和内置 Web 前端。
 - single-instance 插件；再次启动时显示、取消最小化并聚焦主窗口。
 - Tauri `tray-icon` 已提供最小托盘：只有托盘构建成功且 committed `close_to_tray` 启用时才拦截主窗口关闭并隐藏；左键和固定“显示 opc-workspace”恢复窗口，固定“退出 opc-workspace”进入应用退出与 Sidecar 优雅关闭。构建失败或偏好关闭时关闭请求按原路径继续。配置的应用图标不可用时使用代码内本地 RGBA fallback，不读取外部路径。

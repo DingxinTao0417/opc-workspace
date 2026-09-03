@@ -34,11 +34,12 @@ afterEach(() => {
 });
 
 describe("streamAiChat", () => {
-  it("parses meta, delta, and done events from the SSE stream", async () => {
+  it("parses meta, delta, replacement, and done events from the SSE stream", async () => {
     const fetchMock = vi.fn(async () =>
       sseResponse([
         'event: meta\ndata: {"protocol":"openai_chat","generation_id":"gen-1","session_id":"s-1","model":"gpt-test","provider_id":"p-1","sse_protocol":"opc-ai-sse-v1"}\n\n',
         'event: delta\ndata: {"generation_id":"gen-1","text":"你"}\n\nevent: delta\ndata: {"generation_id":"gen-1","text":"好"}\n\n',
+        'event: replace\ndata: {"generation_id":"gen-1","text":"修订后的你好","reasoning":"复核后补全"}\n\n',
         'event: done\ndata: {"generation_id":"gen-1"}\n\n',
       ]),
     );
@@ -66,6 +67,12 @@ describe("streamAiChat", () => {
       },
       { type: "delta", generationId: "gen-1", text: "你" },
       { type: "delta", generationId: "gen-1", text: "好" },
+      {
+        type: "replace",
+        generationId: "gen-1",
+        text: "修订后的你好",
+        reasoning: "复核后补全",
+      },
       { type: "done", generationId: "gen-1" },
     ]);
     const [, init] = fetchMock.mock.calls[0] as unknown as [

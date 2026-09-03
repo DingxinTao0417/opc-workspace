@@ -112,6 +112,19 @@ func (a *API) deleteAISession(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var current models.AISession
+	if err := a.db.WithContext(c.Request.Context()).Where("id = ?", id).First(&current).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "AI_SESSION_NOT_FOUND", "AI session not found")
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
+	if current.Version != expectedVersion {
+		writeProjectRequestError(c, taskVersionConflict())
+		return
+	}
 	a.aiGenerations.cancelSession(id)
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var row models.AISession

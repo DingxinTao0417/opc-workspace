@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { useHealthQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
+import { useUiStore } from "../store/ui";
 import { RightOverview } from "./RightOverview";
 import { Sidebar } from "./Sidebar";
 
@@ -10,12 +11,17 @@ export function AppShell() {
     (state) =>
       state.preview?.general.showRightOverview ?? state.showRightOverview,
   );
+  const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
 
   return (
     <div
-      className={
-        showRightOverview ? "app-shell" : "app-shell app-shell-no-overview"
-      }
+      className={[
+        "app-shell",
+        showRightOverview ? "" : "app-shell-no-overview",
+        sidebarCollapsed ? "app-shell-sidebar-collapsed" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <Sidebar />
       <main className="main-column">

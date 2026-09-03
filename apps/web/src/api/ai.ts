@@ -133,6 +133,14 @@ function parseAiStreamBlock(block: string): AiChatStreamEvent | null {
         generationId,
         text: typeof payload.text === "string" ? payload.text : "",
       };
+    case "replace":
+      return {
+        type: "replace",
+        generationId,
+        text: typeof payload.text === "string" ? payload.text : "",
+        reasoning:
+          typeof payload.reasoning === "string" ? payload.reasoning : "",
+      };
     case "done":
       return { type: "done", generationId };
     case "cancelled":

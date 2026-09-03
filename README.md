@@ -59,7 +59,7 @@
 
 - v0.1 的核心人工闭环正在持续完善，页面与接口的完成度以[模块状态总览](./docs/modules/README.md)为准。
 - 收入、支出与发票目前仍是后续业务模块，不能视为已交付能力。
-- AI 助手独立轨道已交付远程 Provider、本地回环 OpenAI 兼容 Provider、多 Provider 会话切换、流式回复与推理展示、生产零工具 Harness、长期记忆确认流和语义建任务确认卡片；知识库与长程上下文压缩仍未实现。
+- AI 助手独立轨道已交付远程 Provider、本地回环 OpenAI 兼容 Provider、多 Provider 会话切换、流式回复与推理展示、生产零工具 Harness、长期记忆确认流、自然语言语义建任务确认卡片，以及最新完整回合上下文窗口；知识库与会话摘要压缩仍未实现。
 - 本地 Agent 目前只有受限 Adapter 登记与诊断，没有 Runner、Agent Run 或可执行任务能力。
 - 当前没有云同步、多人账号、线上工作流或远程消息发送。
 
@@ -156,7 +156,7 @@ docs/                     PRD、整体架构、ADR 与模块级功能文档
 ## 文档
 
 - [文档中心](./docs/README.md)：阅读顺序、事实优先级与模块状态总览。
-- [产品需求文档（PRD v9.84）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
+- [产品需求文档（PRD v9.86）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
 - [整体功能架构](./docs/functional-architecture.md)：模块关系、事件流和事实归属。
 - [模块文档](./docs/modules/README.md)：每个模块的流程、API、状态、依赖与验收标准。
 - [Sidecar 开发文档](./services/sidecar/README.md)：本地 API、数据与服务端验证说明。

@@ -38,6 +38,7 @@ func HealthCheck(ctx context.Context, protocol Protocol, baseURL string, apiKey 
 	}
 	if protocol == ProtocolAnthropicMessages {
 		request.Header.Set("x-api-key", apiKey)
+		request.Header.Set("anthropic-version", "2023-06-01")
 	} else {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}

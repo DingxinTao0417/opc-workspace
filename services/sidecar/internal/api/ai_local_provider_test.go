@@ -76,6 +76,14 @@ func TestAILocalProviderKeylessLifecycleAndChat(t *testing.T) {
 
 func TestAILocalProviderValidation(t *testing.T) {
 	router, _, _ := newAIProviderTestRouter(t, time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC))
+	for index, endpoint := range []string{
+		"http://localhost.evil.example/v1",
+		"http://127.0.0.1.evil.example/v1",
+		"http://localhost@evil.example/v1",
+	} {
+		spoofed := performRequest(router, http.MethodPost, "/api/v1/ai/providers", []byte(fmt.Sprintf(`{"name":"spoof-%d","kind":"local","protocol":"openai_chat","base_url":"%s","model":"m"}`, index, endpoint)), nil)
+		assertAPIError(t, spoofed, http.StatusUnprocessableEntity, "AI_ENDPOINT_INVALID")
+	}
 	// Local providers are loopback-http only; https endpoints are rejected.
 	httpsEndpoint := performRequest(router, http.MethodPost, "/api/v1/ai/providers", []byte(`{"name":"l1","kind":"local","protocol":"openai_chat","base_url":"https://127.0.0.1:11434/v1","model":"m"}`), nil)
 	assertAPIError(t, httpsEndpoint, http.StatusUnprocessableEntity, "AI_ENDPOINT_INVALID")

@@ -5285,6 +5285,9 @@ export function useDeleteAiSession() {
         queryKey: aiMessagesQueryKey(variables.id),
       });
     },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey });
+    },
   });
 }
 
@@ -5348,6 +5351,7 @@ const AI_STREAM_ERROR_HINTS: Record<string, string> = {
     "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
   AI_ENDPOINT_UNREACHABLE: "无法连接上游端点，请检查网络或代理",
   AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
+  AI_PROMPT_TOO_LARGE: "当前消息和上下文超过提示词上限，请缩短内容后重试",
   AI_KEY_NOT_ALLOWED: "本地部署供应商不需要 API 密钥，请检查供应商类型配置",
 };
 
@@ -5413,6 +5417,13 @@ export function useAiChatStream() {
                   text: (previous?.text ?? "") + event.text,
                   reasoning: previous?.reasoning ?? "",
                 }));
+                break;
+              case "replace":
+                setStreaming({
+                  sessionId,
+                  text: event.text,
+                  reasoning: event.reasoning,
+                });
                 break;
               case "error":
                 failure = aiStreamErrorText(event.error, event.detail);

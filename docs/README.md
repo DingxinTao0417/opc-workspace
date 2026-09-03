@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 56（052–056 为 AI 助手远程/本地 Provider、会话表、推理思考流列、Provider kind 列与长期记忆表；此前的 v44 基线声明已过期）。v9.84 新增默认关闭的本地每日计划、启动/周期补偿和只清理超限自动包的安全保留；实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名 NSIS/MSI 本地打包；实际关闭交互、安装/干净系统、签名及 macOS/Linux 验收仍待完成。
+> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 56（052–056 为 AI 助手远程/本地 Provider、会话表、推理思考流列、Provider kind 列与长期记忆表；此前的 v44 基线声明已过期）。PRD v9.86 在 v9.85 AI 助手稳定性批次之上交付宽屏主导航手动收起/展开；schema/API 版本不变。实际升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名 NSIS/MSI 本地打包；实际关闭交互、安装/干净系统、签名及 macOS/Linux 验收仍待完成。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v9.84）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v9.86）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -39,15 +39,15 @@
 
 ## 后续业务与规划模块
 
-| 模块             | 当前状态                                                                                                                                                            | 目标版本         | 文档                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------- |
-| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                                                               | v0.4             | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                                                                    | v0.4             | [client-followups.md](modules/client-followups.md) |
-| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                                                           | v0.3             | [roadmap.md](modules/roadmap.md)                   |
-| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发                                       | v0.3             | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 首个纵向切片完成                                                                                                                                                    | v0.2             | [automation.md](modules/automation.md)             |
-| 本地知识库       | 未开始                                                                                                                                                              | 待定             | [knowledge-base.md](modules/knowledge-base.md)     |
-| AI 助手          | 纵向切片持续交付：远程 Provider、本地大模型、harness 运行时（纠错/自评反思/长期记忆）已完成（ADR-004/005/006）；长程上下文压缩与记忆工具设计已固化待实施（ADR-007） | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
+| 模块             | 当前状态                                                                                                                                                 | 目标版本         | 文档                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------- |
+| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                                                    | v0.4             | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                                                         | v0.4             | [client-followups.md](modules/client-followups.md) |
+| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                                                | v0.3             | [roadmap.md](modules/roadmap.md)                   |
+| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发                            | v0.3             | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化       | 首个纵向切片完成                                                                                                                                         | v0.2             | [automation.md](modules/automation.md)             |
+| 本地知识库       | 未开始                                                                                                                                                   | 待定             | [knowledge-base.md](modules/knowledge-base.md)     |
+| AI 助手          | 纵向切片持续交付：远程/本地 Provider、harness（纠错/自评修订）、长期记忆、自然语言建任务确认与 G1 最新完整回合窗口已完成；摘要压缩/记忆工具 G2–G5 待实施 | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
 
@@ -80,7 +80,7 @@
 
 - [AI 助手 MVP 实施计划（已评审并实施；实现状态以 [模块文档](modules/ai-assistant.md) 为准）](plans/ai-assistant-mvp.md)
 - [Agent Harness 分阶段计划（ADR-005/006 已实施；实现状态以 [模块文档](modules/ai-assistant.md) 为准）](plans/agent-harness-phases.md)
-- [会话上下文压缩与记忆工具分阶段计划（ADR-007；设计已固化，实施待启动）](plans/context-memory-phases.md)
+- [会话上下文压缩与记忆工具分阶段计划（ADR-007；G1 已交付，G2–G5 待实施）](plans/context-memory-phases.md)
 
 ## 架构决策
 
@@ -88,7 +88,7 @@
 - [ADR-004：AI 助手远程 Provider 接入与安全边界](adr/004-ai-assistant-provider-access.md)
 - [ADR-005：Agent Harness 架构与本地大模型接入](adr/005-agent-harness-and-local-models.md)
 - [ADR-006：Harness 完整组件矩阵与自进化边界](adr/006-harness-matrix-memory-evolution.md)
-- [ADR-007：会话上下文压缩与记忆工具（设计固化，实施待启动）](adr/007-session-context-compaction-and-memory-tools.md)
+- [ADR-007：会话上下文压缩与记忆工具（G1 已交付，G2–G5 待实施）](adr/007-session-context-compaction-and-memory-tools.md)
 
 ## 核心术语
 

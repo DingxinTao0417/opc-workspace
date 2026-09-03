@@ -7,6 +7,8 @@ import {
   Focus,
   Inbox,
   Map,
+  PanelLeftClose,
+  PanelLeftOpen,
   ReceiptText,
   Search,
   Settings2,
@@ -113,6 +115,10 @@ export function Sidebar() {
     (state) => state.setCommandPaletteOpen,
   );
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
+  const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
+  const toggleSidebarCollapsed = useUiStore(
+    (state) => state.toggleSidebarCollapsed,
+  );
   const inboxBadge = inboxStatsQuery.data?.pending
     ? inboxStatsQuery.data.pending > 99
       ? "99+"
@@ -120,7 +126,11 @@ export function Sidebar() {
     : undefined;
 
   return (
-    <aside className="left-sidebar" aria-label="主导航">
+    <aside
+      aria-label="主导航"
+      className={`left-sidebar${sidebarCollapsed ? " is-collapsed" : ""}`}
+      id="primary-sidebar"
+    >
       <div className="brand-block">
         <div className="brand-mark">
           {avatarDataUrl ? (
@@ -135,11 +145,28 @@ export function Sidebar() {
           </div>
           <span className="local-pill">v0.1.1</span>
         </div>
+        <button
+          aria-controls="primary-sidebar"
+          aria-expanded={!sidebarCollapsed}
+          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          className="icon-button sidebar-collapse-button"
+          onClick={toggleSidebarCollapsed}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          type="button"
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen aria-hidden="true" size={17} />
+          ) : (
+            <PanelLeftClose aria-hidden="true" size={17} />
+          )}
+        </button>
       </div>
 
       <button
+        aria-label="搜索或跳转"
         className="sidebar-search"
         onClick={() => setCommandPaletteOpen(true)}
+        title={sidebarCollapsed ? "搜索或跳转" : undefined}
         type="button"
       >
         <Search size={15} />
@@ -153,10 +180,12 @@ export function Sidebar() {
             <div className="nav-label sidebar-copy">{group.label}</div>
             {group.items.map(({ label, to, icon: Icon, badge }) => (
               <NavLink
+                aria-label={sidebarCollapsed ? label : undefined}
                 className={({ isActive }) =>
                   `nav-item${isActive ? " nav-item-active" : ""}`
                 }
                 key={to}
+                title={sidebarCollapsed ? label : undefined}
                 to={to}
               >
                 <Icon className="nav-icon" size={17} />

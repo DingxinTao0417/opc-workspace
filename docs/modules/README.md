@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.84](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.86](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -45,7 +45,7 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 ## 版本待定（独立轨道）
 
 - [本地知识库](knowledge-base.md)
-- [AI 助手](ai-assistant.md)（首个纵向切片已交付：远程 Provider 配置式接入（双协议 API key + OS 安全存储、多 Provider 管理与会话内切换）、本地部署 Provider（回环 OpenAI 兼容端点、无密钥，ADR-005）、agent harness 运行时（生产零工具，机制测试覆盖；纠错重试与反思校验轮，ADR-006）、长期记忆确认流与注入（ai_memories，schema 056）、`opc-ai-sse-v1` 流式只读会话（含推理思考过程独立捕获与折叠展示，schema 054）与取消/并发闸门、语义建任务建议卡片经既有任务 API 确认落地与静态引用跳转；上下文读取、知识库来源（仅扩展点）、长程上下文压缩与记忆工具（设计已固化待实施，ADR-007）、多 Provider 自动路由待后续，见 ADR-004/005/006/007）
+- [AI 助手](ai-assistant.md)（远程/本地 Provider、多 Provider 切换、OS 安全存储、agent harness（生产零工具；纠错与自评 replacement）、长期记忆确认注入、推理过程、取消/并发闸门、自然语言任务建议确认与幂等挂接已交付；ADR-007 G1 最新完整回合窗口/控制块剥离/精确请求预算已完成。业务上下文、知识库来源、摘要压缩、记忆工具、自动路由待后续，见 ADR-004/005/006/007）
 
 ## 维护规则
 

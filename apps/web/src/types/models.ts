@@ -2555,6 +2555,12 @@ export type AiChatStreamEvent =
   | { type: "meta"; meta: AiChatStreamMeta }
   | { type: "delta"; generationId: string; text: string }
   | { type: "reasoning"; generationId: string; text: string }
+  | {
+      type: "replace";
+      generationId: string;
+      text: string;
+      reasoning: string;
+    }
   | { type: "done"; generationId: string }
   | { type: "cancelled"; generationId: string; partialText: string }
   | { type: "error"; generationId: string; error: string; detail?: string };

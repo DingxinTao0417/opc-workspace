@@ -177,6 +177,14 @@ button:disabled {
   grid-template-columns: 220px minmax(0, 1fr);
 }
 
+.app-shell.app-shell-sidebar-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr) 280px;
+}
+
+.app-shell.app-shell-no-overview.app-shell-sidebar-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
 .left-sidebar,
 .right-sidebar,
 .main-column {
@@ -199,6 +207,46 @@ button:disabled {
   gap: 10px;
   min-height: 44px;
   padding: 0 4px;
+}
+
+.brand-block > .sidebar-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-collapse-button {
+  flex: 0 0 30px;
+  margin-left: auto;
+}
+
+.left-sidebar.is-collapsed {
+  align-items: center;
+  padding: 14px 8px;
+}
+
+.left-sidebar.is-collapsed .sidebar-copy,
+.left-sidebar.is-collapsed .brand-mark {
+  display: none !important;
+}
+
+.left-sidebar.is-collapsed .brand-block,
+.left-sidebar.is-collapsed .sidebar-search,
+.left-sidebar.is-collapsed .nav-item {
+  width: 36px;
+  justify-content: center;
+  padding: 0;
+}
+
+.left-sidebar.is-collapsed .brand-block {
+  min-height: 44px;
+}
+
+.left-sidebar.is-collapsed .sidebar-collapse-button {
+  margin-left: 0;
+}
+
+.left-sidebar.is-collapsed .nav-group + .nav-group {
+  margin-top: 5px;
 }
 
 .brand-mark {
@@ -12578,6 +12626,10 @@ kbd {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+  .app-shell.app-shell-sidebar-collapsed {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
   .right-sidebar {
     display: none;
   }
@@ -12701,6 +12753,14 @@ kbd {
 
   .brand-block {
     padding: 0;
+  }
+
+  .sidebar-collapse-button {
+    display: none;
+  }
+
+  .left-sidebar.is-collapsed .brand-mark {
+    display: grid !important;
   }
 
   .sidebar-search,

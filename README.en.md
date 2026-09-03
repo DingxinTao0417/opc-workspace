@@ -59,7 +59,7 @@ Independent developers, freelancers, creators, and consultants often jump betwee
 
 - The v0.1 manual workflow is still being refined. See the [module status overview](./docs/modules/README.md) for the current implementation baseline.
 - Income, expenses, and invoicing remain future business modules and must not be treated as delivered features.
-- The independent AI assistant track includes remote providers, loopback OpenAI-compatible local providers, in-session provider switching, streamed replies and reasoning, a production zero-tool harness, confirmed long-term memory, and semantic task suggestion cards. Knowledge-base retrieval and long-context compaction remain unimplemented.
+- The independent AI assistant track includes remote providers, loopback OpenAI-compatible local providers, in-session provider switching, streamed replies and reasoning, a production zero-tool harness, confirmed long-term memory, natural-language task confirmation cards, and a recent complete-turn context window. Knowledge-base retrieval and conversation summarization remain unimplemented.
 - The local Agent area currently contains constrained Adapter registration and diagnostics only—there is no Runner, Agent Run, or executable task capability.
 - There is no cloud sync, multi-user account system, online workflow, or remote message sending.
 
@@ -156,7 +156,7 @@ docs/                     PRD, architecture, ADRs, and module documentation (Chi
 ## Documentation
 
 - [Documentation center](./docs/README.md): reading order, source-of-truth rules, and module status overview (Chinese).
-- [Product requirements, PRD v9.84](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
+- [Product requirements, PRD v9.86](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
 - [Functional architecture](./docs/functional-architecture.md): module relationships, event flows, and fact ownership (Chinese).
 - [Module documentation](./docs/modules/README.md): workflows, APIs, states, dependencies, and acceptance criteria (Chinese).
 - [Sidecar developer documentation](./services/sidecar/README.md): local API, data, and backend verification notes.

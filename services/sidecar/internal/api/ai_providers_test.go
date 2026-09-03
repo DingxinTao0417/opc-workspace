@@ -262,6 +262,9 @@ func TestAIProviderHealthCheckAnthropicProtocol(t *testing.T) {
 		if r.Header.Get("x-api-key") != "sk-anthropic" {
 			t.Fatalf("anthropic probe key header = %q", r.Header.Get("x-api-key"))
 		}
+		if r.Header.Get("anthropic-version") != "2023-06-01" {
+			t.Fatalf("anthropic probe version header = %q", r.Header.Get("anthropic-version"))
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer upstream.Close()
@@ -274,5 +277,39 @@ func TestAIProviderHealthCheckAnthropicProtocol(t *testing.T) {
 	}
 	if envelope.Data.Status != "ready" || envelope.Data.HealthStatus != "healthy" {
 		t.Fatalf("anthropic health = %#v", envelope.Data)
+	}
+}
+
+func TestAIProviderConnectionOrKeyChangeRequiresFreshHealthCheck(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, _, _ := newAIProviderTestRouter(t, now)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "health-reset", upstream.URL+"/v1", "gpt-test")
+
+	patched := performRequest(router, http.MethodPatch, "/api/v1/ai/providers/"+provider.ID, []byte(`{"model":"gpt-new"}`), map[string]string{"If-Match": `"3"`})
+	if patched.Code != http.StatusOK {
+		t.Fatalf("patch provider identity = %d: %s", patched.Code, patched.Body.String())
+	}
+	var patchedEnvelope aiProviderEnvelope
+	if err := json.Unmarshal(patched.Body.Bytes(), &patchedEnvelope); err != nil {
+		t.Fatalf("decode patched provider: %v", err)
+	}
+	if patchedEnvelope.Data.Status != "unconfigured" || patchedEnvelope.Data.HealthStatus != "unknown" || patchedEnvelope.Data.LastHealthAt != nil {
+		t.Fatalf("connection change kept stale health: %#v", patchedEnvelope.Data)
+	}
+
+	replacedKey := performRequest(router, http.MethodPost, "/api/v1/ai/providers/"+provider.ID+"/key", []byte(`{"api_key":"sk-replaced"}`), map[string]string{"If-Match": `"4"`})
+	if replacedKey.Code != http.StatusOK {
+		t.Fatalf("replace provider key = %d: %s", replacedKey.Code, replacedKey.Body.String())
+	}
+	var keyEnvelope aiProviderEnvelope
+	if err := json.Unmarshal(replacedKey.Body.Bytes(), &keyEnvelope); err != nil {
+		t.Fatalf("decode key-replaced provider: %v", err)
+	}
+	if keyEnvelope.Data.Status != "unconfigured" || keyEnvelope.Data.HealthStatus != "unknown" || keyEnvelope.Data.LastHealthAt != nil {
+		t.Fatalf("key replacement kept stale health: %#v", keyEnvelope.Data)
 	}
 }

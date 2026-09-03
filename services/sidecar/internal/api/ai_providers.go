@@ -180,6 +180,7 @@ func (a *API) patchAIProvider(c *gin.Context) {
 		writeProjectRequestError(c, taskVersionConflict())
 		return
 	}
+	previousRow := row
 	if input.Name != nil {
 		row.Name = *input.Name
 	}
@@ -200,12 +201,40 @@ func (a *API) patchAIProvider(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, code, "The patched AI provider fields are not valid")
 		return
 	}
+	connectionChanged := kind != previousRow.Kind || protocol != previousRow.Protocol || baseURL != previousRow.BaseURL || model != previousRow.Model
+	clearSecret := kind == aiProviderKindLocal && previousRow.HasKey
+	var previousSecret string
+	hadSecret := false
+	if clearSecret {
+		previousSecret, err = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
+		if err != nil && !errors.Is(err, keystore.ErrNotFound) {
+			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+			return
+		}
+		hadSecret = err == nil
+		if hadSecret {
+			if err := a.keyStore.Delete(aiProviderKeyService, aiProviderKeyAccount(id)); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+				writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+				return
+			}
+		}
+	}
 	var response aiProviderResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
+		updates := map[string]any{
 			"name": name, "kind": kind, "protocol": protocol, "base_url": baseURL, "model": model,
 			"version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
-		})
+		}
+		if connectionChanged {
+			updates["status"] = "unconfigured"
+			updates["health_status"] = "unknown"
+			updates["health_error_code"] = nil
+			updates["last_health_at"] = nil
+		}
+		if kind == aiProviderKindLocal {
+			updates["has_key"] = false
+		}
+		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -220,6 +249,11 @@ func (a *API) patchAIProvider(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if clearSecret && hadSecret {
+			if restoreErr := a.keyStore.Set(aiProviderKeyService, aiProviderKeyAccount(id), previousSecret); restoreErr != nil {
+				a.options.Logger.Print("AI provider key restore failed for provider " + id)
+			}
+		}
 		if writeAIProviderRequestError(c, err) {
 			return
 		}
@@ -239,9 +273,42 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 	if !ok {
 		return
 	}
+	row, err := loadAIProvider(a.db.WithContext(c.Request.Context()), id)
+	if err != nil {
+		writeAIProviderLoadError(c, err)
+		return
+	}
+	if row.Version != expectedVersion {
+		writeProjectRequestError(c, taskVersionConflict())
+		return
+	}
+	// Secure storage cannot join the SQLite transaction. Remove the existing
+	// secret before committing the provider deletion, then restore it if the
+	// database transaction rolls back. A successful response therefore means
+	// both sides were removed.
+	var previousSecret string
+	hadSecret := false
+	if row.Kind != aiProviderKindLocal || row.HasKey {
+		previousSecret, err = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
+		switch {
+		case err == nil:
+			hadSecret = true
+		case errors.Is(err, keystore.ErrNotFound):
+			// A stale has_key hint does not prevent safe provider cleanup.
+		default:
+			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+			return
+		}
+		if hadSecret {
+			if err := a.keyStore.Delete(aiProviderKeyService, aiProviderKeyAccount(id)); err != nil && !errors.Is(err, keystore.ErrNotFound) {
+				writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+				return
+			}
+		}
+	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	var response aiProviderResponse
-	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		row, err := loadAIProvider(tx, id)
 		if err != nil {
 			return err
@@ -260,14 +327,16 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if hadSecret {
+			if restoreErr := a.keyStore.Set(aiProviderKeyService, aiProviderKeyAccount(id), previousSecret); restoreErr != nil {
+				a.options.Logger.Print("AI provider key restore failed for provider " + id)
+			}
+		}
 		if writeAIProviderRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
-	}
-	if err := a.keyStore.Delete(aiProviderKeyService, aiProviderKeyAccount(id)); err != nil && !errors.Is(err, keystore.ErrNotFound) {
-		a.options.Logger.Print("AI provider key cleanup failed for provider " + id)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
@@ -398,6 +467,14 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 		writeProjectRequestError(c, taskVersionConflict())
 		return
 	}
+	var previousSecret string
+	hadPreviousSecret := false
+	previousSecret, err = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
+	if err != nil && !errors.Is(err, keystore.ErrNotFound) {
+		writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+		return
+	}
+	hadPreviousSecret = err == nil
 	account := aiProviderKeyAccount(id)
 	if err := a.keyStore.Set(aiProviderKeyService, account, apiKey); err != nil {
 		writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
@@ -406,7 +483,8 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 	var response aiProviderResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
-			"has_key": true, "version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
+			"has_key": true, "status": "unconfigured", "health_status": "unknown", "health_error_code": nil, "last_health_at": nil,
+			"version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
 		})
 		if result.Error != nil {
 			return result.Error
@@ -422,7 +500,11 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
-		_ = a.keyStore.Delete(aiProviderKeyService, account)
+		if hadPreviousSecret {
+			_ = a.keyStore.Set(aiProviderKeyService, account, previousSecret)
+		} else {
+			_ = a.keyStore.Delete(aiProviderKeyService, account)
+		}
 		if writeAIProviderRequestError(c, err) {
 			return
 		}
@@ -458,12 +540,17 @@ func normalizeAIProviderFields(name, kind, protocol, baseURL, model string) (str
 		return "", "", "", "", "", "AI_PROTOCOL_INVALID", false
 	}
 	parsed, err := url.Parse(baseURL)
-	if baseURL == "" || len(baseURL) > 500 || err != nil || parsed.Host == "" ||
-		(!strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "http://127.0.0.1") && !strings.HasPrefix(baseURL, "http://localhost")) {
+	if baseURL == "" || len(baseURL) > 500 || err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", "", "", "", "", "AI_ENDPOINT_INVALID", false
 	}
-	if kind == aiProviderKindLocal &&
-		(!strings.HasPrefix(baseURL, "http://127.0.0.1") && !strings.HasPrefix(baseURL, "http://localhost")) {
+	hostname := strings.ToLower(parsed.Hostname())
+	isLoopbackHost := hostname == "localhost" || hostname == "127.0.0.1"
+	isLoopbackHTTP := strings.EqualFold(parsed.Scheme, "http") && isLoopbackHost
+	isHTTPS := strings.EqualFold(parsed.Scheme, "https")
+	if !isHTTPS && !isLoopbackHTTP {
+		return "", "", "", "", "", "AI_ENDPOINT_INVALID", false
+	}
+	if kind == aiProviderKindLocal && !isLoopbackHTTP {
 		return "", "", "", "", "", "AI_ENDPOINT_INVALID", false
 	}
 	if model == "" || len(model) > 200 {

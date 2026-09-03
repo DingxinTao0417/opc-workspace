@@ -45,6 +45,7 @@ import type { AiMessage, AiSession, TaskStatus } from "../types/models";
 interface PendingTaskCard {
   messageId: string;
   suggestion: AiTaskSuggestion;
+  createdTaskId?: string;
 }
 
 interface DraftTaskForm {
@@ -259,10 +260,13 @@ export function AiAssistantPage() {
   const [taskError, setTaskError] = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const autoScrolledSessionRef = useRef("");
 
   const readyProviders =
     providers.data?.filter(
-      (provider) => provider.status === "ready" && provider.has_key,
+      (provider) =>
+        provider.status === "ready" &&
+        (provider.kind === "local" || provider.has_key),
     ) ?? [];
   const activeProvider =
     readyProviders.find((provider) => provider.id === selectedProviderId) ??
@@ -291,9 +295,23 @@ export function AiAssistantPage() {
 
   useEffect(() => {
     const node = scrollRef.current;
-    if (!node || typeof node.scrollTo !== "function") return;
+    if (
+      !node ||
+      !messages.data ||
+      typeof node.scrollTo !== "function" ||
+      (autoScrolledSessionRef.current === activeSessionId &&
+        chat.streaming?.sessionId !== activeSessionId)
+    ) {
+      return;
+    }
     node.scrollTo({ top: node.scrollHeight });
-  }, [messages.data?.pages, chat.streaming?.text]);
+    autoScrolledSessionRef.current = activeSessionId;
+  }, [
+    activeSessionId,
+    messages.data,
+    chat.streaming?.sessionId,
+    chat.streaming?.text,
+  ]);
 
   const streamedText = chat.streaming?.text ?? "";
   const sessionList = useMemo(() => {
@@ -326,8 +344,14 @@ export function AiAssistantPage() {
   const activeSession = sessions.data?.find(
     (session) => session.id === activeSessionId,
   );
-  const hasMessages =
-    !!messages.data && messages.data.pages.some((page) => page.data.length > 0);
+  const loadedMessages = useMemo(
+    () =>
+      messages.data
+        ? [...messages.data.pages].reverse().flatMap((page) => page.data)
+        : [],
+    [messages.data],
+  );
+  const hasMessages = loadedMessages.length > 0;
 
   function openTaskCard(message: AiMessage) {
     if (message.role !== "assistant") return;
@@ -341,25 +365,32 @@ export function AiAssistantPage() {
   async function confirmCreateTask() {
     if (!pendingCard || !draft || !draft.title.trim()) return;
     setTaskError(null);
+    let taskId = pendingCard.createdTaskId ?? null;
     try {
-      const task = await createTask.mutateAsync({
-        title: draft.title.trim(),
-        description: draft.description.trim() || undefined,
-        priority: "P2",
-        projectId: draft.projectId ?? undefined,
-        dueDate: draft.dueDate ? draft.dueDate : null,
-      });
+      if (!taskId) {
+        const task = await createTask.mutateAsync({
+          title: draft.title.trim(),
+          description: draft.description.trim() || undefined,
+          priority: "P2",
+          projectId: draft.projectId ?? undefined,
+          dueDate: draft.dueDate ? draft.dueDate : null,
+        });
+        taskId = task.id;
+        setPendingCard({ ...pendingCard, createdTaskId: taskId });
+      }
       await attachTask.mutateAsync({
         messageId: pendingCard.messageId,
-        taskId: task.id,
+        taskId,
       });
       setPendingCard(null);
       setDraft(null);
     } catch (error) {
       setTaskError(
-        error instanceof Error && error.message
-          ? `任务创建失败：${error.message}`
-          : "任务创建失败，请重试",
+        taskId
+          ? "任务已经创建，但回复卡片关联失败。再次点击只会重试关联，不会重复创建任务。"
+          : error instanceof Error && error.message
+            ? `任务创建失败：${error.message}`
+            : "任务创建失败，请重试",
       );
     }
   }
@@ -551,20 +582,33 @@ export function AiAssistantPage() {
                   </div>
                 </div>
               ) : (
-                messages.data.pages
-                  .flatMap((page) => page.data)
-                  .map((message) => (
+                <>
+                  {messages.hasNextPage ? (
+                    <button
+                      className="button button-quiet ai-load-earlier"
+                      disabled={messages.isFetchingNextPage}
+                      onClick={() => void messages.fetchNextPage()}
+                      type="button"
+                    >
+                      {messages.isFetchingNextPage
+                        ? "正在加载…"
+                        : "加载更早消息"}
+                    </button>
+                  ) : null}
+                  {loadedMessages.map((message) => (
                     <AiMessageBlock
                       attachedTaskId={message.task_id}
                       content={message.content}
                       createdAt={message.created_at}
                       key={message.id}
+                      messageId={message.id}
                       onOpenTaskCard={() => openTaskCard(message)}
                       reasoning={message.reasoning}
                       role={message.role}
                       status={message.status}
                     />
-                  ))
+                  ))}
+                </>
               )}
               {chat.isStreaming ? (
                 <>
@@ -591,7 +635,10 @@ export function AiAssistantPage() {
                       <div className="ai-msg-text" data-streaming>
                         {streamedText
                           ? renderAiRichText(
-                              stripAiSelfCheckBlock(streamedText),
+                              displayAiReply(
+                                stripAiSelfCheckBlock(streamedText),
+                                true,
+                              ),
                             )
                           : (chat.streaming?.reasoning ?? "").length > 0
                             ? ""
@@ -763,7 +810,11 @@ export function AiAssistantPage() {
               </div>
               <div className="ai-composer-hint">
                 AI 生成内容仅供参考 · 回答只读，创建任务需你确认 ·
-                对话数据仅保存在本机
+                {activeProvider?.kind === "local"
+                  ? "模型请求仅发送到本机回环端点"
+                  : activeProvider
+                    ? "当前对话上下文会发送给所选远程供应商"
+                    : "尚未选择供应商，不会发送对话"}
               </div>
             </div>
           </div>
@@ -788,13 +839,18 @@ export function AiAssistantPage() {
                 void deleteSession
                   .mutateAsync({
                     id: sessionId,
-                    expectedVersion: 1,
+                    expectedVersion:
+                      sessions.data?.find((session) => session.id === sessionId)
+                        ?.version ?? 1,
                   })
                   .then(() => {
                     if (sessionId === activeSessionId) {
                       setActiveSessionId("");
                     }
                     setDeletingSession(null);
+                  })
+                  .catch(() => {
+                    // Mutation state renders the conflict/failure below.
                   });
               }}
               type="button"
@@ -809,6 +865,11 @@ export function AiAssistantPage() {
         width="420px"
       >
         <p>删除后该会话的全部本地消息不可恢复。确定删除？</p>
+        {deleteSession.error ? (
+          <p className="ai-task-card-error" role="alert">
+            会话删除失败，已刷新最新状态，请重试。
+          </p>
+        ) : null}
       </Modal>
     </div>
   );
@@ -844,6 +905,7 @@ function AiThinkingProcess({
 
 function AiMessageBlock({
   role,
+  messageId,
   content,
   reasoning,
   createdAt,
@@ -852,6 +914,7 @@ function AiMessageBlock({
   onOpenTaskCard,
 }: {
   role: AiMessage["role"];
+  messageId: string;
   content: string;
   reasoning: string | null;
   createdAt: string;
@@ -869,7 +932,7 @@ function AiMessageBlock({
     );
   }
   const suggestion = parseAiTaskSuggestion(content);
-  const display = stripAiTaskBlock(content);
+  const display = displayAiReply(content);
   return (
     <div className="ai-msg">
       <div className="ai-avatar">
@@ -907,16 +970,37 @@ function AiMessageBlock({
             建议任务：{suggestion.title}（点击确认创建）
           </button>
         ) : null}
-        <AiMemorySuggestionCard content={content} />
+        <AiMemorySuggestionCard content={content} messageId={messageId} />
       </div>
     </div>
   );
 }
 
+function displayAiReply(content: string, streaming = false): string {
+  const display = stripAiTaskBlock(content).trim();
+  if (display) return display;
+  if (parseAiTaskSuggestion(content)) {
+    return "好的，我已经整理成任务建议，请确认下面的信息后创建。";
+  }
+  if (parseAiMemorySuggestion(content)) {
+    return "好的，我整理了一条可记住的信息，请确认是否保存。";
+  }
+  if (/\[opc:(?:task|memory)\]/i.test(content)) {
+    return streaming ? "" : "这条建议格式不完整，未执行任何操作，请重新生成。";
+  }
+  return content;
+}
+
 // AiMemorySuggestionCard shows the user-confirmation gate for a remembered
 // preference: model output is an untrusted suggestion and nothing is stored
 // until the user confirms (ADR-006).
-function AiMemorySuggestionCard({ content }: { content: string }) {
+function AiMemorySuggestionCard({
+  content,
+  messageId,
+}: {
+  content: string;
+  messageId: string;
+}) {
   const createMemory = useCreateAiMemory();
   const [dismissed, setDismissed] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -938,7 +1022,10 @@ function AiMemorySuggestionCard({ content }: { content: string }) {
         disabled={createMemory.isPending}
         onClick={() => {
           void createMemory
-            .mutateAsync({ content: memory.content })
+            .mutateAsync({
+              content: memory.content,
+              source_message_id: messageId,
+            })
             .then(() => setSaved(true))
             .catch(() => {
               /* save failure surfaces via the mutation state below */

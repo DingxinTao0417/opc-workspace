@@ -59,6 +59,10 @@ func TestAIChatSelfCheckDrivesAutonomousRevision(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "event: done") {
 		t.Fatalf("chat incomplete: %s", response.Body.String())
 	}
+	if !strings.Contains(response.Body.String(), "event: replace") ||
+		!strings.Contains(response.Body.String(), "修订后的回答") {
+		t.Fatalf("revised answer was not sent as a replacement event: %s", response.Body.String())
+	}
 	// The persisted assistant answer is the revised text and never contains
 	// the internal self-check block.
 	var assistantContent string

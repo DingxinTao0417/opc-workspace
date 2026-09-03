@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -113,10 +114,6 @@ func (a *API) chatAI(c *gin.Context) {
 	if !ok {
 		return
 	}
-	session, ok := a.resolveChatSession(c, &input.SessionID, message)
-	if !ok {
-		return
-	}
 	// Local providers run keyless on the loopback interface (ADR-005); remote
 	// providers read their key from the OS credential store, use it for this
 	// request only, and never persist it.
@@ -133,6 +130,20 @@ func (a *API) chatAI(c *gin.Context) {
 			return
 		}
 	}
+	session, newSession, ok := a.resolveChatSession(c, &input.SessionID, message)
+	if !ok {
+		return
+	}
+	memories := a.confirmedAIMemories()
+	history, historyErr := a.chatHistory(session.ID, message, provider.Protocol, provider.Model, memories)
+	if errors.Is(historyErr, modelclient.ErrPromptTooLarge) {
+		writeError(c, http.StatusUnprocessableEntity, "AI_PROMPT_TOO_LARGE", "The current message and system context exceed the prompt budget")
+		return
+	}
+	if historyErr != nil {
+		writeDatabaseError(c)
+		return
+	}
 
 	streamCtx := c.Request.Context()
 	generationCtx, cancelGeneration := context.WithCancel(streamCtx)
@@ -148,12 +159,16 @@ func (a *API) chatAI(c *gin.Context) {
 		ID: generationID, SessionID: session.ID, ProviderID: provider.ID,
 		Status: "streaming", CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
 	}
-	// The user turn is persisted immediately so it shows up right away and
-	// survives an interrupted generation; only the assistant reply waits for
-	// the stream outcome. A session still carrying its default title is
-	// renamed from the first user message (ChatGPT/ZCode-style rail naming).
-	if session.Persist {
-		if err := a.db.Transaction(func(tx *gorm.DB) error {
+	// Session creation, the durable user turn and generation start form one
+	// transaction. The assistant reply is committed separately after the
+	// upstream stream reaches a terminal outcome.
+	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		if newSession {
+			if err := tx.Create(session).Error; err != nil {
+				return err
+			}
+		}
+		if session.Persist {
 			if err := tx.Create(&models.AIMessage{
 				ID: uuid.NewString(), SessionID: session.ID, Role: "user", Status: "completed",
 				Content: message, CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
@@ -166,16 +181,12 @@ func (a *API) chatAI(c *gin.Context) {
 			if session.Title == "" || session.Title == defaultAISessionTitle {
 				updates["title"] = aiSessionTitleFromMessage(message)
 			}
-			return tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(updates).Error
-		}); err != nil {
-			_ = a.db.Model(&models.AIGeneration{}).Where("id = ?", generationID).Updates(map[string]any{
-				"status": "failed", "error_code": "AI_MESSAGE_PERSIST_FAILED", "updated_at": nowStamp(a),
-			}).Error
-			writeDatabaseError(c)
-			return
+			if err := tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(updates).Error; err != nil {
+				return err
+			}
 		}
-	}
-	if err := a.db.Create(&generation).Error; err != nil {
+		return tx.Create(&generation).Error
+	}); err != nil {
 		writeDatabaseError(c)
 		return
 	}
@@ -211,7 +222,7 @@ func (a *API) chatAI(c *gin.Context) {
 	runResult, streamErr := harness.Run(generationCtx, harnessClient,
 		harness.Request{
 			Protocol: provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
-			History: a.chatHistory(session.ID), Memories: a.confirmedAIMemories(),
+			History: history, Memories: memories,
 		},
 		nil, nil,
 		harness.Callbacks{
@@ -255,7 +266,25 @@ func (a *API) chatAI(c *gin.Context) {
 		_ = writeSSE("error", string(errorJSON))
 	default:
 		completedAt := nowStamp(a)
-		a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, completedAt)
+		if err := a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, completedAt); err != nil {
+			a.finalizeFailedGeneration(generation, "AI_MESSAGE_PERSIST_FAILED")
+			errorJSON, _ := json.Marshal(struct {
+				GenerationID string `json:"generation_id"`
+				Error        string `json:"error"`
+			}{generationID, "AI_MESSAGE_PERSIST_FAILED"})
+			_ = writeSSE("error", string(errorJSON))
+			return
+		}
+		if runResult.Reflections > 0 {
+			replacementJSON, _ := json.Marshal(struct {
+				GenerationID string `json:"generation_id"`
+				Text         string `json:"text"`
+				Reasoning    string `json:"reasoning"`
+			}{generationID, runResult.Text, runResult.Reasoning})
+			if !writeSSE("replace", string(replacementJSON)) {
+				return
+			}
+		}
 		doneJSON, _ := json.Marshal(struct {
 			GenerationID string `json:"generation_id"`
 		}{generationID})
@@ -300,33 +329,29 @@ func (a *API) loadChatProvider(c *gin.Context, providerID string) (models.AIProv
 
 // resolveChatSession returns the referenced session or creates one; ok=false
 // means the response has already been written.
-func (a *API) resolveChatSession(c *gin.Context, sessionID *string, firstMessage string) (*models.AISession, bool) {
+func (a *API) resolveChatSession(c *gin.Context, sessionID *string, firstMessage string) (*models.AISession, bool, bool) {
 	if trimmed := strings.TrimSpace(*sessionID); trimmed != "" {
 		if _, err := uuid.Parse(trimmed); err != nil {
 			writeError(c, http.StatusUnprocessableEntity, "INVALID_AI_SESSION_ID", "AI session id must be a UUID")
-			return nil, false
+			return nil, false, false
 		}
 		var row models.AISession
 		if err := a.db.WithContext(c.Request.Context()).Where("id = ?", trimmed).First(&row).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				writeError(c, http.StatusNotFound, "AI_SESSION_NOT_FOUND", "AI session not found")
-				return nil, false
+				return nil, false, false
 			}
 			writeDatabaseError(c)
-			return nil, false
+			return nil, false, false
 		}
-		return &row, true
+		return &row, false, true
 	}
 	now := nowStamp(a)
 	row := models.AISession{
 		ID: uuid.NewString(), Title: aiSessionTitleFromMessage(firstMessage), Persist: true,
 		Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := a.db.Create(&row).Error; err != nil {
-		writeDatabaseError(c)
-		return nil, false
-	}
-	return &row, true
+	return &row, true, true
 }
 
 func aiSessionTitleFromMessage(message string) string {
@@ -340,38 +365,86 @@ func aiSessionTitleFromMessage(message string) string {
 	return string(runes)
 }
 
-// chatHistory assembles the prompt turns from persisted messages
-// (oldest-first, the new user turn included), trimmed from the front to the
-// prompt budget.
-func (a *API) chatHistory(sessionID string) []modelclient.ChatMessage {
+var (
+	aiTaskBlockPattern      = regexp.MustCompile(`(?is)\[opc:task\].*?(?:\[/opc:task\]|\[opc:task\])`)
+	aiMemoryBlockPattern    = regexp.MustCompile(`(?is)\[opc:memory\].*?(?:\[/opc:memory\]|\[opc:memory\])`)
+	aiSelfCheckBlockPattern = regexp.MustCompile(`(?is)\[opc:selfcheck\].*?(?:\[/opc:selfcheck\]|$)`)
+	aiOpenControlTail       = regexp.MustCompile(`(?is)\[opc:(?:task|memory)\].*$`)
+)
+
+func stripAIControlBlocks(content string) string {
+	content = aiTaskBlockPattern.ReplaceAllString(content, "")
+	content = aiMemoryBlockPattern.ReplaceAllString(content, "")
+	content = aiSelfCheckBlockPattern.ReplaceAllString(content, "")
+	return strings.TrimSpace(aiOpenControlTail.ReplaceAllString(content, ""))
+}
+
+// chatHistory builds a complete-turn rolling window from the newest 200
+// persisted messages plus the current user turn. It measures the exact
+// serialized provider payload and never silently removes the current turn.
+func (a *API) chatHistory(sessionID, currentMessage, protocol, model string, memories []string) ([]modelclient.ChatMessage, error) {
 	var rows []models.AIMessage
-	if err := a.db.Where("session_id = ?", sessionID).Order("created_at ASC, id ASC").Limit(200).Find(&rows).Error; err != nil {
-		rows = nil
+	if err := a.db.Where("session_id = ?", sessionID).Order("created_at DESC, id DESC").Limit(200).Find(&rows).Error; err != nil {
+		return nil, err
 	}
-	history := make([]modelclient.ChatMessage, 0, len(rows))
+	for left, right := 0, len(rows)-1; left < right; left, right = left+1, right-1 {
+		rows[left], rows[right] = rows[right], rows[left]
+	}
+	history := make([]modelclient.ChatMessage, 0, len(rows)+1)
 	for _, row := range rows {
 		if row.Content == "" || row.Status == "failed" {
 			continue
 		}
-		history = append(history, modelclient.ChatMessage{Role: row.Role, Content: row.Content})
+		content := row.Content
+		if row.Role == "assistant" {
+			content = stripAIControlBlocks(content)
+		}
+		if content == "" {
+			continue
+		}
+		history = append(history, modelclient.ChatMessage{Role: row.Role, Content: content})
 	}
-	budget := modelclient.MaxPromptBytes - len(modelclient.SystemPrompt) - 1024
-	total := 0
-	cut := len(history)
-	for i := len(history) - 1; i >= 0; i-- {
-		total += len(history[i].Content) + 64
-		if total > budget {
-			cut = i + 1
+	history = append(history, modelclient.ChatMessage{Role: "user", Content: currentMessage})
+
+	turns := make([][]modelclient.ChatMessage, 0, len(history)/2+1)
+	var turn []modelclient.ChatMessage
+	for _, message := range history {
+		if message.Role == "user" {
+			if len(turn) > 0 {
+				turns = append(turns, turn)
+			}
+			turn = []modelclient.ChatMessage{message}
+			continue
+		}
+		if len(turn) > 0 {
+			turn = append(turn, message)
+		}
+	}
+	if len(turn) > 0 {
+		turns = append(turns, turn)
+	}
+
+	selected := make([]modelclient.ChatMessage, 0, len(history))
+	for index := len(turns) - 1; index >= 0; index-- {
+		candidate := make([]modelclient.ChatMessage, 0, len(turns[index])+len(selected))
+		candidate = append(candidate, turns[index]...)
+		candidate = append(candidate, selected...)
+		size, err := modelclient.PromptSize(modelclient.Protocol(protocol), model, candidate, memories)
+		if err != nil {
+			return nil, err
+		}
+		if size > modelclient.MaxPromptBytes {
+			if len(selected) == 0 {
+				return nil, modelclient.ErrPromptTooLarge
+			}
 			break
 		}
-		if i == 0 {
-			cut = 0
-		}
+		selected = candidate
 	}
-	return history[cut:]
+	return selected, nil
 }
 
-func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, completedAt string) {
+func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, completedAt string) error {
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if session.Persist {
 			snapshot, err := json.Marshal(struct {
@@ -400,9 +473,10 @@ func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, sessio
 	})
 	if err != nil {
 		a.options.Logger.Print("AI generation completion persistence failed for " + generation.ID)
-		return
+		return err
 	}
 	a.recordAIGenerationEvent("ai_generation_completed", generation, "")
+	return nil
 }
 
 func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code string) {
@@ -492,6 +566,8 @@ func aiStreamErrorCode(err error) string {
 	switch {
 	case errors.Is(err, modelclient.ErrTimeout):
 		return "AI_GENERATION_TIMEOUT"
+	case errors.Is(err, modelclient.ErrPromptTooLarge):
+		return "AI_PROMPT_TOO_LARGE"
 	case errors.As(err, &statusErr):
 		if statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden {
 			return "AI_KEY_INVALID"

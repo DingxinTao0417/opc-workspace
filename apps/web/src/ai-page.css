@@ -307,6 +307,10 @@
   gap: 22px;
 }
 
+.ai-load-earlier {
+  align-self: center;
+}
+
 /* ===== Empty hero ===== */
 
 .ai-hero {

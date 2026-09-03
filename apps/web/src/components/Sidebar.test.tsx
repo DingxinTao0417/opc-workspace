@@ -39,6 +39,11 @@ const hooks = vi.hoisted(() => ({
   },
 }));
 
+const ui = vi.hoisted(() => ({
+  sidebarCollapsed: false,
+  toggleSidebarCollapsed: vi.fn(),
+}));
+
 vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: () => hooks.inbox,
   useSidebarWeekTasksQuery: (input: unknown) => {
@@ -54,7 +59,12 @@ vi.mock("../store/settings", () => ({
 
 vi.mock("../store/ui", () => ({
   useUiStore: (selector: (state: unknown) => unknown) =>
-    selector({ setCommandPaletteOpen: vi.fn(), setSettingsOpen: vi.fn() }),
+    selector({
+      setCommandPaletteOpen: vi.fn(),
+      setSettingsOpen: vi.fn(),
+      sidebarCollapsed: ui.sidebarCollapsed,
+      toggleSidebarCollapsed: ui.toggleSidebarCollapsed,
+    }),
 }));
 
 function renderSidebar() {
@@ -78,6 +88,8 @@ describe("Sidebar", () => {
     hooks.week.isPending = false;
     hooks.week.refetch.mockReset();
     hooks.weekInput.mockReset();
+    ui.sidebarCollapsed = false;
+    ui.toggleSidebarCollapsed.mockReset();
   });
 
   afterEach(() => {
@@ -89,6 +101,30 @@ describe("Sidebar", () => {
     renderSidebar();
 
     expect(screen.getByLabelText("12 项待处理")).toHaveTextContent("12");
+  });
+
+  it("collapses from the brand control and keeps an accessible restore entry", () => {
+    const view = renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: "收起侧边栏" }));
+    expect(ui.toggleSidebarCollapsed).toHaveBeenCalledOnce();
+
+    ui.sidebarCollapsed = true;
+    view.rerender(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("主导航")).toHaveClass("is-collapsed");
+    expect(screen.getByRole("button", { name: "展开侧边栏" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.getByRole("link", { name: "AI 助手" })).toHaveAttribute(
+      "title",
+      "AI 助手",
+    );
   });
 
   it("shows delivered Roadmap and Content Calendar navigation without future badges", () => {

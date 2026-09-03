@@ -46,6 +46,15 @@ func (a *API) attachTaskToAIMessage(c *gin.Context) {
 		return
 	}
 	if message.TaskID != nil {
+		if *message.TaskID == taskID {
+			c.Header("Idempotency-Replayed", "true")
+			c.JSON(http.StatusOK, gin.H{"data": aiMessageResponse{
+				ID: message.ID, SessionID: message.SessionID, Role: message.Role, Status: message.Status,
+				Content: message.Content, Reasoning: message.Reasoning, TaskID: message.TaskID,
+				TaskTitleSnapshot: message.TaskTitleSnapshot, CreatedAt: normalizeTimestamp(message.CreatedAt),
+			}})
+			return
+		}
 		writeError(c, http.StatusConflict, "AI_MESSAGE_TASK_ALREADY_LINKED", "This message already references a task and cannot be relinked")
 		return
 	}

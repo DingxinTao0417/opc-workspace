@@ -4,12 +4,17 @@ export interface AiTaskSuggestion {
   due?: string;
 }
 
-const AI_TASK_BLOCK_PATTERN = /\[opc:task\]([\s\S]*?)\[\/opc:task\]/;
+// Some compatible/local models repeat the opening marker instead of emitting
+// the slash-prefixed closing marker. Treat that common shape as a recoverable
+// formatting error so the user still gets the confirmation gate.
+const AI_TASK_BLOCK_PATTERN =
+  /\[opc:task\]\s*([\s\S]*?)\s*(?:\[\/opc:task\]|\[opc:task\])/i;
 
 // parseAiTaskSuggestion extracts the first well-formed task suggestion block
 // from an assistant reply. The block is model output and always treated as an
 // untrusted preview: malformed JSON or a missing/oversized title yields null
-// and the reply stays plain text.
+// so the display layer can suppress the protocol text and report a natural-
+// language failure without creating anything.
 export function parseAiTaskSuggestion(
   content: string,
 ): AiTaskSuggestion | null {
@@ -38,7 +43,8 @@ export interface AiMemorySuggestion {
   content: string;
 }
 
-const AI_MEMORY_BLOCK_PATTERN = /\[opc:memory\]([\s\S]*?)\[\/opc:memory\]/;
+const AI_MEMORY_BLOCK_PATTERN =
+  /\[opc:memory\]\s*([\s\S]*?)\s*(?:\[\/opc:memory\]|\[opc:memory\])/i;
 
 // The harness consumes the model's own [opc:selfcheck] verdict and never
 // persists it, but streamed deltas reach the UI before that stripping, so the
@@ -79,5 +85,6 @@ export function stripAiTaskBlock(content: string): string {
   return content
     .replace(AI_TASK_BLOCK_PATTERN, "")
     .replace(AI_MEMORY_BLOCK_PATTERN, "")
+    .replace(/\[opc:(?:task|memory)\][\s\S]*$/i, "")
     .trimEnd();
 }

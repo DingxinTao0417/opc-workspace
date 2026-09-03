@@ -12,6 +12,7 @@ import (
 
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
+	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
@@ -327,6 +328,57 @@ func TestAIChatCancelStopsUpstreamAndKeepsPartial(t *testing.T) {
 	}
 }
 
+func TestAIStaleSessionDeleteDoesNotCancelActiveGeneration(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	chatStarted := make(chan struct{})
+	var startOnce sync.Once
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		startOnce.Do(func() { close(chatStarted) })
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "chat-stale-session-delete", upstream.URL+"/v1", "gpt-test")
+	createdSession := performRequest(router, http.MethodPost, "/api/v1/ai/sessions", []byte(`{}`), nil)
+	var sessionEnvelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createdSession.Body.Bytes(), &sessionEnvelope); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = chatRequest(t, router, provider.ID, sessionEnvelope.Data.ID, "保持生成")
+	}()
+	<-chatStarted
+	staleDelete := performRequest(router, http.MethodDelete, "/api/v1/ai/sessions/"+sessionEnvelope.Data.ID, nil, map[string]string{"If-Match": `"1"`})
+	assertAPIError(t, staleDelete, http.StatusConflict, "VERSION_CONFLICT")
+	select {
+	case <-done:
+		t.Fatal("stale session delete cancelled the active generation")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	var generationID string
+	if err := store.DB.Raw("SELECT id FROM ai_generations WHERE session_id = ? AND status = 'streaming'", sessionEnvelope.Data.ID).Scan(&generationID).Error; err != nil || generationID == "" {
+		t.Fatalf("active generation missing after stale delete: id=%q err=%v", generationID, err)
+	}
+	if cancelled := performRequest(router, http.MethodPost, "/api/v1/ai/generations/"+generationID+"/cancel", nil, nil); cancelled.Code != http.StatusAccepted {
+		t.Fatalf("cleanup cancel = %d: %s", cancelled.Code, cancelled.Body.String())
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("active chat did not stop after explicit cancel")
+	}
+}
+
 func TestAIChatBusyWhileGenerationActive(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	router, store, _ := newAIProviderTestRouter(t, now)
@@ -400,6 +452,95 @@ func TestAIChatGatesAndValidation(t *testing.T) {
 	}
 	if response := chatRequest(t, router, provider.ID, "", "你好"); response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "AI_KEY_UNAVAILABLE") {
 		t.Fatalf("chat without key = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAIChatRejectsSerializedPromptOverflowWithoutCreatingConversation(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("oversized prompt must not reach the model endpoint")
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "chat-prompt-cap", upstream.URL+"/v1", "gpt-test")
+	payload, err := json.Marshal(chatAIRequest{
+		ProviderID: provider.ID,
+		Message:    strings.Repeat("x", modelclient.MaxPromptBytes-100),
+	})
+	if err != nil {
+		t.Fatalf("marshal chat request: %v", err)
+	}
+	response := performRequest(router, http.MethodPost, "/api/v1/ai/chat", payload, nil)
+	assertAPIError(t, response, http.StatusUnprocessableEntity, "AI_PROMPT_TOO_LARGE")
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_sessions", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_generations", 0)
+}
+
+func TestAIChatHistoryUsesNewestCompleteWindowAndStripsControlBlocks(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Messages []modelclient.ChatMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode rolling history: %v", err)
+		}
+		chatMessages := payload.Messages
+		if len(chatMessages) > 0 && chatMessages[0].Role == "system" {
+			chatMessages = chatMessages[1:]
+		}
+		encoded, _ := json.Marshal(chatMessages)
+		history := string(encoded)
+		if strings.Contains(history, "oldest-000") || strings.Contains(history, "oldest-001") {
+			t.Errorf("oldest rows leaked into newest-200 window: %s", history)
+		}
+		if !strings.Contains(history, "latest-natural-answer") || !strings.Contains(history, "current-question") {
+			t.Errorf("recent or current turn missing from rolling history: %s", history)
+		}
+		if strings.Contains(history, "opc:task") || strings.Contains(history, "hidden-task-title") {
+			t.Errorf("task control block leaked into model history: %s", history)
+		}
+		streamMockAIDelta(w, "回答")
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "chat-history-window", upstream.URL+"/v1", "gpt-test")
+
+	createdSession := performRequest(router, http.MethodPost, "/api/v1/ai/sessions", []byte(`{}`), nil)
+	var sessionEnvelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createdSession.Body.Bytes(), &sessionEnvelope); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	base := now.Add(-time.Hour)
+	for index := 0; index < 202; index++ {
+		role := "user"
+		content := fmt.Sprintf("history-%03d", index)
+		if index < 2 {
+			content = fmt.Sprintf("oldest-%03d", index)
+		}
+		if index%2 == 1 {
+			role = "assistant"
+		}
+		if index == 201 {
+			content = `latest-natural-answer[opc:task]{"title":"hidden-task-title"}[opc:task]`
+		}
+		stamp := base.Add(time.Duration(index) * time.Second).Format(time.RFC3339Nano)
+		message := models.AIMessage{
+			ID: fmt.Sprintf("018f0000-0000-7000-8000-%012d", index), SessionID: sessionEnvelope.Data.ID,
+			Role: role, Status: "completed", Content: content, CreatedAt: stamp, UpdatedAt: stamp,
+		}
+		if err := store.DB.Create(&message).Error; err != nil {
+			t.Fatalf("seed history message %d: %v", index, err)
+		}
+	}
+	response := chatRequest(t, router, provider.ID, sessionEnvelope.Data.ID, "current-question")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: done") {
+		t.Fatalf("chat with rolling history = %d: %s", response.Code, response.Body.String())
 	}
 }
 
@@ -678,6 +819,10 @@ func TestAIMessageTaskReferenceLifecycle(t *testing.T) {
 	}
 	if attachedEnvelope.Data.TaskID != taskEnvelope.Data.ID || attachedEnvelope.Data.TaskTitleSnapshot == nil || *attachedEnvelope.Data.TaskTitleSnapshot != "写周报" {
 		t.Fatalf("attached message = %#v", attachedEnvelope.Data)
+	}
+	replayed := performRequest(router, http.MethodPost, "/api/v1/ai/messages/"+message.ID+"/task", []byte(`{"task_id":"`+taskEnvelope.Data.ID+`"}`), nil)
+	if replayed.Code != http.StatusOK || replayed.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("same task attach replay = %d replay=%q: %s", replayed.Code, replayed.Header().Get("Idempotency-Replayed"), replayed.Body.String())
 	}
 	relabeled := performRequest(router, http.MethodPost, "/api/v1/ai/messages/"+message.ID+"/task", []byte(`{"task_id":"018f0000-0000-5000-8000-000000006597"}`), nil)
 	assertAPIError(t, relabeled, http.StatusConflict, "AI_MESSAGE_TASK_ALREADY_LINKED")

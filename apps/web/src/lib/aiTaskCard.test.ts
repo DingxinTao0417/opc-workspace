@@ -18,6 +18,12 @@ describe("parseAiTaskSuggestion", () => {
     });
   });
 
+  it("recovers when a model repeats the opening marker as the close", () => {
+    const content = '[opc:task]{"title":"写作业"}[opc:task]';
+    expect(parseAiTaskSuggestion(content)).toEqual({ title: "写作业" });
+    expect(stripAiTaskBlock(content)).toBe("");
+  });
+
   it("returns null when no block exists", () => {
     expect(parseAiTaskSuggestion("今天没有任务建议。")).toBeNull();
   });
@@ -59,6 +65,10 @@ describe("stripAiTaskBlock", () => {
 
   it("keeps plain replies unchanged", () => {
     expect(stripAiTaskBlock("普通回答")).toBe("普通回答");
+  });
+
+  it("hides an incomplete control block while it is streaming", () => {
+    expect(stripAiTaskBlock('好的。\n[opc:task]{"title":"写')).toBe("好的。");
   });
 });
 

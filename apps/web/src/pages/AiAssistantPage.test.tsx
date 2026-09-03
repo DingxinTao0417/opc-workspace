@@ -12,6 +12,8 @@ import { AiAssistantPage } from "./AiAssistantPage";
 
 afterEach(() => {
   cleanup();
+  mockState.hasNextPage = false;
+  mockState.isFetchingNextPage = false;
 });
 
 const mockState = vi.hoisted(() => {
@@ -24,6 +26,9 @@ const mockState = vi.hoisted(() => {
     providers: [] as unknown[],
     sessions: [] as unknown[],
     messagesPages: [] as { data: unknown[]; meta: { has_more: boolean } }[],
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: vi.fn(async () => ({})),
     streaming: null as { sessionId: string; text: string } | null,
     isStreaming: false,
     sentMessage: null as string | null,
@@ -70,6 +75,9 @@ vi.mock("../api/hooks", () => ({
     isError: false,
     error: null,
     refetch: vi.fn(),
+    hasNextPage: mockState.hasNextPage,
+    isFetchingNextPage: mockState.isFetchingNextPage,
+    fetchNextPage: mockState.fetchNextPage,
   }),
   useAiChatStream: () => ({
     streaming: mockState.streaming,
@@ -186,6 +194,50 @@ describe("AiAssistantPage", () => {
     expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
   });
 
+  it("recovers a repeated task marker and supplies a natural-language reply", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({
+            content: '[opc:task]{"title":"写作业"}[opc:task]',
+          }),
+        ],
+        meta: { has_more: false },
+      },
+    ];
+    renderPage();
+
+    expect(
+      screen.getByText("好的，我已经整理成任务建议，请确认下面的信息后创建。"),
+    ).toBeTruthy();
+    expect(taskChip("建议任务：写作业")).toBeTruthy();
+    expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
+  });
+
+  it("reports an invalid task block naturally without offering a broken card", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({
+            content: "[opc:task]{not-json}[/opc:task]",
+          }),
+        ],
+        meta: { has_more: false },
+      },
+    ];
+    renderPage();
+
+    expect(
+      screen.getByText("这条建议格式不完整，未执行任何操作，请重新生成。"),
+    ).toBeTruthy();
+    expect(screen.queryByText(/建议任务：/)).toBeNull();
+    expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
+  });
+
   it("opens the confirm card, creates the task through the task API, and attaches the reference", async () => {
     mockState.providers = [readyProvider];
     mockState.sessions = [activeSession];
@@ -215,6 +267,39 @@ describe("AiAssistantPage", () => {
       expect(mockState.attachTask.mutateAsync).toHaveBeenCalledWith({
         messageId: "message-1",
         taskId: "task-1",
+      });
+    });
+  });
+
+  it("retries only the message attachment after the task was created", async () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [
+      { data: [assistantMessage()], meta: { has_more: false } },
+    ];
+    mockState.createTask.mutateAsync = vi.fn(async () => ({
+      id: "task-once",
+      title: "写周报",
+    }));
+    mockState.attachTask.mutateAsync = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValueOnce({});
+    renderPage();
+
+    fireEvent.click(taskChip("建议任务：写周报"));
+    fireEvent.click(screen.getByText("确认创建"));
+    expect(
+      await screen.findByText(/任务已经创建，但回复卡片关联失败/),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText("确认创建"));
+
+    await waitFor(() => {
+      expect(mockState.createTask.mutateAsync).toHaveBeenCalledTimes(1);
+      expect(mockState.attachTask.mutateAsync).toHaveBeenCalledTimes(2);
+      expect(mockState.attachTask.mutateAsync).toHaveBeenLastCalledWith({
+        messageId: "message-1",
+        taskId: "task-once",
       });
     });
   });
@@ -330,6 +415,75 @@ describe("AiAssistantPage", () => {
       );
     });
   });
+
+  it("allows a ready local provider without an API key", () => {
+    mockState.providers = [
+      {
+        ...readyProvider,
+        id: "provider-local",
+        name: "Ollama",
+        kind: "local",
+        has_key: false,
+      },
+    ];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [];
+    renderPage();
+
+    expect(screen.getByLabelText("选择 AI 供应商")).toHaveTextContent(
+      "Ollama · deepseek-chat · 本地",
+    );
+    expect(screen.getByPlaceholderText(/向 AI 助手提问/)).not.toBeDisabled();
+    expect(screen.getByText(/模型请求仅发送到本机回环端点/)).toBeTruthy();
+  });
+
+  it("deletes a session with its current version", async () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [{ ...activeSession, version: 7 }];
+    mockState.messagesPages = [];
+    mockState.deleteSession.mutateAsync = vi.fn(async () => ({}));
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除会话 新会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+    await waitFor(() => {
+      expect(mockState.deleteSession.mutateAsync).toHaveBeenCalledWith({
+        id: "session-1",
+        expectedVersion: 7,
+      });
+    });
+  });
+
+  it("shows older message pages before the newest page and loads more on demand", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({ id: "message-3", content: "消息 3" }),
+          assistantMessage({ id: "message-4", content: "消息 4" }),
+        ],
+        meta: { has_more: true },
+      },
+      {
+        data: [
+          assistantMessage({ id: "message-1", content: "消息 1" }),
+          assistantMessage({ id: "message-2", content: "消息 2" }),
+        ],
+        meta: { has_more: false },
+      },
+    ];
+    mockState.hasNextPage = true;
+    mockState.fetchNextPage = vi.fn(async () => ({}));
+    renderPage();
+
+    expect(
+      screen.getAllByText(/^消息 \d$/).map((element) => element.textContent),
+    ).toEqual(["消息 1", "消息 2", "消息 3", "消息 4"]);
+    fireEvent.click(screen.getByRole("button", { name: "加载更早消息" }));
+    expect(mockState.fetchNextPage).toHaveBeenCalledTimes(1);
+    mockState.hasNextPage = false;
+  });
 });
 
 describe("AiAssistantPage memory suggestion", () => {
@@ -358,6 +512,7 @@ describe("AiAssistantPage memory suggestion", () => {
     await waitFor(() => {
       expect(mockState.createMemory.mutateAsync).toHaveBeenCalledWith({
         content: "回答保持简洁",
+        source_message_id: "message-memory",
       });
     });
     await waitFor(() => {

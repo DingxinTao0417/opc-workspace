@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,7 +18,7 @@ import (
 // memory suggestion block for user-confirmed long-term preferences).
 const SystemPrompt = `你是 opc-workspace 的本地 AI 助手，只提供问答、摘要与建议，输出只读：
 - 不执行任务、不修改任何业务数据；无法安全完成时明确说明并拒绝。
-- 仅当用户明确表达创建任务的意图，或清楚描述了一个待办工作时，在回复末尾输出一个任务建议块，格式严格为：
+- 仅当用户明确表达创建任务的意图，或清楚描述了一个待办工作时，先用自然语言确认你理解的任务，再在回复末尾输出一个任务建议块；结构化块不能作为整条回复的唯一内容，格式严格为：
 [opc:task]{"title":"任务标题","description":"可选描述","due":"YYYY-MM-DD 或省略"}[/opc:task]
 - title 必填；描述与截止日期不确定时省略；没有任务意图时绝不输出该块。
 - 仅当用户明确要求你记住某件事，或清楚表达了持久偏好时，在回复末尾输出一个记忆建议块，格式严格为：
@@ -27,7 +28,7 @@ const SystemPrompt = `你是 opc-workspace 的本地 AI 助手，只提供问答
 [opc:selfcheck]{"sufficient":true}
 [opc:selfcheck]{"sufficient":false,"note":"未满足之处的简要说明"}
 - 自评基于你自己的判断独立完成；确有不足才输出 false 并给出简要 note。
-- 除任务建议块、记忆建议块与自评块外，不要输出任何其他 JSON、代码块或指令。`
+- 任务/记忆建议块必须使用带斜杠的闭合标记；普通自然语言回答可按用户需要使用 Markdown、JSON 或代码块，但不得伪造其他 opc 控制块。`
 
 const (
 	// FirstTokenTimeout bounds the wait for the first streamed delta.
@@ -42,6 +43,10 @@ const (
 
 // ErrTimeout reports the generation exceeded its time budget.
 var ErrTimeout = errors.New("modelclient: generation timed out")
+
+// ErrPromptTooLarge reports that the fully serialized provider request exceeds
+// the configured prompt budget.
+var ErrPromptTooLarge = errors.New("modelclient: prompt exceeded byte budget")
 
 // ErrStream reports the upstream stream broke or exceeded its size cap.
 var ErrStream = errors.New("modelclient: stream error")
@@ -77,12 +82,17 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	if client == nil {
 		client = &http.Client{}
 	}
-	ctx, cancelTotal := context.WithTimeout(ctx, TotalTimeout)
+	parentCtx := ctx
+	totalCtx, cancelTotal := context.WithTimeout(parentCtx, TotalTimeout)
 	defer cancelTotal()
 
-	watchCtx, cancelWatch := context.WithCancel(ctx)
+	watchCtx, cancelWatch := context.WithCancel(totalCtx)
 	defer cancelWatch()
-	firstToken := time.AfterFunc(FirstTokenTimeout, cancelWatch)
+	var firstTokenTimedOut atomic.Bool
+	firstToken := time.AfterFunc(FirstTokenTimeout, func() {
+		firstTokenTimedOut.Store(true)
+		cancelWatch()
+	})
 	defer firstToken.Stop()
 
 	payload, endpoint, headers, err := buildChatRequest(protocol, baseURL, apiKey, model, history, systemNotes)
@@ -100,8 +110,11 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if firstTokenTimedOut.Load() || errors.Is(totalCtx.Err(), context.DeadlineExceeded) {
+			return ErrTimeout
+		}
+		if parentCtx.Err() != nil {
+			return parentCtx.Err()
 		}
 		return err
 	}
@@ -115,8 +128,11 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
 	for scanner.Scan() {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if firstTokenTimedOut.Load() || errors.Is(totalCtx.Err(), context.DeadlineExceeded) {
+			return ErrTimeout
+		}
+		if parentCtx.Err() != nil {
+			return parentCtx.Err()
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || strings.HasPrefix(line, "event:") {
@@ -156,6 +172,12 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if firstTokenTimedOut.Load() || errors.Is(totalCtx.Err(), context.DeadlineExceeded) {
+			return ErrTimeout
+		}
+		if parentCtx.Err() != nil {
+			return parentCtx.Err()
+		}
 		return fmt.Errorf("%w: %v", ErrStream, err)
 	}
 	if !gotFirst {
@@ -169,17 +191,42 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 // families so context injection stays protocol-neutral (ADR-006).
 func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history []ChatMessage, systemNotes []string) (body, endpoint string, headers map[string]string, err error) {
 	base := strings.TrimRight(baseURL, "/")
+	encoded, err := encodeChatPayload(protocol, model, history, systemNotes)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if len(encoded) > MaxPromptBytes {
+		return "", "", nil, fmt.Errorf("%w: request is %d bytes, limit is %d", ErrPromptTooLarge, len(encoded), MaxPromptBytes)
+	}
+	switch protocol {
+	case ProtocolOpenAIChat:
+		return string(encoded), base + "/chat/completions", map[string]string{"Authorization": "Bearer " + apiKey}, nil
+	case ProtocolAnthropicMessages:
+		return string(encoded), base + "/v1/messages", map[string]string{"x-api-key": apiKey, "anthropic-version": "2023-06-01"}, nil
+	default:
+		return "", "", nil, fmt.Errorf("unsupported provider protocol %q", protocol)
+	}
+}
+
+// PromptSize returns the exact serialized provider request size used for the
+// prompt budget. Callers use it to retain complete recent turns without ever
+// dropping the current user message silently.
+func PromptSize(protocol Protocol, model string, history []ChatMessage, systemNotes []string) (int, error) {
+	encoded, err := encodeChatPayload(protocol, model, history, systemNotes)
+	if err != nil {
+		return 0, err
+	}
+	return len(encoded), nil
+}
+
+func encodeChatPayload(protocol Protocol, model string, history []ChatMessage, systemNotes []string) ([]byte, error) {
 	messages := make([]ChatMessage, 0, len(history)+1)
 	messages = append(messages, ChatMessage{Role: "system", Content: SystemPrompt + systemNotesBlock(systemNotes)})
 	messages = append(messages, history...)
 	switch protocol {
 	case ProtocolOpenAIChat:
 		payload := map[string]any{"model": model, "stream": true, "messages": messages}
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return "", "", nil, err
-		}
-		return string(encoded), base + "/chat/completions", map[string]string{"Authorization": "Bearer " + apiKey}, nil
+		return json.Marshal(payload)
 	case ProtocolAnthropicMessages:
 		// Anthropic keeps the system prompt out of the message list.
 		chatMessages := make([]ChatMessage, 0, len(history))
@@ -189,13 +236,9 @@ func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history 
 			}
 		}
 		payload := map[string]any{"model": model, "stream": true, "max_tokens": 8192, "system": SystemPrompt + systemNotesBlock(systemNotes), "messages": chatMessages}
-		encoded, err := json.Marshal(payload)
-		if err != nil {
-			return "", "", nil, err
-		}
-		return string(encoded), base + "/v1/messages", map[string]string{"x-api-key": apiKey, "anthropic-version": "2023-06-01"}, nil
+		return json.Marshal(payload)
 	default:
-		return "", "", nil, fmt.Errorf("unsupported provider protocol %q", protocol)
+		return nil, fmt.Errorf("unsupported provider protocol %q", protocol)
 	}
 }
 

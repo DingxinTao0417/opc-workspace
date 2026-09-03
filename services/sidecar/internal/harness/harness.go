@@ -336,8 +336,8 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 // runSelfCheck closes the loop on the agent's own reflection (ADR-006): the
 // draft carries the model's trailing [opc:selfcheck] verdict. An affirmative
 // verdict emits the stripped draft as-is; an insufficiency verdict triggers
-// one silent revision turn fed back with the model's own note, bounded to a
-// single pass. Any failure keeps the draft.
+// one internal revision turn fed back with the model's own note, bounded to a
+// single pass and the global turn budget. Any failure keeps the draft.
 func runSelfCheck(ctx context.Context, client LLMClient, request Request, history []modelclient.ChatMessage, result Result) Result {
 	if ctx.Err() != nil {
 		return result
@@ -350,6 +350,9 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 	}
 	if verdict.sufficient || strings.TrimSpace(stripped) == "" {
 		result.Text = stripped
+		return result
+	}
+	if result.Turns >= DefaultMaxTurns {
 		return result
 	}
 	verifyHistory := make([]modelclient.ChatMessage, 0, len(history)+2)
@@ -372,6 +375,7 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 		return result
 	}
 	result.Text = revisedStripped
+	result.Reasoning = revised.Reasoning
 	result.Reflections = 1
 	return result
 }
