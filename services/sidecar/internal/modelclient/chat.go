@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -53,13 +54,20 @@ var ErrStream = errors.New("modelclient: stream error")
 
 // UpstreamStatusError reports a non-2xx chat completion response; it wraps
 // ErrStream so generic stream handling keeps working while the status stays
-// addressable for error mapping.
+// addressable for error mapping. Snippet carries a sanitized excerpt of the
+// upstream error body (truncated, control characters removed) so provider
+// rejections like "unknown model" are diagnosable instead of surfacing as a
+// bare 404.
 type UpstreamStatusError struct {
 	StatusCode int
+	Snippet    string
 }
 
 func (e *UpstreamStatusError) Error() string {
-	return fmt.Sprintf("upstream status %d", e.StatusCode)
+	if e.Snippet == "" {
+		return fmt.Sprintf("upstream status %d", e.StatusCode)
+	}
+	return fmt.Sprintf("upstream status %d: %s", e.StatusCode, e.Snippet)
 }
 
 func (e *UpstreamStatusError) Unwrap() error { return ErrStream }
@@ -120,7 +128,8 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return &UpstreamStatusError{StatusCode: response.StatusCode}
+		snippet := sanitizeUpstreamErrorBody(response.Body)
+		return &UpstreamStatusError{StatusCode: response.StatusCode, Snippet: snippet}
 	}
 
 	total := 0
@@ -184,6 +193,18 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 		return fmt.Errorf("%w: upstream closed before first token", ErrStream)
 	}
 	return nil
+}
+
+// sanitizeUpstreamErrorBody reads up to 512 bytes of an upstream error
+// response and reduces it to one line of printable text, so provider error
+// messages survive into diagnostics without control characters or dumps.
+func sanitizeUpstreamErrorBody(body io.Reader) string {
+	excerpt, _ := io.ReadAll(io.LimitReader(body, 512))
+	line := strings.Join(strings.Fields(string(excerpt)), " ")
+	if len(line) > 300 {
+		line = line[:300]
+	}
+	return line
 }
 
 // buildChatRequest returns the JSON body, endpoint, and protocol headers.

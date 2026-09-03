@@ -317,6 +317,30 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 			return taskVersionConflict()
 		}
 		previous := aiProviderResponseFromModel(row)
+		// ai_generations carries the provider FK (053), so every session
+		// that actually generated with this provider is removed with it —
+		// the same cascade a session delete performs. Active generations in
+		// these sessions are dead ends once the provider is gone. Sessions
+		// that never generated hold no provider reference and survive.
+		var sessionIDs []string
+		if err := tx.Model(&models.AIGeneration{}).Where("provider_id = ?", id).
+			Distinct().Pluck("session_id", &sessionIDs).Error; err != nil {
+			return err
+		}
+		for _, sessionID := range sessionIDs {
+			a.aiGenerations.cancelSession(sessionID)
+		}
+		if len(sessionIDs) > 0 {
+			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.AIMessage{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.AIGeneration{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("id IN ?", sessionIDs).Delete(&models.AISession{}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Delete(&row).Error; err != nil {
 			return fmt.Errorf("delete AI provider: %w", err)
 		}

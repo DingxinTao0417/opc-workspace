@@ -160,3 +160,72 @@ func TestAILocalProviderUnreachableHealth(t *testing.T) {
 	response := chatRequest(t, router, envelope.Data.ID, "", "hi")
 	assertAPIError(t, response, http.StatusConflict, "AI_PROVIDER_NOT_READY")
 }
+
+// A provider with sessions that actually generated is deleted together with
+// those sessions (messages + generations + sessions cascade); the FK from
+// ai_generations.provider_id would otherwise turn deletion into a 500.
+func TestAIProviderDeleteCascadesUsedSessions(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		streamMockAIDelta(w, "回答")
+	})
+	defer upstream.Close()
+
+	body := []byte(`{"name":"cascading","kind":"local","protocol":"openai_chat","base_url":"` + upstream.URL + `/v1","model":"m"}`)
+	created := performRequest(router, http.MethodPost, "/api/v1/ai/providers", body, nil)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", created.Code, created.Body.String())
+	}
+	var envelope aiProviderEnvelope
+	if err := json.Unmarshal(created.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode provider: %v", err)
+	}
+	provider := envelope.Data
+	if checked := performRequest(router, http.MethodPost, "/api/v1/ai/providers/"+provider.ID+"/health", nil, map[string]string{"If-Match": `"1"`}); checked.Code != http.StatusOK {
+		t.Fatalf("health = %d: %s", checked.Code, checked.Body.String())
+	}
+	if response := chatRequest(t, router, provider.ID, "", "你好"); response.Code != http.StatusOK {
+		t.Fatalf("chat = %d: %s", response.Code, response.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_sessions", 1)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages", 2)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_generations", 1)
+
+	deleted := performRequest(router, http.MethodDelete, "/api/v1/ai/providers/"+provider.ID, nil, map[string]string{"If-Match": `"2"`})
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d: %s", deleted.Code, deleted.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_sessions", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_generations", 0)
+}
+
+// Upstream error responses keep a sanitized body excerpt so rejections like
+// "model not found" (OpenAI-style 404) are diagnosable from the chat error.
+func TestAIChatUpstreamErrorCarriesBodySnippet(t *testing.T) {
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	router, _, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"message":"The model 'm' does not exist","code":"model_not_found"}}`))
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "chat-404", upstream.URL+"/v1", "m")
+
+	response := chatRequest(t, router, provider.ID, "", "hi")
+	if response.Code != http.StatusOK {
+		t.Fatalf("chat = %d: %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"error":"AI_ENDPOINT_INVALID"`) {
+		t.Fatalf("expected AI_ENDPOINT_INVALID: %s", body)
+	}
+	if !strings.Contains(body, "model_not_found") {
+		t.Fatalf("upstream body snippet missing from detail: %s", body)
+	}
+	if strings.Contains(body, "sk-test") {
+		t.Fatalf("snippet must not carry secrets: %s", body)
+	}
+}
