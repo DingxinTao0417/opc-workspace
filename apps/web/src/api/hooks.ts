@@ -17,6 +17,9 @@ import {
   deleteAiSession,
   getAiMessages,
   getAiProvider,
+  createAiMemory,
+  deleteAiMemory,
+  getAiMemories,
   getAiProviders,
   getAiSessions,
   setAiProviderKey,
@@ -5090,9 +5093,49 @@ export function resetApiAndRefetch(refetch: () => Promise<unknown>): void {
 }
 
 export const aiProvidersQueryKey = ["ai", "providers"] as const;
+export const aiMemoriesQueryKey = ["ai", "memories"] as const;
 export const aiSessionsQueryKey = ["ai", "sessions"] as const;
 export const aiMessagesQueryKey = (sessionId: string) =>
   ["ai", "messages", sessionId] as const;
+
+export function useAiMemoriesQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiMemoriesQueryKey,
+    queryFn: getAiMemories,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useCreateAiMemory() {
+  const queryClient = useQueryClient();
+  const idempotencyKey = useRef<string | null>(null);
+  return useMutation({
+    mutationFn: (input: { content: string; source_message_id?: string }) => {
+      idempotencyKey.current ??= crypto.randomUUID();
+      return createAiMemory(input, idempotencyKey.current);
+    },
+    onSuccess: async () => {
+      idempotencyKey.current = null;
+      await queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey });
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey });
+    },
+  });
+}
+
+export function useDeleteAiMemory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => deleteAiMemory(id),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey });
+    },
+  });
+}
 
 export function useAiProvidersQuery(enabled = true) {
   return useQuery({
@@ -5301,6 +5344,7 @@ const AI_STREAM_ERROR_HINTS: Record<string, string> = {
     "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
   AI_ENDPOINT_UNREACHABLE: "无法连接上游端点，请检查网络或代理",
   AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
+  AI_KEY_NOT_ALLOWED: "本地部署供应商不需要 API 密钥，请检查供应商类型配置",
 };
 
 function aiStreamErrorText(code: string, detail?: string): string {

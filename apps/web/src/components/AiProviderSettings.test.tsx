@@ -27,6 +27,9 @@ const mockState = vi.hoisted(() => {
     setKey: mutation(),
     checkHealth: mutation(),
     deleteProvider: mutation(),
+    memories: [] as unknown[],
+    memoriesStatus: "success" as "pending" | "error" | "success",
+    deleteMemory: mutation(),
   };
 });
 
@@ -43,12 +46,22 @@ vi.mock("../api/hooks", () => ({
   useSetAiProviderKey: () => mockState.setKey,
   useCheckAiProviderHealth: () => mockState.checkHealth,
   useDeleteAiProvider: () => mockState.deleteProvider,
+  useAiMemoriesQuery: () => ({
+    data:
+      mockState.memoriesStatus === "success" ? mockState.memories : undefined,
+    isPending: mockState.memoriesStatus === "pending",
+    isError: mockState.memoriesStatus === "error",
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useDeleteAiMemory: () => mockState.deleteMemory,
 }));
 
 function readyProvider(overrides: Record<string, unknown> = {}) {
   return {
     id: "provider-1",
     name: "DeepSeek",
+    kind: "remote",
     protocol: "openai_chat",
     base_url: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
@@ -86,11 +99,111 @@ describe("AiProviderSettings", () => {
     await waitFor(() => {
       expect(mockState.createProvider.mutateAsync).toHaveBeenCalledWith({
         name: "DeepSeek",
+        kind: "remote",
         protocol: "openai_chat",
         base_url: "https://api.deepseek.com/v1",
         model: "deepseek-chat",
       });
     });
+  });
+
+  it("registers a local provider without a key and locks the protocol", async () => {
+    mockState.providers = [];
+    render(<AiProviderSettings />);
+
+    fireEvent.change(screen.getByPlaceholderText("例如 DeepSeek"), {
+      target: { value: "Ollama" },
+    });
+    fireEvent.change(screen.getByDisplayValue("远程 API（API key）"), {
+      target: { value: "local" },
+    });
+    expect(screen.getByText(/本地部署使用 OpenAI 兼容端点/)).toBeTruthy();
+    expect(
+      screen.getByPlaceholderText("http://127.0.0.1:11434/v1"),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("http://127.0.0.1:11434/v1"), {
+      target: { value: "http://127.0.0.1:11434/v1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("例如 qwen3"), {
+      target: { value: "qwen3" },
+    });
+    fireEvent.click(screen.getByText("登记供应商"));
+
+    await waitFor(() => {
+      expect(mockState.createProvider.mutateAsync).toHaveBeenCalledWith({
+        name: "Ollama",
+        kind: "local",
+        protocol: "openai_chat",
+        base_url: "http://127.0.0.1:11434/v1",
+        model: "qwen3",
+      });
+    });
+  });
+
+  it("renders a local provider card without any key input", () => {
+    mockState.providers = [
+      readyProvider({
+        kind: "local",
+        has_key: false,
+        name: "Ollama",
+        model: "qwen3",
+      }),
+    ];
+    render(<AiProviderSettings />);
+
+    expect(screen.getByText("Ollama")).toBeTruthy();
+    expect(
+      screen.getByText("本地部署 · OpenAI Chat Completions 兼容 · qwen3"),
+    ).toBeTruthy();
+    expect(screen.getByText("本地部署供应商，无需 API 密钥。")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("已保存（输入可更换）")).toBeNull();
+    expect(screen.getByText("测试连接")).toBeTruthy();
+  });
+
+  it("lists confirmed memories and deletes one", async () => {
+    mockState.providers = [readyProvider()];
+    mockState.memories = [
+      {
+        id: "memory-1",
+        content: "回答保持简洁",
+        created_at: "2026-09-03T12:00:00Z",
+        updated_at: "2026-09-03T12:00:00Z",
+      },
+    ];
+    render(<AiProviderSettings />);
+
+    expect(screen.getByText("长期记忆")).toBeTruthy();
+    expect(screen.getByText("回答保持简洁")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除记忆：回答保持简洁" }),
+    );
+
+    await waitFor(() => {
+      expect(mockState.deleteMemory.mutateAsync).toHaveBeenCalledWith({
+        id: "memory-1",
+      });
+    });
+  });
+
+  it("shows the empty memory state", () => {
+    mockState.providers = [readyProvider()];
+    mockState.memories = [];
+    render(<AiProviderSettings />);
+    expect(screen.getByText("暂无已确认的记忆。")).toBeTruthy();
+  });
+
+  it("maps the AI_KEY_NOT_ALLOWED error to a safe explanation", () => {
+    mockState.providers = [
+      readyProvider({ kind: "local", has_key: false, name: "Ollama" }),
+    ];
+    mockState.setKey.error = new ApiError("not allowed", {
+      code: "AI_KEY_NOT_ALLOWED",
+    });
+    render(<AiProviderSettings />);
+
+    expect(
+      screen.getByText(/本地部署供应商不需要也不保存 API 密钥/),
+    ).toBeTruthy();
   });
 
   it("renders a ready provider with status and key saving", async () => {

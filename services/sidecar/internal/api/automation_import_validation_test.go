@@ -91,7 +91,10 @@ func TestAutomationBusinessImportPreflightAndApplyAcceptsPortableRunHistory(t *t
 
 func TestAutomationBusinessImportAcceptsPortableNonretryableSafetyFailures(t *testing.T) {
 	now := time.Date(2026, 9, 2, 10, 0, 0, 0, time.UTC)
-	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t)
+	// The source router must share the fixture clock: rule-version proof
+	// events written by the API must not drift past the frozen attempt
+	// timestamps or the graph validation becomes time-of-day dependent.
+	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t, now)
 	ruleOutput := configureAndEnableInvoiceAutomation(t, sourceRouter, "P1")
 	var rule models.AutomationRule
 	if err := sourceStore.DB.First(&rule, "id = ?", ruleOutput.ID).Error; err != nil {

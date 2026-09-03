@@ -26,6 +26,7 @@ import type {
   AiProvider,
   AiProviderProtocol,
   AiProviderStatus,
+  AiMemory,
   AiSession,
   AiMessage,
   AiMessageListResult,
@@ -10449,6 +10450,7 @@ function aiProviderFromRecord(row: unknown): AiProvider {
   return {
     id: stringField(row, "id") ?? "",
     name: stringField(row, "name") ?? "",
+    kind: stringField(row, "kind") === "local" ? "local" : "remote",
     protocol: protocol as AiProvider["protocol"],
     base_url: stringField(row, "base_url") ?? "",
     model: stringField(row, "model") ?? "",
@@ -10530,6 +10532,42 @@ export async function setAiProviderKey(
 function aiProviderFromEnvelope(payload: unknown): AiProvider {
   if (!isRecord(payload)) return invalidResponse("AI 供应商响应格式无效");
   return aiProviderFromRecord(payload.data);
+}
+
+function aiMemoryFromRecord(row: unknown): AiMemory {
+  if (!isRecord(row)) return invalidResponse("AI 记忆响应格式无效");
+  return {
+    id: stringField(row, "id") ?? "",
+    content: stringField(row, "content") ?? "",
+    source_message_id: stringField(row, "source_message_id") ?? null,
+    created_at: stringField(row, "created_at") ?? "",
+    updated_at: stringField(row, "updated_at") ?? "",
+  };
+}
+
+export async function getAiMemories(): Promise<AiMemory[]> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/memories");
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("AI 记忆列表响应格式无效");
+  }
+  return payload.data.map((row) => aiMemoryFromRecord(row));
+}
+
+export async function createAiMemory(
+  input: { content: string; source_message_id?: string },
+  idempotencyKey: string,
+): Promise<AiMemory> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/memories", {
+    method: "POST",
+    body: JSON.stringify(input),
+    headers: { "Idempotency-Key": idempotencyKey },
+  });
+  if (!isRecord(payload)) return invalidResponse("AI 记忆响应格式无效");
+  return aiMemoryFromRecord(payload.data);
+}
+
+export async function deleteAiMemory(id: string): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/ai/memories/${id}`, { method: "DELETE" });
 }
 
 export async function getAiSessions(): Promise<AiSession[]> {

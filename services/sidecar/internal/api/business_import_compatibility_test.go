@@ -136,7 +136,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 55, blocker: "source_schema_newer"},
+		{version: 57, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

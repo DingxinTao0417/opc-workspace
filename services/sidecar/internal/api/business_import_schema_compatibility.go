@@ -7,12 +7,16 @@ const (
 	businessImportSchema52 = 52
 	businessImportSchema53 = 53
 	businessImportSchema54 = 54
+	businessImportSchema55 = 55
+	businessImportSchema56 = 56
 )
 
 // Schema 50 only adds the operational import-authorization table and schema 51
 // only records an immutable migration witness. Schema 52/53 add AI operational
 // tables (providers/sessions/generations/messages) that are excluded from the
-// portable export surface. Neither changes exported table columns. Keep the
+// portable export surface, schema 54 adds an excluded AI message column,
+// schema 55 adds an excluded AI provider column, and schema 56 adds the
+// excluded ai_memories table. None changes exported table columns. Keep the
 // compatibility edges explicit instead of allowing general cross-version
 // imports: v49 packages remain importable into every schema that only added
 // excluded operational state.
@@ -38,7 +42,8 @@ func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, boo
 	if sourceSchema == businessImportSchema49 &&
 		(targetSchema == businessImportSchema50 || targetSchema == businessImportSchema51 ||
 			targetSchema == businessImportSchema52 || targetSchema == businessImportSchema53 ||
-			targetSchema == businessImportSchema54) {
+			targetSchema == businessImportSchema54 || targetSchema == businessImportSchema55 ||
+			targetSchema == businessImportSchema56) {
 		return businessExportExcludedTablesSchema49, true
 	}
 	if sourceSchema == businessImportSchema50 && targetSchema == businessImportSchema51 {

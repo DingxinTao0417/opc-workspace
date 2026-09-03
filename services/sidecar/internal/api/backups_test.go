@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	glebarezsqlite "github.com/glebarez/sqlite"
@@ -21,13 +22,13 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func newBackupTestAPI(t *testing.T) (*gin.Engine, *database.Store, string, string) {
+func newBackupTestAPI(t *testing.T, now ...time.Time) (*gin.Engine, *database.Store, string, string) {
 	t.Helper()
-	router, store, _, artifactDir, backupDir := newBackupCapacityTestRuntime(t, nil)
+	router, store, _, artifactDir, backupDir := newBackupCapacityTestRuntime(t, nil, now...)
 	return router.Engine, store, artifactDir, backupDir
 }
 
-func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, uint64, error)) (*Router, *database.Store, string, string, string) {
+func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, uint64, error), now ...time.Time) (*Router, *database.Store, string, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	databasePath := filepath.Join(root, "workspace.db")
@@ -39,14 +40,21 @@ func newBackupCapacityTestRuntime(t *testing.T, checker func(string) (uint64, ui
 		t.Fatalf("database.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	router, err := NewRouter(store.DB, Options{
+	options := Options{
 		AppVersion: "0.1.0-test", Commit: "backup-test", SchemaVersion: store.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
 		Logger: log.New(io.Discard, "", 0), ArtifactDir: artifactDir, InvoicePDFDir: invoicePDFDir,
 		DatabasePath: databasePath, BackupDir: backupDir,
 		DiskSpaceCheck:         checker,
 		FocusHeartbeatInterval: -1, ReminderScanInterval: -1,
-	})
+	}
+	// A frozen clock keeps API-written audit events consistent with fixtures
+	// that seed rows at fixed timestamps; without it, event-order validations
+	// become time-of-day dependent.
+	if len(now) == 1 {
+		options.Now = func() time.Time { return now[0] }
+	}
+	router, err := NewRouter(store.DB, options)
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}

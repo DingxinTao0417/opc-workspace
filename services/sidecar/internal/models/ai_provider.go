@@ -3,6 +3,7 @@ package models
 type AIProvider struct {
 	ID              string  `gorm:"column:id;primaryKey" json:"id"`
 	Name            string  `gorm:"column:name" json:"name"`
+	Kind            string  `gorm:"column:kind;default:'remote'" json:"kind"`
 	Protocol        string  `gorm:"column:protocol" json:"protocol"`
 	BaseURL         string  `gorm:"column:base_url" json:"base_url"`
 	Model           string  `gorm:"column:model" json:"model"`

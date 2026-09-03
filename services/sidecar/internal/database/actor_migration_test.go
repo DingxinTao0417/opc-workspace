@@ -32,9 +32,9 @@ func TestActorMigrationUpgradesRealV6DatabaseAndBackfillsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upgrade v6 database with Open(): %v", err)
 	}
-	if store.SchemaVersion != 54 {
+	if store.SchemaVersion != 56 {
 		_ = store.Close()
-		t.Fatalf("SchemaVersion = %d, want 54", store.SchemaVersion)
+		t.Fatalf("SchemaVersion = %d, want 56", store.SchemaVersion)
 	}
 
 	for taskID, wantVersion := range map[string]int64{

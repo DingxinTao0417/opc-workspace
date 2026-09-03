@@ -44,6 +44,7 @@ const mockState = vi.hoisted(() => {
     deleteSession: mutation(),
     createTask: mutation(),
     attachTask: mutation(),
+    createMemory: mutation(),
     navigate: vi.fn(),
   };
 });
@@ -79,6 +80,7 @@ vi.mock("../api/hooks", () => ({
     stop: mockState.stop,
   }),
   useCreateAiSession: () => mockState.createSession,
+  useCreateAiMemory: () => mockState.createMemory,
   useDeleteAiSession: () => mockState.deleteSession,
   useCreateTask: () => mockState.createTask,
   useAttachTaskToAiMessage: () => mockState.attachTask,
@@ -109,6 +111,7 @@ vi.mock("../components/ProjectSelect", () => ({
 const readyProvider = {
   id: "provider-1",
   name: "DeepSeek",
+  kind: "remote",
   protocol: "openai_chat",
   base_url: "https://api.deepseek.com/v1",
   model: "deepseek-chat",
@@ -326,5 +329,42 @@ describe("AiAssistantPage", () => {
         expect.objectContaining({ providerId: "provider-2" }),
       );
     });
+  });
+});
+
+describe("AiAssistantPage memory suggestion", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("gates a memory suggestion behind explicit user confirmation", async () => {
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({
+            id: "message-memory",
+            content:
+              '已了解你的偏好。[opc:memory]{"content":"回答保持简洁"}[/opc:memory]',
+          }),
+        ],
+        next_before_created_at: null,
+        next_before_id: null,
+      },
+    ];
+    renderPage();
+
+    expect(screen.getByText(/记住偏好：回答保持简洁/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "记住" }));
+
+    await waitFor(() => {
+      expect(mockState.createMemory.mutateAsync).toHaveBeenCalledWith({
+        content: "回答保持简洁",
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/已记住：回答保持简洁/)).toBeTruthy();
+    });
+    // The raw suggestion block never renders as reply text.
+    expect(screen.queryByText(/opc:memory/)).toBeNull();
   });
 });

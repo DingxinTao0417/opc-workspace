@@ -16,8 +16,8 @@ func TestContentCalendarMigrationCreatesLocalScheduleAndTaskLinks(t *testing.T) 
 		t.Fatalf("upgrade v36 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 54 {
-		t.Fatalf("SchemaVersion = %d, want 54", store.SchemaVersion)
+	if store.SchemaVersion != 56 {
+		t.Fatalf("SchemaVersion = %d, want 56", store.SchemaVersion)
 	}
 	const projectID = "018f0000-0000-7000-8000-000000003701"
 	const taskID = "018f0000-0000-7000-8000-000000003702"

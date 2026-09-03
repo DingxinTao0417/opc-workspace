@@ -78,6 +78,7 @@ var businessExportExcludedTables = []string{
 	"ai_sessions",
 	"ai_generations",
 	"ai_messages",
+	"ai_memories",
 }
 
 type businessExportTable struct {

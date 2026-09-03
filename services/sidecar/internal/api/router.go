@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/harness"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"gorm.io/gorm"
 )
@@ -48,6 +49,7 @@ type API struct {
 	db                        *gorm.DB
 	options                   Options
 	keyStore                  keystore.Store
+	harnessClient             harness.LLMClient
 	aiGenerations             *aiGenerationRegistry
 	artifactStore             *artifactStore
 	invoicePDFStore           *invoicePDFStore
@@ -209,7 +211,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 	}
 	service := &API{
-		db: db, options: options, keyStore: options.KeyStore, aiGenerations: newAIGenerationRegistry(),
+		db: db, options: options, keyStore: options.KeyStore, harnessClient: harness.NewModelClient(nil),
+		aiGenerations: newAIGenerationRegistry(),
 		artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
 		maintenance: &sync.RWMutex{},
 	}
@@ -319,6 +322,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.DELETE("/ai/providers/:id", service.deleteAIProvider)
 		v1.POST("/ai/providers/:id/health", service.checkAIProviderHealth)
 		v1.POST("/ai/providers/:id/key", service.setAIProviderKey)
+		v1.GET("/ai/memories", service.listAIMemories)
+		v1.POST("/ai/memories", service.createAIMemory)
+		v1.DELETE("/ai/memories/:id", service.deleteAIMemory)
 		v1.GET("/ai/sessions", service.listAISessions)
 		v1.POST("/ai/sessions", service.createAISession)
 		v1.GET("/ai/sessions/:id", service.getAISession)

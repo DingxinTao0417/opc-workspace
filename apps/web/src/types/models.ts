@@ -2461,12 +2461,15 @@ export interface StorageCapacityHistoryResult {
 
 export type AiProviderProtocol = "openai_chat" | "anthropic_messages";
 
+export type AiProviderKind = "remote" | "local";
+
 export type AiProviderStatus =
   "unconfigured" | "checking" | "ready" | "unavailable" | "disabled";
 
 export interface AiProvider {
   id: string;
   name: string;
+  kind: AiProviderKind;
   protocol: AiProviderProtocol;
   base_url: string;
   model: string;
@@ -2482,6 +2485,7 @@ export interface AiProvider {
 
 export interface CreateAiProviderInput {
   name: string;
+  kind: AiProviderKind;
   protocol: AiProviderProtocol;
   base_url: string;
   model: string;
@@ -2489,9 +2493,18 @@ export interface CreateAiProviderInput {
 
 export interface UpdateAiProviderInput {
   name?: string;
+  kind?: AiProviderKind;
   protocol?: AiProviderProtocol;
   base_url?: string;
   model?: string;
+}
+
+export interface AiMemory {
+  id: string;
+  content: string;
+  source_message_id?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AiSession {

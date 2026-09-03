@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAiTaskSuggestion, stripAiTaskBlock } from "./aiTaskCard";
+import {
+  parseAiMemorySuggestion,
+  parseAiTaskSuggestion,
+  stripAiSelfCheckBlock,
+  stripAiTaskBlock,
+} from "./aiTaskCard";
 
 describe("parseAiTaskSuggestion", () => {
   it("parses a well-formed suggestion block", () => {
@@ -54,5 +59,52 @@ describe("stripAiTaskBlock", () => {
 
   it("keeps plain replies unchanged", () => {
     expect(stripAiTaskBlock("普通回答")).toBe("普通回答");
+  });
+});
+
+describe("parseAiMemorySuggestion", () => {
+  it("parses a well-formed memory block", () => {
+    const content =
+      '好的，我记下了。[opc:memory]{"content":"回答保持简洁"}[/opc:memory]';
+    expect(parseAiMemorySuggestion(content)).toEqual({
+      content: "回答保持简洁",
+    });
+  });
+
+  it("rejects malformed, missing-content, and oversized blocks", () => {
+    expect(
+      parseAiMemorySuggestion("[opc:memory]not-json[/opc:memory]"),
+    ).toBeNull();
+    expect(
+      parseAiMemorySuggestion('[opc:memory]{"title":"x"}[/opc:memory]'),
+    ).toBeNull();
+    expect(
+      parseAiMemorySuggestion(
+        `[opc:memory]{"content":"${"长".repeat(501)}"}[/opc:memory]`,
+      ),
+    ).toBeNull();
+    expect(parseAiMemorySuggestion("没有记忆块的普通回答")).toBeNull();
+  });
+
+  it("strips both suggestion blocks from the displayed reply", () => {
+    const content =
+      '正文[opc:task]{"title":"t"}[/opc:task]结尾[opc:memory]{"content":"m"}[/opc:memory]';
+    expect(stripAiTaskBlock(content)).toBe("正文结尾");
+  });
+});
+
+describe("stripAiSelfCheckBlock", () => {
+  it("removes the internal self-check verdict from streamed text", () => {
+    expect(
+      stripAiSelfCheckBlock(
+        '草稿正文[opc:selfcheck]{"sufficient":true}[/opc:selfcheck]',
+      ),
+    ).toBe("草稿正文");
+    expect(
+      stripAiSelfCheckBlock(
+        '草稿[opc:selfcheck]{"sufficient":false,"note":"x"}',
+      ),
+    ).toBe("草稿");
+    expect(stripAiSelfCheckBlock("普通流式文本")).toBe("普通流式文本");
   });
 });

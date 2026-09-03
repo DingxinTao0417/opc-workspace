@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/harness"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
@@ -116,14 +117,21 @@ func (a *API) chatAI(c *gin.Context) {
 	if !ok {
 		return
 	}
-	apiKey, err := a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
-	if errors.Is(err, keystore.ErrNotFound) {
-		writeError(c, http.StatusConflict, "AI_KEY_UNAVAILABLE", "This provider has no stored API key")
-		return
-	}
-	if err != nil {
-		writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
-		return
+	// Local providers run keyless on the loopback interface (ADR-005); remote
+	// providers read their key from the OS credential store, use it for this
+	// request only, and never persist it.
+	apiKey := ""
+	if provider.Kind != aiProviderKindLocal {
+		var keyErr error
+		apiKey, keyErr = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
+		if errors.Is(keyErr, keystore.ErrNotFound) {
+			writeError(c, http.StatusConflict, "AI_KEY_UNAVAILABLE", "This provider has no stored API key")
+			return
+		}
+		if keyErr != nil {
+			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+			return
+		}
 	}
 
 	streamCtx := c.Request.Context()
@@ -194,32 +202,39 @@ func (a *API) chatAI(c *gin.Context) {
 		return
 	}
 
-	var builder strings.Builder
-	var reasoningBuilder strings.Builder
-	streamErr := modelclient.StreamChat(generationCtx, modelclient.Protocol(provider.Protocol), provider.BaseURL, apiKey, provider.Model,
-		a.chatHistory(session.ID),
-		func(delta string) {
-			builder.WriteString(delta)
-			deltaJSON, _ := json.Marshal(struct {
-				GenerationID string `json:"generation_id"`
-				Text         string `json:"text"`
-			}{generationID, delta})
-			writeSSE("delta", string(deltaJSON))
+	// The run loop carries no registered tools (ADR-005): it degenerates to
+	// the single streaming LLM call this endpoint has always performed.
+	harnessClient := a.harnessClient
+	if harnessClient == nil {
+		harnessClient = harness.NewModelClient(nil)
+	}
+	runResult, streamErr := harness.Run(generationCtx, harnessClient,
+		harness.Request{
+			Protocol: provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
+			History: a.chatHistory(session.ID), Memories: a.confirmedAIMemories(),
 		},
-		func(reasoning string) {
-			reasoningBuilder.WriteString(reasoning)
-			reasoningJSON, _ := json.Marshal(struct {
-				GenerationID string `json:"generation_id"`
-				Text         string `json:"text"`
-			}{generationID, reasoning})
-			writeSSE("reasoning", string(reasoningJSON))
-		},
-		nil)
+		nil, nil,
+		harness.Callbacks{
+			OnDelta: func(delta string) {
+				deltaJSON, _ := json.Marshal(struct {
+					GenerationID string `json:"generation_id"`
+					Text         string `json:"text"`
+				}{generationID, delta})
+				writeSSE("delta", string(deltaJSON))
+			},
+			OnReasoning: func(reasoning string) {
+				reasoningJSON, _ := json.Marshal(struct {
+					GenerationID string `json:"generation_id"`
+					Text         string `json:"text"`
+				}{generationID, reasoning})
+				writeSSE("reasoning", string(reasoningJSON))
+			},
+		})
 
 	switch {
 	case streamCtx.Err() != nil || generationCtx.Err() != nil:
-		partial := builder.String()
-		a.finalizeCancelledGeneration(generation, session, partial, reasoningBuilder.String())
+		partial := runResult.Text
+		a.finalizeCancelledGeneration(generation, session, partial, runResult.Reasoning)
 		cancelledJSON, _ := json.Marshal(struct {
 			GenerationID string `json:"generation_id"`
 			PartialText  string `json:"partial_text"`
@@ -240,7 +255,7 @@ func (a *API) chatAI(c *gin.Context) {
 		_ = writeSSE("error", string(errorJSON))
 	default:
 		completedAt := nowStamp(a)
-		a.finalizeCompletedGeneration(generation, session, builder.String(), reasoningBuilder.String(), provider, completedAt)
+		a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, completedAt)
 		doneJSON, _ := json.Marshal(struct {
 			GenerationID string `json:"generation_id"`
 		}{generationID})

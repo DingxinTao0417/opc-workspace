@@ -12,18 +12,27 @@ import {
 import { useState } from "react";
 import { ApiError } from "../api/client";
 import {
+  useAiMemoriesQuery,
   useAiProvidersQuery,
   useCheckAiProviderHealth,
   useCreateAiProvider,
+  useDeleteAiMemory,
   useDeleteAiProvider,
   useSetAiProviderKey,
 } from "../api/hooks";
-import type { AiProvider, AiProviderProtocol } from "../types/models";
+import type {
+  AiProvider,
+  AiProviderKind,
+  AiProviderProtocol,
+} from "../types/models";
 
 function aiProviderError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.code === "AI_KEY_STORE_UNAVAILABLE") {
       return "操作系统安全存储不可用，无法保存 API 密钥；已拒绝保存，未写入任何明文。";
+    }
+    if (error.code === "AI_KEY_NOT_ALLOWED") {
+      return "本地部署供应商不需要也不保存 API 密钥。";
     }
     if (error.code === "VERSION_CONFLICT") {
       return "供应商配置已变化，已刷新最新状态，请重试。";
@@ -84,7 +93,8 @@ export function AiProviderSettings() {
       <header className="settings-content-header">
         <h3>AI 助手</h3>
         <p>
-          可登记多个远程大模型供应商（API key 模式），聊天页可随时切换。
+          可登记多个大模型供应商：远程 API（API key 模式）或本地部署 （Ollama /
+          LM Studio 等 OpenAI 兼容端点，无需密钥），聊天页可随时切换。
           密钥只保存在操作系统安全存储，不进入数据库、日志或导出。
         </p>
       </header>
@@ -107,7 +117,52 @@ export function AiProviderSettings() {
           </button>
         </div>
       )}
+      <AiMemoryList />
     </div>
+  );
+}
+
+// AiMemoryList manages the user-confirmed long-term preferences the agent
+// reuses across sessions (ADR-006).
+function AiMemoryList() {
+  const memories = useAiMemoriesQuery();
+  const deleteMemory = useDeleteAiMemory();
+  return (
+    <section className="ai-memory-settings">
+      <h4>长期记忆</h4>
+      <p>你在对话中确认记住的偏好；会注入后续会话，可随时删除。</p>
+      {memories.isPending ? (
+        <div className="settings-state" role="status">
+          <LoaderCircle className="animate-spin" size={16} />
+          正在读取记忆…
+        </div>
+      ) : memories.isError || !memories.data ? (
+        <div className="settings-state settings-state-error" role="alert">
+          <AlertCircle size={16} />
+          无法读取长期记忆
+        </div>
+      ) : memories.data.length === 0 ? (
+        <div className="settings-state">暂无已确认的记忆。</div>
+      ) : (
+        <ul className="ai-memory-rows">
+          {memories.data.map((memory) => (
+            <li key={memory.id}>
+              <span>{memory.content}</span>
+              <button
+                aria-label={`删除记忆：${memory.content}`}
+                className="button button-quiet"
+                disabled={deleteMemory.isPending}
+                onClick={() => void deleteMemory.mutateAsync({ id: memory.id })}
+                type="button"
+              >
+                <Trash2 size={13} />
+                删除
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -173,6 +228,7 @@ function AiProviderCard({ provider }: { provider: AiProvider }) {
         <div>
           <h4>{provider.name}</h4>
           <p>
+            {provider.kind === "local" ? "本地部署 · " : null}
             {protocolLabels[provider.protocol]} · {provider.model}
           </p>
         </div>
@@ -195,30 +251,41 @@ function AiProviderCard({ provider }: { provider: AiProvider }) {
             provider.health_error_code}
         </div>
       ) : null}
-      <div className="ai-provider-actions">
-        <label>
-          <KeyRound size={14} />
-          <input
-            autoComplete="off"
-            onChange={(event) => setApiKey(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && apiKey.trim()) {
-                void saveKey();
+      {provider.kind === "local" ? (
+        <div className="ai-provider-health-note" role="status">
+          <Bot size={14} />
+          本地部署供应商，无需 API 密钥。
+        </div>
+      ) : (
+        <div className="ai-provider-actions">
+          <label>
+            <KeyRound size={14} />
+            <input
+              autoComplete="off"
+              onChange={(event) => setApiKey(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && apiKey.trim()) {
+                  void saveKey();
+                }
+              }}
+              placeholder={
+                provider.has_key ? "已保存（输入可更换）" : "API key"
               }
-            }}
-            placeholder={provider.has_key ? "已保存（输入可更换）" : "API key"}
-            type="password"
-            value={apiKey}
-          />
-        </label>
-        <button
-          className="button button-secondary"
-          disabled={setKey.isPending || !apiKey.trim()}
-          onClick={() => void saveKey()}
-          type="button"
-        >
-          保存密钥
-        </button>
+              type="password"
+              value={apiKey}
+            />
+          </label>
+          <button
+            className="button button-secondary"
+            disabled={setKey.isPending || !apiKey.trim()}
+            onClick={() => void saveKey()}
+            type="button"
+          >
+            保存密钥
+          </button>
+        </div>
+      )}
+      <div className="ai-provider-actions">
         <button
           className="button button-secondary"
           disabled={checkHealth.isPending}
@@ -283,15 +350,18 @@ function AiProviderCard({ provider }: { provider: AiProvider }) {
 function AiProviderForm({ onDone }: { onDone: () => void }) {
   const createProvider = useCreateAiProvider();
   const [name, setName] = useState("");
+  const [kind, setKind] = useState<AiProviderKind>("remote");
   const [protocol, setProtocol] = useState<AiProviderProtocol>("openai_chat");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
+  const localMode = kind === "local";
 
   async function register() {
     try {
       await createProvider.mutateAsync({
         name: name.trim(),
-        protocol,
+        kind,
+        protocol: localMode ? "openai_chat" : protocol,
         base_url: baseUrl.trim(),
         model: model.trim(),
       });
@@ -312,24 +382,49 @@ function AiProviderForm({ onDone }: { onDone: () => void }) {
         />
       </label>
       <label>
+        类型
+        <select
+          onChange={(event) => setKind(event.target.value as AiProviderKind)}
+          value={kind}
+        >
+          <option value="remote">远程 API（API key）</option>
+          <option value="local">本地部署（无需密钥）</option>
+        </select>
+      </label>
+      {localMode ? (
+        <div className="ai-provider-health-note" role="status">
+          <AlertCircle size={14} />
+          本地部署使用 OpenAI 兼容端点，例如 Ollama
+          <code>http://127.0.0.1:11434/v1</code> 或 LM Studio
+          <code>http://127.0.0.1:1234/v1</code>；不保存任何密钥。
+        </div>
+      ) : null}
+      <label>
         协议
         <select
+          disabled={localMode}
           onChange={(event) =>
             setProtocol(event.target.value as AiProviderProtocol)
           }
-          value={protocol}
+          value={localMode ? "openai_chat" : protocol}
         >
           <option value="openai_chat">{protocolLabels.openai_chat}</option>
-          <option value="anthropic_messages">
-            {protocolLabels.anthropic_messages}
-          </option>
+          {localMode ? null : (
+            <option value="anthropic_messages">
+              {protocolLabels.anthropic_messages}
+            </option>
+          )}
         </select>
       </label>
       <label>
         Base URL
         <input
           onChange={(event) => setBaseUrl(event.target.value)}
-          placeholder="https://api.example.com/v1"
+          placeholder={
+            localMode
+              ? "http://127.0.0.1:11434/v1"
+              : "https://api.example.com/v1"
+          }
           value={baseUrl}
         />
       </label>
@@ -337,7 +432,7 @@ function AiProviderForm({ onDone }: { onDone: () => void }) {
         模型名
         <input
           onChange={(event) => setModel(event.target.value)}
-          placeholder="例如 deepseek-chat"
+          placeholder={localMode ? "例如 qwen3" : "例如 deepseek-chat"}
           value={model}
         />
       </label>

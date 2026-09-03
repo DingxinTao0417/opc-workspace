@@ -21,6 +21,7 @@ import {
   useAiChatStream,
   useAiMessagesInfiniteQuery,
   useAiProvidersQuery,
+  useCreateAiMemory,
   useAiSessionsQuery,
   useAttachTaskToAiMessage,
   useCreateAiSession,
@@ -32,7 +33,9 @@ import { ErrorState, LoadingState } from "../components/feedback";
 import { Modal } from "../components/Modal";
 import { ProjectSelect } from "../components/ProjectSelect";
 import {
+  parseAiMemorySuggestion,
   parseAiTaskSuggestion,
+  stripAiSelfCheckBlock,
   stripAiTaskBlock,
   type AiTaskSuggestion,
 } from "../lib/aiTaskCard";
@@ -396,9 +399,9 @@ export function AiAssistantPage() {
 
   const providerError =
     providers.data.length === 0
-      ? "尚未配置 AI 供应商。请到 设置 → AI 助手 登记 API key 供应商并保存密钥。"
+      ? "尚未配置 AI 供应商。请到 设置 → AI 助手 登记远程 API 供应商（保存密钥）或本地部署供应商（如 Ollama）。"
       : readyProviders.length === 0
-        ? "AI 供应商未就绪。请到 设置 → AI 助手 保存 API 密钥并完成连接测试。"
+        ? "AI 供应商未就绪。请到 设置 → AI 助手 保存 API 密钥（远程）或通过连接测试（本地）。"
         : null;
 
   return (
@@ -587,7 +590,9 @@ export function AiAssistantPage() {
                       ) : null}
                       <div className="ai-msg-text" data-streaming>
                         {streamedText
-                          ? renderAiRichText(streamedText)
+                          ? renderAiRichText(
+                              stripAiSelfCheckBlock(streamedText),
+                            )
                           : (chat.streaming?.reasoning ?? "").length > 0
                             ? ""
                             : "正在思考…"}
@@ -726,7 +731,9 @@ export function AiAssistantPage() {
                       >
                         {readyProviders.map((provider) => (
                           <option key={provider.id} value={provider.id}>
-                            {provider.name} · {provider.model}
+                            {provider.kind === "local"
+                              ? `${provider.name} · ${provider.model} · 本地`
+                              : `${provider.name} · ${provider.model}`}
                           </option>
                         ))}
                       </select>
@@ -900,7 +907,59 @@ function AiMessageBlock({
             建议任务：{suggestion.title}（点击确认创建）
           </button>
         ) : null}
+        <AiMemorySuggestionCard content={content} />
       </div>
+    </div>
+  );
+}
+
+// AiMemorySuggestionCard shows the user-confirmation gate for a remembered
+// preference: model output is an untrusted suggestion and nothing is stored
+// until the user confirms (ADR-006).
+function AiMemorySuggestionCard({ content }: { content: string }) {
+  const createMemory = useCreateAiMemory();
+  const [dismissed, setDismissed] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const memory = parseAiMemorySuggestion(content);
+  if (!memory || dismissed) return null;
+  if (saved) {
+    return (
+      <div className="ai-memory-card is-saved" role="status">
+        <Brain size={14} />
+        已记住：{memory.content}
+      </div>
+    );
+  }
+  return (
+    <div className="ai-memory-card">
+      <span className="ai-memory-text">记住偏好：{memory.content}</span>
+      <button
+        className="button button-secondary"
+        disabled={createMemory.isPending}
+        onClick={() => {
+          void createMemory
+            .mutateAsync({ content: memory.content })
+            .then(() => setSaved(true))
+            .catch(() => {
+              /* save failure surfaces via the mutation state below */
+            });
+        }}
+        type="button"
+      >
+        记住
+      </button>
+      <button
+        className="button button-quiet"
+        onClick={() => setDismissed(true)}
+        type="button"
+      >
+        忽略
+      </button>
+      {createMemory.error ? (
+        <span className="ai-memory-error" role="alert">
+          保存失败，请重试
+        </span>
+      ) : null}
     </div>
   );
 }

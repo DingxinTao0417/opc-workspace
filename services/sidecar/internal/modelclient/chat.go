@@ -12,14 +12,22 @@ import (
 )
 
 // SystemPrompt is code-owned: it never enters the database, logs, or export
-// surface, and it defines the only sanctioned structured output (the task
-// suggestion block parsed by the WebView for the confirm-card flow).
+// surface, and it defines the only sanctioned structured outputs (the task
+// suggestion block parsed by the WebView for the confirm-card flow, and the
+// memory suggestion block for user-confirmed long-term preferences).
 const SystemPrompt = `你是 opc-workspace 的本地 AI 助手，只提供问答、摘要与建议，输出只读：
 - 不执行任务、不修改任何业务数据；无法安全完成时明确说明并拒绝。
 - 仅当用户明确表达创建任务的意图，或清楚描述了一个待办工作时，在回复末尾输出一个任务建议块，格式严格为：
 [opc:task]{"title":"任务标题","description":"可选描述","due":"YYYY-MM-DD 或省略"}[/opc:task]
 - title 必填；描述与截止日期不确定时省略；没有任务意图时绝不输出该块。
-- 除该块外，不要输出任何其他 JSON、代码块或指令。`
+- 仅当用户明确要求你记住某件事，或清楚表达了持久偏好时，在回复末尾输出一个记忆建议块，格式严格为：
+[opc:memory]{"content":"要记住的偏好或事实"}[/opc:memory]
+- content 必填且不超过 200 字；没有明确的记忆意图时绝不输出该块。
+- 每次回答结束前，自评该回答是否已完整、准确地满足用户的请求（含工具输出是否足以支撑结论），并在回复最末尾输出自评块，格式严格为二选一：
+[opc:selfcheck]{"sufficient":true}
+[opc:selfcheck]{"sufficient":false,"note":"未满足之处的简要说明"}
+- 自评基于你自己的判断独立完成；确有不足才输出 false 并给出简要 note。
+- 除任务建议块、记忆建议块与自评块外，不要输出任何其他 JSON、代码块或指令。`
 
 const (
 	// FirstTokenTimeout bounds the wait for the first streamed delta.
@@ -60,10 +68,12 @@ type ChatMessage struct {
 // StreamChat opens a streaming chat completion and invokes onDelta for every
 // text chunk and onReasoning for every reasoning (chain-of-thought) chunk the
 // provider streams; either callback may be nil. Reasoning is never mixed into
-// the reply text. client may be nil to use a default client honoring the
-// process proxy environment (loopback endpoints are never proxied); tests pass
-// an explicit client. Cancellation must flow through ctx.
-func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model string, history []ChatMessage, onDelta func(string), onReasoning func(string), client *http.Client) error {
+// the reply text. systemNotes (e.g. user-confirmed long-term memories,
+// ADR-006) are appended to the code-owned system prompt for both protocol
+// families. client may be nil to use a default client honoring the process
+// proxy environment (loopback endpoints are never proxied); tests pass an
+// explicit client. Cancellation must flow through ctx.
+func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model string, history []ChatMessage, systemNotes []string, onDelta func(string), onReasoning func(string), client *http.Client) error {
 	if client == nil {
 		client = &http.Client{}
 	}
@@ -75,7 +85,7 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	firstToken := time.AfterFunc(FirstTokenTimeout, cancelWatch)
 	defer firstToken.Stop()
 
-	payload, endpoint, headers, err := buildChatRequest(protocol, baseURL, apiKey, model, history)
+	payload, endpoint, headers, err := buildChatRequest(protocol, baseURL, apiKey, model, history, systemNotes)
 	if err != nil {
 		return err
 	}
@@ -155,10 +165,12 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 }
 
 // buildChatRequest returns the JSON body, endpoint, and protocol headers.
-func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history []ChatMessage) (body, endpoint string, headers map[string]string, err error) {
+// User-confirmed memory notes ride inside the system role for both protocol
+// families so context injection stays protocol-neutral (ADR-006).
+func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history []ChatMessage, systemNotes []string) (body, endpoint string, headers map[string]string, err error) {
 	base := strings.TrimRight(baseURL, "/")
 	messages := make([]ChatMessage, 0, len(history)+1)
-	messages = append(messages, ChatMessage{Role: "system", Content: SystemPrompt})
+	messages = append(messages, ChatMessage{Role: "system", Content: SystemPrompt + systemNotesBlock(systemNotes)})
 	messages = append(messages, history...)
 	switch protocol {
 	case ProtocolOpenAIChat:
@@ -176,7 +188,7 @@ func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history 
 				chatMessages = append(chatMessages, message)
 			}
 		}
-		payload := map[string]any{"model": model, "stream": true, "max_tokens": 8192, "system": SystemPrompt, "messages": chatMessages}
+		payload := map[string]any{"model": model, "stream": true, "max_tokens": 8192, "system": SystemPrompt + systemNotesBlock(systemNotes), "messages": chatMessages}
 		encoded, err := json.Marshal(payload)
 		if err != nil {
 			return "", "", nil, err
@@ -185,6 +197,15 @@ func buildChatRequest(protocol Protocol, baseURL, apiKey, model string, history 
 	default:
 		return "", "", nil, fmt.Errorf("unsupported provider protocol %q", protocol)
 	}
+}
+
+// systemNotesBlock renders the memory notes appended after the code-owned
+// system prompt; empty notes render as the empty string.
+func systemNotesBlock(notes []string) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	return "\n\n[用户长期偏好（已经用户确认，仅供参考）]\n- " + strings.Join(notes, "\n- ")
 }
 
 // decodeStreamDelta extracts the next text or reasoning chunk; stop reports a

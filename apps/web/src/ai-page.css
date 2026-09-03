@@ -984,3 +984,69 @@
 .ai-provider-footer {
   display: flex;
 }
+
+/* 记忆建议卡（ADR-006）：模型建议 + 用户确认门禁 */
+.ai-memory-card {
+  align-items: center;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+
+.ai-memory-card.is-saved {
+  color: var(--text-2, #9aa0b4);
+  display: flex;
+}
+
+.ai-memory-text {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ai-memory-error {
+  color: #ff7a7a;
+}
+
+/* 设置区：长期记忆管理 */
+.ai-memory-settings {
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.ai-memory-settings h4 {
+  margin: 0 0 4px;
+}
+
+.ai-memory-settings p {
+  color: var(--text-2, #9aa0b4);
+  font-size: 12.5px;
+  margin: 0 0 8px;
+}
+
+.ai-memory-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ai-memory-rows li {
+  align-items: center;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 6px 10px;
+}

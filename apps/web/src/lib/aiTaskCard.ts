@@ -34,7 +34,50 @@ export function parseAiTaskSuggestion(
   return { title: rawTitle, description, due };
 }
 
-// stripAiTaskBlock removes the suggestion block from the displayed reply.
+export interface AiMemorySuggestion {
+  content: string;
+}
+
+const AI_MEMORY_BLOCK_PATTERN = /\[opc:memory\]([\s\S]*?)\[\/opc:memory\]/;
+
+// The harness consumes the model's own [opc:selfcheck] verdict and never
+// persists it, but streamed deltas reach the UI before that stripping, so the
+// display layer drops it too (ADR-006).
+const AI_SELF_CHECK_BLOCK_PATTERN =
+  /\[opc:selfcheck\][\s\S]*?(\[\/opc:selfcheck\]|$)/;
+
+// parseAiMemorySuggestion extracts the first well-formed memory suggestion
+// block from an assistant reply. Like task blocks it is untrusted model
+// output: malformed JSON or missing/oversized content yields null.
+export function parseAiMemorySuggestion(
+  content: string,
+): AiMemorySuggestion | null {
+  const match = AI_MEMORY_BLOCK_PATTERN.exec(content);
+  if (!match) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(match[1]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const rawContent =
+    typeof parsed.content === "string" ? parsed.content.trim() : "";
+  if (!rawContent || rawContent.length > 500) return null;
+  return { content: rawContent };
+}
+
+// stripAiSelfCheckBlock removes the internal self-check verdict from the
+// displayed text (used on streamed deltas; persisted content is already
+// clean).
+export function stripAiSelfCheckBlock(content: string): string {
+  return content.replace(AI_SELF_CHECK_BLOCK_PATTERN, "").trimEnd();
+}
+
+// stripAiTaskBlock removes both suggestion blocks (task + memory) from the
+// displayed reply.
 export function stripAiTaskBlock(content: string): string {
-  return content.replace(AI_TASK_BLOCK_PATTERN, "").trimEnd();
+  return content
+    .replace(AI_TASK_BLOCK_PATTERN, "")
+    .replace(AI_MEMORY_BLOCK_PATTERN, "")
+    .trimEnd();
 }

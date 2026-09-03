@@ -20,6 +20,9 @@ import (
 const (
 	createAIProviderEndpoint = "POST /api/v1/ai/providers"
 	aiProviderKeyService     = "opc-workspace-ai"
+
+	aiProviderKindRemote = "remote"
+	aiProviderKindLocal  = "local"
 )
 
 func aiProviderKeyAccount(providerID string) string {
@@ -29,6 +32,7 @@ func aiProviderKeyAccount(providerID string) string {
 type aiProviderResponse struct {
 	ID              string  `json:"id"`
 	Name            string  `json:"name"`
+	Kind            string  `json:"kind"`
 	Protocol        string  `json:"protocol"`
 	BaseURL         string  `json:"base_url"`
 	Model           string  `json:"model"`
@@ -44,6 +48,7 @@ type aiProviderResponse struct {
 
 type createAIProviderRequest struct {
 	Name     string `json:"name"`
+	Kind     string `json:"kind"`
 	Protocol string `json:"protocol"`
 	BaseURL  string `json:"base_url"`
 	Model    string `json:"model"`
@@ -51,6 +56,7 @@ type createAIProviderRequest struct {
 
 type patchAIProviderRequest struct {
 	Name     *string `json:"name"`
+	Kind     *string `json:"kind"`
 	Protocol *string `json:"protocol"`
 	BaseURL  *string `json:"base_url"`
 	Model    *string `json:"model"`
@@ -79,7 +85,7 @@ func (a *API) createAIProvider(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
 		return
 	}
-	name, protocol, baseURL, model, code, ok := normalizeAIProviderFields(input.Name, input.Protocol, input.BaseURL, input.Model)
+	name, kind, protocol, baseURL, model, code, ok := normalizeAIProviderFields(input.Name, input.Kind, input.Protocol, input.BaseURL, input.Model)
 	if !ok {
 		writeError(c, http.StatusUnprocessableEntity, code, "The AI provider fields are not valid")
 		return
@@ -110,7 +116,7 @@ func (a *API) createAIProvider(c *gin.Context) {
 		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
 		row := models.AIProvider{
-			ID: uuid.NewString(), Name: name, Protocol: protocol, BaseURL: baseURL, Model: model,
+			ID: uuid.NewString(), Name: name, Kind: kind, Protocol: protocol, BaseURL: baseURL, Model: model,
 			Status: "unconfigured", HealthStatus: "unknown", Version: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
@@ -177,6 +183,9 @@ func (a *API) patchAIProvider(c *gin.Context) {
 	if input.Name != nil {
 		row.Name = *input.Name
 	}
+	if input.Kind != nil {
+		row.Kind = *input.Kind
+	}
 	if input.Protocol != nil {
 		row.Protocol = *input.Protocol
 	}
@@ -186,7 +195,7 @@ func (a *API) patchAIProvider(c *gin.Context) {
 	if input.Model != nil {
 		row.Model = *input.Model
 	}
-	name, protocol, baseURL, model, code, valid := normalizeAIProviderFields(row.Name, row.Protocol, row.BaseURL, row.Model)
+	name, kind, protocol, baseURL, model, code, valid := normalizeAIProviderFields(row.Name, row.Kind, row.Protocol, row.BaseURL, row.Model)
 	if !valid {
 		writeError(c, http.StatusUnprocessableEntity, code, "The patched AI provider fields are not valid")
 		return
@@ -194,7 +203,7 @@ func (a *API) patchAIProvider(c *gin.Context) {
 	var response aiProviderResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
-			"name": name, "protocol": protocol, "base_url": baseURL, "model": model,
+			"name": name, "kind": kind, "protocol": protocol, "base_url": baseURL, "model": model,
 			"version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
 		})
 		if result.Error != nil {
@@ -283,7 +292,17 @@ func (a *API) checkAIProviderHealth(c *gin.Context) {
 	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	healthCode := ""
-	if row.HasKey {
+	switch {
+	case row.Kind == aiProviderKindLocal:
+		// Local servers need no key; only endpoint reachability matters.
+		statusCode, probeErr := modelclient.HealthCheck(c.Request.Context(), modelclient.Protocol(row.Protocol), row.BaseURL, "", nil)
+		switch {
+		case probeErr != nil:
+			healthCode = "AI_ENDPOINT_UNREACHABLE"
+		case statusCode < 200 || statusCode > 299:
+			healthCode = "AI_PROVIDER_ERROR"
+		}
+	case row.HasKey:
 		apiKey, keyErr := a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
 		if keyErr != nil && !errors.Is(keyErr, keystore.ErrNotFound) {
 			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
@@ -302,7 +321,7 @@ func (a *API) checkAIProviderHealth(c *gin.Context) {
 				healthCode = "AI_PROVIDER_ERROR"
 			}
 		}
-	} else {
+	default:
 		healthCode = "AI_KEY_UNAVAILABLE"
 	}
 	var response aiProviderResponse
@@ -371,6 +390,10 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 		writeAIProviderLoadError(c, err)
 		return
 	}
+	if row.Kind == aiProviderKindLocal {
+		writeError(c, http.StatusConflict, "AI_KEY_NOT_ALLOWED", "Local AI providers never store an API key")
+		return
+	}
 	if row.Version != expectedVersion {
 		writeProjectRequestError(c, taskVersionConflict())
 		return
@@ -410,31 +433,48 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-func normalizeAIProviderFields(name, protocol, baseURL, model string) (string, string, string, string, string, bool) {
+// normalizeAIProviderFields validates the provider identity fields. Local
+// providers (kind=local) are OpenAI-compatible servers on the loopback
+// interface: http only, no API key, openai_chat protocol only (ADR-005).
+func normalizeAIProviderFields(name, kind, protocol, baseURL, model string) (string, string, string, string, string, string, bool) {
 	name = strings.TrimSpace(name)
+	kind = strings.TrimSpace(kind)
 	protocol = strings.TrimSpace(protocol)
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	model = strings.TrimSpace(model)
 	if name == "" || len(name) > 100 {
-		return "", "", "", "", "AI_PROVIDER_NAME_INVALID", false
+		return "", "", "", "", "", "AI_PROVIDER_NAME_INVALID", false
+	}
+	if kind == "" {
+		kind = aiProviderKindRemote
+	}
+	if kind != aiProviderKindRemote && kind != aiProviderKindLocal {
+		return "", "", "", "", "", "AI_PROVIDER_KIND_INVALID", false
 	}
 	if protocol != string(modelclient.ProtocolOpenAIChat) && protocol != string(modelclient.ProtocolAnthropicMessages) {
-		return "", "", "", "", "AI_PROTOCOL_INVALID", false
+		return "", "", "", "", "", "AI_PROTOCOL_INVALID", false
+	}
+	if kind == aiProviderKindLocal && protocol != string(modelclient.ProtocolOpenAIChat) {
+		return "", "", "", "", "", "AI_PROTOCOL_INVALID", false
 	}
 	parsed, err := url.Parse(baseURL)
 	if baseURL == "" || len(baseURL) > 500 || err != nil || parsed.Host == "" ||
 		(!strings.HasPrefix(baseURL, "https://") && !strings.HasPrefix(baseURL, "http://127.0.0.1") && !strings.HasPrefix(baseURL, "http://localhost")) {
-		return "", "", "", "", "AI_ENDPOINT_INVALID", false
+		return "", "", "", "", "", "AI_ENDPOINT_INVALID", false
+	}
+	if kind == aiProviderKindLocal &&
+		(!strings.HasPrefix(baseURL, "http://127.0.0.1") && !strings.HasPrefix(baseURL, "http://localhost")) {
+		return "", "", "", "", "", "AI_ENDPOINT_INVALID", false
 	}
 	if model == "" || len(model) > 200 {
-		return "", "", "", "", "AI_MODEL_INVALID", false
+		return "", "", "", "", "", "AI_MODEL_INVALID", false
 	}
-	return name, protocol, baseURL, model, "", true
+	return name, kind, protocol, baseURL, model, "", true
 }
 
 func aiProviderResponseFromModel(row models.AIProvider) aiProviderResponse {
 	return aiProviderResponse{
-		ID: row.ID, Name: row.Name, Protocol: row.Protocol, BaseURL: row.BaseURL, Model: row.Model,
+		ID: row.ID, Name: row.Name, Kind: row.Kind, Protocol: row.Protocol, BaseURL: row.BaseURL, Model: row.Model,
 		Status: row.Status, HealthStatus: row.HealthStatus, HealthErrorCode: row.HealthErrorCode,
 		HasKey: row.HasKey, LastHealthAt: row.LastHealthAt, Version: row.Version,
 		CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),
