@@ -4,7 +4,7 @@
 >
 > 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出、冲突预检、同 schema 零主键冲突追加，以及每日计划备份/启动补偿/只清理自动包的保留策略已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天容量样本保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择、实际冲突合并/UUID 重映射、跨 schema 升级、外部目标和完整跨版本矩阵仍未实现。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.86](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.88](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
 ## 定位与边界
 
@@ -236,7 +236,7 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 导出/导入
 
-基础业务 JSON 已实现：顶层记录 `format_version / exported_at / source / artifact_files / excluded_operational_tables / tables`；每张表携带稳定 `columns` 和二维 `rows`。当前格式不包含受控文件正文，会声明 `artifact_files.included=false`，因此不是完整备份替代品。
+基础业务 JSON 已实现：顶层记录 `format_version / exported_at / source / artifact_files / excluded_operational_tables / tables`；每张表携带稳定 `columns` 和二维 `rows`。当前格式不包含受控文件正文，会声明 `artifact_files.included=false`，因此不是完整备份替代品。schema 063–067 的 AI evaluation Run/Result、dataset version、suite 与人工决定审计都属于排除于便携导出的操作态；自由文本审计理由不会进入业务迁移包，一致性 SQLite 备份仍覆盖这些本地事实。v49 业务包兼容扩展至当前 schema 67，并显式接受 v63→67、v64→67、v65→67 与 v66→67；历史源继续按当时的排除表清单校验。schema 67 只扩大这些排除表的 suite CHECK，不改变便携业务表列。
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 

@@ -50,6 +50,19 @@ describe("streamAiChat", () => {
       providerId: "p-1",
       sessionId: "s-1",
       message: "你好",
+      context: {
+        provider_version: 3,
+        sources: [{ type: "task", id: "task-1", expected_version: 4 }],
+        knowledge: [
+          {
+            source_id: "source-1",
+            document_id: "document-1",
+            chunk_id: "chunk-1",
+            expected_source_version: 2,
+            expected_document_version: 1,
+          },
+        ],
+      },
       onEvent: (event) => events.push(event),
     });
 
@@ -82,6 +95,21 @@ describe("streamAiChat", () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer test-token");
     expect(headers.Accept).toBe("text/event-stream");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      context: {
+        provider_version: 3,
+        sources: [{ type: "task", id: "task-1", expected_version: 4 }],
+        knowledge: [
+          {
+            source_id: "source-1",
+            document_id: "document-1",
+            chunk_id: "chunk-1",
+            expected_source_version: 2,
+            expected_document_version: 1,
+          },
+        ],
+      },
+    });
   });
 
   it("surfaces the error event and keeps partial text delivered before it", async () => {

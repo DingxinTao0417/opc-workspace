@@ -2,7 +2,7 @@
 
 本目录按功能边界拆分模块文档。每份文档同时记录当前实现事实与目标规划，不能仅凭文档中的目标功能判断代码已经完成。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.86](../opc-workspace-PRD.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v10.8](../opc-workspace-PRD.md)
 
 ## v0.1 核心闭环
 
@@ -44,8 +44,8 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 
 ## 版本待定（独立轨道）
 
-- [本地知识库](knowledge-base.md)
-- [AI 助手](ai-assistant.md)（远程/本地 Provider、多 Provider 切换、OS 安全存储、agent harness（生产零工具；纠错与自评 replacement）、长期记忆确认注入、推理过程、取消/并发闸门、自然语言任务建议确认与幂等挂接已交付；ADR-007 G1 最新完整回合窗口/控制块剥离/精确请求预算已完成。业务上下文、知识库来源、摘要压缩、记忆工具、自动路由待后续，见 ADR-004/005/006/007）
+- [本地知识库](knowledge-base.md)（ADR-009、schema 059、TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 已交付；PDF、授权引用与变化检测待后续）
+- [AI 助手](ai-assistant.md)（Provider、Harness、记忆、AI5/AI6、AI7-Q1、Q2 scorer/8-case smoke/四类 6-case topic/24-case full Actor/suite 趋势/category/failure/Wilson/候选/人工决定审计与 Q3 steps/Provider token/本地聚合/UTC 趋势已交付；费用、句子级覆盖率与自动路由待后续）
 
 ## 维护规则
 

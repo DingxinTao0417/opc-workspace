@@ -21,13 +21,13 @@
     <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
     <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
     <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
-    <img alt="SQLite schema v56" src="https://img.shields.io/badge/database-SQLite%20v56-003B57" />
+    <img alt="SQLite schema v67" src="https://img.shields.io/badge/database-SQLite%20v67-003B57" />
     <img alt="积极开发中" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
   </p>
 </div>
 
 > [!IMPORTANT]
-> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v56；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
+> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v67；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手与本地知识库作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
 
 ## 为什么做 opc-workspace
 
@@ -43,23 +43,23 @@
 
 ## 核心能力
 
-| 模块         | 当前能力                                                                       |
-| ------------ | ------------------------------------------------------------------------------ |
-| 今日工作台   | 聚合逾期、当天、本周稍后和未排期任务，支持排期、排序与快捷执行                 |
-| 任务与验收   | 六状态任务生命周期、父子任务、责任分派、产出提交、人工验收与返工               |
-| 项目与客户   | 项目进度、产出、附件、客户资料、活动、回访计划与关联视图                       |
-| 收件箱与提醒 | 本地事项受理、稍后处理、任务拆分、完成进度与重复提醒                           |
-| 专注与工时   | 可恢复的专注会话、任务绑定、历史记录、趋势、项目与标签统计                     |
-| 搜索与命令   | 跨任务、项目、客户和活动收件箱的本地搜索与直达                                 |
-| 数据安全     | 版本化迁移、受控文件、完整备份/恢复、业务 JSON/ZIP 导入导出与诊断              |
-| 本地自动化   | 仅开放代码内置的受限预设；不提供任意 Shell、SQL、HTTP 或外发能力               |
-| AI 助手      | 远程/本地 Provider、流式会话、推理展示、受控 Harness、长期记忆与建任务确认卡片 |
+| 模块         | 当前能力                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 今日工作台   | 聚合逾期、当天、本周稍后和未排期任务，支持排期、排序与快捷执行                                                                               |
+| 任务与验收   | 六状态任务生命周期、父子任务、责任分派、产出提交、人工验收与返工                                                                             |
+| 项目与客户   | 项目进度、产出、附件、客户资料、活动、回访计划与关联视图                                                                                     |
+| 收件箱与提醒 | 本地事项受理、稍后处理、任务拆分、完成进度与重复提醒                                                                                         |
+| 专注与工时   | 可恢复的专注会话、任务绑定、历史记录、趋势、项目与标签统计                                                                                   |
+| 搜索与命令   | 跨任务、项目、客户和活动收件箱的本地搜索与直达                                                                                               |
+| 数据安全     | 版本化迁移、受控文件、完整备份/恢复、业务 JSON/ZIP 导入导出与诊断                                                                            |
+| 本地自动化   | 仅开放代码内置的受限预设；不提供任意 Shell、SQL、HTTP 或外发能力                                                                             |
+| AI 助手      | 远程/本地 Provider、流式会话、记忆工具、显式上下文、可验证引用、本地质量评测/趋势/category/失败原因、无正文运行步骤/用量聚合与建任务确认卡片 |
 
 ### 当前边界
 
 - v0.1 的核心人工闭环正在持续完善，页面与接口的完成度以[模块状态总览](./docs/modules/README.md)为准。
 - 收入、支出与发票目前仍是后续业务模块，不能视为已交付能力。
-- AI 助手独立轨道已交付远程 Provider、本地回环 OpenAI 兼容 Provider、多 Provider 会话切换、流式回复与推理展示、生产零工具 Harness、长期记忆确认流、自然语言语义建任务确认卡片，以及最新完整回合上下文窗口；知识库与会话摘要压缩仍未实现。
+- AI 助手独立轨道已交付远程/本地 Provider、多 Provider 切换、流式回复与推理、受控 Harness、长期记忆确认、任务建议、摘要/事实压缩、记忆三工具、显式业务/知识上下文、回答级来源、无正文运行步骤/用量聚合，以及只调用本地回环 Provider 的 dataset v3 8-case 快速/24-case 完整质量 Actor、suite 隔离趋势/category/failure-code、95% Wilson 区间与人工评审候选；快速套件只诊断，unknown usage 不估算，候选不作为发布许可，回答不写入评测历史，费用不计算。本地知识库已交付 TXT/Markdown、Actor、FTS5、来源定位、重建、删除与清单。
 - 本地 Agent 目前只有受限 Adapter 登记与诊断，没有 Runner、Agent Run 或可执行任务能力。
 - 当前没有云同步、多人账号、线上工作流或远程消息发送。
 
@@ -129,7 +129,7 @@ flowchart TB
     Desktop["Tauri 2 / Rust<br/>窗口 · 托盘 · 快捷键 · Sidecar 生命周期"]
     Web["React 18 / TypeScript / WebView<br/>页面 · 表单 · 查询缓存 · UI 状态"]
     API["Go Sidecar / API v1<br/>领域校验 · 事务 · 调度 · 备份"]
-    Data["本地事实层<br/>SQLite v56 · 受控文件 · 备份 · 日志"]
+    Data["本地事实层<br/>SQLite v67 · 受控文件 · FTS5 · 备份 · 日志"]
 
     Desktop --> Web
     Web -->|"Bearer HTTP · 127.0.0.1 动态端口"| API
@@ -156,7 +156,7 @@ docs/                     PRD、整体架构、ADR 与模块级功能文档
 ## 文档
 
 - [文档中心](./docs/README.md)：阅读顺序、事实优先级与模块状态总览。
-- [产品需求文档（PRD v9.86）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
+- [产品需求文档（PRD v10.8）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
 - [整体功能架构](./docs/functional-architecture.md)：模块关系、事件流和事实归属。
 - [模块文档](./docs/modules/README.md)：每个模块的流程、API、状态、依赖与验收标准。
 - [Sidecar 开发文档](./services/sidecar/README.md)：本地 API、数据与服务端验证说明。

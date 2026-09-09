@@ -24,8 +24,21 @@ func NewModelClient(inner *http.Client) *ModelClient {
 // ride inside the system prompt (ADR-006).
 func (m *ModelClient) Stream(ctx context.Context, request Request, onDelta func(string), onReasoning func(string)) (Turn, error) {
 	var turn Turn
-	err := modelclient.StreamChat(ctx, modelclient.Protocol(request.Protocol), request.BaseURL, request.APIKey, request.Model,
-		request.History, request.Memories,
+	promptContext := modelclient.PromptContext{
+		SystemPrompt: request.SystemPrompt, Memories: request.Memories,
+		Summary: request.Summary, Facts: request.Facts,
+		BusinessContext: request.BusinessContext, KnowledgeContext: request.KnowledgeContext,
+		Tools: request.Tools,
+	}
+	inputBytes, err := modelclient.PromptSize(
+		modelclient.Protocol(request.Protocol), request.Model, request.History, promptContext,
+	)
+	if err != nil {
+		return turn, err
+	}
+	turn.InputBytes = inputBytes
+	err = modelclient.StreamChat(ctx, modelclient.Protocol(request.Protocol), request.BaseURL, request.APIKey, request.Model,
+		request.History, promptContext,
 		func(delta string) {
 			turn.Text += delta
 			if onDelta != nil {
@@ -38,6 +51,18 @@ func (m *ModelClient) Stream(ctx context.Context, request Request, onDelta func(
 				onReasoning(reasoning)
 			}
 		},
+		func(calls []modelclient.ToolCall) {
+			turn.ToolCalls = append(turn.ToolCalls, calls...)
+		},
+		func(usage modelclient.Usage) {
+			turn.InputTokens = usage.InputTokens
+			turn.OutputTokens = usage.OutputTokens
+			turn.UsageAvailable = true
+		},
 		m.inner)
+	turn.OutputBytes = len(turn.Text) + len(turn.Reasoning)
+	for _, call := range turn.ToolCalls {
+		turn.OutputBytes += len(call.Arguments)
+	}
 	return turn, err
 }

@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -31,7 +33,13 @@ type aiMemoryResponse struct {
 type createAIMemoryRequest struct {
 	Content         string  `json:"content"`
 	SourceMessageID *string `json:"source_message_id"`
+	ProposalID      *string `json:"proposal_id"`
 }
+
+var (
+	errAIMemoryProposalNotFound = errors.New("AI memory proposal not found")
+	errAIMemoryProposalMismatch = errors.New("AI memory proposal does not match the confirmation")
+)
 
 // listAIMemories serves the user-confirmed long-term preferences (newest
 // first) for the settings management surface.
@@ -55,26 +63,36 @@ func (a *API) createAIMemory(c *gin.Context) {
 		return
 	}
 	content := strings.TrimSpace(input.Content)
-	if content == "" || len(content) > 500 {
+	if content == "" || utf8.RuneCountInString(content) > 500 {
 		writeError(c, http.StatusUnprocessableEntity, "AI_MEMORY_CONTENT_INVALID", "Memory content must be between 1 and 500 characters")
 		return
 	}
 	var sourceMessageID *string
+	var sourceSessionID string
 	if trimmed := strings.TrimSpace(valueOrEmpty(input.SourceMessageID)); trimmed != "" {
 		if _, err := uuid.Parse(trimmed); err != nil {
 			writeError(c, http.StatusUnprocessableEntity, "INVALID_AI_MESSAGE_ID", "AI message id must be a UUID")
 			return
 		}
-		var count int64
-		if err := a.db.WithContext(c.Request.Context()).Model(&models.AIMessage{}).Where("id = ?", trimmed).Count(&count).Error; err != nil {
+		var source models.AIMessage
+		if err := a.db.WithContext(c.Request.Context()).Select("id", "session_id").Where("id = ?", trimmed).First(&source).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			writeDatabaseError(c)
 			return
 		}
-		if count == 0 {
+		if source.ID == "" {
 			writeError(c, http.StatusNotFound, "AI_MESSAGE_NOT_FOUND", "AI message not found")
 			return
 		}
 		sourceMessageID = &trimmed
+		sourceSessionID = source.SessionID
+	}
+	var proposalID *string
+	if trimmed := strings.TrimSpace(valueOrEmpty(input.ProposalID)); trimmed != "" {
+		if _, err := uuid.Parse(trimmed); err != nil {
+			writeError(c, http.StatusUnprocessableEntity, "INVALID_AI_MEMORY_PROPOSAL_ID", "AI memory proposal id must be a UUID")
+			return
+		}
+		proposalID = &trimmed
 	}
 	idempotencyKey, requestHash, ok := taskOutputCommandIdempotency(c, input)
 	if !ok {
@@ -94,6 +112,25 @@ func (a *API) createAIMemory(c *gin.Context) {
 			return nil
 		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		var proposal models.AIMemoryEntry
+		if proposalID != nil {
+			proposalQuery := tx.Where(
+				"id = ? AND kind = 'memory_proposal' AND origin = 'model_proposal' AND status = 'active'",
+				*proposalID,
+			)
+			if sourceSessionID != "" {
+				proposalQuery = proposalQuery.Where("session_id = ?", sourceSessionID)
+			}
+			if err := proposalQuery.First(&proposal).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return errAIMemoryProposalNotFound
+				}
+				return err
+			}
+			if proposal.Content != content {
+				return errAIMemoryProposalMismatch
+			}
+		}
 		row := models.AIMemory{
 			ID: uuid.NewString(), Content: content, SourceMessageID: sourceMessageID,
 			CreatedAt: now, UpdatedAt: now,
@@ -105,9 +142,32 @@ func (a *API) createAIMemory(c *gin.Context) {
 		if err := recordAIMemoryEvent(tx, "ai_memory_created", row.ID, requestIDFromContext(c), now); err != nil {
 			return err
 		}
+		if proposalID != nil {
+			retiredAt := nextAIEntryTimestamp(now, proposal.UpdatedAt)
+			result := tx.Model(&models.AIMemoryEntry{}).
+				Where("id = ? AND status = 'active'", proposal.ID).
+				Updates(map[string]any{"status": "superseded", "updated_at": retiredAt})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errAIMemoryProposalNotFound
+			}
+			if err := recordAIMemoryProposalConfirmedEvent(tx, proposal, row.ID, requestIDFromContext(c), retiredAt); err != nil {
+				return err
+			}
+		}
 		return recordTaskOutputIdempotency(tx, idempotencyKey, createAIMemoryEndpoint, row.ID, requestHash, http.StatusCreated, response, now)
 	})
 	if err != nil {
+		switch {
+		case errors.Is(err, errAIMemoryProposalNotFound):
+			writeError(c, http.StatusNotFound, "AI_MEMORY_PROPOSAL_NOT_FOUND", "The memory proposal is no longer available")
+			return
+		case errors.Is(err, errAIMemoryProposalMismatch):
+			writeError(c, http.StatusConflict, "AI_MEMORY_PROPOSAL_MISMATCH", "The proposed memory content changed before confirmation")
+			return
+		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
@@ -118,6 +178,22 @@ func (a *API) createAIMemory(c *gin.Context) {
 		c.Header("Idempotency-Replayed", "true")
 	}
 	c.JSON(statusCode, gin.H{"data": response})
+}
+
+func recordAIMemoryProposalConfirmedEvent(tx *gorm.DB, proposal models.AIMemoryEntry, memoryID, requestID, createdAt string) error {
+	payload, err := json.Marshal(map[string]any{"proposal_id": proposal.ID, "memory_id": memoryID})
+	if err != nil {
+		return err
+	}
+	var requestIDValue any
+	if requestID != "" {
+		requestIDValue = requestID
+	}
+	return tx.Table("workflow_events").Create(map[string]any{
+		"id": uuid.NewString(), "aggregate_type": "ai_session", "aggregate_id": proposal.SessionID,
+		"action": "ai_memory_proposal_confirmed", "actor_id": models.BuiltinOwnerActorID,
+		"request_id": requestIDValue, "previous_json": nil, "current_json": string(payload), "created_at": createdAt,
+	}).Error
 }
 
 func (a *API) deleteAIMemory(c *gin.Context) {
@@ -138,7 +214,8 @@ func (a *API) deleteAIMemory(c *gin.Context) {
 		return recordAIMemoryEvent(tx, "ai_memory_deleted", id, requestIDFromContext(c), now)
 	})
 	if err != nil {
-		if writeAIProviderRequestError(c, err) {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "AI_MEMORY_NOT_FOUND", "AI memory not found")
 			return
 		}
 		writeDatabaseError(c)

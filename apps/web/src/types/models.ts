@@ -2459,6 +2459,95 @@ export interface StorageCapacityHistoryResult {
   points: StorageCapacityHistoryPoint[];
 }
 
+export type KnowledgeSourceType = "text" | "markdown";
+export type KnowledgeSourceStatus =
+  "pending" | "indexing" | "ready" | "stale" | "missing" | "failed" | "deleted";
+
+export interface KnowledgeSource {
+  id: string;
+  name: string;
+  title: string;
+  sourceType: KnowledgeSourceType;
+  importMode: "managed_copy";
+  mimeType: string;
+  sizeBytes: number;
+  contentSha256: string;
+  status: KnowledgeSourceStatus;
+  lastIndexedAt: string | null;
+  deletedAt: string | null;
+  deleteReason: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  documentId: string | null;
+  documentVersion: number | null;
+  chunkCount: number;
+  latestJob: KnowledgeIndexJob | null;
+}
+
+export interface KnowledgeSourceListResult {
+  items: KnowledgeSource[];
+  meta: PageMeta;
+}
+
+export interface KnowledgeSourcesCSVDownload {
+  blob: Blob;
+  fileName: string;
+}
+
+export type KnowledgeIndexJobStatus =
+  "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export interface KnowledgeIndexJob {
+  id: string;
+  sourceId: string;
+  operation: "import" | "reindex";
+  status: KnowledgeIndexJobStatus;
+  stage: "queued" | "extracting" | "chunking" | "indexing" | "complete";
+  progress: number;
+  attempt: number;
+  retryOfJobId: string | null;
+  errorCode: string | null;
+  cancelRequested: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface KnowledgeImportResult {
+  source: KnowledgeSource;
+  job: KnowledgeIndexJob;
+}
+
+export interface KnowledgeHighlight {
+  start: number;
+  end: number;
+}
+
+export interface KnowledgeSearchResult {
+  chunkId: string;
+  documentId: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: KnowledgeSourceType;
+  documentTitle: string;
+  documentVersion: number;
+  chunkIndex: number;
+  startChar: number;
+  endChar: number;
+  startLine: number;
+  endLine: number;
+  excerpt: string;
+  highlights: KnowledgeHighlight[];
+  rank: number;
+}
+
+export interface KnowledgeSearchResponse {
+  items: KnowledgeSearchResult[];
+  query: string;
+  sourceIds: string[];
+}
+
 export type AiProviderProtocol = "openai_chat" | "anthropic_messages";
 
 export type AiProviderKind = "remote" | "local";
@@ -2507,10 +2596,402 @@ export interface AiMemory {
   updated_at: string;
 }
 
+export interface AiMemoryProposal {
+  id: string;
+  session_id: string;
+  session_title: string;
+  content: string;
+  tags: string[];
+  created_at: string;
+}
+
+export type AiBusinessContextType = "task" | "project" | "client";
+
+export interface AiBusinessContextSource {
+  type: AiBusinessContextType;
+  id: string;
+  version: number;
+  label: string;
+  fields: Record<string, unknown>;
+  truncated_fields: string[];
+}
+
+export interface AiBusinessContextProviderSnapshot {
+  id: string;
+  name: string;
+  kind: AiProviderKind;
+  version: number;
+}
+
+export interface AiKnowledgeContextSource {
+  source_id: string;
+  source_name: string;
+  source_version: number;
+  source_type: KnowledgeSourceType;
+  document_id: string;
+  document_title: string;
+  document_version: number;
+  chunk_id: string;
+  chunk_index: number;
+  start_char: number;
+  end_char: number;
+  start_line: number;
+  end_line: number;
+  content: string;
+}
+
+export type AiCitationStatus =
+  "not_requested" | "validated" | "no_evidence" | "missing" | "invalid";
+
+export interface AiCitation {
+  chunk_id: string;
+  source_id: string;
+  source_name: string;
+  source_type: KnowledgeSourceType;
+  source_version: number;
+  document_id: string;
+  document_title: string;
+  document_version: number;
+  chunk_index: number;
+  start_char: number;
+  end_char: number;
+  start_line: number;
+  end_line: number;
+}
+
+export type AiRunStepKind =
+  | "generation"
+  | "model_turn"
+  | "tool_call"
+  | "self_check"
+  | "citation_validation"
+  | "persistence";
+
+export type AiRunStepStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+export interface AiRunStep {
+  id: string;
+  generationId: string;
+  sequence: number;
+  kind: AiRunStepKind;
+  status: AiRunStepStatus;
+  turnIndex: number | null;
+  toolName: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  inputBytes: number;
+  outputBytes: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  tokenSource: "provider" | null;
+  errorCode: string | null;
+}
+
+export interface AiRunStepListResult {
+  items: AiRunStep[];
+  meta: {
+    generationId: string;
+    status: "queued" | "streaming" | "completed" | "failed" | "cancelled";
+    total: number;
+    inputBytes: number;
+    outputBytes: number;
+    durationMs: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    tokenSource: "provider" | null;
+  };
+}
+
+export interface AiUsageTotals {
+  totalGenerations: number;
+  completedGenerations: number;
+  failedGenerations: number;
+  cancelledGenerations: number;
+  activeGenerations: number;
+  providerUsageGenerations: number;
+  unknownUsageGenerations: number;
+  inputTokens: number;
+  outputTokens: number;
+  inputBytes: number;
+  outputBytes: number;
+  durationMs: number;
+}
+
+export interface AiProviderUsageSummary extends AiUsageTotals {
+  providerId: string;
+  providerName: string;
+  providerKind: AiProviderKind;
+  providerProtocol: AiProviderProtocol;
+  model: string;
+}
+
+export interface AiUsageTrendPoint extends AiUsageTotals {
+  day: string;
+}
+
+export interface AiUsageSummary {
+  scope: {
+    sessionId: string | null;
+    providerId: string | null;
+  };
+  totals: AiUsageTotals;
+  providers: AiProviderUsageSummary[];
+  trendDays: number;
+  trend: AiUsageTrendPoint[];
+}
+
+export type AiEvaluationStatus =
+  "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+export type AiEvaluationResultStatus = "passed" | "failed" | "error";
+export type AiEvaluationSuiteKey =
+  | "smoke"
+  | "full"
+  | "grounded"
+  | "no_evidence"
+  | "prompt_injection"
+  | "conflicting_sources";
+
+export interface AiEvaluationResult {
+  id: string;
+  runId: string;
+  sequence: number;
+  caseId: string;
+  language: "zh-CN" | "en";
+  category:
+    "grounded" | "no_evidence" | "prompt_injection" | "conflicting_sources";
+  status: AiEvaluationResultStatus;
+  failureCodes: string[];
+  citationStatus: Exclude<AiCitationStatus, "not_requested"> | null;
+  citationCount: number;
+  durationMs: number;
+  inputBytes: number;
+  outputBytes: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  tokenSource: "provider" | null;
+  errorCode: string | null;
+  createdAt: string;
+}
+
+export interface AiEvaluationRun {
+  id: string;
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  providerProtocolSnapshot: "openai_chat";
+  providerVersion: number;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  status: AiEvaluationStatus;
+  totalCases: number;
+  completedCases: number;
+  passedCases: number;
+  failedCases: number;
+  errorCases: number;
+  currentCaseId: string | null;
+  cancelRequested: boolean;
+  errorCode: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  results: AiEvaluationResult[];
+}
+
+export interface AiEvaluationListResult {
+  items: AiEvaluationRun[];
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface AiEvaluationStatusCounts {
+  total: number;
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+}
+
+export interface AiEvaluationQualityGroup {
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  providerVersionMin: number;
+  providerVersionMax: number;
+  runCount: number;
+  fullyPassedRuns: number;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  passRateBps: number;
+  wilsonLowerBps: number;
+  wilsonUpperBps: number;
+  evidenceLevel: "single_run" | "limited_runs" | "repeated_runs";
+  readinessStatus:
+    "insufficient_evidence" | "needs_attention" | "review_candidate";
+  readinessReasons: Array<
+    | "OUTDATED_DATASET"
+    | "SUITE_NOT_ELIGIBLE"
+    | "RUN_COUNT_LOW"
+    | "PROVIDER_VERSION_MIXED"
+    | "OVERALL_LOWER_BOUND_LOW"
+    | "CATEGORY_LOWER_BOUND_LOW"
+    | "CRITICAL_FAILURE_PRESENT"
+  >;
+  lastCompletedAt: string;
+}
+
+export interface AiEvaluationTrendPoint {
+  runId: string;
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  completedAt: string;
+}
+
+export interface AiEvaluationCategoryGroup {
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  category: AiEvaluationResult["category"];
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  passRateBps: number;
+  wilsonLowerBps: number;
+  wilsonUpperBps: number;
+  lastCompletedAt: string;
+}
+
+export interface AiEvaluationFailureGroup {
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  failureCode: string;
+  affectedCases: number;
+  occurrences: number;
+  lastCompletedAt: string;
+}
+
+export interface AiEvaluationSummary {
+  scope: { providerId: string | null };
+  uncertainty: {
+    method: "wilson_score";
+    confidenceLevelBps: 9500;
+    repeatedRunMinimum: 3;
+  };
+  readinessPolicy: {
+    mode: "advisory";
+    currentDatasetVersion: number;
+    requiredSuite: "full";
+    minimumCompletedRuns: 3;
+    minimumOverallLowerBps: 8000;
+    minimumCategoryLowerBps: 6000;
+    requiredCategories: AiEvaluationResult["category"][];
+    criticalFailureCodes: string[];
+  };
+  statusCounts: AiEvaluationStatusCounts;
+  groups: AiEvaluationQualityGroup[];
+  categories: AiEvaluationCategoryGroup[];
+  failureCodes: AiEvaluationFailureGroup[];
+  trend: AiEvaluationTrendPoint[];
+  trendLimit: number;
+}
+
+export type AiEvaluationReviewDecision =
+  "accepted_for_local_use" | "needs_more_evidence" | "rejected";
+
+export interface AiEvaluationReview {
+  id: string;
+  providerIdSnapshot: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+  providerVersionMin: number;
+  providerVersionMax: number;
+  groupLastCompletedAt: string;
+  runCount: number;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  overallWilsonLowerBps: number;
+  minimumCategory: AiEvaluationResult["category"];
+  minimumCategoryWilsonLowerBps: number;
+  readinessStatus: AiEvaluationQualityGroup["readinessStatus"];
+  readinessReasons: AiEvaluationQualityGroup["readinessReasons"];
+  criticalFailureCodes: string[];
+  decision: AiEvaluationReviewDecision;
+  reason: string;
+  reviewedByActorId: string;
+  reviewedByActorNameSnapshot: string;
+  createdAt: string;
+}
+
+export interface CreateAiEvaluationReviewInput {
+  group: AiEvaluationQualityGroup;
+  decision: AiEvaluationReviewDecision;
+  reason: string;
+}
+
+export interface AiEvaluationReviewListResult {
+  items: AiEvaluationReview[];
+  meta: {
+    page: number;
+    pageSize: number;
+    total: number;
+  };
+}
+
+export interface AiBusinessContextPreview {
+  provider_id: string;
+  provider_name: string;
+  provider_kind: AiProviderKind;
+  provider_version: number;
+  leaves_device: boolean;
+  serialized_bytes: number;
+  sources: AiBusinessContextSource[];
+  knowledge: AiKnowledgeContextSource[];
+}
+
+export interface AiBusinessContextSelection {
+  provider_version: number;
+  sources: Array<{
+    type: AiBusinessContextType;
+    id: string;
+    expected_version: number;
+  }>;
+  knowledge?: Array<{
+    source_id: string;
+    document_id: string;
+    chunk_id: string;
+    expected_source_version: number;
+    expected_document_version: number;
+  }>;
+}
+
 export interface AiSession {
   id: string;
   title: string;
   persist: boolean;
+  compacted_message_count: number;
   version: number;
   created_at: string;
   updated_at: string;
@@ -2530,6 +3011,12 @@ export interface AiMessage {
   reasoning: string | null;
   task_id: string | null;
   task_title_snapshot: string | null;
+  generation_id: string | null;
+  context_provider: AiBusinessContextProviderSnapshot | null;
+  context_sources: AiBusinessContextSource[];
+  context_knowledge: AiKnowledgeContextSource[];
+  citation_status: AiCitationStatus;
+  citations: AiCitation[];
   created_at: string;
 }
 

@@ -10,18 +10,29 @@ import { useCallback, useRef, useState } from "react";
 import { streamAiChat } from "./ai";
 import {
   attachTaskToAiMessage,
+  cancelAiEvaluation,
   checkAiProviderHealth,
+  createAiEvaluation,
+  createAiEvaluationReview,
   createAiProvider,
   createAiSession,
+  deleteAiEvaluation,
   deleteAiProvider,
   deleteAiSession,
   getAiMessages,
+  getAiEvaluation,
+  getAiEvaluationReviews,
+  getAiEvaluationSummary,
+  getAiEvaluations,
   getAiProvider,
   createAiMemory,
   deleteAiMemory,
   getAiMemories,
+  getAiMemoryProposals,
   getAiProviders,
   getAiSessions,
+  rejectAiMemoryProposal,
+  previewAiBusinessContext,
   setAiProviderKey,
   updateAiProvider,
   ApiError,
@@ -204,10 +215,14 @@ import {
 } from "./client";
 import type {
   ActorListParams,
+  AiBusinessContextType,
+  AiBusinessContextSelection,
+  AiEvaluationSuiteKey,
   AppSettingUpdate,
   AutomationConfig,
   AutomationRunListParams,
   CreateBackupInput,
+  CreateAiEvaluationReviewInput,
   BatchUpdateTasksInput,
   CreateTaskSavedViewInput,
   ClientInput,
@@ -5097,9 +5112,25 @@ export function resetApiAndRefetch(refetch: () => Promise<unknown>): void {
 
 export const aiProvidersQueryKey = ["ai", "providers"] as const;
 export const aiMemoriesQueryKey = ["ai", "memories"] as const;
+export const aiMemoryProposalsQueryKey = ["ai", "memory-proposals"] as const;
 export const aiSessionsQueryKey = ["ai", "sessions"] as const;
 export const aiMessagesQueryKey = (sessionId: string) =>
   ["ai", "messages", sessionId] as const;
+export const aiUsageSummaryQueryKey = (sessionId: string, trendDays = 7) =>
+  ["ai", "usage-summary", sessionId, trendDays] as const;
+export const aiUsageSummarySessionQueryKey = (sessionId: string) =>
+  ["ai", "usage-summary", sessionId] as const;
+export const aiEvaluationsQueryKey = ["ai", "evaluations"] as const;
+export const aiEvaluationQueryKey = (id: string) =>
+  ["ai", "evaluations", id] as const;
+export const aiEvaluationSummaryQueryKey = [
+  "ai",
+  "evaluation-summary",
+] as const;
+export const aiEvaluationReviewsQueryKey = [
+  "ai",
+  "evaluation-reviews",
+] as const;
 
 export function useAiMemoriesQuery(enabled = true) {
   return useQuery({
@@ -5112,21 +5143,68 @@ export function useAiMemoriesQuery(enabled = true) {
   });
 }
 
+export function useAiMemoryProposalsQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiMemoryProposalsQueryKey,
+    queryFn: getAiMemoryProposals,
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
 export function useCreateAiMemory() {
   const queryClient = useQueryClient();
   const idempotencyKey = useRef<string | null>(null);
   return useMutation({
-    mutationFn: (input: { content: string; source_message_id?: string }) => {
+    mutationFn: (input: {
+      content: string;
+      source_message_id?: string;
+      proposal_id?: string;
+    }) => {
       idempotencyKey.current ??= crypto.randomUUID();
       return createAiMemory(input, idempotencyKey.current);
     },
     onSuccess: async () => {
       idempotencyKey.current = null;
-      await queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiMemoryProposalsQueryKey }),
+      ]);
     },
     onError: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiMemoriesQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiMemoryProposalsQueryKey }),
+      ]);
     },
+  });
+}
+
+export function useRejectAiMemoryProposal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => rejectAiMemoryProposal(id),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: aiMemoryProposalsQueryKey,
+      });
+    },
+  });
+}
+
+export function usePreviewAiBusinessContext() {
+  return useMutation({
+    mutationFn: (input: {
+      provider_id: string;
+      sources: Array<{ type: AiBusinessContextType; id: string }>;
+      knowledge?: Array<{
+        source_id: string;
+        document_id: string;
+        chunk_id: string;
+      }>;
+    }) => previewAiBusinessContext(input),
   });
 }
 
@@ -5148,6 +5226,198 @@ export function useAiProvidersQuery(enabled = true) {
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+  });
+}
+
+export function useAiEvaluationsQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiEvaluationsQueryKey,
+    queryFn: () => getAiEvaluations({ page: 1, pageSize: 20 }),
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (run) => run.status === "queued" || run.status === "running",
+      )
+        ? 500
+        : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAiEvaluationSummaryQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiEvaluationSummaryQueryKey,
+    queryFn: () => getAiEvaluationSummary({ limit: 12 }),
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    refetchInterval: (query) =>
+      (query.state.data?.statusCounts.queued ?? 0) +
+        (query.state.data?.statusCounts.running ?? 0) >
+      0
+        ? 500
+        : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAiEvaluationReviewsQuery(enabled = true) {
+  return useQuery({
+    queryKey: aiEvaluationReviewsQueryKey,
+    queryFn: () => getAiEvaluationReviews({ page: 1, pageSize: 20 }),
+    enabled,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export function useAiEvaluationQuery(id: string, enabled = true) {
+  return useQuery({
+    queryKey: aiEvaluationQueryKey(id),
+    queryFn: () => getAiEvaluation(id),
+    enabled: enabled && id !== "",
+    retry: 2,
+    retryDelay: 500,
+    refetchInterval: (query) =>
+      query.state.data?.status === "queued" ||
+      query.state.data?.status === "running"
+        ? 500
+        : false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useCreateAiEvaluation() {
+  const queryClient = useQueryClient();
+  const idempotency = useRef<{ identity: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: ({
+      providerId,
+      providerVersion,
+      suiteKey,
+    }: {
+      providerId: string;
+      providerVersion: number;
+      suiteKey: AiEvaluationSuiteKey;
+    }) => {
+      const identity = `${providerId}\u0000${providerVersion}\u0000${suiteKey}`;
+      if (idempotency.current?.identity !== identity) {
+        idempotency.current = { identity, key: crypto.randomUUID() };
+      }
+      return createAiEvaluation(
+        providerId,
+        providerVersion,
+        suiteKey,
+        idempotency.current.key,
+      );
+    },
+    onSuccess: async (run) => {
+      idempotency.current = null;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiEvaluationsQueryKey }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationSummaryQueryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationQueryKey(run.id),
+        }),
+      ]);
+    },
+    onError: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiEvaluationsQueryKey }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationSummaryQueryKey,
+        }),
+      ]);
+    },
+  });
+}
+
+export function useCreateAiEvaluationReview() {
+  const queryClient = useQueryClient();
+  const idempotency = useRef<{ identity: string; key: string } | null>(null);
+  return useMutation({
+    mutationFn: (input: CreateAiEvaluationReviewInput) => {
+      const group = input.group;
+      const identity = JSON.stringify([
+        group.providerId,
+        group.providerNameSnapshot,
+        group.providerModelSnapshot,
+        group.datasetVersion,
+        group.suiteKey,
+        group.providerVersionMin,
+        group.providerVersionMax,
+        group.lastCompletedAt,
+        group.runCount,
+        group.totalCases,
+        group.passedCases,
+        group.failedCases,
+        group.readinessStatus,
+        group.readinessReasons,
+        input.decision,
+        input.reason,
+      ]);
+      if (idempotency.current?.identity !== identity) {
+        idempotency.current = { identity, key: crypto.randomUUID() };
+      }
+      return createAiEvaluationReview(input, idempotency.current.key);
+    },
+    onSuccess: async () => {
+      idempotency.current = null;
+      await queryClient.invalidateQueries({
+        queryKey: aiEvaluationReviewsQueryKey,
+      });
+    },
+    onError: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationReviewsQueryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationSummaryQueryKey,
+        }),
+      ]);
+    },
+  });
+}
+
+export function useCancelAiEvaluation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => cancelAiEvaluation(id),
+    onSettled: async (_result, _error, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiEvaluationsQueryKey }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationSummaryQueryKey,
+        }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationQueryKey(variables.id),
+        }),
+      ]);
+    },
+  });
+}
+
+export function useDeleteAiEvaluation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => deleteAiEvaluation(id),
+    onSuccess: async (_result, variables) => {
+      queryClient.removeQueries({
+        queryKey: aiEvaluationQueryKey(variables.id),
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiEvaluationsQueryKey }),
+        queryClient.invalidateQueries({
+          queryKey: aiEvaluationSummaryQueryKey,
+        }),
+      ]);
+    },
   });
 }
 
@@ -5256,6 +5526,8 @@ export function useAiSessionsQuery(enabled = true) {
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -5340,6 +5612,7 @@ export interface AiChatStreamOutcome {
   sessionId: string;
   cancelled: boolean;
   error: string | null;
+  errorCode: string | null;
 }
 
 const AI_STREAM_ERROR_HINTS: Record<string, string> = {
@@ -5353,6 +5626,10 @@ const AI_STREAM_ERROR_HINTS: Record<string, string> = {
   AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
   AI_PROMPT_TOO_LARGE: "当前消息和上下文超过提示词上限，请缩短内容后重试",
   AI_KEY_NOT_ALLOWED: "本地部署供应商不需要 API 密钥，请检查供应商类型配置",
+  AI_CONTEXT_CHANGED: "所选工作区上下文已变化，请重新预览后再发送",
+  AI_CONTEXT_PROVIDER_CHANGED: "AI 供应商配置已变化，请重新预览上下文",
+  AI_CONTEXT_SOURCE_NOT_FOUND: "所选工作区上下文已不存在，请重新选择",
+  AI_CONTEXT_TOO_LARGE: "所选工作区上下文超过 16 KiB，请减少选择",
 };
 
 function aiStreamErrorText(code: string, detail?: string): string {
@@ -5379,6 +5656,7 @@ export function useAiChatStream() {
       providerId: string;
       sessionId?: string;
       message: string;
+      context?: AiBusinessContextSelection;
     }): Promise<AiChatStreamOutcome> => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -5392,11 +5670,13 @@ export function useAiChatStream() {
       });
       let sessionId = input.sessionId ?? "";
       let failure: string | null = null;
+      let failureCode: string | null = null;
       try {
         await streamAiChat({
           providerId: input.providerId,
           sessionId: input.sessionId,
           message: input.message,
+          context: input.context,
           signal: controller.signal,
           onEvent: (event) => {
             switch (event.type) {
@@ -5426,6 +5706,7 @@ export function useAiChatStream() {
                 });
                 break;
               case "error":
+                failureCode = event.error;
                 failure = aiStreamErrorText(event.error, event.detail);
                 controller.abort();
                 break;
@@ -5436,6 +5717,8 @@ export function useAiChatStream() {
         });
       } catch (error) {
         if (!controller.signal.aborted) {
+          failureCode =
+            error instanceof ApiError ? error.code : "AI_STREAM_ERROR";
           failure = error instanceof ApiError ? error.message : "AI 回答流中断";
         }
       } finally {
@@ -5448,14 +5731,18 @@ export function useAiChatStream() {
               queryKey: aiMessagesQueryKey(sessionId),
             }),
             queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey }),
+            queryClient.invalidateQueries({
+              queryKey: aiUsageSummarySessionQueryKey(sessionId),
+            }),
           ]);
         }
       }
       if (failure) setStreamError(failure);
       return {
         sessionId,
-        cancelled: controller.signal.aborted,
+        cancelled: controller.signal.aborted && failure === null,
         error: failure,
+        errorCode: failureCode,
       };
     },
     [queryClient],

@@ -26,6 +26,11 @@ type chatAIRequest struct {
 	ProviderID string `json:"provider_id"`
 	SessionID  string `json:"session_id"`
 	Message    string `json:"message"`
+	Context    *struct {
+		ProviderVersion int64                           `json:"provider_version"`
+		Sources         []aiBusinessContextSourceInput  `json:"sources"`
+		Knowledge       []aiKnowledgeContextSourceInput `json:"knowledge"`
+	} `json:"context"`
 }
 
 // aiGenerationRegistry tracks active generations for this Sidecar process so
@@ -92,11 +97,29 @@ func (r *aiGenerationRegistry) cancelSession(sessionID string) {
 // recoverAIGenerationsOnStartup cancels queued/streaming generations left by
 // a previous Sidecar process; they were never observed to completion.
 func recoverAIGenerationsOnStartup(db *gorm.DB, now time.Time) error {
-	return db.Model(&models.AIGeneration{}).
-		Where("status IN ('queued','streaming')").
-		Updates(map[string]any{
-			"status": "cancelled", "error_code": "AI_GENERATION_INTERRUPTED", "updated_at": now.UTC().Format(time.RFC3339Nano),
-		}).Error
+	completedAt := now.UTC().Format(time.RFC3339Nano)
+	return db.Transaction(func(tx *gorm.DB) error {
+		var generationIDs []string
+		if err := tx.Model(&models.AIGeneration{}).
+			Where("status IN ('queued','streaming')").Pluck("id", &generationIDs).Error; err != nil {
+			return err
+		}
+		if len(generationIDs) == 0 {
+			return nil
+		}
+		if err := tx.Model(&models.AIGeneration{}).
+			Where("id IN ?", generationIDs).
+			Updates(map[string]any{
+				"status": "cancelled", "error_code": "AI_GENERATION_INTERRUPTED", "updated_at": completedAt,
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.AIRunStep{}).
+			Where("generation_id IN ? AND kind = 'generation' AND status = 'running'", generationIDs).
+			Updates(map[string]any{
+				"status": "cancelled", "completed_at": completedAt, "duration_ms": 0,
+			}).Error
+	})
 }
 
 func (a *API) chatAI(c *gin.Context) {
@@ -110,9 +133,37 @@ func (a *API) chatAI(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "AI_MESSAGE_INVALID", "The chat message must be between 1 and 65536 characters")
 		return
 	}
+	a.aiProviderMu.RLock()
+	defer a.aiProviderMu.RUnlock()
 	provider, ok := a.loadChatProvider(c, input.ProviderID)
 	if !ok {
 		return
+	}
+	var businessContext aiBusinessContextEnvelope
+	var businessContextJSON *string
+	if input.Context != nil {
+		if input.Context.ProviderVersion < 1 || input.Context.ProviderVersion != provider.Version {
+			writeError(c, http.StatusConflict, "AI_CONTEXT_PROVIDER_CHANGED", "The selected AI provider changed; preview workspace context again")
+			return
+		}
+		var contextErr error
+		businessContext, _, contextErr = buildAIMessageContext(
+			c.Request.Context(), a.db, input.Context.Sources, input.Context.Knowledge, true,
+		)
+		if contextErr != nil {
+			if !writeAIBusinessContextError(c, contextErr) {
+				writeDatabaseError(c)
+			}
+			return
+		}
+		businessContext.Provider = &aiBusinessContextProviderSnapshot{
+			ID: provider.ID, Name: provider.Name, Kind: provider.Kind, Version: provider.Version,
+		}
+		businessContextJSON, contextErr = encodeAIBusinessContextSnapshot(businessContext)
+		if contextErr != nil {
+			writeDatabaseError(c)
+			return
+		}
 	}
 	// Local providers run keyless on the loopback interface (ADR-005); remote
 	// providers read their key from the OS credential store, use it for this
@@ -135,7 +186,20 @@ func (a *API) chatAI(c *gin.Context) {
 		return
 	}
 	memories := a.confirmedAIMemories()
-	history, historyErr := a.chatHistory(session.ID, message, provider.Protocol, provider.Model, memories)
+	_, snapshot, snapshotErr := a.activeAIContextSnapshot(session.ID)
+	if snapshotErr != nil {
+		writeDatabaseError(c)
+		return
+	}
+	promptContext := promptContextFromSnapshot(memories, snapshot)
+	promptContext = promptContextWithBusinessContext(promptContext, businessContext)
+	memoryTools, err := a.aiMemoryToolRegistry(session.ID)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "AI_TOOL_CONFIGURATION_INVALID", "The AI memory tools could not be configured")
+		return
+	}
+	promptContext.Tools = memoryTools.Definitions()
+	history, historyErr := a.chatHistory(session.ID, message, provider.Protocol, provider.Model, promptContext)
 	if errors.Is(historyErr, modelclient.ErrPromptTooLarge) {
 		writeError(c, http.StatusUnprocessableEntity, "AI_PROMPT_TOO_LARGE", "The current message and system context exceed the prompt budget")
 		return
@@ -159,10 +223,29 @@ func (a *API) chatAI(c *gin.Context) {
 		ID: generationID, SessionID: session.ID, ProviderID: provider.ID,
 		Status: "streaming", CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
 	}
+	runSteps := &aiRunStepCollector{}
 	// Session creation, the durable user turn and generation start form one
 	// transaction. The assistant reply is committed separately after the
 	// upstream stream reaches a terminal outcome.
 	if err := a.db.Transaction(func(tx *gorm.DB) error {
+		if input.Context != nil {
+			verified, _, err := buildAIMessageContext(
+				c.Request.Context(), tx, input.Context.Sources, input.Context.Knowledge, true,
+			)
+			if err != nil {
+				return err
+			}
+			verified.Provider = &aiBusinessContextProviderSnapshot{
+				ID: provider.ID, Name: provider.Name, Kind: provider.Kind, Version: provider.Version,
+			}
+			verifiedJSON, err := encodeAIBusinessContextSnapshot(verified)
+			if err != nil {
+				return err
+			}
+			if verifiedJSON == nil || businessContextJSON == nil || *verifiedJSON != *businessContextJSON {
+				return &aiBusinessContextRequestError{status: http.StatusConflict, code: "AI_CONTEXT_CHANGED", message: "Selected workspace context changed; preview it again before sending"}
+			}
+		}
 		if newSession {
 			if err := tx.Create(session).Error; err != nil {
 				return err
@@ -171,7 +254,8 @@ func (a *API) chatAI(c *gin.Context) {
 		if session.Persist {
 			if err := tx.Create(&models.AIMessage{
 				ID: uuid.NewString(), SessionID: session.ID, Role: "user", Status: "completed",
-				Content: message, CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
+				Content: message, ContextSnapshot: businessContextJSON,
+				CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
 			}).Error; err != nil {
 				return err
 			}
@@ -185,8 +269,14 @@ func (a *API) chatAI(c *gin.Context) {
 				return err
 			}
 		}
-		return tx.Create(&generation).Error
+		if err := tx.Create(&generation).Error; err != nil {
+			return err
+		}
+		return createAIRunRootStep(tx, generation)
 	}); err != nil {
+		if writeAIBusinessContextError(c, err) {
+			return
+		}
 		writeDatabaseError(c)
 		return
 	}
@@ -209,12 +299,13 @@ func (a *API) chatAI(c *gin.Context) {
 	}
 	metaJSON, _ := json.Marshal(meta)
 	if !writeSSE("meta", string(metaJSON)) {
-		a.finalizeCancelledGeneration(generation, session, "", "")
+		a.finalizeCancelledGeneration(generation, session, "", "", runSteps.snapshot())
 		return
 	}
 
-	// The run loop carries no registered tools (ADR-005): it degenerates to
-	// the single streaming LLM call this endpoint has always performed.
+	// ADR-007 limits the production registry to the three session-scoped memory
+	// tools above. ADR-010 may inject only user-previewed knowledge snapshots;
+	// it does not register a business, file, shell, network, or knowledge tool.
 	harnessClient := a.harnessClient
 	if harnessClient == nil {
 		harnessClient = harness.NewModelClient(nil)
@@ -222,10 +313,14 @@ func (a *API) chatAI(c *gin.Context) {
 	runResult, streamErr := harness.Run(generationCtx, harnessClient,
 		harness.Request{
 			Protocol: provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
-			History: history, Memories: memories,
+			History: history, Memories: promptContext.Memories,
+			Summary: promptContext.Summary, Facts: promptContext.Facts,
+			BusinessContext:  promptContext.BusinessContext,
+			KnowledgeContext: promptContext.KnowledgeContext,
 		},
-		nil, nil,
+		memoryTools, nil,
 		harness.Callbacks{
+			OnStep: runSteps.add,
 			OnDelta: func(delta string) {
 				deltaJSON, _ := json.Marshal(struct {
 					GenerationID string `json:"generation_id"`
@@ -244,8 +339,8 @@ func (a *API) chatAI(c *gin.Context) {
 
 	switch {
 	case streamCtx.Err() != nil || generationCtx.Err() != nil:
-		partial := runResult.Text
-		a.finalizeCancelledGeneration(generation, session, partial, runResult.Reasoning)
+		partial := stripAIControlBlocks(runResult.Text)
+		a.finalizeCancelledGeneration(generation, session, partial, runResult.Reasoning, runSteps.snapshot())
 		cancelledJSON, _ := json.Marshal(struct {
 			GenerationID string `json:"generation_id"`
 			PartialText  string `json:"partial_text"`
@@ -253,7 +348,7 @@ func (a *API) chatAI(c *gin.Context) {
 		_ = writeSSE("cancelled", string(cancelledJSON))
 	case streamErr != nil:
 		code := aiStreamErrorCode(streamErr)
-		a.finalizeFailedGeneration(generation, code)
+		a.finalizeFailedGeneration(generation, code, runSteps.snapshot())
 		detail := streamErr.Error()
 		if len(detail) > 200 {
 			detail = detail[:200]
@@ -265,9 +360,36 @@ func (a *API) chatAI(c *gin.Context) {
 		}{generationID, code, detail})
 		_ = writeSSE("error", string(errorJSON))
 	default:
+		citationStartedAt := time.Now().UTC()
+		cleanedText, citationsJSON, _, citationErr := validateAIResponseCitations(runResult.Text, businessContext.Knowledge)
+		citationCompletedAt := time.Now().UTC()
+		citationStatus, citationErrorCode := "succeeded", ""
+		if citationErr != nil {
+			citationStatus, citationErrorCode = "failed", "AI_CITATION_PERSIST_FAILED"
+		}
+		citationOutputBytes := 0
+		if citationsJSON != nil {
+			citationOutputBytes = len(*citationsJSON)
+		}
+		runSteps.add(harness.RunStep{
+			Kind: "citation_validation", Status: citationStatus,
+			StartedAt: citationStartedAt, CompletedAt: citationCompletedAt,
+			DurationMS:  citationCompletedAt.Sub(citationStartedAt).Milliseconds(),
+			OutputBytes: citationOutputBytes, ErrorCode: citationErrorCode,
+		})
+		if citationErr != nil {
+			a.finalizeFailedGeneration(generation, "AI_CITATION_PERSIST_FAILED", runSteps.snapshot())
+			errorJSON, _ := json.Marshal(struct {
+				GenerationID string `json:"generation_id"`
+				Error        string `json:"error"`
+			}{generationID, "AI_CITATION_PERSIST_FAILED"})
+			_ = writeSSE("error", string(errorJSON))
+			return
+		}
 		completedAt := nowStamp(a)
-		if err := a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, completedAt); err != nil {
-			a.finalizeFailedGeneration(generation, "AI_MESSAGE_PERSIST_FAILED")
+		runResult.Text = cleanedText
+		if err := a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, citationsJSON, runSteps.snapshot(), completedAt); err != nil {
+			a.finalizeFailedGeneration(generation, "AI_MESSAGE_PERSIST_FAILED", runSteps.snapshot())
 			errorJSON, _ := json.Marshal(struct {
 				GenerationID string `json:"generation_id"`
 				Error        string `json:"error"`
@@ -275,6 +397,7 @@ func (a *API) chatAI(c *gin.Context) {
 			_ = writeSSE("error", string(errorJSON))
 			return
 		}
+		a.scheduleAICompaction(session.ID, provider)
 		if runResult.Reflections > 0 {
 			replacementJSON, _ := json.Marshal(struct {
 				GenerationID string `json:"generation_id"`
@@ -376,13 +499,14 @@ func stripAIControlBlocks(content string) string {
 	content = aiTaskBlockPattern.ReplaceAllString(content, "")
 	content = aiMemoryBlockPattern.ReplaceAllString(content, "")
 	content = aiSelfCheckBlockPattern.ReplaceAllString(content, "")
+	content = stripAICitationBlocks(content)
 	return strings.TrimSpace(aiOpenControlTail.ReplaceAllString(content, ""))
 }
 
 // chatHistory builds a complete-turn rolling window from the newest 200
 // persisted messages plus the current user turn. It measures the exact
 // serialized provider payload and never silently removes the current turn.
-func (a *API) chatHistory(sessionID, currentMessage, protocol, model string, memories []string) ([]modelclient.ChatMessage, error) {
+func (a *API) chatHistory(sessionID, currentMessage, protocol, model string, promptContext modelclient.PromptContext) ([]modelclient.ChatMessage, error) {
 	var rows []models.AIMessage
 	if err := a.db.Where("session_id = ?", sessionID).Order("created_at DESC, id DESC").Limit(200).Find(&rows).Error; err != nil {
 		return nil, err
@@ -390,61 +514,13 @@ func (a *API) chatHistory(sessionID, currentMessage, protocol, model string, mem
 	for left, right := 0, len(rows)-1; left < right; left, right = left+1, right-1 {
 		rows[left], rows[right] = rows[right], rows[left]
 	}
-	history := make([]modelclient.ChatMessage, 0, len(rows)+1)
-	for _, row := range rows {
-		if row.Content == "" || row.Status == "failed" {
-			continue
-		}
-		content := row.Content
-		if row.Role == "assistant" {
-			content = stripAIControlBlocks(content)
-		}
-		if content == "" {
-			continue
-		}
-		history = append(history, modelclient.ChatMessage{Role: row.Role, Content: content})
-	}
-	history = append(history, modelclient.ChatMessage{Role: "user", Content: currentMessage})
-
-	turns := make([][]modelclient.ChatMessage, 0, len(history)/2+1)
-	var turn []modelclient.ChatMessage
-	for _, message := range history {
-		if message.Role == "user" {
-			if len(turn) > 0 {
-				turns = append(turns, turn)
-			}
-			turn = []modelclient.ChatMessage{message}
-			continue
-		}
-		if len(turn) > 0 {
-			turn = append(turn, message)
-		}
-	}
-	if len(turn) > 0 {
-		turns = append(turns, turn)
-	}
-
-	selected := make([]modelclient.ChatMessage, 0, len(history))
-	for index := len(turns) - 1; index >= 0; index-- {
-		candidate := make([]modelclient.ChatMessage, 0, len(turns[index])+len(selected))
-		candidate = append(candidate, turns[index]...)
-		candidate = append(candidate, selected...)
-		size, err := modelclient.PromptSize(modelclient.Protocol(protocol), model, candidate, memories)
-		if err != nil {
-			return nil, err
-		}
-		if size > modelclient.MaxPromptBytes {
-			if len(selected) == 0 {
-				return nil, modelclient.ErrPromptTooLarge
-			}
-			break
-		}
-		selected = candidate
-	}
-	return selected, nil
+	messages := aiPromptMessages(rows)
+	messages = append(messages, aiPromptMessage{Message: modelclient.ChatMessage{Role: "user", Content: currentMessage}})
+	selected, _, err := selectAIHistoryWindow(messages, protocol, model, promptContext)
+	return selected, err
 }
 
-func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, completedAt string) error {
+func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, citationsSnapshot *string, steps []harness.RunStep, completedAt string) error {
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if session.Persist {
 			snapshot, err := json.Marshal(struct {
@@ -457,19 +533,25 @@ func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, sessio
 			if err := tx.Create(&models.AIMessage{
 				ID: uuid.NewString(), SessionID: session.ID, Role: "assistant", Status: "completed",
 				Content: assistantText, Reasoning: aiNullableString(reasoning), ModelSnapshot: aiStringPtr(string(snapshot)),
+				CitationsSnapshot: citationsSnapshot, GenerationID: &generation.ID,
 				CreatedAt: completedAt, UpdatedAt: completedAt,
 			}).Error; err != nil {
 				return err
 			}
 		}
-		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(map[string]any{
-			"status": "completed", "content": assistantText, "updated_at": completedAt,
+		generationUpdates := map[string]any{"status": "completed", "updated_at": completedAt}
+		if session.Persist {
+			generationUpdates["content"] = assistantText
+		}
+		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(generationUpdates).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(map[string]any{
+			"version": gorm.Expr("version + 1"), "updated_at": completedAt,
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(map[string]any{
-			"version": gorm.Expr("version + 1"), "updated_at": completedAt,
-		}).Error
+		return persistAIRunSteps(tx, generation, steps, "succeeded", "", completedAt)
 	})
 	if err != nil {
 		a.options.Logger.Print("AI generation completion persistence failed for " + generation.ID)
@@ -479,10 +561,16 @@ func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, sessio
 	return nil
 }
 
-func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code string) {
-	err := a.db.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(map[string]any{
-		"status": "failed", "error_code": code, "updated_at": nowStamp(a),
-	}).Error
+func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code string, steps []harness.RunStep) {
+	completedAt := nowStamp(a)
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(map[string]any{
+			"status": "failed", "error_code": code, "updated_at": completedAt,
+		}).Error; err != nil {
+			return err
+		}
+		return persistAIRunSteps(tx, generation, steps, "failed", code, completedAt)
+	})
 	if err != nil {
 		a.options.Logger.Print("AI generation failure persistence failed for " + generation.ID)
 		return
@@ -492,21 +580,26 @@ func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code stri
 
 // finalizeCancelledGeneration keeps the generated partial content. The user
 // turn was already persisted when the generation started.
-func (a *API) finalizeCancelledGeneration(generation models.AIGeneration, session *models.AISession, partial, reasoning string) {
+func (a *API) finalizeCancelledGeneration(generation models.AIGeneration, session *models.AISession, partial, reasoning string, steps []harness.RunStep) {
+	completedAt := nowStamp(a)
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		if session.Persist {
 			if err := tx.Create(&models.AIMessage{
 				ID: uuid.NewString(), SessionID: session.ID, Role: "assistant", Status: "cancelled",
-				Content: partial, Reasoning: aiNullableString(reasoning), CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
+				Content: partial, Reasoning: aiNullableString(reasoning), GenerationID: &generation.ID,
+				CreatedAt: completedAt, UpdatedAt: completedAt,
 			}).Error; err != nil {
 				return err
 			}
 		}
-		updates := map[string]any{"status": "cancelled", "updated_at": nowStamp(a)}
-		if partial != "" {
+		updates := map[string]any{"status": "cancelled", "updated_at": completedAt}
+		if session.Persist && partial != "" {
 			updates["content"] = partial
 		}
-		return tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(updates).Error
+		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		return persistAIRunSteps(tx, generation, steps, "cancelled", "", completedAt)
 	})
 	if err != nil {
 		a.options.Logger.Print("AI generation cancel persistence failed for " + generation.ID)

@@ -43,6 +43,7 @@ type Options struct {
 	AutomationDeliveryScanInterval time.Duration
 	ScheduledBackupScanInterval    time.Duration
 	StartupRestore                 StartupRestoreResult
+	HarnessClient                  harness.LLMClient
 }
 
 type API struct {
@@ -51,6 +52,7 @@ type API struct {
 	keyStore                  keystore.Store
 	harnessClient             harness.LLMClient
 	aiGenerations             *aiGenerationRegistry
+	aiCompactions             *aiCompactionRegistry
 	artifactStore             *artifactStore
 	invoicePDFStore           *invoicePDFStore
 	backupStore               *backupStore
@@ -59,6 +61,10 @@ type API struct {
 	lowDiskActive             atomic.Bool
 	lowDiskThresholdBytes     atomic.Uint64
 	automationEventDeliveryMu sync.Mutex
+	aiProviderMu              sync.RWMutex
+	aiEvaluationMu            sync.Mutex
+	aiEvaluationRunner        *aiEvaluationRunner
+	knowledgeIndexer          *knowledgeIndexer
 }
 
 type Router struct {
@@ -75,6 +81,9 @@ type Router struct {
 	diskSpaceScanDone            chan struct{}
 	scheduledBackupScanCancel    context.CancelFunc
 	scheduledBackupScanDone      chan struct{}
+	aiCompactions                *aiCompactionRegistry
+	aiEvaluationRunner           *aiEvaluationRunner
+	knowledgeIndexer             *knowledgeIndexer
 	closeOnce                    sync.Once
 	closeErr                     error
 }
@@ -84,6 +93,15 @@ func (r *Router) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		if r.aiEvaluationRunner != nil {
+			r.aiEvaluationRunner.close()
+		}
+		if r.knowledgeIndexer != nil {
+			r.knowledgeIndexer.close()
+		}
+		if r.aiCompactions != nil {
+			r.aiCompactions.close()
+		}
 		if r.focusHeartbeatCancel != nil {
 			r.focusHeartbeatCancel()
 			<-r.focusHeartbeatDone
@@ -210,9 +228,20 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			return nil, err
 		}
 	}
+	harnessClient := options.HarnessClient
+	if harnessClient == nil {
+		harnessClient = harness.NewModelClient(nil)
+	}
+	compactions := newAICompactionRegistry()
+	keepCompactions := false
+	defer func() {
+		if !keepCompactions {
+			compactions.close()
+		}
+	}()
 	service := &API{
-		db: db, options: options, keyStore: options.KeyStore, harnessClient: harness.NewModelClient(nil),
-		aiGenerations: newAIGenerationRegistry(),
+		db: db, options: options, keyStore: options.KeyStore, harnessClient: harnessClient,
+		aiGenerations: newAIGenerationRegistry(), aiCompactions: compactions,
 		artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
 		maintenance: &sync.RWMutex{},
 	}
@@ -221,6 +250,18 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			_ = artifacts.close()
 		}
 		return nil, fmt.Errorf("recover AI generations: %w", err)
+	}
+	if err := recoverAIEvaluationRunsOnStartup(db, options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover AI evaluation runs: %w", err)
+	}
+	if err := recoverKnowledgeIndexJobsOnStartup(db, options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover knowledge index jobs: %w", err)
 	}
 	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
 		if artifacts != nil {
@@ -325,15 +366,42 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/ai/memories", service.listAIMemories)
 		v1.POST("/ai/memories", service.createAIMemory)
 		v1.DELETE("/ai/memories/:id", service.deleteAIMemory)
+		v1.GET("/ai/memory-proposals", service.listAIMemoryProposals)
+		v1.DELETE("/ai/memory-proposals/:id", service.rejectAIMemoryProposal)
+		v1.POST("/ai/context/preview", service.previewAIBusinessContext)
 		v1.GET("/ai/sessions", service.listAISessions)
 		v1.POST("/ai/sessions", service.createAISession)
 		v1.GET("/ai/sessions/:id", service.getAISession)
 		v1.DELETE("/ai/sessions/:id", service.deleteAISession)
 		v1.GET("/ai/sessions/:id/messages", service.listAIMessages)
+		v1.GET("/ai/evaluations", service.listAIEvaluations)
+		v1.POST("/ai/evaluations", service.createAIEvaluation)
+		v1.GET("/ai/evaluation-summary", service.getAIEvaluationSummary)
+		v1.GET("/ai/evaluation-reviews", service.listAIEvaluationReviews)
+		v1.POST("/ai/evaluation-reviews", service.createAIEvaluationReview)
+		v1.GET("/ai/evaluations/:id", service.getAIEvaluation)
+		v1.POST("/ai/evaluations/:id/cancel", service.cancelAIEvaluation)
+		v1.DELETE("/ai/evaluations/:id", service.deleteAIEvaluation)
+		v1.GET("/ai/usage-summary", service.getAIUsageSummary)
 		v1.POST("/ai/chat", service.chatAI)
+		v1.GET("/ai/generations/:id/steps", service.listAIRunSteps)
 		v1.POST("/ai/generations/:id/cancel", service.cancelAIGeneration)
 		v1.POST("/ai/messages/:id/task", service.attachTaskToAIMessage)
 		v1.GET("/search", service.search)
+		v1.GET("/knowledge/sources", service.listKnowledgeSources)
+		v1.POST("/knowledge/sources", service.createKnowledgeSource)
+		v1.GET("/knowledge/sources/export.csv", service.exportKnowledgeSourcesCSV)
+		v1.GET("/knowledge/sources/:id", service.getKnowledgeSource)
+		v1.DELETE("/knowledge/sources/:id", service.deleteKnowledgeSource)
+		v1.POST("/knowledge/sources/:id/reindex", service.reindexKnowledgeSource)
+		v1.GET("/knowledge/documents", service.listKnowledgeDocuments)
+		v1.GET("/knowledge/documents/:id", service.getKnowledgeDocument)
+		v1.DELETE("/knowledge/documents/:id", service.deleteKnowledgeDocument)
+		v1.POST("/knowledge/search", service.searchKnowledge)
+		v1.GET("/knowledge/index-jobs/:id", service.getKnowledgeIndexJob)
+		v1.POST("/knowledge/index-jobs/:id/cancel", service.cancelKnowledgeIndexJob)
+		v1.POST("/knowledge/index-jobs/:id/retry", service.retryKnowledgeIndexJob)
+		v1.DELETE("/knowledge", service.purgeKnowledgeBase)
 		v1.GET("/tasks", service.listTasks)
 		v1.POST("/tasks", service.createTask)
 		v1.GET("/task-saved-views", service.listTaskSavedViews)
@@ -492,7 +560,13 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/stats/focus", service.focusPeriodStats)
 		v1.GET("/stats/inbox", service.inboxStats)
 	}
-	result := &Router{Engine: router, artifactStore: artifacts, invoicePDFStore: invoicePDFs}
+	service.aiEvaluationRunner = newAIEvaluationRunner(service)
+	service.knowledgeIndexer = newKnowledgeIndexer(service)
+	result := &Router{
+		Engine: router, artifactStore: artifacts, invoicePDFStore: invoicePDFs,
+		aiCompactions: service.aiCompactions, aiEvaluationRunner: service.aiEvaluationRunner,
+		knowledgeIndexer: service.knowledgeIndexer,
+	}
 	if options.FocusHeartbeatInterval > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
 		result.focusHeartbeatCancel = cancel
@@ -650,6 +724,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}()
 	}
 	keepInvoicePDFs = true
+	keepCompactions = true
 	return result, nil
 }
 

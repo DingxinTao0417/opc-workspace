@@ -21,13 +21,13 @@
     <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
     <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
     <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
-    <img alt="SQLite schema v56" src="https://img.shields.io/badge/database-SQLite%20v56-003B57" />
+    <img alt="SQLite schema v67" src="https://img.shields.io/badge/database-SQLite%20v67-003B57" />
     <img alt="Active development" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
   </p>
 </div>
 
 > [!IMPORTANT]
-> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v56. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant is developed on an independent track outside the v0.1–v0.4 product scope.
+> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v67. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant and local knowledge base are developed on independent tracks outside the v0.1–v0.4 product scope.
 
 ## Why opc-workspace
 
@@ -43,23 +43,23 @@ Independent developers, freelancers, creators, and consultants often jump betwee
 
 ## Core capabilities
 
-| Area                 | Current capabilities                                                                                                         |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Today workspace      | Brings together overdue, scheduled, later-this-week, and unscheduled tasks with planning and quick actions                   |
-| Tasks and review     | Six-state lifecycle, parent-child tasks, assignments, deliverable submission, manual review, and rework                      |
-| Projects and clients | Project progress and artifacts, attachments, client records, activities, follow-ups, and related views                       |
-| Inbox and reminders  | Local triage, snoozing, task splitting, completion progress, and recurring reminders                                         |
-| Focus and time       | Recoverable focus sessions, task binding, history, trends, project breakdowns, and tag breakdowns                            |
-| Search and commands  | Local search across tasks, projects, clients, and active inbox items, with direct navigation                                 |
-| Data safety          | Versioned migrations, controlled files, full backup and restore, business JSON/ZIP transfer, and diagnostics                 |
-| Local automation     | Only code-owned, constrained presets; no arbitrary Shell, SQL, HTTP, or external-send actions                                |
-| AI assistant         | Remote/local providers, streaming chat, reasoning display, a constrained harness, long-term memory, and confirmed task cards |
+| Area                 | Current capabilities                                                                                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Today workspace      | Brings together overdue, scheduled, later-this-week, and unscheduled tasks with planning and quick actions                                                                                     |
+| Tasks and review     | Six-state lifecycle, parent-child tasks, assignments, deliverable submission, manual review, and rework                                                                                        |
+| Projects and clients | Project progress and artifacts, attachments, client records, activities, follow-ups, and related views                                                                                         |
+| Inbox and reminders  | Local triage, snoozing, task splitting, completion progress, and recurring reminders                                                                                                           |
+| Focus and time       | Recoverable focus sessions, task binding, history, trends, project breakdowns, and tag breakdowns                                                                                              |
+| Search and commands  | Local search across tasks, projects, clients, and active inbox items, with direct navigation                                                                                                   |
+| Data safety          | Versioned migrations, controlled files, full backup and restore, business JSON/ZIP transfer, and diagnostics                                                                                   |
+| Local automation     | Only code-owned, constrained presets; no arbitrary Shell, SQL, HTTP, or external-send actions                                                                                                  |
+| AI assistant         | Remote/local providers, streaming chat, memory, explicit context, local-only quality evaluation with trends/categories/failure reasons, content-free run steps/usage, and confirmed task cards |
 
 ### Current boundaries
 
 - The v0.1 manual workflow is still being refined. See the [module status overview](./docs/modules/README.md) for the current implementation baseline.
 - Income, expenses, and invoicing remain future business modules and must not be treated as delivered features.
-- The independent AI assistant track includes remote providers, loopback OpenAI-compatible local providers, in-session provider switching, streamed replies and reasoning, a production zero-tool harness, confirmed long-term memory, natural-language task confirmation cards, and a recent complete-turn context window. Knowledge-base retrieval and conversation summarization remain unimplemented.
+- The independent AI assistant track includes remote/local providers, streamed replies and reasoning, a constrained harness, confirmed memory, task cards, summary/fact compaction, three memory tools, explicit business/knowledge context, validated citations, content-free run steps/usage summaries, and local-only dataset-v3 quality suites: an 8-case smoke check and a 24-case full evaluation. Trends, categories, failure codes and Wilson intervals are isolated by suite; only full runs can form an advisory human-review candidate. Evaluation history never stores prompts, knowledge text, model answers, or failure details.
 - The local Agent area currently contains constrained Adapter registration and diagnostics only—there is no Runner, Agent Run, or executable task capability.
 - There is no cloud sync, multi-user account system, online workflow, or remote message sending.
 
@@ -129,7 +129,7 @@ flowchart TB
     Desktop["Tauri 2 / Rust<br/>Window · tray · shortcuts · Sidecar lifecycle"]
     Web["React 18 / TypeScript / WebView<br/>Pages · forms · query cache · UI state"]
     API["Go Sidecar / API v1<br/>Domain validation · transactions · scheduling · backups"]
-    Data["Local fact layer<br/>SQLite v56 · controlled files · backups · logs"]
+    Data["Local fact layer<br/>SQLite v67 · controlled files · FTS5 · backups · logs"]
 
     Desktop --> Web
     Web -->|"Bearer HTTP · dynamic 127.0.0.1 port"| API
@@ -156,7 +156,7 @@ docs/                     PRD, architecture, ADRs, and module documentation (Chi
 ## Documentation
 
 - [Documentation center](./docs/README.md): reading order, source-of-truth rules, and module status overview (Chinese).
-- [Product requirements, PRD v9.86](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
+- [Product requirements, PRD v10.8](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
 - [Functional architecture](./docs/functional-architecture.md): module relationships, event flows, and fact ownership (Chinese).
 - [Module documentation](./docs/modules/README.md): workflows, APIs, states, dependencies, and acceptance criteria (Chinese).
 - [Sidecar developer documentation](./services/sidecar/README.md): local API, data, and backend verification notes.

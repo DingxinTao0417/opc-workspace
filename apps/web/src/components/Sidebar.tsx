@@ -1,4 +1,5 @@
 import {
+  BookOpenText,
   CalendarDays,
   CheckSquare2,
   CircleDollarSign,
@@ -62,6 +63,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { label: "专注", to: "/focus", icon: Focus },
       { label: "AI 助手", to: "/ai", icon: Sparkles },
+      { label: "知识库", to: "/knowledge", icon: BookOpenText },
     ],
   },
   {

@@ -14,7 +14,7 @@ func TestInvoiceFactsMigrationOpensEmptyWorkspaceAtV46(t *testing.T) {
 		t.Fatalf("OpenBeforeDestructiveMigrations() error = %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 56 {
+	if gate != nil || store.SchemaVersion != 67 {
 		t.Fatalf("empty invoice workspace schema=%d gate=%#v, want schema 54 without a gate", store.SchemaVersion, gate)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM invoices"); got != 0 {
@@ -76,7 +76,7 @@ func TestInvoiceFactsMigrationGatesV45AndPreservesLegacyInvoices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open v45 invoice migration gate: %v", err)
 	}
-	if gated.SchemaVersion != 45 || gate == nil || gate.CurrentVersion != 45 || gate.TargetVersion != 56 || !reflect.DeepEqual(gate.PendingVersions, []int{46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56}) {
+	if gated.SchemaVersion != 45 || gate == nil || gate.CurrentVersion != 45 || gate.TargetVersion != 67 || !reflect.DeepEqual(gate.PendingVersions, []int{46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67}) {
 		_ = gated.Close()
 		t.Fatalf("v45 invoice migration gate: store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
@@ -101,8 +101,8 @@ func TestInvoiceFactsMigrationGatesV45AndPreservesLegacyInvoices(t *testing.T) {
 		t.Fatalf("apply v46 invoice migration: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 56 {
-		t.Fatalf("invoice schema version = %d, want 56", store.SchemaVersion)
+	if store.SchemaVersion != 67 {
+		t.Fatalf("invoice schema version = %d, want 67", store.SchemaVersion)
 	}
 
 	var draft struct {

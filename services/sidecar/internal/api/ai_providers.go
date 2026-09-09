@@ -158,6 +158,8 @@ func (a *API) getAIProvider(c *gin.Context) {
 }
 
 func (a *API) patchAIProvider(c *gin.Context) {
+	a.aiProviderMu.Lock()
+	defer a.aiProviderMu.Unlock()
 	id, ok := aiProviderID(c)
 	if !ok {
 		return
@@ -265,6 +267,8 @@ func (a *API) patchAIProvider(c *gin.Context) {
 }
 
 func (a *API) deleteAIProvider(c *gin.Context) {
+	a.aiProviderMu.Lock()
+	defer a.aiProviderMu.Unlock()
 	id, ok := aiProviderID(c)
 	if !ok {
 		return
@@ -280,6 +284,24 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 	}
 	if row.Version != expectedVersion {
 		writeProjectRequestError(c, taskVersionConflict())
+		return
+	}
+	var generationCount int64
+	if err := a.db.WithContext(c.Request.Context()).Model(&models.AIGeneration{}).Where("provider_id = ?", id).Count(&generationCount).Error; err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	if generationCount > 0 {
+		writeError(c, http.StatusConflict, "AI_PROVIDER_HAS_SESSIONS", "Delete the conversations that used this provider before removing it")
+		return
+	}
+	var evaluationCount int64
+	if err := a.db.WithContext(c.Request.Context()).Model(&models.AIEvaluationRun{}).Where("provider_id = ?", id).Count(&evaluationCount).Error; err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	if evaluationCount > 0 {
+		writeError(c, http.StatusConflict, "AI_PROVIDER_HAS_EVALUATIONS", "Delete this provider's local evaluation history before removing it")
 		return
 	}
 	// Secure storage cannot join the SQLite transaction. Remove the existing
@@ -317,30 +339,6 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 			return taskVersionConflict()
 		}
 		previous := aiProviderResponseFromModel(row)
-		// ai_generations carries the provider FK (053), so every session
-		// that actually generated with this provider is removed with it —
-		// the same cascade a session delete performs. Active generations in
-		// these sessions are dead ends once the provider is gone. Sessions
-		// that never generated hold no provider reference and survive.
-		var sessionIDs []string
-		if err := tx.Model(&models.AIGeneration{}).Where("provider_id = ?", id).
-			Distinct().Pluck("session_id", &sessionIDs).Error; err != nil {
-			return err
-		}
-		for _, sessionID := range sessionIDs {
-			a.aiGenerations.cancelSession(sessionID)
-		}
-		if len(sessionIDs) > 0 {
-			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.AIMessage{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("session_id IN ?", sessionIDs).Delete(&models.AIGeneration{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id IN ?", sessionIDs).Delete(&models.AISession{}).Error; err != nil {
-				return err
-			}
-		}
 		if err := tx.Delete(&row).Error; err != nil {
 			return fmt.Errorf("delete AI provider: %w", err)
 		}
@@ -366,6 +364,8 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 }
 
 func (a *API) checkAIProviderHealth(c *gin.Context) {
+	a.aiProviderMu.RLock()
+	defer a.aiProviderMu.RUnlock()
 	id, ok := aiProviderID(c)
 	if !ok {
 		return
@@ -460,6 +460,8 @@ func (a *API) checkAIProviderHealth(c *gin.Context) {
 }
 
 func (a *API) setAIProviderKey(c *gin.Context) {
+	a.aiProviderMu.Lock()
+	defer a.aiProviderMu.Unlock()
 	id, ok := aiProviderID(c)
 	if !ok {
 		return

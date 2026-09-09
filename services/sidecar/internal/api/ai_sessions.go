@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -20,24 +21,31 @@ const (
 )
 
 type aiSessionResponse struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Persist   bool   `json:"persist"`
-	Version   int64  `json:"version"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID                    string `json:"id"`
+	Title                 string `json:"title"`
+	Persist               bool   `json:"persist"`
+	CompactedMessageCount int64  `json:"compacted_message_count"`
+	Version               int64  `json:"version"`
+	CreatedAt             string `json:"created_at"`
+	UpdatedAt             string `json:"updated_at"`
 }
 
 type aiMessageResponse struct {
-	ID                string  `json:"id"`
-	SessionID         string  `json:"session_id"`
-	Role              string  `json:"role"`
-	Status            string  `json:"status"`
-	Content           string  `json:"content"`
-	Reasoning         *string `json:"reasoning"`
-	TaskID            *string `json:"task_id"`
-	TaskTitleSnapshot *string `json:"task_title_snapshot"`
-	CreatedAt         string  `json:"created_at"`
+	ID                string                             `json:"id"`
+	SessionID         string                             `json:"session_id"`
+	Role              string                             `json:"role"`
+	Status            string                             `json:"status"`
+	Content           string                             `json:"content"`
+	Reasoning         *string                            `json:"reasoning"`
+	TaskID            *string                            `json:"task_id"`
+	TaskTitleSnapshot *string                            `json:"task_title_snapshot"`
+	GenerationID      *string                            `json:"generation_id"`
+	ContextProvider   *aiBusinessContextProviderSnapshot `json:"context_provider"`
+	ContextSources    []aiBusinessContextSource          `json:"context_sources"`
+	ContextKnowledge  []aiKnowledgeContextSource         `json:"context_knowledge"`
+	CitationStatus    string                             `json:"citation_status"`
+	Citations         []aiCitationItem                   `json:"citations"`
+	CreatedAt         string                             `json:"created_at"`
 }
 
 type createAISessionRequest struct {
@@ -51,6 +59,45 @@ type aiMessagePageMeta struct {
 	OldestID        *string `json:"oldest_id,omitempty"`
 }
 
+func (a *API) aiSessionCompactedMessageCounts(ctx context.Context, sessions []models.AISession) (map[string]int64, error) {
+	counts := make(map[string]int64, len(sessions))
+	if len(sessions) == 0 {
+		return counts, nil
+	}
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.ID)
+	}
+	var rows []struct {
+		SessionID string `gorm:"column:session_id"`
+		Count     int64  `gorm:"column:message_count"`
+	}
+	err := a.db.WithContext(ctx).Raw(`
+		SELECT snapshot.session_id, COUNT(message.id) AS message_count
+		FROM ai_memory_entries AS snapshot
+		JOIN ai_messages AS source
+		  ON source.id = snapshot.source_message_id
+		 AND source.session_id = snapshot.session_id
+		JOIN ai_messages AS message
+		  ON message.session_id = snapshot.session_id
+		 AND (
+			message.created_at < source.created_at
+			OR (message.created_at = source.created_at AND message.id <= source.id)
+		 )
+		WHERE snapshot.kind = 'context_snapshot'
+		  AND snapshot.status = 'active'
+		  AND snapshot.session_id IN ?
+		GROUP BY snapshot.session_id
+	`, ids).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.SessionID] = row.Count
+	}
+	return counts, nil
+}
+
 func (a *API) listAISessions(c *gin.Context) {
 	var rows []models.AISession
 	if err := a.db.WithContext(c.Request.Context()).Order("updated_at DESC, id ASC").Limit(200).Find(&rows).Error; err != nil {
@@ -58,8 +105,15 @@ func (a *API) listAISessions(c *gin.Context) {
 		return
 	}
 	responses := make([]aiSessionResponse, 0, len(rows))
+	counts, err := a.aiSessionCompactedMessageCounts(c.Request.Context(), rows)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
 	for _, row := range rows {
-		responses = append(responses, aiSessionResponseFromModel(row))
+		response := aiSessionResponseFromModel(row)
+		response.CompactedMessageCount = counts[row.ID]
+		responses = append(responses, response)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": responses})
 }
@@ -99,8 +153,15 @@ func (a *API) getAISession(c *gin.Context) {
 	if !ok {
 		return
 	}
+	counts, err := a.aiSessionCompactedMessageCounts(c.Request.Context(), []models.AISession{row})
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	response := aiSessionResponseFromModel(row)
+	response.CompactedMessageCount = counts[row.ID]
 	setProjectETag(c, row.Version)
-	c.JSON(http.StatusOK, gin.H{"data": aiSessionResponseFromModel(row)})
+	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
 func (a *API) deleteAISession(c *gin.Context) {
@@ -126,6 +187,9 @@ func (a *API) deleteAISession(c *gin.Context) {
 		return
 	}
 	a.aiGenerations.cancelSession(id)
+	if a.aiCompactions != nil {
+		a.aiCompactions.cancelSession(id)
+	}
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var row models.AISession
 		if err := tx.Where("id = ?", id).First(&row).Error; err != nil {
@@ -188,7 +252,12 @@ func (a *API) listAIMessages(c *gin.Context) {
 		meta.OldestCreatedAt = &oldest.CreatedAt
 		meta.OldestID = &oldest.ID
 	}
-	c.JSON(http.StatusOK, gin.H{"data": aiMessageResponsesFromModels(messages), "meta": meta})
+	responses, err := aiMessageResponsesFromModels(messages)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": responses, "meta": meta})
 }
 
 func aiSessionMessagePage(db *gorm.DB, sessionID string, limit int, beforeCreated, beforeID string) ([]models.AIMessage, bool, error) {
@@ -243,14 +312,25 @@ func aiSessionResponseFromModel(row models.AISession) aiSessionResponse {
 	}
 }
 
-func aiMessageResponsesFromModels(rows []models.AIMessage) []aiMessageResponse {
+func aiMessageResponsesFromModels(rows []models.AIMessage) ([]aiMessageResponse, error) {
 	responses := make([]aiMessageResponse, 0, len(rows))
 	for _, row := range rows {
+		contextProvider, contextSources, contextKnowledge, err := decodeAIBusinessContextSnapshot(row.ContextSnapshot)
+		if err != nil {
+			return nil, err
+		}
+		citationStatus, citations, err := decodeAICitationSnapshot(row.CitationsSnapshot)
+		if err != nil {
+			return nil, err
+		}
 		responses = append(responses, aiMessageResponse{
 			ID: row.ID, SessionID: row.SessionID, Role: row.Role, Status: row.Status, Content: row.Content,
 			Reasoning: row.Reasoning, TaskID: row.TaskID, TaskTitleSnapshot: row.TaskTitleSnapshot,
+			GenerationID:    row.GenerationID,
+			ContextProvider: contextProvider, ContextSources: contextSources, ContextKnowledge: contextKnowledge,
+			CitationStatus: citationStatus, Citations: citations,
 			CreatedAt: normalizeTimestamp(row.CreatedAt),
 		})
 	}
-	return responses
+	return responses, nil
 }

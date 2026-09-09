@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   BellRing,
+  BookOpenText,
   CalendarDays,
   CheckCircle2,
   CheckSquare2,
@@ -366,6 +367,13 @@ export function CommandPalette() {
         hint: "页面",
         icon: Sparkles,
         run: () => closeAndNavigate("/ai", "ai-assistant"),
+      },
+      {
+        id: "knowledge-base",
+        label: "知识库",
+        hint: "本地资料 · 关键词检索",
+        icon: BookOpenText,
+        run: () => closeAndNavigate("/knowledge", "knowledge-base"),
       },
       {
         id: "roadmap",

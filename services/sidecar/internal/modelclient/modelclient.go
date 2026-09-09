@@ -28,6 +28,10 @@ func HealthCheck(ctx context.Context, protocol Protocol, baseURL string, apiKey 
 	if client == nil {
 		client = &http.Client{Timeout: healthProbeTimeout}
 	}
+	client, err = secureProviderHTTPClient(baseURL, client)
+	if err != nil {
+		return 0, err
+	}
 	path := "/models"
 	if protocol == ProtocolAnthropicMessages {
 		path = "/v1/models"

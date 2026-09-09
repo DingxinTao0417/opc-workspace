@@ -118,8 +118,52 @@ func TestRunToolLoopFeedsResultsBack(t *testing.T) {
 	// result message.
 	history := client.lastReq.History
 	if len(history) != 3 || history[0].Role != "user" || history[1].Role != "assistant" || history[2].Role != "tool" ||
+		len(history[1].ToolCalls) != 1 || history[1].ToolCalls[0].ID != "c1" || history[2].ToolCallID != "c1" ||
 		!strings.Contains(history[2].Content, "lookup: 42") {
 		t.Fatalf("tool result not fed back: %+v", history)
+	}
+	if len(client.lastReq.Tools) != 1 || client.lastReq.Tools[0].Name != "lookup" || !json.Valid(client.lastReq.Tools[0].Parameters) {
+		t.Fatalf("tool definitions not forwarded: %+v", client.lastReq.Tools)
+	}
+}
+
+func TestRunEmitsContentFreeModelToolAndSelfCheckSteps(t *testing.T) {
+	tool := &fakeTool{name: "lookup", result: "private result"}
+	registry, err := NewRegistry(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := json.RawMessage(`{"q":"private argument"}`)
+	client := &fakeClient{streams: []Turn{
+		{
+			Text: "working", InputBytes: 120, OutputBytes: 40,
+			InputTokens: 30, OutputTokens: 10, UsageAvailable: true,
+			ToolCalls: []ToolCall{{ID: "call-1", Name: "lookup", Arguments: args}},
+		},
+		{Text: `done[opc:selfcheck]{"sufficient":true}[/opc:selfcheck]`, InputBytes: 160, OutputBytes: 55,
+			InputTokens: 40, OutputTokens: 12, UsageAvailable: true},
+	}}
+	var steps []RunStep
+	result, err := Run(context.Background(), client, Request{Model: "m"}, registry, &Executor{}, Callbacks{
+		OnStep: func(step RunStep) { steps = append(steps, step) },
+	})
+	if err != nil || result.Text != "workingdone" {
+		t.Fatalf("run result=%#v err=%v", result, err)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("steps=%#v", steps)
+	}
+	if steps[0].Kind != "model_turn" || steps[0].TurnIndex != 1 || steps[0].InputBytes != 120 || steps[0].OutputBytes != 40 ||
+		!steps[0].UsageAvailable || steps[0].InputTokens != 30 || steps[0].OutputTokens != 10 ||
+		steps[1].Kind != "tool_call" || steps[1].ToolName != "lookup" || steps[1].InputBytes != len(args) || steps[1].OutputBytes != len("private result") ||
+		steps[2].Kind != "model_turn" || steps[2].TurnIndex != 2 || steps[2].InputBytes != 160 || steps[2].OutputBytes != 55 ||
+		steps[3].Kind != "self_check" || steps[3].TurnIndex != 2 {
+		t.Fatalf("unexpected run steps=%#v", steps)
+	}
+	for _, step := range steps {
+		if step.Status != "succeeded" || step.ErrorCode != "" || step.CompletedAt.Before(step.StartedAt) {
+			t.Fatalf("invalid step=%#v", step)
+		}
 	}
 }
 
@@ -143,6 +187,23 @@ func TestRunOversizedToolResultTriggersBudget(t *testing.T) {
 	}
 	if result.ToolCalls != 2 {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestRunRejectsMoreThanThirtyTwoToolCalls(t *testing.T) {
+	tool := &fakeTool{name: "lookup", result: "ok"}
+	registry, err := NewRegistry(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := make([]ToolCall, DefaultMaxToolCalls+1)
+	for index := range calls {
+		calls[index] = ToolCall{ID: fmt.Sprintf("call-%d", index), Name: "lookup", Arguments: json.RawMessage(`{}`)}
+	}
+	client := &fakeClient{streams: []Turn{{ToolCalls: calls}}}
+	result, err := Run(context.Background(), client, Request{Model: "m"}, registry, &Executor{}, Callbacks{})
+	if !errors.Is(err, ErrToolBudget) || result.ToolCalls != DefaultMaxToolCalls+1 {
+		t.Fatalf("too many calls result=%#v err=%v", result, err)
 	}
 }
 
@@ -362,7 +423,10 @@ func TestRunSelfCheckInsufficientTriggersAutonomousRevision(t *testing.T) {
 	}}
 	var deltas int
 	result, err := Run(context.Background(), client,
-		Request{Model: "m", History: []modelclient.ChatMessage{{Role: "user", Content: "问题"}}},
+		Request{
+			Model: "m", History: []modelclient.ChatMessage{{Role: "user", Content: "问题"}},
+			KnowledgeContext: []string{`{"source_name":"guide.md","content":"evidence"}`},
+		},
 		nil, nil, Callbacks{OnDelta: func(string) { deltas++ }})
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -378,6 +442,9 @@ func TestRunSelfCheckInsufficientTriggersAutonomousRevision(t *testing.T) {
 	if len(last) != 3 || last[1].Role != "assistant" || last[1].Content != "有遗漏的草稿" ||
 		!strings.Contains(last[2].Content, "缺了步骤二") {
 		t.Fatalf("revision history wrong: %+v", last)
+	}
+	if len(client.lastReq.KnowledgeContext) != 1 || !strings.Contains(client.lastReq.KnowledgeContext[0], "guide.md") {
+		t.Fatalf("revision lost knowledge context: %+v", client.lastReq.KnowledgeContext)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +19,52 @@ import (
 
 type aiProviderEnvelope struct {
 	Data aiProviderResponse `json:"data"`
+}
+
+func TestAIProviderConcurrentKeyWritesKeepDatabaseAndKeyStoreAligned(t *testing.T) {
+	now := time.Date(2026, 9, 8, 18, 0, 0, 0, time.UTC)
+	router, _, keyStore := newAIProviderTestRouter(t, now)
+	provider := createTestAIProvider(t, router, "concurrent-key", "openai_chat", "https://api.example.com/v1", "model", nil)
+	type result struct {
+		key      string
+		response *httptest.ResponseRecorder
+	}
+	results := make(chan result, 2)
+	var start sync.WaitGroup
+	start.Add(1)
+	for _, key := range []string{"sk-first", "sk-second"} {
+		key := key
+		go func() {
+			start.Wait()
+			response := performRequest(
+				router, http.MethodPost, "/api/v1/ai/providers/"+provider.ID+"/key",
+				[]byte(`{"api_key":"`+key+`"}`), map[string]string{"If-Match": `"1"`},
+			)
+			results <- result{key: key, response: response}
+		}()
+	}
+	start.Done()
+	first, second := <-results, <-results
+	var successful string
+	for _, outcome := range []result{first, second} {
+		switch outcome.response.Code {
+		case http.StatusOK:
+			if successful != "" {
+				t.Fatal("both concurrent key writes succeeded")
+			}
+			successful = outcome.key
+		case http.StatusConflict:
+			if responseErrorCode(t, outcome.response.Body.Bytes()) != "VERSION_CONFLICT" {
+				t.Fatalf("concurrent conflict = %s", outcome.response.Body.String())
+			}
+		default:
+			t.Fatalf("concurrent key write = %d: %s", outcome.response.Code, outcome.response.Body.String())
+		}
+	}
+	stored, err := keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
+	if err != nil || stored != successful {
+		t.Fatalf("stored key=%q successful=%q err=%v", stored, successful, err)
+	}
 }
 
 func newAIProviderTestRouter(t *testing.T, now time.Time) (*gin.Engine, *database.Store, *keystore.MemoryStore) {

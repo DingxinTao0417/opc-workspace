@@ -8,6 +8,9 @@ type AIMessage struct {
 	Content           string  `gorm:"column:content" json:"content"`
 	Reasoning         *string `gorm:"column:reasoning" json:"reasoning"`
 	ModelSnapshot     *string `gorm:"column:model_snapshot" json:"-"`
+	ContextSnapshot   *string `gorm:"column:context_snapshot" json:"-"`
+	CitationsSnapshot *string `gorm:"column:citations_snapshot" json:"-"`
+	GenerationID      *string `gorm:"column:generation_id" json:"generation_id"`
 	TaskID            *string `gorm:"column:task_id" json:"task_id"`
 	TaskTitleSnapshot *string `gorm:"column:task_title_snapshot" json:"task_title_snapshot"`
 	CreatedAt         string  `gorm:"column:created_at" json:"created_at"`

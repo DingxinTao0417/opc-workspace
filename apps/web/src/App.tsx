@@ -18,6 +18,7 @@ import { InboxPage } from "./pages/InboxPage";
 import { IncomePage } from "./pages/IncomePage";
 import { InvoiceDetailPage } from "./pages/InvoiceDetailPage";
 import { InvoicesPage } from "./pages/InvoicesPage";
+import { KnowledgeBasePage } from "./pages/KnowledgeBasePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { RoadmapPage } from "./pages/RoadmapPage";
@@ -58,6 +59,7 @@ export default function App() {
             <Route element={<InboxPage />} path="inbox/:inboxItemId" />
             <Route element={<FocusPage />} path="focus" />
             <Route element={<AiAssistantPage />} path="ai" />
+            <Route element={<KnowledgeBasePage />} path="knowledge" />
             <Route element={<RoadmapPage />} path="roadmap" />
             <Route element={<ContentCalendarPage />} path="content-calendar" />
             <Route element={<NotFoundPage />} path="*" />

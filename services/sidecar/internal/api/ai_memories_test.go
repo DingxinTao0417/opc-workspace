@@ -45,6 +45,12 @@ func TestAIMemoryLifecycle(t *testing.T) {
 	badSource := performRequest(router, http.MethodPost, "/api/v1/ai/memories",
 		[]byte(`{"content":"x","source_message_id":"not-a-uuid"}`), nil)
 	assertAPIError(t, badSource, http.StatusUnprocessableEntity, "INVALID_AI_MESSAGE_ID")
+	unicodeContent := strings.Repeat("记", 500)
+	unicodeMemory := performRequest(router, http.MethodPost, "/api/v1/ai/memories",
+		[]byte(`{"content":"`+unicodeContent+`"}`), map[string]string{"Idempotency-Key": "memory-unicode-500"})
+	if unicodeMemory.Code != http.StatusCreated {
+		t.Fatalf("500-rune memory = %d: %s", unicodeMemory.Code, unicodeMemory.Body.String())
+	}
 
 	// List is newest-first.
 	second := performRequest(router, http.MethodPost, "/api/v1/ai/memories",
@@ -62,8 +68,8 @@ func TestAIMemoryLifecycle(t *testing.T) {
 	if err := json.Unmarshal(list.Body.Bytes(), &listEnvelope); err != nil {
 		t.Fatalf("decode list: %v", err)
 	}
-	if len(listEnvelope.Data) != 2 {
-		t.Fatalf("list = %d rows, want 2", len(listEnvelope.Data))
+	if len(listEnvelope.Data) != 3 {
+		t.Fatalf("list = %d rows, want 3", len(listEnvelope.Data))
 	}
 	seen := map[string]bool{}
 	for _, row := range listEnvelope.Data {
@@ -77,7 +83,7 @@ func TestAIMemoryLifecycle(t *testing.T) {
 	var eventJSONs []string
 	if err := store.DB.Table("workflow_events").
 		Where("aggregate_type = 'ai_memory' AND action = 'ai_memory_created'").
-		Pluck("current_json", &eventJSONs).Error; err != nil || len(eventJSONs) != 2 {
+		Pluck("current_json", &eventJSONs).Error; err != nil || len(eventJSONs) != 3 {
 		t.Fatalf("memory events missing: %v", err)
 	}
 	for _, eventJSON := range eventJSONs {
@@ -91,7 +97,7 @@ func TestAIMemoryLifecycle(t *testing.T) {
 		t.Fatalf("delete memory = %d: %s", deleted.Code, deleted.Body.String())
 	}
 	missing := performRequest(router, http.MethodDelete, "/api/v1/ai/memories/"+envelope.Data.ID, nil, nil)
-	assertAPIError(t, missing, http.StatusNotFound, "AI_PROVIDER_NOT_FOUND")
+	assertAPIError(t, missing, http.StatusNotFound, "AI_MEMORY_NOT_FOUND")
 }
 
 // atomicMemories records the last system prompt seen by the mock upstream.

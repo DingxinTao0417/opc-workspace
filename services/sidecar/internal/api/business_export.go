@@ -79,6 +79,21 @@ var businessExportExcludedTables = []string{
 	"ai_generations",
 	"ai_messages",
 	"ai_memories",
+	"ai_memory_entries",
+	"ai_run_steps",
+	"ai_evaluation_runs",
+	"ai_evaluation_results",
+	"ai_evaluation_reviews",
+	"knowledge_sources",
+	"knowledge_documents",
+	"knowledge_chunks",
+	"knowledge_index_jobs",
+	"knowledge_chunks_fts",
+	"knowledge_chunks_fts_data",
+	"knowledge_chunks_fts_idx",
+	"knowledge_chunks_fts_content",
+	"knowledge_chunks_fts_docsize",
+	"knowledge_chunks_fts_config",
 }
 
 type businessExportTable struct {

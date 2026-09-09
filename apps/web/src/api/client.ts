@@ -23,13 +23,40 @@ import type {
   AutomationRunStatus,
   AutomationTriggerType,
   AgentAdapter,
+  AiEvaluationListResult,
+  AiEvaluationReview,
+  AiEvaluationReviewDecision,
+  AiEvaluationReviewListResult,
+  AiEvaluationCategoryGroup,
+  AiEvaluationFailureGroup,
+  AiEvaluationQualityGroup,
+  AiEvaluationResult,
+  AiEvaluationRun,
+  AiEvaluationSummary,
+  AiEvaluationStatusCounts,
+  AiEvaluationSuiteKey,
+  CreateAiEvaluationReviewInput,
   AiProvider,
+  AiProviderKind,
   AiProviderProtocol,
   AiProviderStatus,
   AiMemory,
+  AiMemoryProposal,
+  AiBusinessContextPreview,
+  AiBusinessContextProviderSnapshot,
+  AiBusinessContextSource,
+  AiBusinessContextType,
   AiSession,
   AiMessage,
   AiMessageListResult,
+  AiKnowledgeContextSource,
+  AiCitation,
+  AiCitationStatus,
+  AiRunStep,
+  AiRunStepListResult,
+  AiUsageSummary,
+  AiUsageTotals,
+  AiUsageTrendPoint,
   CreateAiProviderInput,
   UpdateAiProviderInput,
   BackupArchiveDownload,
@@ -151,6 +178,13 @@ import type {
   InvoiceStatus,
   TransitionInvoiceInput,
   UpdateInvoiceInput,
+  KnowledgeImportResult,
+  KnowledgeIndexJob,
+  KnowledgeSearchResponse,
+  KnowledgeSearchResult,
+  KnowledgeSource,
+  KnowledgeSourceListResult,
+  KnowledgeSourcesCSVDownload,
   CreateInboxItemInput,
   LinkInboxItemTaskInput,
   MarkAllInboxReadResult,
@@ -10427,6 +10461,363 @@ export async function getInboxStats(): Promise<InboxStats> {
   return { serverNow, ...counts };
 }
 
+function knowledgeSourceFromRecord(value: unknown): KnowledgeSource {
+  if (!isRecord(value)) return invalidResponse("知识库来源响应格式无效");
+  const sourceType = stringField(value, "source_type", "sourceType");
+  const status = stringField(value, "status");
+  if (
+    (sourceType !== "text" && sourceType !== "markdown") ||
+    ![
+      "pending",
+      "indexing",
+      "ready",
+      "stale",
+      "missing",
+      "failed",
+      "deleted",
+    ].includes(status ?? "") ||
+    stringField(value, "import_mode", "importMode") !== "managed_copy"
+  ) {
+    return invalidResponse("知识库来源响应格式无效");
+  }
+  const rawDocumentVersion = fieldValue(
+    value,
+    "document_version",
+    "documentVersion",
+  );
+  const rawLatestJob = fieldValue(value, "latest_job", "latestJob");
+  return {
+    id: stringField(value, "id") ?? "",
+    name: stringField(value, "name") ?? "",
+    title: stringField(value, "title") ?? stringField(value, "name") ?? "",
+    sourceType,
+    importMode: "managed_copy",
+    mimeType: stringField(value, "mime_type", "mimeType") ?? "",
+    sizeBytes: nonNegativeInteger(
+      fieldValue(value, "size_bytes", "sizeBytes"),
+      "知识库来源大小",
+    ),
+    contentSha256: stringField(value, "content_sha256", "contentSha256") ?? "",
+    status: status as KnowledgeSource["status"],
+    lastIndexedAt: nullableString(
+      fieldValue(value, "last_indexed_at", "lastIndexedAt"),
+    ),
+    deletedAt: nullableString(fieldValue(value, "deleted_at", "deletedAt")),
+    deleteReason: nullableString(
+      fieldValue(value, "delete_reason", "deleteReason"),
+    ),
+    version: positiveInteger(value.version, "知识库来源版本"),
+    createdAt: stringField(value, "created_at", "createdAt") ?? "",
+    updatedAt: stringField(value, "updated_at", "updatedAt") ?? "",
+    documentId: nullableString(fieldValue(value, "document_id", "documentId")),
+    documentVersion:
+      rawDocumentVersion === null || rawDocumentVersion === undefined
+        ? null
+        : positiveInteger(rawDocumentVersion, "知识库文档版本"),
+    chunkCount: nonNegativeInteger(
+      fieldValue(value, "chunk_count", "chunkCount"),
+      "知识库分段数量",
+    ),
+    latestJob:
+      rawLatestJob === null || rawLatestJob === undefined
+        ? null
+        : knowledgeIndexJobFromRecord(rawLatestJob),
+  };
+}
+
+function knowledgeIndexJobFromRecord(value: unknown): KnowledgeIndexJob {
+  if (!isRecord(value)) return invalidResponse("知识库索引任务响应格式无效");
+  const operation = stringField(value, "operation");
+  const status = stringField(value, "status");
+  const stage = stringField(value, "stage");
+  if (
+    (operation !== "import" && operation !== "reindex") ||
+    !["queued", "running", "succeeded", "failed", "cancelled"].includes(
+      status ?? "",
+    ) ||
+    !["queued", "extracting", "chunking", "indexing", "complete"].includes(
+      stage ?? "",
+    )
+  ) {
+    return invalidResponse("知识库索引任务响应格式无效");
+  }
+  const progress = nonNegativeInteger(value.progress, "知识库索引进度");
+  if (progress > 100) return invalidResponse("知识库索引进度响应无效");
+  return {
+    id: stringField(value, "id") ?? "",
+    sourceId: stringField(value, "source_id", "sourceId") ?? "",
+    operation,
+    status: status as KnowledgeIndexJob["status"],
+    stage: stage as KnowledgeIndexJob["stage"],
+    progress,
+    attempt: positiveInteger(value.attempt, "知识库索引尝试次数"),
+    retryOfJobId: nullableString(
+      fieldValue(value, "retry_of_job_id", "retryOfJobId"),
+    ),
+    errorCode: nullableString(fieldValue(value, "error_code", "errorCode")),
+    cancelRequested:
+      fieldValue(value, "cancel_requested", "cancelRequested") === true,
+    startedAt: nullableString(fieldValue(value, "started_at", "startedAt")),
+    completedAt: nullableString(
+      fieldValue(value, "completed_at", "completedAt"),
+    ),
+    createdAt: stringField(value, "created_at", "createdAt") ?? "",
+  };
+}
+
+function knowledgeImportResult(value: unknown): KnowledgeImportResult {
+  const body = isRecord(value) && isRecord(value.data) ? value.data : value;
+  if (!isRecord(body)) return invalidResponse("知识库导入响应格式无效");
+  const source = knowledgeSourceFromRecord(body.source);
+  const job = knowledgeIndexJobFromRecord(body.job);
+  if (source.id !== job.sourceId) {
+    return invalidResponse("知识库导入来源与索引任务不一致");
+  }
+  return { source, job };
+}
+
+function knowledgeSearchResultFromRecord(
+  value: unknown,
+): KnowledgeSearchResult {
+  if (!isRecord(value) || !Array.isArray(value.highlights)) {
+    return invalidResponse("知识库检索结果响应格式无效");
+  }
+  const sourceType = stringField(value, "source_type", "sourceType");
+  if (sourceType !== "text" && sourceType !== "markdown") {
+    return invalidResponse("知识库检索来源类型无效");
+  }
+  const excerpt = stringField(value, "excerpt") ?? "";
+  const excerptLength = Array.from(excerpt).length;
+  const highlights = value.highlights.map((raw) => {
+    if (!isRecord(raw)) return invalidResponse("知识库高亮响应格式无效");
+    const start = nonNegativeInteger(raw.start, "知识库高亮起点");
+    const end = positiveInteger(raw.end, "知识库高亮终点");
+    if (end <= start || end > excerptLength) {
+      return invalidResponse("知识库高亮范围响应无效");
+    }
+    return { start, end };
+  });
+  return {
+    chunkId: stringField(value, "chunk_id", "chunkId") ?? "",
+    documentId: stringField(value, "document_id", "documentId") ?? "",
+    sourceId: stringField(value, "source_id", "sourceId") ?? "",
+    sourceName: stringField(value, "source_name", "sourceName") ?? "",
+    sourceType,
+    documentTitle: stringField(value, "document_title", "documentTitle") ?? "",
+    documentVersion: positiveInteger(
+      fieldValue(value, "document_version", "documentVersion"),
+      "知识库文档版本",
+    ),
+    chunkIndex: nonNegativeInteger(
+      fieldValue(value, "chunk_index", "chunkIndex"),
+      "知识库分段序号",
+    ),
+    startChar: nonNegativeInteger(
+      fieldValue(value, "start_char", "startChar"),
+      "知识库位置起点",
+    ),
+    endChar: positiveInteger(
+      fieldValue(value, "end_char", "endChar"),
+      "知识库位置终点",
+    ),
+    startLine: positiveInteger(
+      fieldValue(value, "start_line", "startLine"),
+      "知识库起始行",
+    ),
+    endLine: positiveInteger(
+      fieldValue(value, "end_line", "endLine"),
+      "知识库结束行",
+    ),
+    excerpt,
+    highlights,
+    rank: numeric(value.rank),
+  };
+}
+
+export async function getKnowledgeSources(
+  input: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    includeDeleted?: boolean;
+  } = {},
+): Promise<KnowledgeSourceListResult> {
+  const params = new URLSearchParams();
+  if (input.page) params.set("page", String(input.page));
+  if (input.pageSize) params.set("page_size", String(input.pageSize));
+  if (input.search?.trim()) params.set("search", input.search.trim());
+  if (input.includeDeleted) params.set("include_deleted", "true");
+  const suffix = params.size ? `?${params.toString()}` : "";
+  const payload = await apiRequest<unknown>(
+    `/api/v1/knowledge/sources${suffix}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("知识库来源列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(knowledgeSourceFromRecord),
+    meta: {
+      page: positiveInteger(payload.meta.page, "知识库来源页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "知识库来源每页数量",
+      ),
+      total: nonNegativeInteger(payload.meta.total, "知识库来源总数"),
+    },
+  };
+}
+
+export async function downloadKnowledgeSourcesCSV(): Promise<KnowledgeSourcesCSVDownload> {
+  return apiFetch(
+    "/api/v1/knowledge/sources/export.csv?confirm=true",
+    async (response) => {
+      if (!response.headers.get("Content-Type")?.startsWith("text/csv")) {
+        return invalidResponse("知识库来源清单响应格式无效");
+      }
+      return {
+        blob: await response.blob(),
+        fileName: downloadFileName(
+          response.headers.get("Content-Disposition"),
+          "knowledge-sources.csv",
+        ),
+      };
+    },
+  );
+}
+
+export async function createKnowledgeSource(
+  file: File,
+  title?: string,
+  idempotencyKey: string = crypto.randomUUID(),
+): Promise<KnowledgeImportResult> {
+  if (file.size < 1) {
+    throw new ApiError("知识库文件不能为空", {
+      code: "KNOWLEDGE_EMPTY_SOURCE",
+      status: 422,
+    });
+  }
+  if (file.size > 16 * 1024 * 1024) {
+    throw new ApiError("知识库文件不能超过 16 MiB", {
+      code: "KNOWLEDGE_SOURCE_TOO_LARGE",
+      status: 413,
+    });
+  }
+  if (!/\.(txt|md|markdown)$/i.test(file.name)) {
+    throw new ApiError("当前只支持 TXT、MD 和 Markdown 文件", {
+      code: "KNOWLEDGE_FORMAT_UNSUPPORTED",
+      status: 415,
+    });
+  }
+  const form = new FormData();
+  form.append("file", file, file.name);
+  if (title?.trim()) form.append("title", title.trim());
+  const payload = await apiRequest<unknown>(
+    "/api/v1/knowledge/sources",
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: form,
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  return knowledgeImportResult(payload);
+}
+
+export async function reindexKnowledgeSource(
+  id: string,
+  expectedVersion: number,
+): Promise<KnowledgeImportResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/knowledge/sources/${encodeURIComponent(id)}/reindex`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(expectedVersion),
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  return knowledgeImportResult(payload);
+}
+
+export async function deleteKnowledgeSource(
+  id: string,
+  expectedVersion: number,
+): Promise<void> {
+  await apiRequest<unknown>(
+    `/api/v1/knowledge/sources/${encodeURIComponent(id)}?confirm=true`,
+    { method: "DELETE", headers: expectedVersionHeader(expectedVersion) },
+  );
+}
+
+export async function searchKnowledge(
+  query: string,
+  sourceIds: string[] = [],
+  limit = 20,
+): Promise<KnowledgeSearchResponse> {
+  const payload = await apiRequest<unknown>("/api/v1/knowledge/search", {
+    method: "POST",
+    body: JSON.stringify({ query, source_ids: sourceIds, limit }),
+  });
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("知识库检索响应格式无效");
+  }
+  const rawSourceIds = fieldValue(payload.meta, "source_ids", "sourceIds");
+  if (
+    !Array.isArray(rawSourceIds) ||
+    rawSourceIds.some((id) => typeof id !== "string")
+  ) {
+    return invalidResponse("知识库检索来源筛选响应格式无效");
+  }
+  return {
+    items: payload.data.map(knowledgeSearchResultFromRecord),
+    query: stringField(payload.meta, "query") ?? query,
+    sourceIds: rawSourceIds as string[],
+  };
+}
+
+export async function getKnowledgeIndexJob(
+  id: string,
+): Promise<KnowledgeIndexJob> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/knowledge/index-jobs/${encodeURIComponent(id)}`,
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return knowledgeIndexJobFromRecord(body);
+}
+
+export async function cancelKnowledgeIndexJob(
+  id: string,
+): Promise<KnowledgeIndexJob> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/knowledge/index-jobs/${encodeURIComponent(id)}/cancel`,
+    { method: "POST" },
+  );
+  const body = isRecord(payload) && "data" in payload ? payload.data : payload;
+  return knowledgeIndexJobFromRecord(body);
+}
+
+export async function retryKnowledgeIndexJob(
+  id: string,
+  expectedSourceVersion: number,
+): Promise<KnowledgeImportResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/knowledge/index-jobs/${encodeURIComponent(id)}/retry`,
+    {
+      method: "POST",
+      headers: expectedVersionHeader(expectedSourceVersion),
+    },
+    ARTIFACT_TRANSFER_TIMEOUT_MS,
+  );
+  return knowledgeImportResult(payload);
+}
+
 export async function getAiProviders(): Promise<AiProvider[]> {
   const payload = await apiRequest<unknown>("/api/v1/ai/providers");
   return aiProviderList(payload);
@@ -10554,7 +10945,11 @@ export async function getAiMemories(): Promise<AiMemory[]> {
 }
 
 export async function createAiMemory(
-  input: { content: string; source_message_id?: string },
+  input: {
+    content: string;
+    source_message_id?: string;
+    proposal_id?: string;
+  },
   idempotencyKey: string,
 ): Promise<AiMemory> {
   const payload = await apiRequest<unknown>("/api/v1/ai/memories", {
@@ -10570,6 +10965,265 @@ export async function deleteAiMemory(id: string): Promise<void> {
   await apiRequest<unknown>(`/api/v1/ai/memories/${id}`, { method: "DELETE" });
 }
 
+function aiMemoryProposalFromRecord(row: unknown): AiMemoryProposal {
+  if (!isRecord(row) || !Array.isArray(row.tags)) {
+    return invalidResponse("AI 记忆建议响应格式无效");
+  }
+  const tags = row.tags.map((tag) => {
+    if (typeof tag !== "string") {
+      return invalidResponse("AI 记忆建议标签格式无效");
+    }
+    return tag;
+  });
+  return {
+    id: stringField(row, "id") ?? "",
+    session_id: stringField(row, "session_id") ?? "",
+    session_title: stringField(row, "session_title") ?? "",
+    content: stringField(row, "content") ?? "",
+    tags,
+    created_at: stringField(row, "created_at") ?? "",
+  };
+}
+
+export async function getAiMemoryProposals(): Promise<AiMemoryProposal[]> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/memory-proposals");
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("AI 记忆建议列表响应格式无效");
+  }
+  return payload.data.map((row) => aiMemoryProposalFromRecord(row));
+}
+
+export async function rejectAiMemoryProposal(id: string): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/ai/memory-proposals/${id}`, {
+    method: "DELETE",
+  });
+}
+
+function aiBusinessContextSourceFromRecord(
+  row: unknown,
+): AiBusinessContextSource {
+  if (
+    !isRecord(row) ||
+    !isRecord(row.fields) ||
+    !Array.isArray(row.truncated_fields)
+  ) {
+    return invalidResponse("AI 业务上下文响应格式无效");
+  }
+  const type = stringField(row, "type");
+  if (type !== "task" && type !== "project" && type !== "client") {
+    return invalidResponse("AI 业务上下文类型无效");
+  }
+  const truncatedFields = row.truncated_fields.map((field) => {
+    if (typeof field !== "string") {
+      return invalidResponse("AI 业务上下文截断标记无效");
+    }
+    return field;
+  });
+  return {
+    type,
+    id: stringField(row, "id") ?? "",
+    version: numeric(row.version, 0),
+    label: stringField(row, "label") ?? "",
+    fields: row.fields,
+    truncated_fields: truncatedFields,
+  };
+}
+
+function aiBusinessContextProviderFromRecord(
+  row: unknown,
+): AiBusinessContextProviderSnapshot | null {
+  if (row === null || row === undefined) return null;
+  if (!isRecord(row)) {
+    return invalidResponse("AI 业务上下文供应商响应格式无效");
+  }
+  const kind = stringField(row, "kind");
+  if (kind !== "local" && kind !== "remote") {
+    return invalidResponse("AI 业务上下文供应商类型无效");
+  }
+  return {
+    id: stringField(row, "id") ?? "",
+    name: stringField(row, "name") ?? "",
+    kind,
+    version: numeric(row.version, 0),
+  };
+}
+
+function aiKnowledgeContextSourceFromRecord(
+  row: unknown,
+): AiKnowledgeContextSource {
+  if (!isRecord(row)) {
+    return invalidResponse("AI 知识库上下文响应格式无效");
+  }
+  const sourceType = stringField(row, "source_type", "sourceType");
+  if (sourceType !== "text" && sourceType !== "markdown") {
+    return invalidResponse("AI 知识库来源类型无效");
+  }
+  const startChar = nonNegativeInteger(
+    fieldValue(row, "start_char", "startChar"),
+    "AI 知识库字符起点",
+  );
+  const endChar = positiveInteger(
+    fieldValue(row, "end_char", "endChar"),
+    "AI 知识库字符终点",
+  );
+  const startLine = positiveInteger(
+    fieldValue(row, "start_line", "startLine"),
+    "AI 知识库起始行",
+  );
+  const endLine = positiveInteger(
+    fieldValue(row, "end_line", "endLine"),
+    "AI 知识库结束行",
+  );
+  if (endChar <= startChar || endLine < startLine) {
+    return invalidResponse("AI 知识库位置响应无效");
+  }
+  return {
+    source_id: stringField(row, "source_id", "sourceId") ?? "",
+    source_name: stringField(row, "source_name", "sourceName") ?? "",
+    source_version: positiveInteger(
+      fieldValue(row, "source_version", "sourceVersion"),
+      "AI 知识库来源版本",
+    ),
+    source_type: sourceType,
+    document_id: stringField(row, "document_id", "documentId") ?? "",
+    document_title: stringField(row, "document_title", "documentTitle") ?? "",
+    document_version: positiveInteger(
+      fieldValue(row, "document_version", "documentVersion"),
+      "AI 知识库文档版本",
+    ),
+    chunk_id: stringField(row, "chunk_id", "chunkId") ?? "",
+    chunk_index: nonNegativeInteger(
+      fieldValue(row, "chunk_index", "chunkIndex"),
+      "AI 知识库分段序号",
+    ),
+    start_char: startChar,
+    end_char: endChar,
+    start_line: startLine,
+    end_line: endLine,
+    content: stringField(row, "content") ?? "",
+  };
+}
+
+function aiCitationFromRecord(row: unknown): AiCitation {
+  if (!isRecord(row)) return invalidResponse("AI 引用响应格式无效");
+  const sourceType = stringField(row, "source_type", "sourceType");
+  if (sourceType !== "text" && sourceType !== "markdown") {
+    return invalidResponse("AI 引用来源类型无效");
+  }
+  const startChar = nonNegativeInteger(
+    fieldValue(row, "start_char", "startChar"),
+    "AI 引用字符起点",
+  );
+  const endChar = positiveInteger(
+    fieldValue(row, "end_char", "endChar"),
+    "AI 引用字符终点",
+  );
+  const startLine = positiveInteger(
+    fieldValue(row, "start_line", "startLine"),
+    "AI 引用起始行",
+  );
+  const endLine = positiveInteger(
+    fieldValue(row, "end_line", "endLine"),
+    "AI 引用结束行",
+  );
+  if (endChar <= startChar || endLine < startLine) {
+    return invalidResponse("AI 引用位置响应无效");
+  }
+  return {
+    chunk_id: stringField(row, "chunk_id", "chunkId") ?? "",
+    source_id: stringField(row, "source_id", "sourceId") ?? "",
+    source_name: stringField(row, "source_name", "sourceName") ?? "",
+    source_type: sourceType,
+    source_version: positiveInteger(
+      fieldValue(row, "source_version", "sourceVersion"),
+      "AI 引用来源版本",
+    ),
+    document_id: stringField(row, "document_id", "documentId") ?? "",
+    document_title: stringField(row, "document_title", "documentTitle") ?? "",
+    document_version: positiveInteger(
+      fieldValue(row, "document_version", "documentVersion"),
+      "AI 引用文档版本",
+    ),
+    chunk_index: nonNegativeInteger(
+      fieldValue(row, "chunk_index", "chunkIndex"),
+      "AI 引用分段序号",
+    ),
+    start_char: startChar,
+    end_char: endChar,
+    start_line: startLine,
+    end_line: endLine,
+  };
+}
+
+function aiCitationsFromMessage(row: JsonRecord): {
+  status: AiCitationStatus;
+  items: AiCitation[];
+} {
+  const rawStatus = fieldValue(row, "citation_status", "citationStatus");
+  const status: AiCitationStatus =
+    rawStatus === undefined
+      ? "not_requested"
+      : rawStatus === "not_requested" ||
+          rawStatus === "validated" ||
+          rawStatus === "no_evidence" ||
+          rawStatus === "missing" ||
+          rawStatus === "invalid"
+        ? rawStatus
+        : invalidResponse("AI 引用状态响应无效");
+  const rawItems = fieldValue(row, "citations");
+  const items =
+    rawItems === undefined
+      ? []
+      : Array.isArray(rawItems)
+        ? rawItems.map(aiCitationFromRecord)
+        : invalidResponse("AI 引用列表响应格式无效");
+  if ((status === "validated") !== items.length > 0 || items.length > 3) {
+    return invalidResponse("AI 引用状态与列表不一致");
+  }
+  return { status, items };
+}
+
+export async function previewAiBusinessContext(input: {
+  provider_id: string;
+  sources: Array<{ type: AiBusinessContextType; id: string }>;
+  knowledge?: Array<{
+    source_id: string;
+    document_id: string;
+    chunk_id: string;
+  }>;
+}): Promise<AiBusinessContextPreview> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/context/preview", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 业务上下文预览响应格式无效");
+  }
+  const row = payload.data;
+  const providerKind = stringField(row, "provider_kind");
+  if (
+    (providerKind !== "local" && providerKind !== "remote") ||
+    !Array.isArray(row.sources) ||
+    !(row.knowledge === undefined || Array.isArray(row.knowledge))
+  ) {
+    return invalidResponse("AI 业务上下文预览响应格式无效");
+  }
+  return {
+    provider_id: stringField(row, "provider_id") ?? "",
+    provider_name: stringField(row, "provider_name") ?? "",
+    provider_kind: providerKind,
+    provider_version: numeric(row.provider_version, 0),
+    leaves_device: row.leaves_device === true,
+    serialized_bytes: numeric(row.serialized_bytes, 0),
+    sources: row.sources.map((source) =>
+      aiBusinessContextSourceFromRecord(source),
+    ),
+    knowledge: Array.isArray(row.knowledge)
+      ? row.knowledge.map(aiKnowledgeContextSourceFromRecord)
+      : [],
+  };
+}
+
 export async function getAiSessions(): Promise<AiSession[]> {
   const payload = await apiRequest<unknown>("/api/v1/ai/sessions");
   if (!isRecord(payload) || !Array.isArray(payload.data)) {
@@ -10581,6 +11235,7 @@ export async function getAiSessions(): Promise<AiSession[]> {
       id: stringField(row, "id") ?? "",
       title: stringField(row, "title") ?? "",
       persist: row.persist !== false,
+      compacted_message_count: numeric(row.compacted_message_count, 0),
       version: numeric(row.version, 0),
       created_at: stringField(row, "created_at") ?? "",
       updated_at: stringField(row, "updated_at") ?? "",
@@ -10601,6 +11256,7 @@ export async function createAiSession(): Promise<AiSession> {
     id: stringField(row, "id") ?? "",
     title: stringField(row, "title") ?? "",
     persist: row.persist !== false,
+    compacted_message_count: numeric(row.compacted_message_count, 0),
     version: numeric(row.version, 0),
     created_at: stringField(row, "created_at") ?? "",
     updated_at: stringField(row, "updated_at") ?? "",
@@ -10641,6 +11297,7 @@ export async function getAiMessages(
     if (!isRecord(row)) return invalidResponse("AI 消息响应格式无效");
     const role = stringField(row, "role");
     const status = stringField(row, "status");
+    const citation = aiCitationsFromMessage(row);
     return {
       id: stringField(row, "id") ?? "",
       session_id: stringField(row, "session_id") ?? "",
@@ -10650,6 +11307,20 @@ export async function getAiMessages(
       reasoning: stringField(row, "reasoning") ?? null,
       task_id: stringField(row, "task_id") ?? null,
       task_title_snapshot: stringField(row, "task_title_snapshot") ?? null,
+      generation_id: stringField(row, "generation_id", "generationId") ?? null,
+      context_provider: aiBusinessContextProviderFromRecord(
+        row.context_provider,
+      ),
+      context_sources: Array.isArray(row.context_sources)
+        ? row.context_sources.map((source) =>
+            aiBusinessContextSourceFromRecord(source),
+          )
+        : [],
+      context_knowledge: Array.isArray(row.context_knowledge)
+        ? row.context_knowledge.map(aiKnowledgeContextSourceFromRecord)
+        : [],
+      citation_status: citation.status,
+      citations: citation.items,
       created_at: stringField(row, "created_at") ?? "",
     } satisfies AiMessage;
   });
@@ -10661,6 +11332,1875 @@ export async function getAiMessages(
       oldest_id: stringField(payload.meta, "oldest_id"),
     },
   };
+}
+
+function aiRunStepFromRecord(row: unknown): AiRunStep {
+  if (!isRecord(row)) return invalidResponse("AI 运行步骤响应格式无效");
+  if (
+    [
+      "prompt",
+      "content",
+      "reasoning",
+      "arguments",
+      "result",
+      "api_key",
+      "base_url",
+    ].some((field) => field in row)
+  ) {
+    return invalidResponse("AI 运行步骤响应包含禁止的正文或凭据字段");
+  }
+  const kind = stringField(row, "kind");
+  const status = stringField(row, "status");
+  if (
+    kind !== "generation" &&
+    kind !== "model_turn" &&
+    kind !== "tool_call" &&
+    kind !== "self_check" &&
+    kind !== "citation_validation" &&
+    kind !== "persistence"
+  ) {
+    return invalidResponse("AI 运行步骤类型无效");
+  }
+  if (
+    status !== "running" &&
+    status !== "succeeded" &&
+    status !== "failed" &&
+    status !== "cancelled"
+  ) {
+    return invalidResponse("AI 运行步骤状态无效");
+  }
+  const turnIndexRaw = fieldValue(row, "turn_index", "turnIndex");
+  const turnIndex =
+    turnIndexRaw === null || turnIndexRaw === undefined
+      ? null
+      : positiveInteger(turnIndexRaw, "AI 运行轮次");
+  const toolName = nullableString(fieldValue(row, "tool_name", "toolName"));
+  const completedAt = nullableString(
+    fieldValue(row, "completed_at", "completedAt"),
+  );
+  const durationRaw = fieldValue(row, "duration_ms", "durationMs");
+  const durationMs =
+    durationRaw === null || durationRaw === undefined
+      ? null
+      : nonNegativeInteger(durationRaw, "AI 运行步骤耗时");
+  const errorCode = nullableString(fieldValue(row, "error_code", "errorCode"));
+  const inputTokensRaw = fieldValue(row, "input_tokens", "inputTokens");
+  const outputTokensRaw = fieldValue(row, "output_tokens", "outputTokens");
+  const inputTokens =
+    inputTokensRaw === null || inputTokensRaw === undefined
+      ? null
+      : nonNegativeInteger(inputTokensRaw, "AI Provider 输入 token");
+  const outputTokens =
+    outputTokensRaw === null || outputTokensRaw === undefined
+      ? null
+      : nonNegativeInteger(outputTokensRaw, "AI Provider 输出 token");
+  const rawTokenSource = nullableString(
+    fieldValue(row, "token_source", "tokenSource"),
+  );
+  const usageComplete =
+    rawTokenSource === "provider" &&
+    inputTokens !== null &&
+    outputTokens !== null;
+  const usageEmpty =
+    rawTokenSource === null && inputTokens === null && outputTokens === null;
+  if (
+    (kind === "model_turn" || kind === "self_check") !== (turnIndex !== null) ||
+    (kind === "tool_call") !== (toolName !== null) ||
+    (status === "running" &&
+      (completedAt !== null || durationMs !== null || errorCode !== null)) ||
+    (status !== "running" && (completedAt === null || durationMs === null)) ||
+    (status === "failed") !== (errorCode !== null) ||
+    (!usageComplete && !usageEmpty)
+  ) {
+    return invalidResponse("AI 运行步骤状态组合无效");
+  }
+  return {
+    id: stringField(row, "id") ?? "",
+    generationId: stringField(row, "generation_id", "generationId") ?? "",
+    sequence: positiveInteger(row.sequence, "AI 运行步骤序号"),
+    kind,
+    status,
+    turnIndex,
+    toolName,
+    startedAt: stringField(row, "started_at", "startedAt") ?? "",
+    completedAt,
+    durationMs,
+    inputBytes: nonNegativeInteger(
+      fieldValue(row, "input_bytes", "inputBytes"),
+      "AI 运行输入字节",
+    ),
+    outputBytes: nonNegativeInteger(
+      fieldValue(row, "output_bytes", "outputBytes"),
+      "AI 运行输出字节",
+    ),
+    inputTokens,
+    outputTokens,
+    tokenSource: rawTokenSource === "provider" ? "provider" : null,
+    errorCode,
+  };
+}
+
+export async function getAiRunSteps(
+  generationId: string,
+): Promise<AiRunStepListResult> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/generations/${encodeURIComponent(generationId)}/steps`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("AI 运行步骤列表响应格式无效");
+  }
+  const items = payload.data.map(aiRunStepFromRecord);
+  const metaGenerationId =
+    stringField(payload.meta, "generation_id", "generationId") ?? "";
+  const status = stringField(payload.meta, "status");
+  if (
+    metaGenerationId !== generationId ||
+    (status !== "queued" &&
+      status !== "streaming" &&
+      status !== "completed" &&
+      status !== "failed" &&
+      status !== "cancelled") ||
+    items.some(
+      (item, index) =>
+        item.generationId !== generationId || item.sequence !== index + 1,
+    )
+  ) {
+    return invalidResponse("AI 运行步骤列表响应不一致");
+  }
+  const total = nonNegativeInteger(payload.meta.total, "AI 运行步骤总数");
+  const metaInputTokens = nullableNonNegativeInteger(
+    fieldValue(payload.meta, "input_tokens", "inputTokens"),
+    "AI Provider 输入总 token",
+  );
+  const metaOutputTokens = nullableNonNegativeInteger(
+    fieldValue(payload.meta, "output_tokens", "outputTokens"),
+    "AI Provider 输出总 token",
+  );
+  const metaTokenSource = nullableString(
+    fieldValue(payload.meta, "token_source", "tokenSource"),
+  );
+  const metaUsageComplete =
+    metaTokenSource === "provider" &&
+    metaInputTokens !== null &&
+    metaOutputTokens !== null;
+  const metaUsageEmpty =
+    metaTokenSource === null &&
+    metaInputTokens === null &&
+    metaOutputTokens === null;
+  if (total !== items.length || (!metaUsageComplete && !metaUsageEmpty)) {
+    return invalidResponse("AI 运行步骤总数不一致");
+  }
+  return {
+    items,
+    meta: {
+      generationId,
+      status,
+      total,
+      inputBytes: nonNegativeInteger(
+        fieldValue(payload.meta, "input_bytes", "inputBytes"),
+        "AI 运行输入总字节",
+      ),
+      outputBytes: nonNegativeInteger(
+        fieldValue(payload.meta, "output_bytes", "outputBytes"),
+        "AI 运行输出总字节",
+      ),
+      durationMs: nonNegativeInteger(
+        fieldValue(payload.meta, "duration_ms", "durationMs"),
+        "AI 运行总耗时",
+      ),
+      inputTokens: metaInputTokens,
+      outputTokens: metaOutputTokens,
+      tokenSource: metaTokenSource === "provider" ? "provider" : null,
+    },
+  };
+}
+
+function aiUsageTotalsFromRecord(row: unknown, label: string): AiUsageTotals {
+  if (!isRecord(row)) return invalidResponse(`${label}响应格式无效`);
+  const totals: AiUsageTotals = {
+    totalGenerations: nonNegativeInteger(
+      fieldValue(row, "total_generations", "totalGenerations"),
+      `${label}生成总数`,
+    ),
+    completedGenerations: nonNegativeInteger(
+      fieldValue(row, "completed_generations", "completedGenerations"),
+      `${label}已完成数`,
+    ),
+    failedGenerations: nonNegativeInteger(
+      fieldValue(row, "failed_generations", "failedGenerations"),
+      `${label}失败数`,
+    ),
+    cancelledGenerations: nonNegativeInteger(
+      fieldValue(row, "cancelled_generations", "cancelledGenerations"),
+      `${label}取消数`,
+    ),
+    activeGenerations: nonNegativeInteger(
+      fieldValue(row, "active_generations", "activeGenerations"),
+      `${label}活动数`,
+    ),
+    providerUsageGenerations: nonNegativeInteger(
+      fieldValue(row, "provider_usage_generations", "providerUsageGenerations"),
+      `${label}Provider usage 数`,
+    ),
+    unknownUsageGenerations: nonNegativeInteger(
+      fieldValue(row, "unknown_usage_generations", "unknownUsageGenerations"),
+      `${label}未知 usage 数`,
+    ),
+    inputTokens: nonNegativeInteger(
+      fieldValue(row, "input_tokens", "inputTokens"),
+      `${label}输入 token`,
+    ),
+    outputTokens: nonNegativeInteger(
+      fieldValue(row, "output_tokens", "outputTokens"),
+      `${label}输出 token`,
+    ),
+    inputBytes: nonNegativeInteger(
+      fieldValue(row, "input_bytes", "inputBytes"),
+      `${label}输入字节`,
+    ),
+    outputBytes: nonNegativeInteger(
+      fieldValue(row, "output_bytes", "outputBytes"),
+      `${label}输出字节`,
+    ),
+    durationMs: nonNegativeInteger(
+      fieldValue(row, "duration_ms", "durationMs"),
+      `${label}总耗时`,
+    ),
+  };
+  const terminalGenerations =
+    totals.completedGenerations +
+    totals.failedGenerations +
+    totals.cancelledGenerations;
+  if (
+    terminalGenerations + totals.activeGenerations !==
+      totals.totalGenerations ||
+    totals.providerUsageGenerations + totals.unknownUsageGenerations !==
+      terminalGenerations
+  ) {
+    return invalidResponse(`${label}状态计数不一致`);
+  }
+  return totals;
+}
+
+const aiUsageForbiddenFields = [
+  "prompt",
+  "content",
+  "reasoning",
+  "arguments",
+  "result",
+  "api_key",
+  "base_url",
+  "estimated_tokens",
+  "estimated_cost",
+  "cost",
+  "cost_minor",
+  "currency",
+];
+
+function aiUsageTrendPointFromRecord(row: unknown): AiUsageTrendPoint {
+  if (!isRecord(row) || aiUsageForbiddenFields.some((field) => field in row)) {
+    return invalidResponse("AI 本地用量趋势响应格式无效");
+  }
+  const day = stringField(row, "day") ?? "";
+  const parsed = new Date(`${day}T00:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== day
+  ) {
+    return invalidResponse("AI 本地用量趋势日期无效");
+  }
+  const totals = aiUsageTotalsFromRecord(row, "AI 本地用量趋势");
+  if (totals.activeGenerations !== 0) {
+    return invalidResponse("AI 本地用量趋势不能包含活动生成");
+  }
+  return { day, ...totals };
+}
+
+function aiUsageSummaryFromEnvelope(
+  payload: unknown,
+  expectedSessionId: string | null,
+  expectedProviderId: string | null,
+  expectedTrendDays: number,
+): AiUsageSummary {
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 本地用量响应格式无效");
+  }
+  const data = payload.data;
+  if (
+    !isRecord(data.scope) ||
+    !isRecord(data.totals) ||
+    !Array.isArray(data.providers) ||
+    !Array.isArray(data.trend)
+  ) {
+    return invalidResponse("AI 本地用量响应格式无效");
+  }
+  if (
+    [data, data.scope, data.totals, ...data.providers, ...data.trend].some(
+      (row) =>
+        isRecord(row) && aiUsageForbiddenFields.some((field) => field in row),
+    )
+  ) {
+    return invalidResponse("AI 本地用量响应包含禁止的正文或凭据字段");
+  }
+  const sessionId = nullableString(
+    fieldValue(data.scope, "session_id", "sessionId"),
+  );
+  const providerId = nullableString(
+    fieldValue(data.scope, "provider_id", "providerId"),
+  );
+  if (sessionId !== expectedSessionId || providerId !== expectedProviderId) {
+    return invalidResponse("AI 本地用量范围不一致");
+  }
+  const totals = aiUsageTotalsFromRecord(data.totals, "AI 本地用量");
+  const trendDays = positiveInteger(
+    fieldValue(data, "trend_days", "trendDays"),
+    "AI 本地用量趋势天数",
+  );
+  if (trendDays !== expectedTrendDays) {
+    return invalidResponse("AI 本地用量趋势范围不一致");
+  }
+  const trend = data.trend.map(aiUsageTrendPointFromRecord);
+  if (
+    trend.length !== trendDays ||
+    trend.some((point, index) => {
+      if (index === 0) return false;
+      const previous = new Date(`${trend[index - 1]?.day}T00:00:00Z`);
+      const current = new Date(`${point.day}T00:00:00Z`);
+      return current.getTime() - previous.getTime() !== 86_400_000;
+    }) ||
+    trend.some((point) =>
+      (Object.keys(totals) as Array<keyof AiUsageTotals>).some(
+        (key) => point[key] > totals[key],
+      ),
+    )
+  ) {
+    return invalidResponse("AI 本地用量趋势分组或范围不一致");
+  }
+  const providers = data.providers.map((row) => {
+    if (!isRecord(row)) return invalidResponse("AI Provider 用量响应格式无效");
+    const kind = stringField(row, "provider_kind", "providerKind");
+    const protocol = stringField(row, "provider_protocol", "providerProtocol");
+    if (
+      (kind !== "local" && kind !== "remote") ||
+      (protocol !== "openai_chat" && protocol !== "anthropic_messages")
+    ) {
+      return invalidResponse("AI Provider 用量身份无效");
+    }
+    const providerTotals = aiUsageTotalsFromRecord(row, "AI Provider 用量");
+    const providerRecord = {
+      providerId: stringField(row, "provider_id", "providerId") ?? "",
+      providerName: stringField(row, "provider_name", "providerName") ?? "",
+      model: stringField(row, "model") ?? "",
+    };
+    if (
+      !providerRecord.providerId ||
+      !providerRecord.providerName ||
+      !providerRecord.model
+    ) {
+      return invalidResponse("AI Provider 用量身份无效");
+    }
+    return {
+      ...providerRecord,
+      providerKind: kind as AiProviderKind,
+      providerProtocol: protocol as AiProviderProtocol,
+      ...providerTotals,
+    };
+  });
+  if (
+    new Set(providers.map((provider) => provider.providerId)).size !==
+    providers.length
+  ) {
+    return invalidResponse("AI Provider 用量分组重复");
+  }
+  const summed = providers.reduce<AiUsageTotals>(
+    (result, provider) => ({
+      totalGenerations: result.totalGenerations + provider.totalGenerations,
+      completedGenerations:
+        result.completedGenerations + provider.completedGenerations,
+      failedGenerations: result.failedGenerations + provider.failedGenerations,
+      cancelledGenerations:
+        result.cancelledGenerations + provider.cancelledGenerations,
+      activeGenerations: result.activeGenerations + provider.activeGenerations,
+      providerUsageGenerations:
+        result.providerUsageGenerations + provider.providerUsageGenerations,
+      unknownUsageGenerations:
+        result.unknownUsageGenerations + provider.unknownUsageGenerations,
+      inputTokens: result.inputTokens + provider.inputTokens,
+      outputTokens: result.outputTokens + provider.outputTokens,
+      inputBytes: result.inputBytes + provider.inputBytes,
+      outputBytes: result.outputBytes + provider.outputBytes,
+      durationMs: result.durationMs + provider.durationMs,
+    }),
+    {
+      totalGenerations: 0,
+      completedGenerations: 0,
+      failedGenerations: 0,
+      cancelledGenerations: 0,
+      activeGenerations: 0,
+      providerUsageGenerations: 0,
+      unknownUsageGenerations: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      inputBytes: 0,
+      outputBytes: 0,
+      durationMs: 0,
+    },
+  );
+  if (
+    (Object.keys(totals) as Array<keyof AiUsageTotals>).some(
+      (key) => totals[key] !== summed[key],
+    )
+  ) {
+    return invalidResponse("AI 本地用量 Provider 汇总不一致");
+  }
+  return {
+    scope: { sessionId, providerId },
+    totals,
+    providers,
+    trendDays,
+    trend,
+  };
+}
+
+export async function getAiUsageSummary(
+  input: {
+    sessionId?: string;
+    providerId?: string;
+    trendDays?: number;
+  } = {},
+): Promise<AiUsageSummary> {
+  const params = new URLSearchParams();
+  if (input.sessionId) params.set("session_id", input.sessionId);
+  if (input.providerId) params.set("provider_id", input.providerId);
+  const trendDays = input.trendDays ?? 7;
+  params.set("trend_days", String(trendDays));
+  const query = params.size > 0 ? `?${params}` : "";
+  const payload = await apiRequest<unknown>(`/api/v1/ai/usage-summary${query}`);
+  return aiUsageSummaryFromEnvelope(
+    payload,
+    input.sessionId ?? null,
+    input.providerId ?? null,
+    trendDays,
+  );
+}
+
+const aiEvaluationFailureCodes = new Set([
+  "CASE_ID_MISMATCH",
+  "ANSWER_EMPTY",
+  "CONTROL_BLOCK_LEAKED",
+  "CITATION_STATUS_MISMATCH",
+  "REQUIRED_PHRASE_MISSING",
+  "FORBIDDEN_PHRASE_PRESENT",
+  "CITATION_NOT_ALLOWED",
+  "CITATION_DUPLICATE",
+  "CITATION_COUNT_LOW",
+  "CITATION_SET_MISMATCH",
+  "OBSERVATION_MISSING",
+]);
+
+function aiEvaluationForbiddenField(row: Record<string, unknown>) {
+  return [
+    "prompt",
+    "question",
+    "chunks",
+    "content",
+    "answer",
+    "reasoning",
+    "arguments",
+    "result",
+    "base_url",
+    "api_key",
+  ].some((field) => field in row);
+}
+
+function aiEvaluationResultFromRecord(
+  row: unknown,
+  expectedRunId: string,
+): AiEvaluationResult {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测结果包含无效或禁止字段");
+  }
+  const status = stringField(row, "status");
+  const language = stringField(row, "language");
+  const category = stringField(row, "category");
+  const citationStatus = nullableString(
+    fieldValue(row, "citation_status", "citationStatus"),
+  );
+  const errorCode = nullableString(fieldValue(row, "error_code", "errorCode"));
+  const rawFailureCodes = fieldValue(row, "failure_codes", "failureCodes");
+  if (
+    (status !== "passed" && status !== "failed" && status !== "error") ||
+    (language !== "zh-CN" && language !== "en") ||
+    (category !== "grounded" &&
+      category !== "no_evidence" &&
+      category !== "prompt_injection" &&
+      category !== "conflicting_sources") ||
+    !Array.isArray(rawFailureCodes) ||
+    rawFailureCodes.some(
+      (code) => typeof code !== "string" || !aiEvaluationFailureCodes.has(code),
+    ) ||
+    (citationStatus !== null &&
+      citationStatus !== "validated" &&
+      citationStatus !== "no_evidence" &&
+      citationStatus !== "missing" &&
+      citationStatus !== "invalid")
+  ) {
+    return invalidResponse("AI 本地评测结果格式无效");
+  }
+  const inputTokens = nullableNonNegativeInteger(
+    fieldValue(row, "input_tokens", "inputTokens"),
+    "AI 本地评测输入 token",
+  );
+  const outputTokens = nullableNonNegativeInteger(
+    fieldValue(row, "output_tokens", "outputTokens"),
+    "AI 本地评测输出 token",
+  );
+  const tokenSource = nullableString(
+    fieldValue(row, "token_source", "tokenSource"),
+  );
+  const usageComplete =
+    tokenSource === "provider" && inputTokens !== null && outputTokens !== null;
+  const usageEmpty =
+    tokenSource === null && inputTokens === null && outputTokens === null;
+  const failureCodes = rawFailureCodes as string[];
+  if (
+    (!usageComplete && !usageEmpty) ||
+    (status === "passed" &&
+      (failureCodes.length !== 0 ||
+        errorCode !== null ||
+        citationStatus === null)) ||
+    (status === "failed" &&
+      (failureCodes.length === 0 ||
+        errorCode !== null ||
+        citationStatus === null)) ||
+    (status === "error" &&
+      (failureCodes.length !== 0 ||
+        errorCode === null ||
+        citationStatus !== null))
+  ) {
+    return invalidResponse("AI 本地评测结果状态组合无效");
+  }
+  const runId = stringField(row, "run_id", "runId") ?? "";
+  const id = stringField(row, "id") ?? "";
+  const caseId = stringField(row, "case_id", "caseId") ?? "";
+  const citationCount = nonNegativeInteger(
+    fieldValue(row, "citation_count", "citationCount"),
+    "AI 本地评测引用数",
+    3,
+  );
+  if (
+    !id ||
+    !caseId ||
+    runId !== expectedRunId ||
+    (status !== "error" &&
+      ((citationStatus === "validated" && citationCount === 0) ||
+        (citationStatus !== "validated" && citationCount !== 0)))
+  ) {
+    return invalidResponse("AI 本地评测结果归属不一致");
+  }
+  return {
+    id,
+    runId,
+    sequence: positiveInteger(row.sequence, "AI 本地评测结果序号"),
+    caseId,
+    language,
+    category,
+    status,
+    failureCodes,
+    citationStatus,
+    citationCount,
+    durationMs: nonNegativeInteger(
+      fieldValue(row, "duration_ms", "durationMs"),
+      "AI 本地评测耗时",
+    ),
+    inputBytes: nonNegativeInteger(
+      fieldValue(row, "input_bytes", "inputBytes"),
+      "AI 本地评测输入字节",
+    ),
+    outputBytes: nonNegativeInteger(
+      fieldValue(row, "output_bytes", "outputBytes"),
+      "AI 本地评测输出字节",
+    ),
+    inputTokens,
+    outputTokens,
+    tokenSource: tokenSource === "provider" ? "provider" : null,
+    errorCode,
+    createdAt: stringField(row, "created_at", "createdAt") ?? "",
+  };
+}
+
+function aiEvaluationSuiteKeyFromRecord(row: JsonRecord): AiEvaluationSuiteKey {
+  const suiteKey = stringField(row, "suite_key", "suiteKey");
+  if (
+    suiteKey !== "smoke" &&
+    suiteKey !== "full" &&
+    suiteKey !== "grounded" &&
+    suiteKey !== "no_evidence" &&
+    suiteKey !== "prompt_injection" &&
+    suiteKey !== "conflicting_sources"
+  ) {
+    return invalidResponse("AI 本地评测套件无效");
+  }
+  return suiteKey;
+}
+
+function aiEvaluationRunFromRecord(
+  row: unknown,
+  requireResults: boolean,
+): AiEvaluationRun {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测响应包含无效或禁止字段");
+  }
+  const status = stringField(row, "status");
+  const protocol = stringField(
+    row,
+    "provider_protocol_snapshot",
+    "providerProtocolSnapshot",
+  );
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  if (
+    (status !== "queued" &&
+      status !== "running" &&
+      status !== "succeeded" &&
+      status !== "failed" &&
+      status !== "cancelled") ||
+    protocol !== "openai_chat"
+  ) {
+    return invalidResponse("AI 本地评测身份或状态无效");
+  }
+  const totalCases = positiveInteger(
+    fieldValue(row, "total_cases", "totalCases"),
+    "AI 本地评测 case 总数",
+    32,
+  );
+  const completedCases = nonNegativeInteger(
+    fieldValue(row, "completed_cases", "completedCases"),
+    "AI 本地评测完成数",
+    totalCases,
+  );
+  const passedCases = nonNegativeInteger(
+    fieldValue(row, "passed_cases", "passedCases"),
+    "AI 本地评测通过数",
+    completedCases,
+  );
+  const failedCases = nonNegativeInteger(
+    fieldValue(row, "failed_cases", "failedCases"),
+    "AI 本地评测失败数",
+    completedCases,
+  );
+  const errorCases = nonNegativeInteger(
+    fieldValue(row, "error_cases", "errorCases"),
+    "AI 本地评测错误数",
+    completedCases,
+  );
+  const currentCaseId = nullableString(
+    fieldValue(row, "current_case_id", "currentCaseId"),
+  );
+  const errorCode = nullableString(fieldValue(row, "error_code", "errorCode"));
+  const startedAt = nullableString(fieldValue(row, "started_at", "startedAt"));
+  const completedAt = nullableString(
+    fieldValue(row, "completed_at", "completedAt"),
+  );
+  const cancelRequested = fieldValue(
+    row,
+    "cancel_requested",
+    "cancelRequested",
+  );
+  if (typeof cancelRequested !== "boolean") {
+    return invalidResponse("AI 本地评测取消状态无效");
+  }
+  if (
+    passedCases + failedCases + errorCases !== completedCases ||
+    (status === "queued" &&
+      (startedAt !== null ||
+        completedAt !== null ||
+        currentCaseId !== null ||
+        errorCode !== null)) ||
+    (status === "running" &&
+      (startedAt === null || completedAt !== null || errorCode !== null)) ||
+    (status === "succeeded" &&
+      (startedAt === null ||
+        completedAt === null ||
+        currentCaseId !== null ||
+        errorCode !== null ||
+        completedCases !== totalCases ||
+        errorCases !== 0)) ||
+    (status === "failed" &&
+      (startedAt === null ||
+        completedAt === null ||
+        currentCaseId !== null ||
+        errorCode === null)) ||
+    (status === "cancelled" &&
+      (completedAt === null || currentCaseId !== null || errorCode !== null))
+  ) {
+    return invalidResponse("AI 本地评测状态组合无效");
+  }
+  const id = stringField(row, "id") ?? "";
+  const providerId = stringField(row, "provider_id", "providerId") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const createdAt = stringField(row, "created_at", "createdAt") ?? "";
+  const updatedAt = stringField(row, "updated_at", "updatedAt") ?? "";
+  const rawResults = fieldValue(row, "results");
+  if (
+    !Array.isArray(rawResults) ||
+    (!requireResults && rawResults.length > 0)
+  ) {
+    return invalidResponse("AI 本地评测结果列表格式无效");
+  }
+  const results = rawResults.map((result) =>
+    aiEvaluationResultFromRecord(result, id),
+  );
+  if (
+    !id ||
+    !providerId ||
+    !providerNameSnapshot ||
+    !providerModelSnapshot ||
+    !createdAt ||
+    !updatedAt ||
+    (requireResults && results.length !== completedCases) ||
+    results.some((result, index) => result.sequence !== index + 1) ||
+    new Set(results.map((result) => result.caseId)).size !== results.length
+  ) {
+    return invalidResponse("AI 本地评测结果序列不一致");
+  }
+  return {
+    id,
+    providerId,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    providerProtocolSnapshot: "openai_chat",
+    providerVersion: positiveInteger(
+      fieldValue(row, "provider_version", "providerVersion"),
+      "AI 本地评测 Provider 版本",
+    ),
+    datasetVersion,
+    suiteKey,
+    status,
+    totalCases,
+    completedCases,
+    passedCases,
+    failedCases,
+    errorCases,
+    currentCaseId,
+    cancelRequested,
+    errorCode,
+    startedAt,
+    completedAt,
+    createdAt,
+    updatedAt,
+    results,
+  };
+}
+
+export async function getAiEvaluations(
+  input: {
+    providerId?: string;
+    status?: AiEvaluationRun["status"];
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<AiEvaluationListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.providerId) params.set("provider_id", input.providerId);
+  if (input.status) params.set("status", input.status);
+  const payload = await apiRequest<unknown>(`/api/v1/ai/evaluations?${params}`);
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("AI 本地评测列表响应格式无效");
+  }
+  const items = payload.data.map((row) =>
+    aiEvaluationRunFromRecord(row, false),
+  );
+  return {
+    items,
+    meta: {
+      page: positiveInteger(payload.meta.page, "AI 本地评测页码"),
+      pageSize: positiveInteger(
+        fieldValue(payload.meta, "page_size", "pageSize"),
+        "AI 本地评测每页数量",
+        100,
+      ),
+      total: nonNegativeInteger(payload.meta.total, "AI 本地评测总数"),
+    },
+  };
+}
+
+function aiEvaluationStatusCountsFromRecord(
+  row: unknown,
+): AiEvaluationStatusCounts {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测趋势状态响应无效");
+  }
+  const result: AiEvaluationStatusCounts = {
+    total: nonNegativeInteger(row.total, "AI 本地评测 Run 总数"),
+    queued: nonNegativeInteger(row.queued, "AI 本地评测排队数"),
+    running: nonNegativeInteger(row.running, "AI 本地评测运行数"),
+    succeeded: nonNegativeInteger(row.succeeded, "AI 本地评测完成数"),
+    failed: nonNegativeInteger(row.failed, "AI 本地评测运行失败数"),
+    cancelled: nonNegativeInteger(row.cancelled, "AI 本地评测取消数"),
+  };
+  if (
+    result.queued +
+      result.running +
+      result.succeeded +
+      result.failed +
+      result.cancelled !==
+    result.total
+  ) {
+    return invalidResponse("AI 本地评测趋势状态计数不一致");
+  }
+  return result;
+}
+
+const aiEvaluationWilsonZ = 1.959963984540054;
+
+function aiEvaluationWilsonIntervalBps(passed: number, total: number) {
+  const proportion = passed / total;
+  const zSquared = aiEvaluationWilsonZ * aiEvaluationWilsonZ;
+  const denominator = 1 + zSquared / total;
+  const center = (proportion + zSquared / (2 * total)) / denominator;
+  const spread =
+    (aiEvaluationWilsonZ *
+      Math.sqrt(
+        (proportion * (1 - proportion)) / total +
+          zSquared / (4 * total * total),
+      )) /
+    denominator;
+  const toBasisPoints = (value: number) =>
+    Math.round(Math.max(0, Math.min(1, value)) * 10_000);
+  return {
+    passRateBps: toBasisPoints(proportion),
+    wilsonLowerBps: toBasisPoints(center - spread),
+    wilsonUpperBps: toBasisPoints(center + spread),
+  };
+}
+
+function aiEvaluationIntervalFromRecord(
+  row: JsonRecord,
+  passed: number,
+  total: number,
+  label: string,
+) {
+  const interval = {
+    passRateBps: nonNegativeInteger(
+      fieldValue(row, "pass_rate_bps", "passRateBps"),
+      `${label}通过率`,
+    ),
+    wilsonLowerBps: nonNegativeInteger(
+      fieldValue(row, "wilson_lower_bps", "wilsonLowerBps"),
+      `${label} Wilson 下界`,
+    ),
+    wilsonUpperBps: nonNegativeInteger(
+      fieldValue(row, "wilson_upper_bps", "wilsonUpperBps"),
+      `${label} Wilson 上界`,
+    ),
+  };
+  const expected = aiEvaluationWilsonIntervalBps(passed, total);
+  if (
+    interval.passRateBps !== expected.passRateBps ||
+    interval.wilsonLowerBps !== expected.wilsonLowerBps ||
+    interval.wilsonUpperBps !== expected.wilsonUpperBps ||
+    interval.passRateBps > 10_000 ||
+    interval.wilsonLowerBps > 10_000 ||
+    interval.wilsonUpperBps > 10_000 ||
+    interval.wilsonLowerBps > interval.passRateBps ||
+    interval.passRateBps > interval.wilsonUpperBps
+  ) {
+    return invalidResponse(`${label} Wilson 区间不一致`);
+  }
+  return interval;
+}
+
+function aiEvaluationEvidenceLevel(runCount: number) {
+  if (runCount >= 3) return "repeated_runs" as const;
+  if (runCount === 2) return "limited_runs" as const;
+  return "single_run" as const;
+}
+
+const aiEvaluationReadinessStatuses = new Set([
+  "insufficient_evidence",
+  "needs_attention",
+  "review_candidate",
+]);
+
+const aiEvaluationReadinessReasonCodes = new Set([
+  "OUTDATED_DATASET",
+  "SUITE_NOT_ELIGIBLE",
+  "RUN_COUNT_LOW",
+  "PROVIDER_VERSION_MIXED",
+  "OVERALL_LOWER_BOUND_LOW",
+  "CATEGORY_LOWER_BOUND_LOW",
+  "CRITICAL_FAILURE_PRESENT",
+]);
+
+const aiEvaluationRequiredCategories = [
+  "grounded",
+  "no_evidence",
+  "prompt_injection",
+  "conflicting_sources",
+] as const;
+
+const aiEvaluationCriticalFailureCodes = [
+  "CONTROL_BLOCK_LEAKED",
+  "CITATION_NOT_ALLOWED",
+  "FORBIDDEN_PHRASE_PRESENT",
+] as const;
+
+function aiEvaluationQualityGroupFromRecord(row: unknown) {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测质量分组响应无效");
+  }
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测分组数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  const runCount = positiveInteger(
+    fieldValue(row, "run_count", "runCount"),
+    "AI 本地评测分组 Run 数",
+  );
+  const providerVersionMin = positiveInteger(
+    fieldValue(row, "provider_version_min", "providerVersionMin"),
+    "AI 本地评测最小 Provider 版本",
+  );
+  const providerVersionMax = positiveInteger(
+    fieldValue(row, "provider_version_max", "providerVersionMax"),
+    "AI 本地评测最大 Provider 版本",
+  );
+  const fullyPassedRuns = nonNegativeInteger(
+    fieldValue(row, "fully_passed_runs", "fullyPassedRuns"),
+    "AI 本地评测全通过 Run 数",
+    runCount,
+  );
+  const totalCases = positiveInteger(
+    fieldValue(row, "total_cases", "totalCases"),
+    "AI 本地评测分组 case 总数",
+  );
+  const passedCases = nonNegativeInteger(
+    fieldValue(row, "passed_cases", "passedCases"),
+    "AI 本地评测分组通过数",
+    totalCases,
+  );
+  const failedCases = nonNegativeInteger(
+    fieldValue(row, "failed_cases", "failedCases"),
+    "AI 本地评测分组未通过数",
+    totalCases,
+  );
+  const providerId = stringField(row, "provider_id", "providerId") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const lastCompletedAt =
+    stringField(row, "last_completed_at", "lastCompletedAt") ?? "";
+  const interval = aiEvaluationIntervalFromRecord(
+    row,
+    passedCases,
+    totalCases,
+    "AI 本地评测质量分组",
+  );
+  const evidenceLevel = stringField(row, "evidence_level", "evidenceLevel");
+  const readinessStatus = stringField(
+    row,
+    "readiness_status",
+    "readinessStatus",
+  );
+  const rawReadinessReasons = fieldValue(
+    row,
+    "readiness_reasons",
+    "readinessReasons",
+  );
+  if (
+    !Array.isArray(rawReadinessReasons) ||
+    rawReadinessReasons.length > aiEvaluationReadinessReasonCodes.size ||
+    rawReadinessReasons.some(
+      (reason) =>
+        typeof reason !== "string" ||
+        !aiEvaluationReadinessReasonCodes.has(reason),
+    ) ||
+    new Set(rawReadinessReasons).size !== rawReadinessReasons.length
+  ) {
+    return invalidResponse("AI 本地评测人工评审原因无效");
+  }
+  if (
+    !providerId ||
+    !providerNameSnapshot ||
+    !providerModelSnapshot ||
+    !lastCompletedAt ||
+    passedCases + failedCases !== totalCases ||
+    providerVersionMax < providerVersionMin ||
+    evidenceLevel !== aiEvaluationEvidenceLevel(runCount) ||
+    !readinessStatus ||
+    !aiEvaluationReadinessStatuses.has(readinessStatus)
+  ) {
+    return invalidResponse("AI 本地评测质量分组不一致");
+  }
+  return {
+    providerId,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    datasetVersion,
+    suiteKey,
+    providerVersionMin,
+    providerVersionMax,
+    runCount,
+    fullyPassedRuns,
+    totalCases,
+    passedCases,
+    failedCases,
+    ...interval,
+    evidenceLevel,
+    readinessStatus:
+      readinessStatus as AiEvaluationQualityGroup["readinessStatus"],
+    readinessReasons:
+      rawReadinessReasons as AiEvaluationQualityGroup["readinessReasons"],
+    lastCompletedAt,
+  };
+}
+
+function aiEvaluationTrendPointFromRecord(row: unknown) {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测趋势点响应无效");
+  }
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测趋势数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  const totalCases = positiveInteger(
+    fieldValue(row, "total_cases", "totalCases"),
+    "AI 本地评测趋势 case 总数",
+  );
+  const passedCases = nonNegativeInteger(
+    fieldValue(row, "passed_cases", "passedCases"),
+    "AI 本地评测趋势通过数",
+    totalCases,
+  );
+  const failedCases = nonNegativeInteger(
+    fieldValue(row, "failed_cases", "failedCases"),
+    "AI 本地评测趋势未通过数",
+    totalCases,
+  );
+  const runId = stringField(row, "run_id", "runId") ?? "";
+  const providerId = stringField(row, "provider_id", "providerId") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const completedAt = stringField(row, "completed_at", "completedAt") ?? "";
+  if (
+    !runId ||
+    !providerId ||
+    !providerNameSnapshot ||
+    !providerModelSnapshot ||
+    !completedAt ||
+    passedCases + failedCases !== totalCases
+  ) {
+    return invalidResponse("AI 本地评测趋势点不一致");
+  }
+  return {
+    runId,
+    providerId,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    datasetVersion,
+    suiteKey,
+    totalCases,
+    passedCases,
+    failedCases,
+    completedAt,
+  };
+}
+
+function aiEvaluationCategoryGroupFromRecord(
+  row: unknown,
+): AiEvaluationCategoryGroup {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测 category 响应无效");
+  }
+  const category = stringField(row, "category");
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测 category 数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  const totalCases = positiveInteger(
+    fieldValue(row, "total_cases", "totalCases"),
+    "AI 本地评测 category case 总数",
+  );
+  const passedCases = nonNegativeInteger(
+    fieldValue(row, "passed_cases", "passedCases"),
+    "AI 本地评测 category 通过数",
+    totalCases,
+  );
+  const failedCases = nonNegativeInteger(
+    fieldValue(row, "failed_cases", "failedCases"),
+    "AI 本地评测 category 未通过数",
+    totalCases,
+  );
+  const providerId = stringField(row, "provider_id", "providerId") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const lastCompletedAt =
+    stringField(row, "last_completed_at", "lastCompletedAt") ?? "";
+  const interval = aiEvaluationIntervalFromRecord(
+    row,
+    passedCases,
+    totalCases,
+    "AI 本地评测 category",
+  );
+  if (
+    (category !== "grounded" &&
+      category !== "no_evidence" &&
+      category !== "prompt_injection" &&
+      category !== "conflicting_sources") ||
+    !providerId ||
+    !providerNameSnapshot ||
+    !providerModelSnapshot ||
+    !lastCompletedAt ||
+    passedCases + failedCases !== totalCases
+  ) {
+    return invalidResponse("AI 本地评测 category 分组不一致");
+  }
+  return {
+    providerId,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    datasetVersion,
+    suiteKey,
+    category,
+    totalCases,
+    passedCases,
+    failedCases,
+    ...interval,
+    lastCompletedAt,
+  };
+}
+
+function aiEvaluationFailureGroupFromRecord(
+  row: unknown,
+): AiEvaluationFailureGroup {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测失败原因响应无效");
+  }
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测失败原因数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  const failureCode = stringField(row, "failure_code", "failureCode") ?? "";
+  const occurrences = positiveInteger(
+    fieldValue(row, "occurrences"),
+    "AI 本地评测失败原因出现次数",
+  );
+  const affectedCases = positiveInteger(
+    fieldValue(row, "affected_cases", "affectedCases"),
+    "AI 本地评测失败原因影响 case 数",
+    occurrences,
+  );
+  const providerId = stringField(row, "provider_id", "providerId") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const lastCompletedAt =
+    stringField(row, "last_completed_at", "lastCompletedAt") ?? "";
+  if (
+    !aiEvaluationFailureCodes.has(failureCode) ||
+    !providerId ||
+    !providerNameSnapshot ||
+    !providerModelSnapshot ||
+    !lastCompletedAt
+  ) {
+    return invalidResponse("AI 本地评测失败原因分组不一致");
+  }
+  return {
+    providerId,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    datasetVersion,
+    suiteKey,
+    failureCode,
+    affectedCases,
+    occurrences,
+    lastCompletedAt,
+  };
+}
+
+function aiEvaluationQualityGroupKey(value: {
+  providerId: string;
+  providerNameSnapshot: string;
+  providerModelSnapshot: string;
+  datasetVersion: number;
+  suiteKey: AiEvaluationSuiteKey;
+}) {
+  return [
+    value.providerId,
+    value.providerNameSnapshot,
+    value.providerModelSnapshot,
+    value.datasetVersion,
+    value.suiteKey,
+  ].join("\u0000");
+}
+
+function expectedAIEvaluationReadiness(
+  group: AiEvaluationQualityGroup,
+  categories: AiEvaluationCategoryGroup[],
+  failures: AiEvaluationFailureGroup[],
+  policy: AiEvaluationSummary["readinessPolicy"],
+) {
+  if (group.datasetVersion !== policy.currentDatasetVersion) {
+    return {
+      status: "insufficient_evidence" as const,
+      reasons: ["OUTDATED_DATASET"] as const,
+    };
+  }
+  if (group.suiteKey !== policy.requiredSuite) {
+    return {
+      status: "insufficient_evidence" as const,
+      reasons: ["SUITE_NOT_ELIGIBLE"] as const,
+    };
+  }
+  if (group.runCount < policy.minimumCompletedRuns) {
+    return {
+      status: "insufficient_evidence" as const,
+      reasons: ["RUN_COUNT_LOW"] as const,
+    };
+  }
+  if (group.providerVersionMin !== group.providerVersionMax) {
+    return {
+      status: "insufficient_evidence" as const,
+      reasons: ["PROVIDER_VERSION_MIXED"] as const,
+    };
+  }
+  const groupCategories = categories.filter(
+    (category) =>
+      aiEvaluationQualityGroupKey(category) ===
+      aiEvaluationQualityGroupKey(group),
+  );
+  if (
+    policy.requiredCategories.some(
+      (required) =>
+        !groupCategories.some((category) => category.category === required),
+    )
+  ) {
+    return invalidResponse("AI 本地评测人工评审缺少必要类别");
+  }
+  const reasons: AiEvaluationQualityGroup["readinessReasons"] = [];
+  if (group.wilsonLowerBps < policy.minimumOverallLowerBps) {
+    reasons.push("OVERALL_LOWER_BOUND_LOW");
+  }
+  if (
+    groupCategories.some(
+      (category) => category.wilsonLowerBps < policy.minimumCategoryLowerBps,
+    )
+  ) {
+    reasons.push("CATEGORY_LOWER_BOUND_LOW");
+  }
+  const criticalCodes = new Set(policy.criticalFailureCodes);
+  if (
+    failures.some(
+      (failure) =>
+        aiEvaluationQualityGroupKey(failure) ===
+          aiEvaluationQualityGroupKey(group) &&
+        criticalCodes.has(failure.failureCode),
+    )
+  ) {
+    reasons.push("CRITICAL_FAILURE_PRESENT");
+  }
+  return reasons.length === 0
+    ? { status: "review_candidate" as const, reasons }
+    : { status: "needs_attention" as const, reasons };
+}
+
+export async function getAiEvaluationSummary(
+  input: { providerId?: string; limit?: number } = {},
+): Promise<AiEvaluationSummary> {
+  const limit = input.limit ?? 12;
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (input.providerId) params.set("provider_id", input.providerId);
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/evaluation-summary?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !isRecord(payload.data) ||
+    !isRecord(payload.meta) ||
+    !isRecord(payload.data.scope) ||
+    !isRecord(payload.data.uncertainty) ||
+    !isRecord(payload.data.readiness_policy) ||
+    !isRecord(payload.data.status_counts) ||
+    !Array.isArray(payload.data.groups) ||
+    !Array.isArray(payload.data.categories) ||
+    !Array.isArray(payload.data.failure_codes) ||
+    !Array.isArray(payload.data.trend) ||
+    [
+      payload.data,
+      payload.data.scope,
+      payload.data.uncertainty,
+      payload.data.readiness_policy,
+      payload.data.status_counts,
+      ...payload.data.groups,
+      ...payload.data.categories,
+      ...payload.data.failure_codes,
+      ...payload.data.trend,
+    ].some((row) => isRecord(row) && aiEvaluationForbiddenField(row))
+  ) {
+    return invalidResponse("AI 本地评测趋势响应格式无效");
+  }
+  const providerId = nullableString(
+    fieldValue(payload.data.scope, "provider_id", "providerId"),
+  );
+  if (providerId !== (input.providerId ?? null)) {
+    return invalidResponse("AI 本地评测趋势范围不一致");
+  }
+  const uncertaintyMethod = stringField(payload.data.uncertainty, "method");
+  const confidenceLevelBps = positiveInteger(
+    fieldValue(
+      payload.data.uncertainty,
+      "confidence_level_bps",
+      "confidenceLevelBps",
+    ),
+    "AI 本地评测置信水平",
+  );
+  const repeatedRunMinimum = positiveInteger(
+    fieldValue(
+      payload.data.uncertainty,
+      "repeated_run_minimum",
+      "repeatedRunMinimum",
+    ),
+    "AI 本地评测重复运行门槛",
+  );
+  if (
+    uncertaintyMethod !== "wilson_score" ||
+    confidenceLevelBps !== 9500 ||
+    repeatedRunMinimum !== 3
+  ) {
+    return invalidResponse("AI 本地评测不确定性口径无效");
+  }
+  const readinessPolicyRow = payload.data.readiness_policy;
+  const currentDatasetVersion = positiveInteger(
+    fieldValue(
+      readinessPolicyRow,
+      "current_dataset_version",
+      "currentDatasetVersion",
+    ),
+    "AI 本地评测当前数据集版本",
+  );
+  const requiredSuite = stringField(
+    readinessPolicyRow,
+    "required_suite",
+    "requiredSuite",
+  );
+  const minimumCompletedRuns = positiveInteger(
+    fieldValue(
+      readinessPolicyRow,
+      "minimum_completed_runs",
+      "minimumCompletedRuns",
+    ),
+    "AI 本地评测人工评审最少 Run 数",
+  );
+  const minimumOverallLowerBps = nonNegativeInteger(
+    fieldValue(
+      readinessPolicyRow,
+      "minimum_overall_lower_bps",
+      "minimumOverallLowerBps",
+    ),
+    "AI 本地评测总体下界",
+  );
+  const minimumCategoryLowerBps = nonNegativeInteger(
+    fieldValue(
+      readinessPolicyRow,
+      "minimum_category_lower_bps",
+      "minimumCategoryLowerBps",
+    ),
+    "AI 本地评测类别下界",
+  );
+  const requiredCategories = fieldValue(
+    readinessPolicyRow,
+    "required_categories",
+    "requiredCategories",
+  );
+  const criticalFailureCodes = fieldValue(
+    readinessPolicyRow,
+    "critical_failure_codes",
+    "criticalFailureCodes",
+  );
+  if (
+    stringField(readinessPolicyRow, "mode") !== "advisory" ||
+    requiredSuite !== "full" ||
+    minimumCompletedRuns !== 3 ||
+    minimumOverallLowerBps !== 8000 ||
+    minimumCategoryLowerBps !== 6000 ||
+    !Array.isArray(requiredCategories) ||
+    !Array.isArray(criticalFailureCodes) ||
+    JSON.stringify(requiredCategories) !==
+      JSON.stringify(aiEvaluationRequiredCategories) ||
+    JSON.stringify(criticalFailureCodes) !==
+      JSON.stringify(aiEvaluationCriticalFailureCodes)
+  ) {
+    return invalidResponse("AI 本地评测人工评审口径无效");
+  }
+  const readinessPolicy: AiEvaluationSummary["readinessPolicy"] = {
+    mode: "advisory",
+    currentDatasetVersion,
+    requiredSuite: "full",
+    minimumCompletedRuns: 3,
+    minimumOverallLowerBps: 8000,
+    minimumCategoryLowerBps: 6000,
+    requiredCategories: [...aiEvaluationRequiredCategories],
+    criticalFailureCodes: [...aiEvaluationCriticalFailureCodes],
+  };
+  const trendLimit = positiveInteger(
+    fieldValue(payload.meta, "trend_limit", "trendLimit"),
+    "AI 本地评测趋势上限",
+    50,
+  );
+  if (trendLimit !== limit) {
+    return invalidResponse("AI 本地评测趋势上限不一致");
+  }
+  const statusCounts = aiEvaluationStatusCountsFromRecord(
+    payload.data.status_counts,
+  );
+  const groups = payload.data.groups.map(aiEvaluationQualityGroupFromRecord);
+  const categories = payload.data.categories.map(
+    aiEvaluationCategoryGroupFromRecord,
+  );
+  const failureCodes = payload.data.failure_codes.map(
+    aiEvaluationFailureGroupFromRecord,
+  );
+  const trend = payload.data.trend.map(aiEvaluationTrendPointFromRecord);
+  const groupKeys = new Set(groups.map(aiEvaluationQualityGroupKey));
+  const categoryKeys = new Set<string>();
+  const categoryTotals = new Map<
+    string,
+    { totalCases: number; passedCases: number; failedCases: number }
+  >();
+  for (const category of categories) {
+    const groupKey = aiEvaluationQualityGroupKey(category);
+    const categoryKey = `${groupKey}\u0000${category.category}`;
+    if (!groupKeys.has(groupKey) || categoryKeys.has(categoryKey)) {
+      return invalidResponse("AI 本地评测 category 归属或唯一性无效");
+    }
+    categoryKeys.add(categoryKey);
+    const current = categoryTotals.get(groupKey) ?? {
+      totalCases: 0,
+      passedCases: 0,
+      failedCases: 0,
+    };
+    current.totalCases += category.totalCases;
+    current.passedCases += category.passedCases;
+    current.failedCases += category.failedCases;
+    categoryTotals.set(groupKey, current);
+  }
+  const failureKeys = new Set<string>();
+  const failureCoverage = new Map<string, number>();
+  for (const failure of failureCodes) {
+    const groupKey = aiEvaluationQualityGroupKey(failure);
+    const failureKey = `${groupKey}\u0000${failure.failureCode}`;
+    const group = groups.find(
+      (candidate) => aiEvaluationQualityGroupKey(candidate) === groupKey,
+    );
+    if (
+      !group ||
+      failureKeys.has(failureKey) ||
+      failure.affectedCases > group.failedCases
+    ) {
+      return invalidResponse("AI 本地评测失败原因归属或唯一性无效");
+    }
+    failureKeys.add(failureKey);
+    failureCoverage.set(
+      groupKey,
+      (failureCoverage.get(groupKey) ?? 0) + failure.affectedCases,
+    );
+  }
+  if (
+    new Set(groups.map(aiEvaluationQualityGroupKey)).size !== groups.length ||
+    trend.length > trendLimit ||
+    new Set(trend.map((point) => point.runId)).size !== trend.length ||
+    trend.some(
+      (point, index) =>
+        !groupKeys.has(aiEvaluationQualityGroupKey(point)) ||
+        (index > 0 && trend[index - 1].completedAt > point.completedAt),
+    ) ||
+    groups.reduce((total, group) => total + group.runCount, 0) !==
+      statusCounts.succeeded ||
+    groups.some((group) => {
+      const totals = categoryTotals.get(aiEvaluationQualityGroupKey(group));
+      return (
+        !totals ||
+        totals.totalCases !== group.totalCases ||
+        totals.passedCases !== group.passedCases ||
+        totals.failedCases !== group.failedCases ||
+        (failureCoverage.get(aiEvaluationQualityGroupKey(group)) ?? 0) <
+          group.failedCases
+      );
+    }) ||
+    groups.some((group) => {
+      const expected = expectedAIEvaluationReadiness(
+        group,
+        categories,
+        failureCodes,
+        readinessPolicy,
+      );
+      return (
+        group.readinessStatus !== expected.status ||
+        JSON.stringify(group.readinessReasons) !==
+          JSON.stringify(expected.reasons)
+      );
+    })
+  ) {
+    return invalidResponse("AI 本地评测趋势分组或时序不一致");
+  }
+  return {
+    scope: { providerId },
+    uncertainty: {
+      method: "wilson_score",
+      confidenceLevelBps: 9500,
+      repeatedRunMinimum: 3,
+    },
+    readinessPolicy,
+    statusCounts,
+    groups,
+    categories,
+    failureCodes,
+    trend,
+    trendLimit,
+  };
+}
+
+const aiEvaluationReviewDecisions = new Set<AiEvaluationReviewDecision>([
+  "accepted_for_local_use",
+  "needs_more_evidence",
+  "rejected",
+]);
+
+function aiEvaluationReviewFromRecord(row: unknown): AiEvaluationReview {
+  if (!isRecord(row) || aiEvaluationForbiddenField(row)) {
+    return invalidResponse("AI 本地评测人工决定包含无效或禁止字段");
+  }
+  const id = stringField(row, "id") ?? "";
+  const providerIdSnapshot =
+    stringField(row, "provider_id_snapshot", "providerIdSnapshot") ?? "";
+  const providerNameSnapshot =
+    stringField(row, "provider_name_snapshot", "providerNameSnapshot") ?? "";
+  const providerModelSnapshot =
+    stringField(row, "provider_model_snapshot", "providerModelSnapshot") ?? "";
+  const datasetVersion = positiveInteger(
+    fieldValue(row, "dataset_version", "datasetVersion"),
+    "AI 本地评测人工决定数据集版本",
+  );
+  const suiteKey = aiEvaluationSuiteKeyFromRecord(row);
+  const providerVersionMin = positiveInteger(
+    fieldValue(row, "provider_version_min", "providerVersionMin"),
+    "AI 本地评测人工决定最小 Provider 版本",
+  );
+  const providerVersionMax = positiveInteger(
+    fieldValue(row, "provider_version_max", "providerVersionMax"),
+    "AI 本地评测人工决定最大 Provider 版本",
+  );
+  const groupLastCompletedAt =
+    stringField(row, "group_last_completed_at", "groupLastCompletedAt") ?? "";
+  const runCount = positiveInteger(
+    fieldValue(row, "run_count", "runCount"),
+    "AI 本地评测人工决定 Run 数",
+  );
+  const totalCases = positiveInteger(
+    fieldValue(row, "total_cases", "totalCases"),
+    "AI 本地评测人工决定 case 总数",
+  );
+  const passedCases = nonNegativeInteger(
+    fieldValue(row, "passed_cases", "passedCases"),
+    "AI 本地评测人工决定通过数",
+  );
+  const failedCases = nonNegativeInteger(
+    fieldValue(row, "failed_cases", "failedCases"),
+    "AI 本地评测人工决定失败数",
+  );
+  const overallWilsonLowerBps = nonNegativeInteger(
+    fieldValue(row, "overall_wilson_lower_bps", "overallWilsonLowerBps"),
+    "AI 本地评测人工决定总体 Wilson 下界",
+  );
+  const minimumCategory = stringField(
+    row,
+    "minimum_category",
+    "minimumCategory",
+  );
+  const minimumCategoryWilsonLowerBps = nonNegativeInteger(
+    fieldValue(
+      row,
+      "minimum_category_wilson_lower_bps",
+      "minimumCategoryWilsonLowerBps",
+    ),
+    "AI 本地评测人工决定最低类别 Wilson 下界",
+  );
+  const readinessStatus = stringField(
+    row,
+    "readiness_status",
+    "readinessStatus",
+  );
+  const rawReadinessReasons = fieldValue(
+    row,
+    "readiness_reasons",
+    "readinessReasons",
+  );
+  const rawCriticalFailureCodes = fieldValue(
+    row,
+    "critical_failure_codes",
+    "criticalFailureCodes",
+  );
+  const decision = stringField(row, "decision");
+  const reason = stringField(row, "reason") ?? "";
+  const reviewedByActorId =
+    stringField(row, "reviewed_by_actor_id", "reviewedByActorId") ?? "";
+  const reviewedByActorNameSnapshot =
+    stringField(
+      row,
+      "reviewed_by_actor_name_snapshot",
+      "reviewedByActorNameSnapshot",
+    ) ?? "";
+  const createdAt = stringField(row, "created_at", "createdAt") ?? "";
+  const criticalSet = new Set<string>(aiEvaluationCriticalFailureCodes);
+  if (
+    !Array.isArray(rawReadinessReasons) ||
+    rawReadinessReasons.length > aiEvaluationReadinessReasonCodes.size ||
+    rawReadinessReasons.some(
+      (item) =>
+        typeof item !== "string" || !aiEvaluationReadinessReasonCodes.has(item),
+    ) ||
+    new Set(rawReadinessReasons).size !== rawReadinessReasons.length ||
+    !Array.isArray(rawCriticalFailureCodes) ||
+    rawCriticalFailureCodes.some(
+      (item) => typeof item !== "string" || !criticalSet.has(item),
+    ) ||
+    new Set(rawCriticalFailureCodes).size !== rawCriticalFailureCodes.length
+  ) {
+    return invalidResponse("AI 本地评测人工决定原因快照无效");
+  }
+  const readinessReasons =
+    rawReadinessReasons as AiEvaluationQualityGroup["readinessReasons"];
+  const criticalFailureCodes = rawCriticalFailureCodes as string[];
+  const selectedCriticalCodes = new Set(criticalFailureCodes);
+  const expectedCriticalOrder = aiEvaluationCriticalFailureCodes.filter(
+    (code) => selectedCriticalCodes.has(code),
+  );
+  const expectedOverall = aiEvaluationWilsonIntervalBps(
+    passedCases,
+    totalCases,
+  );
+  if (
+    !id ||
+    !providerIdSnapshot ||
+    !providerNameSnapshot ||
+    providerNameSnapshot !== providerNameSnapshot.trim() ||
+    !providerModelSnapshot ||
+    providerModelSnapshot !== providerModelSnapshot.trim() ||
+    !groupLastCompletedAt ||
+    providerVersionMax < providerVersionMin ||
+    passedCases + failedCases !== totalCases ||
+    overallWilsonLowerBps > 10_000 ||
+    overallWilsonLowerBps !== expectedOverall.wilsonLowerBps ||
+    minimumCategoryWilsonLowerBps > 10_000 ||
+    !aiEvaluationRequiredCategories.includes(
+      minimumCategory as (typeof aiEvaluationRequiredCategories)[number],
+    ) ||
+    !readinessStatus ||
+    !aiEvaluationReadinessStatuses.has(readinessStatus) ||
+    (readinessStatus === "review_candidate"
+      ? readinessReasons.length !== 0
+      : readinessReasons.length === 0) ||
+    !decision ||
+    !aiEvaluationReviewDecisions.has(decision as AiEvaluationReviewDecision) ||
+    !reason ||
+    reason !== reason.trim() ||
+    [...reason].length > 1000 ||
+    reviewedByActorId !== "00000000-0000-5000-8000-000000000001" ||
+    !reviewedByActorNameSnapshot ||
+    reviewedByActorNameSnapshot !== reviewedByActorNameSnapshot.trim() ||
+    !createdAt ||
+    JSON.stringify(criticalFailureCodes) !==
+      JSON.stringify(expectedCriticalOrder)
+  ) {
+    return invalidResponse("AI 本地评测人工决定证据快照不一致");
+  }
+  return {
+    id,
+    providerIdSnapshot,
+    providerNameSnapshot,
+    providerModelSnapshot,
+    datasetVersion,
+    suiteKey,
+    providerVersionMin,
+    providerVersionMax,
+    groupLastCompletedAt,
+    runCount,
+    totalCases,
+    passedCases,
+    failedCases,
+    overallWilsonLowerBps,
+    minimumCategory: minimumCategory as AiEvaluationReview["minimumCategory"],
+    minimumCategoryWilsonLowerBps,
+    readinessStatus: readinessStatus as AiEvaluationReview["readinessStatus"],
+    readinessReasons,
+    criticalFailureCodes,
+    decision: decision as AiEvaluationReviewDecision,
+    reason,
+    reviewedByActorId,
+    reviewedByActorNameSnapshot,
+    createdAt,
+  };
+}
+
+export async function getAiEvaluationReviews(
+  input: {
+    providerId?: string;
+    decision?: AiEvaluationReviewDecision;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<AiEvaluationReviewListResult> {
+  const page = input.page ?? 1;
+  const pageSize = input.pageSize ?? 20;
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(pageSize),
+  });
+  if (input.providerId) params.set("provider_id", input.providerId);
+  if (input.decision) params.set("decision", input.decision);
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/evaluation-reviews?${params}`,
+  );
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("AI 本地评测人工决定列表响应格式无效");
+  }
+  const items = payload.data.map(aiEvaluationReviewFromRecord);
+  const meta = {
+    page: positiveInteger(payload.meta.page, "AI 本地评测人工决定页码"),
+    pageSize: positiveInteger(
+      fieldValue(payload.meta, "page_size", "pageSize"),
+      "AI 本地评测人工决定每页数量",
+    ),
+    total: nonNegativeInteger(payload.meta.total, "AI 本地评测人工决定总数"),
+  };
+  if (
+    meta.page !== page ||
+    meta.pageSize !== pageSize ||
+    items.length > meta.pageSize ||
+    items.length > meta.total ||
+    (input.providerId !== undefined &&
+      items.some((item) => item.providerIdSnapshot !== input.providerId)) ||
+    (input.decision !== undefined &&
+      items.some((item) => item.decision !== input.decision))
+  ) {
+    return invalidResponse("AI 本地评测人工决定分页不一致");
+  }
+  return { items, meta };
+}
+
+export async function createAiEvaluationReview(
+  input: CreateAiEvaluationReviewInput,
+  idempotencyKey: string,
+): Promise<AiEvaluationReview> {
+  const { group } = input;
+  const payload = await apiRequest<unknown>("/api/v1/ai/evaluation-reviews", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      provider_id: group.providerId,
+      provider_name_snapshot: group.providerNameSnapshot,
+      provider_model_snapshot: group.providerModelSnapshot,
+      dataset_version: group.datasetVersion,
+      suite_key: group.suiteKey,
+      expected_provider_version_min: group.providerVersionMin,
+      expected_provider_version_max: group.providerVersionMax,
+      expected_last_completed_at: group.lastCompletedAt,
+      expected_run_count: group.runCount,
+      expected_total_cases: group.totalCases,
+      expected_passed_cases: group.passedCases,
+      expected_failed_cases: group.failedCases,
+      expected_readiness_status: group.readinessStatus,
+      expected_readiness_reasons: group.readinessReasons,
+      decision: input.decision,
+      reason: input.reason,
+    }),
+  });
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 本地评测人工决定创建响应格式无效");
+  }
+  return aiEvaluationReviewFromRecord(payload.data);
+}
+
+export async function getAiEvaluation(id: string): Promise<AiEvaluationRun> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/evaluations/${encodeURIComponent(id)}`,
+  );
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 本地评测详情响应格式无效");
+  }
+  return aiEvaluationRunFromRecord(payload.data, true);
+}
+
+export async function createAiEvaluation(
+  providerId: string,
+  providerVersion: number,
+  suiteKey: AiEvaluationSuiteKey,
+  idempotencyKey: string,
+): Promise<AiEvaluationRun> {
+  const payload = await apiRequest<unknown>("/api/v1/ai/evaluations", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({
+      provider_id: providerId,
+      provider_version: providerVersion,
+      suite_key: suiteKey,
+    }),
+  });
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 本地评测创建响应格式无效");
+  }
+  return aiEvaluationRunFromRecord(payload.data, false);
+}
+
+export async function cancelAiEvaluation(id: string): Promise<AiEvaluationRun> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/ai/evaluations/${encodeURIComponent(id)}/cancel`,
+    { method: "POST" },
+  );
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    return invalidResponse("AI 本地评测取消响应格式无效");
+  }
+  return aiEvaluationRunFromRecord(payload.data, false);
+}
+
+export async function deleteAiEvaluation(id: string): Promise<void> {
+  await apiRequest<unknown>(
+    `/api/v1/ai/evaluations/${encodeURIComponent(id)}?confirm=true`,
+    { method: "DELETE" },
+  );
 }
 
 export async function attachTaskToAiMessage(
@@ -10675,6 +13215,7 @@ export async function attachTaskToAiMessage(
     return invalidResponse("AI 消息响应格式无效");
   }
   const row = payload.data;
+  const citation = aiCitationsFromMessage(row);
   return {
     id: stringField(row, "id") ?? "",
     session_id: stringField(row, "session_id") ?? "",
@@ -10684,6 +13225,18 @@ export async function attachTaskToAiMessage(
     reasoning: stringField(row, "reasoning") ?? null,
     task_id: stringField(row, "task_id") ?? null,
     task_title_snapshot: stringField(row, "task_title_snapshot") ?? null,
+    generation_id: stringField(row, "generation_id", "generationId") ?? null,
+    context_provider: aiBusinessContextProviderFromRecord(row.context_provider),
+    context_sources: Array.isArray(row.context_sources)
+      ? row.context_sources.map((source) =>
+          aiBusinessContextSourceFromRecord(source),
+        )
+      : [],
+    context_knowledge: Array.isArray(row.context_knowledge)
+      ? row.context_knowledge.map(aiKnowledgeContextSourceFromRecord)
+      : [],
+    citation_status: citation.status,
+    citations: citation.items,
     created_at: stringField(row, "created_at") ?? "",
   };
 }

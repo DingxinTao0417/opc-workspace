@@ -41,6 +41,7 @@ export function parseAiTaskSuggestion(
 
 export interface AiMemorySuggestion {
   content: string;
+  proposalId?: string;
 }
 
 const AI_MEMORY_BLOCK_PATTERN =
@@ -51,6 +52,8 @@ const AI_MEMORY_BLOCK_PATTERN =
 // display layer drops it too (ADR-006).
 const AI_SELF_CHECK_BLOCK_PATTERN =
   /\[opc:selfcheck\][\s\S]*?(\[\/opc:selfcheck\]|$)/;
+const AI_CITATION_BLOCK_PATTERN =
+  /\[opc:citations\][\s\S]*?(?:\[\/opc:citations\]|\[opc:citations\])/gi;
 
 // parseAiMemorySuggestion extracts the first well-formed memory suggestion
 // block from an assistant reply. Like task blocks it is untrusted model
@@ -69,7 +72,19 @@ export function parseAiMemorySuggestion(
   const rawContent =
     typeof parsed.content === "string" ? parsed.content.trim() : "";
   if (!rawContent || rawContent.length > 500) return null;
-  return { content: rawContent };
+  let proposalId: string | undefined;
+  if (parsed.proposal_id !== undefined) {
+    if (
+      typeof parsed.proposal_id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        parsed.proposal_id.trim(),
+      )
+    ) {
+      return null;
+    }
+    proposalId = parsed.proposal_id.trim();
+  }
+  return { content: rawContent, ...(proposalId ? { proposalId } : {}) };
 }
 
 // stripAiSelfCheckBlock removes the internal self-check verdict from the
@@ -85,6 +100,7 @@ export function stripAiTaskBlock(content: string): string {
   return content
     .replace(AI_TASK_BLOCK_PATTERN, "")
     .replace(AI_MEMORY_BLOCK_PATTERN, "")
-    .replace(/\[opc:(?:task|memory)\][\s\S]*$/i, "")
+    .replace(AI_CITATION_BLOCK_PATTERN, "")
+    .replace(/\[opc:(?:task|memory|citations)\][\s\S]*$/i, "")
     .trimEnd();
 }

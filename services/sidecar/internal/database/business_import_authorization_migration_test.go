@@ -14,8 +14,8 @@ func TestBusinessImportProjectCompletionAuthorizationIsExactAndSingleUse(t *test
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 56 {
-		t.Fatalf("SchemaVersion = %d, want 56", store.SchemaVersion)
+	if store.SchemaVersion != 67 {
+		t.Fatalf("SchemaVersion = %d, want 67", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, `
 		SELECT COUNT(*) FROM sqlite_master

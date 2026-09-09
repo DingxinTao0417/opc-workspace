@@ -56,6 +56,7 @@ import {
   normalizeActor,
   previewBusinessDataImport,
   previewBusinessPackageImport,
+  previewAiBusinessContext,
   normalizeActorSummary,
   normalizeBackupSummary,
   normalizeFinancialEntry,
@@ -91,6 +92,98 @@ import {
   transitionInvoice,
   voidFinancialEntry,
 } from "./client";
+
+describe("AI business context preview", () => {
+  it("sends only selected identities and parses the exact preview fields", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          provider_id: "provider-1",
+          provider_name: "DeepSeek",
+          provider_kind: "remote",
+          provider_version: 3,
+          leaves_device: true,
+          serialized_bytes: 512,
+          sources: [
+            {
+              type: "task",
+              id: "task-1",
+              version: 7,
+              label: "Prepare release",
+              fields: { title: "Prepare release", status: "todo" },
+              truncated_fields: ["description"],
+            },
+          ],
+          knowledge: [
+            {
+              source_id: "source-1",
+              source_name: "guide.md",
+              source_version: 2,
+              source_type: "markdown",
+              document_id: "document-1",
+              document_title: "Guide",
+              document_version: 1,
+              chunk_id: "chunk-1",
+              chunk_index: 0,
+              start_char: 0,
+              end_char: 20,
+              start_line: 2,
+              end_line: 3,
+              content: "Selected local evidence",
+            },
+          ],
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const preview = await previewAiBusinessContext({
+      provider_id: "provider-1",
+      sources: [{ type: "task", id: "task-1" }],
+      knowledge: [
+        {
+          source_id: "source-1",
+          document_id: "document-1",
+          chunk_id: "chunk-1",
+        },
+      ],
+    });
+    expect(preview).toMatchObject({
+      provider_id: "provider-1",
+      leaves_device: true,
+      sources: [
+        {
+          type: "task",
+          label: "Prepare release",
+          fields: { status: "todo" },
+          truncated_fields: ["description"],
+        },
+      ],
+      knowledge: [
+        {
+          source_name: "guide.md",
+          document_version: 1,
+          start_line: 2,
+          content: "Selected local evidence",
+        },
+      ],
+    });
+    const [, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(JSON.parse(String(init.body))).toEqual({
+      provider_id: "provider-1",
+      sources: [{ type: "task", id: "task-1" }],
+      knowledge: [
+        {
+          source_id: "source-1",
+          document_id: "document-1",
+          chunk_id: "chunk-1",
+        },
+      ],
+    });
+  });
+});
 
 describe("content item requests", () => {
   it("omits schedule fields when creating an unscheduled draft", async () => {

@@ -6,6 +6,7 @@
 - 明确授权：用户 2026-09-03 要求设计包含 harness 核心组件的 agent 架构，支持多协议接入 LLM、支持接入本地大模型，并为后续知识库预留扩展点（知识库本轮不做）；本轮边界仅限 AI 助手与模型设置内容，不新增与其他模块的联动；开发完成后不提交代码，等用户确认
 - 当前代码基线：app v0.1.0 / API v1 / SQLite schema 054 → 本纵切新增 055
 - 与 ADR-004 的关系：继承全部安全边界（密钥仅 OS 安全存储、模型输出只读、语义建任务人工确认、AI 表排除导出）；本 ADR 撤销 ADR-004 中"不做本地部署模型适配"的延后决定（用户本轮明确要求接入本地大模型），并新增 harness 运行时设计
+- 后续状态：ADR-007 G3/G4 已在本 ADR 的空 Registry 基础上实现两协议 tool call，并只注册 `memory_search / memory_write / memory_propose`；本 ADR 禁止的业务/Shell/文件/知识库工具仍未开放
 
 ## 背景
 
@@ -22,7 +23,7 @@ AI 助手首个纵切（ADR-004）交付了远程 Provider 双协议流式会话
 - **LLMClient 接口**：harness 只依赖接口（流式回调 + 返回结构化回合结果）。`modelclient` 提供真实实现（包装既有 `StreamChat`），测试注入假实现。
 - **Run 循环**：`harness.Run` 按"调用 LLM → 若有工具调用则执行并把结果回填 → 继续下一轮"迭代，直到产出最终回复或触发预算；本轮生产环境没有任何注册工具，循环退化为单次调用，行为与现有管线一致（SSE 契约 `opc-ai-sse-v1` 不变）。
 - **Tool / Registry / Executor**：工具为命名接口（名称、摘要、执行），注册表唯一性校验 + 显式 allowlist；执行器带单工具超时、结果字节上限、panic 恢复。工具机制本轮仅以测试验证（假工具），不向生产注册任何工具——ADR-004"禁止工具调用/bash"对本轮交付物仍然成立，工具的实际启用（含知识库检索工具）必须在后续纵切中逐个评审授权。
-- **上下文来源扩展点（设计预留）**：未来知识库检索应通过受控来源接口把带来源标识的片段注入提示词，并使用独立字节预算。本纵切代码未创建名为 `ContextSource` 的接口；现有实现只有会话窗口与长期记忆参数，后续接入时仍需落地接口和测试，不能把设计位视为当前能力。
+- **上下文来源扩展点（设计预留）**：未来知识库检索应通过受控来源接口把带来源标识的片段注入提示词，并使用独立字节预算。本纵切未创建 `ContextSource`。后续 ADR-008 已独立实现用户预览确认的 Task/Project/Client 白名单快照，但知识库仍没有来源接口或检索实现。
 - **预算**：沿用并集中于 harness——首 token 90s / 总时长 10min / 响应 1 MiB / 提示 64 KiB，另加最大轮数与工具结果总量上限。
 
 `chatAI` 处理器改为经由 harness 执行，持久化、SSE、并发闸门、启动恢复逻辑保持不变。
@@ -32,7 +33,7 @@ AI 助手首个纵切（ADR-004）交付了远程 Provider 双协议流式会话
 - `ai_providers` 新增加法列 `kind`（`remote` | `local`，默认 `remote`，迁移 055）。
 - 本地 Provider = **OpenAI 兼容端点 + `openai_chat` 协议**：Ollama、LM Studio、llama.cpp server、vLLM 等主流本地推理服务都暴露 OpenAI 兼容 API，无需新协议映射器，直接复用现有流式适配器与健康探测（`/models`）。
 - **无密钥**：本地 Provider 不存储、不要求 API key。聊天跳过密钥库读取；对本地 Provider 调用密钥端点返回 409 `AI_KEY_NOT_ALLOWED`。
-- **回环防护**：`kind=local` 强制 URL 解析后的 scheme 为 `http` 且 hostname 精确等于 `127.0.0.1` 或 `localhost`，拒绝 userinfo/query/fragment（SQL CHECK 保持基础白名单，Go 做严格校验）；Go 默认 HTTP 客户端对回环地址不走代理，本地流量不出本机。
+- **回环防护**：`kind=local` 强制 URL 解析后的 scheme 为 `http` 且 hostname 精确等于 `127.0.0.1` 或 `localhost`，拒绝 userinfo/query/fragment；HTTP 客户端不走代理且只跟随同 scheme/hostname/effective-port 重定向，跨 origin 307/308 不携带 prompt 继续请求。
 - 远程 Provider 行为完全不变（仍要求密钥）。
 
 ### 3. 多协议接入

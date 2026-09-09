@@ -48,10 +48,10 @@ Allowed stages are `acquiring_workspace_lock`, `checking_pending_restore`, `veri
   "url": "http://127.0.0.1:49152",
   "port": 49152,
   "pid": 1234,
-  "version": "0.1.0",
-  "app_version": "0.1.0",
+  "version": "0.1.1",
+  "app_version": "0.1.1",
   "api_version": "v1",
-  "schema_version": 34
+  "schema_version": 65
 }
 ```
 
@@ -80,6 +80,7 @@ The Sidecar exposes:
 - one-time plus daily/weekly/weekdays/monthly local Reminder CRUD, optimistic concurrency, cancellation, startup compensation, IANA/DST/month-end-aware periodic due scanning, offline folding, and exactly-once Reminder-to-Inbox/next-occurrence projection;
 - five code-owned preset Automation Rules with strict preview/configuration, optimistic enable/disable, immutable Run history, event/schedule dedupe, bounded retry, and three currently available local-only actions; Invoice and Agent-dependent presets remain unavailable;
 - one code-owned Agent Adapter diagnostic preset with idempotent registration, optimistic health checks, safe blocked-state reporting, and fail-closed enablement; it does not accept executable paths or create Agent Runs;
+- AI Provider management, cancellable SSE chat, reasoning, confirmed memories, task suggestions, background summary/fact compaction, both protocols' tool-call mapping, and memory_search/write/propose are implemented. Schema v58 persists exact AI context snapshots; ADR-010 extends them compatibly to v2 for up to three explicit knowledge chunks. Schema v60 stores only Sidecar-rebuilt allowlist citation metadata and validated/no-evidence/missing/invalid status on completed assistant messages; raw model citation blocks are stripped. No automatic knowledge or business tool is exposed. Schema v59 provides local-only TXT/Markdown managed-copy ingestion, actor-backed indexing/cancel/retry/recovery, FTS5 search, source positions, metadata export, reindexing, and deletion. AI and knowledge operational data stay outside portable business exports;
 - persistent Focus Session start/pause/resume/heartbeat/stop/cancel/recovery commands, terminal history pagination, timezone-aware today/period aggregation with streaks, and optional current-Task-attributed Project filtering for history and reports;
 - T-18D D2 manual review, Submission, Artifact, and controlled file endpoints listed below.
 - synchronous, idempotency-aware local backup creation, list, and full re-verification. Creation holds the maintenance write gate, snapshots SQLite with `VACUUM INTO`, copies the owned marker and every active controlled Task Artifact or Client Attachment through same-volume staging, checks hashes/database integrity/foreign keys/schema/identity, and atomically publishes a UUID package under the configured backup root.
@@ -107,6 +108,49 @@ GET    /api/v1/agent-adapters/:id
 POST   /api/v1/agent-adapters/:id/check
 POST   /api/v1/agent-adapters/:id/enable
 POST   /api/v1/agent-adapters/:id/disable
+GET    /api/v1/ai/providers
+POST   /api/v1/ai/providers
+GET    /api/v1/ai/providers/:id
+PATCH  /api/v1/ai/providers/:id
+DELETE /api/v1/ai/providers/:id
+POST   /api/v1/ai/providers/:id/health
+POST   /api/v1/ai/providers/:id/key
+GET    /api/v1/ai/memories
+POST   /api/v1/ai/memories
+DELETE /api/v1/ai/memories/:id
+GET    /api/v1/ai/memory-proposals
+DELETE /api/v1/ai/memory-proposals/:id
+POST   /api/v1/ai/context/preview
+GET    /api/v1/ai/sessions
+POST   /api/v1/ai/sessions
+GET    /api/v1/ai/sessions/:id
+DELETE /api/v1/ai/sessions/:id
+GET    /api/v1/ai/sessions/:id/messages
+POST   /api/v1/ai/chat
+GET    /api/v1/ai/usage-summary?session_id=&provider_id=
+GET    /api/v1/ai/evaluations?provider_id=&status=&page=&page_size=
+POST   /api/v1/ai/evaluations
+GET    /api/v1/ai/evaluation-summary?provider_id=&limit=
+GET    /api/v1/ai/evaluations/:id
+POST   /api/v1/ai/evaluations/:id/cancel
+DELETE /api/v1/ai/evaluations/:id?confirm=true
+GET    /api/v1/ai/generations/:id/steps
+POST   /api/v1/ai/generations/:id/cancel
+POST   /api/v1/ai/messages/:id/task
+GET    /api/v1/knowledge/sources
+POST   /api/v1/knowledge/sources
+GET    /api/v1/knowledge/sources/export.csv?confirm=true
+GET    /api/v1/knowledge/sources/:id
+DELETE /api/v1/knowledge/sources/:id?confirm=true
+POST   /api/v1/knowledge/sources/:id/reindex
+GET    /api/v1/knowledge/documents
+GET    /api/v1/knowledge/documents/:id
+DELETE /api/v1/knowledge/documents/:id?confirm=true
+POST   /api/v1/knowledge/search
+GET    /api/v1/knowledge/index-jobs/:id
+POST   /api/v1/knowledge/index-jobs/:id/cancel
+POST   /api/v1/knowledge/index-jobs/:id/retry
+DELETE /api/v1/knowledge?confirm=true
 GET    /api/v1/projects/:id/notes
 POST   /api/v1/projects/:id/notes
 GET    /api/v1/projects/:id/artifacts
@@ -169,6 +213,26 @@ POST   /api/v1/automations/runs/:id/retry
 ```
 
 Successful resources use `{ "data": ... }`; lists add `meta`. Errors use `{ "code", "message", "request_id" }`. API timestamps are RFC 3339 UTC. Task, Assignment, lifecycle, output, review, Artifact deletion, and hard Task deletion writes use Task `If-Match`; Client Attachment upload/deletion and Client contact link/unlink use the containing Client `If-Match`. Stale versions return `409 VERSION_CONFLICT`. Retryable commands accept an optional stable `Idempotency-Key`, persist the normalized request hash and first response, replay the same request without repeating events or file writes, and reject key reuse with different input.
+
+Knowledge source upload uses the same optional `Idempotency-Key` contract. The hash covers the normalized display name/title/type, byte size, and SHA-256; replay returns the first `202 queued` response without creating or enqueuing a second source/job. Reusing the key for different bytes returns `409 IDEMPOTENCY_CONFLICT`.
+
+Completed assistant message history exposes `citation_status` and `citations`. With explicit knowledge context, the model may submit only one strict `[opc:citations]` block containing allowlisted chunk IDs; Sidecar rebuilds source/document versions and positions before storing schema v60 metadata. Empty, missing, or invalid declarations become `no_evidence`, `missing`, or `invalid` with an empty citation list. A null snapshot is returned as `not_requested`. Raw citation control text is stripped before message/generation persistence and from historical prompts.
+
+`internal/aieval` is a code-owned, offline quality gate rather than a user-data feature. Its embedded bilingual cases cover grounded answers, no evidence, conflicting sources, and quoted prompt injection. The deterministic evaluator checks required/forbidden phrases, citation status, allowlists, duplicate/minimum/exact sets, leaked control markers, and missing observations. It does not call a Provider or store prompts/results in the workspace database.
+
+`GET /api/v1/ai/generations/:id/steps` exposes schema v61–62's ordered content-free timeline. Rows contain only kind/status, turn index, code-owned tool name, timestamps/duration, serialized byte counts, optional exact Provider input/output tokens, and stable error codes. Token fields are all NULL unless `token_source=provider`; the root only aggregates a complete set of Provider-reported model calls. Successful persistent/cancelled assistant messages carry a generation ID, and startup recovery closes stale roots. The endpoint never returns prompt, answer, reasoning, tool arguments/results, Provider URL, or key, and it never computes cost.
+
+`GET /api/v1/ai/usage-summary` reads only sequence-1 generation root steps in one read-only transaction. Optional canonical `session_id` and `provider_id` filters can be combined; missing filter resources return 404, while a valid empty scope returns zero totals and an empty Provider list. The response separates completed/failed/cancelled from active generations, Provider-reported usage from terminal unknown usage, and returns exact token sums, bytes, duration, plus stable Provider groups. It has no materialized table, prompt/content/reasoning, Base URL, key, network lookup, token estimate, or cost calculation.
+
+ADR-013/schema v63 adds explicitly triggered local quality evaluation; schema v64 preserves dataset versions and schema v65 adds a `smoke|full` suite identity, defaulting historical Runs to full. `POST /api/v1/ai/evaluations` accepts only a ready/healthy local loopback Provider plus an optional suite (default full). A single-mailbox actor serially evaluates dataset v3's balanced 8-case smoke or 24-case full suite with a three-minute per-case timeout; the endpoint never falls back to remote. List/detail expose only Provider/dataset/suite snapshots, lifecycle/progress, stable failure codes, citations and content-free metrics. Active Runs can be cancelled; terminal history requires explicit deletion.
+
+ADR-014–021 add the read-only `GET /api/v1/ai/evaluation-summary` without another persistence table. One SQLite read transaction returns status counts, succeeded-only parent/category/failure groups and recent Runs. Every quality key includes Provider ID, name/model snapshot, dataset version, and suite, so 8/24-case observations never mix. Parent/category groups return Wilson intervals; parents also expose Provider-version min/max and repetition evidence. Advisory readiness requires the current dataset's full suite, three Runs, one Provider version, overall/category lower bounds, and no critical code; smoke always returns `SUITE_NOT_ELIGIBLE`. The Web recomputes all counts, suite ownership, intervals, policy, statuses and reasons. A candidate never grants release permission or writes state.
+
+ADR-022/schema v66 adds append-only `ai_evaluation_reviews`. `POST /api/v1/ai/evaluation-reviews` accepts an exact visible quality-group snapshot, one of three human decisions, a required reason, and optional Idempotency-Key. The write transaction recomputes succeeded Run/Result aggregates, Wilson intervals, categories, critical codes, and advisory readiness; changed evidence returns `AI_EVALUATION_REVIEW_STALE` without writing. `GET` provides descending pagination with optional Provider-snapshot/decision filters. Database triggers reject update/delete, and the table has no Provider foreign key so audit history survives evaluation cleanup. Review writes never change Provider, chat, Task, Inbox, or other business state. The table, including free-text reasons, is excluded from portable business exports but remains in consistent SQLite backups.
+
+ADR-023/schema v67 adds four code-owned 6-case topic suites: `grounded`, `no_evidence`, `prompt_injection`, and `conflicting_sources`. Each contains every dataset-v3 case for exactly one category, with three Chinese and three English cases in original dataset order. Migration 067 passes through the destructive-migration backup gate, jointly rebuilds Run/Result/Review suite constraints, copies every column, and restores foreign keys, indexes, and immutable triggers. Evaluation create/Actor/summary/review paths accept all six stable suite keys; unknown keys fail closed. Smoke and topic suites always return `SUITE_NOT_ELIGIBLE`; only full contributes advisory candidate evidence. No endpoint permits arbitrary case selection.
+
+ADR-024 extends `GET /api/v1/ai/usage-summary` with `trend_days=1..30` (default 7). The response retains all-history scope totals and Provider groups, while `trend` is a fixed-length, consecutive UTC-day series of terminal generation root steps only. Every point preserves exact Provider usage/unknown, token, byte, and duration semantics and has zero active generations; zero-use days are returned explicitly. The endpoint never computes price, currency, cost, estimated token usage, or a cloud-derived price. Session UI may switch 7/30 days, and generation completion invalidates every cached window for that session.
 
 ### Project list and shared Task selector contract
 
@@ -327,7 +391,7 @@ Stored file names are server-generated lowercase Artifact UUIDs; SQLite stores t
 
 Numbered SQL migrations are embedded from `internal/database/migrations/` and recorded in `schema_migrations`. Startup uses one physical SQLite connection and enables foreign keys, WAL, and a 5-second busy timeout. Add schema changes as new numbered migrations; never edit a shipped migration.
 
-The current schema is v41. Migrations 009–014 add controlled Artifact/Submission, Client aggregate facts, Focus intervals, manual Inbox Items, Inbox–Task relationships, and one-time Reminders. Migrations 015–31 add orchestration, settings, controlled files, Inbox-source guards, avatars, parent progress and Client projections. Migration 032 adds Reminder series, daily/weekly recurrence, IANA timezone, and occurrence constraints; migrations 033–39 add preset Automation, Agent Adapter diagnostics, Client Followup, Roadmap/Content Calendar facts and their local Inbox projections. Migration 040 rebuilds the Reminder table behind the destructive-migration rollback gate, preserves existing rows, restores all guards/indexes, and adds monthly recurrence plus a server-derived local-day anchor. Startup registers Automation presets but does not register an Agent Adapter; no migration creates business Runs, agent Actors, Assignments, or demo data. Migration 041 preserves all Reminder facts and adds Monday-to-Friday weekdays recurrence. Future changes must start at `042_*`; never edit a shipped migration. A migration that deletes, rebuilds, or irreversibly rewrites existing facts must include `-- migration: destructive` in its consecutive header directives. Existing workspaces stop before the first such migration, publish a fully verified SQLite and controlled-file rollback package, then reopen and continue; backup failure leaves destructive SQL unapplied and prevents ready.
+The current schema is v63. Migrations 009–51 provide the business workflow, settings, Inbox/Reminder, backup/import and related local facts. Migrations 052–60 add AI Providers, sessions/messages, memory/context, the knowledge base/FTS5, and citation snapshots. Migration 061 adds the assistant generation link and content-free run steps. Migration 062 adds nullable, all-or-none Provider input/output token counts. Migration 063 adds local-only, content-free AI evaluation Runs/Results. AI and knowledge operational state remains excluded from portable business exports but covered by consistent SQLite backups. Future changes must start at `064_*`; never edit a shipped migration. A migration that deletes, rebuilds, or irreversibly rewrites existing facts must include `-- migration: destructive`; existing workspaces create a verified rollback package before such SQL runs.
 
 Each v13 relationship stores an immutable relation ID, Inbox ID, stable `task_ref_id`, nullable live `task_id`, title snapshot, `linked | created` relation type, required flag, positive position, link actor/time, and all-or-none unlink actor/time/reason. The current public POST API creates only `linked` relationships to existing Tasks. Active rows have all unlink fields null and a live Task; history rows have all three unlink facts present. Duplicate active Inbox/Task pairs and active positions are rejected. Relationship rows cannot be hard-deleted while their Inbox Item exists.
 

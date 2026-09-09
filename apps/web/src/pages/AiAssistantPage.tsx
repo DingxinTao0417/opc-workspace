@@ -1,8 +1,11 @@
 import {
   AlertCircle,
+  BarChart3,
   Brain,
   CalendarDays,
   CheckCircle2,
+  Database,
+  Eye,
   FileText,
   Lightbulb,
   ListChecks,
@@ -13,11 +16,19 @@ import {
   Sparkles,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  getAiRunSteps,
+  getAiUsageSummary,
+  searchKnowledge,
+} from "../api/client";
+import {
+  aiUsageSummaryQueryKey,
   useAiChatStream,
   useAiMessagesInfiniteQuery,
   useAiProvidersQuery,
@@ -27,11 +38,14 @@ import {
   useCreateAiSession,
   useCreateTask,
   useDeleteAiSession,
+  usePreviewAiBusinessContext,
   useTaskQuery,
 } from "../api/hooks";
 import { ErrorState, LoadingState } from "../components/feedback";
+import { ClientSelect } from "../components/ClientSelect";
 import { Modal } from "../components/Modal";
 import { ProjectSelect } from "../components/ProjectSelect";
+import { TaskSelect } from "../components/TaskSelect";
 import {
   parseAiMemorySuggestion,
   parseAiTaskSuggestion,
@@ -40,7 +54,19 @@ import {
   type AiTaskSuggestion,
 } from "../lib/aiTaskCard";
 import { useUiStore } from "../store/ui";
-import type { AiMessage, AiSession, TaskStatus } from "../types/models";
+import type {
+  AiBusinessContextPreview,
+  AiBusinessContextProviderSnapshot,
+  AiBusinessContextSource,
+  AiBusinessContextType,
+  AiCitation,
+  AiCitationStatus,
+  AiMessage,
+  AiSession,
+  AiKnowledgeContextSource,
+  KnowledgeSearchResult,
+  TaskStatus,
+} from "../types/models";
 
 interface PendingTaskCard {
   messageId: string;
@@ -247,6 +273,7 @@ export function AiAssistantPage() {
   const sessions = useAiSessionsQuery();
   const createSession = useCreateAiSession();
   const deleteSession = useDeleteAiSession();
+  const previewContext = usePreviewAiBusinessContext();
   const createTask = useCreateTask();
   const chat = useAiChatStream();
   const setSettingsOpen = useUiStore((store) => store.setSettingsOpen);
@@ -259,8 +286,22 @@ export function AiAssistantPage() {
   const [draft, setDraft] = useState<DraftTaskForm | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
+  const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
+  const [contextTaskId, setContextTaskId] = useState("");
+  const [contextProjectId, setContextProjectId] = useState("");
+  const [contextClientId, setContextClientId] = useState("");
+  const [contextKnowledgeQuery, setContextKnowledgeQuery] = useState("");
+  const [selectedKnowledgeChunks, setSelectedKnowledgeChunks] = useState<
+    KnowledgeSearchResult[]
+  >([]);
+  const [confirmedContext, setConfirmedContext] =
+    useState<AiBusinessContextPreview | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const autoScrolledSessionRef = useRef("");
+  const knowledgeSearch = useMutation({
+    mutationFn: (query: string) => searchKnowledge(query, [], 8),
+  });
 
   const readyProviders =
     providers.data?.filter(
@@ -272,6 +313,46 @@ export function AiAssistantPage() {
     readyProviders.find((provider) => provider.id === selectedProviderId) ??
     null;
 
+  const selectedContextSources = useMemo(
+    () =>
+      [
+        contextTaskId ? { type: "task" as const, id: contextTaskId } : null,
+        contextProjectId
+          ? { type: "project" as const, id: contextProjectId }
+          : null,
+        contextClientId
+          ? { type: "client" as const, id: contextClientId }
+          : null,
+      ].filter(
+        (source): source is { type: AiBusinessContextType; id: string } =>
+          source !== null,
+      ),
+    [contextClientId, contextProjectId, contextTaskId],
+  );
+  const contextSelectionCount =
+    selectedContextSources.length + selectedKnowledgeChunks.length;
+
+  const confirmedContextIsCurrent = Boolean(
+    confirmedContext &&
+    activeProvider &&
+    confirmedContext.provider_id === activeProvider.id &&
+    confirmedContext.provider_version === activeProvider.version &&
+    confirmedContext.sources.length === selectedContextSources.length &&
+    confirmedContext.sources.every((source) =>
+      selectedContextSources.some(
+        (selected) =>
+          selected.type === source.type && selected.id === source.id,
+      ),
+    ) &&
+    (confirmedContext.knowledge ?? []).length ===
+      selectedKnowledgeChunks.length &&
+    (confirmedContext.knowledge ?? []).every((source) =>
+      selectedKnowledgeChunks.some(
+        (selected) => selected.chunkId === source.chunk_id,
+      ),
+    ),
+  );
+
   useEffect(() => {
     if (
       readyProviders.length > 0 &&
@@ -280,6 +361,16 @@ export function AiAssistantPage() {
       setSelectedProviderId(readyProviders[0].id);
     }
   }, [readyProviders, selectedProviderId]);
+
+  useEffect(() => {
+    setConfirmedContext(null);
+  }, [
+    contextClientId,
+    contextProjectId,
+    contextTaskId,
+    selectedKnowledgeChunks,
+    selectedProviderId,
+  ]);
 
   const messages = useAiMessagesInfiniteQuery(
     activeSessionId,
@@ -395,17 +486,100 @@ export function AiAssistantPage() {
     }
   }
 
+  async function previewSelectedContext() {
+    if (!activeProvider || contextSelectionCount === 0) return;
+    try {
+      await previewContext.mutateAsync({
+        provider_id: activeProvider.id,
+        sources: selectedContextSources,
+        knowledge: selectedKnowledgeChunks.map((result) => ({
+          source_id: result.sourceId,
+          document_id: result.documentId,
+          chunk_id: result.chunkId,
+        })),
+      });
+      setContextPreviewOpen(true);
+    } catch {
+      // mutation state renders a safe error in the context panel
+    }
+  }
+
+  function clearSelectedContext() {
+    setContextTaskId("");
+    setContextProjectId("");
+    setContextClientId("");
+    setContextKnowledgeQuery("");
+    setSelectedKnowledgeChunks([]);
+    knowledgeSearch.reset();
+    setConfirmedContext(null);
+    previewContext.reset();
+  }
+
+  function toggleKnowledgeResult(result: KnowledgeSearchResult) {
+    setSelectedKnowledgeChunks((current) => {
+      if (current.some((item) => item.chunkId === result.chunkId)) {
+        return current.filter((item) => item.chunkId !== result.chunkId);
+      }
+      if (current.length >= 3) return current;
+      return [...current, result];
+    });
+  }
+
   async function sendMessage() {
     const message = input.trim();
-    if (!activeProvider || !message || chat.isStreaming) return;
+    if (
+      !activeProvider ||
+      !message ||
+      chat.isStreaming ||
+      (contextSelectionCount > 0 && !confirmedContextIsCurrent)
+    )
+      return;
     setInput("");
     const outcome = await chat.send({
       providerId: activeProvider.id,
       sessionId: activeSessionId || undefined,
       message,
+      context:
+        confirmedContext && confirmedContextIsCurrent
+          ? {
+              provider_version: confirmedContext.provider_version,
+              sources: confirmedContext.sources.map((source) => ({
+                type: source.type,
+                id: source.id,
+                expected_version: source.version,
+              })),
+              knowledge: (confirmedContext.knowledge ?? []).map((source) => ({
+                source_id: source.source_id,
+                document_id: source.document_id,
+                chunk_id: source.chunk_id,
+                expected_source_version: source.source_version,
+                expected_document_version: source.document_version,
+              })),
+            }
+          : undefined,
     });
     if (outcome.sessionId && outcome.sessionId !== activeSessionId) {
       setActiveSessionId(outcome.sessionId);
+    }
+    if (
+      outcome.errorCode === "AI_CONTEXT_CHANGED" ||
+      outcome.errorCode === "AI_CONTEXT_PROVIDER_CHANGED" ||
+      outcome.errorCode === "AI_CONTEXT_SOURCE_NOT_FOUND" ||
+      outcome.errorCode === "AI_KNOWLEDGE_CONTEXT_CHANGED" ||
+      outcome.errorCode === "AI_KNOWLEDGE_CONTEXT_NOT_FOUND"
+    ) {
+      setConfirmedContext(null);
+      setContextPanelOpen(true);
+    }
+    if (!outcome.error) {
+      setContextTaskId("");
+      setContextProjectId("");
+      setContextClientId("");
+      setContextKnowledgeQuery("");
+      setSelectedKnowledgeChunks([]);
+      knowledgeSearch.reset();
+      setConfirmedContext(null);
+      setContextPanelOpen(false);
     }
   }
 
@@ -455,19 +629,29 @@ export function AiAssistantPage() {
         <aside className="ai-session-rail" aria-label="会话列表">
           <button
             className="ai-new-chat-btn"
-            disabled={createSession.isPending}
+            disabled={createSession.isPending || chat.isStreaming}
             onClick={() => {
               setPendingCard(null);
               setDraft(null);
-              void createSession.mutateAsync().then((session) => {
-                setActiveSessionId(session.id);
-              });
+              void createSession
+                .mutateAsync()
+                .then((session) => {
+                  setActiveSessionId(session.id);
+                })
+                .catch(() => {
+                  // mutation state renders the safe error below
+                });
             }}
             type="button"
           >
             <Plus size={15} />
             新会话
           </button>
+          {createSession.error ? (
+            <div className="ai-session-create-error" role="alert">
+              无法新建会话，请重试
+            </div>
+          ) : null}
           <div className="ai-rail-search">
             <Search size={14} />
             <input
@@ -502,6 +686,7 @@ export function AiAssistantPage() {
                     key={session.id}
                   >
                     <button
+                      disabled={chat.isStreaming}
                       onClick={() => {
                         setActiveSessionId(session.id);
                         setPendingCard(null);
@@ -518,6 +703,7 @@ export function AiAssistantPage() {
                     <button
                       aria-label={`删除会话 ${session.title}`}
                       className="ai-session-delete"
+                      disabled={chat.isStreaming}
                       onClick={() => setDeletingSession(session.id)}
                       type="button"
                     >
@@ -532,6 +718,42 @@ export function AiAssistantPage() {
 
         <section className="ai-chat-main">
           <header className="ai-chat-header">
+            <div className="ai-mobile-session-controls">
+              <select
+                aria-label="移动端选择会话"
+                disabled={chat.isStreaming}
+                onChange={(event) => {
+                  setActiveSessionId(event.target.value);
+                  setPendingCard(null);
+                  setDraft(null);
+                }}
+                value={activeSessionId}
+              >
+                <option value="">新会话</option>
+                {(sessions.data ?? []).map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.title}
+                  </option>
+                ))}
+              </select>
+              <button
+                aria-label="移动端新会话"
+                disabled={createSession.isPending || chat.isStreaming}
+                onClick={() => {
+                  setPendingCard(null);
+                  setDraft(null);
+                  void createSession
+                    .mutateAsync()
+                    .then((session) => setActiveSessionId(session.id))
+                    .catch(() => {
+                      // mutation state renders the safe error in the rail on wider layouts
+                    });
+                }}
+                type="button"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
             <div className="min-w-0">
               <div className="ai-chat-header-title">
                 {activeSession?.title ?? "新会话"}
@@ -541,7 +763,13 @@ export function AiAssistantPage() {
                   ? `${activeProvider.name} · ${activeProvider.model}`
                   : "未配置供应商"}
               </div>
+              {(activeSession?.compacted_message_count ?? 0) > 0 ? (
+                <span className="ai-context-compressed-badge" role="status">
+                  已压缩前 {activeSession?.compacted_message_count} 条消息
+                </span>
+              ) : null}
             </div>
+            <AiUsageSummaryPanel sessionId={activeSessionId} />
           </header>
 
           <div className="ai-chat-messages" ref={scrollRef}>
@@ -599,6 +827,14 @@ export function AiAssistantPage() {
                     <AiMessageBlock
                       attachedTaskId={message.task_id}
                       content={message.content}
+                      contextProvider={message.context_provider}
+                      contextKnowledge={message.context_knowledge ?? []}
+                      contextSources={message.context_sources}
+                      citationStatus={
+                        message.citation_status ?? "not_requested"
+                      }
+                      citations={message.citations ?? []}
+                      generationId={message.generation_id ?? null}
                       createdAt={message.created_at}
                       key={message.id}
                       messageId={message.id}
@@ -615,7 +851,21 @@ export function AiAssistantPage() {
                   {chat.sentMessage !== null ? (
                     <div className="ai-msg-user">
                       <span className="ai-msg-time" />
-                      <div className="ai-bubble-user">{chat.sentMessage}</div>
+                      <div className="ai-user-message-stack">
+                        <div className="ai-bubble-user">{chat.sentMessage}</div>
+                        {confirmedContextIsCurrent && confirmedContext ? (
+                          <AiBusinessContextChips
+                            provider={{
+                              id: confirmedContext.provider_id,
+                              name: confirmedContext.provider_name,
+                              kind: confirmedContext.provider_kind,
+                              version: confirmedContext.provider_version,
+                            }}
+                            knowledge={confirmedContext.knowledge ?? []}
+                            sources={confirmedContext.sources}
+                          />
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
                   <div className="ai-msg">
@@ -744,6 +994,239 @@ export function AiAssistantPage() {
             </div>
           ) : null}
 
+          {contextPanelOpen ? (
+            <section className="ai-context-panel" aria-label="选择工作区上下文">
+              <header>
+                <div>
+                  <strong>用于下一条消息的显式上下文</strong>
+                  <span>
+                    业务对象最多各一个，知识片段最多三个；不会自动扩展或检索。
+                  </span>
+                </div>
+                <button
+                  aria-label="关闭上下文选择"
+                  className="button button-quiet"
+                  onClick={() => setContextPanelOpen(false)}
+                  type="button"
+                >
+                  <X size={14} />
+                </button>
+              </header>
+              <div className="ai-context-select-grid">
+                <label>
+                  Task
+                  <TaskSelect
+                    ariaLabel="选择 AI 上下文任务"
+                    disabled={
+                      !activeProvider ||
+                      chat.isStreaming ||
+                      previewContext.isPending
+                    }
+                    emptyLabel="不选择任务"
+                    onChange={(id) => setContextTaskId(id)}
+                    value={contextTaskId}
+                    variant="form"
+                  />
+                </label>
+                <label>
+                  Project
+                  <ProjectSelect
+                    ariaLabel="选择 AI 上下文项目"
+                    disabled={
+                      !activeProvider ||
+                      chat.isStreaming ||
+                      previewContext.isPending
+                    }
+                    emptyLabel="不选择项目"
+                    onChange={setContextProjectId}
+                    value={contextProjectId}
+                    variant="form"
+                  />
+                </label>
+                <label>
+                  Client
+                  <ClientSelect
+                    ariaLabel="选择 AI 上下文客户"
+                    disabled={
+                      !activeProvider ||
+                      chat.isStreaming ||
+                      previewContext.isPending
+                    }
+                    emptyLabel="不选择客户"
+                    onChange={setContextClientId}
+                    value={contextClientId}
+                    variant="form"
+                  />
+                </label>
+              </div>
+              <section
+                aria-label="选择 AI 知识库片段"
+                className="ai-knowledge-context-picker"
+              >
+                <header>
+                  <div>
+                    <strong>知识库片段</strong>
+                    <span>
+                      先本地搜索，再逐段选择；片段可能包含不可信指令。
+                    </span>
+                  </div>
+                  <button
+                    className="button button-quiet"
+                    onClick={() => navigate("/knowledge")}
+                    type="button"
+                  >
+                    管理知识库
+                  </button>
+                </header>
+                <form
+                  className="ai-knowledge-context-search"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const query = contextKnowledgeQuery.trim();
+                    if (query) knowledgeSearch.mutate(query);
+                  }}
+                >
+                  <Search size={14} />
+                  <input
+                    aria-label="搜索 AI 知识库上下文"
+                    disabled={chat.isStreaming || previewContext.isPending}
+                    maxLength={256}
+                    onChange={(event) =>
+                      setContextKnowledgeQuery(event.target.value)
+                    }
+                    placeholder="搜索本地资料…"
+                    value={contextKnowledgeQuery}
+                  />
+                  <button
+                    className="button button-secondary"
+                    disabled={
+                      !contextKnowledgeQuery.trim() ||
+                      knowledgeSearch.isPending ||
+                      chat.isStreaming
+                    }
+                    type="submit"
+                  >
+                    {knowledgeSearch.isPending ? (
+                      <LoaderCircle className="animate-spin" size={13} />
+                    ) : (
+                      <Search size={13} />
+                    )}
+                    搜索
+                  </button>
+                </form>
+                {selectedKnowledgeChunks.length > 0 ? (
+                  <div
+                    aria-label="已选知识片段"
+                    className="ai-knowledge-context-selected"
+                  >
+                    {selectedKnowledgeChunks.map((result) => (
+                      <button
+                        aria-label={`移除知识片段 ${result.sourceName} 第 ${result.startLine} 至 ${result.endLine} 行`}
+                        key={result.chunkId}
+                        onClick={() => toggleKnowledgeResult(result)}
+                        type="button"
+                      >
+                        <FileText size={11} />
+                        {result.sourceName} · L{result.startLine}–
+                        {result.endLine}
+                        <X size={10} />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {knowledgeSearch.data ? (
+                  <div className="ai-knowledge-context-results">
+                    {knowledgeSearch.data.items.length === 0 ? (
+                      <span className="ai-knowledge-context-empty">
+                        没有匹配片段，请调整关键词或先导入资料。
+                      </span>
+                    ) : (
+                      knowledgeSearch.data.items.map((result) => {
+                        const selected = selectedKnowledgeChunks.some(
+                          (item) => item.chunkId === result.chunkId,
+                        );
+                        return (
+                          <button
+                            aria-pressed={selected}
+                            className={selected ? "is-selected" : ""}
+                            disabled={
+                              !selected && selectedKnowledgeChunks.length >= 3
+                            }
+                            key={result.chunkId}
+                            onClick={() => toggleKnowledgeResult(result)}
+                            type="button"
+                          >
+                            <span>
+                              <strong>{result.sourceName}</strong>
+                              <small>
+                                第 {result.startLine}–{result.endLine} 行 · 文档
+                                v{result.documentVersion}
+                              </small>
+                            </span>
+                            <p>{result.excerpt}</p>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+                {knowledgeSearch.error ? (
+                  <div className="ai-context-error" role="alert">
+                    <AlertCircle size={14} />
+                    {knowledgeSearch.error instanceof Error
+                      ? knowledgeSearch.error.message
+                      : "无法搜索本地知识库"}
+                  </div>
+                ) : null}
+              </section>
+              <footer>
+                <span>
+                  {contextSelectionCount === 0
+                    ? "尚未选择上下文"
+                    : confirmedContextIsCurrent
+                      ? `已确认 ${contextSelectionCount} 项，将随下一条消息发送`
+                      : `已选择 ${contextSelectionCount} 项，发送前需要预览确认`}
+                </span>
+                <div>
+                  <button
+                    className="button button-quiet"
+                    disabled={contextSelectionCount === 0}
+                    onClick={clearSelectedContext}
+                    type="button"
+                  >
+                    清空
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    disabled={
+                      !activeProvider ||
+                      contextSelectionCount === 0 ||
+                      previewContext.isPending ||
+                      chat.isStreaming
+                    }
+                    onClick={() => void previewSelectedContext()}
+                    type="button"
+                  >
+                    {previewContext.isPending ? (
+                      <LoaderCircle className="animate-spin" size={13} />
+                    ) : (
+                      <Eye size={13} />
+                    )}
+                    预览发送内容
+                  </button>
+                </div>
+              </footer>
+              {previewContext.error ? (
+                <div className="ai-context-error" role="alert">
+                  <AlertCircle size={14} />
+                  {previewContext.error instanceof Error
+                    ? previewContext.error.message
+                    : "无法预览所选上下文"}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <div className="ai-composer">
             <div className="ai-composer-inner">
               <div className="ai-composer-box">
@@ -767,10 +1250,29 @@ export function AiAssistantPage() {
                 />
                 <div className="ai-composer-tool-row">
                   <div className="ai-composer-tools-left">
+                    <button
+                      aria-pressed={contextPanelOpen}
+                      className="ai-context-toggle"
+                      data-confirmed={confirmedContextIsCurrent}
+                      disabled={!activeProvider || chat.isStreaming}
+                      onClick={() => setContextPanelOpen((open) => !open)}
+                      type="button"
+                    >
+                      {confirmedContextIsCurrent ? (
+                        <CheckCircle2 size={13} />
+                      ) : (
+                        <Database size={13} />
+                      )}
+                      {confirmedContextIsCurrent ? "上下文已确认" : "上下文"}
+                      {contextSelectionCount > 0 ? (
+                        <span>{contextSelectionCount}</span>
+                      ) : null}
+                    </button>
                     {activeProvider ? (
                       <select
                         aria-label="选择 AI 供应商"
                         className="ai-model-select"
+                        disabled={chat.isStreaming}
                         onChange={(event) =>
                           setSelectedProviderId(event.target.value)
                         }
@@ -799,7 +1301,12 @@ export function AiAssistantPage() {
                     <button
                       aria-label="发送"
                       className="ai-send-btn"
-                      disabled={!activeProvider || !input.trim()}
+                      disabled={
+                        !activeProvider ||
+                        !input.trim() ||
+                        (contextSelectionCount > 0 &&
+                          !confirmedContextIsCurrent)
+                      }
                       onClick={() => void sendMessage()}
                       type="button"
                     >
@@ -820,6 +1327,42 @@ export function AiAssistantPage() {
           </div>
         </section>
       </div>
+
+      <Modal
+        footer={
+          <>
+            <button
+              className="button button-secondary"
+              onClick={() => setContextPreviewOpen(false)}
+              type="button"
+            >
+              返回修改
+            </button>
+            <button
+              className="button button-primary"
+              disabled={!previewContext.data}
+              onClick={() => {
+                const preview = previewContext.data;
+                if (!preview) return;
+                setConfirmedContext(preview);
+                setContextPreviewOpen(false);
+                setContextPanelOpen(false);
+              }}
+              type="button"
+            >
+              确认用于下一条消息
+            </button>
+          </>
+        }
+        onClose={() => setContextPreviewOpen(false)}
+        open={contextPreviewOpen && Boolean(previewContext.data)}
+        title="发送前检查工作区上下文"
+        width="720px"
+      >
+        {previewContext.data ? (
+          <AiBusinessContextPreviewContent preview={previewContext.data} />
+        ) : null}
+      </Modal>
 
       <Modal
         footer={
@@ -875,6 +1418,159 @@ export function AiAssistantPage() {
   );
 }
 
+const aiBusinessContextTypeLabels: Record<AiBusinessContextType, string> = {
+  task: "Task",
+  project: "Project",
+  client: "Client",
+};
+
+const aiBusinessContextFieldLabels: Record<string, string> = {
+  title: "标题",
+  name: "名称",
+  description: "描述",
+  kind: "类型",
+  status: "状态",
+  priority: "优先级",
+  completion_criteria: "完成条件",
+  planned_date: "计划日期",
+  due_date: "截止日期",
+  start_date: "开始日期",
+  project_id: "所属项目 ID",
+  project_name: "所属项目",
+  notes: "备注",
+  task_total: "任务总数",
+  task_done: "已完成任务",
+  task_blocked: "阻塞任务",
+  task_waiting_review: "待验收任务",
+};
+
+function displayAIContextValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "未设置";
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+  if (typeof value === "boolean") return value ? "是" : "否";
+  return JSON.stringify(value);
+}
+
+function AiBusinessContextChips({
+  provider,
+  sources,
+  knowledge,
+}: {
+  provider?: AiBusinessContextProviderSnapshot | null;
+  sources: AiBusinessContextSource[];
+  knowledge: AiKnowledgeContextSource[];
+}) {
+  return (
+    <div className="ai-context-chips" aria-label="随消息发送的工作区上下文">
+      {provider ? (
+        <span className="is-provider">
+          <Database size={11} />
+          {provider.name} · {provider.kind === "local" ? "本地" : "远程"}
+        </span>
+      ) : null}
+      {sources.map((source) => (
+        <span key={`${source.type}:${source.id}`}>
+          <Database size={11} />
+          {aiBusinessContextTypeLabels[source.type]} · {source.label}
+        </span>
+      ))}
+      {knowledge.map((source) => (
+        <span className="is-knowledge" key={source.chunk_id}>
+          <FileText size={11} />
+          {source.source_name} · L{source.start_line}–{source.end_line}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AiBusinessContextPreviewContent({
+  preview,
+}: {
+  preview: AiBusinessContextPreview;
+}) {
+  return (
+    <div className="ai-context-preview">
+      <div
+        className="ai-context-disclosure"
+        data-remote={preview.leaves_device}
+        role="status"
+      >
+        <Database size={16} />
+        <div>
+          <strong>
+            {preview.leaves_device
+              ? `将发送给远程供应商 ${preview.provider_name}`
+              : `只发送到本机供应商 ${preview.provider_name}`}
+          </strong>
+          <span>
+            共 {preview.sources.length + (preview.knowledge ?? []).length}{" "}
+            项，序列化约 {preview.serialized_bytes} 字节；
+            发送时若数据或供应商版本变化，系统会拒绝并要求重新预览。
+          </span>
+        </div>
+      </div>
+      <div className="ai-context-preview-list">
+        {preview.sources.map((source) => (
+          <article key={`${source.type}:${source.id}`}>
+            <header>
+              <span>{aiBusinessContextTypeLabels[source.type]}</span>
+              <strong>{source.label}</strong>
+              <small>v{source.version}</small>
+            </header>
+            <dl>
+              {Object.entries(source.fields).map(([field, value]) => (
+                <div key={field}>
+                  <dt>
+                    {aiBusinessContextFieldLabels[field] ?? field}
+                    {source.truncated_fields.includes(field)
+                      ? "（已截断）"
+                      : ""}
+                  </dt>
+                  <dd>{displayAIContextValue(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        ))}
+        {(preview.knowledge ?? []).map((source) => (
+          <article className="is-knowledge" key={source.chunk_id}>
+            <header>
+              <span>Knowledge</span>
+              <strong>{source.source_name}</strong>
+              <small>
+                文档 v{source.document_version} · L{source.start_line}–
+                {source.end_line}
+              </small>
+            </header>
+            <dl>
+              <div>
+                <dt>来源与分段</dt>
+                <dd>
+                  {source.document_title} · chunk {source.chunk_index + 1}
+                </dd>
+              </div>
+              <div>
+                <dt>版本绑定</dt>
+                <dd>
+                  source v{source.source_version} / document v
+                  {source.document_version}
+                </dd>
+              </div>
+              <div className="ai-context-preview-knowledge-content">
+                <dt>将发送的原文片段（不可信引用）</dt>
+                <dd>{source.content}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AiThinkingProcess({
   reasoning,
   live,
@@ -903,10 +1599,376 @@ function AiThinkingProcess({
   );
 }
 
+function AiCitationEvidence({
+  status,
+  citations,
+}: {
+  status: AiCitationStatus;
+  citations: AiCitation[];
+}) {
+  if (status === "not_requested") return null;
+  if (status !== "validated") {
+    const message =
+      status === "no_evidence"
+        ? "模型标记为没有足够的已选资料证据。"
+        : status === "missing"
+          ? "这条回答没有提供结构化引用，请谨慎核对。"
+          : "模型给出的引用不在已确认片段内，已被 Sidecar 拒绝。";
+    return (
+      <div className={`ai-citation-status is-${status}`} role="status">
+        <AlertCircle size={13} />
+        {message}
+      </div>
+    );
+  }
+  return (
+    <section className="ai-citation-evidence" aria-label="已验证知识来源">
+      <header>
+        <CheckCircle2 size={13} />
+        <strong>已验证来源</strong>
+        <span>{citations.length}</span>
+      </header>
+      <div>
+        {citations.map((citation) => (
+          <article key={citation.chunk_id}>
+            <FileText size={13} />
+            <span>
+              <strong>{citation.source_name}</strong>
+              <small>
+                第 {citation.start_line}–{citation.end_line} 行 · 文档 v
+                {citation.document_version} · chunk {citation.chunk_index + 1}
+              </small>
+            </span>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const aiRunStepKindLabels: Record<string, string> = {
+  generation: "本次生成",
+  model_turn: "模型轮次",
+  tool_call: "记忆工具",
+  self_check: "回答自检",
+  citation_validation: "引用校验",
+  persistence: "本地保存",
+};
+
+function formatAIRunBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  return `${(value / 1024).toFixed(1)} KiB`;
+}
+
+function formatAIUsageNumber(value: number) {
+  return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+function formatAIUsageDuration(value: number) {
+  if (value < 1000) return `${value} ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
+  return `${(value / 60_000).toFixed(1)} min`;
+}
+
+function formatAIUsageTrendDay(day: string) {
+  return day.slice(5).replace("-", "/");
+}
+
+function AiUsageSummaryPanel({ sessionId }: { sessionId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [trendDays, setTrendDays] = useState<7 | 30>(7);
+  const summary = useQuery({
+    queryKey: aiUsageSummaryQueryKey(sessionId, trendDays),
+    queryFn: () => getAiUsageSummary({ sessionId, trendDays }),
+    enabled: expanded && sessionId !== "",
+  });
+  if (!sessionId) return null;
+
+  const terminalGenerations = summary.data
+    ? summary.data.totals.completedGenerations +
+      summary.data.totals.failedGenerations +
+      summary.data.totals.cancelledGenerations
+    : 0;
+  return (
+    <div className="ai-usage-summary">
+      <button
+        aria-expanded={expanded}
+        className="ai-usage-summary-toggle"
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        <BarChart3 size={13} />
+        <span>本地用量</span>
+        {summary.data ? (
+          <small>
+            {summary.data.totals.providerUsageGenerations}/{terminalGenerations}{" "}
+            有 token
+          </small>
+        ) : null}
+      </button>
+      {expanded ? (
+        <section
+          aria-label="当前会话本地用量"
+          className="ai-usage-summary-panel"
+        >
+          {summary.isPending ? (
+            <span className="ai-usage-summary-loading">
+              正在汇总本地运行事实…
+            </span>
+          ) : null}
+          {summary.isError ? (
+            <ErrorState
+              compact
+              message="无法读取本地用量"
+              onRetry={() => void summary.refetch()}
+            />
+          ) : null}
+          {summary.data ? (
+            <>
+              <dl className="ai-usage-summary-grid">
+                <div>
+                  <dt>已结束生成</dt>
+                  <dd>{terminalGenerations}</dd>
+                </div>
+                <div>
+                  <dt>Provider usage</dt>
+                  <dd>
+                    {summary.data.totals.providerUsageGenerations}/
+                    {terminalGenerations}
+                  </dd>
+                </div>
+                <div>
+                  <dt>原始 token</dt>
+                  <dd>
+                    {summary.data.totals.providerUsageGenerations > 0
+                      ? `${formatAIUsageNumber(summary.data.totals.inputTokens)} in / ${formatAIUsageNumber(summary.data.totals.outputTokens)} out`
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>累计耗时</dt>
+                  <dd>
+                    {formatAIUsageDuration(summary.data.totals.durationMs)}
+                  </dd>
+                </div>
+              </dl>
+              <section className="ai-usage-summary-trend">
+                <header>
+                  <span>
+                    <strong>用量趋势</strong>
+                    <small>UTC 日 · 仅终态运行</small>
+                  </span>
+                  <span className="ai-usage-summary-range" role="group">
+                    {([7, 30] as const).map((days) => (
+                      <button
+                        aria-pressed={trendDays === days}
+                        className={trendDays === days ? "is-selected" : ""}
+                        disabled={summary.isFetching}
+                        key={days}
+                        onClick={() => setTrendDays(days)}
+                        type="button"
+                      >
+                        {days} 天
+                      </button>
+                    ))}
+                  </span>
+                </header>
+                {(() => {
+                  const maximum = Math.max(
+                    1,
+                    ...summary.data.trend.map(
+                      (point) => point.totalGenerations,
+                    ),
+                  );
+                  return (
+                    <div
+                      className={`ai-usage-summary-trend-points ${
+                        trendDays === 30 ? "is-extended" : ""
+                      }`}
+                    >
+                      {summary.data.trend.map((point) => {
+                        const terminal =
+                          point.completedGenerations +
+                          point.failedGenerations +
+                          point.cancelledGenerations;
+                        return (
+                          <div key={point.day}>
+                            <small>{formatAIUsageTrendDay(point.day)}</small>
+                            <span className="ai-usage-summary-trend-track">
+                              <span
+                                style={{
+                                  width: `${Math.round(
+                                    (point.totalGenerations / maximum) * 100,
+                                  )}%`,
+                                }}
+                              />
+                            </span>
+                            <strong>{point.totalGenerations}</strong>
+                            <small>
+                              {terminal === 0
+                                ? "—"
+                                : `${point.providerUsageGenerations}/${terminal} token`}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </section>
+              <div className="ai-usage-summary-by-provider">
+                {summary.data.providers.length === 0 ? (
+                  <span>当前会话还没有生成记录。</span>
+                ) : (
+                  summary.data.providers.map((provider) => (
+                    <article key={provider.providerId}>
+                      <span>
+                        <strong>{provider.providerName}</strong>
+                        <small>
+                          {provider.model} ·{" "}
+                          {provider.providerKind === "local" ? "本地" : "远程"}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>
+                          {provider.providerUsageGenerations > 0
+                            ? `${formatAIUsageNumber(provider.inputTokens)} → ${formatAIUsageNumber(provider.outputTokens)}`
+                            : "usage unknown"}
+                        </strong>
+                        <small>
+                          {provider.providerUsageGenerations}/
+                          {provider.completedGenerations +
+                            provider.failedGenerations +
+                            provider.cancelledGenerations}{" "}
+                          有 token
+                        </small>
+                      </span>
+                    </article>
+                  ))
+                )}
+              </div>
+              <p className="ai-usage-summary-note">
+                仅汇总本机运行步骤；趋势按 UTC 日统计终态运行；
+                {summary.data.totals.unknownUsageGenerations} 次未返回 usage，
+                不估算 token，也不计算费用。
+              </p>
+            </>
+          ) : null}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function AiRunTimeline({ generationId }: { generationId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const steps = useQuery({
+    queryKey: ["ai", "run-steps", generationId],
+    queryFn: () => getAiRunSteps(generationId),
+    enabled: expanded,
+  });
+  return (
+    <section className="ai-run-timeline" aria-label="AI 运行详情">
+      <button
+        aria-expanded={expanded}
+        className="ai-run-timeline-toggle"
+        onClick={() => setExpanded((current) => !current)}
+        type="button"
+      >
+        <ListChecks size={13} />
+        <span>运行详情</span>
+        {steps.data ? (
+          <small>
+            {steps.data.meta.total} 步 · {steps.data.meta.durationMs} ms
+          </small>
+        ) : null}
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+      </button>
+      {expanded ? (
+        <div className="ai-run-timeline-panel">
+          {steps.isPending ? (
+            <span className="ai-run-timeline-loading">
+              正在读取本地运行事实…
+            </span>
+          ) : null}
+          {steps.isError ? (
+            <ErrorState
+              compact
+              message={
+                steps.error instanceof Error
+                  ? steps.error.message
+                  : "无法读取本地运行详情"
+              }
+              onRetry={() => void steps.refetch()}
+            />
+          ) : null}
+          {steps.data ? (
+            <>
+              <div className="ai-run-timeline-summary">
+                <span>输入 {formatAIRunBytes(steps.data.meta.inputBytes)}</span>
+                <span>
+                  输出 {formatAIRunBytes(steps.data.meta.outputBytes)}
+                </span>
+                {steps.data.meta.tokenSource === "provider" ? (
+                  <span>
+                    Provider token：{steps.data.meta.inputTokens} in /{" "}
+                    {steps.data.meta.outputTokens} out
+                  </span>
+                ) : (
+                  <span>Provider 未返回 token usage</span>
+                )}
+                <span>仅字节与耗时，不保存正文</span>
+              </div>
+              <div className="ai-run-timeline-list">
+                {steps.data.items.map((step) => (
+                  <article data-status={step.status} key={step.id}>
+                    <span className="ai-run-step-index">{step.sequence}</span>
+                    <span className="ai-run-step-copy">
+                      <strong>
+                        {aiRunStepKindLabels[step.kind] ?? step.kind}
+                        {step.turnIndex ? ` ${step.turnIndex}` : ""}
+                        {step.toolName ? ` · ${step.toolName}` : ""}
+                      </strong>
+                      <small>
+                        {step.status === "succeeded"
+                          ? "完成"
+                          : step.status === "cancelled"
+                            ? "已取消"
+                            : step.status === "failed"
+                              ? `失败 · ${step.errorCode}`
+                              : "运行中"}
+                      </small>
+                    </span>
+                    <span className="ai-run-step-metrics">
+                      {step.durationMs ?? 0} ms
+                      {step.inputBytes || step.outputBytes
+                        ? ` · ${formatAIRunBytes(step.inputBytes)} → ${formatAIRunBytes(step.outputBytes)}`
+                        : ""}
+                      {step.tokenSource === "provider"
+                        ? ` · ${step.inputTokens} → ${step.outputTokens} tokens`
+                        : ""}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function AiMessageBlock({
   role,
   messageId,
   content,
+  contextProvider,
+  contextSources,
+  contextKnowledge,
+  citationStatus,
+  citations,
+  generationId,
   reasoning,
   createdAt,
   status,
@@ -916,6 +1978,12 @@ function AiMessageBlock({
   role: AiMessage["role"];
   messageId: string;
   content: string;
+  contextProvider: AiMessage["context_provider"];
+  contextSources: AiBusinessContextSource[];
+  contextKnowledge: AiKnowledgeContextSource[];
+  citationStatus: AiCitationStatus;
+  citations: AiCitation[];
+  generationId: string | null;
   reasoning: string | null;
   createdAt: string;
   status: AiMessage["status"];
@@ -927,7 +1995,16 @@ function AiMessageBlock({
     return (
       <div className="ai-msg-user">
         <span className="ai-msg-time">{messageTimeLabel(createdAt)}</span>
-        <div className="ai-bubble-user">{content}</div>
+        <div className="ai-user-message-stack">
+          <div className="ai-bubble-user">{content}</div>
+          {contextSources.length > 0 || contextKnowledge.length > 0 ? (
+            <AiBusinessContextChips
+              knowledge={contextKnowledge}
+              provider={contextProvider}
+              sources={contextSources}
+            />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -954,6 +2031,8 @@ function AiMessageBlock({
             ? "（已停止生成，内容不完整）"
             : null}
         </div>
+        <AiCitationEvidence citations={citations} status={citationStatus} />
+        {generationId ? <AiRunTimeline generationId={generationId} /> : null}
         {attachedTaskId ? (
           <AiTaskCreatedCard
             onOpen={() => navigate(`/tasks/${attachedTaskId}`)}
@@ -1025,6 +2104,7 @@ function AiMemorySuggestionCard({
             .mutateAsync({
               content: memory.content,
               source_message_id: messageId,
+              ...(memory.proposalId ? { proposal_id: memory.proposalId } : {}),
             })
             .then(() => setSaved(true))
             .catch(() => {

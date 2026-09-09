@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
@@ -206,6 +207,35 @@ func TestAIChatKeepsTaskSuggestionBlockInRawContent(t *testing.T) {
 	}
 }
 
+func TestAIChatNonPersistentSessionKeepsOnlyGenerationMetadata(t *testing.T) {
+	now := time.Date(2026, 9, 8, 19, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, _ *http.Request) {
+		streamMockAIDelta(w, "ephemeral answer")
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "ephemeral-provider", upstream.URL+"/v1", "gpt-test")
+	created := performRequest(
+		router, http.MethodPost, "/api/v1/ai/sessions",
+		[]byte(`{"title":"ephemeral","persist":false}`), nil,
+	)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create non-persistent session = %d: %s", created.Code, created.Body.String())
+	}
+	var sessionEnvelope struct {
+		Data aiSessionResponse `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &sessionEnvelope); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	response := chatRequest(t, router, provider.ID, sessionEnvelope.Data.ID, "private turn")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "ephemeral answer") {
+		t.Fatalf("chat = %d: %s", response.Code, response.Body.String())
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages WHERE session_id = ?", 0, sessionEnvelope.Data.ID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_generations WHERE session_id = ? AND status = 'completed' AND content IS NULL", 1, sessionEnvelope.Data.ID)
+}
+
 func TestAIChatMapsAnthropicDeltas(t *testing.T) {
 	now := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	router, store, _ := newAIProviderTestRouter(t, now)
@@ -326,6 +356,9 @@ func TestAIChatCancelStopsUpstreamAndKeepsPartial(t *testing.T) {
 	if assistantStatus != "cancelled" || assistantContent != "部分" {
 		t.Fatalf("cancelled assistant message status=%q content=%q", assistantStatus, assistantContent)
 	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages WHERE role = 'assistant' AND generation_id = ?", 1, generationID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE generation_id = ? AND kind = 'generation' AND status = 'cancelled'", 1, generationID)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE generation_id = ? AND kind = 'model_turn' AND status = 'cancelled'", 1, generationID)
 }
 
 func TestAIStaleSessionDeleteDoesNotCancelActiveGeneration(t *testing.T) {
@@ -565,6 +598,42 @@ func TestAIChatUpstreamFailurePersistsFailedGeneration(t *testing.T) {
 	}
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'ai_generation' AND action = 'ai_generation_failed'", 1)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages WHERE role = 'assistant'", 0)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE kind = 'generation' AND status = 'failed' AND error_code = 'AI_PROVIDER_ERROR'", 1)
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE kind = 'model_turn' AND status = 'failed' AND error_code = 'MODEL_TURN_FAILED'", 1)
+}
+
+func TestAIChatPersistsOnlyProviderReportedTokenUsage(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	router, store, _ := newAIProviderTestRouter(t, now)
+	upstream := newMockAIUpstream(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":321,\"completion_tokens\":45,\"total_tokens\":366}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answer[opc:selfcheck]{\\\"sufficient\\\":true}[/opc:selfcheck]\"},\"finish_reason\":\"stop\"}]}\n\n")
+	})
+	defer upstream.Close()
+	provider := createReadyAIProvider(t, router, "chat-usage", upstream.URL+"/v1", "gpt-test")
+	response := chatRequest(t, router, provider.ID, "", "measure exact provider usage")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "event: done") {
+		t.Fatalf("usage chat = %d: %s", response.Code, response.Body.String())
+	}
+	var root, modelStep models.AIRunStep
+	if err := store.DB.Where("kind = 'generation'").First(&root).Error; err != nil {
+		t.Fatalf("load usage root: %v", err)
+	}
+	if err := store.DB.Where("kind = 'model_turn'").First(&modelStep).Error; err != nil {
+		t.Fatalf("load model usage step: %v", err)
+	}
+	for name, step := range map[string]models.AIRunStep{"root": root, "model": modelStep} {
+		if step.TokenSource == nil || *step.TokenSource != "provider" || step.InputTokens == nil || *step.InputTokens != 321 ||
+			step.OutputTokens == nil || *step.OutputTokens != 45 {
+			t.Fatalf("%s token usage=%#v", name, step)
+		}
+	}
+	steps := performRequest(router, http.MethodGet, "/api/v1/ai/generations/"+root.GenerationID+"/steps", nil, nil)
+	if steps.Code != http.StatusOK || !strings.Contains(steps.Body.String(), `"input_tokens":321`) ||
+		!strings.Contains(steps.Body.String(), `"output_tokens":45`) || !strings.Contains(steps.Body.String(), `"token_source":"provider"`) {
+		t.Fatalf("usage steps = %d: %s", steps.Code, steps.Body.String())
+	}
 }
 
 func TestAISessionLifecycleMessagesPaginationAndDeletion(t *testing.T) {
@@ -682,6 +751,12 @@ func TestAIChatRecoversStaleGenerationsOnStartup(t *testing.T) {
 		if err := store.DB.Create(&generation).Error; err != nil {
 			t.Fatalf("seed generation: %v", err)
 		}
+		if err := store.DB.Create(&models.AIRunStep{
+			ID: uuid.NewString(), GenerationID: generation.ID, Sequence: 1,
+			Kind: "generation", Status: "running", StartedAt: generation.CreatedAt, CreatedAt: generation.CreatedAt,
+		}).Error; err != nil {
+			t.Fatalf("seed generation root step: %v", err)
+		}
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
@@ -702,6 +777,7 @@ func TestAIChatRecoversStaleGenerationsOnStartup(t *testing.T) {
 	}
 	defer router.Close()
 	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_generations WHERE status = 'cancelled' AND error_code = 'AI_GENERATION_INTERRUPTED'", 2)
+	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_run_steps WHERE kind = 'generation' AND status = 'cancelled'", 2)
 }
 
 func TestAIChatRenamesDefaultTitleFromFirstUserMessage(t *testing.T) {

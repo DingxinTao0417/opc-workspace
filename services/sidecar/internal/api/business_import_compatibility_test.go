@@ -37,6 +37,40 @@ func TestBusinessImportSchemaContractAllowsSchema50Into51(t *testing.T) {
 	}
 }
 
+func TestBusinessImportSchemaContractAllowsSchema63Into64(t *testing.T) {
+	for _, target := range []int{businessImportSchema64, businessImportSchema65, businessImportSchema66, businessImportSchema67} {
+		excluded, ok := businessImportSchemaContract(businessImportSchema63, target)
+		if !ok || !equalStrings(excluded, businessExportExcludedTablesSchema65) {
+			t.Fatalf("schema 63 to %d contract = %#v, ok=%v", target, excluded, ok)
+		}
+	}
+}
+
+func TestBusinessImportSchemaContractAllowsSchema64Into65(t *testing.T) {
+	for _, target := range []int{businessImportSchema65, businessImportSchema66, businessImportSchema67} {
+		excluded, ok := businessImportSchemaContract(businessImportSchema64, target)
+		if !ok || !equalStrings(excluded, businessExportExcludedTablesSchema65) {
+			t.Fatalf("schema 64 to %d contract = %#v, ok=%v", target, excluded, ok)
+		}
+	}
+}
+
+func TestBusinessImportSchemaContractAllowsSchema65IntoCurrent(t *testing.T) {
+	for _, target := range []int{businessImportSchema66, businessImportSchema67} {
+		excluded, ok := businessImportSchemaContract(businessImportSchema65, target)
+		if !ok || !equalStrings(excluded, businessExportExcludedTablesSchema65) {
+			t.Fatalf("schema 65 to %d contract = %#v, ok=%v", target, excluded, ok)
+		}
+	}
+}
+
+func TestBusinessImportSchemaContractAllowsSchema66Into67(t *testing.T) {
+	excluded, ok := businessImportSchemaContract(businessImportSchema66, businessImportSchema67)
+	if !ok || !equalStrings(excluded, businessExportExcludedTables) {
+		t.Fatalf("schema 66 to 67 contract = %#v, ok=%v", excluded, ok)
+	}
+}
+
 func TestBusinessImportAcceptsFrozenV49DeletedProjectCompletionHistory(t *testing.T) {
 	fixture := newHistoricalProjectAutomationImportFixture(t)
 	jsonPackage := frozenBusinessExportV49(t, fixture.jsonBody)
@@ -136,7 +170,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 57, blocker: "source_schema_newer"},
+		{version: 68, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

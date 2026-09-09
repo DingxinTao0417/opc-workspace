@@ -1,10 +1,14 @@
 import { ApiError, getRuntimeConnection } from "./client";
-import type { AiChatStreamEvent } from "../types/models";
+import type {
+  AiBusinessContextSelection,
+  AiChatStreamEvent,
+} from "../types/models";
 
 export interface StreamAiChatInput {
   providerId: string;
   sessionId?: string;
   message: string;
+  context?: AiBusinessContextSelection;
   signal?: AbortSignal;
   onEvent: (event: AiChatStreamEvent) => void;
 }
@@ -39,6 +43,7 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
         provider_id: input.providerId,
         session_id: input.sessionId ?? "",
         message: input.message,
+        ...(input.context ? { context: input.context } : {}),
       }),
       signal: controller.signal,
     });

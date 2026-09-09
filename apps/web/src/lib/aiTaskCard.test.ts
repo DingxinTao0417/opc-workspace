@@ -70,6 +70,17 @@ describe("stripAiTaskBlock", () => {
   it("hides an incomplete control block while it is streaming", () => {
     expect(stripAiTaskBlock('好的。\n[opc:task]{"title":"写')).toBe("好的。");
   });
+
+  it("hides complete and partial citation control blocks", () => {
+    expect(
+      stripAiTaskBlock(
+        '有来源的回答[opc:citations]{"chunk_ids":["chunk-1"]}[/opc:citations]',
+      ),
+    ).toBe("有来源的回答");
+    expect(
+      stripAiTaskBlock('流式回答[opc:citations]{"chunk_ids":["chunk'),
+    ).toBe("流式回答");
+  });
 });
 
 describe("parseAiMemorySuggestion", () => {
@@ -81,12 +92,26 @@ describe("parseAiMemorySuggestion", () => {
     });
   });
 
+  it("keeps a valid tool proposal id for the confirmation request", () => {
+    const content =
+      '确认后再保存。[opc:memory]{"content":"回答保持简洁","proposal_id":"018f0000-0000-7000-8000-000000005741"}[/opc:memory]';
+    expect(parseAiMemorySuggestion(content)).toEqual({
+      content: "回答保持简洁",
+      proposalId: "018f0000-0000-7000-8000-000000005741",
+    });
+  });
+
   it("rejects malformed, missing-content, and oversized blocks", () => {
     expect(
       parseAiMemorySuggestion("[opc:memory]not-json[/opc:memory]"),
     ).toBeNull();
     expect(
       parseAiMemorySuggestion('[opc:memory]{"title":"x"}[/opc:memory]'),
+    ).toBeNull();
+    expect(
+      parseAiMemorySuggestion(
+        '[opc:memory]{"content":"x","proposal_id":"not-a-uuid"}[/opc:memory]',
+      ),
     ).toBeNull();
     expect(
       parseAiMemorySuggestion(

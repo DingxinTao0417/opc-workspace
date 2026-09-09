@@ -33,6 +33,7 @@ AI 助手模块此前文档边界为"仅评估本地模型，不接入线上模�
 
 - API key 仅存操作系统安全存储（首版 Windows 凭据管理器），Sidecar 进程内读入、用后即弃。
 - 密钥不进 SQLite、`localStorage`、日志、命令行、诊断包或任何前端持久化；access log 不记录密钥请求体（operationlog 把密钥头注册为 secret 脱敏）。
+- Provider 配置/健康与密钥写入由进程级读写互斥串行化跨 Keyring/SQLite 操作；上游非 2xx 或流错误按当前 API key 再脱敏后才能进入 SSE detail。
 - 平台无可用安全存储（如 Linux 无 Secret Service）时：登记/健康/聊天返回稳定不可用错误（503），明确拒绝，**不落盘退化**。首版验证平台为 Windows；macOS/Linux 作为平台门禁后续补齐。
 
 ### 5. 失败边界与资源预算
@@ -44,7 +45,7 @@ AI 助手模块此前文档边界为"仅评估本地模型，不接入线上模�
 
 ### 6. 撤销
 
-- 删除 Provider 配置即撤销接入；安全存储与 SQLite 无法共享事务，因此 Sidecar 先删密钥、数据库失败时恢复原密钥，任一步安全存储失败都中止数据库删除。
+- 删除 Provider 配置即撤销接入；已有 generation 历史时返回 `AI_PROVIDER_HAS_SESSIONS`，用户必须先显式删除相关会话，避免撤销配置隐式删除历史。无历史时 Sidecar 先删密钥、数据库失败时恢复原密钥，任一步安全存储失败都中止数据库删除。
 - 已建任务按任务模块既有 `cancel` 命令撤销；AI 助手侧不做 undo，不触碰任务状态机。
 
 ### 7. 事件与日志
