@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  aiEvaluationQualityGroupKey,
   getAiEvaluationSummary,
   resetRuntimeConnection,
 } from "./client";
@@ -317,6 +318,112 @@ afterEach(() => {
 });
 
 describe("AI local evaluation quality summary", () => {
+  it("keeps stable configuration identity across health ETags and display renames", async () => {
+    const responseBody = await evaluationSummaryResponse().json();
+    const group = responseBody.data.groups[0];
+    Object.assign(group, {
+      provider_config_version: 1,
+      dataset_version: 4,
+      provider_version_min: 1,
+      provider_version_max: 3,
+      run_count: 3,
+      fully_passed_runs: 3,
+      total_cases: 72,
+      passed_cases: 72,
+      failed_cases: 0,
+      ...intervalFields(72, 72),
+      evidence_level: "repeated_runs",
+      readiness_status: "review_candidate",
+      readiness_reasons: [],
+    });
+    responseBody.data.groups = [group];
+    responseBody.data.categories = responseBody.data.categories
+      .filter(
+        (row: Record<string, unknown>) =>
+          row.provider_model_snapshot === "alpha",
+      )
+      .map((row: Record<string, unknown>) => ({
+        ...row,
+        provider_config_version: 1,
+        dataset_version: 4,
+        provider_name_snapshot: "Earlier display name",
+        total_cases: 18,
+        passed_cases: 18,
+        failed_cases: 0,
+        ...intervalFields(18, 18),
+      }));
+    responseBody.data.failure_codes = [];
+    responseBody.data.trend = [
+      {
+        ...responseBody.data.trend[0],
+        provider_config_version: 1,
+        dataset_version: 4,
+        total_cases: 24,
+        passed_cases: 24,
+        failed_cases: 0,
+      },
+    ];
+    responseBody.data.status_counts = {
+      total: 3,
+      queued: 0,
+      running: 0,
+      succeeded: 3,
+      failed: 0,
+      cancelled: 0,
+    };
+    responseBody.data.readiness_policy.current_dataset_version = 4;
+    responseBody.data.readiness_policy.critical_failure_codes.push(
+      "FACT_CONTRADICTED",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(responseBody), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+    const summary = await getAiEvaluationSummary({ providerId });
+    expect(summary.groups[0]).toMatchObject({
+      providerConfigVersion: 1,
+      providerVersionMin: 1,
+      providerVersionMax: 3,
+      readinessStatus: "review_candidate",
+    });
+    const key = aiEvaluationQualityGroupKey(summary.groups[0]);
+    expect(
+      aiEvaluationQualityGroupKey({
+        ...summary.groups[0],
+        providerNameSnapshot: "Another name",
+      }),
+    ).toBe(key);
+    expect(
+      aiEvaluationQualityGroupKey({
+        ...summary.groups[0],
+        providerConfigVersion: 2,
+      }),
+    ).not.toBe(key);
+    expect(
+      aiEvaluationQualityGroupKey({
+        ...summary.groups[0],
+        providerConfigVersion: null,
+      }),
+    ).not.toBe(key);
+  });
+
+  it("rejects a non-positive configuration identity", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        evaluationSummaryResponse({ provider_config_version: 0 }),
+      ),
+    );
+    await expect(getAiEvaluationSummary({ providerId })).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
   it("parses model/dataset groups and chronological points", async () => {
     let requestedURL = "";
     vi.stubGlobal(

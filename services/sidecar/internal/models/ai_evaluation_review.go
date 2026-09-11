@@ -1,6 +1,7 @@
 package models
 
 type AIEvaluationReview struct {
+	ProviderConfigVersion         *int64 `gorm:"column:provider_config_version" json:"provider_config_version"`
 	ID                            string `gorm:"column:id;primaryKey" json:"id"`
 	ProviderIDSnapshot            string `gorm:"column:provider_id_snapshot" json:"provider_id_snapshot"`
 	ProviderNameSnapshot          string `gorm:"column:provider_name_snapshot" json:"provider_name_snapshot"`

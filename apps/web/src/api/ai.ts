@@ -9,8 +9,21 @@ export interface StreamAiChatInput {
   sessionId?: string;
   message: string;
   context?: AiBusinessContextSelection;
+  requestId?: string;
   signal?: AbortSignal;
   onEvent: (event: AiChatStreamEvent) => void;
+}
+
+export class AiChatAlreadyAccepted extends ApiError {
+  constructor(
+    readonly generationId: string,
+    readonly sessionId: string,
+  ) {
+    super("消息已被接收，正在恢复原来的生成", {
+      code: "AI_CHAT_ALREADY_ACCEPTED",
+      status: 409,
+    });
+  }
 }
 
 // streamAiChat consumes the Sidecar's opc-ai-sse-v1 stream and forwards
@@ -35,6 +48,7 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         "X-Request-ID": crypto.randomUUID(),
+        "Idempotency-Key": input.requestId ?? crypto.randomUUID(),
         ...(connection.token
           ? { Authorization: `Bearer ${connection.token}` }
           : {}),
@@ -48,6 +62,7 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
       signal: controller.signal,
     });
   } catch (error) {
+    upstreamSignal?.removeEventListener("abort", abortFromUpstream);
     if (controller.signal.aborted) return;
     throw new ApiError("无法连接本地 Sidecar", { code: "NETWORK_ERROR" });
   }
@@ -60,10 +75,25 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
         const body = (await response.json()) as {
           code?: string;
           message?: string;
+          error?: { code?: string; message?: string };
+          generation_id?: string;
+          session_id?: string;
         };
-        code = typeof body.code === "string" ? body.code : code;
-        message = typeof body.message === "string" ? body.message : message;
-      } catch {
+        code =
+          body.error?.code ??
+          (typeof body.code === "string" ? body.code : code);
+        message =
+          body.error?.message ??
+          (typeof body.message === "string" ? body.message : message);
+        if (
+          code === "AI_CHAT_ALREADY_ACCEPTED" &&
+          typeof body.generation_id === "string" &&
+          typeof body.session_id === "string"
+        ) {
+          throw new AiChatAlreadyAccepted(body.generation_id, body.session_id);
+        }
+      } catch (error) {
+        if (error instanceof AiChatAlreadyAccepted) throw error;
         // non-JSON error body keeps the generic message
       }
       throw new ApiError(message, { code, status: response.status });
@@ -72,19 +102,36 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let terminal = false;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      let separator = buffer.indexOf("\n\n");
+      let boundary = /\r?\n\r?\n/.exec(buffer);
+      let separator = boundary?.index ?? -1;
       while (separator >= 0) {
         const block = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
+        buffer = buffer.slice(separator + (boundary?.[0].length ?? 2));
         const event = parseAiStreamBlock(block);
-        if (event) input.onEvent(event);
-        separator = buffer.indexOf("\n\n");
+        if (event) {
+          input.onEvent(event);
+          terminal =
+            event.type === "done" ||
+            event.type === "cancelled" ||
+            event.type === "error";
+          if (terminal) {
+            await reader.cancel().catch(() => {});
+            return;
+          }
+        }
+        boundary = /\r?\n\r?\n/.exec(buffer);
+        separator = boundary?.index ?? -1;
       }
     }
+    if (!terminal)
+      throw new ApiError("AI 回答流提前中断，已收到的内容可能不完整", {
+        code: "AI_STREAM_INCOMPLETE",
+      });
   } catch (error) {
     if (controller.signal.aborted) return;
     if (error instanceof ApiError) throw error;
@@ -111,8 +158,11 @@ function parseAiStreamBlock(block: string): AiChatStreamEvent | null {
   } catch {
     return null;
   }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return null;
   const generationId =
     typeof payload.generation_id === "string" ? payload.generation_id : "";
+  if (!generationId) return null;
   switch (event) {
     case "meta":
       return {
@@ -162,6 +212,9 @@ function parseAiStreamBlock(block: string): AiChatStreamEvent | null {
         error:
           typeof payload.error === "string" ? payload.error : "AI_STREAM_ERROR",
         detail: typeof payload.detail === "string" ? payload.detail : undefined,
+        ...(typeof payload.partial_text === "string"
+          ? { partialText: payload.partial_text }
+          : {}),
       };
     default:
       return null;

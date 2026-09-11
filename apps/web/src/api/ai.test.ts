@@ -34,6 +34,62 @@ afterEach(() => {
 });
 
 describe("streamAiChat", () => {
+  it("handles CRLF split across chunks and ignores null/unknown frames", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          "event: delta\r\ndata: null\r\n\r",
+          '\nevent: extension\ndata: {}\n\nevent: delta\r\ndata: {"generation_id":"g","text":"回答"}\r\n\r\n',
+          'event: done\r\ndata: {"generation_id":"g"}\r\n\r\n',
+        ]),
+      ),
+    );
+    const events: unknown[] = [];
+    await streamAiChat({
+      providerId: "p",
+      message: "hi",
+      onEvent: (event) => events.push(event),
+    });
+    expect(events).toEqual([
+      { type: "delta", generationId: "g", text: "回答" },
+      { type: "done", generationId: "g" },
+    ]);
+  });
+
+  it("does not accept a malformed or unterminated done frame", async () => {
+    for (const frame of [
+      "event: done\ndata: null\n\n",
+      'event: done\ndata: {"generation_id":"g"}',
+    ]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => sseResponse([frame])),
+      );
+      await expect(
+        streamAiChat({ providerId: "p", message: "hi", onEvent: () => {} }),
+      ).rejects.toMatchObject({ code: "AI_STREAM_INCOMPLETE" });
+    }
+  });
+  it("rejects EOF without a terminal event and retains delivered content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        sseResponse([
+          'event: delta\ndata: {"generation_id":"gen-1","text":"partial"}\n\n',
+        ]),
+      ),
+    );
+    const onEvent = vi.fn();
+    await expect(
+      streamAiChat({ providerId: "p-1", message: "hi", onEvent }),
+    ).rejects.toMatchObject({ code: "AI_STREAM_INCOMPLETE" });
+    expect(onEvent).toHaveBeenCalledWith({
+      type: "delta",
+      generationId: "gen-1",
+      text: "partial",
+    });
+  });
   it("parses meta, delta, replacement, and done events from the SSE stream", async () => {
     const fetchMock = vi.fn(async () =>
       sseResponse([

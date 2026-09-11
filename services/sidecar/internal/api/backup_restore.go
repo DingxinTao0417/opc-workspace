@@ -114,6 +114,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 			return
 		}
 		a.restorePending.Store(true)
+		a.cancelAIRunsForRestore()
 		c.JSON(http.StatusAccepted, gin.H{"data": scheduledRestoreResult{
 			BackupID: existing.BackupID, RollbackBackupID: existing.RollbackBackupID,
 			RequestedAt: existing.RequestedAt, RestartRequired: true,
@@ -200,6 +201,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		return
 	}
 	a.restorePending.Store(true)
+	a.cancelAIRunsForRestore()
 	c.JSON(http.StatusAccepted, gin.H{"data": scheduledRestoreResult{
 		BackupID: id, RollbackBackupID: rollback.ID, RequestedAt: requestedAt, RestartRequired: true,
 	}})

@@ -1,6 +1,6 @@
 # 本地知识库模块
 
-> 目标版本：待定。TXT/Markdown 本地检索、Actor 异步任务与 ADR-010 AI6 已交付；PDF、授权引用、来源变化和结构化 citation 继续分阶段推进。
+> 目标版本：待定。TXT/Markdown 本地检索、Actor 异步任务、ADR-010 AI6 显式知识上下文与 ADR-011 回答级结构化 citation 已交付；PDF、授权引用、来源变化和句子级证据覆盖仍待后续。回答级来源身份验证不等于事实正确性证明。
 >
 > 决策：[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md) · [实施计划](../plans/knowledge-base-phases.md)
 

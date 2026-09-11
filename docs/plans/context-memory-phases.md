@@ -1,6 +1,6 @@
 # 会话上下文压缩与记忆工具——分阶段实施计划
 
-> 状态：G1–G5 功能实现完成（[ADR-007](../adr/007-session-context-compaction-and-memory-tools.md)）；相关门禁已通过，仓库全量 API 仍有两项可在未修改 AI 分支复现的 Automation 基线失败
+> 状态：G1–G5 基线已交付；[ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 接续 schema 069 部分压缩进度、可回读记忆决定和 persist=false 工具隐私。下文交付记录保留历史，最新验证与 5 个 Automation/导入基线失败见 [AI7 计划](ai-quality-gates.md)。
 > 授权：用户 2026-09-03 确定长程上下文方向（摘要 + 关键信息提取 + 滚动窗口 + 外部存储与工具调用）；G3/G4 将注册首个真实工具（记忆工具），系对 ADR-004 工具禁令的首次正式突破
 > 流程约束：每阶段真实测试验证通过才进入下一阶段；全部阶段完成后回归测试；开发完成不提交代码，等用户确认
 
@@ -20,7 +20,7 @@
 ## G2：压缩管线与注入（已交付）
 
 1. 迁移 057（加法）：`ai_memory_entries` append-only 快照表；业务导入兼容契约与导出排除同步扩展。
-2. 压缩管线：Run 收尾后异步触发（窗口外 >16 KiB、会话互斥）、单批 ≤32 KiB、严格 JSON 快照（summary ≤4 KiB + facts ≤32 条）、同事务落库 + 水位线推进、`ai_session_compacted` 脱敏事件、失败静默降级为硬截断。
+2. 压缩管线：Run 收尾异步触发（窗口外 >16 KiB、会话互斥），单批 ≤32 KiB JSONL。ADR-025 为大回合按 UTF-8 分段并持久 source_message_offset；0 表示整条，正数表示清理控制块后的正文已处理字节。每次最多 8 批/10 分钟，剩余标 pending 下次成功聊天继续；失败/取消/配置变化保留旧进度，API/UI 显示状态。快照 summary ≤4 KiB/facts ≤32/4 KiB，替换/水位线/脱敏事件同事务，不跳过正文宣称完成。
 3. 注入接入：前情摘要 ≤4 KiB + 关键事实 ≤4 KiB 两段进组装器（最新 active 快照）。
 
 **验收**：假 LLM 单测（快照延续、水位线推进、失败降级、并发互斥、事件不含内容）；mock 上游注入断言（各段存在、预算不超）；数据库迁移测试；全量回归。
@@ -41,7 +41,7 @@
 1. `memory_write`（会话级事实，agent 自发、无需确认、随会话亡）、`memory_propose`（持久记忆仅提议 pending，经既有确认卡片落地）、`memory_search`（关键词/tags 检索 active 条目与历史消息，确定性检索无向量）。
 2. 三工具经 allowlist 注册进 harness，工具执行预算与纠错机制复用。
 
-**验收**：三工具行为与边界测试（write 自发落库、propose 不经确认绝不持久化、search 命中与空态、预算约束、事件脱敏）；端到端 mock 会话（agent 通过工具读写工作状态）。
+**验收**：持久会话 write 写会话事实、propose 只保存待确认操作记录（不写永久 ai_memories），search 受限于会话；非持久会话三工具只用运行内内存，不落任何正文。确认/忽略可刷新回读，旧卡兼容；端到端 mock 会话覆盖真实协议与执行，不调用真实模型。
 
 **交付记录（2026-09-08）**：生产 Registry 只注册 `memory_search / memory_write / memory_propose`。`memory_write` 写会话级 active fact 并精确去重，`memory_search` 在当前会话 active snapshot/fact 与历史消息中做确定性关键词/标签检索，`memory_propose` 只创建 pending proposal；proposal 经对话卡片或设置区显式确认后才进入 `ai_memories`，忽略则受控 supersede。三类工具均使用严格参数 Schema、数量/字符/字节预算与脱敏事件；mock 上游两轮工具调用金链已覆盖真实协议解析、执行与结果回填。
 
@@ -58,7 +58,7 @@
 
 - 全量门禁：Go（vet + 全量 test）、Web（typecheck + vitest + build）、check:docs、gofmt/prettier。
 - 文档同步：模块文档、PRD §5.10、架构文档、索引、根 README（schema 057 基线与能力表述）。
-- 剩余限制如实标注：压缩质量依赖所配模型；无向量检索；token 预算后置；F3 步骤追踪另行。
+- 剩余限制：压缩质量依赖模型；无向量检索，不估算 token 或费用。F3 步骤追踪与 Provider 原始 token/unknown 已由 ADR-012/schema 061–062 交付，UTC 趋势由 ADR-024 接续。
 
 **本次验证（2026-09-08）**：Web typecheck、113 文件/1063 测试、生产构建、文档/Prettier/gofmt、Go vet、数据库/modelclient/harness/cmd/config/operationlog/runlease 全量及 AI/业务导入兼容专项通过；Provider 密钥/压缩并发专项通过 race detector。`internal/api` 全量除 `TestAutomationEventDeliveryReplayDoesNotRecaptureCompletedRunAfterRuleEdit` 与 `TestDisabledEventAutomationRunStillRetriesWhenDue` 外通过；两项在未修改的 `origin/feature/ai-assistant@57cd42d` 同样失败，属于既有 Automation 时间基线问题，不由 G2–G5 引入。
 

@@ -493,31 +493,7 @@ func (a *API) createTask(c *gin.Context) {
 				return fmt.Errorf("read idempotency key: %w", err)
 			}
 		}
-		if task.ProjectID != nil {
-			if err := requireAssignableProject(tx, *task.ProjectID); err != nil {
-				return err
-			}
-		}
-		if task.ParentTaskID != nil {
-			if err := requireValidTaskParent(tx, task.ID, *task.ParentTaskID); err != nil {
-				return err
-			}
-		}
-		if err := requireTaskTags(tx, tagIDs); err != nil {
-			return err
-		}
-		if err := tx.Create(&task).Error; err != nil {
-			return fmt.Errorf("create task: %w", err)
-		}
-		if err := replaceTaskTags(tx, task.ID, tagIDs); err != nil {
-			return err
-		}
-		if err := reconcileTaskParentChain(
-			tx, task.ParentTaskID, requestIDFromContext(c), task.CreatedAt,
-		); err != nil {
-			return taskParentProgressError("reconcile created Task parent", err)
-		}
-		response, err = loadTask(tx, task.ID)
+		response, err = createTaskInTransaction(tx, task, tagIDs, requestIDFromContext(c))
 		if err != nil {
 			return fmt.Errorf("load created task: %w", err)
 		}

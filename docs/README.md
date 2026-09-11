@@ -2,11 +2,11 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 67（052–062 为 AI/知识库/citation/run steps/Provider usage，063–067 为本地评测/版本/suite/人工决定审计/专题 suite）。PRD v10.8 已交付 1–30 天本地用量 UTC 趋势：连续零填充、仅终态根步骤、7/30 天会话面板切换；趋势窗口不改变累计 totals，不提供价格或费用。业务导入兼容扩展至 v49/v63/v64/v65/v66→67，AI/知识库操作态仍排除便携业务导出。实际业务升级、冲突合并、外部备份目录和覆盖仍保持禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名 NSIS/MSI 本地打包；其他平台和正式发布验收仍待完成。
+> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 69。PRD v10.9 与 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口 AI 运行隔离/预算、流终态、应用级恢复、任务确认事务、记忆决定、分段压缩和 dataset v4 配置身份评测；068 增加 Provider 配置身份，069 增加请求/确认/记忆决定/压缩水位线，不新增 AI 表。业务导入兼容为 v49/v63/v64/v65/v66/v67/v68→69，AI/知识库操作态仍排除便携业务导出。业务冲突合并、外部备份目录和覆盖仍禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名本地打包；实机模型、真实故障与跨平台发布验收不由隔离自动化代替。
 
 ## 阅读顺序与事实优先级
 
-1. [产品需求文档（PRD v10.8）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
+1. [产品需求文档（PRD v10.9）](opc-workspace-PRD.md)：产品范围、版本边界、数据/API 目标契约和当前状态。
 2. [整体功能架构](functional-architecture.md)：模块如何协作、事件如何流转、谁拥有哪类事实。
 3. [模块文档](modules/README.md)：单个模块的用户流程、数据、API、依赖、实施阶段和验收条件。
 4. 仓库代码与测试：判断“现在实际实现了什么”的最终证据。
@@ -31,7 +31,7 @@
 
 | 模块                       | 当前状态                                                                                                                                                                               | 目标版本            | 文档                                               |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 已完成安全 ADR；Adapter、Run 与执行仍未实现                                                                                                                                            | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 本地 Agent Runtime         | 安全 ADR、受限 Adapter 登记与诊断已交付；Runner、Agent Run 与执行尚未实现                                                                                                              | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                                                                                                                               | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                       | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份/恢复完整闭环、每日计划/启动补偿/自动包安全保留、业务 JSON/含文件 ZIP 空目标及同 schema 零主键冲突追加已交付；启动前备份选择、外部目录、冲突合并及升级待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |
@@ -39,15 +39,15 @@
 
 ## 后续业务与规划模块
 
-| 模块             | 当前状态                                                                                                                                                       | 目标版本         | 文档                                               |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------- |
-| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                                                          | v0.4             | [finance-invoices.md](modules/finance-invoices.md) |
-| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                                                               | v0.4             | [client-followups.md](modules/client-followups.md) |
-| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                                                      | v0.3             | [roadmap.md](modules/roadmap.md)                   |
-| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发                                  | v0.3             | [content-calendar.md](modules/content-calendar.md) |
-| 预设自动化       | 首个纵向切片完成                                                                                                                                               | v0.2             | [automation.md](modules/automation.md)             |
-| 本地知识库       | TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 显式片段已交付；PDF、授权引用待后续                                                   | 独立轨道         | [knowledge-base.md](modules/knowledge-base.md)     |
-| AI 助手          | AI5/AI6、AI7-Q1、Q2 scorer/本地评测 Actor/smoke/topic/full/趋势/category/failure/Wilson/候选/人工决定审计与 Q3 steps/Provider token/unknown/UTC 用量趋势已推进 | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
+| 模块             | 当前状态                                                                                                                                               | 目标版本         | 文档                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | -------------------------------------------------- |
+| 收入、支出与发票 | 页面骨架 / 数据表预留                                                                                                                                  | v0.4             | [finance-invoices.md](modules/finance-invoices.md) |
+| 客户回访         | C2–C5 数据/API、原子下一次计划、到期 Inbox 投影、详情管理及 Today/Inbox 入口完成                                                                       | v0.4             | [client-followups.md](modules/client-followups.md) |
+| 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                                              | v0.3             | [roadmap.md](modules/roadmap.md)                   |
+| 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发                          | v0.3             | [content-calendar.md](modules/content-calendar.md) |
+| 预设自动化       | 首个纵向切片完成                                                                                                                                       | v0.2             | [automation.md](modules/automation.md)             |
+| 本地知识库       | TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 显式片段已交付；PDF、授权引用待后续                                           | 独立轨道         | [knowledge-base.md](modules/knowledge-base.md)     |
+| AI 助手          | Provider/Harness/记忆/显式上下文/citation、dataset v4 配置身份评测/人工审计、steps/用量趋势，以及 ADR-025 可靠性、确认与恢复已交付；真机场景待专项验收 | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
 
@@ -84,7 +84,7 @@
 - [AI 显式业务上下文分阶段计划（ADR-008；AI5 已交付）](plans/ai-explicit-context-phases.md)
 - [本地知识库分阶段计划（ADR-009；K1 与 K2–K5 文本基线已交付）](plans/knowledge-base-phases.md)
 - [AI6 显式知识片段实施计划（ADR-010；已交付）](plans/ai-knowledge-context-phases.md)
-- [AI7 质量闸门与可解释性计划（ADR-011–024；Q1、Q2 本地运行/smoke/topic/full/趋势/category/failure/Wilson/候选/人工决定审计与 Q3 UTC 用量趋势已交付）](plans/ai-quality-gates.md)
+- [AI7 质量闸门与可解释性计划（ADR-011–025；引用、本地质量/用量、可靠性与确认恢复；验证记录集中维护）](plans/ai-quality-gates.md)
 
 ## 架构决策
 
@@ -110,6 +110,7 @@
 - [ADR-022：AI 本地质量人工决定审计（精确证据快照与不可变理由已交付）](adr/022-ai-local-quality-human-review-audit.md)
 - [ADR-023：AI 本地质量代码所有专题套件（四类 6-case 已交付）](adr/023-ai-local-quality-topic-suites.md)
 - [ADR-024：AI 本地用量 UTC 时间趋势（1–30 天已交付）](adr/024-ai-local-usage-time-trends.md)
+- [ADR-025：AI 运行可靠性、确认事务与评测配置身份（schema 068–069、dataset v4）](adr/025-ai-reliability-confirmations-and-evaluation-identity.md)
 
 ## 核心术语
 

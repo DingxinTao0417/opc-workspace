@@ -44,6 +44,7 @@ type aiEvaluationResultResponse struct {
 }
 
 type aiEvaluationRunResponse struct {
+	ProviderConfigVersion    *int64                       `json:"provider_config_version"`
 	ID                       string                       `json:"id"`
 	ProviderID               string                       `json:"provider_id"`
 	ProviderNameSnapshot     string                       `json:"provider_name_snapshot"`
@@ -73,7 +74,8 @@ func aiEvaluationRunResponseFromModel(row models.AIEvaluationRun, results []mode
 		return aiEvaluationRunResponse{}, errors.New("invalid AI evaluation suite")
 	}
 	response := aiEvaluationRunResponse{
-		ID: row.ID, ProviderID: row.ProviderID, ProviderNameSnapshot: row.ProviderNameSnapshot,
+		ProviderConfigVersion: row.ProviderConfigVersion,
+		ID:                    row.ID, ProviderID: row.ProviderID, ProviderNameSnapshot: row.ProviderNameSnapshot,
 		ProviderModelSnapshot: row.ProviderModelSnapshot, ProviderProtocolSnapshot: row.ProviderProtocolSnapshot,
 		ProviderVersion: row.ProviderVersion, DatasetVersion: row.DatasetVersion, SuiteKey: row.SuiteKey, Status: row.Status,
 		TotalCases: row.TotalCases, CompletedCases: row.CompletedCases, PassedCases: row.PassedCases,
@@ -111,6 +113,7 @@ func aiEvaluationRunResponseFromModel(row models.AIEvaluationRun, results []mode
 func aiEvaluationFailureCodeAllowed(code string) bool {
 	switch code {
 	case "CASE_ID_MISMATCH", "ANSWER_EMPTY", "CONTROL_BLOCK_LEAKED", "CITATION_STATUS_MISMATCH",
+		"FACT_CONTRADICTED", "FACT_MISSING",
 		"REQUIRED_PHRASE_MISSING", "FORBIDDEN_PHRASE_PRESENT", "CITATION_NOT_ALLOWED",
 		"CITATION_DUPLICATE", "CITATION_COUNT_LOW", "CITATION_SET_MISMATCH", "OBSERVATION_MISSING":
 		return true
@@ -193,7 +196,8 @@ func (a *API) createAIEvaluation(c *gin.Context) {
 		}
 		now := nowStamp(a)
 		run := models.AIEvaluationRun{
-			ID: uuid.NewString(), ProviderID: provider.ID, ProviderNameSnapshot: provider.Name,
+			ProviderConfigVersion: &provider.ConfigVersion,
+			ID:                    uuid.NewString(), ProviderID: provider.ID, ProviderNameSnapshot: provider.Name,
 			ProviderModelSnapshot: provider.Model, ProviderProtocolSnapshot: provider.Protocol,
 			ProviderVersion: provider.Version, DatasetVersion: dataset.Version, SuiteKey: input.SuiteKey,
 			Status: "queued", TotalCases: len(cases), CreatedAt: now, UpdatedAt: now,

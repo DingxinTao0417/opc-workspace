@@ -461,15 +461,15 @@ func TestRunSelfCheckSufficientEmitsWithoutRevision(t *testing.T) {
 	}
 }
 
-func TestRunSelfCheckMissingOrMalformedStaysSufficient(t *testing.T) {
+func TestRunSelfCheckMissingOrMalformedReturnsDraftWithoutRevision(t *testing.T) {
 	// No block at all: one call, text untouched.
 	client := &fakeClient{streams: []Turn{{Text: "普通回答"}}}
 	result, err := Run(context.Background(), client, Request{Model: "m"}, nil, nil, Callbacks{})
 	if err != nil || result.Text != "普通回答" || client.calls != 1 {
 		t.Fatalf("missing block: %+v calls=%d err=%v", result, client.calls, err)
 	}
-	// Malformed or unclosed blocks are stripped defensively and the draft is
-	// treated as sufficient.
+	// Malformed or unclosed blocks are stripped; reliability_test separately
+	// verifies that their quality step remains unknown, never sufficient.
 	client = &fakeClient{streams: []Turn{{Text: "回答[opc:selfcheck]不是json[/opc:selfcheck]"}}}
 	result, err = Run(context.Background(), client, Request{Model: "m"}, nil, nil, Callbacks{})
 	if err != nil || result.Text != "回答" || client.calls != 1 {
@@ -484,11 +484,11 @@ func TestRunSelfCheckMissingOrMalformedStaysSufficient(t *testing.T) {
 
 func TestRunSelfCheckRevisionFailureKeepsStrippedDraft(t *testing.T) {
 	client := &fakeClient{streams: []Turn{
-		{Text: `草稿[opc:selfcheck]{"sufficient":false,"note":"理由"}`},
+		{Text: `草稿[opc:selfcheck]{"sufficient":false,"note":"理由"}[/opc:selfcheck]`},
 	}, failOn: map[int]error{2: errors.New("revision down")}}
 	result, err := Run(context.Background(), client, Request{Model: "m"}, nil, nil, Callbacks{})
-	if err != nil {
-		t.Fatalf("revision failure must not fail the run: %v", err)
+	if err == nil || err.Error() != "revision down" {
+		t.Fatalf("revision failure must remain visible with the draft: %v", err)
 	}
 	if result.Text != "草稿" || result.Reflections != 0 {
 		t.Fatalf("draft must survive revision failure without the block: %+v", result)

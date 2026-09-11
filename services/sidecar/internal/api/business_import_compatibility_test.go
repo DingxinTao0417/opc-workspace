@@ -15,6 +15,29 @@ import (
 
 const frozenBusinessImportSchemaV49 = 49
 
+func TestBusinessImportSchemaContractAIOnly68And69(t *testing.T) {
+	for _, target := range []int{68, 69} {
+		for _, source := range []int{49, 63, 64, 65, 66, 67, 68} {
+			if source > target {
+				continue
+			}
+			expected := businessExportExcludedTables
+			if source == 49 {
+				expected = businessExportExcludedTablesSchema49
+			} else if source >= 63 && source <= 65 {
+				expected = businessExportExcludedTablesSchema65
+			}
+			actual, ok := businessImportSchemaContract(source, target)
+			if !ok || !equalStrings(actual, expected) {
+				t.Fatalf("schema %d -> %d contract invalid: %#v %v", source, target, actual, ok)
+			}
+		}
+	}
+	if _, ok := businessImportSchemaContract(70, 69); ok {
+		t.Fatal("future schema accepted")
+	}
+}
+
 var frozenBusinessExportV49ExcludedTables = []string{
 	"schema_migrations",
 	"workspace_identity",
@@ -170,7 +193,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 68, blocker: "source_schema_newer"},
+		{version: 70, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

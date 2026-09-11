@@ -1,11 +1,11 @@
 # opc-workspace 整体功能架构
 
-> 文档版本：3.11
-> 日期：2026-09-09
-> 依据：[PRD v10.8](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 67（052–062 为 AI/知识库/citation/run steps/Provider usage，063–067 为本地评测/版本/suite/人工决定审计/专题 suite；独立轨道交付）
+> 文档版本：3.12
+> 日期：2026-09-10
+> 依据：[PRD v10.9](opc-workspace-PRD.md)
+> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 69（052–067 为既有 AI/知识库及评测；068 为配置身份，069 为可靠确认、请求恢复和分段水位线；独立轨道交付）
 
-> 3.11 说明：ADR-024/AI7-Q3 增加 1–30 天 UTC 本地用量趋势；只读终态根步骤、连续零填充，不改变累计 totals，不提供价格或费用。
+> 3.12 说明：[ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口短维护锁、全运行预算、明确流终态、应用级恢复、任务原子确认、记忆决定、临时会话隐私、分段压缩与 dataset v4 配置身份评测。真实模型、原生 WebView 输入法与真实崩溃验收不由自动化结果替代。
 
 ## 1. 目的
 
@@ -75,7 +75,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly/weekdays/monthly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema 67：schema v11–v51 交付核心业务；schema v52–60 增加 AI/知识库/citation；schema v61–62 增加无正文 run steps 与 Provider token；schema v63 增加评测 Run/Result；schema v64 允许版本化 dataset；schema v65 为 Run 增加 `suite_key` 并默认回填 full；schema v66 增加不可变人工决定审计；schema v67 扩展四个代码所有专题 suite。ADR-024 不新增持久化表，只从根步骤派生 UTC 趋势。AI 与知识库操作态排除便携业务导出，覆盖于一致性 SQLite 备份（见 ADR-004–024）。
+- SQLite 当前为 schema 69：v11–v51 交付核心业务；v52–v60 增加 AI/知识库/citation；v61–v62 增加无正文 run steps 与 Provider token；v63–v67 增加评测 Run/Result、dataset/suite 和不可变人工审计。v68 增加 Provider/Run/Review 配置身份，v69 增加请求身份、消息确认摘要、记忆决定和部分压缩水位线，不新增 AI 表。ADR-024 的 UTC 趋势仍只从根步骤派生。AI/知识库操作态排除便携业务导出，但覆盖于一致性 SQLite 备份；兼容图显式允许既有 v49/v63–v68→v69，不接受未知未来 schema（见 ADR-004–025）。
 - Client Activity 继续以 `client_activities` 为唯一事实；`GET /api/v1/client-activities` 只读分页聚合所有客户未删除的 note/meeting/system_reference，按规范 UTC 纳秒键和 ID 稳定排序，并附带当前客户名称/状态。RightOverview 只取最近 3 条并深链客户详情，不复制活动、不生成 Inbox，也不推断邮件或提案下载等线上行为。
 - Roadmap Milestone 继续以 `roadmap_milestones`、关联 Project 与派生 Task 汇总为唯一事实；列表白名单 `sort=target_date` 在分页前按纯日期和 ID 稳定排序，缺省仍保留季度手工顺序。RightOverview 分别读取 planned/active 各 3 条，再按目标日期/ID 合并取最近 3 条，显示 Project 与已完成/总 Task 数；任一路失败整体显示重试，不把局部结果当完整概览，也不写 Today 副本。每条和路线图卡片都以 `?milestone=<id>` 打开同一个最新详情读模型，关闭/编辑只清理该参数并保留其他 URL 上下文。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
@@ -426,21 +426,35 @@ owner 在设置中选择 ready/healthy local Provider 并点击运行
   → Sidecar 重验 Provider ID/version/local loopback 边界
   → 幂等创建 ai_evaluation_run(queued)
   → 用户显式选择 8-case smoke、四类之一的 6-case topic 或 24-case full；单邮箱 Actor 顺序执行
-  → 回答只在内存中经 production citation parser + deterministic scorer
+  → 生产系统提示与真实 Harness 执行；回答只在内存中经 production citation parser + dataset v4 分层 scorer
   → 每个 case 只保存 passed/failed/error、failure codes、citation 数和无正文指标
   → 全部执行完成：Run succeeded；质量结果仍按 case 独立展示
   → 用户可取消活动 Run；重启遗留态标 interrupted；终态可二次确认删除
   → summary 在同一只读快照分开状态计数与 succeeded-only 质量
-  → 按 Provider ID/名称快照/模型快照/dataset version/suite 分组，并正序显示最近完整 Run
+  → 按 Provider ID/config_version/dataset version/suite 分组，并正序显示最近完整 Run；名称/模型只作快照说明
   → 同组再从无正文 Result 分解四类 category，类别三项合计必须与父组一致
   → failed Result 的稳定 code 展开为 affected cases + occurrences，不返回 failure detail
   → 总体/category 即时计算 95% Wilson 区间；1/2/3+ 次完整 Run 标记重复程度
-  → 仅 full：当前 dataset + 3 Run + 单一 Provider version + 下界/严重 code 生成只读人工评审候选
+  → 仅 full：当前 dataset + 已知配置身份 + 3 Run + 下界/严重 code 生成只读人工评审候选
   → owner 选择人工决定并填写理由；写事务重新聚合相同组，证据变化则拒绝旧快照
   → 追加 ai_evaluation_review；不可编辑/删除，只读历史显示决定、理由、证据与 Actor
 ```
 
-评测不读取用户会话、长期记忆、业务对象或用户知识库，也不调用远程 Provider。Run succeeded 不是模型质量全部通过；failed/cancelled/active 只进入状态计数，不进入总体、category、failure-code 或区间聚合。同一个 failed case 可有多个原因，因此各 code affected 不能相加冒充唯一失败 case。四个专题 suite 分别完整覆盖一个 category、中英各 3，不开放任意 case；它们与 smoke 一样只供诊断。Wilson 区间、重复运行标签和人工评审候选只描述固定数据集的历史观察，不证明生产质量，也不产生发布许可或模型/业务写入。Provider 配置在评测期间由同一读锁冻结；候选另要求同组 Provider version 单一。人工决定同样只是一条本机审计，不启停 Provider、不阻止聊天、不创建 Inbox/Task；它在写入时固化精确证据，之后只能追加新判断。已有评测历史会保护 Provider 删除，用户清理终态历史后才可删除；审计记录不依赖 Provider 外键，因此仍保留历史解释。
+评测不读取用户会话、长期记忆、业务对象或用户知识库，也不调用远程 Provider。Run succeeded 只表示执行结束，不等于质量通过；failed/cancelled/active 只进入状态计数。四个 6-case 专题与 8-case smoke 只供诊断，24-case full 才参与候选；case 可命中多个 failure code，各 code 的 affected 不能相加冒充唯一失败数。dataset v4 的结构校验、词语匹配、数据驱动的有限事实规则（含否定/冲突与 `FACT_CONTRADICTED`）和人工判断分层，不构成通用语义证明；回答级 validated 也只证明引用身份在 allowlist 内。
+
+Provider `version` 仍是 HTTP ETag；配置身份 `config_version` 只在类型、协议、端点、模型或实际凭据变化时递增，健康检查不拆分证据。准备/提交阶段短锁并复验配置，模型网络等待不持有 Provider 或全局维护锁。Run/Review 保存 nullable `provider_config_version`，旧记录保持 NULL 与原审计，不冒充当前配置或阻止新配置积累独立证据。Wilson 区间和人工评审候选只是固定数据集观察，不是发布许可。人工决定只追加，不启停 Provider、不阻止聊天、不创建 Inbox/Task；已有 Run 保护 Provider 删除，独立审计则保留历史解释。自动化使用隔离 mock/回环夹具，未宣称真实模型质量已经验证。
+
+### 6.13 AI 运行恢复与人工确认
+
+生成由 React 应用级内存状态持有，SPA 切页后继续执行并保留全局停止入口。`POST /api/v1/ai/chat` 的稳定 `Idempotency-Key` 与原始输入摘要绑定；已接受的同键重试返回 `AI_CHAT_ALREADY_ACCEPTED` 及 generation/session ID，不另建消息。`GET /ai/active-generations`、`GET /ai/generations/:id` 和 `GET /ai/generations/by-request/:key` 回读真实状态，`POST /ai/generations/:id/cancel` 停止运行（以上相对路径均位于 `/api/v1`）。浏览器仅持久化恢复标识；刷新/断连终止旧 SSE，上游取消与落库竞态通过回读收敛，不承诺恢复模型计算；Sidecar 重启使用 interrupted/cancelled 恢复语义。草稿只在应用内存保留，接受前失败不覆盖后来输入，硬刷新不保存草稿。
+
+任务路径是“模型建议 → 用户编辑并确认 → `POST /ai/messages/:id/task-confirmation` → 共享 Task 领域事务创建并原子关联消息”。消息 ID 是稳定确认身份，同载荷重放返回 `{data:{task,message}}`，改载荷冲突，已删任务返回 410、不重建。Task 拥有字段校验、父级协调和生命周期事实；普通创建没有 `task_created` 事件，不新增虚构事件。UI 只有读取真实 Task/Message 关联才显示成功，旧 `/ai/messages/:id/task` 仅保留挂接兼容。模型没有业务写工具。
+
+记忆卡以 `GET /ai/memory-proposals/:id` 回读 pending/confirmed/rejected 与 memory_id；旧无 proposal_id 卡使用 `GET /ai/messages/:id/memory-decision` 从消息派生，GET 不落库。对应 DELETE 才持久忽略；确认使用既有 `POST /ai/memories` 并校验会话/内容，重复确认不重建已删除记忆。确认与忽略是人工决定，不是仅隐藏卡片。
+
+`GET /ai/sessions/:id/compaction` 返回 idle/running/pending/succeeded/failed/cancelled 与部分消息标记。摘要逐段推进，`source_message_offset` 表示剥离控制块后的 UTF-8 字节水位线；正 offset 的部分消息不计入已压缩消息数。快照和水位线同事务，失败/取消保留上次成功进度。`persist=false` 的正文、事实、工具提议和摘要只存在当前运行内存，永久记忆另需人工明确确认。
+
+模型各轮、工具结果、自检修订共享 10 分钟/累计 1 MiB，另有限制 8 轮、32 次工具、每工具 30 秒/64 KiB。流必须有明确终态；OpenAI stop 后继续读 usage，无终态 EOF/截断/过滤不算成功。非法或缺失 selfcheck 为 unavailable，修订失败保留部分回答。锁、隐私、迁移及验证边界详见 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md)。
 
 ## 7. 状态传播规则
 
@@ -514,28 +528,29 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
 - Artifact producer 由 Sidecar 从 active assignee 派生，客户端不能上传 Actor ID 冒充产出者；manual Submission submitter 与 Artifact recorder 固定 owner，零 Artifact 的 child_rollup Submission submitter 固定内置 system。
 - 文件 Artifact 只允许上传到带数据库绑定 JSON marker 且由 Sidecar 进程独占锁定的受控 root，数据库仅保存 `objects/<artifact-id>` 相对路径；multipart 的 manifest 必须是首个 part，之后只接受被它精确且唯一引用的文件 part。严格 JSON body、manifest 与单个 structured object 各限 1 MiB，单文件限 50 MiB、完整 multipart 限 100 MiB，服务端 HTTP read/write timeout 为 180 秒、客户端上传/下载端到端超时 120 秒。下载通过鉴权 API 重新校验大小和 SHA-256，并强制 attachment/nosniff/no-store；关键文件与目录项在成功前做耐久同步。
 - Artifact 软删除需要确认、Task `If-Match` 和原因；pending-review 批次禁止删除。Task 聚合硬删除和文件软删除都通过 `.trash/` 做数据库事务补偿，并在同一事务留下不可变 tombstone；物理文件已经缺失时仍允许删除，软删记录 missing 完整性事实。
-- AI 助手是唯一例外并经明确授权（ADR-004–011）：远程请求可外发代码系统提示、已确认长期记忆、会话摘要/事实、最近回合、当前输入、memory_search 命中、用户逐字段确认的 Task/Project/Client 最小快照，以及最多 3 个逐段确认的知识 chunk。业务对象不自动扩展，知识不自动检索；Provider/source/document version 变化在 AI 写入前拒绝。模型 citation 只提交 allowlisted chunk IDs，来源/位置由 Sidecar 重建。远程 key 存 OS 安全存储；本地仅精确回环且拒绝跨 origin 重定向。生产工具仍只含记忆三工具，不提供业务/Shell/文件/网络/知识库工具。
+- AI 助手是唯一例外并经明确授权（ADR-004–011、ADR-025）：远程请求可外发代码系统提示、已确认长期记忆、会话摘要/事实、最近回合、当前输入、memory_search 命中、用户逐字段确认的 Task/Project/Client 最小快照，以及最多 3 个逐段确认的知识 chunk。业务对象不自动扩展，知识不自动检索；Provider/source/document version 变化在 AI 写入前拒绝。模型 citation 只提交 allowlisted chunk IDs，来源/位置由 Sidecar 重建。远程 key 存 OS 安全存储；本地仅精确回环且拒绝跨 origin 重定向。生产工具仍只含记忆三工具，不提供业务/Shell/文件/网络/知识库工具。 `persist=false` 不把消息/generation 正文、会话事实、提议或摘要写入数据库、日志、事件、幂等响应缓存或前端 storage；仅保留无正文运行元数据，永久记忆须另行人工明确确认。
 - 当前阶段不提供线上更新、云同步或自动对外发送。
 
 ## 10. 故障与恢复协作
 
-| 故障                            | 责任模块                         | 对其他模块的行为                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Sidecar 启动失败                | 桌面平台                         | **已交付 v1**：桌面根闸门在 `starting/restarting/error` 时拦截业务页和设置 bootstrap，提供状态重查、打开脱敏日志目录和安全重启，不展示原始 message。内置启动失败可消耗有界重试预算；若尚未创建 child，受管应用重启无需伪造退出结果即可继续。数据库打开前的恢复/迁移固定阶段进度已显示；启动前备份选择仍待实现                                                                                                                              |
-| Sidecar 运行中意外退出          | 桌面平台 + Web                   | 已启动 generation 只有真实 `Terminated` 才按 500 ms、2 s 最多重拉两次；当前代连续 Ready 30 秒重置预算。每代生成新 token 并重新请求动态 port，非 ready 清连接和全部 TanStack Query，generation 改变补偿遗漏的 `restarting`。外部模式、显式 shutdown、仅事件流关闭均不自动重拉                                                                                                                                                               |
-| Agent 中断                      | 本地 Agent + 自动化投影器        | Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                                                                      |
-| 备份操作失败                    | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝，以及 `BACKUP_INVALID` 等可解释结果不投影；UI 保留 note 并提示清理或刷新，启动应用失败转入下一行的 journal 补偿                                                                  |
-| 数据库/Sidecar/存储故障         | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、卷 ID、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、WebView→Sidecar request ID、全局启动故障恢复页 v1、数据库打开前白名单恢复进度、可配置低空间监测、物理卷同卷去重、无路径手动容量检查和 30 天本地趋势已交付 |
-| 恢复等待重启 / 启动 applying    | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`。若受管 child 存在，只有 code 0 且无 signal 的真实退出才允许重启应用；内置启动失败未创建 child 时允许继续，延迟到达的干净退出确认后可再次请求。健康启动后只读诊断 API 汇总恢复结果；数据库打开前恢复、验证、收尾及迁移阶段由白名单 stdout 协议显示，不暴露恢复包身份或路径；启动前备份选择仍待实现        |
-| 来源资源删除（T-11E）           | 来源模块 + Inbox                 | Task Artifact、Task 阻塞、Task 临期、Project 完成、Content Item 与 Roadmap Milestone 已实现：open/tracking 来源项阻止来源硬删除；允许删除前原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                                |
-| 关联 Task 硬删除                | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                                                                |
-| 并发旧写入                      | Sidecar 领域服务                 | Task/Tag 当前事实、父子/标签嵌入、Assignment、生命周期、Submission/Artifact、Project/Client 聚合和 Actor 变化都会使旧 `If-Match` 或 `expected_version` 返回 409；输出前端保留 summary、text、link、structured 与浏览器 File 草稿，Client 编辑前端保留资料草稿，刷新后要求用户再次明确提交，不用旧版本自动重试                                                                                                                              |
-| 受控文件缺失/篡改               | Task/Client/Project + 数据管理   | 保留元数据和审计，标记 missing/mismatch，拒绝下载；缺失不阻断确认软删或父聚合硬删，软删保留 missing 检查事实                                                                                                                                                                                                                                                                                                                               |
-| 受控文件/数据库提交中断         | Task/Client/Project + 文件 store | 提交报错后查询三类数据库引用，仅删除可证明无引用的 object；模糊 COMMIT 保留给 reconcile。恢复 active trash 前校验 size/SHA，错配隔离并记 mismatch；三类 tombstone 让已授权删除与未知候选可区分，意外目录/链接不递归处理                                                                                                                                                                                                                    |
-| 数据库与 Artifact root 不匹配   | 数据管理 + 受控文件 store        | marker 的 `database_id / store_id` 分别匹配 workspace 的不可变数据库 ID 与一次性绑定 store ID；错库、换 root、未知 marker 格式或版本在 ready 前拒绝启动                                                                                                                                                                                                                                                                                    |
-| 第二 Sidecar 共用数据库父目录   | 桌面平台 + 数据管理              | 固定 `.opc-sidecar-run.lock` 的非阻塞 OS 独占锁在 pending restore、迁移和 DB open 前使后启动进程立即失败且不接触数据库；锁文件可保留，所有权只由 OS lock 表示。hard-hung orphan 会继续持锁并阻止新进程，但当前不会被自动识别或回收                                                                                                                                                                                                         |
-| 第二 Sidecar 共用 Artifact root | 桌面平台 + 受控文件 store        | Artifact root 进程级非阻塞独占锁使后启动进程在 ready 前失败，禁止双进程协调同一文件根；它不替代数据库父目录运行锁                                                                                                                                                                                                                                                                                                                          |
-| Focus 进程中断                  | Focus + Sidecar                  | 启动把遗留 active 原子改为 recovery_pending；全局不可关闭弹窗要求用户计入间隔继续、排除至最后 heartbeat 后继续，或中断。heartbeat 和活动查询不会递增业务 version                                                                                                                                                                                                                                                                           |
+| 故障                               | 责任模块                         | 对其他模块的行为                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sidecar 启动失败                   | 桌面平台                         | **已交付 v1**：桌面根闸门在 `starting/restarting/error` 时拦截业务页和设置 bootstrap，提供状态重查、打开脱敏日志目录和安全重启，不展示原始 message。内置启动失败可消耗有界重试预算；若尚未创建 child，受管应用重启无需伪造退出结果即可继续。数据库打开前的恢复/迁移固定阶段进度已显示；启动前备份选择仍待实现                                                                                                                              |
+| Sidecar 运行中意外退出             | 桌面平台 + Web                   | 已启动 generation 只有真实 `Terminated` 才按 500 ms、2 s 最多重拉两次；当前代连续 Ready 30 秒重置预算。每代生成新 token 并重新请求动态 port，非 ready 清连接和全部 TanStack Query，generation 改变补偿遗漏的 `restarting`。外部模式、显式 shutdown、仅事件流关闭均不自动重拉                                                                                                                                                               |
+| AI 流中断、预算耗尽或 Sidecar 重启 | AI + 应用级生成状态              | 明确失败/取消并保留可用部分回答；按 generation/request key 回读，不自动重复发送。模型等待不持全局维护锁，取消不等待维护写锁；恢复安排取消生成、压缩和评测但不持锁等待退出。禁用备份扫描不拿写锁，AI 失败不阻断核心模块或投影 Inbox                                                                                                                                                                                                         |
+| Agent 中断                         | 本地 Agent + 自动化投影器        | 规划中的 Runner 将 Run 标记 interrupted 并追加事件；内置投影器以统一 key 创建/更新 Inbox Item，Task 保持未完成                                                                                                                                                                                                                                                                                                                             |
+| 备份操作失败                       | 数据管理 + Inbox                 | 创建/校验/恢复演练/恢复安排的操作性失败分别尽力创建 `backup:create` / `backup:verify` / `backup:drill` / `backup:restore` Inbox Item，只记录固定安全字段并保持原错误响应。手动创建的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 准入拒绝，以及 `BACKUP_INVALID` 等可解释结果不投影；UI 保留 note 并提示清理或刷新，启动应用失败转入下一行的 journal 补偿                                                                  |
+| 数据库/Sidecar/存储故障            | 数据管理 + 桌面 + Inbox          | 数据库启动/迁移和 Sidecar 启动失败先写独立白名单 journal；运行期数据库失败及低空间先直接投影，数据库不可写时同样降级 journal。下一次健康启动在 ready 前补偿。稳定 incident ID 防模糊清理重放；原错误、路径、卷 ID、容量和敏感内容不进入 journal/Inbox。Sidecar/Tauri 壳脱敏日志、WebView→Sidecar request ID、全局启动故障恢复页 v1、数据库打开前白名单恢复进度、可配置低空间监测、物理卷同卷去重、无路径手动容量检查和 30 天本地趋势已交付 |
+| 恢复等待重启 / 启动 applying       | 数据管理 + 桌面平台              | 安排阶段在维护锁内创建回滚包并发布 pending，随后普通 API 返回 `RESTORE_RESTART_REQUIRED`；桌面设置页可调用 `restart_application`。若受管 child 存在，只有 code 0 且无 signal 的真实退出才允许重启应用；内置启动失败未创建 child 时允许继续，延迟到达的干净退出确认后可再次请求。健康启动后只读诊断 API 汇总恢复结果；数据库打开前恢复、验证、收尾及迁移阶段由白名单 stdout 协议显示，不暴露恢复包身份或路径；启动前备份选择仍待实现        |
+| 来源资源删除（T-11E）              | 来源模块 + Inbox                 | Task Artifact、Task 阻塞、Task 临期、Project 完成、Content Item 与 Roadmap Milestone 已实现：open/tracking 来源项阻止来源硬删除；允许删除前原子标记 `source_deleted_at`、保留快照并显示来源已删除。系统维护来源禁止 `source_deleted_at`。其他来源仍需逐项实现；它与 schema v13 的关联 Task 删除互锁相互独立                                                                                                                                |
+| 关联 Task 硬删除                   | Task + Inbox                     | 任一活动 Inbox 关系存在时返回 `TASK_HAS_ACTIVE_INBOX_RELATIONS`，不移动 Artifact 文件或删除聚合；用户带原因软解除后才可删除，历史关系的 `task_id` 置空而 `task_ref_id / task_title_snapshot` 与事件继续保留                                                                                                                                                                                                                                |
+| 并发旧写入                         | Sidecar 领域服务                 | Task/Tag 当前事实、父子/标签嵌入、Assignment、生命周期、Submission/Artifact、Project/Client 聚合和 Actor 变化都会使旧 `If-Match` 或 `expected_version` 返回 409；输出前端保留 summary、text、link、structured 与浏览器 File 草稿，Client 编辑前端保留资料草稿，刷新后要求用户再次明确提交，不用旧版本自动重试                                                                                                                              |
+| 受控文件缺失/篡改                  | Task/Client/Project + 数据管理   | 保留元数据和审计，标记 missing/mismatch，拒绝下载；缺失不阻断确认软删或父聚合硬删，软删保留 missing 检查事实                                                                                                                                                                                                                                                                                                                               |
+| 受控文件/数据库提交中断            | Task/Client/Project + 文件 store | 提交报错后查询三类数据库引用，仅删除可证明无引用的 object；模糊 COMMIT 保留给 reconcile。恢复 active trash 前校验 size/SHA，错配隔离并记 mismatch；三类 tombstone 让已授权删除与未知候选可区分，意外目录/链接不递归处理                                                                                                                                                                                                                    |
+| 数据库与 Artifact root 不匹配      | 数据管理 + 受控文件 store        | marker 的 `database_id / store_id` 分别匹配 workspace 的不可变数据库 ID 与一次性绑定 store ID；错库、换 root、未知 marker 格式或版本在 ready 前拒绝启动                                                                                                                                                                                                                                                                                    |
+| 第二 Sidecar 共用数据库父目录      | 桌面平台 + 数据管理              | 固定 `.opc-sidecar-run.lock` 的非阻塞 OS 独占锁在 pending restore、迁移和 DB open 前使后启动进程立即失败且不接触数据库；锁文件可保留，所有权只由 OS lock 表示。hard-hung orphan 会继续持锁并阻止新进程，但当前不会被自动识别或回收                                                                                                                                                                                                         |
+| 第二 Sidecar 共用 Artifact root    | 桌面平台 + 受控文件 store        | Artifact root 进程级非阻塞独占锁使后启动进程在 ready 前失败，禁止双进程协调同一文件根；它不替代数据库父目录运行锁                                                                                                                                                                                                                                                                                                                          |
+| Focus 进程中断                     | Focus + Sidecar                  | 启动把遗留 active 原子改为 recovery_pending；全局不可关闭弹窗要求用户计入间隔继续、排除至最后 heartbeat 后继续，或中断。heartbeat 和活动查询不会递增业务 version                                                                                                                                                                                                                                                                           |
 
 ## 11. 实施依赖顺序
 
@@ -557,7 +572,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → v0.3 路线图 / 内容日历 / 高级数据管理
   → v0.4 财务 / 发票 / 客户回访
   → 本地知识库（TXT/Markdown 受控导入、Actor 异步索引/取消/retry/恢复、FTS5、引用、重建与删除已交付；PDF/授权引用待后续）
-  → AI 助手（远程/本地会话、记忆、AI5/AI6、ADR-011 citation 与 ADR-012 run steps 已交付；只读取用户预览确认的业务白名单/知识 chunk，不自动扩展或检索）
+  → AI 助手（远程/本地会话、记忆、显式业务/知识上下文、回答级 citation、无正文步骤/用量、dataset v4 配置身份评测、ADR-025 原子人工确认与运行恢复已交付；句子级证据、费用、自动路由和真实模型质量验收仍待）
 ```
 
 在前置事实层未完成时，下游模块只能展示明确的占位或禁用态，不能以静态数据、无行为按钮或预留表冒充可用功能。

@@ -6,8 +6,9 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { Query, QueryClient } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
-import { streamAiChat } from "./ai";
+import { useRef } from "react";
+import { configureAiChatRefresh, useAiChatStore } from "../store/aiChat";
+import { confirmAiMessageTask } from "./aiActions";
 import {
   attachTaskToAiMessage,
   cancelAiEvaluation,
@@ -5602,158 +5603,44 @@ export function useAttachTaskToAiMessage(sessionId: string) {
   });
 }
 
-export interface AiChatStreamState {
-  sessionId: string;
-  text: string;
-  reasoning: string;
-}
+export type { AiChatStreamState, AiChatStreamOutcome } from "../store/aiChat";
 
-export interface AiChatStreamOutcome {
-  sessionId: string;
-  cancelled: boolean;
-  error: string | null;
-  errorCode: string | null;
-}
-
-const AI_STREAM_ERROR_HINTS: Record<string, string> = {
-  AI_KEY_INVALID: "API 密钥被上游拒绝，请到 设置 → AI 助手 重新保存密钥",
-  AI_ENDPOINT_INVALID:
-    "端点路径不存在（404），请确认 Base URL 指向 OpenAI 兼容的 chat/completions 接口",
-  AI_PROVIDER_ERROR: "上游服务返回错误，请稍后重试或更换模型",
-  AI_STREAM_ERROR:
-    "上游响应不是有效的流式回答，请确认端点支持流式 chat/completions",
-  AI_ENDPOINT_UNREACHABLE: "无法连接上游端点，请检查网络或代理",
-  AI_GENERATION_TIMEOUT: "生成超时，请重试或更换更快的模型",
-  AI_PROMPT_TOO_LARGE: "当前消息和上下文超过提示词上限，请缩短内容后重试",
-  AI_KEY_NOT_ALLOWED: "本地部署供应商不需要 API 密钥，请检查供应商类型配置",
-  AI_CONTEXT_CHANGED: "所选工作区上下文已变化，请重新预览后再发送",
-  AI_CONTEXT_PROVIDER_CHANGED: "AI 供应商配置已变化，请重新预览上下文",
-  AI_CONTEXT_SOURCE_NOT_FOUND: "所选工作区上下文已不存在，请重新选择",
-  AI_CONTEXT_TOO_LARGE: "所选工作区上下文超过 16 KiB，请减少选择",
-};
-
-function aiStreamErrorText(code: string, detail?: string): string {
-  const hint = AI_STREAM_ERROR_HINTS[code] ?? `AI 生成失败（${code}）`;
-  return detail ? `${hint}（${detail}）` : hint;
-}
-
-// useAiChatStream drives one streamed generation at a time. Aborting the
-// request is the cancel path: the Sidecar keeps the partial content and the
-// message queries are refreshed with the persisted turn.
+// The stream belongs to the application. Route unmounts only unsubscribe the
+// view; the controller and generated content remain available to the monitor.
 export function useAiChatStream() {
   const queryClient = useQueryClient();
-  const [streaming, setStreaming] = useState<AiChatStreamState | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const [sentMessage, setSentMessage] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const state = useAiChatStore();
+  configureAiChatRefresh(async (sessionId) => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: aiMessagesQueryKey(sessionId),
+      }),
+      queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey }),
+      queryClient.invalidateQueries({
+        queryKey: aiUsageSummarySessionQueryKey(sessionId),
+      }),
+    ]);
+  });
+  return { ...state, isStreaming: state.streaming !== null };
+}
 
-  const stop = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
-
-  const send = useCallback(
-    async (input: {
-      providerId: string;
-      sessionId?: string;
-      message: string;
-      context?: AiBusinessContextSelection;
-    }): Promise<AiChatStreamOutcome> => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-      setStreamError(null);
-      setSentMessage(input.message);
-      setStreaming({
-        sessionId: input.sessionId ?? "",
-        text: "",
-        reasoning: "",
-      });
-      let sessionId = input.sessionId ?? "";
-      let failure: string | null = null;
-      let failureCode: string | null = null;
-      try {
-        await streamAiChat({
-          providerId: input.providerId,
-          sessionId: input.sessionId,
-          message: input.message,
-          context: input.context,
-          signal: controller.signal,
-          onEvent: (event) => {
-            switch (event.type) {
-              case "meta":
-                sessionId = event.meta.session_id || sessionId;
-                setStreaming({ sessionId, text: "", reasoning: "" });
-                break;
-              case "reasoning":
-                setStreaming((previous) => ({
-                  sessionId: previous?.sessionId || sessionId,
-                  text: previous?.text ?? "",
-                  reasoning: (previous?.reasoning ?? "") + event.text,
-                }));
-                break;
-              case "delta":
-                setStreaming((previous) => ({
-                  sessionId: previous?.sessionId || sessionId,
-                  text: (previous?.text ?? "") + event.text,
-                  reasoning: previous?.reasoning ?? "",
-                }));
-                break;
-              case "replace":
-                setStreaming({
-                  sessionId,
-                  text: event.text,
-                  reasoning: event.reasoning,
-                });
-                break;
-              case "error":
-                failureCode = event.error;
-                failure = aiStreamErrorText(event.error, event.detail);
-                controller.abort();
-                break;
-              default:
-                break;
-            }
-          },
-        });
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          failureCode =
-            error instanceof ApiError ? error.code : "AI_STREAM_ERROR";
-          failure = error instanceof ApiError ? error.message : "AI 回答流中断";
-        }
-      } finally {
-        abortRef.current = null;
-        setStreaming(null);
-        setSentMessage(null);
-        if (sessionId) {
-          await Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: aiMessagesQueryKey(sessionId),
-            }),
-            queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey }),
-            queryClient.invalidateQueries({
-              queryKey: aiUsageSummarySessionQueryKey(sessionId),
-            }),
-          ]);
-        }
-      }
-      if (failure) setStreamError(failure);
-      return {
-        sessionId,
-        cancelled: controller.signal.aborted && failure === null,
-        error: failure,
-        errorCode: failureCode,
-      };
+export function useConfirmAiMessageTask(sessionId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      messageId,
+      input,
+    }: {
+      messageId: string;
+      input: NewTaskInput;
+    }) => confirmAiMessageTask(messageId, input),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: aiMessagesQueryKey(sessionId),
+        }),
+        invalidateTaskAggregates(queryClient),
+      ]);
     },
-    [queryClient],
-  );
-
-  return {
-    streaming,
-    isStreaming: streaming !== null,
-    streamError,
-    sentMessage,
-    send,
-    stop,
-  };
+  });
 }

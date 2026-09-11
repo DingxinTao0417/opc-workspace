@@ -1,5 +1,7 @@
 # ADR-020：AI 本地质量评测数据集 v3
 
+> 后续修订：[ADR-025](025-ai-reliability-confirmations-and-evaluation-identity.md) 接续运行预算/锁、确认事务/隐私、部分压缩进度及评测配置身份。本文保留当时决策与验证记录；当前行为以 ADR-025 和模块文档为准。
+
 - 状态：Accepted，AI7-Q2 24-case 事实覆盖已实现
 - 日期：2026-09-09
 - 决策范围：第二轮事实场景扩展、中英/category 平衡、历史版本与人工评审候选联动

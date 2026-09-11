@@ -2,18 +2,18 @@
 
 > 依据：[ADR-010](../adr/010-ai-explicit-knowledge-context.md)、[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md)
 >
-> 当前状态（2026-09-08）：AI6 纵向切片与 ADR-011 AI7-Q1 可验证 citation 已完成。知识搜索仍由用户发起，模型没有整库工具；PDF、句子级覆盖率和离线质量评测是后续阶段。
+> 当前状态（2026-09-10）：AI6、ADR-011 回答级 citation、AI7-Q2 离线 scorer/本地模型评测及固定无答案/冲突/注入套件已交付；评测后续由 [AI7 计划](ai-quality-gates.md) 与 [ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 接续。知识搜索仍由用户发起，模型没有整库工具；PDF、句子级覆盖率仍待后续。
 
 ## 阶段与状态
 
-| 阶段                 | 状态     | 交付                                                                                                                   |
-| -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
-| AI6-1 决策与威胁模型 | 已完成   | ADR-010：显式片段、提示注入、版本、预算、历史与删除边界                                                                |
-| AI6-2 预览契约       | 已完成   | `/ai/context/preview` 接 1–3 knowledge identities，返回 Provider/版本/位置/正文/字节数                                 |
-| AI6-3 Chat 原子门禁  | 已完成   | Provider/source/document 两次重验；任何 AI 写入前拒绝 changed/not-found                                                |
-| AI6-4 Prompt/Harness | 已完成   | 独立不可信引用段；双协议、工具轮与 self-check 修订保持上下文；无 knowledge tool                                        |
-| AI6-5 Web 与历史     | 已完成   | AI 面板本地搜索/逐段选择、预览确认、远程披露、发送、历史来源 chips                                                     |
-| AI6-6 评测增强       | 部分完成 | schema 060 回答级 allowlist citation 与无证据/缺失/非法状态已完成；固定问答/冲突/注入集、句子级覆盖率和 PDF 页码待后续 |
+| 阶段                 | 状态     | 交付                                                                                             |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| AI6-1 决策与威胁模型 | 已完成   | ADR-010：显式片段、提示注入、版本、预算、历史与删除边界                                          |
+| AI6-2 预览契约       | 已完成   | `/ai/context/preview` 接 1–3 knowledge identities，返回 Provider/版本/位置/正文/字节数           |
+| AI6-3 Chat 原子门禁  | 已完成   | Provider/source/document 两次重验；任何 AI 写入前拒绝 changed/not-found                          |
+| AI6-4 Prompt/Harness | 已完成   | 独立不可信引用段；双协议、工具轮与 self-check 修订保持上下文；无 knowledge tool                  |
+| AI6-5 Web 与历史     | 已完成   | AI 面板本地搜索/逐段选择、预览确认、远程披露、发送、历史来源 chips                               |
+| AI6-6 评测增强       | 部分完成 | 回答级 allowlist citation、无答案/冲突/注入固定集与本地评测已交付；句子级覆盖率和 PDF 页码待后续 |
 
 ## 固定契约
 
@@ -35,6 +35,6 @@
 
 ## 后续
 
-1. 建立带标准答案与允许来源的离线评测集，区分“资料无答案”与模型自由发挥。
+1. 带预期事实、允许来源、无答案/冲突/注入的离线评测集与本地 runner 已交付；继续扩展事实覆盖，真实模型质量须实机验证，规则评分不替代人工评审。
 2. 回答级结构化 citation、合法 chunk allowlist 和缺失/非法反馈已按 ADR-011 完成；后续评审句子级归因与覆盖率，不能把回答级声明写成事实正确性证明。
 3. PDF 交付后扩展 page/location 引用；向量检索若立项需单独 ADR。

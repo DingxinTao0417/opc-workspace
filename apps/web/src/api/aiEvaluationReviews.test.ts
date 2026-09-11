@@ -75,6 +75,25 @@ afterEach(() => {
 });
 
 describe("AI evaluation review API", () => {
+  it("round trips the exact stable configuration identity", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: reviewRecord({ provider_config_version: 2 }),
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const review = await createAiEvaluationReview(
+      { ...reviewInput, group: { ...group, providerConfigVersion: 2 } },
+      "config-audit",
+    );
+    expect(review.providerConfigVersion).toBe(2);
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)),
+    ).toMatchObject({ provider_config_version: 2 });
+  });
   it("creates an append-only decision against the exact visible snapshot", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ data: reviewRecord() }), {

@@ -159,6 +159,12 @@ func pathContains(parent, candidate string) bool {
 func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(apiContextKey, a)
+		// Cancellation first addresses the in-memory registry and must not
+		// queue behind a backup writer or a pending restore.
+		if c.Request.Method == http.MethodPost && (strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/generations/") || strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/evaluations/")) && strings.HasSuffix(c.Request.URL.Path, "/cancel") {
+			c.Next()
+			return
+		}
 		if a.restorePending.Load() {
 			backupRootPath := "/api/" + Version + "/backups"
 			isRestoreReplay := c.Request.Method == http.MethodPost &&
@@ -173,6 +179,8 @@ func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 			return
 		}
 		if strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/backups") ||
+			c.Request.URL.Path == "/api/"+Version+"/ai/chat" ||
+			(c.Request.Method == http.MethodPost && strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/providers/") && strings.HasSuffix(c.Request.URL.Path, "/health")) ||
 			c.Request.URL.Path == "/api/"+Version+"/imports/business-data" ||
 			c.Request.URL.Path == "/api/"+Version+"/imports/business-package" ||
 			c.Request.URL.Path == "/api/"+Version+"/exports/business-package" {
@@ -181,6 +189,10 @@ func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 		}
 		a.maintenance.RLock()
 		defer a.maintenance.RUnlock()
+		if a.restorePending.Load() {
+			writeError(c, http.StatusServiceUnavailable, "RESTORE_RESTART_REQUIRED", "A verified restore is pending; restart the application to apply it")
+			return
+		}
 		c.Next()
 	}
 }

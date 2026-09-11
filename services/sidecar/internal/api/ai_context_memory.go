@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/harness"
-	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
@@ -58,10 +57,11 @@ type aiPromptTurn struct {
 }
 
 type aiCompactionCandidate struct {
-	Messages        []modelclient.ChatMessage
-	MessageCount    int
-	InputBytes      int
-	SourceMessageID string
+	Messages            []modelclient.ChatMessage
+	MessageCount        int
+	InputBytes          int
+	SourceMessageID     string
+	SourceMessageOffset int
 }
 
 // aiCompactionRegistry gives each session at most one background compaction
@@ -71,13 +71,14 @@ type aiCompactionRegistry struct {
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
+	states map[string]aiCompactionState
 	wg     sync.WaitGroup
 	closed bool
 }
 
 func newAICompactionRegistry() *aiCompactionRegistry {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &aiCompactionRegistry{ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc)}
+	return &aiCompactionRegistry{ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc), states: make(map[string]aiCompactionState)}
 }
 
 func (r *aiCompactionRegistry) start(sessionID string, run func(context.Context)) bool {
@@ -300,9 +301,29 @@ func (a *API) buildAICompactionCandidate(sessionID, protocol, model string, prom
 	for left, right := 0, len(latest)-1; left < right; left, right = left+1, right-1 {
 		latest[left], latest[right] = latest[right], latest[left]
 	}
-	_, firstSelected, err := selectAIHistoryWindow(aiPromptMessages(latest), protocol, model, promptContext)
+	if len(latest) == 0 {
+		return aiCompactionCandidate{}, nil
+	}
+	promptMessages := aiPromptMessages(latest)
+	// Reserve a next user turn. Otherwise a final oversized assistant reply
+	// can itself make the history window invalid and prevent any compaction.
+	last := latest[len(latest)-1]
+	promptMessages = append(promptMessages, aiPromptMessage{ID: last.ID + "~", CreatedAt: last.CreatedAt, Message: modelclient.ChatMessage{Role: "user", Content: "继续"}})
+	_, firstSelected, err := selectAIHistoryWindow(promptMessages, protocol, model, promptContext)
 	if err != nil || firstSelected == nil {
 		return aiCompactionCandidate{}, err
+	}
+	var watermark models.AIMessage
+	if active != nil && active.SourceMessageID != nil {
+		if err := a.db.Where("id = ? AND session_id = ?", *active.SourceMessageID, sessionID).First(&watermark).Error; err != nil {
+			return aiCompactionCandidate{}, err
+		}
+		// A smaller replacement summary can pull a partially summarized
+		// message back into the live window. Finish that source regardless of
+		// the moved boundary so its durable offset never gets stranded.
+		if active.SourceMessageOffset > 0 && (watermark.CreatedAt > firstSelected.CreatedAt || (watermark.CreatedAt == firstSelected.CreatedAt && watermark.ID >= firstSelected.ID)) {
+			firstSelected = &aiPromptMessage{CreatedAt: watermark.CreatedAt, ID: watermark.ID + "~"}
+		}
 	}
 
 	rangeQuery := a.db.Model(&models.AIMessage{}).
@@ -318,19 +339,22 @@ func (a *API) buildAICompactionCandidate(sessionID, protocol, model string, prom
 	`
 	sumArgs := []any{sessionID, firstSelected.CreatedAt, firstSelected.CreatedAt, firstSelected.ID}
 	if active != nil && active.SourceMessageID != nil {
-		var watermark models.AIMessage
-		if err := a.db.Where("id = ? AND session_id = ?", *active.SourceMessageID, sessionID).First(&watermark).Error; err != nil {
-			return aiCompactionCandidate{}, err
+		comparison := ">"
+		if active.SourceMessageOffset > 0 {
+			comparison = ">="
 		}
-		rangeQuery = rangeQuery.Where("created_at > ? OR (created_at = ? AND id > ?)", watermark.CreatedAt, watermark.CreatedAt, watermark.ID)
-		sumQuery += " AND (created_at > ? OR (created_at = ? AND id > ?))"
+		rangeQuery = rangeQuery.Where("created_at > ? OR (created_at = ? AND id "+comparison+" ?)", watermark.CreatedAt, watermark.CreatedAt, watermark.ID)
+		sumQuery += " AND (created_at > ? OR (created_at = ? AND id " + comparison + " ?))"
 		sumArgs = append(sumArgs, watermark.CreatedAt, watermark.CreatedAt, watermark.ID)
 	}
 	var uncompressedBytes int64
 	if err := a.db.Raw(sumQuery, sumArgs...).Row().Scan(&uncompressedBytes); err != nil {
 		return aiCompactionCandidate{}, err
 	}
-	if uncompressedBytes <= aiCompactionTriggerBytes {
+	if active != nil {
+		uncompressedBytes -= int64(active.SourceMessageOffset)
+	}
+	if uncompressedBytes <= aiCompactionTriggerBytes && (active == nil || active.SourceMessageOffset == 0) {
 		return aiCompactionCandidate{}, nil
 	}
 
@@ -338,33 +362,69 @@ func (a *API) buildAICompactionCandidate(sessionID, protocol, model string, prom
 	if err := rangeQuery.Order("created_at ASC, id ASC").Limit(aiCompactionCandidateLimit).Find(&rows).Error; err != nil {
 		return aiCompactionCandidate{}, err
 	}
-	truncated := len(rows) > aiCompactionCandidateWindow
-	if truncated {
+	if len(rows) > aiCompactionCandidateWindow {
 		rows = rows[:aiCompactionCandidateWindow]
 	}
-	turns := groupAIPromptTurns(aiPromptMessages(rows))
-	if truncated && len(turns) > 0 {
-		turns = turns[:len(turns)-1]
-	}
-
 	var candidate aiCompactionCandidate
-	for _, turn := range turns {
-		turnMessages := make([]modelclient.ChatMessage, 0, len(turn.Messages))
-		turnBytes := 0
-		for _, item := range turn.Messages {
-			encoded, _ := json.Marshal(item.Message)
-			turnBytes += len(encoded) + 1
-			turnMessages = append(turnMessages, item.Message)
+	for _, item := range aiPromptMessages(rows) {
+		offset := 0
+		if active != nil && active.SourceMessageID != nil && *active.SourceMessageID == item.ID {
+			offset = active.SourceMessageOffset
 		}
-		if candidate.InputBytes+turnBytes > aiCompactionBatchBytes {
+		if offset < 0 || offset > len(item.Message.Content) || !utf8.ValidString(item.Message.Content[:offset]) {
+			return aiCompactionCandidate{}, errors.New("AI context watermark offset is invalid")
+		}
+		remaining := item.Message.Content[offset:]
+		if remaining == "" {
+			continue
+		}
+		fits := func(n int) bool {
+			message := modelclient.ChatMessage{Role: item.Message.Role, Content: remaining[:utf8PrefixLength(remaining, n)]}
+			encoded, _ := json.Marshal(message)
+			if candidate.InputBytes+len(encoded)+1 > aiCompactionBatchBytes {
+				return false
+			}
+			probe := candidate
+			probe.Messages = append(append([]modelclient.ChatMessage(nil), candidate.Messages...), message)
+			size, sizeErr := modelclient.PromptSize(modelclient.Protocol(protocol), model, []modelclient.ChatMessage{{Role: "user", Content: buildAICompactionInput(active, probe)}}, modelclient.PromptContext{SystemPrompt: aiCompactionSystemPrompt})
+			return sizeErr == nil && size <= modelclient.MaxPromptBytes
+		}
+		low, high := 0, len(remaining)
+		for low < high {
+			middle := (low + high + 1) / 2
+			if fits(middle) {
+				low = middle
+			} else {
+				high = middle - 1
+			}
+		}
+		take := utf8PrefixLength(remaining, low)
+		if take == 0 {
 			break
 		}
-		candidate.Messages = append(candidate.Messages, turnMessages...)
-		candidate.MessageCount += len(turn.Messages)
-		candidate.InputBytes += turnBytes
-		candidate.SourceMessageID = turn.Messages[len(turn.Messages)-1].ID
+		message := modelclient.ChatMessage{Role: item.Message.Role, Content: remaining[:take]}
+		encoded, _ := json.Marshal(message)
+		candidate.Messages = append(candidate.Messages, message)
+		candidate.InputBytes += len(encoded) + 1
+		candidate.SourceMessageID = item.ID
+		candidate.SourceMessageOffset = 0
+		if take < len(remaining) {
+			candidate.SourceMessageOffset = offset + take
+			break
+		}
+		candidate.MessageCount++
 	}
 	return candidate, nil
+}
+
+func utf8PrefixLength(value string, n int) int {
+	if n >= len(value) {
+		return len(value)
+	}
+	for n > 0 && !utf8.RuneStart(value[n]) {
+		n--
+	}
+	return n
 }
 
 func buildAICompactionInput(previous *models.AIMemoryEntry, candidate aiCompactionCandidate) string {
@@ -375,7 +435,7 @@ func buildAICompactionInput(previous *models.AIMemoryEntry, candidate aiCompacti
 	var builder strings.Builder
 	builder.WriteString("旧快照：\n")
 	builder.WriteString(previousContent)
-	builder.WriteString("\n\n待压缩对话（JSONL，按时间正序）：\n")
+	builder.WriteString("\n\n待压缩对话（JSONL，按时间正序；超长消息可分成连续片段，每片只包含尚未压缩的内容，需与旧快照合并）：\n")
 	for _, message := range candidate.Messages {
 		encoded, _ := json.Marshal(message)
 		builder.Write(encoded)
@@ -389,17 +449,64 @@ func (a *API) scheduleAICompaction(sessionID string, provider models.AIProvider)
 		return
 	}
 	a.aiCompactions.start(sessionID, func(ctx context.Context) {
-		if err := a.compactAISession(ctx, sessionID, provider); err != nil && !errors.Is(err, context.Canceled) {
-			a.options.Logger.Printf("AI context compaction failed for session %s", sessionID)
+		ctx, cancel := context.WithTimeout(ctx, modelclient.TotalTimeout)
+		defer cancel()
+		for batch := 0; batch < 8; batch++ {
+			progressed, err := a.compactAISessionBatch(ctx, sessionID, provider)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					a.options.Logger.Printf("AI context compaction failed for session %s", sessionID)
+				}
+				return
+			}
+			if !progressed {
+				return
+			}
 		}
+		a.setAICompactionState(sessionID, "pending", "")
 	})
 }
 
 func (a *API) compactAISession(ctx context.Context, sessionID string, provider models.AIProvider) error {
+	_, err := a.compactAISessionBatch(ctx, sessionID, provider)
+	return err
+}
+
+func (a *API) compactAISessionBatch(ctx context.Context, sessionID string, provider models.AIProvider) (progressed bool, err error) {
+	a.setAICompactionState(sessionID, "running", "")
+	defer func() {
+		state, code := "idle", ""
+		if progressed {
+			state = "succeeded"
+		}
+		if err != nil {
+			state, code = "failed", "AI_COMPACTION_FAILED"
+			if errors.Is(err, errAICompactionProviderChanged) {
+				code = "AI_COMPACTION_PROVIDER_CHANGED"
+			}
+			if errors.Is(err, context.Canceled) {
+				state, code = "cancelled", ""
+			}
+		}
+		a.setAICompactionState(sessionID, state, code)
+	}()
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return false, ctx.Err()
 	}
 	a.maintenance.RLock()
+	if a.restorePending.Load() {
+		a.maintenance.RUnlock()
+		return false, context.Canceled
+	}
+	var session models.AISession
+	if err := a.db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
+		a.maintenance.RUnlock()
+		return false, err
+	}
+	if !session.Persist {
+		a.maintenance.RUnlock()
+		return false, nil
+	}
 	active, snapshot, err := a.activeAIContextSnapshot(sessionID)
 	if err == nil {
 		memories := a.confirmedAIMemories()
@@ -414,65 +521,86 @@ func (a *API) compactAISession(ctx context.Context, sessionID string, provider m
 		if err == nil {
 			candidate, err = a.buildAICompactionCandidate(sessionID, provider.Protocol, provider.Model, promptContext, active)
 		}
-		if err == nil && candidate.MessageCount == 0 {
+		if err == nil && len(candidate.Messages) == 0 {
 			a.maintenance.RUnlock()
-			return nil
+			return false, nil
 		}
 		if err == nil {
 			input := buildAICompactionInput(active, candidate)
 			a.maintenance.RUnlock()
-			return a.runAICompaction(ctx, sessionID, provider, active, candidate, input)
+			err = a.runAICompaction(ctx, sessionID, provider, active, candidate, input)
+			return err == nil, err
 		}
 	}
 	a.maintenance.RUnlock()
-	return err
+	return false, err
 }
 
+var errAICompactionProviderChanged = errors.New("AI compaction provider configuration changed")
+
 func (a *API) runAICompaction(ctx context.Context, sessionID string, provider models.AIProvider, active *models.AIMemoryEntry, candidate aiCompactionCandidate, input string) error {
+	a.maintenance.RLock()
 	a.aiProviderMu.RLock()
-	defer a.aiProviderMu.RUnlock()
-	currentProvider, err := loadAIProvider(a.db.WithContext(ctx), provider.ID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
-	}
+	apiKey, err := func() (string, error) {
+		if a.restorePending.Load() {
+			return "", context.Canceled
+		}
+		if err := a.checkAICompactionProvider(ctx, provider); err != nil {
+			return "", err
+		}
+		if provider.Kind == aiProviderKindLocal {
+			return "", nil
+		}
+		return a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
+	}()
+	a.aiProviderMu.RUnlock()
+	a.maintenance.RUnlock()
 	if err != nil {
 		return err
-	}
-	if currentProvider.Version != provider.Version || currentProvider.Kind != provider.Kind ||
-		currentProvider.Protocol != provider.Protocol || currentProvider.BaseURL != provider.BaseURL || currentProvider.Model != provider.Model {
-		return nil
-	}
-	apiKey := ""
-	if provider.Kind != aiProviderKindLocal {
-		var err error
-		apiKey, err = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
-		if err != nil {
-			if errors.Is(err, keystore.ErrNotFound) {
-				return nil
-			}
-			return err
-		}
 	}
 	client := a.harnessClient
 	if client == nil {
 		client = harness.NewModelClient(nil)
 	}
+	ctx, cancel := context.WithTimeout(ctx, modelclient.TotalTimeout)
+	defer cancel()
 	turn, err := client.Stream(ctx, harness.Request{
-		Protocol: provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
+		ResponseByteLimit: modelclient.MaxResponseBytes,
+		Protocol:          provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
 		SystemPrompt: aiCompactionSystemPrompt,
 		History:      []modelclient.ChatMessage{{Role: "user", Content: input}},
 	}, nil, nil)
 	if err != nil {
 		return err
 	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if len(turn.Text)+len(turn.Reasoning) > modelclient.MaxResponseBytes {
+		return modelclient.ErrResponseBudget
+	}
 	next, err := decodeAIContextSnapshot(turn.Text)
 	if err != nil {
 		return err
 	}
-	return a.persistAIContextSnapshot(ctx, sessionID, active, next, candidate)
+	return a.persistAIContextSnapshot(ctx, sessionID, active, next, candidate, provider)
 }
 
-func (a *API) persistAIContextSnapshot(ctx context.Context, sessionID string, previous *models.AIMemoryEntry, snapshot aiContextSnapshot, candidate aiCompactionCandidate) error {
+func (a *API) checkAICompactionProvider(ctx context.Context, provider models.AIProvider) error {
+	current, err := loadAIProvider(a.db.WithContext(ctx), provider.ID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errAICompactionProviderChanged
+	}
+	if err != nil {
+		return err
+	}
+	if current.ConfigVersion != provider.ConfigVersion || current.Kind != provider.Kind || current.Protocol != provider.Protocol || current.BaseURL != provider.BaseURL || current.Model != provider.Model || current.Status != "ready" {
+		return errAICompactionProviderChanged
+	}
+	return nil
+}
+
+func (a *API) persistAIContextSnapshot(ctx context.Context, sessionID string, previous *models.AIMemoryEntry, snapshot aiContextSnapshot, candidate aiCompactionCandidate, providers ...models.AIProvider) error {
 	content, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
@@ -499,10 +627,28 @@ func (a *API) persistAIContextSnapshot(ctx context.Context, sessionID string, pr
 		ID: uuid.NewString(), SessionID: sessionID, Kind: "context_snapshot",
 		Content: string(content), Tags: string(tagsJSON), Origin: "model_compaction", Status: "active",
 		SourceMessageID: &candidate.SourceMessageID, CreatedAt: now, UpdatedAt: now,
+		SourceMessageOffset: candidate.SourceMessageOffset,
 	}
 	a.maintenance.RLock()
 	defer a.maintenance.RUnlock()
+	if a.restorePending.Load() {
+		return context.Canceled
+	}
+	a.aiProviderMu.RLock()
+	defer a.aiProviderMu.RUnlock()
+	if len(providers) > 0 {
+		if err := a.checkAICompactionProvider(ctx, providers[0]); err != nil {
+			return err
+		}
+	}
 	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session models.AISession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		if !session.Persist {
+			return errors.New("nonpersistent sessions cannot retain context snapshots")
+		}
 		if previous != nil {
 			result := tx.Model(&models.AIMemoryEntry{}).
 				Where("id = ? AND session_id = ? AND status = 'active'", previous.ID, sessionID).
@@ -520,6 +666,7 @@ func (a *API) persistAIContextSnapshot(ctx context.Context, sessionID string, pr
 		payload, err := json.Marshal(map[string]any{
 			"entry_id": entry.ID, "message_count": candidate.MessageCount,
 			"input_bytes": candidate.InputBytes, "source_message_id": candidate.SourceMessageID,
+			"source_message_offset": candidate.SourceMessageOffset,
 		})
 		if err != nil {
 			return err

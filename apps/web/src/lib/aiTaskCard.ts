@@ -10,7 +10,7 @@ export interface AiTaskSuggestion {
 const AI_TASK_BLOCK_PATTERN =
   /\[opc:task\]\s*([\s\S]*?)\s*(?:\[\/opc:task\]|\[opc:task\])/i;
 
-// parseAiTaskSuggestion extracts the first well-formed task suggestion block
+// parseAiTaskSuggestion extracts a single unambiguous task suggestion block
 // from an assistant reply. The block is model output and always treated as an
 // untrusted preview: malformed JSON or a missing/oversized title yields null
 // so the display layer can suppress the protocol text and report a natural-
@@ -18,16 +18,21 @@ const AI_TASK_BLOCK_PATTERN =
 export function parseAiTaskSuggestion(
   content: string,
 ): AiTaskSuggestion | null {
-  const match = AI_TASK_BLOCK_PATTERN.exec(content);
-  if (!match) return null;
+  const matches = [
+    ...content.matchAll(new RegExp(AI_TASK_BLOCK_PATTERN.source, "gi")),
+  ];
+  if (matches.length !== 1) return null;
+  const match = matches[0];
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(match[1]) as Record<string, unknown>;
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return null;
   const rawTitle = typeof parsed.title === "string" ? parsed.title.trim() : "";
-  if (!rawTitle || rawTitle.length > 200) return null;
+  if (!rawTitle || [...rawTitle].length > 200) return null;
   const description =
     typeof parsed.description === "string" && parsed.description.trim()
       ? parsed.description.trim()
@@ -51,27 +56,32 @@ const AI_MEMORY_BLOCK_PATTERN =
 // persists it, but streamed deltas reach the UI before that stripping, so the
 // display layer drops it too (ADR-006).
 const AI_SELF_CHECK_BLOCK_PATTERN =
-  /\[opc:selfcheck\][\s\S]*?(\[\/opc:selfcheck\]|$)/;
-const AI_CITATION_BLOCK_PATTERN =
-  /\[opc:citations\][\s\S]*?(?:\[\/opc:citations\]|\[opc:citations\])/gi;
+  /\[opc:selfcheck\][\s\S]*?(\[\/opc:selfcheck\]|$)/gi;
+const AI_DISPLAY_CONTROL_PATTERN =
+  /\[opc:(task|memory|citations)\][\s\S]*?(?:\[\/opc:\1\]|(?=\[opc:\1\])|$)/gi;
 
-// parseAiMemorySuggestion extracts the first well-formed memory suggestion
+// parseAiMemorySuggestion extracts a single unambiguous memory suggestion
 // block from an assistant reply. Like task blocks it is untrusted model
 // output: malformed JSON or missing/oversized content yields null.
 export function parseAiMemorySuggestion(
   content: string,
 ): AiMemorySuggestion | null {
-  const match = AI_MEMORY_BLOCK_PATTERN.exec(content);
-  if (!match) return null;
+  const matches = [
+    ...content.matchAll(new RegExp(AI_MEMORY_BLOCK_PATTERN.source, "gi")),
+  ];
+  if (matches.length !== 1) return null;
+  const match = matches[0];
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(match[1]) as Record<string, unknown>;
   } catch {
     return null;
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return null;
   const rawContent =
     typeof parsed.content === "string" ? parsed.content.trim() : "";
-  if (!rawContent || rawContent.length > 500) return null;
+  if (!rawContent || [...rawContent].length > 500) return null;
   let proposalId: string | undefined;
   if (parsed.proposal_id !== undefined) {
     if (
@@ -98,9 +108,9 @@ export function stripAiSelfCheckBlock(content: string): string {
 // displayed reply.
 export function stripAiTaskBlock(content: string): string {
   return content
-    .replace(AI_TASK_BLOCK_PATTERN, "")
-    .replace(AI_MEMORY_BLOCK_PATTERN, "")
-    .replace(AI_CITATION_BLOCK_PATTERN, "")
-    .replace(/\[opc:(?:task|memory|citations)\][\s\S]*$/i, "")
+    .replace(AI_DISPLAY_CONTROL_PATTERN, "")
+    .replace(AI_SELF_CHECK_BLOCK_PATTERN, "")
+    .replace(/\[\/opc:(?:task|memory|selfcheck|citations)\]/gi, "")
+    .replace(/\[\/?opc(?::[^\]]*)?$/i, "")
     .trimEnd();
 }

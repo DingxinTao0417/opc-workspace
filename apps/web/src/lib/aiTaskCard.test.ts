@@ -8,6 +8,18 @@ import {
 } from "./aiTaskCard";
 
 describe("parseAiTaskSuggestion", () => {
+  it("rejects multiple complete task blocks instead of choosing an ambiguous command", () => {
+    expect(
+      parseAiTaskSuggestion(
+        '[opc:task]{"title":"第一个"}[/opc:task][opc:task]{"title":"第二个"}[/opc:task]',
+      ),
+    ).toBeNull();
+  });
+  it.each(["null", "[]", "42", "true", '"text"', '{"title":null}'])(
+    "rejects non-object or invalid task payload %s without throwing",
+    (json) =>
+      expect(parseAiTaskSuggestion(`[opc:task]${json}[/opc:task]`)).toBeNull(),
+  );
   it("parses a well-formed suggestion block", () => {
     const content =
       '好的，建议如下\n[opc:task]{"title":"写周报","description":"汇总本周进展","due":"2026-09-02"}[/opc:task]';
@@ -50,14 +62,32 @@ describe("parseAiTaskSuggestion", () => {
     expect(suggestion).toEqual({ title: "写周报" });
   });
 
-  it("only reads the first block", () => {
+  it("keeps surrounding prose but rejects ambiguous task blocks", () => {
     const content =
       '[opc:task]{"title":"第一个"}[/opc:task] 中间 [opc:task]{"title":"第二个"}[/opc:task]';
-    expect(parseAiTaskSuggestion(content)?.title).toBe("第一个");
+    expect(parseAiTaskSuggestion(content)).toBeNull();
+    expect(stripAiTaskBlock(content).trim()).toBe("中间");
   });
 });
 
 describe("stripAiTaskBlock", () => {
+  it("suppresses overlapping repeated openings and orphan closing markers", () => {
+    expect(
+      stripAiTaskBlock(
+        '正文[opc:task]{"title":"a"}[opc:task]{"title":"b"}[/opc:task]',
+      ),
+    ).toBe("正文");
+    expect(
+      stripAiTaskBlock("正文[/opc:memory][/opc:selfcheck][/opc:citations]"),
+    ).toBe("正文");
+  });
+  it("strips every repeated control block without exposing trailing protocol text", () => {
+    expect(
+      stripAiTaskBlock(
+        '前文[opc:task]null[/opc:task]中间[opc:task]{"title":"t"}[/opc:task]后文[opc:memory]null[/opc:memory][opc:',
+      ),
+    ).toBe("前文中间后文");
+  });
   it("removes the block and trailing whitespace without touching other text", () => {
     const content = '回复正文。\n[opc:task]{"title":"写周报"}[/opc:task]\n';
     expect(stripAiTaskBlock(content)).toBe("回复正文。");
@@ -84,6 +114,20 @@ describe("stripAiTaskBlock", () => {
 });
 
 describe("parseAiMemorySuggestion", () => {
+  it("rejects multiple complete memory blocks consistently with server confirmation", () => {
+    expect(
+      parseAiMemorySuggestion(
+        '[opc:memory]{"content":"一个偏好"}[/opc:memory][opc:memory]{"content":"另一个偏好"}[/opc:memory]',
+      ),
+    ).toBeNull();
+  });
+  it.each(["null", "[]", "42", "true", '"text"', '{"content":null}'])(
+    "rejects non-object or invalid memory payload %s without throwing",
+    (json) =>
+      expect(
+        parseAiMemorySuggestion(`[opc:memory]${json}[/opc:memory]`),
+      ).toBeNull(),
+  );
   it("parses a well-formed memory block", () => {
     const content =
       '好的，我记下了。[opc:memory]{"content":"回答保持简洁"}[/opc:memory]';

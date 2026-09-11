@@ -29,7 +29,7 @@ var aiEvaluationRequiredCategories = []string{
 }
 
 var aiEvaluationCriticalFailureCodes = []string{
-	"CONTROL_BLOCK_LEAKED", "CITATION_NOT_ALLOWED", "FORBIDDEN_PHRASE_PRESENT",
+	"CONTROL_BLOCK_LEAKED", "CITATION_NOT_ALLOWED", "FORBIDDEN_PHRASE_PRESENT", "FACT_CONTRADICTED",
 }
 
 type aiEvaluationSummaryScope struct {
@@ -46,6 +46,7 @@ type aiEvaluationStatusCounts struct {
 }
 
 type aiEvaluationQualityGroup struct {
+	ProviderConfigVersion *int64   `gorm:"column:provider_config_version" json:"provider_config_version"`
 	ProviderID            string   `gorm:"column:provider_id" json:"provider_id"`
 	ProviderNameSnapshot  string   `gorm:"column:provider_name_snapshot" json:"provider_name_snapshot"`
 	ProviderModelSnapshot string   `gorm:"column:provider_model_snapshot" json:"provider_model_snapshot"`
@@ -68,6 +69,7 @@ type aiEvaluationQualityGroup struct {
 }
 
 type aiEvaluationTrendPoint struct {
+	ProviderConfigVersion *int64 `gorm:"column:provider_config_version" json:"provider_config_version"`
 	RunID                 string `gorm:"column:run_id" json:"run_id"`
 	ProviderID            string `gorm:"column:provider_id" json:"provider_id"`
 	ProviderNameSnapshot  string `gorm:"column:provider_name_snapshot" json:"provider_name_snapshot"`
@@ -81,6 +83,7 @@ type aiEvaluationTrendPoint struct {
 }
 
 type aiEvaluationCategoryGroup struct {
+	ProviderConfigVersion *int64 `gorm:"column:provider_config_version" json:"provider_config_version"`
 	ProviderID            string `gorm:"column:provider_id" json:"provider_id"`
 	ProviderNameSnapshot  string `gorm:"column:provider_name_snapshot" json:"provider_name_snapshot"`
 	ProviderModelSnapshot string `gorm:"column:provider_model_snapshot" json:"provider_model_snapshot"`
@@ -114,6 +117,7 @@ type aiEvaluationReadinessPolicy struct {
 }
 
 type aiEvaluationFailureGroup struct {
+	ProviderConfigVersion *int64 `gorm:"column:provider_config_version" json:"provider_config_version"`
 	ProviderID            string `gorm:"column:provider_id" json:"provider_id"`
 	ProviderNameSnapshot  string `gorm:"column:provider_name_snapshot" json:"provider_name_snapshot"`
 	ProviderModelSnapshot string `gorm:"column:provider_model_snapshot" json:"provider_model_snapshot"`
@@ -200,7 +204,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			return err
 		}
 		qualityQuery := `SELECT
-			provider_id, provider_name_snapshot, provider_model_snapshot, dataset_version, suite_key,
+			provider_id, provider_config_version, MAX(provider_name_snapshot) AS provider_name_snapshot, MAX(provider_model_snapshot) AS provider_model_snapshot, dataset_version, suite_key,
 			MIN(provider_version) AS provider_version_min,
 			MAX(provider_version) AS provider_version_max,
 			COUNT(*) AS run_count,
@@ -211,7 +215,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			MAX(completed_at) AS last_completed_at
 			FROM ai_evaluation_runs
 			WHERE ` + where + ` AND status = 'succeeded'
-			GROUP BY provider_id, provider_name_snapshot, provider_model_snapshot, dataset_version, suite_key
+			GROUP BY provider_id, provider_config_version, CASE WHEN provider_config_version IS NULL THEN provider_name_snapshot ELSE '' END, CASE WHEN provider_config_version IS NULL THEN provider_model_snapshot ELSE '' END, dataset_version, suite_key
 			ORDER BY lower(provider_name_snapshot) ASC, lower(provider_model_snapshot) ASC,
 				dataset_version ASC, suite_key ASC, provider_id ASC`
 		if err := tx.Raw(qualityQuery, args...).Scan(&response.Groups).Error; err != nil {
@@ -223,7 +227,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			categoryArgs = append(categoryArgs, *providerID)
 		}
 		categoryQuery := `SELECT
-			run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+			run.provider_id, run.provider_config_version, MAX(run.provider_name_snapshot) AS provider_name_snapshot, MAX(run.provider_model_snapshot) AS provider_model_snapshot,
 			run.dataset_version, run.suite_key, result.category,
 			COUNT(*) AS total_cases,
 			COALESCE(SUM(CASE WHEN result.status = 'passed' THEN 1 ELSE 0 END), 0) AS passed_cases,
@@ -232,7 +236,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			FROM ai_evaluation_runs run
 			JOIN ai_evaluation_results result ON result.run_id = run.id
 			WHERE ` + categoryWhere + ` AND run.status = 'succeeded'
-			GROUP BY run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+			GROUP BY run.provider_id, run.provider_config_version, CASE WHEN run.provider_config_version IS NULL THEN run.provider_name_snapshot ELSE '' END, CASE WHEN run.provider_config_version IS NULL THEN run.provider_model_snapshot ELSE '' END,
 				run.dataset_version, run.suite_key, result.category
 			ORDER BY lower(run.provider_name_snapshot) ASC, lower(run.provider_model_snapshot) ASC,
 				run.dataset_version ASC, run.suite_key ASC,
@@ -274,7 +278,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			response.Categories[index].WilsonUpperBPS = upper
 		}
 		failureQuery := `SELECT
-			run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+			run.provider_id, run.provider_config_version, MAX(run.provider_name_snapshot) AS provider_name_snapshot, MAX(run.provider_model_snapshot) AS provider_model_snapshot,
 			run.dataset_version, run.suite_key, CAST(failure.value AS TEXT) AS failure_code,
 			COUNT(DISTINCT result.id) AS affected_cases,
 			COUNT(*) AS occurrences,
@@ -283,7 +287,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 			JOIN ai_evaluation_results result ON result.run_id = run.id
 			JOIN json_each(result.failure_codes) failure
 			WHERE ` + categoryWhere + ` AND run.status = 'succeeded' AND result.status = 'failed'
-			GROUP BY run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+			GROUP BY run.provider_id, run.provider_config_version, CASE WHEN run.provider_config_version IS NULL THEN run.provider_name_snapshot ELSE '' END, CASE WHEN run.provider_config_version IS NULL THEN run.provider_model_snapshot ELSE '' END,
 				run.dataset_version, run.suite_key, failure.value
 			ORDER BY lower(run.provider_name_snapshot) ASC, lower(run.provider_model_snapshot) ASC,
 				run.dataset_version ASC, run.suite_key ASC, occurrences DESC, failure_code ASC, run.provider_id ASC`
@@ -293,12 +297,12 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 		groupFailedCases := make(map[string]int64, len(response.Groups))
 		for _, group := range response.Groups {
 			groupFailedCases[aiEvaluationSummaryGroupKey(
-				group.ProviderID, group.ProviderNameSnapshot, group.ProviderModelSnapshot, group.DatasetVersion, group.SuiteKey,
+				group.ProviderID, group.ProviderNameSnapshot, group.ProviderModelSnapshot, group.DatasetVersion, group.SuiteKey, group.ProviderConfigVersion,
 			)] = group.FailedCases
 		}
 		for _, failure := range response.FailureCodes {
 			groupKey := aiEvaluationSummaryGroupKey(
-				failure.ProviderID, failure.ProviderNameSnapshot, failure.ProviderModelSnapshot, failure.DatasetVersion, failure.SuiteKey,
+				failure.ProviderID, failure.ProviderNameSnapshot, failure.ProviderModelSnapshot, failure.DatasetVersion, failure.SuiteKey, failure.ProviderConfigVersion,
 			)
 			if !aiEvaluationFailureCodeAllowed(failure.FailureCode) || failure.AffectedCases < 1 ||
 				failure.Occurrences < failure.AffectedCases || failure.AffectedCases > groupFailedCases[groupKey] {
@@ -312,7 +316,7 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 		}
 		trendArgs := append(append([]any{}, args...), limit)
 		trendQuery := `SELECT * FROM (
-			SELECT id AS run_id, provider_id, provider_name_snapshot, provider_model_snapshot,
+			SELECT id AS run_id, provider_id, provider_config_version, provider_name_snapshot, provider_model_snapshot,
 				dataset_version, suite_key, total_cases, passed_cases, failed_cases, completed_at
 			FROM ai_evaluation_runs
 			WHERE ` + where + ` AND status = 'succeeded'
@@ -333,7 +337,10 @@ func (a *API) getAIEvaluationSummary(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response, "meta": gin.H{"trend_limit": limit}})
 }
 
-func aiEvaluationSummaryGroupKey(providerID, providerName, model string, datasetVersion int, suiteKey string) string {
+func aiEvaluationSummaryGroupKey(providerID, providerName, model string, datasetVersion int, suiteKey string, configVersions ...*int64) string {
+	if len(configVersions) > 0 && configVersions[0] != nil {
+		return providerID + "\x00config:" + strconv.FormatInt(*configVersions[0], 10) + "\x00" + strconv.Itoa(datasetVersion) + "\x00" + suiteKey
+	}
 	return providerID + "\x00" + providerName + "\x00" + model + "\x00" + strconv.Itoa(datasetVersion) + "\x00" + suiteKey
 }
 
@@ -379,7 +386,7 @@ func applyAIEvaluationReadiness(
 	categoryByGroup := make(map[string]map[string]aiEvaluationCategoryGroup, len(groups))
 	for _, category := range categories {
 		groupKey := aiEvaluationSummaryGroupKey(
-			category.ProviderID, category.ProviderNameSnapshot, category.ProviderModelSnapshot, category.DatasetVersion, category.SuiteKey,
+			category.ProviderID, category.ProviderNameSnapshot, category.ProviderModelSnapshot, category.DatasetVersion, category.SuiteKey, category.ProviderConfigVersion,
 		)
 		if categoryByGroup[groupKey] == nil {
 			categoryByGroup[groupKey] = make(map[string]aiEvaluationCategoryGroup, len(policy.RequiredCategories))
@@ -396,7 +403,7 @@ func applyAIEvaluationReadiness(
 			continue
 		}
 		criticalByGroup[aiEvaluationSummaryGroupKey(
-			failure.ProviderID, failure.ProviderNameSnapshot, failure.ProviderModelSnapshot, failure.DatasetVersion, failure.SuiteKey,
+			failure.ProviderID, failure.ProviderNameSnapshot, failure.ProviderModelSnapshot, failure.DatasetVersion, failure.SuiteKey, failure.ProviderConfigVersion,
 		)] = true
 	}
 	for index := range groups {
@@ -420,13 +427,13 @@ func applyAIEvaluationReadiness(
 		if group.ProviderVersionMin < 1 || group.ProviderVersionMax < group.ProviderVersionMin {
 			return errors.New("AI evaluation readiness provider versions are invalid")
 		}
-		if group.ProviderVersionMin != group.ProviderVersionMax {
+		if group.ProviderConfigVersion == nil && group.ProviderVersionMin != group.ProviderVersionMax {
 			group.ReadinessStatus = "insufficient_evidence"
 			group.ReadinessReasons = append(group.ReadinessReasons, "PROVIDER_VERSION_MIXED")
 			continue
 		}
 		groupKey := aiEvaluationSummaryGroupKey(
-			group.ProviderID, group.ProviderNameSnapshot, group.ProviderModelSnapshot, group.DatasetVersion, group.SuiteKey,
+			group.ProviderID, group.ProviderNameSnapshot, group.ProviderModelSnapshot, group.DatasetVersion, group.SuiteKey, group.ProviderConfigVersion,
 		)
 		groupCategories := categoryByGroup[groupKey]
 		for _, required := range policy.RequiredCategories {

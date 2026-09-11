@@ -1,5 +1,7 @@
 # ADR-007：会话上下文压缩与记忆工具
 
+> 后续修订：[ADR-025](025-ai-reliability-confirmations-and-evaluation-identity.md) 接续运行预算/锁、确认事务/隐私、部分压缩进度及评测配置身份。本文保留当时决策与验证记录；当前行为以 ADR-025 和模块文档为准。
+
 - 状态：已接受并实施（G1–G5 已交付）
 - 日期：2026-09-03
 - 对应任务：[分阶段实施计划](../plans/context-memory-phases.md)（G1–G5）

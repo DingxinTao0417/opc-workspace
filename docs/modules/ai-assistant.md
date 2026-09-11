@@ -11,29 +11,31 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 - 聊天由 Sidecar `internal/harness` 运行时驱动（LLMClient 接口 + 运行循环 + 工具注册表 + 预算）；生产只注册 ADR-007 明确授权的 `memory_search / memory_write / memory_propose`，不注册业务、文件、Shell、网络或知识库工具。其他能力仍须逐个评审授权。
 - 远程 Provider 请求可包含系统提示、长期记忆、摘要/事实、最近回合、当前输入、memory_search 命中，以及本条消息由用户预览确认的 Task/Project/Client 最小快照和最多 3 个知识 chunk。每类业务对象最多一项，知识只来自用户手工选择的本地搜索结果；不自动扩展关联对象或检索整库，不读取联系人、邮箱、电话、金额、活动、附件、Artifact 或发票。本地 Provider 请求只发往配置的回环 origin。
 - 助手回复只读，不直接创建、修改或删除任何业务数据；模型输出视为不可信预览。
-- 语义建任务：识别到任务意图时先自然语言确认，再在回复末尾输出 `[opc:task]{...}[/opc:task]` 结构化块（系统提示词为 Sidecar 代码常量）；前端隐藏协议块并解析为**可编辑待确认建议卡片**（标题必填、描述/截止可改、项目可选），用户确认后经既有 `POST /api/v1/tasks` 创建（新建固定 `todo`），创建成功后消息挂静态引用（task_id + task_title_snapshot，不可改绑）；点击卡片跳转 `tasks/:taskId`。兼容部分模型把结束标记误写成第二个 `[opc:task]` 的常见格式；只有结构块而无自然语言时，展示层补一条自然确认。完全没有结构块时保留模型的自然语言回复且不创建任务；存在任务/记忆标记但 JSON 非法或块未闭合时隐藏协议文本，改显自然语言失败说明且不创建任务。
+- 语义建任务：模型先给自然语言待确认说明，再给 `[opc:task]{...}[/opc:task]`。前端隐藏控制块、允许编辑；用户明确确认后调用 `/ai/messages/:id/task-confirmation`，服务端复用 Task 领域规则原子创建与绑定（固定 todo），按消息身份幂等。显示“尚未创建/已创建”以服务端事实为准，已创建卡片跳转 `tasks/:taskId`；旧误闭合格式兼容，null/数组/错类型/多块/非法/未闭合内容均不崩溃或直接建任务，改显自然语言失败说明。
 - 不做：自动读取当前页面/最近对象、关系扩展、模型自主知识库检索、业务/Shell/文件/网络/knowledge 工具、任意业务写、自主代理、Inbox 投影、自动建任务（必须先确认）。
 - AI 未配置、密钥无效或端点不可达时，所有既有核心模块完全可用；AI 失败不投影 Inbox。
 
 ## 当前实现状态
 
+本轮可靠性契约由 [ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 接续，SQLite schema 068–069；整体回归结果见 [AI7 验证记录](../plans/ai-quality-gates.md)。应用级恢复、原子确认和临时记忆隐私不再依赖组件局部状态。
+
 首个纵向切片已交付（代码与测试为据）：
 
-- **Provider 管理**：`ai_providers` 表（schema 052 + 055 kind、version/触发器）；Provider 登记、PATCH、健康、密钥与删除均有 API。已产生 generation 的 Provider 返回 `AI_PROVIDER_HAS_SESSIONS`，要求用户先显式删除相关会话，绝不隐式删除会话历史。Provider 配置/健康读取与密钥写入使用进程级读写互斥，Keyring 与 SQLite 补偿路径不会被同版本并发请求交错。上游 HTTP 只允许同 scheme/host/effective-port 重定向；跨 origin 的 3xx 不携带 prompt 或密钥继续请求。非 2xx/流错误返回前会按当前 API key 脱敏。
-- **Agent Harness**：`internal/harness` 运行时——`LLMClient`、最多 8 轮的 Run、名称唯一 Registry、30 秒/64 KiB/panic 隔离 Executor。OpenAI function tools 与 Anthropic tool_use/input_json_delta 均能下发定义、聚合多调用和跨帧参数，并把 provider-specific call/result 映射回下一轮；参数必须是 JSON object，工具字节计入响应预算。生产 Registry 只含记忆三工具。工具失败可回填纠错（上限 3）；模型 selfcheck 不充分时最多静默修订一次并以 `replace` 更新界面。
+- **Provider 管理**：schema 052/055/068；登记、PATCH、健康、密钥与删除均有 API。`version` 保护 HTTP 并发，`config_version` 标识真实请求配置；健康和名称变化不递增配置身份。已有会话/评测历史保护删除，不隐式删历史。准备/密钥读取与收尾使用短 Provider 锁，不跨模型或健康网络等待；同 origin 重定向与密钥脱敏边界不变。
+- **Agent Harness**：最多 8 轮、32 次工具调用；单工具 30 秒/64 KiB/panic 隔离。模型轮、工具结果和最多一次自检修订共享 generation 的 10 分钟/累计 1 MiB 预算。两协议支持多工具及参数跨帧；只注册记忆三工具。工具失败可回填纠错（上限 3）；selfcheck 缺失/非法记录 unavailable，不假装通过，不充分最多一次修订；修订错误传播并保留已有部分回答。
 - **本地大模型**：`kind=local` 只允许 `http://127.0.0.1` 或 `http://localhost` 的 OpenAI 兼容端点，拒绝 userinfo/query/fragment，协议固定 `openai_chat` 且无密钥；健康和聊天均不走代理，并拒绝跨 origin 重定向，保证 prompt 不随 307/308 离开配置的回环 origin。
-- **长程上下文（G1–G5 已交付）**：每次从数据库取最新 200 条消息，按完整 user turn 和最终 64 KiB 请求预算装入（含工具定义）；助手控制块先剥离，当前输入不静默丢弃。Run 成功后，窗口外未压缩正文超过 16 KiB 会按会话互斥后台压缩最多 32 KiB；严格 JSON 快照限制 summary ≤4 KiB、五类 facts ≤32 条且注入文本 ≤4 KiB。schema 057 保存 append-only 快照与水位线，替换 active 快照和脱敏事件同事务提交；失败或 Provider 配置已变化时不推进水位线并降级为硬截断。AI 页显示 active 水位线覆盖的消息数。
-- **记忆与工作状态**：`memory_write` 自动记录仅当前会话有效的 active fact，`memory_search` 按关键词/标签检索当前会话快照、fact 与历史消息；`memory_propose` 只创建 pending proposal。持久偏好仍须在对话卡片或设置区逐条“记住”，才进入 schema 056 `ai_memories` 并注入后续会话（前 20 条、8 KiB）；“忽略”只 supersede proposal。工具参数、内容/标签、检索数量均有边界，事件只记 ID/kind/count。系统提示和工具集仍由代码拥有。
-- **会话与消息**：`ai_sessions / ai_generations / ai_messages` 表（schema 053）；会话列表返回 active 快照覆盖的 `compacted_message_count`。`persist=false` 不写 message，也不把生成/取消正文写入 generation，只保留运行元数据。删除会话先取消活动生成与压缩，再级联清理 AI 操作态。
-- **流式聊天**：`POST /api/v1/ai/chat` 以 `opc-ai-sse-v1` 返回 meta/delta/reasoning/replace/done/error/cancelled；首 token 90 秒、总时长 10 分钟、响应 1 MiB、提示 64 KiB，每 Provider/会话并发 1。前端生成期间锁定新建、会话切换/删除和 Provider 切换，避免流内容显示到错误会话；请求错误会脱敏。启动恢复、断连/显式取消和部分内容规则保持不变。
-- **任务引用**：`POST /api/v1/ai/messages/:id/task` 只做静态引用落地（消息与任务存在性校验、禁止改绑）；同一任务重复挂接是幂等成功。任务创建本身走既有任务 API（`task_created` 事件不重复写）；若任务已创建而挂接失败，前端保留 task ID，再次确认只重试挂接，不重复创建。
+- **长程上下文（G1–G5 + ADR-025）**：最新 200 条按完整 user turn 和最终 64 KiB 请求预算装入，助手控制块剥离。窗口外正文超过 16 KiB 后后台压缩；单批 JSONL ≤32 KiB，大回合按 UTF-8 有界分段，持久 offset 不跳过未处理正文。每次触发最多 8 批/10 分钟，剩余标 pending，下次成功聊天继续。summary ≤4 KiB、五类 facts ≤32/4 KiB；替换快照/水位线/脱敏事件同事务，失败/取消/配置变化不推进。API/UI 区分运行、滞后、失败/取消及部分消息；完整计数不含只覆盖一部分的消息。
+- **记忆与工作状态**：持久会话的 memory_write/search/propose 分别记录会话事实、查当前会话记忆/历史、提出待确认偏好；非持久会话只在当前运行共享内存中完成三项操作。永久记忆仍须用户另行明确确认，才进入 `ai_memories` 并注入后续会话（前 20 条、8 KiB）。schema 069 保存提议的 confirmed/rejected 与 memory_id，忽略/确认均可刷新回读，旧无 proposal_id 卡片按消息身份兼容。事件不记录内容，提示词与工具集仍代码所有。
+- **会话与消息**：schema 053/069。`persist=false` 不保存消息、generation 正文、会话事实、记忆提议或摘要；请求身份与状态等无正文元数据可保存。应用内草稿/部分回答在内存中；storage 只保留恢复 ID。删除会话先取消生成/压缩，再清理 AI 操作态。
+- **流式聊天**：`POST /api/v1/ai/chat` 返回 opc-ai-sse-v1 meta/delta/reasoning/replace/done/error/cancelled；首 token 90 秒、generation 总 10 分钟/1 MiB、提示 64 KiB，每 Provider/会话并发 1。应用级状态支持切路由继续与全局停止；硬刷新/断连取消原连接并回读真实终态。接受过的 Idempotency-Key 不重发新消息。无完成事件 EOF、截断、过滤为失败，持久会话保存失败部分回答；非持久会话不落正文。
+- **任务确认**：`POST /api/v1/ai/messages/:id/task-confirmation` 接收既有 Task 创建字段，复用共享领域创建函数，在一个事务内创建 Task 并保存消息静态引用。消息 ID 是服务端稳定确认身份；相同载荷返回真实 Task/完整 Message，改参 409，任务已删除 410，不重复创建。旧 `/messages/:id/task` 保留只挂接兼容。普通 Task 创建没有 `task_created` 事件，本次不新增虚构事件，沿用父级协调及其事件规则。
 - **前端**：`/ai` 提供会话、新建/删除、历史分页、Provider 切换、流式回答/停止、推理折叠、任务与记忆确认卡片，并显示“已压缩前 N 条消息”；会话事实每 15 秒刷新。设置「AI 助手」区管理 Provider、密钥、健康、pending 记忆建议的来源会话/标签/确认/忽略，以及已确认长期记忆。页脚按 Provider 类型说明远程外发或本地回环边界。
 - **显式业务上下文（AI5）**：Composer 复用 TaskSelect/ProjectSelect/ClientSelect，最多各选一个。`POST /api/v1/ai/context/preview` 返回目标 Provider、本地/远程边界、全部白名单字段、截断标记、版本和字节数；用户确认后才能随下一条消息发送。Chat 在任何会话/消息/generation 写入前按 Provider/source version 重建同一快照，变化返回 `AI_CONTEXT_PROVIDER_CHANGED / AI_CONTEXT_CHANGED`。发送成功清空一次性选择，失败保留；历史 user message 展示实际发送来源卡片。
 - **显式知识上下文（AI6）**：同一面板调用本地知识搜索，用户最多逐段选择 3 个 chunk；preview 展示完整实际正文、来源、source/document version、行/字符位置、Provider 外发边界和组合字节数。Chat 在任何 AI 写入前两次重验三层 identity 与版本，v2 `context_snapshot` 保存实际发送片段；历史展示 `来源 · Lx–y`。生产仍无 knowledge tool，代码所有提示把片段标为不可信引用并要求引用来源/行号。
 - **可验证知识引用（AI7-Q1）**：有知识上下文时模型只声明实际使用的 `chunk_ids`；Sidecar 对本次 allowlist 做严格 JSON/UUID/重复/数量校验，并从已验证上下文重建来源、版本和位置。schema 060 `citations_snapshot` 保存 `validated / no_evidence / missing / invalid` 与最多 3 个引用，不复制正文；历史 UI 展示已验证来源或差异化质量警告。Raw citation control block 在持久化、历史 prompt 和流式 UI 中剥离。
 - **运行步骤与本地指标（AI7-Q3）**：schema 061 `ai_run_steps` 保存 generation/model turn/记忆工具/self-check/citation/persistence 的状态、耗时、字节和稳定错误码，不保存正文/凭据。schema 062 只在 Provider 返回完整非负 usage 时保存 input/output token 与 `token_source=provider`；OpenAI 读根 usage，Anthropic 合并 start/delta，缺失/部分保持 unknown，不强制 stream_options。历史时间线与当前会话用量均按需展示；ADR-024 将终态根步骤按 UTC 日派生 1–30 天连续趋势，7/30 天面板切换不改变累计 totals。用量 API 可按 session/provider 聚合终态、活动、coverage、原始 token、bytes 与 duration；不新增表、不估算 token、不计算费用。
-- **显式本地模型质量评测、分层套件与人工决定审计（AI7-Q2）**：ADR-013/schema 063 新增 `ai_evaluation_runs/results`；schema 064 保留 dataset 版本，ADR-020 当前为 v3/24；ADR-021/schema 065 增加 8-case smoke 与 24-case full，并给旧 Run 回填 full；ADR-023/schema 067 再增加 grounded/no-evidence/prompt-injection/conflicting-sources 四个各 6-case 的代码所有专题套件。设置页只对 ready/healthy 本地 Provider 开放快速、专题和完整入口；单邮箱 Actor 按 suite 串行运行，支持幂等、进度、取消、恢复与删除。Run succeeded 与 case quality 分层，只保存 Provider/dataset/suite 快照、failure code、citation 数和无正文指标。趋势、category、failure、Wilson 与 Provider version 都按 suite 隔离；smoke/topic 固定只诊断，只有 full 可继续判断人工评审候选。ADR-022/schema 066 允许 owner 对精确证据快照追加“接受本机试用/需要更多证据/拒绝使用”及必填理由；记录不可编辑/删除且不改变 Provider、聊天或业务状态。v1/v2 历史继续可读但过期。
-- **业务导出边界**：AI/知识库操作表明确排除出业务 JSON/ZIP；schema 058/060–067 的上下文、citation、generation link、run steps、usage、本地评测与自由文本人工决定理由也在该排除面内，业务导入兼容覆盖 v49/v63/v64/v65/v66→67。
+- **显式本地模型质量评测、分层套件与人工决定审计（AI7-Q2）**：schema 063–068。当前 dataset v4/24，仍有 smoke 8、full 24 和四个 topic 各 6；只显式运行 ready/healthy 本地 Provider。真实生产系统提示与 Harness，单邮箱 Actor 支持幂等/进度/取消/恢复/删除；只保存无正文指标。配置已知组按 Provider ID/config_version/dataset/suite 隔离，旧 NULL 身份保留原名称/模型分组及混合版本规则，不改写原评审记录。有限事实别名、否定/冲突与 FACT_MISSING/FACT_CONTRADICTED 和结构/关键词检查分层；后者为严重 code，自动通过仍不替代人工。full 才可能形成候选，smoke/topic 只诊断；owner 决定只追加审计，不改变 Provider/业务状态。
+- **业务导出边界**：十张 AI 表及知识库操作表仍排除便携业务 JSON/ZIP；schema 068–069 没有新增业务表。兼容显式增加 v67/v68→69，并沿用 v49/v63/v64/v65/v66 兼容路径，未知未来 schema 拒绝。
 
 多供应商支持（已交付）：可登记多个 Provider，聊天页手动切换。AI5/AI6 上下文预览绑定 Provider version；切换或配置变化会使旧确认失效。尚未实现：句子级 citation/引用覆盖率、更多事实覆盖/发布阈值、多 Provider 自动路由/并存生成、费用、非 Windows 平台安全存储验证。
 
@@ -45,17 +47,17 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 2. **发起会话**：进入 `/ai`，多个就绪供应商时在输入区下拉选择本次使用的供应商（本地供应商带「本地」标识），输入问题（Enter 发送）；回答流式逐字显示，可点「停止」，取消保留已生成部分。
 3. **显式业务上下文**：展开“上下文”→ 各选最多一个 Task/Project/Client →“预览发送内容”查看目标 Provider、全部字段/截断和字节数 →“确认用于下一条消息”→ 发送；版本变化会拒绝并保留选择供重新预览。
 4. **显式知识上下文**：在同一面板搜索本地知识库 → 逐段选择最多 3 个结果 → preview 检查完整正文、来源、位置、版本和远程/本地披露 → 确认发送；搜索未选结果和整份来源不进入模型。
-5. **语义建任务**：助手先给自然语言确认，协议块只用于生成「建议任务」chip且不会原样展示 → 点击展开待确认卡片（标题必填可改）→「确认创建」→ 经任务 API 创建（`todo`）→ 消息显示已创建任务卡片 → 点击跳转任务详情。创建成功但引用挂接短暂失败时可原位重试，且不会重复建任务。
-6. **运行本地质量评测并查看趋势/category/失败原因**：设置 → AI 助手 → 选择“快速质量检查”8-case、四类之一的“专题检查”6-case 或“完整质量评测”24-case → 单邮箱 Actor 顺序运行 → 列表轮询并按 suite 展示结果。总体、趋势、category、failure 与 Wilson 只在同 Provider 名称/模型快照/dataset/suite 内聚合；smoke/topic 即使三次全通过也显示“诊断套件不形成候选资格”，full 才可按 3 Run、Provider version、总体 80%、四类 60% 与严重 code 形成只读人工评审候选。活动 Run 可取消，终态历史可删除；不会调用远程 Provider 或保存回答。
+5. **语义建任务**：自然语言“尚未创建”与待确认建议 → 编辑/明确确认 → 服务端 Task 领域事务原子创建并绑定 → 显示真实 Task 名称和入口。响应丢失或刷新后同消息重试返回已有 Task，改参冲突；已删除任务不会用原建议重新创建。
+6. **本地评测与审计**：设置中显式选择 smoke/topic/full → 本地 Actor 顺序执行 → 按 dataset/suite/真实配置身份展示计数、事实规则失败、趋势/Wilson。健康检查不拆组，真实配置变化形成新组，旧历史无需删除。只有当前 full 的同配置重复证据可形成只读人工候选；规则、重复次数和 Wilson 均不是发布许可。
 7. **清理**：会话删除会取消生成/压缩并清理其操作态；供应商只在没有 generation 或评测历史时允许删除，远程同时清理安全存储密钥。终态评测历史可显式删除；知识来源删除不追溯改写已发送的会话快照。
 
 ## 数据、API、状态与事件
 
 ### 数据
 
-- `ai_providers`：id、name（唯一）、kind（`remote / local`，默认 remote，schema 055）、protocol（`openai_chat / anthropic_messages`；本地固定 `openai_chat`）、base_url（https 或回环 http；本地强制回环 http）、model、status（`unconfigured / checking / ready / unavailable / disabled`）、health_status（`unknown / healthy / unhealthy`）、health_error_code、has_key、last_health_at、version、时间戳；version 步进触发器。
+- `ai_providers`：id/name/kind/protocol/base_url/model、状态/健康、has_key、last_health_at、HTTP `version`、schema 068 `config_version`、时间戳；配置身份只随类型/协议/端点/模型/实际密钥变化。
 - `ai_sessions`：id、title、persist、version、时间戳；响应派生 `compacted_message_count`，不复制进表。
-- `ai_generations`：id、session_id、provider_id、status（`queued / streaming / completed / failed / cancelled`）、error_code、content（≤1 MiB）、时间戳。
+- `ai_generations`：id/session_id/provider_id、queued/streaming/completed/failed/cancelled、error_code、nullable content（≤1 MiB）、时间戳；schema 069 增加配对且不可变的 nullable request_key/request_hash，旧行保持 NULL。
 - `ai_messages`：既有 role/status/content/reasoning/model/task 引用；schema 058 的 nullable `context_snapshot` 用于持久 user message，v1 保存 Provider + 业务 sources，向后兼容的 v2 另保存最多 3 个 knowledge chunk；数据库防线 32 KiB，业务层 16 KiB、知识层 12 KiB、组合 30 KiB。
 - schema 060 为 `ai_messages` 增加 nullable `citations_snapshot`：只允许 completed assistant，version 1、最多 3 项、16 KiB 防线；只保存 Sidecar 重建的来源/文档/chunk/版本/位置，不保存正文或模型 quote。
 - schema 061 新增 `ai_run_steps` 和 assistant generation link；schema 062 增加全有/全无的 nullable provider token 列。既有 generation 只回填 summary root 且 token unknown；会话删除级联 steps，便携业务导出排除。
@@ -63,11 +65,16 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 - schema 066 新增 `ai_evaluation_reviews`：保存精确质量组计数/Wilson/readiness/严重 code 快照、三值人工决定、必填理由与 builtin owner Actor 快照；UPDATE/DELETE 由 trigger 拒绝，且不依赖 Provider 外键。
 - schema 067 受保护共同重建 Run/Result/Review 并逐列保留历史，把三表 suite CHECK 扩展为 smoke/full + 四个专题 key；恢复原外键、索引和不可变 trigger。
 - `ai_memories`：id、content（1–500 字）、source_message_id（可空）、时间戳（schema 056；不进入业务导出）。
-- `ai_memory_entries`：session_id、kind（context_snapshot/session_fact/memory_proposal）、content、tags、origin、status、source_message_id 水位线与时间戳（schema 057）；同一会话最多一个 active 快照，payload 不可改，active→superseded 受控；源消息或会话删除时级联清理。
+- `ai_memory_entries`：session_id、kind、content/tags/origin/status、source_message_id 与时间戳；schema 069 增加 source_message_offset、decision、memory_id。offset>0 为清理控制块后 UTF-8 已处理字节，0 为整条完成；确认/拒绝与快照 payload 均不可重写，active→superseded 受控。
 - API 密钥：仅 OS 安全存储（服务名 `opc-workspace-ai`，账户 `ai:<provider-id>:api_key`）。
 - 十张 AI 表均不进入业务 JSON/ZIP 导出（操作态与隐私边界，同 ADR-004/007/012/013/022）。
 
 ### API
+
+- `POST /api/v1/ai/messages/:id/task-confirmation`（显式人工命令；原子 Task 创建/静态绑定，返回 `{data:{task,message}}`）
+- `GET /api/v1/ai/active-generations`、`GET /api/v1/ai/generations/:id`、`GET /api/v1/ai/generations/by-request/:key`（活动内存/持久终态回读；非持久终态不返回正文）
+- `GET /api/v1/ai/memory-proposals/:id`、`GET / DELETE /api/v1/ai/messages/:id/memory-decision`（新提议和旧无 proposal_id 消息的决定回读/忽略；GET 不产生写入）
+- `GET /api/v1/ai/sessions/:id/compaction`（运行状态、稳定错误码、部分消息和完整覆盖消息数）
 
 - `GET / POST /api/v1/ai/providers`、`GET / PATCH / DELETE /api/v1/ai/providers/:id`、`POST /api/v1/ai/providers/:id/health`、`POST /api/v1/ai/providers/:id/key`
 - `GET / POST /api/v1/ai/sessions`、`GET / DELETE /api/v1/ai/sessions/:id`、`GET /api/v1/ai/sessions/:id/messages`
@@ -85,15 +92,23 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 
 ### 状态与事件
 
+- schema 068：Provider `config_version` 与 HTTP `version` 分离；Run/Review `provider_config_version` 为 nullable 历史快照。相同配置的健康检查不拆组；旧 NULL 身份保留未知，不改写历史审计。数据集当前 v4/24，新增 `FACT_CONTRADICTED`，自动事实规则不等于通用语义判断。
+- schema 069：Generation `request_key/request_hash` 配对且不可变；Message `task_confirmation_hash` 固化已确认载荷；MemoryEntry `decision/memory_id` 固化确认/拒绝，`source_message_offset` 记录 UTF-8 部分进度。确认 Task/Memory 被删除后，旧建议不重新创建。
+- 记忆 GET 返回 `pending / confirmed / rejected`。旧无 proposal_id 卡片只在用户明确确认/忽略时 materialize 稳定记录；刷新可回读，已确认不能被“忽略”撤销。无法验证决定的旧 superseded 提议返回 `409 AI_MEMORY_DECISION_UNAVAILABLE`，不冒充已忽略；缓存重放仍检查记忆是否被删除，已删除返回 410。`persist=false` 三工具共享运行内内存，临时提议无持久 proposal_id；跨会话永久记忆须另外明确确认。
+- 应用级生成状态跨 SPA 路由保留，并有全局停止入口；浏览器 storage 只保存恢复 ID。硬刷新/断连取消原 SSE，上游和终态通过回读收敛，不能自动重复发送。接受前失败保留草稿/上下文，不覆盖后来输入；纯内存草稿不承诺硬刷新恢复。中文输入法 composition Enter 不发送。
+- 完整 SSE 终态回合仅在应用内存保留，最多 20 回合 / 8 MiB（用户输入、回答和思考合计），超限淘汰最旧回合，删除会话同步清除；持久消息按 generation 去重。无持久 message ID 的回合只读，不调用任务/记忆确认 API。恢复有命令代次检查，旧结果/404 不覆盖新请求；非持久终态只回元数据或服务重启 404 时，已收片段继续可见但标记不完整，不能宣称获得完整回答。
+- 模型网络等待不占全局 maintenance/Provider 锁；数据库准备/收尾短锁仍保护恢复边界。整次 generation 共享 10 分钟/1 MiB，包含多轮、工具结果与自检修订。只有内容的 EOF 为失败；OpenAI stop 后继续收 usage；缺失/非法 selfcheck 为 unavailable，不伪装通过。
+- Citation `validated` 仅证明引用来自本次已确认 allowlist，不能证明回答事实正确或逐句被引用支持。
+
 - Generation 状态链：`queued / streaming → completed | failed | cancelled`；终态不可改（仅启动恢复把遗留活跃态标 cancelled）。
 - Workflow Event（脱敏，不含提示/回答/任务/摘要/记忆正文）：Provider/Generation 既有事件，`ai_session_compacted`，以及 `ai_session_memory_written / ai_memory_proposed / ai_memory_proposal_confirmed / ai_memory_proposal_rejected`（aggregate `ai_session`，只记资源 ID、kind、tag/count）。
 - 主要错误码：既有 Provider/Generation/Message/Memory 错误族，AI5 `AI_CONTEXT_*`、AI6 `AI_KNOWLEDGE_CONTEXT_*`，以及仅编码/持久化失败使用的 `AI_CITATION_PERSIST_FAILED`；模型 citation 缺失/非法是可解释质量状态，不伪装成网络失败。
 
 ## 与其他模块协作
 
-- **任务**：任务创建一律经既有 `POST /api/v1/tasks` 门禁（用户在建议卡片显式确认）；消息仅保存静态快照引用，不跟踪任务状态，不触碰任务状态机；取消误建任务须在任务模块操作。
+- **任务**：人工确认接口与 `POST /api/v1/tasks` 复用同一创建领域逻辑；确认、Task 创建和静态绑定同事务，不跟踪后续任务状态，不绕过生命周期/验收。取消误建任务仍在任务模块操作。
 - **设置**：Provider 配置区挂在设置「AI 助手」模块，独立自持保存（不走共享 draft/preview）。
-- **数据管理**：AI 九表为操作态/隐私边界，排除出业务导出；一致性备份（SQLite 快照）仍覆盖它们。
+- **数据管理**：AI 十表为操作态/隐私边界，排除出业务导出；一致性备份（SQLite 快照）仍覆盖它们。
 - **知识库**：AI 只调用用户触发的本地 search，并把选中 identity 交给 context preview；Sidecar 重新加载完整 chunk。无 knowledge tool，不自动扫描；知识来源重建/删除通过版本或不存在门禁使旧确认失效。
 - **诊断/日志**：普通日志只记 provider/generation ID、阶段与错误码；密钥由 operationlog 的 secrets 机制脱敏。
 - **本地 Agent（v0.2）**：互不共享能力。Agent Adapter 是受控执行器（ADR-003 匿名管道）；AI 助手是远程只读对话，不获得任何执行能力。
@@ -109,7 +124,7 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 7. **AI4.8 长程上下文压缩与记忆工具**（已完成，[ADR-007](../adr/007-session-context-compaction-and-memory-tools.md)）：G1 完整回合窗口与精确预算；G2 schema 057 快照、后台压缩、水位线、摘要/事实注入；G3 OpenAI/Anthropic 工具协议；G4 记忆三工具与持久确认门禁；G5 压缩标记和 pending proposal 管理均已交付。
 8. **AI5 显式上下文**（已完成，[ADR-008](../adr/008-ai-explicit-business-context.md)）：三类单选、最小字段白名单、发送前预览、Provider/source version 重验、一次性发送、schema 058 历史快照与来源卡片。
 9. **AI6 知识库与来源**（已完成，[ADR-010](../adr/010-ai-explicit-knowledge-context.md)）：本地搜索、最多 3 个显式 chunk、完整发送预览、Provider/source/document 双重版本重验、v2 历史快照和来源 chips；没有新增工具。回答级 citation 已由 ADR-011 AI7-Q1 补齐。
-10. **AI7 质量闸门与扩展**（进行中）：Q1 citation；Q2 的本地评测 Actor、dataset v3/24、[ADR-021](../adr/021-ai-local-quality-tiered-suites.md) smoke/full、[ADR-023](../adr/023-ai-local-quality-topic-suites.md) 四类专题、suite 趋势/category/failure/Wilson、人工评审候选与 [ADR-022](../adr/022-ai-local-quality-human-review-audit.md) 不可变人工决定审计已交付；Q3 已交付无正文 steps、Provider token/unknown、本地聚合、[ADR-024](../adr/024-ai-local-usage-time-trends.md) UTC 时间趋势和按需 UI，费用仍待；Q4 自动路由/更多协议未开始，编排与子代理 F4 未授权。
+10. **AI7 质量闸门与扩展**（进行中）：Q1 回答级 citation；Q2 v4/24、smoke/topic/full、本地 Actor、配置身份分组/趋势/category/failure/Wilson/人工决定审计；Q3 无正文 steps、原始 Provider token/unknown、聚合与 UTC 趋势已实现；ADR-025 修复运行、确认、恢复和隐私。费用、句子级证据覆盖、Q4 自动路由/更多协议待定，F4 编排/子代理未授权。
 
 ## 验收标准（当前切片已覆盖项）
 
@@ -117,19 +132,19 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 - 密钥不进 SQLite/日志/响应/导出：key 端点响应断言不含密钥原文；删除供应商清理安全存储（Go 测试覆盖）。
 - 本地 Provider 无密钥 创建→健康→流式聊天 全链路（httptest 回环上游）；密钥端点 409 `AI_KEY_NOT_ALLOWED`；本地非回环端点与非法 kind 被拒；远程行为回归不变（Go 测试覆盖）。
 - harness 单元测试：单轮直通、多轮工具循环与回填、轮数预算、取消传播、重复工具名拒绝、执行器超时/panic/截断/总预算（假 LLM/假工具覆盖）；`chatAI` 契约回归（既有 AI API 测试全绿）。
-- 结构化块缺失/非法不建任务；正常闭合和常见的重复开始标记都能生成卡片，协议文本不展示且始终有自然语言确认；非法或未闭合标记改显自然语言失败说明；确认创建只经既有任务 API且新建为 `todo`，挂接重试不重复创建（解析器、页面与 API 测试覆盖）。
+- 结构化任务/记忆 null、数组、字段错型、重复、缺失和未闭合不崩溃或建任务；历史坏消息可打开。确认复用 Task 领域事务；并发、响应丢失、刷新同身份不重复创建，改参/删除后重建受控拒绝。
 - 取消/断连终止上游并保留部分内容；并发 409；启动恢复遗留生成（Go 测试覆盖）。
 - 流式帧序 meta/delta/reasoning/replace/done 与 openai/anthropic 双协议映射（mock 上游 Go 测试 + 前端 SSE 解析测试覆盖）。
 - 设置表单类型切换（本地隐藏密钥、提交载荷带 kind、协议锁定）、本地卡片无密钥行、聊天页「本地」标识（Web 测试覆盖）。
 - 纠错/反思：工具失败回填重试与超限终止（harness 单测）；自评充分→单次调用且块被剥离、不充分→恰好一次内部修订并以 `replace` 更新界面（note 回填）、缺失/未闭合/非法块防御性剥离（API 契约测试 + harness 单测）。
 - 记忆：建议块解析（合法/非法/超长）、确认落地与幂等、列表/删除、注入预算（数量/字节/超大跳过）、事件不含内容、导出排除（Go + Web 测试覆盖）。
 - 上下文压缩：v56→57 加法迁移保留事实并约束单 active 快照/受控 supersede；严格 JSON 形状与摘要/事实预算、窗口外批次、水位线推进、连续快照、失败不落库、会话互斥/关闭取消、事件不含摘要正文，以及聊天注入三层上下文均有 Go 测试。
-- 工具与前端：OpenAI/Anthropic 单/多工具跨帧聚合、异常参数、call/result 协议映射与 Harness 定义下发有单测；mock 会话覆盖真实 `memory_write` 两轮调用。记忆 write/search/propose、pending 不持久化、确认/忽略、事件脱敏、压缩数量与设置区交互有 Go/Web 测试。
+- 工具与前端：两协议单/多工具跨帧、异常参数、call/result 映射和 Harness 定义有单测；mock 会话覆盖真实 memory_write 两轮调用。持久会话 pending 提议可存操作表，但未经确认不写 ai_memories；非持久三工具仅内存。确认/忽略/删除后重试、事件脱敏和压缩状态有 Go/Web 回归。
 - 稳定性：跨 origin redirect 不访问目标、同 origin redirect 可用；Provider 密钥并发写在 race detector 下保持 Keyring/SQLite 一致；已使用 Provider 删除受控拒绝且保留会话；远端错误回显密钥被脱敏；非持久会话不留正文；500 个 Unicode 字符记忆可保存。
 - 显式上下文：Go 覆盖字段白名单/排除项、Unicode 截断、类型/重复/不存在来源、Provider/source 版本变化无脏写、prompt 注入、持久历史和非持久会话；Web 覆盖未预览禁发、精确预览、发送载荷、Provider 变化失效和历史来源卡片。
 - 显式知识上下文：Go 覆盖 preview→chat→v2 snapshot→history、chunk/source/document 关系、source/document version 变化零写入；ModelClient/Harness 覆盖双协议不可信引用段、工具/自评轮上下文保持；Web 覆盖本地搜索、逐段选择、完整预览、精确版本载荷、历史来源 chips 和未确认禁发。
 - 可验证引用：schema 059→060 保留消息并约束 completed assistant/shape/状态/数量；Go 覆盖 allowlist、空/缺失/非法/重复/越权/多块/未闭合、服务器 metadata 重建、控制块剥离与 history；Web 覆盖 strict 状态一致性、已验证来源卡、无答案/缺失/非法警告及流式块隐藏。
-- 质量门禁、本地运行与分析：`internal/aieval` 严格加载 dataset v3 的 suites + 24 cases，校验 full 全覆盖、smoke 8-case 中英/category 平衡，以及四个 topic 各自完整覆盖单 category/中英各 3；schema 065 固化 suite，schema 067 扩展六值。API/Web 覆盖默认 full、显式 smoke/topic、suite 幂等、6/8/24 Actor、五字段分组、Provider version、category/failure/Wilson，以及 advisory required_suite、三状态/七类原因和禁止字段。
+- 质量门禁、本地运行与分析：v4/24、6/8/24 套件严格加载；结构/关键词/有限事实规则/人工审核分层；配置身份正负例、健康不拆组、旧 NULL/审计兼容、生产提示与真实 Harness 修订/usage 链有回归。真实模型效果仍未由自动化验证。
 - 运行步骤与聚合：schema 060→062 保留消息/generation 并回填 summary root/unknown usage；Harness step callback、PromptSize 字节、32 tool-call 上限、Chat 终态、OpenAI/Anthropic 完整 usage、API 禁止正文及 Web 时间线均有测试。聚合 API 另覆盖 session/provider 双过滤、空范围、终态/活动与 coverage 对账、Provider 分组、404/400；Web 会重算总计并显示 unknown/不计费边界。
 
 ### 本地模型真机验证步骤（需用户本机环境）
@@ -163,7 +178,8 @@ AI 助手是面向用户的问答、摘要和建议入口。它帮助用户理�
 - [ADR-022：AI 本地质量人工决定审计](../adr/022-ai-local-quality-human-review-audit.md)（AI7-Q2 精确证据快照、必填理由与不可变历史已交付）
 - [ADR-023：AI 本地质量代码所有专题套件](../adr/023-ai-local-quality-topic-suites.md)（AI7-Q2 四类 6-case 专题已交付）
 - [ADR-024：AI 本地用量 UTC 时间趋势](../adr/024-ai-local-usage-time-trends.md)（AI7-Q3 1–30 天趋势已交付）
+- [ADR-025：AI 运行可靠性、确认事务与评测配置身份](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md)（schema 068–069；本轮验证见 AI7 计划）
 - [MVP 计划草稿](../plans/ai-assistant-mvp.md)、[Harness 分阶段计划](../plans/agent-harness-phases.md)
 - Sidecar：`services/sidecar/internal/api/ai_providers.go`、`ai_sessions.go`、`ai_chat.go`、`ai_messages.go`、`ai_memories.go`、`ai_context_memory.go`、`ai_evaluations.go`、`ai_evaluation_runner.go`、`ai_evaluation_reviews.go`、`internal/aieval/`、`internal/harness/`、`internal/modelclient/`、`internal/keystore/`
 - 前端：`apps/web/src/pages/AiAssistantPage.tsx`、`apps/web/src/components/AiProviderSettings.tsx`、`apps/web/src/api/ai.ts`、`apps/web/src/lib/aiTaskCard.ts`
-- 迁移：`services/sidecar/internal/database/migrations/052_ai_providers.sql` 至 `067_ai_evaluation_topic_suites.sql`
+- 迁移：`services/sidecar/internal/database/migrations/052_ai_providers.sql` 至 `069_ai_reliable_confirmations.sql`

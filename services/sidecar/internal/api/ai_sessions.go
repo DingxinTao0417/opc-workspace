@@ -82,7 +82,7 @@ func (a *API) aiSessionCompactedMessageCounts(ctx context.Context, sessions []mo
 		  ON message.session_id = snapshot.session_id
 		 AND (
 			message.created_at < source.created_at
-			OR (message.created_at = source.created_at AND message.id <= source.id)
+			OR (message.created_at = source.created_at AND (message.id < source.id OR (message.id = source.id AND snapshot.source_message_offset = 0)))
 		 )
 		WHERE snapshot.kind = 'context_snapshot'
 		  AND snapshot.status = 'active'

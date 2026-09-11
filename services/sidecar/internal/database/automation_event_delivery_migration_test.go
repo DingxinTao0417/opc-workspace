@@ -26,8 +26,8 @@ func TestAutomationEventDeliveryMigrationUpgradesV48WithEmptyPendingQueue(t *tes
 		t.Fatalf("upgrade v48 automation delivery database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 67 {
-		t.Fatalf("SchemaVersion = %d, want 67", store.SchemaVersion)
+	if store.SchemaVersion != 69 {
+		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM automation_event_deliveries"); got != 0 {
 		t.Fatalf("automation_event_deliveries rows = %d, want no historical backfill", got)

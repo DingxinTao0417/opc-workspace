@@ -69,12 +69,13 @@ type KnowledgeChunk struct {
 }
 
 type Expected struct {
-	CitationStatus   string   `json:"citation_status"`
-	AllowedChunkIDs  []string `json:"allowed_chunk_ids"`
-	MinimumCitations int      `json:"minimum_citations"`
-	ExactCitationSet bool     `json:"exact_citation_set"`
-	RequiredPhrases  []string `json:"required_phrases"`
-	ForbiddenPhrases []string `json:"forbidden_phrases"`
+	FactChecks       []FactCheck `json:"fact_checks,omitempty"`
+	CitationStatus   string      `json:"citation_status"`
+	AllowedChunkIDs  []string    `json:"allowed_chunk_ids"`
+	MinimumCitations int         `json:"minimum_citations"`
+	ExactCitationSet bool        `json:"exact_citation_set"`
+	RequiredPhrases  []string    `json:"required_phrases"`
+	ForbiddenPhrases []string    `json:"forbidden_phrases"`
 }
 
 type Dataset struct {
@@ -110,9 +111,10 @@ type Failure struct {
 }
 
 type Result struct {
-	CaseID   string    `json:"case_id"`
-	Passed   bool      `json:"passed"`
-	Failures []Failure `json:"failures"`
+	Assessment Assessment `json:"assessment"`
+	CaseID     string     `json:"case_id"`
+	Passed     bool       `json:"passed"`
+	Failures   []Failure  `json:"failures"`
 }
 
 type Summary struct {
@@ -327,12 +329,18 @@ func ValidateCases(cases []Case) error {
 				return fmt.Errorf("AI evaluation case %q contains a blank phrase", item.ID)
 			}
 		}
+		if err := validateFactChecks(item.Expected.FactChecks); err != nil {
+			return fmt.Errorf("case %q: %w", item.ID, err)
+		}
 	}
 	return nil
 }
 
 func Evaluate(item Case, observation Observation) Result {
-	result := Result{CaseID: item.ID, Failures: []Failure{}}
+	result := Result{CaseID: item.ID, Failures: []Failure{}, Assessment: Assessment{Method: "deterministic_rules", HumanReviewRequired: true, FactChecks: len(item.Expected.FactChecks), KeywordChecks: len(item.Expected.RequiredPhrases) + len(item.Expected.ForbiddenPhrases)}}
+	if len(item.Expected.FactChecks) > 0 {
+		result.Assessment.KeywordChecks = len(item.Expected.ForbiddenPhrases)
+	}
 	if observation.CaseID != item.ID {
 		result.Failures = append(result.Failures, Failure{Code: "CASE_ID_MISMATCH", Detail: "observation case identity differs"})
 	}
@@ -348,10 +356,14 @@ func Evaluate(item Case, observation Observation) Result {
 		result.Failures = append(result.Failures, Failure{Code: "CITATION_STATUS_MISMATCH", Detail: "citation status differs from expectation"})
 	}
 	for _, phrase := range item.Expected.RequiredPhrases {
+		if len(item.Expected.FactChecks) > 0 {
+			continue
+		}
 		if !strings.Contains(answerFolded, strings.ToLower(phrase)) {
 			result.Failures = append(result.Failures, Failure{Code: "REQUIRED_PHRASE_MISSING", Detail: phrase})
 		}
 	}
+	result.Failures = append(result.Failures, evaluateFactChecks(item.Expected.FactChecks, answer)...)
 	for _, phrase := range item.Expected.ForbiddenPhrases {
 		if strings.Contains(answerFolded, strings.ToLower(phrase)) {
 			result.Failures = append(result.Failures, Failure{Code: "FORBIDDEN_PHRASE_PRESENT", Detail: phrase})

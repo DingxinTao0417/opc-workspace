@@ -593,7 +593,7 @@ async function apiFetch<T>(
   }
 }
 
-async function apiRequest<T>(
+export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
@@ -10839,6 +10839,10 @@ function aiProviderFromRecord(row: unknown): AiProvider {
     return invalidResponse("AI 供应商响应格式无效");
   }
   return {
+    configVersion: numeric(
+      fieldValue(row, "config_version", "configVersion"),
+      1,
+    ),
     id: stringField(row, "id") ?? "",
     name: stringField(row, "name") ?? "",
     kind: stringField(row, "kind") === "local" ? "local" : "remote",
@@ -11790,6 +11794,8 @@ export async function getAiUsageSummary(
 }
 
 const aiEvaluationFailureCodes = new Set([
+  "FACT_CONTRADICTED",
+  "FACT_MISSING",
   "CASE_ID_MISMATCH",
   "ANSWER_EMPTY",
   "CONTROL_BLOCK_LEAKED",
@@ -11949,6 +11955,15 @@ function aiEvaluationSuiteKeyFromRecord(row: JsonRecord): AiEvaluationSuiteKey {
   return suiteKey;
 }
 
+function aiEvaluationConfigVersion(row: JsonRecord): number | null {
+  const value = fieldValue(
+    row,
+    "provider_config_version",
+    "providerConfigVersion",
+  );
+  return value == null ? null : positiveInteger(value, "AI 模型配置版本");
+}
+
 function aiEvaluationRunFromRecord(
   row: unknown,
   requireResults: boolean,
@@ -12076,6 +12091,7 @@ function aiEvaluationRunFromRecord(
     return invalidResponse("AI 本地评测结果序列不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     id,
     providerId,
     providerNameSnapshot,
@@ -12262,6 +12278,7 @@ const aiEvaluationCriticalFailureCodes = [
   "CONTROL_BLOCK_LEAKED",
   "CITATION_NOT_ALLOWED",
   "FORBIDDEN_PHRASE_PRESENT",
+  "FACT_CONTRADICTED",
 ] as const;
 
 function aiEvaluationQualityGroupFromRecord(row: unknown) {
@@ -12354,6 +12371,7 @@ function aiEvaluationQualityGroupFromRecord(row: unknown) {
     return invalidResponse("AI 本地评测质量分组不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     providerId,
     providerNameSnapshot,
     providerModelSnapshot,
@@ -12417,6 +12435,7 @@ function aiEvaluationTrendPointFromRecord(row: unknown) {
     return invalidResponse("AI 本地评测趋势点不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     runId,
     providerId,
     providerNameSnapshot,
@@ -12483,6 +12502,7 @@ function aiEvaluationCategoryGroupFromRecord(
     return invalidResponse("AI 本地评测 category 分组不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     providerId,
     providerNameSnapshot,
     providerModelSnapshot,
@@ -12535,6 +12555,7 @@ function aiEvaluationFailureGroupFromRecord(
     return invalidResponse("AI 本地评测失败原因分组不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     providerId,
     providerNameSnapshot,
     providerModelSnapshot,
@@ -12547,13 +12568,22 @@ function aiEvaluationFailureGroupFromRecord(
   };
 }
 
-function aiEvaluationQualityGroupKey(value: {
+export function aiEvaluationQualityGroupKey(value: {
+  providerConfigVersion?: number | null;
   providerId: string;
   providerNameSnapshot: string;
   providerModelSnapshot: string;
   datasetVersion: number;
   suiteKey: AiEvaluationSuiteKey;
 }) {
+  if (value.providerConfigVersion != null) {
+    return [
+      value.providerId,
+      `config:${value.providerConfigVersion}`,
+      value.datasetVersion,
+      value.suiteKey,
+    ].join("\u0000");
+  }
   return [
     value.providerId,
     value.providerNameSnapshot,
@@ -12587,7 +12617,10 @@ function expectedAIEvaluationReadiness(
       reasons: ["RUN_COUNT_LOW"] as const,
     };
   }
-  if (group.providerVersionMin !== group.providerVersionMax) {
+  if (
+    group.providerConfigVersion == null &&
+    group.providerVersionMin !== group.providerVersionMax
+  ) {
     return {
       status: "insufficient_evidence" as const,
       reasons: ["PROVIDER_VERSION_MIXED"] as const,
@@ -12757,7 +12790,11 @@ export async function getAiEvaluationSummary(
     JSON.stringify(requiredCategories) !==
       JSON.stringify(aiEvaluationRequiredCategories) ||
     JSON.stringify(criticalFailureCodes) !==
-      JSON.stringify(aiEvaluationCriticalFailureCodes)
+      JSON.stringify(
+        currentDatasetVersion >= 4
+          ? aiEvaluationCriticalFailureCodes
+          : aiEvaluationCriticalFailureCodes.slice(0, 3),
+      )
   ) {
     return invalidResponse("AI 本地评测人工评审口径无效");
   }
@@ -12769,7 +12806,10 @@ export async function getAiEvaluationSummary(
     minimumOverallLowerBps: 8000,
     minimumCategoryLowerBps: 6000,
     requiredCategories: [...aiEvaluationRequiredCategories],
-    criticalFailureCodes: [...aiEvaluationCriticalFailureCodes],
+    criticalFailureCodes:
+      currentDatasetVersion >= 4
+        ? [...aiEvaluationCriticalFailureCodes]
+        : aiEvaluationCriticalFailureCodes.slice(0, 3),
   };
   const trendLimit = positiveInteger(
     fieldValue(payload.meta, "trend_limit", "trendLimit"),
@@ -13044,6 +13084,7 @@ function aiEvaluationReviewFromRecord(row: unknown): AiEvaluationReview {
     return invalidResponse("AI 本地评测人工决定证据快照不一致");
   }
   return {
+    providerConfigVersion: aiEvaluationConfigVersion(row),
     id,
     providerIdSnapshot,
     providerNameSnapshot,
@@ -13135,6 +13176,9 @@ export async function createAiEvaluationReview(
       provider_model_snapshot: group.providerModelSnapshot,
       dataset_version: group.datasetVersion,
       suite_key: group.suiteKey,
+      ...(group.providerConfigVersion != null
+        ? { provider_config_version: group.providerConfigVersion }
+        : {}),
       expected_provider_version_min: group.providerVersionMin,
       expected_provider_version_max: group.providerVersionMax,
       expected_last_completed_at: group.lastCompletedAt,

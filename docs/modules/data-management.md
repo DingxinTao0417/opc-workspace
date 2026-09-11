@@ -236,11 +236,11 @@ Task file Artifact、Client Attachment、Project Attachment 与 Workspace Avatar
 
 ### 导出/导入
 
-基础业务 JSON 已实现：顶层记录 `format_version / exported_at / source / artifact_files / excluded_operational_tables / tables`；每张表携带稳定 `columns` 和二维 `rows`。当前格式不包含受控文件正文，会声明 `artifact_files.included=false`，因此不是完整备份替代品。schema 063–067 的 AI evaluation Run/Result、dataset version、suite 与人工决定审计都属于排除于便携导出的操作态；自由文本审计理由不会进入业务迁移包，一致性 SQLite 备份仍覆盖这些本地事实。v49 业务包兼容扩展至当前 schema 67，并显式接受 v63→67、v64→67、v65→67 与 v66→67；历史源继续按当时的排除表清单校验。schema 67 只扩大这些排除表的 suite CHECK，不改变便携业务表列。
+基础业务 JSON 已实现：顶层记录 `format_version / exported_at / source / artifact_files / excluded_operational_tables / tables`；每张表携带稳定 `columns` 和二维 `rows`。当前格式不包含受控文件正文，会声明 `artifact_files.included=false`，因此不是完整备份替代品。schema 063–069 的 AI evaluation Run/Result、dataset version、suite、人工决定审计、配置身份、确认决定及压缩水位线都属于排除于便携导出的操作态；自由文本审计理由不会进入业务迁移包，一致性 SQLite 备份仍覆盖这些本地事实。v49 业务包兼容扩展至当前 schema 69，并显式接受 v63/v64/v65/v66/v67/v68→69；历史源继续按当时的排除表清单校验。schema 068 受保护重建评审约束并保留旧审计；069 为 AI 操作态追加可靠性字段，均不改变便携业务表列，详见 [ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md)。
 
 含文件业务 ZIP 导出 v1 已实现：`business-data.json` 复用同一白名单快照并声明 `artifact_files.included=true`，`manifest.json` 独立记录业务 JSON 和每个 active 受控文件的路径、size/SHA-256；正文只出现在 `files/` 下。生成期间维护写锁阻止数据库/文件事实漂移，ZIP 完整关闭并同步后才响应，临时文件在成功发送或失败时清理。它是便携导出，不包含数据库身份与恢复协议，当前不能直接作为恢复包导入。
 
-业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v44 的完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。容量样本与计划备份策略/运行结果是本机维护事实，不进入便携业务导入导出。
+业务 JSON 导入 v1 已实现：最大 16 MiB，只接受 format v1、API v1、当前 schema v69 或显式兼容图允许的历史源及其完整固定表/列清单与标量行；设置值仍作为 `app_settings` 业务行导出/导入，schema v2 general 必须含严格布尔 `close_to_tray`。容量样本与计划备份策略/运行结果是本机维护事实，不进入便携业务导入导出。
 
 正式 apply 根据 `replace_empty / append` 要求不同固定确认头，并在维护写锁内再次预检。Sidecar 先创建完整且已校验的自动回滚备份，再在一个 SQLite 事务中写入业务白名单、重建排除于导出之外的 `task_focus_totals`，最后执行 foreign-key 与 quick-check；失败整批回滚，回滚备份保留。append 只接受同 schema 零主键重叠，保留目标 owner/system、设置与既有业务事实；源规则只可替换未修改默认 Automation。跨 schema、主键冲突逐条策略与 UUID 重映射仍待独立设计。
 
@@ -252,7 +252,7 @@ schema v44 与 API v1 已交付本机计划首个纵切：
 
 1. `scheduled_backup_policy` 是默认关闭的单例机器维护事实，保存每日 `HH:MM`、IANA 时区、1–365 份保留数、当地日认领和最近成功/失败安全状态；不进入业务 JSON/ZIP。
 2. 保存使用 `If-Match` 乐观锁。设置页先在 draft 中即时预览启停、时间、时区和保留影响；保存后后台生效，取消恢复最近 committed。
-3. Sidecar ready 时先做一次错过计划补偿，之后默认每分钟扫描；到达或错过当地时间且当天未认领时，在维护写锁与备份互斥锁内原子认领，同一当地日最多尝试一次，避免持续低空间时刷屏。
+3. Sidecar ready 时先做一次错过计划补偿，之后默认每分钟扫描；禁用或尚未到期的扫描不申请维护写锁。到达或错过当地时间且当天未认领时，再取得维护写锁与备份互斥锁、重验策略并原子认领，同一当地日最多尝试一次，避免持续低空间时刷屏。AI 模型网络等待不持维护锁，取消入口不等待该写锁；AI 数据准备/收尾仍在短维护锁内，恢复挂起时取消活动生成、压缩及评测且不持锁等其退出。
 4. 计划执行复用现有容量准入、`VACUUM INTO`、受控文件复制、manifest/hash、quick/foreign-key/schema/identity 和原子发布链；manifest/list 用 `kind=scheduled` 区分计划包，旧包无 kind 时兼容解释为 manual。
 5. 成功发布后按 `created_at/id` 对 scheduled 包稳定排序，只删除超过 `retention_count` 的计划包；manual、导入/恢复/迁移回滚包永不参与。存在 pending restore 时，目标和回滚 ID 额外保护；安全路径验证或目录同步失败即停止清理并记录 `BACKUP_RETENTION_FAILED`，不会扩大删除范围。
 6. 最近失败只保存固定错误码（容量不足/无法确认、创建失败、保留失败），不保存路径、卷、容量或底层错误。计划失败不伪造成业务 Workflow Event。

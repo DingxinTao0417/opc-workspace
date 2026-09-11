@@ -167,14 +167,38 @@ func (a *API) runDueScheduledBackup(ctx context.Context) error {
 	if a.backupStore == nil || a.restorePending.Load() {
 		return nil
 	}
+	// Most scans have no work. They must not enqueue an exclusive writer
+	// merely to discover that the policy is disabled or not due.
+	a.maintenance.RLock()
+	policy, err := loadScheduledBackupPolicy(a.db.WithContext(ctx))
+	a.maintenance.RUnlock()
+	if err != nil {
+		return fmt.Errorf("read policy: %w", err)
+	}
+	if !policy.Enabled {
+		return nil
+	}
+	if location, locationErr := time.LoadLocation(policy.Timezone); locationErr == nil {
+		if hour, minute, timeErr := parseScheduledLocalTime(policy.LocalTime); timeErr == nil {
+			localNow := a.options.Now().In(location)
+			if localNow.Before(time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, location)) || (policy.LastAttemptedDate != nil && *policy.LastAttemptedDate == localNow.Format("2006-01-02")) {
+				return nil
+			}
+		}
+	}
 	a.maintenance.Lock()
 	defer a.maintenance.Unlock()
+	if a.restorePending.Load() || ctx.Err() != nil {
+		return ctx.Err()
+	}
 	a.backupStore.mu.Lock()
 	defer a.backupStore.mu.Unlock()
 	unlockInvoicePDFs := a.lockInvoicePDFStore()
 	defer unlockInvoicePDFs()
 
-	policy, err := loadScheduledBackupPolicy(a.db.WithContext(ctx))
+	// Re-read after obtaining exclusivity: configuration or a preceding scan
+	// may have changed while this scan waited.
+	policy, err = loadScheduledBackupPolicy(a.db.WithContext(ctx))
 	if err != nil {
 		return fmt.Errorf("read policy: %w", err)
 	}

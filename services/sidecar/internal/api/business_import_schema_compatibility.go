@@ -20,6 +20,8 @@ const (
 	businessImportSchema65 = 65
 	businessImportSchema66 = 66
 	businessImportSchema67 = 67
+	businessImportSchema68 = 68
+	businessImportSchema69 = 69
 )
 
 // Schema 50 only adds the operational import-authorization table and schema 51
@@ -94,6 +96,14 @@ var businessExportExcludedTablesSchema65 = []string{
 func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, bool) {
 	if sourceSchema == targetSchema {
 		return businessExportExcludedTables, true
+	}
+	// 68/69 change only excluded AI operational columns/triggers. Reuse the
+	// explicit pre-67 compatibility graph, without admitting unknown schemas.
+	if targetSchema == businessImportSchema68 || targetSchema == businessImportSchema69 {
+		if sourceSchema == businessImportSchema67 || sourceSchema == businessImportSchema68 {
+			return businessExportExcludedTables, true
+		}
+		return businessImportSchemaContract(sourceSchema, businessImportSchema67)
 	}
 	if sourceSchema == businessImportSchema49 &&
 		(targetSchema == businessImportSchema50 || targetSchema == businessImportSchema51 ||

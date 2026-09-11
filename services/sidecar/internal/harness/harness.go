@@ -47,38 +47,55 @@ const SelfCheckRevisionPrompt = `你刚才自评认为你的回答尚未满足�
 
 // selfCheckVerdict is the parsed model self-assessment.
 type selfCheckVerdict struct {
+	valid      bool
 	sufficient bool
 	note       string
 }
 
-// parseSelfCheck extracts the [opc:selfcheck] verdict block (the last one,
-// normally trailing) and returns the text without it, so the internal block
-// never leaks into emitted or persisted content. A missing open tag is an
-// affirmative verdict over the untouched text; an unclosed or malformed block
-// is stripped defensively and also treated as affirmative.
+// parseSelfCheck extracts a single [opc:selfcheck] verdict and returns the text
+// without any such controls, so the internal block
+// never leaks into emitted or persisted content. Missing, repeated and invalid
+// declarations remain unknown rather than claiming that quality was checked.
 func parseSelfCheck(text string) (selfCheckVerdict, string) {
-	idx := strings.LastIndex(text, selfCheckOpen)
-	if idx < 0 {
-		return selfCheckVerdict{sufficient: true}, text
+	if !strings.Contains(text, selfCheckOpen) {
+		return selfCheckVerdict{}, text
 	}
-	remainder := text[idx:]
-	end := strings.Index(remainder, selfCheckClose)
-	verdict := selfCheckVerdict{sufficient: true}
-	var stripped string
-	if end < 0 {
-		stripped = strings.TrimSpace(text[:idx])
-		return verdict, stripped
+	verdict := selfCheckVerdict{}
+	var stripped strings.Builder
+	remaining := text
+	count := 0
+	for {
+		open := strings.Index(remaining, selfCheckOpen)
+		if open < 0 {
+			stripped.WriteString(remaining)
+			break
+		}
+		stripped.WriteString(remaining[:open])
+		count++
+		remaining = remaining[open+len(selfCheckOpen):]
+		end := strings.Index(remaining, selfCheckClose)
+		if end < 0 {
+			verdict = selfCheckVerdict{}
+			break
+		}
+		if count == 1 {
+			payload := remaining[:end]
+			var parsed struct {
+				Sufficient *bool  `json:"sufficient"`
+				Note       string `json:"note"`
+			}
+			decoder := json.NewDecoder(strings.NewReader(payload))
+			decoder.DisallowUnknownFields()
+			if json.Valid([]byte(payload)) && decoder.Decode(&parsed) == nil && parsed.Sufficient != nil {
+				verdict = selfCheckVerdict{valid: true, sufficient: *parsed.Sufficient, note: strings.TrimSpace(parsed.Note)}
+			}
+		}
+		remaining = remaining[end+len(selfCheckClose):]
 	}
-	payload := remainder[len(selfCheckOpen):end]
-	stripped = strings.TrimSpace(text[:idx] + remainder[end+len(selfCheckClose):])
-	var parsed struct {
-		Sufficient *bool  `json:"sufficient"`
-		Note       string `json:"note"`
+	if count != 1 {
+		verdict = selfCheckVerdict{}
 	}
-	if json.Unmarshal([]byte(payload), &parsed) == nil && parsed.Sufficient != nil {
-		verdict = selfCheckVerdict{sufficient: *parsed.Sufficient, note: strings.TrimSpace(parsed.Note)}
-	}
-	return verdict, stripped
+	return verdict, strings.TrimSpace(stripped.String())
 }
 
 // selfCheckNoteMessage builds the user-role revision instruction carrying the
@@ -108,12 +125,14 @@ type LLMClient interface {
 
 // Request is one provider-scoped generation request.
 type Request struct {
-	Protocol     string
-	BaseURL      string
-	APIKey       string
-	Model        string
-	SystemPrompt string
-	History      []modelclient.ChatMessage
+	// ResponseByteLimit is assigned by the run budget, never by the user API.
+	ResponseByteLimit int
+	Protocol          string
+	BaseURL           string
+	APIKey            string
+	Model             string
+	SystemPrompt      string
+	History           []modelclient.ChatMessage
 	// Memories are user-confirmed long-term preference notes injected into
 	// the system prompt with a byte budget (ADR-006).
 	Memories []string
@@ -320,6 +339,10 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 		return Result{}, errors.New("harness: nil LLM client")
 	}
 	maxTurns := DefaultMaxTurns
+	ctx, cancelRun := context.WithTimeout(ctx, modelclient.TotalTimeout)
+	defer cancelRun()
+	budget := &budgetedClient{inner: client, remaining: modelclient.MaxResponseBytes}
+	client = budget
 
 	var result Result
 	history := make([]modelclient.ChatMessage, len(request.History))
@@ -333,7 +356,7 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 
 	for result.Turns < maxTurns {
 		if ctx.Err() != nil {
-			return result, ctx.Err()
+			return result, runContextError(ctx.Err())
 		}
 		turnIndex := result.Turns + 1
 		startedAt := time.Now().UTC()
@@ -349,7 +372,7 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 		stepStatus, stepErrorCode := "succeeded", ""
 		if err != nil {
 			stepStatus, stepErrorCode = "failed", "MODEL_TURN_FAILED"
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			if errors.Is(err, context.Canceled) {
 				stepStatus, stepErrorCode = "cancelled", ""
 			}
 		}
@@ -375,7 +398,7 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			return result, err
 		}
 		if len(turn.ToolCalls) == 0 {
-			return runSelfCheck(ctx, client, request, history, result, callbacks), nil
+			return runSelfCheck(ctx, client, request, history, result, callbacks)
 		}
 		if tools == nil || len(tools.Names()) == 0 {
 			return result, ErrToolUnavailable
@@ -407,6 +430,9 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			toolCompletedAt := time.Now().UTC()
 			toolStatus, toolErrorCode := "succeeded", ""
 			if err != nil {
+				if ctx.Err() != nil {
+					return result, runContextError(ctx.Err())
+				}
 				toolStatus, toolErrorCode = "failed", "TOOL_EXECUTION_FAILED"
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 					toolStatus, toolErrorCode = "cancelled", ""
@@ -425,8 +451,13 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 				if result.Corrections > DefaultMaxToolCorrections {
 					return result, ErrToolCorrections
 				}
+				failureText := fmt.Sprintf("%s: error: %v", tool.Name(), err)
+				budget.remaining -= len(failureText)
+				if budget.remaining < 0 {
+					return result, modelclient.ErrResponseBudget
+				}
 				history = append(history, modelclient.ChatMessage{
-					Role: "tool", Content: fmt.Sprintf("%s: error: %v", tool.Name(), err),
+					Role: "tool", Content: failureText,
 					ToolCallID: call.ID, ToolName: tool.Name(),
 				})
 				continue
@@ -434,6 +465,10 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			totalToolResults += len(output)
 			if totalToolResults > DefaultMaxResultBytes {
 				return result, ErrToolBudget
+			}
+			budget.remaining -= len(output)
+			if budget.remaining < 0 {
+				return result, modelclient.ErrResponseBudget
 			}
 			history = append(history, modelclient.ChatMessage{
 				Role: "tool", Content: tool.Name() + ": " + output,
@@ -448,23 +483,29 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 // draft carries the model's trailing [opc:selfcheck] verdict. An affirmative
 // verdict emits the stripped draft as-is; an insufficiency verdict triggers
 // one internal revision turn fed back with the model's own note, bounded to a
-// single pass and the global turn budget. Any failure keeps the draft.
-func runSelfCheck(ctx context.Context, client LLMClient, request Request, history []modelclient.ChatMessage, result Result, callbacks Callbacks) Result {
+// single pass and the global turn budget. Failure retains the draft and is
+// propagated so the generation never presents an incomplete revision as success.
+func runSelfCheck(ctx context.Context, client LLMClient, request Request, history []modelclient.ChatMessage, result Result, callbacks Callbacks) (Result, error) {
 	checkStartedAt := time.Now().UTC()
 	if ctx.Err() != nil {
 		emitRunStep(callbacks, RunStep{
 			Kind: "self_check", Status: "cancelled", TurnIndex: maxInt(result.Turns, 1),
 			StartedAt: checkStartedAt, CompletedAt: checkStartedAt,
 		})
-		return result
+		return result, runContextError(ctx.Err())
 	}
 	verdict, stripped := parseSelfCheck(result.Text)
+	result.Text = stripped
+	if !verdict.valid {
+		emitRunStep(callbacks, RunStep{Kind: "self_check", Status: "failed", TurnIndex: maxInt(result.Turns, 1), StartedAt: checkStartedAt, CompletedAt: time.Now().UTC(), ErrorCode: "SELF_CHECK_UNAVAILABLE"})
+		return result, nil
+	}
 	if !verdict.sufficient {
 		// The self-check block must never leak into the emitted text, even
 		// when the revision path is not taken.
 		result.Text = stripped
 	}
-	if verdict.sufficient || strings.TrimSpace(stripped) == "" {
+	if verdict.sufficient {
 		result.Text = stripped
 		completedAt := time.Now().UTC()
 		emitRunStep(callbacks, RunStep{
@@ -472,7 +513,18 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 			StartedAt: checkStartedAt, CompletedAt: completedAt,
 			DurationMS: completedAt.Sub(checkStartedAt).Milliseconds(),
 		})
-		return result
+		return result, nil
+	}
+	if strings.TrimSpace(stripped) == "" {
+		// There is no draft to revise, but the explicit insufficiency verdict
+		// must not be reported as a successful quality check.
+		completedAt := time.Now().UTC()
+		emitRunStep(callbacks, RunStep{
+			Kind: "self_check", Status: "failed", TurnIndex: maxInt(result.Turns, 1),
+			StartedAt: checkStartedAt, CompletedAt: completedAt,
+			DurationMS: completedAt.Sub(checkStartedAt).Milliseconds(), ErrorCode: "SELF_CHECK_INSUFFICIENT",
+		})
+		return result, nil
 	}
 	if result.Turns >= DefaultMaxTurns {
 		completedAt := time.Now().UTC()
@@ -481,7 +533,7 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 			StartedAt: checkStartedAt, CompletedAt: completedAt,
 			DurationMS: completedAt.Sub(checkStartedAt).Milliseconds(), ErrorCode: "TURN_BUDGET_EXHAUSTED",
 		})
-		return result
+		return result, ErrMaxTurns
 	}
 	verifyHistory := make([]modelclient.ChatMessage, 0, len(history)+2)
 	verifyHistory = append(verifyHistory, history...)
@@ -502,9 +554,16 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 	revisionStatus, revisionErrorCode := "succeeded", ""
 	if err != nil {
 		revisionStatus, revisionErrorCode = "failed", "SELF_CHECK_REVISION_FAILED"
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		if errors.Is(err, context.Canceled) {
 			revisionStatus, revisionErrorCode = "cancelled", ""
 		}
+	}
+	revisedVerdict, revisedStripped := parseSelfCheck(revised.Text)
+	if err == nil && !revisedVerdict.valid {
+		revisionStatus, revisionErrorCode = "failed", "SELF_CHECK_UNAVAILABLE"
+	}
+	if err == nil && revisedVerdict.valid && !revisedVerdict.sufficient {
+		revisionStatus, revisionErrorCode = "failed", "SELF_CHECK_INSUFFICIENT"
 	}
 	revisionOutputBytes := revised.OutputBytes
 	if revisionOutputBytes == 0 {
@@ -520,16 +579,15 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 	})
 	result.Turns++
 	if err != nil {
-		return result
+		return result, err
 	}
-	_, revisedStripped := parseSelfCheck(revised.Text)
 	if revisedStripped == "" || revisedStripped == stripped {
-		return result
+		return result, nil
 	}
 	result.Text = revisedStripped
 	result.Reasoning = revised.Reasoning
 	result.Reflections = 1
-	return result
+	return result, nil
 }
 
 func emitRunStep(callbacks Callbacks, step RunStep) {

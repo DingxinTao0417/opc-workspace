@@ -74,9 +74,10 @@
 
 **验收证据（真实运行）**：解析器测试（合法/非法/缺 content/双块剥离）；api `TestAIMemoryLifecycle`（创建/幂等重放/校验/列表/删除/事件不含内容）、`TestAIChatInjectsConfirmedMemories`（mock 上游断言 system 含记忆且代码提示词保留、不落消息表）、`TestAIMemoryInjectionBudgets`（数量/字节预算、超大跳过）全绿；Web 页面记忆卡片确认流与设置区列表/删除测试全绿。
 
-### F3 运行追踪与时间线（设计就绪，未实施）
+### F3 运行追踪与时间线（已由 AI7-Q3 接续交付）
 
-- `ai_runs`/`ai_run_steps`（llm/tool/reflection 步骤、耗时、结果摘要）+ 会话内执行时间线 UI；随工具纵切与真实数据一起交付，不提前建空表。
+- [ADR-012](../adr/012-ai-run-steps-and-local-metrics.md) / schema 061–062 已复用 `ai_generations` 并交付 `ai_run_steps`、会话时间线、字节/耗时、Provider 原始 token/unknown；没有另建 `ai_runs`，不保存结果正文摘要。ADR-024 又补齐 UTC 用量趋势。
+- [ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 修订整次运行累计预算、流终态与 selfcheck unavailable 语义。上方 A–F2 及下方测试记录保留为当时历史，不代表当前版本仍零工具或修订失败仍按成功处理。
 
 ### F4 编排、规划与子代理（仅设计）
 

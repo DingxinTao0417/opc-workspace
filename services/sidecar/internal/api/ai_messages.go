@@ -48,11 +48,7 @@ func (a *API) attachTaskToAIMessage(c *gin.Context) {
 	if message.TaskID != nil {
 		if *message.TaskID == taskID {
 			c.Header("Idempotency-Replayed", "true")
-			c.JSON(http.StatusOK, gin.H{"data": aiMessageResponse{
-				ID: message.ID, SessionID: message.SessionID, Role: message.Role, Status: message.Status,
-				Content: message.Content, Reasoning: message.Reasoning, TaskID: message.TaskID,
-				TaskTitleSnapshot: message.TaskTitleSnapshot, CreatedAt: normalizeTimestamp(message.CreatedAt),
-			}})
+			writeAIMessageResponse(c, message)
 			return
 		}
 		writeError(c, http.StatusConflict, "AI_MESSAGE_TASK_ALREADY_LINKED", "This message already references a task and cannot be relinked")
@@ -86,9 +82,14 @@ func (a *API) attachTaskToAIMessage(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": aiMessageResponse{
-		ID: message.ID, SessionID: message.SessionID, Role: message.Role, Status: message.Status,
-		Content: message.Content, Reasoning: message.Reasoning, TaskID: message.TaskID,
-		TaskTitleSnapshot: message.TaskTitleSnapshot, CreatedAt: normalizeTimestamp(message.CreatedAt),
-	}})
+	writeAIMessageResponse(c, message)
+}
+
+func writeAIMessageResponse(c *gin.Context, message models.AIMessage) {
+	responses, err := aiMessageResponsesFromModels([]models.AIMessage{message})
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": responses[0]})
 }

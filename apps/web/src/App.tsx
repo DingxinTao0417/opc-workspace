@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { AiGenerationMonitor } from "./components/AiGenerationMonitor";
 import { RoutedAppErrorBoundary } from "./components/AppErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
 import { FocusTicker } from "./components/FocusTicker";
@@ -38,6 +39,7 @@ export default function App() {
       <ThemeController />
       <FocusTicker />
       <FocusRecoveryModal />
+      <AiGenerationMonitor />
       <RoutedAppErrorBoundary>
         <Routes>
           <Route element={<AppShell />}>

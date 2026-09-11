@@ -19,6 +19,7 @@ import (
 const createAIEvaluationReviewEndpoint = "POST /api/v1/ai/evaluation-reviews"
 
 type createAIEvaluationReviewRequest struct {
+	ProviderConfigVersion      *int64   `json:"provider_config_version"`
 	ProviderID                 string   `json:"provider_id"`
 	ProviderNameSnapshot       string   `json:"provider_name_snapshot"`
 	ProviderModelSnapshot      string   `json:"provider_model_snapshot"`
@@ -38,6 +39,7 @@ type createAIEvaluationReviewRequest struct {
 }
 
 type aiEvaluationReviewResponse struct {
+	ProviderConfigVersion         *int64   `json:"provider_config_version"`
 	ID                            string   `json:"id"`
 	ProviderIDSnapshot            string   `json:"provider_id_snapshot"`
 	ProviderNameSnapshot          string   `json:"provider_name_snapshot"`
@@ -95,7 +97,8 @@ func aiEvaluationReviewResponseFromModel(row models.AIEvaluationReview) (aiEvalu
 		}
 	}
 	return aiEvaluationReviewResponse{
-		ID: row.ID, ProviderIDSnapshot: row.ProviderIDSnapshot,
+		ProviderConfigVersion: row.ProviderConfigVersion,
+		ID:                    row.ID, ProviderIDSnapshot: row.ProviderIDSnapshot,
 		ProviderNameSnapshot: row.ProviderNameSnapshot, ProviderModelSnapshot: row.ProviderModelSnapshot,
 		DatasetVersion: row.DatasetVersion, SuiteKey: row.SuiteKey,
 		ProviderVersionMin: row.ProviderVersionMin, ProviderVersionMax: row.ProviderVersionMax,
@@ -165,7 +168,8 @@ func (a *API) createAIEvaluationReview(c *gin.Context) {
 		}
 		now := nowStamp(a)
 		row := models.AIEvaluationReview{
-			ID: uuid.NewString(), ProviderIDSnapshot: snapshot.Group.ProviderID,
+			ProviderConfigVersion: snapshot.Group.ProviderConfigVersion,
+			ID:                    uuid.NewString(), ProviderIDSnapshot: snapshot.Group.ProviderID,
 			ProviderNameSnapshot:  snapshot.Group.ProviderNameSnapshot,
 			ProviderModelSnapshot: snapshot.Group.ProviderModelSnapshot,
 			DatasetVersion:        snapshot.Group.DatasetVersion, SuiteKey: snapshot.Group.SuiteKey,
@@ -265,6 +269,9 @@ func normalizeAndValidateAIEvaluationReviewInput(input *createAIEvaluationReview
 	input.ExpectedReadinessStatus = strings.TrimSpace(input.ExpectedReadinessStatus)
 	input.Decision = strings.TrimSpace(input.Decision)
 	input.Reason = strings.TrimSpace(input.Reason)
+	if input.ProviderConfigVersion != nil && *input.ProviderConfigVersion < 1 {
+		return false
+	}
 	parsed, err := uuid.Parse(input.ProviderID)
 	if err != nil || parsed.String() != input.ProviderID ||
 		utf8.RuneCountInString(input.ProviderNameSnapshot) < 1 || utf8.RuneCountInString(input.ProviderNameSnapshot) > 100 ||
@@ -298,7 +305,7 @@ func normalizeAndValidateAIEvaluationReviewInput(input *createAIEvaluationReview
 }
 
 func aiEvaluationReviewSnapshotMatchesInput(group aiEvaluationQualityGroup, input createAIEvaluationReviewRequest) bool {
-	return group.ProviderID == input.ProviderID && group.ProviderNameSnapshot == input.ProviderNameSnapshot &&
+	return aiConfigVersionsEqual(group.ProviderConfigVersion, input.ProviderConfigVersion) && group.ProviderID == input.ProviderID && group.ProviderNameSnapshot == input.ProviderNameSnapshot &&
 		group.ProviderModelSnapshot == input.ProviderModelSnapshot && group.DatasetVersion == input.DatasetVersion &&
 		group.SuiteKey == input.SuiteKey && group.ProviderVersionMin == input.ExpectedProviderVersionMin &&
 		group.ProviderVersionMax == input.ExpectedProviderVersionMax && group.LastCompletedAt == input.ExpectedLastCompletedAt &&
@@ -310,7 +317,7 @@ func aiEvaluationReviewSnapshotMatchesInput(group aiEvaluationQualityGroup, inpu
 func loadAIEvaluationReviewSnapshot(tx *gorm.DB, input createAIEvaluationReviewRequest) (aiEvaluationReviewSnapshot, error) {
 	var group aiEvaluationQualityGroup
 	if err := tx.Raw(`SELECT
-		provider_id, provider_name_snapshot, provider_model_snapshot, dataset_version, suite_key,
+		provider_id, provider_config_version, MAX(provider_name_snapshot) AS provider_name_snapshot, MAX(provider_model_snapshot) AS provider_model_snapshot, dataset_version, suite_key,
 		MIN(provider_version) AS provider_version_min, MAX(provider_version) AS provider_version_max,
 		COUNT(*) AS run_count,
 		COALESCE(SUM(CASE WHEN failed_cases = 0 THEN 1 ELSE 0 END), 0) AS fully_passed_runs,
@@ -319,10 +326,10 @@ func loadAIEvaluationReviewSnapshot(tx *gorm.DB, input createAIEvaluationReviewR
 		COALESCE(SUM(failed_cases), 0) AS failed_cases,
 		MAX(completed_at) AS last_completed_at
 		FROM ai_evaluation_runs
-		WHERE provider_id = ? AND provider_name_snapshot = ? AND provider_model_snapshot = ?
+		WHERE provider_id = ? AND provider_config_version IS ? AND (? IS NOT NULL OR (provider_name_snapshot = ? AND provider_model_snapshot = ?))
 		  AND dataset_version = ? AND suite_key = ? AND status = 'succeeded'
-		GROUP BY provider_id, provider_name_snapshot, provider_model_snapshot, dataset_version, suite_key`,
-		input.ProviderID, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
+		GROUP BY provider_id, provider_config_version, dataset_version, suite_key`,
+		input.ProviderID, input.ProviderConfigVersion, input.ProviderConfigVersion, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
 	).Scan(&group).Error; err != nil {
 		return aiEvaluationReviewSnapshot{}, err
 	}
@@ -337,7 +344,7 @@ func loadAIEvaluationReviewSnapshot(tx *gorm.DB, input createAIEvaluationReviewR
 	group.EvidenceLevel = aiEvaluationEvidenceLevel(group.RunCount)
 	categories := make([]aiEvaluationCategoryGroup, 0, 4)
 	if err := tx.Raw(`SELECT
-		run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+		run.provider_id, run.provider_config_version, MAX(run.provider_name_snapshot) AS provider_name_snapshot, MAX(run.provider_model_snapshot) AS provider_model_snapshot,
 		run.dataset_version, run.suite_key, result.category,
 		COUNT(*) AS total_cases,
 		COALESCE(SUM(CASE WHEN result.status = 'passed' THEN 1 ELSE 0 END), 0) AS passed_cases,
@@ -345,11 +352,11 @@ func loadAIEvaluationReviewSnapshot(tx *gorm.DB, input createAIEvaluationReviewR
 		MAX(run.completed_at) AS last_completed_at
 		FROM ai_evaluation_runs run
 		JOIN ai_evaluation_results result ON result.run_id = run.id
-		WHERE run.provider_id = ? AND run.provider_name_snapshot = ? AND run.provider_model_snapshot = ?
+		WHERE run.provider_id = ? AND run.provider_config_version IS ? AND (? IS NOT NULL OR (run.provider_name_snapshot = ? AND run.provider_model_snapshot = ?))
 		  AND run.dataset_version = ? AND run.suite_key = ? AND run.status = 'succeeded'
-		GROUP BY run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+		GROUP BY run.provider_id, run.provider_config_version,
 		  run.dataset_version, run.suite_key, result.category`,
-		input.ProviderID, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
+		input.ProviderID, input.ProviderConfigVersion, input.ProviderConfigVersion, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
 	).Scan(&categories).Error; err != nil {
 		return aiEvaluationReviewSnapshot{}, err
 	}
@@ -362,18 +369,18 @@ func loadAIEvaluationReviewSnapshot(tx *gorm.DB, input createAIEvaluationReviewR
 	}
 	failures := make([]aiEvaluationFailureGroup, 0)
 	if err := tx.Raw(`SELECT
-		run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+		run.provider_id, run.provider_config_version, MAX(run.provider_name_snapshot) AS provider_name_snapshot, MAX(run.provider_model_snapshot) AS provider_model_snapshot,
 		run.dataset_version, run.suite_key, CAST(failure.value AS TEXT) AS failure_code,
 		COUNT(DISTINCT result.id) AS affected_cases, COUNT(*) AS occurrences,
 		MAX(run.completed_at) AS last_completed_at
 		FROM ai_evaluation_runs run
 		JOIN ai_evaluation_results result ON result.run_id = run.id
 		JOIN json_each(result.failure_codes) failure
-		WHERE run.provider_id = ? AND run.provider_name_snapshot = ? AND run.provider_model_snapshot = ?
+		WHERE run.provider_id = ? AND run.provider_config_version IS ? AND (? IS NOT NULL OR (run.provider_name_snapshot = ? AND run.provider_model_snapshot = ?))
 		  AND run.dataset_version = ? AND run.suite_key = ? AND run.status = 'succeeded' AND result.status = 'failed'
-		GROUP BY run.provider_id, run.provider_name_snapshot, run.provider_model_snapshot,
+		GROUP BY run.provider_id, run.provider_config_version,
 		  run.dataset_version, run.suite_key, failure.value`,
-		input.ProviderID, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
+		input.ProviderID, input.ProviderConfigVersion, input.ProviderConfigVersion, input.ProviderNameSnapshot, input.ProviderModelSnapshot, input.DatasetVersion, input.SuiteKey,
 	).Scan(&failures).Error; err != nil {
 		return aiEvaluationReviewSnapshot{}, err
 	}
@@ -489,4 +496,8 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func aiConfigVersionsEqual(left, right *int64) bool {
+	return (left == nil && right == nil) || (left != nil && right != nil && *left == *right)
 }

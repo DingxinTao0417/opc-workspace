@@ -66,6 +66,25 @@
   font-size: 13px;
 }
 
+.ai-generation-monitor {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  width: max-content;
+  flex-wrap: wrap;
+  margin: 0;
+  box-shadow: 0 4px 20px rgb(0 0 0 / 12%);
+}
+
+.ai-generation-monitor > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ===== Chat shell: session rail + chat main ===== */
 
 .ai-layout {

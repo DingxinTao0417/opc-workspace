@@ -2556,6 +2556,7 @@ export type AiProviderStatus =
   "unconfigured" | "checking" | "ready" | "unavailable" | "disabled";
 
 export interface AiProvider {
+  configVersion?: number;
   id: string;
   name: string;
   kind: AiProviderKind;
@@ -2776,6 +2777,7 @@ export interface AiEvaluationResult {
 }
 
 export interface AiEvaluationRun {
+  providerConfigVersion?: number | null;
   id: string;
   providerId: string;
   providerNameSnapshot: string;
@@ -2819,6 +2821,7 @@ export interface AiEvaluationStatusCounts {
 }
 
 export interface AiEvaluationQualityGroup {
+  providerConfigVersion?: number | null;
   providerId: string;
   providerNameSnapshot: string;
   providerModelSnapshot: string;
@@ -2850,6 +2853,7 @@ export interface AiEvaluationQualityGroup {
 }
 
 export interface AiEvaluationTrendPoint {
+  providerConfigVersion?: number | null;
   runId: string;
   providerId: string;
   providerNameSnapshot: string;
@@ -2863,6 +2867,7 @@ export interface AiEvaluationTrendPoint {
 }
 
 export interface AiEvaluationCategoryGroup {
+  providerConfigVersion?: number | null;
   providerId: string;
   providerNameSnapshot: string;
   providerModelSnapshot: string;
@@ -2879,6 +2884,7 @@ export interface AiEvaluationCategoryGroup {
 }
 
 export interface AiEvaluationFailureGroup {
+  providerConfigVersion?: number | null;
   providerId: string;
   providerNameSnapshot: string;
   providerModelSnapshot: string;
@@ -2919,6 +2925,7 @@ export type AiEvaluationReviewDecision =
   "accepted_for_local_use" | "needs_more_evidence" | "rejected";
 
 export interface AiEvaluationReview {
+  providerConfigVersion?: number | null;
   id: string;
   providerIdSnapshot: string;
   providerNameSnapshot: string;
@@ -3050,4 +3057,10 @@ export type AiChatStreamEvent =
     }
   | { type: "done"; generationId: string }
   | { type: "cancelled"; generationId: string; partialText: string }
-  | { type: "error"; generationId: string; error: string; detail?: string };
+  | {
+      type: "error";
+      generationId: string;
+      error: string;
+      detail?: string;
+      partialText?: string;
+    };

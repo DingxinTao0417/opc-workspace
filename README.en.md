@@ -21,13 +21,13 @@
     <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
     <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
     <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
-    <img alt="SQLite schema v67" src="https://img.shields.io/badge/database-SQLite%20v67-003B57" />
+    <img alt="SQLite schema v69" src="https://img.shields.io/badge/database-SQLite%20v69-003B57" />
     <img alt="Active development" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
   </p>
 </div>
 
 > [!IMPORTANT]
-> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v67. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant and local knowledge base are developed on independent tracks outside the v0.1–v0.4 product scope.
+> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v69. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant and local knowledge base are developed on independent tracks outside the v0.1–v0.4 product scope.
 
 ## Why opc-workspace
 
@@ -59,7 +59,8 @@ Independent developers, freelancers, creators, and consultants often jump betwee
 
 - The v0.1 manual workflow is still being refined. See the [module status overview](./docs/modules/README.md) for the current implementation baseline.
 - Income, expenses, and invoicing remain future business modules and must not be treated as delivered features.
-- The independent AI assistant track includes remote/local providers, streamed replies and reasoning, a constrained harness, confirmed memory, task cards, summary/fact compaction, three memory tools, explicit business/knowledge context, validated citations, content-free run steps/usage summaries, and local-only dataset-v3 quality suites: an 8-case smoke check and a 24-case full evaluation. Trends, categories, failure codes and Wilson intervals are isolated by suite; only full runs can form an advisory human-review candidate. Evaluation history never stores prompts, knowledge text, model answers, or failure details.
+- The independent AI assistant track includes remote/local providers, streamed replies and reasoning, a constrained harness, three memory tools, segmented summary/fact compaction, explicit business/knowledge context, answer-level citations, and content-free run steps, usage summaries and UTC trends. Dataset v4 provides an 8-case smoke suite, four 6-case topic suites and a 24-case full suite. Quality evidence is grouped by provider configuration, dataset and suite; bounded fact rules, Wilson intervals and human decisions are review aids, not general semantic proofs or release approval. Missing usage stays unknown and no costs are estimated.
+- [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) adds run-wide budgets and explicit stream outcomes, application-wide stop/recovery controls, atomic task confirmation, durable memory decisions and progress through oversized history turns. Model network waits do not hold the global maintenance lock. Tasks require explicit user confirmation and domain validation; non-persistent chat text and tool memory remain in runtime memory. Automated checks use isolated fixtures; real model quality, native WebView input methods and real crash scenarios still require platform testing.
 - The local Agent area currently contains constrained Adapter registration and diagnostics only—there is no Runner, Agent Run, or executable task capability.
 - There is no cloud sync, multi-user account system, online workflow, or remote message sending.
 
@@ -129,7 +130,7 @@ flowchart TB
     Desktop["Tauri 2 / Rust<br/>Window · tray · shortcuts · Sidecar lifecycle"]
     Web["React 18 / TypeScript / WebView<br/>Pages · forms · query cache · UI state"]
     API["Go Sidecar / API v1<br/>Domain validation · transactions · scheduling · backups"]
-    Data["Local fact layer<br/>SQLite v67 · controlled files · FTS5 · backups · logs"]
+    Data["Local fact layer<br/>SQLite v69 · controlled files · FTS5 · backups · logs"]
 
     Desktop --> Web
     Web -->|"Bearer HTTP · dynamic 127.0.0.1 port"| API
@@ -156,7 +157,7 @@ docs/                     PRD, architecture, ADRs, and module documentation (Chi
 ## Documentation
 
 - [Documentation center](./docs/README.md): reading order, source-of-truth rules, and module status overview (Chinese).
-- [Product requirements, PRD v10.8](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
+- [Product requirements, PRD v10.9](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
 - [Functional architecture](./docs/functional-architecture.md): module relationships, event flows, and fact ownership (Chinese).
 - [Module documentation](./docs/modules/README.md): workflows, APIs, states, dependencies, and acceptance criteria (Chinese).
 - [Sidecar developer documentation](./services/sidecar/README.md): local API, data, and backend verification notes.

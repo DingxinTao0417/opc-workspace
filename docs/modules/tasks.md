@@ -1,6 +1,6 @@
 # 任务管理模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）；Task D2 结构仍由 schema v9 引入，schema v11 通过 Focus 精确秒数账本向 `actual_minutes` 追加完整分钟；schema v23–v25 分别为显式 follow-up Artifact、Task 阻塞与 Task 临期增加 Inbox 来源投影和删除协调 guards。schema v30 给 Submission 增加来源并交付父任务自动发起验收；schema v31 只约束 Project→Client Activity 来源，schema v32 只扩展 Reminder，schema v33 新增受限 Automation Rule/Run，schema v34 新增 Agent Adapter 诊断事实，schema v35 新增 Client Followup，均不改变 Task 表、API 或既有 manual 提交。v9.17 的 ProjectSelect 复用既有 Project API，不改变 app/API/schema 版本，也不新增迁移。
+> 实现基线：app v0.1.1 / API v1 / SQLite schema v69（2026-09-10）。Task D2 由 schema v9 引入；v11 增加 Focus 工时回写，v23–v25 增加 Artifact/阻塞/临期 Inbox 来源，v30 增加父任务自动发起验收。schema v69 为 AI 消息增加确认身份，复用 Task 创建领域事务，不改变 Task 生命周期；参见 [ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md)。
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、共享服务端 Project 选择、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox，以及有门禁的父任务自动发起验收已交付。自动建 Reminder 和本地 Agent Run 属于后续纵切。
 
@@ -163,6 +163,7 @@ accepted parent done + 子任务失效 ── system reopen ──> todo
 | 方法   | 路径                                                                  | 关键约束                                                                                |
 | ------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | POST   | `/api/v1/tasks`                                                       | 仅 todo；支持 `review_policy`; 可选稳定幂等键                                           |
+| POST   | `/api/v1/ai/messages/:id/task-confirmation`                           | 用户明确确认；共享 Task 创建校验与事务，原子关联消息，消息 ID 保证跨刷新幂等            |
 | GET    | `/api/v1/tasks/:id`                                                   | 完整 Task、关系、版本和 `ETag`                                                          |
 | PATCH  | `/api/v1/tasks/:id`                                                   | `If-Match`；不写 status；策略变化仅 todo+无历史                                         |
 | DELETE | `/api/v1/tasks/:id`                                                   | `If-Match`；先拒绝开放 Focus/活动 Inbox 关系或来源，再硬删 Task 聚合并协调来源/文件清理 |
@@ -171,6 +172,12 @@ accepted parent done + 子任务失效 ── system reopen ──> todo
 | GET    | `/api/v1/tasks/:id/events`                                            | 默认 50/最大 100；返回 Task ETag 与 `meta.task_version`                                 |
 
 批量生命周期使用与单任务命令相同的转换矩阵和领域副作用。服务端先读取并校验完整选择集的版本、状态、active assignee 和 review policy，确认全部可执行后才开始写入；complete/cancel 会结束活动 Assignment，waiting-review cancel 会撤回当前 Submission，block 会创建对应 Inbox 来源，每个 Task 都追加独立 Workflow Event。创建、改绑/解除父任务、删除，以及单条/批量 complete/cancel/reopen 和 review accept 都会在同一事务协调受影响的父任务与祖先；start/unblock 还会重算任务自身，使迁移前已经满足子任务条件但未回填的父任务可在后续明确写命令中进入待验收。批量会去重父任务并返回协调后的最终 version。阻塞/取消使用一份 1–1,000 字符统一原因，前端对六种生命周期命令均要求二次确认。批量 API 依靠 expected version 保证重试可判定，不提供单任务命令的 Idempotency-Key 重放响应。
+
+### AI 建议的任务确认（独立轨道）
+
+AI 只生成建议，不拥有任务创建成功的事实。用户在确认表单提交现有 Task 创建字段后，`POST /api/v1/ai/messages/:id/task-confirmation` 调用共享 `createTaskInTransaction`，在同一事务中完成标题、日期、标签、项目和父级校验、任务创建、父级协调及 AI 消息关联。返回 `{data:{task,message}}`，其中 message 是完整服务端快照。普通 Task 创建当前没有 `task_created` 事件；父级协调复用已有事件，不为 AI 另造业务事件或绕过 Assignment、review policy 和生命周期规则。
+
+消息 ID 是稳定的确认命令身份：相同载荷重复确认返回已有结果，不再创建任务；不同载荷冲突；已关联任务删除后返回 410，不生成替代任务。响应丢失时可读取会话消息或重试同一确认恢复结果。未确认明确显示“尚未创建”；确认后名称和入口使用 `task_id / task_title_snapshot`，模型文字不能作为成功凭证。旧 `POST /ai/messages/:id/task` 仅保留静态挂接兼容，新 UI 不再先创建再挂接。
 
 ### 提交
 
@@ -330,11 +337,13 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - 给 `task_submissions` 增加非空 `origin`，只允许 `manual / child_rollup`；既有行通过默认值保持 manual，不重写其状态、Actor、摘要或时间；
 - 约束 child_rollup 只能由内置 system 创建、必须 `is_inferred=0`，并禁止其拥有 Task Artifact；`origin` 与其他 Submission 身份事实同样不可变；
 - 不在 migration 或 Sidecar 启动时扫描、补写既有父任务层级。只有迁移后的相关 Task/Assignment/review policy 写命令触发事务内 reconciliation；
-- 不改变 Inbox 表或 `inbox_item_tasks.is_required`，不创建 demo 数据。schema v31 已追加 Project→Client Activity 来源约束，schema v32 已扩展 Reminder，schema v33 已新增受限 Automation Rule/Run，schema v34 已新增 Agent Adapter，schema v35 已新增 Client Followup；下一迁移只能从 `036_*` 追加。
+- 不改变 Inbox 表或 `inbox_item_tasks.is_required`，不创建 demo 数据。schema v31 已追加 Project→Client Activity 来源约束，schema v32 已扩展 Reminder，schema v33 已新增受限 Automation Rule/Run，schema v34 已新增 Agent Adapter，schema v35 已新增 Client Followup。这些是各版本迁移当时的变更；当前迁移链已到 v69，后续只能单调追加，不重写历史迁移。
 
 ## 已验证与后续
 
-当前自动验证覆盖：
+当前自动验证覆盖（既有历史验收与本次完整门禁分别记录；本次统一结果见 [AI7 计划](../plans/ai-quality-gates.md)）：
+
+- ADR-025 的 Task 共享创建校验、原子创建与消息绑定、重复确认、改载荷冲突、任务删除后不重建，以及前端响应丢失后恢复和真实创建结果文案；自动化使用隔离 HTTP/数据库夹具，不代表真实模型已验收。
 
 - migration v8→v9 数据保留、约束、inferred 回填、事件关联、重跑/回滚和外键恢复；
 - JSON 与 multipart 混合提交、Actor 归属、限制、并发、幂等重放和补偿；
@@ -358,7 +367,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 
 已知环境边界：当前自动协调只由迁移后的相关写命令触发，没有全库启动回填；accepted 父任务被系统重开时不会恢复已经结束的 Assignment，需要 owner 重新分派后才能继续人工流转。祖先协调使用 visited 集合防止循环，并沿完整有效祖先链传播。ClientSelect 与 ProjectSelect 均尚未完成真实浏览器键盘/焦点、窄屏和 1,000/10,000 条数据性能专项；组件测试不能替代这些证据，Project 的包含式 `LIKE` 搜索也不能仅凭有界分页推断大数据量响应性能。Windows 桌面 Rust 原生测试在未安装 MSVC linker 的主机仍可能无法执行，这不影响已通过的 Go 定向测试和前端 typecheck，但不能据此宣称完整跨平台桌面验收。
 
-仍属后续：其他业务来源投影、自动创建 Reminder、Agent Adapter/Run、自动生成 Artifact、Focus 高级分析、Client 外部来源/回访/财务，以及 AI 助手与知识库；显式 follow-up Artifact、Task 阻塞与 Task 临期来源已经交付。
+仍属后续：其他业务来源投影、自动创建 Reminder、Agent Runner/Run、自动生成 Artifact 与 Client 外部来源等。显式 follow-up Artifact、Task 阻塞与 Task 临期来源已交付；Agent Adapter 注册/诊断、Focus 统计分析、客户回访、财务，以及独立轨道 AI 助手与本地知识库文本基线也已有对应模块实现，不能继续统称未开始。AI 的人工确认创建不代表自主 Agent 执行。
 
 ## 相关代码/PRD 链接
 
@@ -376,6 +385,9 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
 - [父任务自动推进服务](../../services/sidecar/internal/api/task_parent_progress.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)
+- [共享 Task 创建领域逻辑](../../services/sidecar/internal/api/task_creation.go)
+- [AI 任务原子确认 API](../../services/sidecar/internal/api/ai_task_confirmation.go)
+- [ADR-025：可靠性与确认事务](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md)
 - [Task 保存视图 API](../../services/sidecar/internal/api/task_saved_views.go)
 - [schema v17 保存视图迁移](../../services/sidecar/internal/database/migrations/017_task_saved_views.sql)
 - [Task output model](../../services/sidecar/internal/models/artifact.go)

@@ -13,6 +13,7 @@ type AIProvider struct {
 	HasKey          bool    `gorm:"column:has_key" json:"has_key"`
 	LastHealthAt    *string `gorm:"column:last_health_at" json:"last_health_at"`
 	Version         int64   `gorm:"column:version" json:"version"`
+	ConfigVersion   int64   `gorm:"column:config_version;default:1" json:"config_version"`
 	CreatedAt       string  `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt       string  `gorm:"column:updated_at" json:"updated_at"`
 }

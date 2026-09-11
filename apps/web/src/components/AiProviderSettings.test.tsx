@@ -632,7 +632,7 @@ describe("AiProviderSettings", () => {
 
     expect(screen.getAllByText(/有依据回答/)).toHaveLength(3);
     expect(screen.getAllByText(/资料不足/)).toHaveLength(3);
-    expect(screen.getAllByText("缺少必要事实")).toHaveLength(2);
+    expect(screen.getAllByText("缺少指定关键词（旧口径）")).toHaveLength(2);
     expect(screen.getByText(/64 → 16 tokens/)).toBeTruthy();
     expect(screen.getByText(/token unknown/)).toBeTruthy();
     expect(screen.getAllByText("75%")).toHaveLength(2);

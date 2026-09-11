@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useState } from "react";
-import { ApiError } from "../api/client";
+import { ApiError, aiEvaluationQualityGroupKey } from "../api/client";
 import {
   useAiMemoriesQuery,
   useAiMemoryProposalsQuery,
@@ -141,7 +141,7 @@ const aiEvaluationReviewDecisionLabels: Record<
 };
 
 function aiEvaluationGroupKey(group: AiEvaluationQualityGroup) {
-  return `${group.providerId}:${group.providerNameSnapshot}:${group.providerModelSnapshot}:${group.datasetVersion}:${group.suiteKey}`;
+  return aiEvaluationQualityGroupKey(group);
 }
 
 function readinessReasonLabel(
@@ -704,7 +704,9 @@ const aiEvaluationFailureLabels: Record<string, string> = {
   ANSWER_EMPTY: "回答为空",
   CONTROL_BLOCK_LEAKED: "内部控制块泄露",
   CITATION_STATUS_MISMATCH: "引用状态不符",
-  REQUIRED_PHRASE_MISSING: "缺少必要事实",
+  REQUIRED_PHRASE_MISSING: "缺少指定关键词（旧口径）",
+  FACT_MISSING: "未识别到要求的事实表达",
+  FACT_CONTRADICTED: "发现事实否定或矛盾表达",
   FORBIDDEN_PHRASE_PRESENT: "出现禁止结论",
   CITATION_NOT_ALLOWED: "引用越权",
   CITATION_DUPLICATE: "重复引用",
@@ -731,6 +733,8 @@ function AiEvaluationHistory({
           <p>
             显式运行 8-case 快速、6-case 专题或当前 24-case
             完整评测；只调用已就绪的本地 Provider，不保存问题、资料或模型回答。
+            v4
+            使用生产提示词与自检。引用结构、关键词和有界事实规则分别检查；规则通过不等于通用语义正确，最终判断仍需人工评审。
           </p>
         </span>
         <button
@@ -835,10 +839,13 @@ function AiEvaluationReviewHistory({
                 </strong>
                 <small>
                   dataset v{review.datasetVersion} ·{" "}
-                  {aiEvaluationSuiteLabels[review.suiteKey]}套件 · Provider v
+                  {aiEvaluationSuiteLabels[review.suiteKey]}套件 · ETag v
                   {review.providerVersionMin === review.providerVersionMax
                     ? review.providerVersionMin
                     : `${review.providerVersionMin}–${review.providerVersionMax}`}
+                  {review.providerConfigVersion != null
+                    ? ` · 配置 v${review.providerConfigVersion}`
+                    : " · 历史配置身份未知"}
                 </small>
               </div>
               <p>{review.reason}</p>
@@ -934,6 +941,9 @@ function AiEvaluationTrend({
                       dataset v{group.datasetVersion} ·{" "}
                       {aiEvaluationSuiteLabels[group.suiteKey]}套件 ·{" "}
                       {group.runCount} 次完整运行
+                      {group.providerConfigVersion != null
+                        ? ` · 配置 v${group.providerConfigVersion}`
+                        : " · 历史配置身份未知"}
                     </small>
                   </span>
                   <span>
@@ -1113,9 +1123,7 @@ function AiEvaluationTrend({
             <h5>按类别</h5>
             <div>
               {query.data.groups.map((group) => (
-                <section
-                  key={`${group.providerId}:${group.providerNameSnapshot}:${group.providerModelSnapshot}:${group.datasetVersion}:${group.suiteKey}`}
-                >
+                <section key={aiEvaluationGroupKey(group)}>
                   <header>
                     {group.providerModelSnapshot} · v{group.datasetVersion} ·{" "}
                     {aiEvaluationSuiteLabels[group.suiteKey]}
@@ -1123,13 +1131,8 @@ function AiEvaluationTrend({
                   {query.data.categories
                     .filter(
                       (category) =>
-                        category.providerId === group.providerId &&
-                        category.providerNameSnapshot ===
-                          group.providerNameSnapshot &&
-                        category.providerModelSnapshot ===
-                          group.providerModelSnapshot &&
-                        category.datasetVersion === group.datasetVersion &&
-                        category.suiteKey === group.suiteKey,
+                        aiEvaluationQualityGroupKey(category) ===
+                        aiEvaluationGroupKey(group),
                     )
                     .map((category) => {
                       const score = Math.round(
@@ -1169,19 +1172,12 @@ function AiEvaluationTrend({
                   .filter((group) =>
                     query.data.failureCodes.some(
                       (failure) =>
-                        failure.providerId === group.providerId &&
-                        failure.providerNameSnapshot ===
-                          group.providerNameSnapshot &&
-                        failure.providerModelSnapshot ===
-                          group.providerModelSnapshot &&
-                        failure.datasetVersion === group.datasetVersion &&
-                        failure.suiteKey === group.suiteKey,
+                        aiEvaluationQualityGroupKey(failure) ===
+                        aiEvaluationGroupKey(group),
                     ),
                   )
                   .map((group) => (
-                    <section
-                      key={`${group.providerId}:${group.providerNameSnapshot}:${group.providerModelSnapshot}:${group.datasetVersion}:${group.suiteKey}`}
-                    >
+                    <section key={aiEvaluationGroupKey(group)}>
                       <header>
                         {group.providerModelSnapshot} · v{group.datasetVersion}{" "}
                         · {aiEvaluationSuiteLabels[group.suiteKey]}
@@ -1189,13 +1185,8 @@ function AiEvaluationTrend({
                       {query.data.failureCodes
                         .filter(
                           (failure) =>
-                            failure.providerId === group.providerId &&
-                            failure.providerNameSnapshot ===
-                              group.providerNameSnapshot &&
-                            failure.providerModelSnapshot ===
-                              group.providerModelSnapshot &&
-                            failure.datasetVersion === group.datasetVersion &&
-                            failure.suiteKey === group.suiteKey,
+                            aiEvaluationQualityGroupKey(failure) ===
+                            aiEvaluationGroupKey(group),
                         )
                         .map((failure) => (
                           <div key={failure.failureCode}>

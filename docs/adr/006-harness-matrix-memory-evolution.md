@@ -1,5 +1,7 @@
 # ADR-006：Harness 完整组件矩阵与自进化边界
 
+> 后续修订：[ADR-025](025-ai-reliability-confirmations-and-evaluation-identity.md) 接续运行预算/锁、确认事务/隐私、部分压缩进度及评测配置身份。本文保留当时决策与验证记录；当前行为以 ADR-025 和模块文档为准。
+
 - 状态：已接受（agent harness 能力扩展纵切实施）
 - 日期：2026-09-03
 - 对应任务：[harness 分阶段计划](../plans/agent-harness-phases.md)（F 阶段组）

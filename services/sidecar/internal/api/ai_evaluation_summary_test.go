@@ -22,6 +22,7 @@ func seedEvaluationSummaryVersionedRun(
 	datasetVersion, totalCases int,
 	suiteKey string,
 	completedAt string,
+	configVersions ...*int64,
 ) models.AIEvaluationRun {
 	t.Helper()
 	startedAt := completedAt
@@ -32,6 +33,9 @@ func seedEvaluationSummaryVersionedRun(
 		SuiteKey:   suiteKey,
 		TotalCases: totalCases, CompletedCases: totalCases, PassedCases: totalCases,
 		StartedAt: &startedAt, CompletedAt: &completedAt, CreatedAt: completedAt, UpdatedAt: completedAt,
+	}
+	if len(configVersions) > 0 {
+		run.ProviderConfigVersion = configVersions[0]
 	}
 	if err := store.DB.Create(&run).Error; err != nil {
 		t.Fatalf("create dataset v%d summary run: %v", datasetVersion, err)
@@ -186,7 +190,7 @@ func TestAIEvaluationSummarySeparatesStatusAndDatasetModelGroups(t *testing.T) {
 	}) {
 		t.Fatalf("summary uncertainty = %#v", data.Uncertainty)
 	}
-	if data.ReadinessPolicy.Mode != "advisory" || data.ReadinessPolicy.CurrentDatasetVersion != 3 ||
+	if data.ReadinessPolicy.Mode != "advisory" || data.ReadinessPolicy.CurrentDatasetVersion != 4 ||
 		data.ReadinessPolicy.RequiredSuite != aieval.SuiteFull ||
 		data.ReadinessPolicy.MinimumCompletedRuns != 3 || data.ReadinessPolicy.MinimumOverallLowerBPS != 8000 ||
 		data.ReadinessPolicy.MinimumCategoryLowerBPS != 6000 ||
@@ -282,7 +286,7 @@ func TestAIEvaluationSummaryKeepsDatasetVersionsSeparate(t *testing.T) {
 	router, store, provider := newAIEvaluationTestRouter(t, &scriptedEvaluationClient{})
 	seedEvaluationSummaryRun(t, store, provider, provider.Model, "succeeded", "2026-09-09T09:00:01Z", 4, 0, 0)
 	seedEvaluationSummaryVersionedRun(t, store, provider, 2, 12, aieval.SuiteFull, "2026-09-09T09:00:02Z")
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 24, aieval.SuiteFull, "2026-09-09T09:00:03Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 24, aieval.SuiteFull, "2026-09-09T09:00:03Z")
 
 	response := performRequest(router.Engine, http.MethodGet, "/api/v1/ai/evaluation-summary?provider_id="+provider.ID, nil, nil)
 	if response.Code != http.StatusOK {
@@ -302,24 +306,24 @@ func TestAIEvaluationSummaryKeepsDatasetVersionsSeparate(t *testing.T) {
 		groups[group.DatasetVersion] = group
 	}
 	if groups[1].TotalCases != 4 || groups[1].PassedCases != 4 || groups[2].TotalCases != 12 || groups[2].PassedCases != 12 ||
-		groups[3].TotalCases != 24 || groups[3].PassedCases != 24 {
+		groups[4].TotalCases != 24 || groups[4].PassedCases != 24 {
 		t.Fatalf("versioned summary groups = %#v", groups)
 	}
-	if groups[1].WilsonLowerBPS != 5101 || groups[2].WilsonLowerBPS != 7575 || groups[3].WilsonLowerBPS != 8620 {
+	if groups[1].WilsonLowerBPS != 5101 || groups[2].WilsonLowerBPS != 7575 || groups[4].WilsonLowerBPS != 8620 {
 		t.Fatalf("versioned summary intervals = %#v", groups)
 	}
 	if groups[1].ReadinessStatus != "insufficient_evidence" || !reflect.DeepEqual(groups[1].ReadinessReasons, []string{"OUTDATED_DATASET"}) ||
 		groups[2].ReadinessStatus != "insufficient_evidence" || !reflect.DeepEqual(groups[2].ReadinessReasons, []string{"OUTDATED_DATASET"}) ||
-		groups[3].ReadinessStatus != "insufficient_evidence" || !reflect.DeepEqual(groups[3].ReadinessReasons, []string{"RUN_COUNT_LOW"}) {
+		groups[4].ReadinessStatus != "insufficient_evidence" || !reflect.DeepEqual(groups[4].ReadinessReasons, []string{"RUN_COUNT_LOW"}) {
 		t.Fatalf("versioned summary readiness = %#v", groups)
 	}
 }
 
 func TestAIEvaluationSummaryKeepsDiagnosticAndFullSuitesSeparate(t *testing.T) {
 	router, store, provider := newAIEvaluationTestRouter(t, &scriptedEvaluationClient{})
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 8, aieval.SuiteSmoke, "2026-09-09T09:00:01Z")
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 6, aieval.SuiteGrounded, "2026-09-09T09:00:02Z")
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 24, aieval.SuiteFull, "2026-09-09T09:00:03Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 8, aieval.SuiteSmoke, "2026-09-09T09:00:01Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 6, aieval.SuiteGrounded, "2026-09-09T09:00:02Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 24, aieval.SuiteFull, "2026-09-09T09:00:03Z")
 
 	response := performRequest(router.Engine, http.MethodGet, "/api/v1/ai/evaluation-summary?provider_id="+provider.ID, nil, nil)
 	if response.Code != http.StatusOK {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -27,6 +28,13 @@ type aiMemoryTool struct {
 	api       *API
 	sessionID string
 	name      string
+	ephemeral *aiEphemeralMemory
+}
+
+// Shared only by the three tools in one run; it is never serialized or logged.
+type aiEphemeralMemory struct {
+	mu      sync.Mutex
+	entries []models.AIMemoryEntry
 }
 
 func (t *aiMemoryTool) Name() string { return t.name }
@@ -58,6 +66,16 @@ func (t *aiMemoryTool) InputSchema() json.RawMessage {
 }
 
 func (t *aiMemoryTool) Execute(ctx context.Context, arguments json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if t.api.maintenance != nil {
+		t.api.maintenance.RLock()
+		defer t.api.maintenance.RUnlock()
+	}
+	if t.api.restorePending.Load() {
+		return "", errors.New("workspace restore is pending")
+	}
 	switch t.name {
 	case "memory_write":
 		return t.write(ctx, arguments, "session_fact", "agent", aiSessionFactMaxRunes, aiSessionFactMaxBytes)
@@ -90,6 +108,32 @@ func (t *aiMemoryTool) write(ctx context.Context, arguments json.RawMessage, kin
 	}
 	tagsJSON, _ := json.Marshal(tags)
 	now := nowStamp(t.api)
+	if t.ephemeral != nil {
+		t.ephemeral.mu.Lock()
+		defer t.ephemeral.mu.Unlock()
+		var entry models.AIMemoryEntry
+		for _, existing := range t.ephemeral.entries {
+			if existing.Kind == kind && existing.Content == content && existing.Tags == string(tagsJSON) {
+				entry = existing
+				break
+			}
+		}
+		if entry.ID == "" {
+			if len(t.ephemeral.entries) >= aiMemorySearchMaxRows {
+				return "", errors.New("temporary memory capacity reached")
+			}
+			entry = models.AIMemoryEntry{ID: uuid.NewString(), SessionID: t.sessionID, Kind: kind, Content: content, Tags: string(tagsJSON), Origin: origin, Status: "active", CreatedAt: now, UpdatedAt: now}
+			t.ephemeral.entries = append(t.ephemeral.entries, entry)
+		}
+		result := map[string]any{"entry_id": entry.ID, "kind": kind, "status": "active", "persistence": "temporary"}
+		if kind == "memory_proposal" {
+			result["content"] = content
+			result["confirmation_required"] = true
+			result["instruction"] = "仅当前运行保留；永久记忆需要用户另行明确确认，输出不带 proposal_id 的记忆建议"
+		}
+		encoded, _ := json.Marshal(result)
+		return string(encoded), nil
+	}
 	var entry models.AIMemoryEntry
 	err = t.api.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Where(
@@ -169,7 +213,11 @@ func (t *aiMemoryTool) search(ctx context.Context, arguments json.RawMessage) (s
 	}
 
 	var entries []models.AIMemoryEntry
-	if err := t.api.db.WithContext(ctx).
+	if t.ephemeral != nil {
+		t.ephemeral.mu.Lock()
+		entries = append(entries, t.ephemeral.entries...)
+		t.ephemeral.mu.Unlock()
+	} else if err := t.api.db.WithContext(ctx).
 		Where("session_id = ? AND status = 'active' AND kind IN ?", t.sessionID, []string{"context_snapshot", "session_fact"}).
 		Order("created_at DESC, id DESC").Limit(aiMemorySearchMaxRows).Find(&entries).Error; err != nil {
 		return "", safeAIMemoryToolStorageError(ctx)
@@ -189,7 +237,7 @@ func (t *aiMemoryTool) search(ctx context.Context, arguments json.RawMessage) (s
 			Tags: entryTags, CreatedAt: entry.CreatedAt,
 		})
 	}
-	if len(tags) == 0 {
+	if len(tags) == 0 && t.ephemeral == nil {
 		var messages []models.AIMessage
 		like := "%" + escapeLike(query) + "%"
 		if err := t.api.db.WithContext(ctx).
@@ -290,10 +338,24 @@ func boundedAIMemorySearchContent(content string) string {
 	return string(runes)
 }
 
-func (a *API) aiMemoryToolRegistry(sessionID string) (*harness.Registry, error) {
+func (a *API) aiMemoryToolRegistry(sessionID string, persist ...bool) (*harness.Registry, error) {
+	durable := true
+	if len(persist) > 0 {
+		durable = persist[0]
+	} else {
+		var session models.AISession
+		if err := a.db.Select("persist").Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return nil, err
+		}
+		durable = session.Persist
+	}
+	var ephemeral *aiEphemeralMemory
+	if !durable {
+		ephemeral = &aiEphemeralMemory{}
+	}
 	return harness.NewRegistry(
-		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_search"},
-		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_write"},
-		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_propose"},
+		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_search", ephemeral: ephemeral},
+		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_write", ephemeral: ephemeral},
+		&aiMemoryTool{api: a, sessionID: sessionID, name: "memory_propose", ephemeral: ephemeral},
 	)
 }

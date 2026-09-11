@@ -2,7 +2,7 @@
 
 > 依据：[ADR-011](../adr/011-ai-validated-knowledge-citations.md)、[ADR-012](../adr/012-ai-run-steps-and-local-metrics.md)、[ADR-013](../adr/013-ai-local-quality-evaluation-runner.md)、[ADR-014](../adr/014-ai-local-quality-trends.md)、[ADR-015](../adr/015-ai-local-quality-categories.md)、[ADR-016](../adr/016-ai-local-quality-failure-codes.md)、[ADR-017](../adr/017-ai-local-quality-dataset-v2.md)、[ADR-018](../adr/018-ai-local-quality-confidence-intervals.md)、[ADR-019](../adr/019-ai-local-quality-advisory-readiness.md)、[ADR-020](../adr/020-ai-local-quality-dataset-v3.md)、[ADR-021](../adr/021-ai-local-quality-tiered-suites.md)、[ADR-022](../adr/022-ai-local-quality-human-review-audit.md)、[ADR-023](../adr/023-ai-local-quality-topic-suites.md)、[ADR-024](../adr/024-ai-local-usage-time-trends.md)、[AI 助手模块](../modules/ai-assistant.md)
 >
-> 当前状态（2026-09-09）：AI7-Q1 已完成；Q2 当前范围已交付离线 scorer、本地 Provider Actor、dataset v3、8-case smoke/四类 6-case topic/24-case full、suite 隔离趋势/category/failure/Wilson、只读人工评审候选与不可变人工决定审计；Q3 已交付 run steps、Provider token/unknown、本地聚合与 UTC 时间趋势，费用仍待。Q4 自动路由及更多协议尚未完成。
+> 当前状态（2026-09-10）：Q1 回答级 citation；Q2 本地 Actor、dataset v4/24、6/8/24 套件、配置身份分组/趋势/category/failure/Wilson/人工审计；Q3 无正文 steps/原始 token/unknown/UTC 趋势已实现。[ADR-025](../adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 的运行、确认、恢复和隐私修复已完成本地实现及自动化验证；完整 Go 保留 5 个已确认基线失败，未宣称全绿。费用、句子级证据覆盖、Q4 自动路由/更多协议仍待后续，F4 未授权。
 
 ## 分阶段
 
@@ -29,7 +29,9 @@
 - AI6 金链覆盖 preview→chat→clean answer→validated snapshot→history，引用 metadata 来自 Sidecar，正文不复制。
 - Web 严格解析引用状态与 items；历史展示来源卡，缺失/非法/无答案给出不同反馈；流式完整/半截块不显示。
 
-### 本轮验证记录
+### 历史阶段验证记录（截至 ADR-024）
+
+以下保留各阶段当时的测试数字及真机观察，不是本轮 schema 069 的验收结果。其中“两条 Automation 基线失败”的历史描述已被本轮复验更新为 5 个顶层失败，详见后面的 ADR-025 验证记录。
 
 - 完整 Web 门禁通过：121 个测试文件、1,109 项测试，typecheck 与 production build 成功；仅有既有 bundle size warning。
 - schema 060 迁移与完整 database 包通过；AI citation/AI6 金链 race 专项及 `go vet ./...` 通过。
@@ -71,7 +73,54 @@
 - ADR-024 完整 Web 门禁通过：122 个测试文件、1,123 项测试、typecheck 与 production build 成功；仅保留既有 bundle size warning。UTC trend API race 专项、`go vet ./...`、55 个 Markdown 文件/本地链接、gofmt 与 diff 检查通过。完整 Go 仍只有两条已确认 Automation Event Delivery 基线失败，其他包通过。
 - 真实本地 Sidecar/schema 067 + Web 用量趋势检查通过：受控 root steps 在 7 天窗口显示 `09/03`、`09/07`、`09/09` 的终态运行、两天 Provider usage 和一天 unknown，中间零日未省略；切换 30 天后窗口连续扩展且累计 `200 in / 50 out`、`9.0 s` 不变。390×844 视口隐藏会话 rail 但提供会话选择/新建控制，趋势浮层与主栏等宽，30 天列表限高滚动；费用说明仍明确“不估算 token，也不计算费用”。临时环境已停止并移入废纸篓。
 
-## Q2 建议数据结构
+## ADR-025 修复与验证记录（2026-09-10）
+
+审查基线：`feature/ai-assistant@34b197c`，开始时工作树干净。本轮不提交/推送/部署，不访问真实或付费模型，不启动正式工作区服务。
+
+### 问题、根因与修复结果
+
+| 问题                                       | 根因                                                                   | 本轮结果                                                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| 慢模型连带阻塞任务查询/取消                | HTTP 维护读锁跨模型等待，禁用备份扫描仍排队取写锁；Provider 锁同样过长 | 网络等待释放全局锁；扫描先判定启用/到期，再在写锁内重验；取消绕过维护排队，恢复屏障取消活动工作                             |
+| 多轮可以反复获得预算                       | 超时与响应字节上限仅在每次模型调用初始化                               | 一个 generation 共享 10 分钟/1 MiB，覆盖模型、工具结果、自检修订；不同耗尽和协议错误有稳定码                                |
+| 切页后运行不可见，旧恢复覆盖新发送         | controller 与草稿归页面组件，异步回读没有代次所有权                    | 应用级状态/全局停止，服务端活动与 request-key 回读；恢复 epoch 防竞态，临时回合仅在有界内存保留                             |
+| 异常历史卡崩溃、协议文本外露               | JSON 被直接当对象；闭合格式与模型输出不一致                            | null/数组/错误字段/重复/未闭合安全处理；控制文本隐藏，卡片由真实状态决定自然语言反馈                                        |
+| 自检未知被当充分，流中断被当成功，用量漏读 | 提示词示例缺闭合；缺失/非法默认通过；EOF 与 stop 即返回                | 真实提示/解析一致；充分、不足、不可用分离；无终态 EOF/截断/取消保留片段但不报完整，stop 后继续读取 usage，缺失仍 unknown    |
+| 创建任务后关联失败导致重复                 | 创建和挂接分两次请求，只靠组件内 task ID                               | 消息 ID 是稳定确认身份；共享任务领域事务创建并静态绑定；同载荷重试回读，改参冲突，删除后 410                                |
+| 草稿丢失、确认状态刷新丢失、IME 误发       | 发送前清空、本地忽略状态、未检查 composition                           | 接受前失败/取消保留草稿及上下文，不覆盖新编辑；记忆真实拒绝与持久决定、旧消息身份兼容；composition Enter 不发送             |
+| 大回合永久卡住压缩                         | 最老回合超过整批上限时零候选，没有部分进度                             | UTF-8 有界分段与 durable offset，事务替换快照；失败/取消/配置改变不跳水位线，API/UI 显示部分进度和滞后                      |
+| 非持久会话经工具写入正文                   | 记忆工具未继承 persist 契约                                            | 三工具共享运行内内存；成功/失败/取消不存正文、提议或摘要；永久记忆独立人工确认，无持久消息身份的临时卡片只读                |
+| 健康检查使历史评测永久混组，关键词误判     | HTTP 行版本承担模型配置身份；词语出现即视为事实                        | 独立 config_version，旧审计与 NULL 身份不改写；dataset v4 分离结构、关键词、有界事实规则和人工判断，支持别名/否定/冲突回归  |
+| 产品/架构/计划口径滞后                     | 后续交付未接续旧状态、表数/迁移/接口描述                               | 现行文档统一 schema 69、十张 AI 表、citation/Adapter/steps/评测已交付；旧 ADR 保留并链接 ADR-025，不把 validated 当语义证明 |
+
+### 自动化证据
+
+已验证的纵切：
+
+- 慢模型/评测/健康探测释放维护与 Provider 锁，禁用备份扫描不阻塞核心查询；取消及安排恢复不持锁等待。
+- 空值/非对象控制块、尾帧 usage、无终态 EOF、取消/截断、整次多轮及修订共享预算；系统提示真实 selfcheck 示例与解析器一致。交叉审查再补“明确 insufficient 但无正文/仅空白”先红后绿回归，不记为成功、不启动空修订。
+- 真实 HTTP 的原子任务确认、并发 8 次仍单 Task、消息绑定失败全部回滚、改参冲突及 Task 删除后 410。
+- 新旧记忆确认/拒绝回读；迁移前旧记忆删除先固化确认决定，幂等缓存回放重验真实记忆存在，删除后不误报保存成功或重建。
+- 临时会话记忆工具只用内存；持久消息与上下文、generation、失败/取消正文按 persist 分支处理。补充生产 HTTP→Harness→两个 memory tool→模型终态整链回归，覆盖成功、无终态 EOF、取消；检查全库各表字段、API 日志及 SQLite/WAL 字节均无唯一正文标记。永久记忆须独立确认。
+- 超 32 KiB 大回合含中文/转义的有界分段、连续推进、失败重试精确余段、配置变化/取消不推进，以及部分消息重入滚动窗口仍可继续。
+- 健康/改名/同密钥不改变 config identity，真实配置变化独立分组，旧审计逐列保留及 NULL 身份；v4 的否定/冲突/改写规则与生产 Prompt/Harness/回环 HTTP/自检修订/usage 链。
+- Web 真实 Hook/SSE/HTTP/页面测试覆盖任务响应丢失、旧记忆状态、上下文版本失败草稿、输入法、全局停止与恢复；交叉审查补齐恢复代次、旧 404、接受前停止、临时成功回答跨页保留及无正文终态的 incomplete 回归。内存上限 20 回合 / 8 MiB，无持久 message ID 的记录只读，刷新不保留正文。
+
+最终门禁结果：
+
+- 最终 `pnpm check:web`（typecheck / test:web / build:web）通过：125 文件 / 1177 测试；构建主 chunk 1,239.58 kB，仍有既有 chunk size warning，没有新增构建错误。
+- `go test ./internal/api -run '^TestNonPersistentChatToolsDoNotLeakBodiesAcrossTerminalPaths$' -count=3` 通过，三种终态各重复三轮；`go test ./internal/harness -count=3` 通过，包含最终空正文 selfcheck 修复。
+- 最终 Harness 改动后再执行 `go test ./internal/api -run '^(TestAIChat|TestAIEvaluationUsesProductionPromptProtocolAndHarnessRevision|TestNonPersistentChatToolsDoNotLeakBodiesAcrossTerminalPaths)' -count=1`，19.013 秒通过，覆盖现有聊天、生产评测修订链和临时会话三种终态。
+- `go test ./internal/database -count=1` 已通过；schema 068/069 定向保留/约束测试通过；业务 schema v67/v68→69 及既有兼容路径测试通过。
+- `go -C services/sidecar test -count=1 ./...` 实际执行结束，exit 1；API 394.215 秒、database 66.648 秒，只有下述 5 个已确认基线顶层失败，其余包通过。最终追加的隐私测试与空正文自检回归另行重复验证；未将补测冒充先前完整 Go 快照中的结果。
+- 最终 `go vet ./...`、`pnpm build:sidecar` 均通过，构建标识 `34b197cfdd8c-dirty`。`pnpm format:check`（Prettier / 321 个 Go 文件 / Rust fmt）、`pnpm check:docs`（56 份 Markdown 与本地链接）、`git diff --check` 通过。纯换行规范化未产生无关业务差异。
+- 基线 5 个顶层测试已单独复验，失败内容与审查一致：`TestAutomationEventDeliveryReplayDoesNotRecaptureCompletedRunAfterRuleEdit`、`TestDisabledEventAutomationRunStillRetriesWhenDue`（record not found）；`TestAutomationBusinessImportPreflightAndApplyAcceptsPortableRunHistory`（JSON/ZIP 的 IMPORT_ROW_INVALID）；`TestAutomationBusinessImportPreflightRejectsInvalidRunGraphsWithoutSideEffects`、`TestAutomationBusinessPackagePreflightRejectsInvalidRunGraphWithoutSideEffects`（无有效导入基线）。未删、跳过或弱化这些测试。
+
+尚未验证：真实模型效果、Windows 原生 IME/WebView 与真实网络断连/父进程崩溃。测试夹具和模拟输入不能替代这些真机证据。本机 `CGO_ENABLED=0` 且无 C 编译器，`-race` 无法运行，普通并发测试已通过；没有安装额外编译环境。运行状态/草稿的纯内存保存不承诺硬刷新恢复正文；临时会话永久动作需单独明确确认。
+
+资源：测试使用 TempDir/httptest，正常路径自动清理，测试进程均已结束。未启动正式工作区服务，检查 1420/9876 无监听；未操作正式用户数据库。Web dist 与 Sidecar 二进制为正常忽略的构建产物，保留。后端门禁完整日志、先红后绿回归及退出码保留在 `C:\Users\20825\AppData\Local\Temp\opc-ai-backend-gate-d980c64cb4154689a05e607529378dd2` 供审计。一次失败 fixture 的临时目录 `C:\Users\20825\AppData\Local\Temp\TestAIConfigurationIdentityMigrationPreservesLegacyAudit2391747045` 清理被工具策略拒绝，目录仍保留，无运行进程；不包含真实用户/模型数据，此项未声称已清理。Git 保持 `feature/ai-assistant` / `34b197cfdd8c`，全部功能改动未暂存、未提交、未推送、未部署。
+
+## Q2 当前数据结构
 
 首个制品已放在 `internal/aieval/testdata/knowledge_quality_cases.json`，不进入用户数据库，记录：
 
@@ -83,4 +132,4 @@
 
 `internal/aieval` 已提供严格数据集校验、单 case `Evaluate` 和稳定排序的 `EvaluateAll`。当前四类 good observations 全通过；坏观察会稳定报告 case mismatch、控制块泄露、必需事实缺失、禁止事实出现、citation 状态/allowlist/重复/数量/集合错误以及 observation 缺失。
 
-ADR-013 已实现真实**本地**模型 runner；ADR-014–020 已交付 dataset v3、趋势、category、failure-code、Wilson 和人工评审候选；ADR-021 已提供 8-case smoke 与 24-case full 并按 suite 隔离；ADR-022 已提供对精确证据快照的不可变人工决定与理由审计；ADR-023 已提供四个各 6-case 的 category 专题套件。同一个 case 可贡献多个原因，因此各 code affected 不得相加冒充唯一失败 case；重复同一 case 也不得当作新的事实覆盖。当前不开放任意 case 选择。任何自动动作仍需单独设计。
+ADR-013 已实现真实**本地**模型 runner，ADR-025 接入生产系统提示与 Harness 并升级 dataset v4。结构、关键词、有界事实别名/否定/冲突规则和人工评审明确分层；FACT_MISSING/FACT_CONTRADICTED 不冒充通用语义判定，后者进入严重 code。新 Run/summary/review 按真实配置身份、dataset、suite 隔离，旧 NULL 身份/审计不改写。套件仍为 8-case smoke、四类各 6-case topic、24-case full；同一个 case 可贡献多个原因，affected 不能相加冒充唯一失败数，重复 case 不增加事实覆盖。只在 full 上产生人工候选，不开放任意 case 或自动动作。

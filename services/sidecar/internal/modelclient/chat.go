@@ -33,8 +33,8 @@ const SystemPrompt = `你是 opc-workspace 的本地 AI 助手，只提供问答
 [opc:citations]{"chunk_ids":["实际用于回答的 chunk_id"]}[/opc:citations]
 - chunk_ids 只能来自本条消息提供的片段，最多 3 个且不得重复；没有可靠证据时自然语言明确说明，并输出空数组。没有知识片段时绝不输出引用块。
 - 每次回答结束前，自评该回答是否已完整、准确地满足用户的请求（含工具输出是否足以支撑结论），并在回复最末尾输出自评块，格式严格为二选一：
-[opc:selfcheck]{"sufficient":true}
-[opc:selfcheck]{"sufficient":false,"note":"未满足之处的简要说明"}
+[opc:selfcheck]{"sufficient":true}[/opc:selfcheck]
+[opc:selfcheck]{"sufficient":false,"note":"未满足之处的简要说明"}[/opc:selfcheck]
 - 自评基于你自己的判断独立完成；确有不足才输出 false 并给出简要 note。
 - 任务/记忆建议块必须使用带斜杠的闭合标记；普通自然语言回答可按用户需要使用 Markdown、JSON 或代码块，但不得伪造其他 opc 控制块。`
 
@@ -58,6 +58,13 @@ var ErrPromptTooLarge = errors.New("modelclient: prompt exceeded byte budget")
 
 // ErrStream reports the upstream stream broke or exceeded its size cap.
 var ErrStream = errors.New("modelclient: stream error")
+
+var (
+	ErrIncompleteStream = fmt.Errorf("%w: upstream closed without a completion event", ErrStream)
+	ErrTruncated        = fmt.Errorf("%w: upstream response was truncated", ErrStream)
+	ErrFiltered         = fmt.Errorf("%w: upstream response was filtered", ErrStream)
+	ErrResponseBudget   = fmt.Errorf("%w: generation exceeded its response byte budget", ErrStream)
+)
 
 // UpstreamStatusError reports a non-2xx chat completion response; it wraps
 // ErrStream so generic stream handling keeps working while the status stays
@@ -115,6 +122,12 @@ type Usage struct {
 // calls use the package default while internal jobs such as context
 // compaction provide a dedicated prompt.
 type PromptContext struct {
+	// ResponseByteLimit is the remaining run budget; zero uses the default.
+	// It is local bookkeeping and is never serialized in the model request.
+	ResponseByteLimit int
+	// OnResponseBytes observes accepted bytes, including partial tool calls
+	// that cannot yet be finalized. This callback never enters the payload.
+	OnResponseBytes  func(int)
 	SystemPrompt     string
 	Memories         []string
 	Summary          string
@@ -181,6 +194,11 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 	}
 
 	total := 0
+	responseLimit := promptContext.ResponseByteLimit
+	if responseLimit <= 0 || responseLimit > MaxResponseBytes {
+		responseLimit = MaxResponseBytes
+	}
+	openAIStopped := false
 	gotFirst := false
 	toolCalls := newToolCallAccumulator()
 	usage := providerUsageAccumulator{}
@@ -216,15 +234,15 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 		}
 		data = strings.TrimSpace(data)
 		if data == "[DONE]" {
+			if protocol != ProtocolOpenAIChat {
+				return fmt.Errorf("%w: unexpected DONE sentinel", ErrStream)
+			}
 			return finish()
 		}
 		usage.apply(protocol, data)
 		delta, reasoning, toolBytes, stop, err := decodeStreamDelta(protocol, data, toolCalls)
-		if err != nil {
-			return redactModelClientError(err, apiKey)
-		}
 		hasActivity := delta != "" || reasoning != "" || toolBytes > 0
-		if !hasActivity && !stop {
+		if !hasActivity && !stop && err == nil {
 			continue
 		}
 		if hasActivity && !gotFirst {
@@ -232,8 +250,11 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 			gotFirst = true
 		}
 		total += len(delta) + len(reasoning) + toolBytes
-		if total > MaxResponseBytes {
-			return fmt.Errorf("%w: response exceeded %d bytes", ErrStream, MaxResponseBytes)
+		if total > responseLimit {
+			return ErrResponseBudget
+		}
+		if promptContext.OnResponseBytes != nil {
+			promptContext.OnResponseBytes(total)
 		}
 		if delta != "" && onDelta != nil {
 			onDelta(delta)
@@ -241,7 +262,17 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 		if reasoning != "" && onReasoning != nil {
 			onReasoning(reasoning)
 		}
+		if err != nil {
+			return redactModelClientError(err, apiKey)
+		}
 		if stop {
+			firstToken.Stop()
+			if protocol == ProtocolOpenAIChat {
+				// finish_reason ends the choice, not the transport. Compatible
+				// providers may still emit a usage-only frame before DONE or EOF.
+				openAIStopped = true
+				continue
+			}
 			return finish()
 		}
 	}
@@ -254,10 +285,18 @@ func StreamChat(ctx context.Context, protocol Protocol, baseURL, apiKey, model s
 		}
 		return fmt.Errorf("%w: %v", ErrStream, err)
 	}
-	if !gotFirst {
-		return fmt.Errorf("%w: upstream closed before first token", ErrStream)
+	if firstTokenTimedOut.Load() || errors.Is(totalCtx.Err(), context.DeadlineExceeded) {
+		return ErrTimeout
 	}
-	return finish()
+	if parentCtx.Err() != nil {
+		return parentCtx.Err()
+	}
+	if protocol == ProtocolOpenAIChat && openAIStopped {
+		// A semantic stop plus a clean EOF is accepted for endpoints that omit
+		// DONE. Content-only EOF is always an incomplete stream.
+		return finish()
+	}
+	return ErrIncompleteStream
 }
 
 // sanitizeUpstreamErrorBody reads up to 512 bytes of an upstream error
@@ -663,6 +702,10 @@ func (a *providerUsageAccumulator) apply(protocol Protocol, data string) {
 		if usage == nil {
 			return
 		}
+		// An OpenAI usage frame is one complete measurement, not additive
+		// fragments. A later invalid or partial frame must not preserve stale
+		// fields from a previous measurement.
+		a.inputTokens, a.outputTokens = nil, nil
 		if value, ok := nonNegativeJSONInteger(usage["prompt_tokens"]); ok {
 			a.inputTokens = &value
 		}
@@ -683,8 +726,11 @@ func (a *providerUsageAccumulator) apply(protocol Protocol, data string) {
 		if value, ok := nonNegativeJSONInteger(usage["input_tokens"]); ok {
 			a.inputTokens = &value
 		}
-		if value, ok := nonNegativeJSONInteger(usage["output_tokens"]); ok {
-			a.outputTokens = &value
+		if frame["type"] == "message_delta" {
+			a.outputTokens = nil
+			if value, ok := nonNegativeJSONInteger(usage["output_tokens"]); ok {
+				a.outputTokens = &value
+			}
 		}
 	}
 }
@@ -741,7 +787,16 @@ func decodeStreamDelta(protocol Protocol, data string, toolCalls *toolCallAccumu
 		}
 		text, _ := deltaMap["content"].(string)
 		finish, _ := choice["finish_reason"].(string)
-		return text, reasoningText, toolBytes, finish == "stop" || finish == "tool_calls", nil
+		switch finish {
+		case "", "stop", "tool_calls":
+			return text, reasoningText, toolBytes, finish != "", nil
+		case "length":
+			return text, reasoningText, toolBytes, false, ErrTruncated
+		case "content_filter":
+			return text, reasoningText, toolBytes, false, ErrFiltered
+		default:
+			return text, reasoningText, toolBytes, false, fmt.Errorf("%w: unsupported finish reason", ErrStream)
+		}
 	case ProtocolAnthropicMessages:
 		switch frame["type"] {
 		case "error":
@@ -749,6 +804,19 @@ func decodeStreamDelta(protocol Protocol, data string, toolCalls *toolCallAccumu
 			return "", "", 0, false, fmt.Errorf("%w: %s", ErrStream, messagePrefix(code, message))
 		case "message_stop":
 			return "", "", 0, true, nil
+		case "message_delta":
+			deltaMap, _ := frame["delta"].(map[string]any)
+			reason, _ := deltaMap["stop_reason"].(string)
+			switch reason {
+			case "", "end_turn", "stop_sequence", "tool_use":
+				return "", "", 0, false, nil
+			case "max_tokens", "model_context_window_exceeded":
+				return "", "", 0, false, ErrTruncated
+			case "refusal":
+				return "", "", 0, false, ErrFiltered
+			default:
+				return "", "", 0, false, fmt.Errorf("%w: unsupported stop reason", ErrStream)
+			}
 		case "content_block_start":
 			return "", "", toolCalls.applyAnthropicStart(frame), false, nil
 		case "content_block_delta":

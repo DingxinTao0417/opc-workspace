@@ -14,14 +14,14 @@ import (
 
 func evaluationReviewInputForGroup(group aiEvaluationQualityGroup, decision, reason string) createAIEvaluationReviewRequest {
 	return createAIEvaluationReviewRequest{
-		ProviderID: group.ProviderID, ProviderNameSnapshot: group.ProviderNameSnapshot,
+		ProviderID: group.ProviderID, ProviderNameSnapshot: group.ProviderNameSnapshot, ProviderConfigVersion: group.ProviderConfigVersion,
 		ProviderModelSnapshot: group.ProviderModelSnapshot, DatasetVersion: group.DatasetVersion,
 		SuiteKey: group.SuiteKey, ExpectedProviderVersionMin: group.ProviderVersionMin,
 		ExpectedProviderVersionMax: group.ProviderVersionMax, ExpectedLastCompletedAt: group.LastCompletedAt,
 		ExpectedRunCount: group.RunCount, ExpectedTotalCases: group.TotalCases,
 		ExpectedPassedCases: group.PassedCases, ExpectedFailedCases: group.FailedCases,
 		ExpectedReadinessStatus:  group.ReadinessStatus,
-		ExpectedReadinessReasons: append([]string(nil), group.ReadinessReasons...),
+		ExpectedReadinessReasons: append([]string{}, group.ReadinessReasons...),
 		Decision:                 decision, Reason: reason,
 	}
 }
@@ -73,7 +73,7 @@ func TestAIEvaluationReviewRecordsExactSnapshotAndListsAuditHistory(t *testing.T
 		if index > 0 {
 			provider.Version++
 		}
-		seedEvaluationSummaryVersionedRun(t, store, provider, 3, 24, aieval.SuiteFull, completedAt)
+		seedEvaluationSummaryVersionedRun(t, store, provider, 4, 24, aieval.SuiteFull, completedAt)
 	}
 	group := loadEvaluationReviewGroup(t, router.Engine, provider.ID, aieval.SuiteFull)
 	if group.ReadinessStatus != "insufficient_evidence" || !reflect.DeepEqual(group.ReadinessReasons, []string{"PROVIDER_VERSION_MIXED"}) {
@@ -148,7 +148,7 @@ func TestAIEvaluationReviewRecordsExactSnapshotAndListsAuditHistory(t *testing.T
 
 func TestAIEvaluationReviewRejectsStaleOrInvalidEvidence(t *testing.T) {
 	router, store, provider := newAIEvaluationTestRouter(t, &scriptedEvaluationClient{})
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 6, aieval.SuiteGrounded, "2026-09-09T11:00:01Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 6, aieval.SuiteGrounded, "2026-09-09T11:00:01Z")
 	group := loadEvaluationReviewGroup(t, router.Engine, provider.ID, aieval.SuiteGrounded)
 	input := evaluationReviewInputForGroup(group, "needs_more_evidence", "有依据回答专题只用于诊断，继续运行完整套件。")
 
@@ -165,7 +165,7 @@ func TestAIEvaluationReviewRejectsStaleOrInvalidEvidence(t *testing.T) {
 		!strings.Contains(recorded.Body.String(), `"decision":"needs_more_evidence"`) {
 		t.Fatalf("record topic review = %d: %s", recorded.Code, recorded.Body.String())
 	}
-	seedEvaluationSummaryVersionedRun(t, store, provider, 3, 6, aieval.SuiteGrounded, "2026-09-09T11:01:01Z")
+	seedEvaluationSummaryVersionedRun(t, store, provider, 4, 6, aieval.SuiteGrounded, "2026-09-09T11:01:01Z")
 	stale := createEvaluationReviewRequest(t, router.Engine, input, "evaluation-review-stale")
 	assertAPIError(t, stale, http.StatusConflict, "AI_EVALUATION_REVIEW_STALE")
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_evaluation_reviews", 1)

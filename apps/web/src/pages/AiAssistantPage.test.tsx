@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,9 +12,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AiAssistantPage } from "./AiAssistantPage";
+import { useAiChatStore } from "../store/aiChat";
 
 afterEach(() => {
   cleanup();
+  useAiChatStore.setState({
+    input: "",
+    lastSessionId: "",
+    streaming: null,
+    interrupted: null,
+    retainedTurns: [],
+  });
   mockState.hasNextPage = false;
   mockState.isFetchingNextPage = false;
   mockState.previewData = null;
@@ -52,15 +61,21 @@ const mockState = vi.hoisted(() => {
       async (): Promise<{
         sessionId: string;
         cancelled: boolean;
+        accepted: boolean;
         error: string | null;
         errorCode: string | null;
-      }> => ({ sessionId: "", cancelled: false, error: null, errorCode: null }),
+      }> => ({
+        sessionId: "",
+        cancelled: false,
+        accepted: true,
+        error: null,
+        errorCode: null,
+      }),
     ),
     stop: vi.fn(),
     createSession: mutation(),
     deleteSession: mutation(),
-    createTask: mutation(),
-    attachTask: mutation(),
+    confirmTask: mutation(),
     createMemory: mutation(),
     previewData: null as null | Record<string, unknown>,
     previewContext: {
@@ -239,14 +254,31 @@ vi.mock("../api/hooks", () => ({
     data: mockState.previewData,
   }),
   useDeleteAiSession: () => mockState.deleteSession,
-  useCreateTask: () => mockState.createTask,
-  useAttachTaskToAiMessage: () => mockState.attachTask,
+  useConfirmAiMessageTask: () => mockState.confirmTask,
   useTaskQuery: (id: string | null) => ({
     data: id && mockState.taskDetail ? mockState.taskDetail : undefined,
     isPending: false,
     isError: false,
     error: null,
   }),
+}));
+
+vi.mock("../api/aiActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/aiActions")>()),
+  getAiMemoryDecision: vi.fn(async () => ({
+    id: "proposal-1",
+    session_id: "session-1",
+    content: "回答保持简洁",
+    status: "pending",
+    memory_id: null,
+  })),
+  getAiCompactionStatus: vi.fn(async () => ({
+    session_id: "session-1",
+    status: "idle",
+    partial_message: false,
+    compacted_message_count: 0,
+    error_code: null,
+  })),
 }));
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -388,6 +420,137 @@ function taskChip(text: string): HTMLElement {
 }
 
 describe("AiAssistantPage", () => {
+  it("renders non-persistent completed turns as read-only natural language with no confirmation commands", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [{ ...activeSession, persist: false }];
+    mockState.messagesPages = [];
+    mockState.isStreaming = false;
+    useAiChatStore.setState({
+      retainedTurns: [
+        {
+          sessionId: activeSession.id,
+          generationId: "ephemeral-generation",
+          userText: "创建一个任务并记住我的偏好",
+          text: '已创建任务并记住了。[opc:task]{"title":"临时建议"}[/opc:task][opc:memory]{"content":"简洁回答"}[/opc:memory]',
+          reasoning: "临时思考",
+          status: "completed",
+          createdAt: activeSession.created_at,
+        },
+      ],
+    });
+    renderPage();
+    expect(screen.getByText("创建一个任务并记住我的偏好")).toBeTruthy();
+    expect(
+      screen.getByText(/已整理任务建议「临时建议」，尚未创建/),
+    ).toBeTruthy();
+    expect(screen.getByText(/仅在当前窗口内存中保留/)).toBeTruthy();
+    expect(screen.queryByText(/已创建任务并记住了/)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /点击确认创建|记住这个/ }),
+    ).toBeNull();
+  });
+
+  it("deduplicates a retained turn after its durable message arrives", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.isStreaming = false;
+    const retained = {
+      sessionId: activeSession.id,
+      generationId: "durable-generation",
+      userText: "问题",
+      text: "唯一回复",
+      reasoning: "",
+      status: "completed" as const,
+      createdAt: activeSession.created_at,
+    };
+    useAiChatStore.setState({ retainedTurns: [retained] });
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({
+            content: retained.text,
+            generation_id: retained.generationId,
+          }),
+        ],
+        meta: { has_more: false },
+      },
+    ];
+    renderPage();
+    expect(screen.getAllByText("唯一回复")).toHaveLength(1);
+  });
+
+  it("keeps a draft cancelled before acceptance", async () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [];
+    mockState.isStreaming = false;
+    mockState.send.mockResolvedValueOnce({
+      sessionId: "",
+      cancelled: true,
+      accepted: false,
+      error: null,
+      errorCode: null,
+    });
+    renderPage();
+    const input = screen.getByPlaceholderText(/向 AI 助手提问/);
+    fireEvent.change(input, { target: { value: "未接收的草稿" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    });
+    expect(input).toHaveValue("未接收的草稿");
+  });
+
+  it("does not send Enter while confirming an IME candidate", async () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [];
+    mockState.isStreaming = false;
+    mockState.send.mockClear();
+    renderPage();
+    const input = screen.getByPlaceholderText(/向 AI 助手提问/);
+    fireEvent.change(input, { target: { value: "中文输入" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true, keyCode: 229 });
+    expect(mockState.send).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "Enter", isComposing: false });
+    await waitFor(() => expect(mockState.send).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["后来的草稿", "第一条"])(
+    "does not overwrite newer typing %s when a previous accepted send settles",
+    async (laterDraft) => {
+      mockState.providers = [readyProvider];
+      mockState.sessions = [activeSession];
+      mockState.messagesPages = [];
+      mockState.isStreaming = false;
+      let resolve!: (value: {
+        sessionId: string;
+        cancelled: boolean;
+        accepted: boolean;
+        error: null;
+        errorCode: null;
+      }) => void;
+      mockState.send.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          }),
+      );
+      renderPage();
+      const input = screen.getByPlaceholderText(/向 AI 助手提问/);
+      fireEvent.change(input, { target: { value: "第一条" } });
+      fireEvent.click(screen.getByRole("button", { name: "发送" }));
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.change(input, { target: { value: laterDraft } });
+      resolve({
+        sessionId: "session-1",
+        cancelled: false,
+        accepted: true,
+        error: null,
+        errorCode: null,
+      });
+      await waitFor(() => expect(input).toHaveValue(laterDraft));
+    },
+  );
   it("guides to settings when no provider is registered", () => {
     mockState.providers = [];
     renderPage();
@@ -423,7 +586,7 @@ describe("AiAssistantPage", () => {
     ];
     renderPage();
     expect(taskChip("建议任务：写周报")).toBeTruthy();
-    expect(screen.getByText(/好的，建议如下/)).toBeTruthy();
+    expect(screen.getByText(/已整理任务建议「写周报」，尚未创建/)).toBeTruthy();
     expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
   });
 
@@ -443,7 +606,9 @@ describe("AiAssistantPage", () => {
     renderPage();
 
     expect(
-      screen.getByText("好的，我已经整理成任务建议，请确认下面的信息后创建。"),
+      screen.getByText(
+        "已整理任务建议「写作业」，尚未创建。请确认下面的信息后创建。",
+      ),
     ).toBeTruthy();
     expect(taskChip("建议任务：写作业")).toBeTruthy();
     expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
@@ -471,17 +636,16 @@ describe("AiAssistantPage", () => {
     expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
   });
 
-  it("opens the confirm card, creates the task through the task API, and attaches the reference", async () => {
+  it("confirms an edited suggestion using the atomic message task command", async () => {
     mockState.providers = [readyProvider];
     mockState.sessions = [activeSession];
     mockState.messagesPages = [
       { data: [assistantMessage()], meta: { has_more: false } },
     ];
-    mockState.createTask.mutateAsync = vi.fn(async () => ({
+    mockState.confirmTask.mutateAsync = vi.fn(async () => ({
       id: "task-1",
       title: "写周报",
     }));
-    mockState.attachTask.mutateAsync = vi.fn(async () => ({}));
     renderPage();
 
     fireEvent.click(taskChip("建议任务：写周报"));
@@ -490,31 +654,24 @@ describe("AiAssistantPage", () => {
     fireEvent.click(screen.getByText("确认创建"));
 
     await waitFor(() => {
-      expect(mockState.createTask.mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
+      expect(mockState.confirmTask.mutateAsync).toHaveBeenCalledWith({
+        messageId: "message-1",
+        input: expect.objectContaining({
           title: "写周报",
           priority: "P2",
           dueDate: "2026-09-02",
         }),
-      );
-      expect(mockState.attachTask.mutateAsync).toHaveBeenCalledWith({
-        messageId: "message-1",
-        taskId: "task-1",
       });
     });
   });
 
-  it("retries only the message attachment after the task was created", async () => {
+  it("retries the same durable confirmation identity after closing and reopening a failed card", async () => {
     mockState.providers = [readyProvider];
     mockState.sessions = [activeSession];
     mockState.messagesPages = [
       { data: [assistantMessage()], meta: { has_more: false } },
     ];
-    mockState.createTask.mutateAsync = vi.fn(async () => ({
-      id: "task-once",
-      title: "写周报",
-    }));
-    mockState.attachTask.mutateAsync = vi
+    mockState.confirmTask.mutateAsync = vi
       .fn()
       .mockRejectedValueOnce(new Error("temporary"))
       .mockResolvedValueOnce({});
@@ -522,17 +679,16 @@ describe("AiAssistantPage", () => {
 
     fireEvent.click(taskChip("建议任务：写周报"));
     fireEvent.click(screen.getByText("确认创建"));
-    expect(
-      await screen.findByText(/任务已经创建，但回复卡片关联失败/),
-    ).toBeTruthy();
+    expect(await screen.findByText(/任务确认未完成/)).toBeTruthy();
+    fireEvent.click(screen.getByText("取消"));
+    fireEvent.click(taskChip("建议任务：写周报"));
     fireEvent.click(screen.getByText("确认创建"));
 
     await waitFor(() => {
-      expect(mockState.createTask.mutateAsync).toHaveBeenCalledTimes(1);
-      expect(mockState.attachTask.mutateAsync).toHaveBeenCalledTimes(2);
-      expect(mockState.attachTask.mutateAsync).toHaveBeenLastCalledWith({
+      expect(mockState.confirmTask.mutateAsync).toHaveBeenCalledTimes(2);
+      expect(mockState.confirmTask.mutateAsync).toHaveBeenLastCalledWith({
         messageId: "message-1",
-        taskId: "task-once",
+        input: expect.objectContaining({ title: "写周报" }),
       });
     });
   });
@@ -633,11 +789,13 @@ describe("AiAssistantPage", () => {
       async (): Promise<{
         sessionId: string;
         cancelled: boolean;
+        accepted: boolean;
         error: string | null;
         errorCode: string | null;
       }> => ({
         sessionId: "session-1",
         cancelled: false,
+        accepted: true,
         error: null,
         errorCode: null,
       }),
@@ -686,6 +844,19 @@ describe("AiAssistantPage", () => {
     mockState.sessions = [{ ...activeSession, version: 7 }];
     mockState.messagesPages = [];
     mockState.deleteSession.mutateAsync = vi.fn(async () => ({}));
+    useAiChatStore.setState({
+      retainedTurns: [
+        {
+          sessionId: activeSession.id,
+          generationId: "deleted-generation",
+          userText: "问题",
+          text: "应删除的临时回复",
+          reasoning: "",
+          status: "completed",
+          createdAt: activeSession.created_at,
+        },
+      ],
+    });
     renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "删除会话 新会话" }));
@@ -695,6 +866,7 @@ describe("AiAssistantPage", () => {
         id: "session-1",
         expectedVersion: 7,
       });
+      expect(useAiChatStore.getState().retainedTurns).toEqual([]);
     });
   });
 
@@ -1187,6 +1359,7 @@ describe("AiAssistantPage", () => {
     mockState.send.mockResolvedValueOnce({
       sessionId: "session-1",
       cancelled: false,
+      accepted: false,
       error: "context changed",
       errorCode: "AI_CONTEXT_CHANGED",
     });
@@ -1203,6 +1376,7 @@ describe("AiAssistantPage", () => {
     await waitFor(() => {
       expect(screen.getByText("已选择 1 项，发送前需要预览确认")).toBeTruthy();
     });
+    expect(screen.getByPlaceholderText(/向 AI 助手提问/)).toHaveValue("总结");
   });
 });
 
@@ -1227,6 +1401,9 @@ describe("AiAssistantPage memory suggestion", () => {
     renderPage();
 
     expect(screen.getByText(/记住偏好：回答保持简洁/)).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "记住" })).not.toBeDisabled(),
+    );
     fireEvent.click(screen.getByRole("button", { name: "记住" }));
 
     await waitFor(() => {

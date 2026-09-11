@@ -51,8 +51,8 @@ func TestAIRunStepsMigrationBackfillsAndConstrainsContentFreeTimeline(t *testing
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 67 {
-		t.Fatalf("SchemaVersion=%d, want 67", store.SchemaVersion)
+	if store.SchemaVersion != 69 {
+		t.Fatalf("SchemaVersion=%d, want 69", store.SchemaVersion)
 	}
 	var step struct {
 		Status      string

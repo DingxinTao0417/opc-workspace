@@ -184,7 +184,7 @@ func TestAILocalEvaluationActorRunsEmbeddedCasesWithoutPersistingContent(t *test
 	client := &scriptedEvaluationClient{responses: goodEvaluationResponses()}
 	router, store, provider := newAIEvaluationTestRouter(t, client)
 	created, run := createEvaluationRequest(t, router.Engine, provider, "local-evaluation-good")
-	if created.Code != http.StatusAccepted || run.ID == "" || run.DatasetVersion != 3 || run.SuiteKey != aieval.SuiteFull || run.TotalCases != 24 || run.Status != "queued" {
+	if created.Code != http.StatusAccepted || run.ID == "" || run.DatasetVersion != 4 || run.SuiteKey != aieval.SuiteFull || run.TotalCases != 24 || run.Status != "queued" {
 		t.Fatalf("create evaluation = %#v run=%#v", created, run)
 	}
 	replayed, replayRun := createEvaluationRequest(t, router.Engine, provider, "local-evaluation-good")
@@ -254,7 +254,7 @@ func TestAILocalEvaluationDiagnosticSuitesRunCodeOwnedSubsetsAndRejectUnknownSui
 	client := &scriptedEvaluationClient{responses: responses}
 	router, store, provider := newAIEvaluationTestRouter(t, client)
 	created, run := createEvaluationRequestForSuite(t, router.Engine, provider, "local-evaluation-smoke", aieval.SuiteSmoke)
-	if created.Code != http.StatusAccepted || run.SuiteKey != aieval.SuiteSmoke || run.DatasetVersion != 3 || run.TotalCases != 8 {
+	if created.Code != http.StatusAccepted || run.SuiteKey != aieval.SuiteSmoke || run.DatasetVersion != 4 || run.TotalCases != 8 {
 		t.Fatalf("create smoke evaluation = %#v run=%#v", created, run)
 	}
 	terminal := waitForEvaluationStatus(t, store, run.ID, true)
@@ -283,7 +283,7 @@ func TestAILocalEvaluationDiagnosticSuitesRunCodeOwnedSubsetsAndRejectUnknownSui
 		t, router.Engine, provider, "local-evaluation-prompt-injection", aieval.SuitePromptInjection,
 	)
 	if topicCreated.Code != http.StatusAccepted || topicRun.SuiteKey != aieval.SuitePromptInjection ||
-		topicRun.DatasetVersion != 3 || topicRun.TotalCases != 6 {
+		topicRun.DatasetVersion != 4 || topicRun.TotalCases != 6 {
 		t.Fatalf("create topic evaluation = %#v run=%#v", topicCreated, topicRun)
 	}
 	topicTerminal := waitForEvaluationStatus(t, store, topicRun.ID, true)
@@ -334,7 +334,7 @@ func TestAILocalEvaluationRecordsQualityFailuresAsCompletedBenchmark(t *testing.
 		t.Fatalf("decode quality failure: %v body=%s", err, detail.Body.String())
 	}
 	first := envelope.Data.Results[0]
-	if first.Status != "failed" || !containsString(first.FailureCodes, "REQUIRED_PHRASE_MISSING") || !containsString(first.FailureCodes, "FORBIDDEN_PHRASE_PRESENT") {
+	if first.Status != "failed" || !containsString(first.FailureCodes, "FACT_MISSING") || !containsString(first.FailureCodes, "FORBIDDEN_PHRASE_PRESENT") {
 		t.Fatalf("quality failure codes = %#v", first)
 	}
 }

@@ -108,6 +108,14 @@ func (a *API) createAIMemory(c *gin.Context) {
 			return err
 		}
 		if replayed {
+			var memory models.AIMemory
+			if err := tx.First(&memory, "id = ?", response.ID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return newProjectRequestError(http.StatusGone, "AI_CONFIRMED_MEMORY_DELETED", "The saved memory was deleted; replay cannot recreate it")
+				}
+				return err
+			}
+			response = aiMemoryResponseFromModel(memory)
 			statusCode = replayStatus
 			return nil
 		}
@@ -115,7 +123,7 @@ func (a *API) createAIMemory(c *gin.Context) {
 		var proposal models.AIMemoryEntry
 		if proposalID != nil {
 			proposalQuery := tx.Where(
-				"id = ? AND kind = 'memory_proposal' AND origin = 'model_proposal' AND status = 'active'",
+				"id = ? AND kind = 'memory_proposal' AND origin = 'model_proposal'",
 				*proposalID,
 			)
 			if sourceSessionID != "" {
@@ -130,6 +138,46 @@ func (a *API) createAIMemory(c *gin.Context) {
 			if proposal.Content != content {
 				return errAIMemoryProposalMismatch
 			}
+		} else if sourceMessageID != nil {
+			legacy, legacyErr := loadAIMessageMemoryDecision(tx, *sourceMessageID)
+			if legacyErr == nil {
+				if legacy.Content != content {
+					return errAIMemoryProposalMismatch
+				}
+				proposal = legacy
+			} else if !errors.Is(legacyErr, errAIMemoryProposalNotFound) {
+				return legacyErr
+			}
+		}
+		if proposal.ID != "" {
+			if proposal.Status == "superseded" {
+				if proposal.Decision == nil {
+					return newProjectRequestError(http.StatusConflict, "AI_MEMORY_DECISION_UNAVAILABLE", "Historic memory decision cannot be verified")
+				}
+				if proposal.Decision == nil || *proposal.Decision != "confirmed" {
+					return newProjectRequestError(http.StatusConflict, "AI_MEMORY_PROPOSAL_REJECTED", "This proposal was ignored; create a separate memory explicitly if desired")
+				}
+				var memory models.AIMemory
+				if proposal.MemoryID == nil {
+					return newProjectRequestError(http.StatusGone, "AI_CONFIRMED_MEMORY_DELETED", "The saved memory is no longer available")
+				}
+				if err := tx.First(&memory, "id = ?", *proposal.MemoryID).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return newProjectRequestError(http.StatusGone, "AI_CONFIRMED_MEMORY_DELETED", "The saved memory was deleted; this proposal cannot create it again")
+					}
+					return err
+				}
+				response = aiMemoryResponseFromModel(memory)
+				if err := ensureAIMemoryDecisionEntry(tx, proposal); err != nil {
+					return err
+				}
+				replayed = true
+				statusCode = http.StatusOK
+				return nil
+			}
+			if err := ensureAIMemoryDecisionEntry(tx, proposal); err != nil {
+				return err
+			}
 		}
 		row := models.AIMemory{
 			ID: uuid.NewString(), Content: content, SourceMessageID: sourceMessageID,
@@ -142,11 +190,11 @@ func (a *API) createAIMemory(c *gin.Context) {
 		if err := recordAIMemoryEvent(tx, "ai_memory_created", row.ID, requestIDFromContext(c), now); err != nil {
 			return err
 		}
-		if proposalID != nil {
+		if proposal.ID != "" {
 			retiredAt := nextAIEntryTimestamp(now, proposal.UpdatedAt)
 			result := tx.Model(&models.AIMemoryEntry{}).
 				Where("id = ? AND status = 'active'", proposal.ID).
-				Updates(map[string]any{"status": "superseded", "updated_at": retiredAt})
+				Updates(map[string]any{"status": "superseded", "decision": "confirmed", "memory_id": row.ID, "updated_at": retiredAt})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -204,6 +252,22 @@ func (a *API) deleteAIMemory(c *gin.Context) {
 	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		// Legacy confirmed cards predate decision rows. Materialize their
+		// tombstone before removing the sole old confirmation evidence.
+		var memory models.AIMemory
+		if err := tx.First(&memory, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if memory.SourceMessageID != nil {
+			proposal, err := loadAIMessageMemoryDecision(tx, *memory.SourceMessageID)
+			if err == nil && proposal.Decision != nil && *proposal.Decision == "confirmed" && proposal.MemoryID != nil && *proposal.MemoryID == memory.ID {
+				if err := ensureAIMemoryDecisionEntry(tx, proposal); err != nil {
+					return err
+				}
+			} else if err != nil && !errors.Is(err, errAIMemoryProposalNotFound) && !errors.Is(err, gorm.ErrRecordNotFound) && !errors.Is(err, errAIMemoryProposalMismatch) {
+				return err
+			}
+		}
 		result := tx.Where("id = ?", id).Delete(&models.AIMemory{})
 		if result.Error != nil {
 			return result.Error

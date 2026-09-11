@@ -7,6 +7,7 @@ type AIEvaluationRun struct {
 	ProviderModelSnapshot    string  `gorm:"column:provider_model_snapshot" json:"provider_model_snapshot"`
 	ProviderProtocolSnapshot string  `gorm:"column:provider_protocol_snapshot" json:"provider_protocol_snapshot"`
 	ProviderVersion          int64   `gorm:"column:provider_version" json:"provider_version"`
+	ProviderConfigVersion    *int64  `gorm:"column:provider_config_version" json:"provider_config_version"`
 	DatasetVersion           int     `gorm:"column:dataset_version" json:"dataset_version"`
 	SuiteKey                 string  `gorm:"column:suite_key;default:full" json:"suite_key"`
 	Status                   string  `gorm:"column:status" json:"status"`

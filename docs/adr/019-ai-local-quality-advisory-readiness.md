@@ -1,5 +1,7 @@
 # ADR-019：AI 本地质量人工评审候选
 
+> 后续修订：[ADR-025](025-ai-reliability-confirmations-and-evaluation-identity.md) / schema 068 将配置身份从 HTTP 行版本拆开，新增组按 `provider_config_version` 隔离，健康检查不再破坏证据连续性，旧审计保持不变。下文保留原决策背景；不再建议通过删除历史解决混组。dataset v4 还新增 `FACT_CONTRADICTED` 严重失败码。
+
 - 状态：Accepted，AI7-Q2 advisory readiness 已实现
 - 日期：2026-09-09
 - 决策范围：当前数据集的最低重复运行、Wilson 下界、严重失败码与人工评审候选提示

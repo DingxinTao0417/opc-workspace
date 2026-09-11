@@ -1,5 +1,7 @@
 # ADR-004：AI 助手远程 Provider 接入与安全边界
 
+> 后续修订：[ADR-025](025-ai-reliability-confirmations-and-evaluation-identity.md) 接续运行预算/锁、确认事务/隐私、部分压缩进度及评测配置身份。本文保留当时决策与验证记录；当前行为以 ADR-025 和模块文档为准。
+
 - 状态：已接受（AI 助手首个纵向切片实施）
 - 日期：2026-09-01
 - 对应任务：AI2 评审 + AI3/AI4 会话纵切（[计划](../plans/ai-assistant-mvp.md)）

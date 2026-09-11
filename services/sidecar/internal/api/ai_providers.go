@@ -30,6 +30,7 @@ func aiProviderKeyAccount(providerID string) string {
 }
 
 type aiProviderResponse struct {
+	ConfigVersion   int64   `json:"config_version"`
 	ID              string  `json:"id"`
 	Name            string  `json:"name"`
 	Kind            string  `json:"kind"`
@@ -228,6 +229,7 @@ func (a *API) patchAIProvider(c *gin.Context) {
 			"version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if connectionChanged {
+			updates["config_version"] = gorm.Expr("config_version + 1")
 			updates["status"] = "unconfigured"
 			updates["health_status"] = "unknown"
 			updates["health_error_code"] = nil
@@ -364,8 +366,19 @@ func (a *API) deleteAIProvider(c *gin.Context) {
 }
 
 func (a *API) checkAIProviderHealth(c *gin.Context) {
+	a.maintenance.RLock()
 	a.aiProviderMu.RLock()
-	defer a.aiProviderMu.RUnlock()
+	preparing := true
+	defer func() {
+		if preparing {
+			a.aiProviderMu.RUnlock()
+			a.maintenance.RUnlock()
+		}
+	}()
+	if a.restorePending.Load() {
+		writeError(c, http.StatusServiceUnavailable, "RESTORE_RESTART_REQUIRED", "A verified restore is pending; restart the application to apply it")
+		return
+	}
 	id, ok := aiProviderID(c)
 	if !ok {
 		return
@@ -384,38 +397,44 @@ func (a *API) checkAIProviderHealth(c *gin.Context) {
 		return
 	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
-	healthCode := ""
-	switch {
-	case row.Kind == aiProviderKindLocal:
-		// Local servers need no key; only endpoint reachability matters.
-		statusCode, probeErr := modelclient.HealthCheck(c.Request.Context(), modelclient.Protocol(row.Protocol), row.BaseURL, "", nil)
+	healthCode, apiKey := "", ""
+	if row.Kind != aiProviderKindLocal {
+		if row.HasKey {
+			key, keyErr := a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
+			if keyErr != nil && !errors.Is(keyErr, keystore.ErrNotFound) {
+				writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
+				return
+			}
+			if keyErr != nil {
+				healthCode = "AI_KEY_UNAVAILABLE"
+			} else {
+				apiKey = key
+			}
+		} else {
+			healthCode = "AI_KEY_UNAVAILABLE"
+		}
+	}
+	a.aiProviderMu.RUnlock()
+	a.maintenance.RUnlock()
+	preparing = false
+	if healthCode == "" {
+		statusCode, probeErr := modelclient.HealthCheck(c.Request.Context(), modelclient.Protocol(row.Protocol), row.BaseURL, apiKey, nil)
 		switch {
 		case probeErr != nil:
 			healthCode = "AI_ENDPOINT_UNREACHABLE"
+		case row.Kind != aiProviderKindLocal && (statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden):
+			healthCode = "AI_KEY_INVALID"
 		case statusCode < 200 || statusCode > 299:
 			healthCode = "AI_PROVIDER_ERROR"
 		}
-	case row.HasKey:
-		apiKey, keyErr := a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(id))
-		if keyErr != nil && !errors.Is(keyErr, keystore.ErrNotFound) {
-			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
-			return
-		}
-		if keyErr != nil {
-			healthCode = "AI_KEY_UNAVAILABLE"
-		} else {
-			statusCode, probeErr := modelclient.HealthCheck(c.Request.Context(), modelclient.Protocol(row.Protocol), row.BaseURL, apiKey, nil)
-			switch {
-			case probeErr != nil:
-				healthCode = "AI_ENDPOINT_UNREACHABLE"
-			case statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden:
-				healthCode = "AI_KEY_INVALID"
-			case statusCode < 200 || statusCode > 299:
-				healthCode = "AI_PROVIDER_ERROR"
-			}
-		}
-	default:
-		healthCode = "AI_KEY_UNAVAILABLE"
+	}
+	a.maintenance.RLock()
+	defer a.maintenance.RUnlock()
+	a.aiProviderMu.Lock()
+	defer a.aiProviderMu.Unlock()
+	if a.restorePending.Load() {
+		writeError(c, http.StatusServiceUnavailable, "RESTORE_RESTART_REQUIRED", "A verified restore is pending; restart the application to apply it")
+		return
 	}
 	var response aiProviderResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
@@ -508,10 +527,14 @@ func (a *API) setAIProviderKey(c *gin.Context) {
 	}
 	var response aiProviderResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
+		updates := map[string]any{
 			"has_key": true, "status": "unconfigured", "health_status": "unknown", "health_error_code": nil, "last_health_at": nil,
 			"version": gorm.Expr("version + 1"), "updated_at": a.options.Now().UTC().Format(time.RFC3339Nano),
-		})
+		}
+		if !hadPreviousSecret || previousSecret != apiKey {
+			updates["config_version"] = gorm.Expr("config_version + 1")
+		}
+		result := tx.Model(&models.AIProvider{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -587,7 +610,8 @@ func normalizeAIProviderFields(name, kind, protocol, baseURL, model string) (str
 
 func aiProviderResponseFromModel(row models.AIProvider) aiProviderResponse {
 	return aiProviderResponse{
-		ID: row.ID, Name: row.Name, Kind: row.Kind, Protocol: row.Protocol, BaseURL: row.BaseURL, Model: row.Model,
+		ConfigVersion: row.ConfigVersion,
+		ID:            row.ID, Name: row.Name, Kind: row.Kind, Protocol: row.Protocol, BaseURL: row.BaseURL, Model: row.Model,
 		Status: row.Status, HealthStatus: row.HealthStatus, HealthErrorCode: row.HealthErrorCode,
 		HasKey: row.HasKey, LastHealthAt: row.LastHealthAt, Version: row.Version,
 		CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),

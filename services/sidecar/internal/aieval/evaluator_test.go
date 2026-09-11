@@ -9,7 +9,7 @@ func TestEmbeddedKnowledgeQualityCasesPassDeterministicGoodObservations(t *testi
 	if err != nil {
 		t.Fatalf("LoadEmbeddedKnowledgeDataset: %v", err)
 	}
-	if dataset.Version != 3 || len(dataset.Cases) != 24 {
+	if dataset.Version != 4 || len(dataset.Cases) != 24 {
 		t.Fatalf("embedded dataset version=%d cases=%d, want v3/24", dataset.Version, len(dataset.Cases))
 	}
 	categoryCounts := map[string]int{}
@@ -198,7 +198,7 @@ func TestEvaluatorReportsStableGroundingFailures(t *testing.T) {
 	}
 	want := map[string]bool{
 		"CASE_ID_MISMATCH": false, "CONTROL_BLOCK_LEAKED": false, "CITATION_STATUS_MISMATCH": false,
-		"REQUIRED_PHRASE_MISSING": false, "FORBIDDEN_PHRASE_PRESENT": false,
+		"FACT_MISSING": false, "FORBIDDEN_PHRASE_PRESENT": false,
 		"CITATION_NOT_ALLOWED": false, "CITATION_DUPLICATE": false, "CITATION_COUNT_LOW": false,
 		"CITATION_SET_MISMATCH": false,
 	}

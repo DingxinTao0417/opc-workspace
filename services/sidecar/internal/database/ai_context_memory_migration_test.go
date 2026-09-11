@@ -34,8 +34,8 @@ func TestAIContextMemoryMigrationPreservesV56AndConstrainsSnapshots(t *testing.T
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 67 {
-		t.Fatalf("SchemaVersion = %d, want 67", store.SchemaVersion)
+	if store.SchemaVersion != 69 {
+		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
 	}
 	var sessionCount, messageCount, entryCount int
 	if err := store.SQL.QueryRow("SELECT COUNT(*) FROM ai_sessions WHERE id = ?", sessionID).Scan(&sessionCount); err != nil {
