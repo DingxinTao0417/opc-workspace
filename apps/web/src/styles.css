@@ -13496,3 +13496,150 @@ kbd {
 }
 
 @import "./ai-page.css";
+
+/* Agent 执行区块（ADR-027 内置执行器） */
+.task-agent-runs {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.task-agent-runs-heading {
+  margin: 0 2px 9px;
+}
+
+.task-agent-runs-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.task-agent-runs-heading p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.task-agent-runs-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.task-agent-runs-controls select {
+  min-width: 0;
+  flex: 1;
+  max-width: 420px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.task-agent-runs-alert {
+  margin: 0 2px 10px;
+  color: var(--danger, #b42318);
+  font-size: 11px;
+}
+
+.task-agent-runs-empty {
+  margin: 0 2px;
+  padding: 14px 13px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.task-agent-runs-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-agent-run-card {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.task-agent-run-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.task-agent-run-status {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.task-agent-run-status[data-status="running"],
+.task-agent-run-status[data-status="queued"] {
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--accent);
+}
+
+.task-agent-run-status[data-status="succeeded"] {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
+.task-agent-run-status[data-status="failed"],
+.task-agent-run-status[data-status="interrupted"] {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b42318;
+}
+
+.task-agent-run-meta {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-agent-run-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+
+.task-agent-run-actions button {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.task-agent-run-error {
+  margin: 6px 0 0;
+  color: #b42318;
+  font-size: 11px;
+}
+
+.task-agent-run-result {
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.06));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}

@@ -103,11 +103,13 @@ export function TaskAgentRunsSection({
     retryMutation.isPending;
 
   return (
-    <section className="task-agent-runs">
-      <h3>Agent 执行</h3>
-      <p className="task-agent-runs-hint">
-        把任务交给内置执行代理，由本地或在线模型生成交付文本；产出仅进入执行记录。
-      </p>
+    <section className="task-section task-agent-runs">
+      <div className="task-outputs-heading task-agent-runs-heading">
+        <div>
+          <h3>Agent 执行</h3>
+          <p>把任务交给内置执行代理，由本地或在线模型生成交付文本；产出仅进入执行记录。</p>
+        </div>
+      </div>
       <div className="task-agent-runs-controls">
         <select
           aria-label="选择执行模型"
@@ -132,7 +134,7 @@ export function TaskAgentRunsSection({
         </button>
       </div>
       {startMutation.error ? (
-        <p className="task-agent-runs-error" role="alert">
+        <p className="task-agent-runs-alert" role="alert">
           {startMutation.error instanceof Error
             ? startMutation.error.message
             : "启动失败"}
@@ -143,10 +145,12 @@ export function TaskAgentRunsSection({
       ) : (
         <ul className="task-agent-runs-list">
           {runs.map((run) => (
-            <li key={run.id} data-status={run.status}>
+            <li key={run.id} className="task-agent-run-card" data-status={run.status}>
               <div className="task-agent-run-heading">
-                <strong>{statusLabels[run.status]}</strong>
-                <span>
+                <span className="task-agent-run-status" data-status={run.status}>
+                  {statusLabels[run.status]}
+                </span>
+                <span className="task-agent-run-meta">
                   第 {run.attempt} 次 · {run.model} ·{" "}
                   {formatRunTime(run.completedAt ?? run.startedAt)}
                 </span>
