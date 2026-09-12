@@ -126,6 +126,7 @@ export function TaskAgentRunsSection({
           ))}
         </select>
         <button
+          className="button button-primary"
           disabled={disabled || busy || !providerId}
           onClick={() => startMutation.mutate()}
           type="button"
@@ -157,6 +158,7 @@ export function TaskAgentRunsSection({
                 <span className="task-agent-run-actions">
                   {run.status === "queued" || run.status === "running" ? (
                     <button
+                      className="button button-secondary"
                       disabled={disabled || busy}
                       onClick={() => cancelMutation.mutate(run.id)}
                       type="button"
@@ -168,6 +170,7 @@ export function TaskAgentRunsSection({
                   run.status === "cancelled" ||
                   run.status === "interrupted" ? (
                     <button
+                      className="button button-secondary"
                       disabled={disabled || busy}
                       onClick={() => retryMutation.mutate(run.id)}
                       type="button"
@@ -177,6 +180,7 @@ export function TaskAgentRunsSection({
                   ) : null}
                   {run.resultText ? (
                     <button
+                      className="button button-secondary"
                       onClick={() =>
                         setExpandedRunId((current) =>
                           current === run.id ? null : run.id,
