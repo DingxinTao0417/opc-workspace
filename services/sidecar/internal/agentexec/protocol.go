@@ -43,18 +43,19 @@ type InputFrame struct {
 	// ModelAPIKey carries a run-scoped provider credential for online models.
 	// It exists only in the pipe and both processes' memory; it is never
 	// persisted, logged, or included in snapshots (ADR-027).
-	ModelAPIKey     string       `json:"model_api_key,omitempty"`
-	DeadlineMS      int64        `json:"deadline_ms"`
-	MaxResultBytes  int          `json:"max_result_bytes"`
-	Instruction     string       `json:"instruction"`
+	ModelAPIKey    string `json:"model_api_key,omitempty"`
+	DeadlineMS     int64  `json:"deadline_ms"`
+	MaxResultBytes int    `json:"max_result_bytes"`
+	Instruction    string `json:"instruction"`
 }
 
 type TaskSnapshot struct {
-	TaskID      string `json:"task_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Kind        string `json:"kind"`
+	TaskID             string `json:"task_id"`
+	Title              string `json:"title"`
+	Description        string `json:"description"`
+	CompletionCriteria string `json:"completion_criteria,omitempty"`
+	Status             string `json:"status"`
+	Kind               string `json:"kind"`
 }
 
 // ManifestFrame is the single response frame read from the executor's stdout.

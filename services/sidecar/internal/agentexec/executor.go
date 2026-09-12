@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-
 // Executor error codes surface as agent run error codes; they never include
 // model output or endpoint details.
 const (
