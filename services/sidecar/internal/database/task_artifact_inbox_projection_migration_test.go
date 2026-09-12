@@ -52,8 +52,8 @@ func TestTaskArtifactInboxProjectionMigrationGuardsSourceLifecycle(t *testing.T)
 		t.Fatalf("upgrade v22 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
-		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
+	if store.SchemaVersion != 70 {
+		t.Fatalf("SchemaVersion = %d, want 70", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM inbox_items"); got != 0 {
 		t.Fatalf("migration invented %d Inbox Items", got)
@@ -123,8 +123,8 @@ func TestTaskArtifactInboxGapMigrationDoesNotMarkPostProjectionArtifactWithoutIn
 		t.Fatalf("upgrade v23 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
-		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
+	if store.SchemaVersion != 70 {
+		t.Fatalf("SchemaVersion = %d, want 70", store.SchemaVersion)
 	}
 	if got := readInt64(t, store.SQL, `
 		SELECT COUNT(*)
@@ -166,8 +166,8 @@ func TestTaskArtifactInboxGapMigrationMarksRFC3339NanoArtifactWithinProjectionSe
 		t.Fatalf("upgrade same-second v23 database: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
-		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
+	if store.SchemaVersion != 70 {
+		t.Fatalf("SchemaVersion = %d, want 70", store.SchemaVersion)
 	}
 	assertTaskArtifactInboxGapMigrationMarker(t, store.SQL, taskID, submissionID, artifactID)
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM inbox_items"); got != 0 {

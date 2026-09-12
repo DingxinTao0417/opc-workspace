@@ -36,6 +36,8 @@ type aiCitationItem struct {
 	EndChar         int    `json:"end_char"`
 	StartLine       int    `json:"start_line"`
 	EndLine         int    `json:"end_line"`
+	StartPage       int    `json:"start_page"`
+	EndPage         int    `json:"end_page"`
 }
 
 type aiCitationSnapshot struct {
@@ -123,6 +125,7 @@ func aiCitationItemFromKnowledge(source aiKnowledgeContextSource) aiCitationItem
 		DocumentID: source.DocumentID, DocumentTitle: source.DocumentTitle, DocumentVersion: source.DocumentVersion,
 		ChunkIndex: source.ChunkIndex, StartChar: source.StartChar, EndChar: source.EndChar,
 		StartLine: source.StartLine, EndLine: source.EndLine,
+		StartPage: source.StartPage, EndPage: source.EndPage,
 	}
 }
 

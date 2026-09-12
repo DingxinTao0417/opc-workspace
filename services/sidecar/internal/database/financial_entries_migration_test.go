@@ -11,7 +11,7 @@ func TestFinancialEntriesMigrationCreatesConstrainedAuditLedger(t *testing.T) {
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
+	if store.SchemaVersion != 70 {
 		t.Fatalf("schema version = %d, want 69", store.SchemaVersion)
 	}
 	var initialCount int64

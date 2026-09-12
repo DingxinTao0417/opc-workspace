@@ -1,19 +1,20 @@
 # 本地知识库分阶段实施计划
 
-> 依据：[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md) 与 [知识库模块](../modules/knowledge-base.md)
+> 依据：[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md)、[ADR-026](../adr/026-local-knowledge-pdf-extraction.md) 与 [知识库模块](../modules/knowledge-base.md)
 >
-> 当前状态（2026-09-08）：K1–K4、K5 核心文本闭环与 K6 已完成。TXT/Markdown 由本地单邮箱 Actor 异步索引，支持可观察取消、失败重试与启动中断恢复；来源清单与 AI 显式片段已交付。PDF、授权引用/变化检测尚未完成。
+> 当前状态（2026-09-12）：K1–K4、K5 核心文本闭环、K6 与 K3b PDF 提取已完成。TXT/Markdown/PDF 由本地单邮箱 Actor 异步索引，支持可观察取消、失败重试与启动中断恢复；来源清单与 AI 显式片段已交付；PDF 带页码定位与损坏/加密/无文本页/预算防护（schema 070）。授权引用/变化检测尚未完成。
 
 ## 阶段与完成定义
 
-| 阶段              | 状态                | 交付内容                                                                                    | 完成门禁                                     |
-| ----------------- | ------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| K1 决策与威胁模型 | 已完成              | ADR-009 固化来源、路径、格式、上限、备份、删除、网络与 AI 边界                              | ADR 与模块文档一致                           |
-| K2 数据与任务框架 | 已完成              | schema 059 + 单邮箱 Actor；queued/running/terminal、阶段进度、取消、retry attempt、启动恢复 | Actor 竞态、旧索引保留和中断无半成品测试通过 |
-| K3 文本导入       | TXT/Markdown 已完成 | 单文件受控上传、UTF-8/NUL/空白校验、换行规范化、1,200 字符分段                              | 16 MiB 与损坏输入；PDF 另阶段                |
-| K4 本地检索       | 已完成              | FTS5、中文单字/双字辅助列、来源筛选、rank、纯文本高亮与行/字符引用                          | 中文、英文、无结果、过滤和注入输入测试通过   |
-| K5 生命周期       | 核心闭环已完成      | 版本化重建、单文档删除后恢复、来源删除、全库清理、FTS 级联、metadata-only CSV               | 来源变化自动标 stale 仍待                    |
-| K6 AI 集成        | 已完成              | ADR-010 显式片段 + ADR-011 回答级 allowlist citation、无证据/缺失/非法状态                  | AI 无整库扫描工具；句子级覆盖率待 AI7-Q2     |
+| 阶段              | 状态                 | 交付内容                                                                                          | 完成门禁                                         |
+| ----------------- | -------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| K1 决策与威胁模型 | 已完成               | ADR-009 固化来源、路径、格式、上限、备份、删除、网络与 AI 边界                                    | ADR 与模块文档一致                               |
+| K2 数据与任务框架 | 已完成               | schema 059 + 单邮箱 Actor；queued/running/terminal、阶段进度、取消、retry attempt、启动恢复       | Actor 竞态、旧索引保留和中断无半成品测试通过     |
+| K3 文本导入       | TXT/Markdown 已完成  | 单文件受控上传、UTF-8/NUL/空白校验、换行规范化、1,200 字符分段                                    | 16 MiB 与损坏输入；PDF 另阶段                    |
+| K3b PDF 导入      | 已完成（2026-09-12） | ADR-026/schema 070：`ledongthuc/pdf` 纯 Go 提取、页码定位、加密/损坏/无文本页防护、文本与操作预算 | 中英文提取、页映射、稳定错误码与迁移保留测试通过 |
+| K4 本地检索       | 已完成               | FTS5、中文单字/双字辅助列、来源筛选、rank、纯文本高亮与行/字符引用                                | 中文、英文、无结果、过滤和注入输入测试通过       |
+| K5 生命周期       | 核心闭环已完成       | 版本化重建、单文档删除后恢复、来源删除、全库清理、FTS 级联、metadata-only CSV                     | 来源变化自动标 stale 仍待                        |
+| K6 AI 集成        | 已完成               | ADR-010 显式片段 + ADR-011 回答级 allowlist citation、无证据/缺失/非法状态                        | AI 无整库扫描工具；句子级覆盖率待 AI7-Q2         |
 
 ## 本次文件范围
 
@@ -42,8 +43,15 @@
 - race detector 通过 Knowledge Actor 取消/retry/恢复/旧索引与 AI5/AI6 上下文专项；文档 52 个 Markdown 文件及本地链接通过。
 - 真实本地 Sidecar/schema 059 + Web 视觉检查通过：来源/进度卡、中文高亮、筛选、删除确认、AI 本地搜索、逐段选择和完整不可信引用 preview 均正常；临时服务已停止，临时数据已移入废纸篓。
 
+## K3b 交付记录（2026-09-12）
+
+- schema 070（`-- migration: foreign_keys=off`）：重建 `knowledge_sources` 把 `source_type` 扩展为 `('text','markdown','pdf')`；`knowledge_chunks` 增加 `start_page`/`end_page`（默认 1，`end_page >= start_page`）。v69 既有来源、文档、chunk 与 FTS 行逐列保留，FTS trigger 在 ADD COLUMN 后继续级联。
+- 提取器 `internal/api/knowledge_pdf.go`：以 `ledongthuc/pdf`（纯 Go、零传递依赖，2026-09 仍在维护）导出的 `Interpret`/`Value`/`Font` API 自实现文本操作符遍历，`recover` 兜住库内 panic；文本上限 16,777,216 runes、操作数上限 5,000,000、页数上限 20,000。文档 `extractor_version=pdf-text-v1`。
+- 页码定位：按页提取并归一化换行，无文本页不占行号；chunk 行号范围经页映射得到页码范围并写入检索响应、AI6 预览/上下文载荷与 citation 元数据（旧 citation snapshot 无页码字段，Web 以可选字段解析）。
+- 上传契约：`.pdf` 走魔数 `%PDF-` 预检 + 既有 16 MiB 上限，完整提取在 Actor 异步执行；失败码 `KNOWLEDGE_PDF_INVALID/ENCRYPTED/NO_TEXT/TEXT_TOO_LARGE/TOO_COMPLEX/TOO_MANY_PAGES` 进入既有 failed/retry 生命周期。
+- 验证：`go test ./internal/database`（含新增 v69→v70 迁移保留/约束测试）与 `go test ./internal/api -run '^TestKnowledge'` 通过；新增提取器分页/页映射/稳定错误码与 PDF 导入→检索→AI6 上下文金链测试；Web 客户端与页面新增 PDF 解析/展示/拒绝用例，全量 vitest 125 文件/1,180 项通过。
+
 ## 后续顺序
 
-1. K3b：评审本地 PDF 提取依赖、页码定位、压缩炸弹/密码文件/无文本页和跨平台包体；补低磁盘与较大文本性能基线。
-2. K5b：桌面授权引用、mtime/hash 变化检测、stale 与原子新版本切换。
-3. AI6 已按 ADR-010 完成；后续结构化 citation 和无答案评测归 AI7，不开放自动整库检索。
+1. K5b：桌面授权引用、mtime/hash 变化检测、stale 与原子新版本切换。
+2. AI6 已按 ADR-010 完成；后续结构化 citation 和无答案评测归 AI7，不开放自动整库检索。

@@ -1,6 +1,6 @@
 # ADR-009：本地知识库导入、索引与检索边界
 
-- 状态：Accepted，首个纵向切片已实现
+- 状态：Accepted，首个纵向切片已实现；PDF 部分由 [ADR-026](026-local-knowledge-pdf-extraction.md) 接续交付
 - 日期：2026-09-08
 - 决策范围：知识库 K1–K5 基线
 - 相关文档：[知识库模块](../modules/knowledge-base.md)、[实施计划](../plans/knowledge-base-phases.md)、[ADR-008](008-ai-explicit-business-context.md)
@@ -16,7 +16,7 @@
 - 导入入口为 `multipart/form-data` 的单个 `file` part，可附可选 `title`；API 不接受绝对路径、相对路径、目录或符号链接引用。
 - 服务端只把清理后的 basename 作为显示名称，原始客户端路径不会进入 SQLite、日志或错误。
 - 首版支持 `.txt`、`.md`、`.markdown`，单文件最大 16 MiB；内容必须是非空 UTF-8 且不得包含 NUL。
-- PDF、本地授权引用和来源变化探测不与文本基线混在一次决策中；它们需要新的提取器、桌面权限和资源上限评审。
+- PDF、本地授权引用和来源变化探测不与文本基线混在一次决策中；PDF 提取已由 [ADR-026](026-local-knowledge-pdf-extraction.md) 单独决策并交付，授权引用与变化检测仍待后续。
 
 ### 2. 文本原文保存在 SQLite 受控副本中
 

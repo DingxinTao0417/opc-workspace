@@ -1,8 +1,8 @@
 # 本地知识库模块
 
-> 目标版本：待定。TXT/Markdown 本地检索、Actor 异步任务、ADR-010 AI6 显式知识上下文与 ADR-011 回答级结构化 citation 已交付；PDF、授权引用、来源变化和句子级证据覆盖仍待后续。回答级来源身份验证不等于事实正确性证明。
+> 目标版本：待定。TXT/Markdown/PDF 本地检索、Actor 异步任务、ADR-010 AI6 显式知识上下文与 ADR-011 回答级结构化 citation 已交付；授权引用、来源变化和句子级证据覆盖仍待后续。回答级来源身份验证不等于事实正确性证明。
 >
-> 决策：[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md) · [实施计划](../plans/knowledge-base-phases.md)
+> 决策：[ADR-009](../adr/009-local-knowledge-base-ingestion-and-search.md) · [ADR-026](../adr/026-local-knowledge-pdf-extraction.md) · [实施计划](../plans/knowledge-base-phases.md)
 
 ## 定位与边界
 
@@ -13,15 +13,16 @@
 - 当前只评估本地向量索引或本地 embedding；远程 embedding 不在范围内。
 - 不自动扫描磁盘、浏览器、邮件或云盘；只有用户通过文件对话框明确选择的来源才能进入知识库。
 - 不自动上传、同步或分享原文、分段、索引、查询或检索结果。
-- PDF 导入是本地文本提取，不包含 OCR、密码破解或任意代码执行；复杂格式另行评审。
+- PDF 导入是本地文本提取（ADR-026），不包含 OCR、密码破解或任意代码执行；复杂格式另行评审。
 
 ## 当前实现状态
 
-- schema 059 已新增 `knowledge_sources`、`knowledge_documents`、`knowledge_chunks`、`knowledge_index_jobs` 与 FTS5/trigger；知识库操作态显式排除便携业务导出，完整 SQLite 备份覆盖原文与索引。
-- Sidecar 已交付 TXT/Markdown 单文件受控上传、幂等重放、UTF-8/NUL/空白/16 MiB 校验、换行规范化、Unicode 分段、中文辅助词项、来源过滤检索、纯文本高亮、行/字符定位、版本化重建、单文档删除、来源删除和全库清理 API。
-- Web 已新增知识库页面、主导航与命令面板入口，展示本地-only 边界、来源状态/版本/分段/大小、Actor 阶段/进度、取消/retry、来源清单导出、筛选检索、位置引用、重建及删除确认。
-- 当前文本索引由进程内单邮箱 Actor 异步执行：HTTP 持久化 queued Job 后返回 202，Worker 推进阶段，支持运行中取消、failed/cancelled retry attempt 和启动中断恢复。最终文档/chunks/FTS/来源/Job 单事务发布，重建期间旧文档保持可搜索。
-- PDF、文件对话框授权引用、来源变化自动标 stale、向量索引尚未实现；来源清单 CSV 与 ADR-010 AI6 显式知识片段已经交付，没有远程 embedding 或新增生产依赖。
+- schema 059 已新增 `knowledge_sources`、`knowledge_documents`、`knowledge_chunks`、`knowledge_index_jobs` 与 FTS5/trigger；知识库操作态显式排除便携业务导出，完整 SQLite 备份覆盖原文与索引。schema 070 把 `source_type` 扩展到 `pdf` 并为 `knowledge_chunks` 增加 `start_page`/`end_page` 页码定位。
+- Sidecar 已交付 TXT/Markdown/PDF 单文件受控上传、幂等重放、UTF-8/NUL/空白/16 MiB 校验（PDF 另有魔数预检）、换行规范化、Unicode 分段、中文辅助词项、来源过滤检索、纯文本高亮、行/字符定位、PDF 页码定位、版本化重建、单文档删除、来源删除和全库清理 API。
+- PDF 提取（ADR-026）由 `ledongthuc/pdf` 纯 Go 解释器驱动：中英文经 ToUnicode CMap 提取，无文本页跳过，加密/损坏/退化内容流以稳定错误码失败（`KNOWLEDGE_PDF_ENCRYPTED/INVALID/NO_TEXT/TEXT_TOO_LARGE/TOO_COMPLEX/TOO_MANY_PAGES`），文本与操作预算防止压缩炸弹膨胀；文档 `extractor_version` 为 `pdf-text-v1`。
+- Web 已新增知识库页面、主导航与命令面板入口，展示本地-only 边界、来源状态/类型/版本/分段/大小、Actor 阶段/进度、取消/retry、来源清单导出、筛选检索、位置引用（PDF 显示页码范围）、重建及删除确认。
+- 当前文本与 PDF 索引由进程内单邮箱 Actor 异步执行：HTTP 持久化 queued Job 后返回 202，Worker 推进阶段，支持运行中取消、failed/cancelled retry attempt 和启动中断恢复。最终文档/chunks/FTS/来源/Job 单事务发布，重建期间旧文档保持可搜索。
+- 文件对话框授权引用、来源变化自动标 stale、向量索引尚未实现；来源清单 CSV 与 ADR-010 AI6 显式知识片段已经交付，没有远程 embedding（PDF 提取依赖是仓库新增的唯一生产依赖，纯 Go、零传递依赖）。
 
 ## 目标功能
 
@@ -47,9 +48,9 @@
 
 ### 数据
 
-- `knowledge_sources`：当前保存显示名、`managed_copy`、类型、大小、内容哈希、原始 bytes、状态、版本和审计时间；授权引用、路径作用域与 mtime 为后续字段。
-- `knowledge_documents`：来源解析版本、标题、语言、提取器版本、文本校验和及状态。
-- `knowledge_chunks`：文档、顺序、位置引用、正文、正文哈希和索引版本。
+- `knowledge_sources`：当前保存显示名、`managed_copy`、类型（`text`/`markdown`/`pdf`）、大小、内容哈希、原始 bytes、状态、版本和审计时间；授权引用、路径作用域与 mtime 为后续字段。
+- `knowledge_documents`：来源解析版本、标题、语言、提取器版本（`plain-text-v1` / `pdf-text-v1`）、文本校验和及状态。
+- `knowledge_chunks`：文档、顺序、位置引用（字符/行范围与 `start_page`/`end_page` 页码范围，文本来源恒为 1）、正文、正文哈希和索引版本。
 - `knowledge_index_jobs`：来源/文档、任务类型、状态、阶段、进度、attempt、错误码、取消标记和时间。
 - FTS5 虚表及映射由迁移创建；不能让 FTS 行成为原文事实源。
 - 任意文件路径都通过 Tauri 授权和受控引用保存；日志、API 错误和事件不包含完整正文。
@@ -91,7 +92,7 @@
 
 1. **K1 ADR 与威胁模型（已完成）**：ADR-009 明确受控副本、无路径 API、格式/资源上限、删除、备份和本地-only 网络边界。
 2. **K2 数据与任务框架（已完成）**：schema 059、单邮箱 Actor、阶段进度、取消/retry、旧索引保留和启动中断恢复已交付。
-3. **K3 文本导入（TXT/Markdown 已完成）**：格式、UTF-8、NUL、空白和损坏输入已覆盖；PDF 待 K3b。
+3. **K3 文本导入（已完成）**：TXT/Markdown 格式、UTF-8、NUL、空白和损坏输入已覆盖；PDF（K3b，ADR-026/schema 070）已交付页码定位、损坏/加密/无文本页与预算防护。
 4. **K4 本地检索（已完成）**：FTS5、中文辅助词项、来源过滤、高亮、位置引用和无结果已交付。
 5. **K5 生命周期（核心闭环已完成）**：版本化重建、文档/来源删除、彻底清理与 metadata-only 来源清单已交付；变化检测、stale 待 K5b。
 6. **K6 AI 集成（已完成，[ADR-010](../adr/010-ai-explicit-knowledge-context.md)）**：只开放用户显式选择的 1–3 个受控片段并保存来源历史；没有自动整库检索。本地向量/embedding 另做包体、性能和跨平台 ADR。
@@ -105,7 +106,7 @@
 - 删除后原文副本、派生文本、chunks、FTS 行和缓存均可验证清除，备份策略明确。
 - 日志、错误、事件和诊断不包含完整正文或敏感片段。
 - 断网时导入、索引、搜索、更新和删除完整可用；网络监测确认没有远程 embedding 或数据外发。
-- 关键词检索的准确来源、无结果、提示注入文本、损坏 PDF、大文件、低磁盘和跨平台路径均有测试。
+- 关键词检索的准确来源、无结果、提示注入文本、损坏/加密/无文本 PDF、大文件、低磁盘和跨平台路径均有测试；纯 Go 提取对复杂排版（表格、多栏、非 ToUnicode 编码）以稳定错误码失败或不产出文本，不伪造内容。
 - 知识库故障不影响任务、项目、客户等核心模块。
 
 ## 相关 PRD 与代码链接

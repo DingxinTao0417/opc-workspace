@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 69。PRD v10.9 与 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口 AI 运行隔离/预算、流终态、应用级恢复、任务确认事务、记忆决定、分段压缩和 dataset v4 配置身份评测；068 增加 Provider 配置身份，069 增加请求/确认/记忆决定/压缩水位线，不新增 AI 表。业务导入兼容为 v49/v63/v64/v65/v66/v67/v68→69，AI/知识库操作态仍排除便携业务导出。业务冲突合并、外部备份目录和覆盖仍禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名本地打包；实机模型、真实故障与跨平台发布验收不由隔离自动化代替。
+> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 70。PRD v10.9 与 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口 AI 运行隔离/预算、流终态、应用级恢复、任务确认事务、记忆决定、分段压缩和 dataset v4 配置身份评测；[ADR-026](adr/026-local-knowledge-pdf-extraction.md) 交付知识库 PDF 提取与页码定位（schema 070）。业务导入兼容为 v49/v63–v69→70，AI/知识库操作态仍排除便携业务导出。业务冲突合并、外部备份目录和覆盖仍禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名本地打包；实机模型、真实故障与跨平台发布验收不由隔离自动化代替。
 
 ## 阅读顺序与事实优先级
 
@@ -46,7 +46,7 @@
 | 路线图           | R2/R3/R5 完成，R4 同季度排序、跨季度/跨年度移动与季度内精确日期拖拽已交付                                                                              | v0.3             | [roadmap.md](modules/roadmap.md)                   |
 | 内容日历         | CC1–CC5-B、CC6-A 与指定详情 URL 已交付；拖拽/键盘改期即时预移且失败回滚，审核/发布 Inbox 可精确回到跨月份最新详情，不自动外发                          | v0.3             | [content-calendar.md](modules/content-calendar.md) |
 | 预设自动化       | 首个纵向切片完成                                                                                                                                       | v0.2             | [automation.md](modules/automation.md)             |
-| 本地知识库       | TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 显式片段已交付；PDF、授权引用待后续                                           | 独立轨道         | [knowledge-base.md](modules/knowledge-base.md)     |
+| 本地知识库       | TXT/Markdown/PDF（ADR-026 页码定位）、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 显式片段已交付；授权引用、来源变化待后续              | 独立轨道         | [knowledge-base.md](modules/knowledge-base.md)     |
 | AI 助手          | Provider/Harness/记忆/显式上下文/citation、dataset v4 配置身份评测/人工审计、steps/用量趋势，以及 ADR-025 可靠性、确认与恢复已交付；真机场景待专项验收 | 待定（独立轨道） | [ai-assistant.md](modules/ai-assistant.md)         |
 
 ## 全局产品边界
@@ -82,7 +82,7 @@
 - [Agent Harness 分阶段计划（ADR-005/006 已实施；实现状态以 [模块文档](modules/ai-assistant.md) 为准）](plans/agent-harness-phases.md)
 - [会话上下文压缩与记忆工具分阶段计划（ADR-007；G1–G5 已交付）](plans/context-memory-phases.md)
 - [AI 显式业务上下文分阶段计划（ADR-008；AI5 已交付）](plans/ai-explicit-context-phases.md)
-- [本地知识库分阶段计划（ADR-009；K1 与 K2–K5 文本基线已交付）](plans/knowledge-base-phases.md)
+- [本地知识库分阶段计划（ADR-009/026；K1–K6 与 K3b PDF 已交付）](plans/knowledge-base-phases.md)
 - [AI6 显式知识片段实施计划（ADR-010；已交付）](plans/ai-knowledge-context-phases.md)
 - [AI7 质量闸门与可解释性计划（ADR-011–025；引用、本地质量/用量、可靠性与确认恢复；验证记录集中维护）](plans/ai-quality-gates.md)
 
@@ -94,7 +94,7 @@
 - [ADR-006：Harness 完整组件矩阵与自进化边界](adr/006-harness-matrix-memory-evolution.md)
 - [ADR-007：会话上下文压缩与记忆工具（G1–G5 已交付）](adr/007-session-context-compaction-and-memory-tools.md)
 - [ADR-008：AI 显式业务上下文与发送前预览（AI5 已交付）](adr/008-ai-explicit-business-context.md)
-- [ADR-009：本地知识库导入、索引与检索边界（文本基线已交付）](adr/009-local-knowledge-base-ingestion-and-search.md)
+- [ADR-009：本地知识库导入、索引与检索边界（文本基线已交付；PDF 由 ADR-026 接续）](adr/009-local-knowledge-base-ingestion-and-search.md)
 - [ADR-010：AI 显式知识片段上下文与来源引用（AI6 已交付）](adr/010-ai-explicit-knowledge-context.md)
 - [ADR-011：AI 回答的可验证知识引用（AI7-Q1 已交付）](adr/011-ai-validated-knowledge-citations.md)
 - [ADR-012：AI 运行步骤与本地无正文指标（AI7-Q3 steps、Provider usage 与本地聚合已交付）](adr/012-ai-run-steps-and-local-metrics.md)
@@ -111,6 +111,7 @@
 - [ADR-023：AI 本地质量代码所有专题套件（四类 6-case 已交付）](adr/023-ai-local-quality-topic-suites.md)
 - [ADR-024：AI 本地用量 UTC 时间趋势（1–30 天已交付）](adr/024-ai-local-usage-time-trends.md)
 - [ADR-025：AI 运行可靠性、确认事务与评测配置身份（schema 068–069、dataset v4）](adr/025-ai-reliability-confirmations-and-evaluation-identity.md)
+- [ADR-026：本地知识库 PDF 文本提取与页码定位（K3b 已交付）](adr/026-local-knowledge-pdf-extraction.md)
 
 ## 核心术语
 

@@ -141,7 +141,7 @@ func (a *API) runKnowledgeIndexJob(jobID string) {
 		a.failKnowledgeIndexJob(jobID, "KNOWLEDGE_SOURCE_UNAVAILABLE")
 		return
 	}
-	text, err := extractKnowledgeText(source.Name, source.OriginalContent)
+	text, pages, err := extractKnowledgeSource(source)
 	if err != nil {
 		a.failKnowledgeIndexJob(jobID, knowledgeIndexFailureCode(err))
 		return
@@ -153,9 +153,16 @@ func (a *API) runKnowledgeIndexJob(jobID string) {
 		a.knowledgeIndexer.stageHook(jobID, "chunking")
 	}
 	chunks := splitKnowledgeText(text)
+	for index := range chunks {
+		chunks[index].StartPage, chunks[index].EndPage = knowledgePagesForLines(pages, chunks[index].StartLine, chunks[index].EndLine)
+	}
 	if len(chunks) == 0 {
 		a.failKnowledgeIndexJob(jobID, "KNOWLEDGE_EMPTY_SOURCE")
 		return
+	}
+	extractorVersion := knowledgeExtractorVersion
+	if source.SourceType == "pdf" {
+		extractorVersion = knowledgePDFExtractorVersion
 	}
 	if !a.advanceKnowledgeIndexJob(jobID, "indexing", 75) {
 		return
@@ -187,7 +194,7 @@ func (a *API) runKnowledgeIndexJob(jobID string) {
 		if errors.Is(documentErr, gorm.ErrRecordNotFound) {
 			document = models.KnowledgeDocument{
 				ID: uuid.NewString(), SourceID: source.ID, Title: source.Title, Language: detectKnowledgeLanguage(text),
-				ExtractorVersion: knowledgeExtractorVersion, ContentText: text,
+				ExtractorVersion: extractorVersion, ContentText: text,
 				ContentSHA256: knowledgeSHA256([]byte(text)), Status: "ready", Version: 1,
 				CreatedAt: completedAt, UpdatedAt: completedAt,
 			}
@@ -200,7 +207,7 @@ func (a *API) runKnowledgeIndexJob(jobID string) {
 			}
 			document.Version++
 			if err := tx.Model(&models.KnowledgeDocument{}).Where("id = ?", document.ID).Updates(map[string]any{
-				"language": detectKnowledgeLanguage(text), "extractor_version": knowledgeExtractorVersion,
+				"language": detectKnowledgeLanguage(text), "extractor_version": extractorVersion,
 				"content_text": text, "content_sha256": knowledgeSHA256([]byte(text)),
 				"status": "ready", "version": document.Version, "updated_at": completedAt,
 			}).Error; err != nil {

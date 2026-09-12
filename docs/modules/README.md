@@ -44,7 +44,7 @@ v0.1 的内置 Sidecar 只在真实 `Terminated` 后按 500 ms、2 s 最多重�
 
 ## 版本待定（独立轨道）
 
-- [本地知识库](knowledge-base.md)（ADR-009、schema 059、TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 已交付；PDF、授权引用与变化检测待后续）
+- [本地知识库](knowledge-base.md)（ADR-009、schema 059、TXT/Markdown、Actor、FTS5/中文检索、定位、重建、删除、清单与 ADR-010 AI6 已交付；ADR-026/schema 070 的 PDF 提取与页码定位已交付；授权引用与变化检测待后续）
 - [AI 助手](ai-assistant.md)（Provider、Harness、记忆、AI5/AI6、回答级 citation、dataset v4 的 smoke/topic/full 配置身份评测与人工决定审计、steps/原始 token/unknown/UTC 趋势，以及 ADR-025 运行隔离、全局停止与恢复、原子任务确认、记忆决定和分段压缩已交付；费用、句子级覆盖率、自动路由与真机质量验证待后续）
 
 ## 维护规则

@@ -207,7 +207,8 @@ func TestKnowledgeImportRejectsUnsafeOrInvalidSources(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{name: "unsupported extension", filename: "notes.pdf", content: []byte("PDF"), status: http.StatusUnsupportedMediaType, code: "KNOWLEDGE_FORMAT_UNSUPPORTED"},
+		{name: "unsupported extension", filename: "notes.docx", content: []byte("docx"), status: http.StatusUnsupportedMediaType, code: "KNOWLEDGE_FORMAT_UNSUPPORTED"},
+		{name: "pdf without magic bytes", filename: "notes.pdf", content: []byte("PDF"), status: http.StatusUnprocessableEntity, code: "KNOWLEDGE_PDF_INVALID"},
 		{name: "invalid utf8", filename: "notes.txt", content: []byte{0xff, 0xfe}, status: http.StatusUnprocessableEntity, code: "KNOWLEDGE_TEXT_INVALID"},
 		{name: "null byte", filename: "notes.md", content: []byte("safe\x00unsafe"), status: http.StatusUnprocessableEntity, code: "KNOWLEDGE_TEXT_INVALID"},
 		{name: "blank", filename: "notes.txt", content: []byte("  \n\t"), status: http.StatusUnprocessableEntity, code: "KNOWLEDGE_EMPTY_SOURCE"},

@@ -40,6 +40,8 @@ type aiKnowledgeContextSource struct {
 	EndChar         int    `json:"end_char"`
 	StartLine       int    `json:"start_line"`
 	EndLine         int    `json:"end_line"`
+	StartPage       int    `json:"start_page"`
+	EndPage         int    `json:"end_page"`
 	Content         string `json:"content"`
 }
 
@@ -159,6 +161,7 @@ func buildAIKnowledgeContext(ctx context.Context, db *gorm.DB, inputs []aiKnowle
 			SourceType: row.SourceType, DocumentID: row.DocumentID, DocumentTitle: row.DocumentTitle,
 			DocumentVersion: row.DocumentVersion, ChunkID: row.ID, ChunkIndex: row.ChunkIndex,
 			StartChar: row.StartChar, EndChar: row.EndChar, StartLine: row.StartLine, EndLine: row.EndLine,
+			StartPage: row.StartPage, EndPage: row.EndPage,
 			Content: row.Content,
 		})
 	}

@@ -10466,7 +10466,9 @@ function knowledgeSourceFromRecord(value: unknown): KnowledgeSource {
   const sourceType = stringField(value, "source_type", "sourceType");
   const status = stringField(value, "status");
   if (
-    (sourceType !== "text" && sourceType !== "markdown") ||
+    (sourceType !== "text" &&
+      sourceType !== "markdown" &&
+      sourceType !== "pdf") ||
     ![
       "pending",
       "indexing",
@@ -10583,7 +10585,11 @@ function knowledgeSearchResultFromRecord(
     return invalidResponse("知识库检索结果响应格式无效");
   }
   const sourceType = stringField(value, "source_type", "sourceType");
-  if (sourceType !== "text" && sourceType !== "markdown") {
+  if (
+    sourceType !== "text" &&
+    sourceType !== "markdown" &&
+    sourceType !== "pdf"
+  ) {
     return invalidResponse("知识库检索来源类型无效");
   }
   const excerpt = stringField(value, "excerpt") ?? "";
@@ -10627,6 +10633,14 @@ function knowledgeSearchResultFromRecord(
     endLine: positiveInteger(
       fieldValue(value, "end_line", "endLine"),
       "知识库结束行",
+    ),
+    startPage: positiveInteger(
+      fieldValue(value, "start_page", "startPage"),
+      "知识库起始页",
+    ),
+    endPage: positiveInteger(
+      fieldValue(value, "end_page", "endPage"),
+      "知识库结束页",
     ),
     excerpt,
     highlights,
@@ -10706,8 +10720,8 @@ export async function createKnowledgeSource(
       status: 413,
     });
   }
-  if (!/\.(txt|md|markdown)$/i.test(file.name)) {
-    throw new ApiError("当前只支持 TXT、MD 和 Markdown 文件", {
+  if (!/\.(txt|md|markdown|pdf)$/i.test(file.name)) {
+    throw new ApiError("当前只支持 TXT、Markdown 和 PDF 文件", {
       code: "KNOWLEDGE_FORMAT_UNSUPPORTED",
       status: 415,
     });
@@ -11059,7 +11073,11 @@ function aiKnowledgeContextSourceFromRecord(
     return invalidResponse("AI 知识库上下文响应格式无效");
   }
   const sourceType = stringField(row, "source_type", "sourceType");
-  if (sourceType !== "text" && sourceType !== "markdown") {
+  if (
+    sourceType !== "text" &&
+    sourceType !== "markdown" &&
+    sourceType !== "pdf"
+  ) {
     return invalidResponse("AI 知识库来源类型无效");
   }
   const startChar = nonNegativeInteger(
@@ -11104,6 +11122,16 @@ function aiKnowledgeContextSourceFromRecord(
     end_char: endChar,
     start_line: startLine,
     end_line: endLine,
+    start_page: positiveInteger(
+      fieldValue(row, "start_page", "startPage"),
+      "AI 知识库起始页",
+      0,
+    ),
+    end_page: positiveInteger(
+      fieldValue(row, "end_page", "endPage"),
+      "AI 知识库结束页",
+      0,
+    ),
     content: stringField(row, "content") ?? "",
   };
 }
@@ -11111,7 +11139,11 @@ function aiKnowledgeContextSourceFromRecord(
 function aiCitationFromRecord(row: unknown): AiCitation {
   if (!isRecord(row)) return invalidResponse("AI 引用响应格式无效");
   const sourceType = stringField(row, "source_type", "sourceType");
-  if (sourceType !== "text" && sourceType !== "markdown") {
+  if (
+    sourceType !== "text" &&
+    sourceType !== "markdown" &&
+    sourceType !== "pdf"
+  ) {
     return invalidResponse("AI 引用来源类型无效");
   }
   const startChar = nonNegativeInteger(
@@ -11156,6 +11188,16 @@ function aiCitationFromRecord(row: unknown): AiCitation {
     end_char: endChar,
     start_line: startLine,
     end_line: endLine,
+    start_page: positiveInteger(
+      fieldValue(row, "start_page", "startPage"),
+      "AI 引用起始页",
+      0,
+    ),
+    end_page: positiveInteger(
+      fieldValue(row, "end_page", "endPage"),
+      "AI 引用结束页",
+      0,
+    ),
   };
 }
 

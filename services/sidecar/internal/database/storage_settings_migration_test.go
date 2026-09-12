@@ -25,7 +25,7 @@ func TestStorageSettingsMigrationGatesAndPreservesExistingSettings(t *testing.T)
 	if err != nil {
 		t.Fatalf("open migration gate: %v", err)
 	}
-	if gated.SchemaVersion != 28 || gate == nil || gate.CurrentVersion != 28 || gate.TargetVersion != 69 || !reflect.DeepEqual(gate.PendingVersions, []int{29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69}) {
+	if gated.SchemaVersion != 28 || gate == nil || gate.CurrentVersion != 28 || gate.TargetVersion != 70 || !reflect.DeepEqual(gate.PendingVersions, []int{29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70}) {
 		t.Fatalf("storage settings migration gate: store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
 	if err := gated.Close(); err != nil {
@@ -37,8 +37,8 @@ func TestStorageSettingsMigrationGatesAndPreservesExistingSettings(t *testing.T)
 		t.Fatalf("apply storage settings migration: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
-		t.Fatalf("SchemaVersion = %d, want 69", store.SchemaVersion)
+	if store.SchemaVersion != 70 {
+		t.Fatalf("SchemaVersion = %d, want 70", store.SchemaVersion)
 	}
 	var value string
 	var version int

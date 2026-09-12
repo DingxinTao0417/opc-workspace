@@ -3,7 +3,7 @@
 > 文档版本：3.12
 > 日期：2026-09-10
 > 依据：[PRD v10.9](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 69（052–067 为既有 AI/知识库及评测；068 为配置身份，069 为可靠确认、请求恢复和分段水位线；独立轨道交付）
+> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 70（052–067 为既有 AI/知识库及评测；068 为配置身份，069 为可靠确认、请求恢复和分段水位线；070 为知识库 PDF 与页码定位；独立轨道交付）
 
 > 3.12 说明：[ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口短维护锁、全运行预算、明确流终态、应用级恢复、任务原子确认、记忆决定、临时会话隐私、分段压缩与 dataset v4 配置身份评测。真实模型、原生 WebView 输入法与真实崩溃验收不由自动化结果替代。
 
@@ -75,7 +75,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly/weekdays/monthly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema 69：v11–v51 交付核心业务；v52–v60 增加 AI/知识库/citation；v61–v62 增加无正文 run steps 与 Provider token；v63–v67 增加评测 Run/Result、dataset/suite 和不可变人工审计。v68 增加 Provider/Run/Review 配置身份，v69 增加请求身份、消息确认摘要、记忆决定和部分压缩水位线，不新增 AI 表。ADR-024 的 UTC 趋势仍只从根步骤派生。AI/知识库操作态排除便携业务导出，但覆盖于一致性 SQLite 备份；兼容图显式允许既有 v49/v63–v68→v69，不接受未知未来 schema（见 ADR-004–025）。
+- SQLite 当前为 schema 70：v11–v51 交付核心业务；v52–v60 增加 AI/知识库/citation；v61–v62 增加无正文 run steps 与 Provider token；v63–v67 增加评测 Run/Result、dataset/suite 和不可变人工审计。v68 增加 Provider/Run/Review 配置身份，v69 增加请求身份、消息确认摘要、记忆决定和部分压缩水位线，不新增 AI 表；v70（ADR-026）把知识库来源类型扩展到 PDF 并为 chunk 增加页码范围。ADR-024 的 UTC 趋势仍只从根步骤派生。AI/知识库操作态排除便携业务导出，但覆盖于一致性 SQLite 备份；兼容图显式允许既有 v49/v63–v69→v70，不接受未知未来 schema（见 ADR-004–026）。
 - Client Activity 继续以 `client_activities` 为唯一事实；`GET /api/v1/client-activities` 只读分页聚合所有客户未删除的 note/meeting/system_reference，按规范 UTC 纳秒键和 ID 稳定排序，并附带当前客户名称/状态。RightOverview 只取最近 3 条并深链客户详情，不复制活动、不生成 Inbox，也不推断邮件或提案下载等线上行为。
 - Roadmap Milestone 继续以 `roadmap_milestones`、关联 Project 与派生 Task 汇总为唯一事实；列表白名单 `sort=target_date` 在分页前按纯日期和 ID 稳定排序，缺省仍保留季度手工顺序。RightOverview 分别读取 planned/active 各 3 条，再按目标日期/ID 合并取最近 3 条，显示 Project 与已完成/总 Task 数；任一路失败整体显示重试，不把局部结果当完整概览，也不写 Today 副本。每条和路线图卡片都以 `?milestone=<id>` 打开同一个最新详情读模型，关闭/编辑只清理该参数并保留其他 URL 上下文。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
@@ -114,7 +114,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 - v0.2：本地 Agent Runtime 和预设自动化。
 - v0.3：路线图、内容日历、高级备份配置和规划增强。
 - v0.4：收入/支出、发票和客户回访。
-- 独立轨道：AI 助手 AI5/AI6、citation、离线 scorer/Q2 本地模型 8-case smoke/四类 6-case topic/24-case full Actor、suite 趋势/category/failure/Wilson/人工评审候选/不可变人工决定审计、Q3 run steps/Provider token/本地聚合/UTC 用量趋势已交付；知识库已交付文本/Actor/FTS/生命周期。PDF、授权引用、费用和自动路由待定。
+- 独立轨道：AI 助手 AI5/AI6、citation、离线 scorer/Q2 本地模型 8-case smoke/四类 6-case topic/24-case full Actor、suite 趋势/category/failure/Wilson/人工评审候选/不可变人工决定审计、Q3 run steps/Provider token/本地聚合/UTC 用量趋势已交付；知识库已交付文本/Actor/FTS/生命周期与 PDF 页码提取（ADR-026）。授权引用、费用和自动路由待定。
 
 ## 4. 核心领域对象与事实归属
 
@@ -157,7 +157,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 | [路线图](modules/roadmap.md)               | Project/Task 派生进度                                                                                                   | 已交付季度里程碑数据/API、项目关联、只读进度、服务端 Project 筛选/分页、新建/编辑/详情/归档恢复/保护性删除、同季度安全排序、年度跨季度/跨年度移动和季度内精确日期调整                | 里程碑到期/达成已投影本地 Inbox 事件；原生通知待后续                                                                                                                         |
 | [内容日历](modules/content-calendar.md)    | Project、Task、日期                                                                                                     | 内容计划、六周月格、IANA/DST 安全改期、拖拽/卡片键盘逐日改期即时预移与失败回滚、准备 Task 关系、本地发布确认；指定详情由 `?item=<id>` 和单条读取承载；CC2–CC5-B 已交付               | 准备 Task（读写已交付）；审核/发布时间到期事实投影到 Inbox，Inbox 通过内容 ID 精确回到最新详情（已交付）                                                                     |
 | [自动化](modules/automation.md)            | 当前消费 Project `project_completed` 与本地时钟；发票/Agent 事件待依赖交付                                              | 五个代码所有预设、版本化配置、next run、不可变 Run、attempt 与稳定去重                                                                                                               | 当前创建本地 Inbox Item 或 Reminder；Task 动作待依赖预设交付                                                                                                                 |
-| [知识库](modules/knowledge-base.md)        | 用户明确选择的 TXT/Markdown bytes；不接受路径                                                                           | SQLite 受控副本、单邮箱 Actor、FTS5/中文辅助检索、定位、重建和级联删除；向 AI 只提供用户选中的 chunk identity                                                                        | 带来源/文档版本/行号/字符范围的搜索结果、metadata-only CSV、AI6 显式片段 preview                                                                                             |
+| [知识库](modules/knowledge-base.md)        | 用户明确选择的 TXT/Markdown/PDF bytes；不接受路径                                                                       | SQLite 受控副本、单邮箱 Actor、FTS5/中文辅助检索、定位（文本行号 + PDF 页码）、重建和级联删除；向 AI 只提供用户选中的 chunk identity                                                 | 带来源/文档版本/行号/字符/页码范围的搜索结果、metadata-only CSV、AI6 显式片段 preview                                                                                        |
 | [AI 助手](modules/ai-assistant.md)         | 当前输入、最近回合、摘要/事实、长期记忆、确认的业务/知识上下文、显式选择的本地评测 Provider                             | 预览/重验、流式问答、记忆、citation、无正文 steps/usage/UTC 趋势、本地评测 Actor、趋势/category/failure-code；无业务写/knowledge tool/远程评测                                       | user context、assistant citation、generation/run steps/usage、无正文 evaluation run/result、派生用量 UTC 趋势、质量分组/趋势/category/failure-code、会话/记忆、Task 静态引用 |
 
 ## 6. 跨模块主流程
@@ -571,7 +571,7 @@ schema v8 为同一请求产生的多个 Workflow Event 增加正整数 `command
   → v0.2 本地 Agent / 预设自动化
   → v0.3 路线图 / 内容日历 / 高级数据管理
   → v0.4 财务 / 发票 / 客户回访
-  → 本地知识库（TXT/Markdown 受控导入、Actor 异步索引/取消/retry/恢复、FTS5、引用、重建与删除已交付；PDF/授权引用待后续）
+  → 本地知识库（TXT/Markdown/PDF 受控导入、Actor 异步索引/取消/retry/恢复、FTS5、行号/页码引用、重建与删除已交付；授权引用待后续）
   → AI 助手（远程/本地会话、记忆、显式业务/知识上下文、回答级 citation、无正文步骤/用量、dataset v4 配置身份评测、ADR-025 原子人工确认与运行恢复已交付；句子级证据、费用、自动路由和真实模型质量验收仍待）
 ```
 

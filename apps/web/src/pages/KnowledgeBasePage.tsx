@@ -63,6 +63,12 @@ const indexStage: Record<
   complete: "已完成",
 };
 
+function knowledgeSourceTypeLabel(sourceType: KnowledgeSource["sourceType"]) {
+  if (sourceType === "pdf") return "PDF";
+  if (sourceType === "markdown") return "Markdown";
+  return "TXT";
+}
+
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
@@ -171,7 +177,9 @@ function SourceCard({
         <span className="knowledge-source-copy">
           <strong title={source.name}>{source.name}</strong>
           <span>
-            {formatBytes(source.sizeBytes)} · {source.chunkCount} 个分段
+            {formatBytes(source.sizeBytes)} ·{" "}
+            {knowledgeSourceTypeLabel(source.sourceType)} · {source.chunkCount}{" "}
+            个分段
           </span>
         </span>
         <span className={`knowledge-status knowledge-status-${source.status}`}>
@@ -236,6 +244,9 @@ function SearchResultCard({ result }: { result: KnowledgeSearchResult }) {
           <strong>{result.sourceName}</strong>
         </span>
         <span className="knowledge-result-location">
+          {result.sourceType === "pdf"
+            ? `第 ${result.startPage}–${result.endPage} 页 · `
+            : ""}
           第 {result.startLine}–{result.endLine} 行 · 文档 v
           {result.documentVersion}
         </span>
@@ -451,7 +462,7 @@ export function KnowledgeBasePage() {
         actions={
           <>
             <input
-              accept=".txt,.md,.markdown,text/plain,text/markdown"
+              accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf"
               aria-label="选择知识库文件"
               className="knowledge-file-input"
               onChange={(event) => {

@@ -46,6 +46,8 @@ type KnowledgeChunk struct {
 	EndChar       int    `gorm:"column:end_char" json:"end_char"`
 	StartLine     int    `gorm:"column:start_line" json:"start_line"`
 	EndLine       int    `gorm:"column:end_line" json:"end_line"`
+	StartPage     int    `gorm:"column:start_page" json:"start_page"`
+	EndPage       int    `gorm:"column:end_page" json:"end_page"`
 	Content       string `gorm:"column:content" json:"content"`
 	SearchText    string `gorm:"column:search_text" json:"-"`
 	ContentSHA256 string `gorm:"column:content_sha256" json:"content_sha256"`

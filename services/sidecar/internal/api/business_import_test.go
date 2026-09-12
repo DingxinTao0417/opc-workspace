@@ -405,7 +405,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 		blocker string
 	}{
 		{name: "older", schema: 42, blocker: "source_schema_older"},
-		{name: "newer", schema: 70, blocker: "source_schema_newer"},
+		{name: "newer", schema: 71, blocker: "source_schema_newer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			router, store, _, backupDir := newBackupTestAPI(t)

@@ -31,6 +31,7 @@ const (
 	knowledgeChunkRunes             = 1200
 	knowledgeChunkOverlap           = 160
 	knowledgeExtractorVersion       = "plain-text-v1"
+	knowledgePDFExtractorVersion    = "pdf-text-v1"
 )
 
 type knowledgeSourceRow struct {
@@ -122,6 +123,8 @@ type knowledgeSearchRow struct {
 	EndChar         int     `gorm:"column:end_char"`
 	StartLine       int     `gorm:"column:start_line"`
 	EndLine         int     `gorm:"column:end_line"`
+	StartPage       int     `gorm:"column:start_page"`
+	EndPage         int     `gorm:"column:end_page"`
 	Content         string  `gorm:"column:content"`
 	Rank            float64 `gorm:"column:rank"`
 }
@@ -144,6 +147,8 @@ type knowledgeSearchResult struct {
 	EndChar         int                  `json:"end_char"`
 	StartLine       int                  `json:"start_line"`
 	EndLine         int                  `json:"end_line"`
+	StartPage       int                  `json:"start_page"`
+	EndPage         int                  `json:"end_page"`
 	Excerpt         string               `json:"excerpt"`
 	Highlights      []knowledgeHighlight `json:"highlights"`
 	Rank            float64              `json:"rank"`
@@ -155,6 +160,8 @@ type knowledgeChunkDraft struct {
 	EndChar   int
 	StartLine int
 	EndLine   int
+	StartPage int
+	EndPage   int
 }
 
 type knowledgeUpload struct {
@@ -670,7 +677,8 @@ func (a *API) searchKnowledge(c *gin.Context) {
 		s.name AS source_name, s.source_type AS source_type,
 		d.title AS document_title, d.version AS document_version,
 		c.chunk_index AS chunk_index, c.start_char AS start_char, c.end_char AS end_char,
-		c.start_line AS start_line, c.end_line AS end_line, c.content AS content,
+		c.start_line AS start_line, c.end_line AS end_line,
+		c.start_page AS start_page, c.end_page AS end_page, c.content AS content,
 		bm25(knowledge_chunks_fts) AS rank
 	`).Joins("JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.chunk_id").
 		Joins("JOIN knowledge_documents d ON d.id = c.document_id AND d.status = 'ready'").
@@ -693,6 +701,7 @@ func (a *API) searchKnowledge(c *gin.Context) {
 			DocumentTitle: rows[index].DocumentTitle, DocumentVersion: rows[index].DocumentVersion,
 			ChunkIndex: rows[index].ChunkIndex, StartChar: rows[index].StartChar, EndChar: rows[index].EndChar,
 			StartLine: rows[index].StartLine, EndLine: rows[index].EndLine,
+			StartPage: rows[index].StartPage, EndPage: rows[index].EndPage,
 			Excerpt: excerpt, Highlights: highlights, Rank: rows[index].Rank,
 		}
 	}
@@ -882,8 +891,14 @@ func readKnowledgeUpload(c *gin.Context) (knowledgeUpload, error) {
 	if err != nil {
 		return knowledgeUpload{}, err
 	}
-	if _, err = extractKnowledgeText(result.Name, result.Bytes); err != nil {
-		return knowledgeUpload{}, err
+	if result.SourceType == "pdf" {
+		if err = validateKnowledgePDFUpload(result.Bytes); err != nil {
+			return knowledgeUpload{}, err
+		}
+	} else {
+		if _, err = extractKnowledgeText(result.Name, result.Bytes); err != nil {
+			return knowledgeUpload{}, err
+		}
 	}
 	if result.Title == "" {
 		result.Title = result.Name
@@ -920,14 +935,20 @@ func knowledgeFileType(name string) (string, string, error) {
 		return "text", "text/plain", nil
 	case ".md", ".markdown":
 		return "markdown", "text/markdown", nil
+	case ".pdf":
+		return "pdf", "application/pdf", nil
 	default:
-		return "", "", newProjectRequestError(http.StatusUnsupportedMediaType, "KNOWLEDGE_FORMAT_UNSUPPORTED", "Only .txt, .md, and .markdown files are supported")
+		return "", "", newProjectRequestError(http.StatusUnsupportedMediaType, "KNOWLEDGE_FORMAT_UNSUPPORTED", "Only .txt, .md, .markdown, and .pdf files are supported")
 	}
 }
 
 func extractKnowledgeText(name string, content []byte) (string, error) {
-	if _, _, err := knowledgeFileType(name); err != nil {
+	sourceType, _, err := knowledgeFileType(name)
+	if err != nil {
 		return "", err
+	}
+	if sourceType == "pdf" {
+		return "", newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_PDF_INVALID", "PDF sources are extracted by the indexing Actor")
 	}
 	if !utf8.Valid(content) || strings.IndexByte(string(content), 0) >= 0 {
 		return "", newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_TEXT_INVALID", "The selected file must contain valid UTF-8 text without null bytes")
@@ -938,6 +959,54 @@ func extractKnowledgeText(name string, content []byte) (string, error) {
 		return "", newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_EMPTY_SOURCE", "The selected file does not contain indexable text")
 	}
 	return text, nil
+}
+
+func validateKnowledgePDFUpload(content []byte) error {
+	if !bytes.HasPrefix(content, []byte("%PDF-")) {
+		return newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_PDF_INVALID", "The selected file is not a readable PDF document")
+	}
+	return nil
+}
+
+// extractKnowledgeSource runs the upload-appropriate extraction for an indexed
+// source. Text sources return nil pages; every chunk of such a source stays on
+// page 1.
+func extractKnowledgeSource(source models.KnowledgeSource) (string, []knowledgePDFPageLocation, error) {
+	if source.SourceType == "pdf" {
+		extraction, err := extractKnowledgePDF(source.OriginalContent)
+		if err != nil {
+			return "", nil, err
+		}
+		return extraction.Text, extraction.Pages, nil
+	}
+	text, err := extractKnowledgeText(source.Name, source.OriginalContent)
+	if err != nil {
+		return "", nil, err
+	}
+	return text, nil, nil
+}
+
+// knowledgePagesForLines maps a chunk line range onto PDF page numbers. Pages
+// without extractable text contribute no lines, so contributing pages cover
+// the line sequence without gaps; ranges beyond the last page clamp to it.
+func knowledgePagesForLines(pages []knowledgePDFPageLocation, startLine, endLine int) (int, int) {
+	if len(pages) == 0 {
+		return 1, 1
+	}
+	startPage, endPage := pages[len(pages)-1].Number, pages[len(pages)-1].Number
+	for index := range pages {
+		if pages[index].EndLine >= startLine {
+			startPage = pages[index].Number
+			break
+		}
+	}
+	for index := range pages {
+		if pages[index].EndLine >= endLine {
+			endPage = pages[index].Number
+			break
+		}
+	}
+	return startPage, endPage
 }
 
 func splitKnowledgeText(text string) []knowledgeChunkDraft {
@@ -962,6 +1031,7 @@ func splitKnowledgeText(text string) []knowledgeChunkDraft {
 			chunks = append(chunks, knowledgeChunkDraft{
 				Content: segment, StartChar: start, EndChar: end,
 				StartLine: startLine, EndLine: startLine + strings.Count(segment, "\n"),
+				StartPage: 1, EndPage: 1,
 			})
 		}
 		if end == len(runes) {
@@ -983,6 +1053,7 @@ func insertKnowledgeChunks(tx *gorm.DB, sourceID, documentID string, indexVersio
 			ID: uuid.NewString(), DocumentID: documentID, SourceID: sourceID, ChunkIndex: index,
 			StartChar: drafts[index].StartChar, EndChar: drafts[index].EndChar,
 			StartLine: drafts[index].StartLine, EndLine: drafts[index].EndLine,
+			StartPage: drafts[index].StartPage, EndPage: drafts[index].EndPage,
 			Content: drafts[index].Content, SearchText: knowledgeSearchText(drafts[index].Content),
 			ContentSHA256: knowledgeSHA256([]byte(drafts[index].Content)),
 			IndexVersion:  indexVersion, CreatedAt: now,

@@ -87,6 +87,8 @@ beforeEach(() => {
         endChar: 20,
         startLine: 2,
         endLine: 3,
+        startPage: 1,
+        endPage: 1,
         excerpt: "客户发票在付款后归档",
         highlights: [{ start: 2, end: 4 }],
         rank: -1,
@@ -200,6 +202,57 @@ describe("KnowledgeBasePage", () => {
     expect(
       screen.queryByText("当前不会把检索内容发送给 AI 或任何远程服务。"),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows page locations and a type label for pdf sources", async () => {
+    vi.mocked(getKnowledgeSources).mockResolvedValue({
+      items: [
+        {
+          ...source,
+          name: "manual.pdf",
+          sourceType: "pdf",
+          mimeType: "application/pdf",
+        },
+      ],
+      meta: { page: 1, pageSize: 100, total: 1 },
+    });
+    vi.mocked(searchKnowledge).mockResolvedValue({
+      query: "安装",
+      sourceIds: [source.id],
+      items: [
+        {
+          chunkId: "chunk-2",
+          documentId: "document-1",
+          sourceId: source.id,
+          sourceName: "manual.pdf",
+          sourceType: "pdf",
+          documentTitle: "Manual",
+          documentVersion: 1,
+          chunkIndex: 0,
+          startChar: 0,
+          endChar: 20,
+          startLine: 41,
+          endLine: 43,
+          startPage: 2,
+          endPage: 3,
+          excerpt: "安装步骤说明",
+          highlights: [{ start: 0, end: 2 }],
+          rank: -1,
+        },
+      ],
+    });
+    renderPage();
+
+    expect(await screen.findByText("manual.pdf")).toBeVisible();
+    expect(screen.getByText(/2\.0 KiB · PDF · 3 个分段/)).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索知识库" }), {
+      target: { value: "安装" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "搜索" }));
+
+    expect(
+      await screen.findByText("第 2–3 页 · 第 41–43 行 · 文档 v1"),
+    ).toBeVisible();
   });
 
   it("imports an explicitly selected file and confirms complete local deletion", async () => {

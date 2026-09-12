@@ -2459,7 +2459,7 @@ export interface StorageCapacityHistoryResult {
   points: StorageCapacityHistoryPoint[];
 }
 
-export type KnowledgeSourceType = "text" | "markdown";
+export type KnowledgeSourceType = "text" | "markdown" | "pdf";
 export type KnowledgeSourceStatus =
   "pending" | "indexing" | "ready" | "stale" | "missing" | "failed" | "deleted";
 
@@ -2537,6 +2537,8 @@ export interface KnowledgeSearchResult {
   endChar: number;
   startLine: number;
   endLine: number;
+  startPage: number;
+  endPage: number;
   excerpt: string;
   highlights: KnowledgeHighlight[];
   rank: number;
@@ -2638,6 +2640,8 @@ export interface AiKnowledgeContextSource {
   end_char: number;
   start_line: number;
   end_line: number;
+  start_page?: number;
+  end_page?: number;
   content: string;
 }
 
@@ -2658,6 +2662,8 @@ export interface AiCitation {
   end_char: number;
   start_line: number;
   end_line: number;
+  start_page?: number;
+  end_page?: number;
 }
 
 export type AiRunStepKind =

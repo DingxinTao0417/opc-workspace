@@ -11,7 +11,7 @@ func TestStorageCapacityHistoryMigrationCreatesEmptyConstrainedTable(t *testing.
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 69 {
+	if store.SchemaVersion != 70 {
 		t.Fatalf("schema version=%d, want 69", store.SchemaVersion)
 	}
 	var count int64

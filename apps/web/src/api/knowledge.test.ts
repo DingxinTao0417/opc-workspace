@@ -165,6 +165,8 @@ describe("knowledge-base requests", () => {
             end_char: 12,
             start_line: 1,
             end_line: 2,
+            start_page: 1,
+            end_page: 1,
             excerpt: "客户发票已归档",
             highlights: [{ start: 2, end: 4 }],
             rank: -0.75,
@@ -189,6 +191,7 @@ describe("knowledge-base requests", () => {
           excerpt: "客户发票已归档",
           highlights: [{ start: 2, end: 4 }],
           startLine: 1,
+          startPage: 1,
           documentVersion: 2,
         },
       ],
@@ -202,6 +205,86 @@ describe("knowledge-base requests", () => {
       source_ids: ["source-1"],
       limit: 20,
     });
+  });
+
+  it("imports PDF sources and still rejects unsupported extensions", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(
+        {
+          data: {
+            source: {
+              ...sourceFixture(),
+              name: "manual.pdf",
+              source_type: "pdf",
+              mime_type: "application/pdf",
+            },
+            job: { ...jobFixture(), source_id: "source-1" },
+          },
+        },
+        201,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["%PDF-1.7 test"], "manual.pdf", {
+      type: "application/pdf",
+    });
+
+    const result = await createKnowledgeSource(file);
+
+    expect(result.source).toMatchObject({
+      sourceType: "pdf",
+      mimeType: "application/pdf",
+    });
+    const unsupported = new File(["docx"], "notes.docx");
+    await expect(createKnowledgeSource(unsupported)).rejects.toMatchObject({
+      code: "KNOWLEDGE_FORMAT_UNSUPPORTED",
+    });
+  });
+
+  it("parses pdf page locations and rejects responses without them", async () => {
+    const searchRow = {
+      chunk_id: "chunk-1",
+      document_id: "document-1",
+      source_id: "source-1",
+      source_name: "manual.pdf",
+      source_type: "pdf",
+      document_title: "Manual",
+      document_version: 1,
+      chunk_index: 0,
+      start_char: 0,
+      end_char: 12,
+      start_line: 41,
+      end_line: 43,
+      start_page: 2,
+      end_page: 3,
+      excerpt: "安装步骤说明",
+      highlights: [{ start: 0, end: 2 }],
+      rank: -1.5,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [searchRow],
+          meta: { query: "安装", result_count: 1, source_ids: [] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: [{ ...searchRow, start_page: undefined }],
+          meta: { query: "安装", result_count: 1, source_ids: [] },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await searchKnowledge("安装");
+    expect(result.items[0]).toMatchObject({
+      sourceType: "pdf",
+      startPage: 2,
+      endPage: 3,
+    });
+
+    await expect(searchKnowledge("安装")).rejects.toThrow();
   });
 
   it("cancels an active job and retries it against the latest source version", async () => {
