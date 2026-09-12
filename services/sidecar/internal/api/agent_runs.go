@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,7 +74,11 @@ func builtinExecutionReady() (bool, string) {
 
 func (a *API) activeAgentAssignment(tx *gorm.DB, taskID string) (models.TaskAssignment, models.Actor, models.AgentAdapter, error) {
 	var assignment models.TaskAssignment
-	err := tx.First(&assignment, "task_id = ? AND unassigned_at IS NULL", taskID).Error
+	err := tx.Table("task_assignments AS assignment").
+		Joins("JOIN actors AS actor ON actor.id = assignment.actor_id").
+		Where("assignment.task_id = ? AND assignment.role = 'assignee' AND assignment.unassigned_at IS NULL", taskID).
+		Where("actor.status = 'active' AND actor.type = 'agent'").
+		Take(&assignment).Error
 	if err != nil {
 		return assignment, models.Actor{}, models.AgentAdapter{}, newProjectRequestError(
 			http.StatusConflict, agentRunNotExecutable, "The task has no active assignment to an agent actor")
@@ -455,6 +461,116 @@ func (a *API) finalizeAgentRun(run models.AgentRun, resultText, errorCode, compl
 		}
 		return recordAgentRunWorkflowEvent(tx, event, run.ID, map[string]any{"error_code": errorCode}, "", completedAt)
 	})
+	if event == "agent_run_succeeded" {
+		a.submitAgentRunResult(run, resultText, completedAt)
+	}
+}
+
+// submitAgentRunResult pushes a succeeded run's text output through the same
+// manual-review submission chain as human output (v0.2-C): the agent actor is
+// the producer, the task enters waiting_review, and owner review/acceptance
+// stays the only completion path. Domain preconditions that are not met leave
+// the output on the run record and are recorded as a skip event.
+func (a *API) submitAgentRunResult(run models.AgentRun, resultText string, completedAt string) {
+	submissionErr := a.db.Transaction(func(tx *gorm.DB) error {
+		var task models.Task
+		if err := tx.First(&task, "id = ?", run.TaskID).Error; err != nil {
+			return err
+		}
+		if task.ReviewPolicy != "manual" {
+			return newProjectRequestError(http.StatusConflict, "TASK_MANUAL_REVIEW_REQUIRED",
+				"Only manual-review tasks accept submitted output")
+		}
+		if task.Status != "todo" && task.Status != "in_progress" {
+			return newProjectRequestError(http.StatusConflict, "TASK_SUBMISSION_NOT_ALLOWED",
+				"Output can only be submitted from todo or in-progress status")
+		}
+		if _, err := requireTaskOutputActors(tx, run.TaskID); err != nil {
+			return err
+		}
+		var sequence int
+		if err := tx.Model(&models.TaskSubmission{}).Where("task_id = ?", run.TaskID).
+			Select("COALESCE(MAX(sequence), 0) + 1").Scan(&sequence).Error; err != nil {
+			return err
+		}
+		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		submission := models.TaskSubmission{
+			ID: uuid.NewString(), TaskID: run.TaskID, Sequence: sequence, Status: "pending_review",
+			Origin: taskSubmissionOriginManual, Summary: "Agent Run 交付（attempt " +
+				strconv.Itoa(run.Attempt) + "）",
+			SubmittedByActorID: run.ActorID, SubmittedAt: now,
+		}
+		if err := tx.Create(&submission).Error; err != nil {
+			return err
+		}
+		artifact := models.TaskArtifact{
+			ID: uuid.NewString(), TaskID: run.TaskID, SubmissionID: submission.ID, Position: 1,
+			StorageKind: "text", Name: fmt.Sprintf("agent-run-attempt-%d.md", run.Attempt),
+			ContentText:       &resultText,
+			ProducedByActorID: run.ActorID, RecordedByActorID: models.BuiltinSystemActorID,
+			IntegrityStatus: "unverified", CreatedAt: now,
+		}
+		if err := tx.Create(&artifact).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"status": "waiting_review", "current_submission_id": submission.ID,
+			"submitted_at": now, "reviewed_at": nil, "completed_at": nil,
+			"updated_at": now, "version": gorm.Expr("version + 1"),
+		}
+		result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", run.TaskID, task.Version).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return taskVersionConflict()
+		}
+		return recordAgentRunWorkflowEvent(tx, "agent_run_output_submitted", run.ID, map[string]any{
+			"submission_id": submission.ID, "artifact_id": artifact.ID, "task_version": task.Version + 1,
+		}, "", completedAt)
+	})
+	if submissionErr != nil {
+		reason := "AGENT_SUBMISSION_FAILED"
+		var requestErr *projectRequestError
+		if errors.As(submissionErr, &requestErr) {
+			reason = requestErr.code
+		}
+		_ = a.db.Transaction(func(tx *gorm.DB) error {
+			return recordAgentRunWorkflowEvent(tx, "agent_run_submission_skipped", run.ID,
+				map[string]any{"reason": reason}, "", completedAt)
+		})
+	}
+}
+
+func ptrString(value string) *string { return &value }
+
+// deriveArtifactExtension resolves the deliverable extension from what the
+// task asked for. Requirement keywords win; the produced content is only the
+// fallback so a task asking for "html" always yields an .html artifact.
+func deriveArtifactExtension(task models.Task, resultText string) string {
+	requirements := strings.ToLower(task.CompletionCriteria + "\n" +
+		task.Description + "\n" + task.Title)
+	for _, keyword := range []struct {
+		keyword   string
+		extension string
+	}{
+		{"html", ".html"}, {"json", ".json"}, {"csv", ".csv"},
+		{"xml", ".xml"}, {"yaml", ".yaml"}, {"yml", ".yml"},
+		{"sql", ".sql"}, {"python", ".py"}, {"javascript", ".js"},
+		{" markdown", ".md"}, {"markdown 文档", ".md"},
+	} {
+		if strings.Contains(requirements, keyword.keyword) {
+			return keyword.extension
+		}
+	}
+	lowerResult := strings.ToLower(resultText)
+	if strings.Contains(lowerResult, "<!doctype html") || strings.Contains(lowerResult, "<html") {
+		return ".html"
+	}
+	if strings.HasPrefix(strings.TrimSpace(resultText), "{") {
+		return ".json"
+	}
+	return ".md"
 }
 
 // recoverAgentRunsOnStartup marks leftover queued/running runs interrupted;

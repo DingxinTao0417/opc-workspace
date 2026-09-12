@@ -1657,7 +1657,9 @@ func requireTaskOutputActors(tx *gorm.DB, taskIDValue string) (activeTaskAssigne
 	err := tx.Table("task_assignments AS assignment").Select("assignment.actor_id").
 		Joins("JOIN actors AS actor ON actor.id = assignment.actor_id").
 		Where("assignment.task_id = ? AND assignment.role = 'assignee' AND assignment.unassigned_at IS NULL", taskIDValue).
-		Where("actor.status = 'active' AND actor.type IN ('owner', 'person')").Take(&assignee).Error
+		// ADR-027: an active agent assignee submits through its run pipeline;
+		// the produced artifact records the agent as producer.
+		Where("actor.status = 'active' AND actor.type IN ('owner', 'person', 'agent')").Take(&assignee).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return activeTaskAssignee{}, newProjectRequestError(http.StatusConflict, "TASK_ASSIGNEE_REQUIRED", "An active assignee is required before submitting output")
 	}

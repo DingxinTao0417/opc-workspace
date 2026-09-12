@@ -62,7 +62,7 @@ func RunExecutor(stdin io.Reader, stdout io.Writer, dialTimeout time.Duration) e
 		}
 		return fail(code, err)
 	}
-	text = strings.TrimSpace(text)
+	text = stripMarkdownFence(strings.TrimSpace(text))
 	if text == "" {
 		return fail(ErrorCodeEmptyResult, errors.New("model returned no text"))
 	}
@@ -98,9 +98,37 @@ func buildPrompt(input InputFrame) string {
 	return builder.String()
 }
 
+// stripMarkdownFence unwraps a single markdown fenced code block. Models
+// routinely wrap whole deliverables (e.g. an HTML page) in ``` fences; the
+// artifact must contain the deliverable itself, not the fence.
+func stripMarkdownFence(text string) string {
+	if !strings.HasPrefix(text, "```") {
+		return text
+	}
+	newline := strings.Index(text, "\n")
+	if newline < 0 {
+		return text
+	}
+	body := strings.TrimSuffix(strings.TrimRight(text[newline+1:], "\n"), "\n```")
+	return strings.TrimSpace(body)
+}
+
 // ErrModelUnavailable marks connection failures so the run record can
 // distinguish "local model down" from "model rejected the request".
 var ErrModelUnavailable = errors.New("local model endpoint unreachable")
+
+func failHTTPStatus(status int) error {
+	switch {
+	case status == 401 || status == 403:
+		return fmt.Errorf("AGENT_MODEL_AUTH_FAILED (http %d)", status)
+	case status == 429:
+		return fmt.Errorf("AGENT_MODEL_RATE_LIMITED (http %d)", status)
+	case status >= 500:
+		return fmt.Errorf("AGENT_MODEL_UPSTREAM_ERROR (http %d)", status)
+	default:
+		return fmt.Errorf("AGENT_MODEL_HTTP_%d", status)
+	}
+}
 
 type chatRequest struct {
 	Model    string        `json:"model"`
@@ -164,7 +192,9 @@ func callLocalModel(dialTimeout time.Duration, endpoint *url.URL, model, apiKey,
 		return "", err
 	}
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("model endpoint status %d", response.StatusCode)
+		// Surface the upstream status in the stable code so a failed run
+		// immediately distinguishes auth, rate limiting, and gateway errors.
+		return "", failHTTPStatus(response.StatusCode)
 	}
 	var decoded chatResponse
 	if err := json.Unmarshal(payload, &decoded); err != nil {

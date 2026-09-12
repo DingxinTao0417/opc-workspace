@@ -31,7 +31,8 @@
 - [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md) 把 Adapter 信任分为 builtin（代码所有、随 Sidecar 自再执行分发）与 external（导入对象，维持 ADR-003 全部闸门）两级；builtin 的 `execution_ready` 由生命周期验证矩阵决定（Windows 已实测：管道往返、Job Object 子树回收、超时/取消），external 在三平台验证前永不启用。
 - schema 071 新增 `agent_runs` 与 `actors.agent_adapter_id`（agent Actor 必须指向 Adapter）。Sidecar 已交付 Run 状态机 `queued -> running -> succeeded|failed|cancelled|interrupted`、单次管道协议 `opc-agent-pipe-v1`（4 字节大端长度前缀 JSON、1 MiB 帧上限、未知字段拒绝、64 KiB 结果预算）、启用时幂等创建 agent Actor、Assignment 门控、创建/列表/详情/取消/重试 API 与追加事件；Sidecar 启动把遗留 queued/running Run 标 `interrupted`。
 - builtin-local-text-v1 执行器经保留子命令 `agent-executor` 自再执行，读取脱敏 Task 快照与回环 http 模型端点（仅 IP 字面量回环，拒绝主机名），调用 OpenAI 兼容 `/chat/completions`，产出不超过 64 KiB 的交付文本存入 Run 记录。Run 创建必须引用 `kind=local` 的健康 Provider。
-- Artifact/Submission/owner 验收接入（v0.2-C）、Run 的 Web UI、macOS/Linux 矩阵验证与 external 导入仍未实现；未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
+- v0.2-C 产出与验收闭环已交付（2026-09-12）：Run 成功后经既有 manual-review 提交链创建 text Artifact（producer=agent Actor，origin 保持 manual），任务进入 `waiting_review`，owner 验收/返工是唯一完成路径；领域前置不满足时追加 `agent_run_submission_skipped` 事件。重试对任意终态开放。
+- Run 的 Web 区块（任务详情内启动/列表/取消/重试/查看产出）与在线模型支持已交付；macOS/Linux 矩阵验证与 external 导入仍未实现。Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
 - Tauri 当前只管理 Go Sidecar；Agent 子进程由 Sidecar 的 kill-on-close Job Object 直接治理，Sidecar 退出即回收整棵执行树。
 
 因此，界面在没有已注册且健康的本地 Adapter 时必须隐藏或禁用 agent 分派，不能用占位 Actor 暗示功能已经可用。

@@ -92,7 +92,7 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 
 	// 3. Create a task and assign the agent actor.
 	createdTask := performRequest(router, http.MethodPost, "/api/v1/tasks",
-		[]byte(`{"title":"撰写季度复盘"}`), nil)
+		[]byte(`{"title":"撰写季度复盘","review_policy":"manual"}`), nil)
 	if createdTask.Code != http.StatusCreated {
 		t.Fatalf("create task = %d: %s", createdTask.Code, createdTask.Body.String())
 	}
@@ -110,6 +110,13 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 		map[string]string{"If-Match": `"1"`})
 	if assigned.Code != http.StatusCreated {
 		t.Fatalf("assign agent actor = %d: %s", assigned.Code, assigned.Body.String())
+	}
+	// Manual review requires an active owner reviewer before submission.
+	if reviewer := performRequest(router, http.MethodPost,
+		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/assignments",
+		[]byte(fmt.Sprintf(`{"role":"reviewer","actor_id":%q}`, models.BuiltinOwnerActorID)),
+		map[string]string{"If-Match": `"2"`}); reviewer.Code != http.StatusCreated {
+		t.Fatalf("assign reviewer = %d: %s", reviewer.Code, reviewer.Body.String())
 	}
 
 	// 4. Point the run at a local provider backed by the fake model server.
@@ -159,7 +166,44 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 	if retryEnvelope.Data.Attempt != 2 || retryEnvelope.Data.ParentRunID == nil || *retryEnvelope.Data.ParentRunID != run.ID {
 		t.Fatalf("retry run metadata = %#v", retryEnvelope.Data)
 	}
-	waitAgentRunStatus(t, router, retryEnvelope.Data.ID, "succeeded")
+	retryFinished := waitAgentRunStatus(t, router, retryEnvelope.Data.ID, "succeeded")
+	var skipReason string
+	_ = store.DB.Table("workflow_events").Select("current_json").
+		Where("aggregate_type = 'agent_run' AND action = 'agent_run_submission_skipped'").
+		Order("created_at DESC").Limit(1).Scan(&skipReason)
+	t.Logf("SKIP REASON: %s", skipReason)
+	var assignments []struct {
+		Role         string
+		ActorID      string
+		UnassignedAt *string
+	}
+	_ = store.DB.Table("task_assignments").Select("role, actor_id, unassigned_at").
+		Where("task_id = ?", taskEnvelope.Data.ID).Scan(&assignments).Error
+	t.Logf("ASSIGNMENTS: %+v", assignments)
+
+	// v0.2-C: the first successful run submitted its output through the
+	// manual-review chain and moved the task to waiting_review; the second
+	// run's submission is skipped because the task is no longer actionable.
+	var taskRow struct {
+		Status              string
+		CurrentSubmissionID *string
+	}
+	if err := store.DB.Table("tasks").
+		Select("status, current_submission_id").
+		Where("id = ?", taskEnvelope.Data.ID).
+		Scan(&taskRow).Error; err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if taskRow.Status != "waiting_review" || taskRow.CurrentSubmissionID == nil {
+		t.Fatalf("task after run = %#v, want waiting_review with submission", taskRow)
+	}
+	var artifact models.TaskArtifact
+	if err := store.DB.First(&artifact, "submission_id = ?", *taskRow.CurrentSubmissionID).Error; err != nil ||
+		artifact.StorageKind != "text" || artifact.ProducedByActorID != agentAdapterBuiltinActorID ||
+		artifact.ContentText == nil || *artifact.ContentText != *retryFinished.ResultText && *artifact.ContentText != *run.ResultText {
+		t.Fatalf("submitted artifact = %#v err=%v", artifact, err)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'agent_run' AND action = 'agent_run_submission_skipped'", 1)
 
 	var eventCount int64
 	if err := store.DB.Table("workflow_events").
@@ -214,7 +258,7 @@ func TestAgentRunSupportsOnlineProviderWithKey(t *testing.T) {
 		Protocol: "openai_chat", BaseURL: modelServer.URL + "/v1", Model: "online-test",
 		Status: "ready", HealthStatus: "healthy", HasKey: true, Version: 1,
 		LastHealthAt: aiStringPtr("2026-09-12T12:00:00Z"),
-		CreatedAt: "2026-09-12T12:00:00Z", UpdatedAt: "2026-09-12T12:00:00Z",
+		CreatedAt:    "2026-09-12T12:00:00Z", UpdatedAt: "2026-09-12T12:00:00Z",
 	}
 	if err := store.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("create online provider: %v", err)

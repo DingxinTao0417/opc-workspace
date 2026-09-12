@@ -42,6 +42,13 @@ ADR-003 把"平台沙箱/禁网/进程树回收全部验证"设为一切 Agent �
 - 状态机 `queued → running → succeeded|failed|cancelled|interrupted`；Sidecar 启动把遗留 running 标 `interrupted`；重试总是新 Run（parent_run_id + attempt）；取消先关 stdin，宽限期后 `TerminateJobObject`。
 - Windows 生命周期矩阵（本机实测，2026-09-12）：kill-on-close Job Object + `TerminateJobObject` 回收整棵进程树（含孙进程）、1 GiB 进程内存上限、管道帧往返、取消/超时终止。未验证并保持关闭：external 层的 OS 禁网与 AppContainer/restricted token；macOS/Linux 全矩阵。
 
+## 修订（2026-09-12，v0.2-C）
+
+1. **模型来源扩展**：Run 创建接受 `kind=local` 与 `kind=remote` 两类 Provider。本地仍强制回环 http；在线模型的运行级凭据经管道帧（`model_api_key`）从密钥库读出并仅在父子进程内存中存在，不落库、不进日志或事件；执行器禁止重定向以防凭据外带。
+2. **产出语义**：执行指令要求直接产出任务交付物本身（而非交付说明），任务完成条件随输入快照进入提示词。
+3. **产出提交（v0.2-C）**：Run 成功后由 Sidecar 经既有 manual-review 提交链创建 `TaskSubmission` + text 类型 `TaskArtifact`（producer=agent Actor，origin 保持 `manual`，来源追溯靠 producer 与 `agent_run_output_submitted` 事件），任务进入 `waiting_review`；owner 验收/返工是唯一完成路径。领域前置不满足（无 owner 审核人、任务不可提交等）时产出留在 Run 记录并追加 `agent_run_submission_skipped` 事件（仅稳定原因码）。`requireTaskOutputActors` 相应允许 agent 负责人提交。
+4. **重试语义**：重试对任意终态 Run 开放（含 succeeded）；等待验收期间的新成功 Run 按领域规则跳过重复提交。
+
 ## 被拒方案
 
 1. **Sidecar 进程内直接执行**（无子进程）：失去崩溃隔离、资源上限和统一清理，Run 状态不可信。

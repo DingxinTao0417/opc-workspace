@@ -24,6 +24,20 @@ interface TaskAgentRunsSectionProps {
   disabled?: boolean;
 }
 
+function downloadRunResult(taskTitle: string, run: AgentRun) {
+  if (!run.resultText) return;
+  const isHtml = /<!doctype html|<html/i.test(run.resultText);
+  const blob = new Blob([run.resultText], {
+    type: isHtml ? "text/html;charset=utf-8" : "text/markdown;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${taskTitle}${isHtml ? ".html" : ".md"}`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function formatRunTime(value: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
 }
@@ -177,17 +191,26 @@ export function TaskAgentRunsSection({
                     </button>
                   ) : null}
                   {run.resultText ? (
-                    <button
-                      className="button button-secondary"
-                      onClick={() =>
-                        setExpandedRunId((current) =>
-                          current === run.id ? null : run.id,
-                        )
-                      }
-                      type="button"
-                    >
-                      {expandedRunId === run.id ? "收起产出" : "查看产出"}
-                    </button>
+                    <>
+                      <button
+                        className="button button-secondary"
+                        onClick={() =>
+                          setExpandedRunId((current) =>
+                            current === run.id ? null : run.id,
+                          )
+                        }
+                        type="button"
+                      >
+                        {expandedRunId === run.id ? "收起产出" : "查看产出"}
+                      </button>
+                      <button
+                        className="button button-secondary"
+                        onClick={() => downloadRunResult(task.title, run)}
+                        type="button"
+                      >
+                        下载
+                      </button>
+                    </>
                   ) : null}
                 </span>
               </div>
