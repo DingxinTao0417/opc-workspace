@@ -1077,7 +1077,9 @@ func newAutomationImportFixture(t *testing.T) automationImportFixture {
 	if enabledDaily.Code != http.StatusOK {
 		t.Fatalf("enable schedule Automation = %d: %s", enabledDaily.Code, enabledDaily.Body.String())
 	}
-	scheduledAt := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
+	// Schedule windows must stay after the real-clock enable event, or the
+	// import validator rejects the runs as violating rule-version causality.
+	scheduledAt := time.Now().UTC().AddDate(0, 0, 1)
 	var scheduleRuns []models.AutomationRun
 	for index := 0; index < 2; index++ {
 		window := scheduledAt.AddDate(0, 0, index)

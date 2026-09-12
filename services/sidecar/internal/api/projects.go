@@ -588,7 +588,7 @@ func (a *API) transitionProject(c *gin.Context) {
 			}
 		}
 
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+		updatedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
 		updates := map[string]any{
 			"status":               target,
 			"archived_from_status": archivedFrom,
