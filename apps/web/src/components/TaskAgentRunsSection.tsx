@@ -166,9 +166,7 @@ export function TaskAgentRunsSection({
                       取消
                     </button>
                   ) : null}
-                  {run.status === "failed" ||
-                  run.status === "cancelled" ||
-                  run.status === "interrupted" ? (
+                  {run.status !== "queued" && run.status !== "running" ? (
                     <button
                       className="button button-secondary"
                       disabled={disabled || busy}
