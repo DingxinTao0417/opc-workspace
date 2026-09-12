@@ -530,6 +530,7 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		if pendingProjectCompletionAuthorizations != 0 {
 			return fmt.Errorf("Project completion import authorizations were not empty: count=%d", pendingProjectCompletionAuthorizations)
 		}
+		tables["agent_adapters"] = normalizeImportedAgentAdapters(tables["agent_adapters"])
 		if err := importActorRows(tx, tables["actors"], applyMode == importModeAppend); err != nil {
 			return err
 		}
@@ -862,6 +863,45 @@ func importInteger(value any) (int64, bool) {
 	}
 }
 
+// normalizeImportedAgentAdapters re-gates imported builtin adapters against
+// the importing platform (ADR-027): a verified-ready row keeps its state only
+// where the lifecycle matrix is proven locally, and otherwise returns to the
+// fresh blocked diagnostic state so re-diagnosis is required.
+func normalizeImportedAgentAdapters(table businessExportTable) businessExportTable {
+	if len(table.Rows) == 0 {
+		return table
+	}
+	indexes := make(map[string]int, len(table.Columns))
+	for index, column := range table.Columns {
+		indexes[column] = index
+	}
+	for _, column := range []string{"status", "health_status", "health_error_code", "isolation_status", "execution_ready", "last_health_at"} {
+		if _, ok := indexes[column]; !ok {
+			return table
+		}
+	}
+	localReady, _ := builtinExecutionReady()
+	rows := make([][]any, len(table.Rows))
+	for index, row := range table.Rows {
+		rows[index] = row
+		ready, ok := businessImportInt64(row[indexes["execution_ready"]])
+		if !ok || ready != 1 || localReady {
+			continue
+		}
+		normalized := make([]any, len(row))
+		copy(normalized, row)
+		normalized[indexes["status"]] = "disabled"
+		normalized[indexes["health_status"]] = "unknown"
+		normalized[indexes["health_error_code"]] = nil
+		normalized[indexes["isolation_status"]] = "unverified"
+		normalized[indexes["execution_ready"]] = int64(0)
+		normalized[indexes["last_health_at"]] = nil
+		rows[index] = normalized
+	}
+	table.Rows = rows
+	return table
+}
+
 func insertBusinessImportRows(tx *gorm.DB, table businessExportTable) error {
 	if len(table.Rows) == 0 {
 		return nil
@@ -1091,7 +1131,25 @@ func tableHasInvalidAgentAdapters(table businessExportTable) bool {
 		executableRef, executableOK := row[indexes["executable_ref"]].(string)
 		manifestJSON, manifestOK := row[indexes["manifest_json"]].(string)
 		protocol, protocolOK := row[indexes["protocol_version"]].(string)
-		if !keyOK || !exists || err != nil || !statusOK || status != "disabled" || !healthOK ||
+		// ADR-027: an exported builtin adapter may carry the verified ready
+		// state; apply re-gates it against the importing platform.
+		verifiedReady := health == "healthy" && isolation == "verified" && ready == 1 &&
+			(status == "disabled" || status == "enabled") && version >= 1
+		if verifiedReady {
+			if !keyOK || !exists || err != nil || !idOK || id != preset.ID || !kindOK || kind != "builtin" ||
+				!displayOK || displayName != preset.DisplayName || !executableOK || executableRef != preset.ExecutableRef ||
+				!manifestOK || manifestJSON != string(manifest) || !protocolOK || protocol != agentAdapterProtocolVersion {
+				return true
+			}
+			lastHealth := row[indexes["last_health_at"]]
+			timestamp, timestampOK := lastHealth.(string)
+			if !timestampOK || row[indexes["health_error_code"]] != nil {
+				return true
+			}
+			if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+				return true
+			}
+		} else if !keyOK || !exists || err != nil || !statusOK || status != "disabled" || !healthOK ||
 			!isolationOK || isolation != "unverified" || !readyOK || ready != 0 || !versionOK || version != 1 ||
 			!idOK || id != preset.ID || !kindOK || kind != "builtin" || !displayOK || displayName != preset.DisplayName ||
 			!executableOK || executableRef != preset.ExecutableRef || !manifestOK || manifestJSON != string(manifest) ||
@@ -1102,6 +1160,9 @@ func tableHasInvalidAgentAdapters(table businessExportTable) bool {
 			return true
 		}
 		seen[key] = struct{}{}
+		if verifiedReady {
+			continue
+		}
 		healthError := row[indexes["health_error_code"]]
 		lastHealth := row[indexes["last_health_at"]]
 		switch health {

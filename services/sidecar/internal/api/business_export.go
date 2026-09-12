@@ -93,7 +93,7 @@ var businessExportExcludedTables = []string{
 	"knowledge_chunks_fts_idx",
 	"knowledge_chunks_fts_content",
 	"knowledge_chunks_fts_docsize",
-	"knowledge_chunks_fts_config",
+	"knowledge_chunks_fts_config", "agent_runs",
 }
 
 type businessExportTable struct {

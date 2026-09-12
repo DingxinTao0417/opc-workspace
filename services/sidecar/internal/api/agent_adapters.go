@@ -31,6 +31,9 @@ type agentAdapterPreset struct {
 	Manifest                            agentAdapterManifest
 }
 
+const agentAdapterBuiltinTextKey = "builtin-local-text-v1"
+const agentAdapterBuiltinActorID = "018f0000-0000-5000-8000-000000003411"
+
 var agentAdapterPresets = []agentAdapterPreset{{
 	ID: "018f0000-0000-5000-8000-000000003401", Key: "builtin-local-text-v1",
 	DisplayName: "本地文本诊断执行器", ExecutableRef: "builtin:local-text-v1",
@@ -127,10 +130,22 @@ func (a *API) createAgentAdapter(c *gin.Context) {
 		if err != nil {
 			return err
 		}
+		isolationStatus, executionReady, healthStatus := "unverified", false, "unknown"
+		var lastHealthAt *string
+		if preset.Key == agentAdapterBuiltinTextKey {
+			// ADR-027: on a verified-Windows build the builtin lifecycle
+			// matrix (pipe roundtrip, job-object subtree reclaim,
+			// cancel/timeout) is proven, so the executor registers healthy.
+			if ready, _ := builtinExecutionReady(); ready {
+				isolationStatus, executionReady, healthStatus = "verified", true, "healthy"
+				lastHealthAt = &now
+			}
+		}
 		row := models.AgentAdapter{
 			ID: preset.ID, AdapterKey: preset.Key, Kind: "builtin", DisplayName: preset.DisplayName,
 			ExecutableRef: preset.ExecutableRef, ManifestJSON: string(manifest), ProtocolVersion: agentAdapterProtocolVersion,
-			Status: "disabled", HealthStatus: "unknown", IsolationStatus: "unverified", Version: 1,
+			Status: "disabled", HealthStatus: healthStatus, IsolationStatus: isolationStatus,
+			ExecutionReady: executionReady, LastHealthAt: lastHealthAt, Version: 1,
 			CreatedAt: now, UpdatedAt: now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
@@ -204,9 +219,20 @@ func (a *API) checkAgentAdapter(c *gin.Context) {
 			return err
 		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		// ADR-027: a verified builtin re-confirms its build-time lifecycle
+		// matrix on every check; unverified or external adapters keep the
+		// blocked diagnostic until their platform gates are proven.
+		healthStatus, isolationStatus, executionReady := "blocked", "unverified", false
+		var healthErrorCode any = agentAdapterIsolationBlockedCode
+		if row.Kind == "builtin" && row.AdapterKey == agentAdapterBuiltinTextKey {
+			if ready, _ := builtinExecutionReady(); ready {
+				healthStatus, isolationStatus, executionReady, healthErrorCode = "healthy", "verified", true, nil
+			}
+		}
 		result := tx.Model(&models.AgentAdapter{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
-			"health_status": "blocked", "health_error_code": agentAdapterIsolationBlockedCode,
-			"isolation_status": "unverified", "execution_ready": false, "last_health_at": now, "updated_at": now,
+			"health_status": healthStatus, "health_error_code": healthErrorCode,
+			"isolation_status": isolationStatus, "execution_ready": executionReady,
+			"last_health_at": now, "updated_at": now,
 		})
 		if result.Error != nil {
 			return result.Error
@@ -253,7 +279,58 @@ func (a *API) enableAgentAdapter(c *gin.Context) {
 		writeProjectRequestError(c, taskVersionConflict())
 		return
 	}
-	writeError(c, http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY", "Platform isolation, network blocking, and process-tree cleanup must be verified before this Agent Adapter can be enabled")
+	if !row.ExecutionReady {
+		writeError(c, http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY", "Platform isolation, network blocking, and process-tree cleanup must be verified before this Agent Adapter can be enabled")
+		return
+	}
+	now := a.options.Now().UTC().Format(time.RFC3339Nano)
+	var response agentAdapterResponse
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.AgentAdapter{}).
+			Where("id = ? AND version = ? AND status = 'disabled' AND execution_ready = 1", row.ID, row.Version).
+			Updates(map[string]any{"status": "enabled", "version": row.Version + 1, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		var actorCount int64
+		if err := tx.Model(&models.Actor{}).Where("id = ?", agentAdapterBuiltinActorID).Count(&actorCount).Error; err != nil {
+			return err
+		}
+		if actorCount == 0 {
+			adapterID := row.ID
+			if err := tx.Create(&models.Actor{
+				ID: agentAdapterBuiltinActorID, Type: "agent",
+				DisplayName: "本地文本执行代理", Status: "active", IsBuiltin: false,
+				MetadataJSON: "{}", AgentAdapterID: &adapterID, Version: 1, CreatedAt: now, UpdatedAt: now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		response, err = agentAdapterResponseFromModel(row)
+		if err != nil {
+			return err
+		}
+		if err := recordAgentAdapterWorkflowEvent(tx, "agent_adapter_enabled", row.ID, nil, response, requestIDFromContext(c), now); err != nil {
+			return err
+		}
+		reloaded, err := loadAgentAdapter(tx, row.ID)
+		if err != nil {
+			return err
+		}
+		response, err = agentAdapterResponseFromModel(reloaded)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
+	setProjectETag(c, response.Version)
+	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
 func (a *API) disableAgentAdapter(c *gin.Context) {

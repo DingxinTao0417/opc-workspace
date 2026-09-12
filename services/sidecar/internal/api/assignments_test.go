@@ -337,6 +337,19 @@ func TestAssignmentValidationPermissionsConflictsAndDoneRules(t *testing.T) {
 		ID: uuid.NewString(), Type: "agent", DisplayName: "Unavailable agent", Status: "active",
 		MetadataJSON: "{}", Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	// ADR-027: agent actors must link to an adapter to satisfy schema 071;
+	// the linked adapter below is not enabled, so assignment stays rejected.
+	adapter := models.AgentAdapter{
+		ID: uuid.NewString(), AdapterKey: "builtin-local-text-v1", Kind: "builtin",
+		DisplayName: "本地文本诊断执行器", ExecutableRef: "builtin:local-text-v1",
+		ManifestJSON: "{}", ProtocolVersion: "opc-agent-pipe-v1", Status: "disabled",
+		HealthStatus: "unknown", IsolationStatus: "unverified", Version: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.DB.Create(&adapter).Error; err != nil {
+		t.Fatalf("seed agent adapter: %v", err)
+	}
+	agent.AgentAdapterID = &adapter.ID
 	if err := store.DB.Create(&agent).Error; err != nil {
 		t.Fatalf("seed agent actor: %v", err)
 	}
@@ -350,7 +363,7 @@ func TestAssignmentValidationPermissionsConflictsAndDoneRules(t *testing.T) {
 	}{
 		{name: "inactive assignee", role: "assignee", actorID: inactive.ID, status: http.StatusConflict, code: "ASSIGNMENT_ACTOR_NOT_ACTIVE"},
 		{name: "system assignee", role: "assignee", actorID: models.BuiltinSystemActorID, status: http.StatusUnprocessableEntity, code: "ASSIGNMENT_ACTOR_TYPE_NOT_ALLOWED"},
-		{name: "agent assignee", role: "assignee", actorID: agent.ID, status: http.StatusUnprocessableEntity, code: "ASSIGNMENT_ACTOR_TYPE_NOT_ALLOWED"},
+		{name: "agent assignee", role: "assignee", actorID: agent.ID, status: http.StatusConflict, code: "ASSIGNMENT_ACTOR_NOT_EXECUTABLE"},
 		{name: "person reviewer", role: "reviewer", actorID: person.ID, status: http.StatusUnprocessableEntity, code: "ASSIGNMENT_REVIEWER_MUST_BE_OWNER"},
 		{name: "missing actor", role: "assignee", actorID: uuid.NewString(), status: http.StatusUnprocessableEntity, code: "ACTOR_NOT_FOUND"},
 	}

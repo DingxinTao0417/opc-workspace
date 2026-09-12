@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 70。PRD v10.9 与 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口 AI 运行隔离/预算、流终态、应用级恢复、任务确认事务、记忆决定、分段压缩和 dataset v4 配置身份评测；[ADR-026](adr/026-local-knowledge-pdf-extraction.md) 交付知识库 PDF 提取与页码定位（schema 070）。业务导入兼容为 v49/v63–v69→70，AI/知识库操作态仍排除便携业务导出。业务冲突合并、外部备份目录和覆盖仍禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名本地打包；实机模型、真实故障与跨平台发布验收不由隔离自动化代替。
+> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 71。PRD v10.9 与 [ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口 AI 运行隔离/预算、流终态、应用级恢复、任务确认事务、记忆决定、分段压缩和 dataset v4 配置身份评测；[ADR-026](adr/026-local-knowledge-pdf-extraction.md) 交付知识库 PDF 提取与页码定位（schema 070）；[ADR-027](adr/027-builtin-agent-executor-and-run-lifecycle.md) 交付内置 Agent 执行器与 Run 生命周期（schema 071）。业务导入兼容为 v49/v63–v69→70，AI/知识库操作态仍排除便携业务导出。业务冲突合并、外部备份目录和覆盖仍禁用。当前 Windows x64 已完成 Tauri 原生链接、Rust 测试及未签名本地打包；实机模型、真实故障与跨平台发布验收不由隔离自动化代替。
 
 ## 阅读顺序与事实优先级
 
@@ -112,6 +112,7 @@
 - [ADR-024：AI 本地用量 UTC 时间趋势（1–30 天已交付）](adr/024-ai-local-usage-time-trends.md)
 - [ADR-025：AI 运行可靠性、确认事务与评测配置身份（schema 068–069、dataset v4）](adr/025-ai-reliability-confirmations-and-evaluation-identity.md)
 - [ADR-026：本地知识库 PDF 文本提取与页码定位（K3b 已交付）](adr/026-local-knowledge-pdf-extraction.md)
+- [ADR-027：内置 Agent 执行器与 Run 生命周期（v0.2-B 首片已交付）](adr/027-builtin-agent-executor-and-run-lifecycle.md)
 
 ## 核心术语
 

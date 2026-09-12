@@ -29,8 +29,8 @@ func TestAILocalEvaluationMigrationCreatesContentFreeRunLedger(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 70 {
-		t.Fatalf("SchemaVersion=%d, want 70", store.SchemaVersion)
+	if store.SchemaVersion != 71 {
+		t.Fatalf("SchemaVersion=%d, want 71", store.SchemaVersion)
 	}
 
 	const runID = "018f0000-0000-7000-8000-000000006702"
@@ -149,8 +149,8 @@ func TestAIEvaluationDatasetVersionMigrationPreservesV1AndAllowsV2(t *testing.T)
 	if err != nil {
 		t.Fatalf("open schema 64 migration gate: %v", err)
 	}
-	if gated.SchemaVersion != 63 || gate == nil || gate.CurrentVersion != 63 || gate.TargetVersion != 70 ||
-		len(gate.PendingVersions) != 7 || gate.PendingVersions[0] != 64 || gate.PendingVersions[1] != 65 || gate.PendingVersions[2] != 66 || gate.PendingVersions[3] != 67 || gate.PendingVersions[4] != 68 || gate.PendingVersions[5] != 69 || gate.PendingVersions[6] != 70 {
+	if gated.SchemaVersion != 63 || gate == nil || gate.CurrentVersion != 63 || gate.TargetVersion != 71 ||
+		len(gate.PendingVersions) != 8 || gate.PendingVersions[0] != 64 || gate.PendingVersions[1] != 65 || gate.PendingVersions[2] != 66 || gate.PendingVersions[3] != 67 || gate.PendingVersions[4] != 68 || gate.PendingVersions[5] != 69 || gate.PendingVersions[6] != 70 || gate.PendingVersions[7] != 71 {
 		_ = gated.Close()
 		t.Fatalf("schema 64 migration gate store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
@@ -168,8 +168,8 @@ func TestAIEvaluationDatasetVersionMigrationPreservesV1AndAllowsV2(t *testing.T)
 		t.Fatalf("apply schema 64: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 70 {
-		t.Fatalf("SchemaVersion=%d, want 70", store.SchemaVersion)
+	if store.SchemaVersion != 71 {
+		t.Fatalf("SchemaVersion=%d, want 71", store.SchemaVersion)
 	}
 	var postMigrationSQL string
 	if err := store.SQL.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='ai_evaluation_runs'").Scan(&postMigrationSQL); err != nil || !strings.Contains(postMigrationSQL, "dataset_version >= 1") {

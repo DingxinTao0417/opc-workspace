@@ -65,6 +65,8 @@ type API struct {
 	aiEvaluationMu            sync.Mutex
 	aiEvaluationRunner        *aiEvaluationRunner
 	knowledgeIndexer          *knowledgeIndexer
+	agentRunCancels           map[string]context.CancelFunc
+	agentRunCancelsMu         sync.Mutex
 }
 
 type Router struct {
@@ -243,7 +245,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		db: db, options: options, keyStore: options.KeyStore, harnessClient: harnessClient,
 		aiGenerations: newAIGenerationRegistry(), aiCompactions: compactions,
 		artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
-		maintenance: &sync.RWMutex{},
+		maintenance:     &sync.RWMutex{},
+		agentRunCancels: map[string]context.CancelFunc{},
 	}
 	if err := recoverAIGenerationsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
@@ -262,6 +265,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			_ = artifacts.close()
 		}
 		return nil, fmt.Errorf("recover knowledge index jobs: %w", err)
+	}
+	if err := recoverAgentRunsOnStartup(db, options.Now().UTC()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover agent runs: %w", err)
 	}
 	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
 		if artifacts != nil {
@@ -356,6 +365,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/agent-adapters/:id/check", service.checkAgentAdapter)
 		v1.POST("/agent-adapters/:id/enable", service.enableAgentAdapter)
 		v1.POST("/agent-adapters/:id/disable", service.disableAgentAdapter)
+		v1.GET("/tasks/:id/agent-runs", service.listTaskAgentRuns)
+		v1.POST("/tasks/:id/agent-runs", service.createAgentRun)
+		v1.GET("/agent-runs/:id", service.getAgentRun)
+		v1.POST("/agent-runs/:id/cancel", service.cancelAgentRun)
+		v1.POST("/agent-runs/:id/retry", service.retryAgentRun)
 		v1.GET("/ai/providers", service.listAIProviders)
 		v1.POST("/ai/providers", service.createAIProvider)
 		v1.GET("/ai/providers/:id", service.getAIProvider)

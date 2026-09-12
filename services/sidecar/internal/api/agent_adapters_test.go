@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -54,9 +55,19 @@ func TestAgentAdapterRegistrationAndBlockedDiagnosticLifecycle(t *testing.T) {
 		t.Fatalf("decode Agent Adapter: %v", err)
 	}
 	adapter := createdEnvelope.Data
-	if adapter.AdapterKey != "builtin-local-text-v1" || adapter.Status != "disabled" || adapter.HealthStatus != "unknown" ||
-		adapter.ExecutionReady || adapter.Readiness.CanEnable || adapter.ProtocolVersion != agentAdapterProtocolVersion {
+	if adapter.AdapterKey != "builtin-local-text-v1" || adapter.Status != "disabled" ||
+		adapter.ProtocolVersion != agentAdapterProtocolVersion {
 		t.Fatalf("created Agent Adapter = %#v", adapter)
+	}
+	// ADR-027: on a verified-Windows build the builtin lifecycle matrix ships
+	// ready; other platforms keep the blocked diagnostic state.
+	if ready, _ := builtinExecutionReady(); ready {
+		if !adapter.ExecutionReady || !adapter.Readiness.CanEnable || adapter.IsolationStatus != "verified" ||
+			adapter.HealthStatus != "healthy" {
+			t.Fatalf("verified builtin adapter should be execution ready = %#v", adapter)
+		}
+	} else if adapter.ExecutionReady || adapter.Readiness.CanEnable || adapter.HealthStatus != "unknown" {
+		t.Fatalf("unverified builtin adapter must stay blocked = %#v", adapter)
 	}
 
 	replayed := performRequest(router, http.MethodPost, "/api/v1/agent-adapters", body, map[string]string{"Idempotency-Key": "register-local-text-adapter"})
@@ -83,21 +94,46 @@ func TestAgentAdapterRegistrationAndBlockedDiagnosticLifecycle(t *testing.T) {
 		t.Fatalf("decode checked Agent Adapter: %v", err)
 	}
 	checkedAdapter := checkedEnvelope.Data
-	if checkedAdapter.HealthStatus != "blocked" || checkedAdapter.HealthErrorCode == nil ||
-		*checkedAdapter.HealthErrorCode != agentAdapterIsolationBlockedCode || checkedAdapter.IsolationStatus != "unverified" ||
-		checkedAdapter.ExecutionReady || checkedAdapter.Version != 1 || checkedAdapter.LastHealthAt == nil {
-		t.Fatalf("checked Agent Adapter = %#v", checkedAdapter)
+	ready, _ := builtinExecutionReady()
+	if ready {
+		if checkedAdapter.HealthStatus != "healthy" || checkedAdapter.HealthErrorCode != nil ||
+			checkedAdapter.IsolationStatus != "verified" || !checkedAdapter.ExecutionReady ||
+			checkedAdapter.Version != 1 || checkedAdapter.LastHealthAt == nil {
+			t.Fatalf("verified builtin check should confirm readiness = %#v", checkedAdapter)
+		}
+		enable := performRequest(router, http.MethodPost, "/api/v1/agent-adapters/"+adapter.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+		if enable.Code != http.StatusOK {
+			t.Fatalf("enable verified builtin = %d: %s", enable.Code, enable.Body.String())
+		}
+		assertDatabaseCount(t, store, "SELECT COUNT(*) FROM actors WHERE type = 'agent' AND agent_adapter_id = ?", 1, adapter.ID)
+	} else {
+		if checkedAdapter.HealthStatus != "blocked" || checkedAdapter.HealthErrorCode == nil ||
+			*checkedAdapter.HealthErrorCode != agentAdapterIsolationBlockedCode || checkedAdapter.IsolationStatus != "unverified" ||
+			checkedAdapter.ExecutionReady || checkedAdapter.Version != 1 || checkedAdapter.LastHealthAt == nil {
+			t.Fatalf("checked Agent Adapter = %#v", checkedAdapter)
+		}
+		enable := performRequest(router, http.MethodPost, "/api/v1/agent-adapters/"+adapter.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+		assertAPIError(t, enable, http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY")
 	}
-	enable := performRequest(router, http.MethodPost, "/api/v1/agent-adapters/"+adapter.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
-	assertAPIError(t, enable, http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY")
-	disabled := performRequest(router, http.MethodPost, "/api/v1/agent-adapters/"+adapter.ID+"/disable", nil, map[string]string{"If-Match": `"1"`})
-	if disabled.Code != http.StatusOK || disabled.Header().Get("ETag") != `"1"` {
+	disableVersion := int64(1)
+	expectedDisableVersion := int64(1)
+	if ready {
+		disableVersion = 2
+		expectedDisableVersion = 3
+	}
+	disabled := performRequest(router, http.MethodPost, "/api/v1/agent-adapters/"+adapter.ID+"/disable", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, disableVersion)})
+	if disabled.Code != http.StatusOK || disabled.Header().Get("ETag") != fmt.Sprintf(`"%d"`, expectedDisableVersion) {
 		t.Fatalf("disable already-disabled Agent Adapter = %d: %s", disabled.Code, disabled.Body.String())
 	}
 
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'agent_adapter' AND action = 'agent_adapter_registered' AND request_id = ?", 1, requestID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'agent_adapter' AND action = 'agent_adapter_health_checked'", 1)
-	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM actors WHERE type = 'agent'", 0)
+	agentActors := int64(0)
+	if ready {
+		agentActors = 1
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM actors WHERE type = 'agent'", agentActors)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM task_assignments WHERE actor_id NOT IN ('00000000-0000-5000-8000-000000000001', '00000000-0000-5000-8000-000000000002')", 0)
 }
 

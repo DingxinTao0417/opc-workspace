@@ -1,6 +1,6 @@
 # 本地 Agent 执行模块
 
-> 文档状态：T-19 v0.2-A Adapter 登记与安全诊断已完成；目标版本为 v0.2。当前仓库仍未实现 Runner、Run 或任何可执行 Agent。
+> 文档状态：T-19 v0.2-A Adapter 登记与安全诊断、v0.2-B Runner 首片（[ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)）已完成；目标版本为 v0.2。内置文本执行器在 Windows 上具备真实可执行链路；Artifact/验收接入、Web UI、macOS/Linux 矩阵与 external 闸门仍待。
 
 ## 定位与边界
 
@@ -28,8 +28,11 @@
 - Sidecar 已提供 Adapter 列表、幂等登记、详情、手动诊断、启用拒绝和停用 API。唯一预设为 `builtin-local-text-v1`；响应不暴露 `executable_ref`。当前诊断只验证代码清单并记录 `blocked / PLATFORM_ISOLATION_UNVERIFIED`，不会启动进程。
 - 设置新增独立“本地 Agent”模块和命令面板入口，覆盖加载、空、错误、登记、能力/安全闸门、诊断反馈与禁用启用入口；当前没有 agent 负责人选项、Run 详情、输出预览或 Agent 验收入口。
 - 业务 JSON/ZIP 导入导出包含 Adapter 行，并严格接受代码所有身份、disabled、version=1、`execution_ready=false` 以及 unknown 或固定 blocked 诊断状态；普通备份随 SQLite 自动包含该事实，恢复后仍必须重新诊断。
-- 当前 API 仍明确拒绝 agent assignee，仓库没有 `agent_runs`、Runner、超时、取消、重试、中断恢复、Agent 专用鉴权或单次能力协议实现。未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
-- Tauri 当前只管理 Go Sidecar，没有额外 Agent 子进程的生命周期与隔离策略。
+- [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md) 把 Adapter 信任分为 builtin（代码所有、随 Sidecar 自再执行分发）与 external（导入对象，维持 ADR-003 全部闸门）两级；builtin 的 `execution_ready` 由生命周期验证矩阵决定（Windows 已实测：管道往返、Job Object 子树回收、超时/取消），external 在三平台验证前永不启用。
+- schema 071 新增 `agent_runs` 与 `actors.agent_adapter_id`（agent Actor 必须指向 Adapter）。Sidecar 已交付 Run 状态机 `queued -> running -> succeeded|failed|cancelled|interrupted`、单次管道协议 `opc-agent-pipe-v1`（4 字节大端长度前缀 JSON、1 MiB 帧上限、未知字段拒绝、64 KiB 结果预算）、启用时幂等创建 agent Actor、Assignment 门控、创建/列表/详情/取消/重试 API 与追加事件；Sidecar 启动把遗留 queued/running Run 标 `interrupted`。
+- builtin-local-text-v1 执行器经保留子命令 `agent-executor` 自再执行，读取脱敏 Task 快照与回环 http 模型端点（仅 IP 字面量回环，拒绝主机名），调用 OpenAI 兼容 `/chat/completions`，产出不超过 64 KiB 的交付文本存入 Run 记录。Run 创建必须引用 `kind=local` 的健康 Provider。
+- Artifact/Submission/owner 验收接入（v0.2-C）、Run 的 Web UI、macOS/Linux 矩阵验证与 external 导入仍未实现；未来 Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
+- Tauri 当前只管理 Go Sidecar；Agent 子进程由 Sidecar 的 kill-on-close Job Object 直接治理，Sidecar 退出即回收整棵执行树。
 
 因此，界面在没有已注册且健康的本地 Adapter 时必须隐藏或禁用 agent 分派，不能用占位 Actor 暗示功能已经可用。
 
@@ -119,18 +122,18 @@
 
 ### 当前与规划 API
 
-| 方法与路径                              | 用途                                              |
-| --------------------------------------- | ------------------------------------------------- |
-| GET / POST /api/v1/agent-adapters       | **已实现**：查询或幂等登记代码内置 Adapter        |
-| GET /api/v1/agent-adapters/:id          | **已实现**：详情与数值 ETag，不返回内部执行器引用 |
-| POST /api/v1/agent-adapters/:id/check   | **已实现**：版本化诊断；当前固定返回隔离未验证    |
-| POST /api/v1/agent-adapters/:id/enable  | **已实现拒绝路径**：未就绪时返回 409，不改变事实  |
-| POST /api/v1/agent-adapters/:id/disable | **已实现**：版本化停用；当前 disabled 时稳定返回  |
-| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或由 owner 启动 Run                       |
-| GET /api/v1/agent-runs/:id              | 查看 Run、输出和错误                              |
-| POST /api/v1/agent-runs/:id/cancel      | 取消当前 Run                                      |
-| POST /api/v1/agent-runs/:id/retry       | 基于旧 Run 创建新尝试                             |
-| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工                          |
+| 方法与路径                              | 用途                                                  |
+| --------------------------------------- | ----------------------------------------------------- |
+| GET / POST /api/v1/agent-adapters       | **已实现**：查询或幂等登记代码内置 Adapter            |
+| GET /api/v1/agent-adapters/:id          | **已实现**：详情与数值 ETag，不返回内部执行器引用     |
+| POST /api/v1/agent-adapters/:id/check   | **已实现**：版本化诊断；当前固定返回隔离未验证        |
+| POST /api/v1/agent-adapters/:id/enable  | **已实现拒绝路径**：未就绪时返回 409，不改变事实      |
+| POST /api/v1/agent-adapters/:id/disable | **已实现**：版本化停用；当前 disabled 时稳定返回      |
+| GET / POST /api/v1/tasks/:id/agent-runs | **已实现**：查询历史或由 owner 启动 Run（幂等键重放） |
+| GET /api/v1/agent-runs/:id              | **已实现**：查看 Run、结果与稳定错误码                |
+| POST /api/v1/agent-runs/:id/cancel      | **已实现**：queued 直接取消，running 经取消传播回收   |
+| POST /api/v1/agent-runs/:id/retry       | **已实现**：基于终态 Run 创建新 attempt               |
+| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工                              |
 
 Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议已由 [ADR-003](../adr/003-local-agent-runtime-security.md) 冻结为单次匿名管道方案；实现仍必须通过平台隔离、禁网、进程树清理和协议验收，不能仅凭 ADR 标记为可执行。
 
@@ -174,8 +177,10 @@ Agent Run 状态为：
 
 - [x] 编写 Adapter、专用传输、单次管道能力、路径授权、沙箱和网络阻断 ADR。
 - [x] 完成 schema v34 Adapter 表、代码所有 manifest、列表/幂等登记/详情/停用/健康诊断和未就绪启用拒绝 API。
+- [x] v0.2-B 首片（ADR-027，2026-09-12）：Windows 生命周期矩阵实测（管道往返、kill-on-close Job Object 子树回收含孙进程、超时/取消）、schema 071 agent_runs、Runner 与单次管道协议、builtin 本地模型文本执行器、agent Actor/Assignment 门控、Run API 与事件、启动 interrupted 恢复。
 - [x] 设置增加本地 Agent 模块，不能验证的隔离能力明确标注并保持执行关闭。
-- [ ] 在 Windows、macOS、Linux 建立并验证实际沙箱/禁网/进程树能力矩阵；当前三个闸门均未验证。
+- [x] Windows：进程树回收（Job Object）与取消/超时已实测；builtin 层网络边界由回环代码校验承担，external 层仍要求 OS 级禁网。
+- [ ] macOS、Linux 生命周期矩阵；external 层沙箱/禁网（AppContainer/namespace）仍全部未验证。
 
 ### v0.2-B：Runner 与生命周期
 

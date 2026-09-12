@@ -21,13 +21,13 @@
     <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
     <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
     <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
-    <img alt="SQLite schema v70" src="https://img.shields.io/badge/database-SQLite%20v70-003B57" />
+    <img alt="SQLite schema v71" src="https://img.shields.io/badge/database-SQLite%20v71-003B57" />
     <img alt="积极开发中" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
   </p>
 </div>
 
 > [!IMPORTANT]
-> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v70；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手与本地知识库作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
+> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v71；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手与本地知识库作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
 
 ## 为什么做 opc-workspace
 
@@ -61,7 +61,7 @@
 - 收入、支出与发票目前仍是后续业务模块，不能视为已交付能力。
 - AI 助手独立轨道已交付远程/本地 Provider、双协议流式回复与推理、受控 Harness、记忆三工具、分段摘要/事实压缩、显式业务/知识上下文、回答级来源、无正文运行步骤/用量与 UTC 趋势，以及 dataset v4 的 8-case 快速、四类 6-case 专题和 24-case 完整本地评测。质量按 Provider 配置身份、数据集和套件隔离；有限事实规则、Wilson 区间与人工决定用于审阅，不代表通用语义正确或发布许可，缺失用量保持 unknown，不计算费用。
 - [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 修复生成总预算/流终态、跨页面停止与刷新恢复、任务原子确认、记忆决定回读和大回合压缩。模型等待不占全局维护锁；任务只在用户确认后按领域规则创建；`persist=false` 的正文和工具记忆仅在运行内保存。自动化使用隔离夹具，真实模型质量、WebView 输入法和真实崩溃仍需实机验收。本地知识库文本基线与 PDF 页码定位提取（ADR-026）已交付，授权引用与来源变化检测仍待。
-- 本地 Agent 目前只有受限 Adapter 登记与诊断，没有 Runner、Agent Run 或可执行任务能力。
+- 本地 Agent 已交付内置文本执行器与 Run 生命周期（ADR-027，Windows 实测），产出仅入 Run 记录；Artifact/验收接入、Web UI 与 macOS/Linux 矩阵仍待。
 - 当前没有云同步、多人账号、线上工作流或远程消息发送。
 
 ## 快速开始
@@ -130,7 +130,7 @@ flowchart TB
     Desktop["Tauri 2 / Rust<br/>窗口 · 托盘 · 快捷键 · Sidecar 生命周期"]
     Web["React 18 / TypeScript / WebView<br/>页面 · 表单 · 查询缓存 · UI 状态"]
     API["Go Sidecar / API v1<br/>领域校验 · 事务 · 调度 · 备份"]
-    Data["本地事实层<br/>SQLite v70 · 受控文件 · FTS5 · 备份 · 日志"]
+    Data["本地事实层<br/>SQLite v71 · 受控文件 · FTS5 · 备份 · 日志"]
 
     Desktop --> Web
     Web -->|"Bearer HTTP · 127.0.0.1 动态端口"| API

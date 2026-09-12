@@ -12,7 +12,7 @@ func TestInvoicePDFAssetMigrationOpensEmptyWorkspaceAtV47(t *testing.T) {
 		t.Fatalf("OpenBeforeDestructiveMigrations() error = %v", err)
 	}
 	defer store.Close()
-	if gate != nil || store.SchemaVersion != 70 {
+	if gate != nil || store.SchemaVersion != 71 {
 		t.Fatalf("empty invoice PDF workspace schema=%d gate=%#v, want schema 54 without a gate", store.SchemaVersion, gate)
 	}
 	if got := readInt64(t, store.SQL, "SELECT COUNT(*) FROM invoice_pdf_assets"); got != 0 {
@@ -32,7 +32,7 @@ func TestInvoicePDFAssetMigrationUpgradesV46AndEnforcesFacts(t *testing.T) {
 		t.Fatalf("apply v47 invoice PDF migration: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 70 {
+	if store.SchemaVersion != 71 {
 		t.Fatalf("invoice PDF schema version = %d, want 69", store.SchemaVersion)
 	}
 

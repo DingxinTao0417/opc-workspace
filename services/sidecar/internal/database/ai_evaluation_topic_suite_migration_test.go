@@ -72,8 +72,8 @@ func TestAIEvaluationTopicSuiteMigrationPreservesHistoryAndWidensChecks(t *testi
 	if err != nil {
 		t.Fatalf("open schema 67 migration gate: %v", err)
 	}
-	if gated.SchemaVersion != 66 || gate == nil || gate.CurrentVersion != 66 || gate.TargetVersion != 70 ||
-		!reflect.DeepEqual(gate.PendingVersions, []int{67, 68, 69, 70}) {
+	if gated.SchemaVersion != 66 || gate == nil || gate.CurrentVersion != 66 || gate.TargetVersion != 71 ||
+		!reflect.DeepEqual(gate.PendingVersions, []int{67, 68, 69, 70, 71}) {
 		_ = gated.Close()
 		t.Fatalf("schema 67 migration gate store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
@@ -86,8 +86,8 @@ func TestAIEvaluationTopicSuiteMigrationPreservesHistoryAndWidensChecks(t *testi
 		t.Fatalf("apply schema 67: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 70 {
-		t.Fatalf("SchemaVersion=%d, want 70", store.SchemaVersion)
+	if store.SchemaVersion != 71 {
+		t.Fatalf("SchemaVersion=%d, want 71", store.SchemaVersion)
 	}
 	for table, id := range map[string]string{
 		"ai_evaluation_runs": runID, "ai_evaluation_results": resultID, "ai_evaluation_reviews": reviewID,

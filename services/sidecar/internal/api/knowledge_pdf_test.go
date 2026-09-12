@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	gopdf "github.com/signintech/gopdf"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
+	gopdf "github.com/signintech/gopdf"
 )
 
 func buildKnowledgeTestPDF(t *testing.T, pages [][]string) []byte {

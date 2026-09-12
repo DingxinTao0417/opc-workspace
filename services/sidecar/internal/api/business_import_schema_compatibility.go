@@ -23,6 +23,7 @@ const (
 	businessImportSchema68 = 68
 	businessImportSchema69 = 69
 	businessImportSchema70 = 70
+	businessImportSchema71 = 71
 )
 
 // Schema 50 only adds the operational import-authorization table and schema 51
@@ -92,6 +93,7 @@ var businessExportExcludedTablesSchema65 = []string{
 	"knowledge_chunks_fts_content",
 	"knowledge_chunks_fts_docsize",
 	"knowledge_chunks_fts_config",
+	"agent_runs",
 }
 
 func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, bool) {
@@ -106,11 +108,11 @@ func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, boo
 		}
 		return businessImportSchemaContract(sourceSchema, businessImportSchema67)
 	}
-	// 70 only widens excluded knowledge-base schema (PDF source type and chunk
-	// page columns); the portable export surface is unchanged.
-	if targetSchema == businessImportSchema70 {
-		if sourceSchema == businessImportSchema67 || sourceSchema == businessImportSchema68 ||
-			sourceSchema == businessImportSchema69 {
+	// 70/71 only widen excluded knowledge-base schema (PDF source type and
+	// chunk page columns) and add the excluded agent_runs execution ledger;
+	// the portable export surface is unchanged.
+	if targetSchema == businessImportSchema70 || targetSchema == businessImportSchema71 {
+		if sourceSchema >= businessImportSchema67 && sourceSchema <= businessImportSchema70 {
 			return businessExportExcludedTables, true
 		}
 		return businessImportSchemaContract(sourceSchema, businessImportSchema67)

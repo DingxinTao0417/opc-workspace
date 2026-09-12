@@ -708,7 +708,20 @@ func requireAssignmentActor(tx *gorm.DB, actorIDValue, role string) error {
 	if role == "reviewer" && actor.Type != "owner" {
 		return newProjectRequestError(http.StatusUnprocessableEntity, "ASSIGNMENT_REVIEWER_MUST_BE_OWNER", "The v0.1 reviewer must be the owner")
 	}
-	if role == "assignee" && actor.Type != "owner" && actor.Type != "person" {
+	if role == "assignee" && actor.Type == "agent" {
+		// Agent assignees are allowed only through an execution-ready builtin
+		// adapter link (ADR-027); anything else stays a stable rejection.
+		if actor.AgentAdapterID == nil || *actor.AgentAdapterID == "" {
+			return newProjectRequestError(http.StatusUnprocessableEntity, "ASSIGNMENT_ACTOR_NOT_EXECUTABLE", "The agent actor is not linked to an execution-ready adapter")
+		}
+		var adapter models.AgentAdapter
+		if err := tx.Select("status", "execution_ready").First(&adapter, "id = ?", *actor.AgentAdapterID).Error; err != nil {
+			return newProjectRequestError(http.StatusUnprocessableEntity, "ASSIGNMENT_ACTOR_NOT_EXECUTABLE", "The agent actor adapter does not exist")
+		}
+		if adapter.Status != "enabled" || !adapter.ExecutionReady {
+			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_ACTOR_NOT_EXECUTABLE", "The agent adapter must be enabled and execution ready before assignment")
+		}
+	} else if role == "assignee" && actor.Type != "owner" && actor.Type != "person" {
 		return newProjectRequestError(http.StatusUnprocessableEntity, "ASSIGNMENT_ACTOR_TYPE_NOT_ALLOWED", "The v0.1 assignee must be an owner or person")
 	}
 	if actor.Status != "active" {

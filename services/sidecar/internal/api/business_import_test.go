@@ -102,8 +102,17 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 		ExecutionReady bool   `gorm:"column:execution_ready"`
 		Version        int64  `gorm:"column:version"`
 	}
-	if err := targetStore.DB.Table("agent_adapters").Take(&importedAdapter).Error; err != nil || importedAdapter.HealthStatus != "blocked" || importedAdapter.ExecutionReady || importedAdapter.Version != 1 {
-		t.Fatalf("imported Agent Adapter = %#v err=%v", importedAdapter, err)
+	if err := targetStore.DB.Table("agent_adapters").Take(&importedAdapter).Error; err != nil {
+		t.Fatalf("imported Agent Adapter err=%v", err)
+	}
+	if ready, _ := builtinExecutionReady(); ready {
+		// ADR-027: the verified builtin keeps its ready state when imported
+		// onto a platform whose lifecycle matrix is proven.
+		if importedAdapter.HealthStatus != "healthy" || !importedAdapter.ExecutionReady {
+			t.Fatalf("imported ready Agent Adapter = %#v", importedAdapter)
+		}
+	} else if importedAdapter.HealthStatus != "blocked" || importedAdapter.ExecutionReady || importedAdapter.Version != 1 {
+		t.Fatalf("imported Agent Adapter = %#v", importedAdapter)
 	}
 	var ownerName string
 	if err := targetStore.DB.Table("actors").Where("id = ?", "00000000-0000-5000-8000-000000000001").Pluck("display_name", &ownerName).Error; err != nil || ownerName != "Imported Owner" {
@@ -405,7 +414,7 @@ func TestBusinessImportClassifiesOlderAndNewerSchemasWithoutApplyingThem(t *test
 		blocker string
 	}{
 		{name: "older", schema: 42, blocker: "source_schema_older"},
-		{name: "newer", schema: 71, blocker: "source_schema_newer"},
+		{name: "newer", schema: 72, blocker: "source_schema_newer"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			router, store, _, backupDir := newBackupTestAPI(t)

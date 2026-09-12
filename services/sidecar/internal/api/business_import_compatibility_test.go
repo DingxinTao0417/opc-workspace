@@ -15,9 +15,9 @@ import (
 
 const frozenBusinessImportSchemaV49 = 49
 
-func TestBusinessImportSchemaContractAIOnly68To70(t *testing.T) {
-	for _, target := range []int{68, 69, 70} {
-		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69} {
+func TestBusinessImportSchemaContractAIOnly68To71(t *testing.T) {
+	for _, target := range []int{68, 69, 70, 71} {
+		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69, 70} {
 			if source > target {
 				continue
 			}
@@ -33,7 +33,7 @@ func TestBusinessImportSchemaContractAIOnly68To70(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := businessImportSchemaContract(71, 70); ok {
+	if _, ok := businessImportSchemaContract(72, 71); ok {
 		t.Fatal("future schema accepted")
 	}
 }
@@ -193,7 +193,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 71, blocker: "source_schema_newer"},
+		{version: 72, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

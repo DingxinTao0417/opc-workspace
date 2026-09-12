@@ -3,7 +3,7 @@
 > 文档版本：3.12
 > 日期：2026-09-10
 > 依据：[PRD v10.9](opc-workspace-PRD.md)
-> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 70（052–067 为既有 AI/知识库及评测；068 为配置身份，069 为可靠确认、请求恢复和分段水位线；070 为知识库 PDF 与页码定位；独立轨道交付）
+> 当前实现基线：app v0.1.1 / API v1 / SQLite schema 71（052–067 为既有 AI/知识库及评测；068 为配置身份，069 为可靠确认、请求恢复和分段水位线；070 为知识库 PDF 与页码定位，071 为 Agent Run；独立轨道交付）
 
 > 3.12 说明：[ADR-025](adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 收口短维护锁、全运行预算、明确流终态、应用级恢复、任务原子确认、记忆决定、临时会话隐私、分段压缩与 dataset v4 配置身份评测。真实模型、原生 WebView 输入法与真实崩溃验收不由自动化结果替代。
 
@@ -75,7 +75,7 @@ SQLite 是跨启动事实源，Rust 原子布尔只拥有当前进程的窗口�
 - Go 已提供健康检查、Task/Project/Project Note/Client/Client Activity/Client Attachment/Client–Actor Link/Client Followup/Actor/Assignment、D1/D2、Focus Session、手工 Inbox 受理/分诊、已有 Task 关系、一次性与 daily/weekly/weekdays/monthly Reminder、Today 统计，以及可选 Project 过滤的 Focus 终态历史/周期报告 API；Inbox 列表的受限 `source_entity_type=client_followup` 可读取真实到期回访。Task 列表提供与 Today 统计共享固定宽度 UTC 纳秒比较口径的 `due_state=overdue|due_soon`。Project 列表的每种排序均追加 `id ASC`，同名项目顺序确定，并在同一只读事务完成 `COUNT` 与当页读取。`/health` 返回真实 app/commit/API/schema 运行事实，项目笔记、客户关联、Attachment、Activity、Focus、Inbox/关系和 Reminder 写入使用 `If-Match`、幂等快照或事务维护事实。
 - Project Artifact 读模型在同一只读事务返回 Artifact/Task/Submission 与 nullable follow-up：Inbox ID/version/status/policy/`source_deleted_at` 及当前 required progress。列表保留 Project 聚合数值 `ETag`，`meta.project_version` 与它表达同一 Project 并发版本；follow-up 不传播进 Project version，Inbox 写入应使用 `followup.inbox_item_version`。当前 Project UI 只深链 Inbox；所有可能改变 follow-up 的成功 Inbox mutation 会失效可信来源 Project，split 另失效 Task、Today、Project。
 - React 项目详情把产出放在任务后，显示待拆分/跟进中/已解决/已忽略、required 完成度及阻塞/待验收/取消并深链 Inbox。Inbox split 对可信本地来源默认继承 Project，但每个草稿可清除/改选；独立完成条件写入 Task，person 明确为本地责任记录。活动关系和仍有实时 Task 的历史关系都用 stack-aware Modal 复用全局 Task detail。
-- SQLite 当前为 schema 70：v11–v51 交付核心业务；v52–v60 增加 AI/知识库/citation；v61–v62 增加无正文 run steps 与 Provider token；v63–v67 增加评测 Run/Result、dataset/suite 和不可变人工审计。v68 增加 Provider/Run/Review 配置身份，v69 增加请求身份、消息确认摘要、记忆决定和部分压缩水位线，不新增 AI 表；v70（ADR-026）把知识库来源类型扩展到 PDF 并为 chunk 增加页码范围。ADR-024 的 UTC 趋势仍只从根步骤派生。AI/知识库操作态排除便携业务导出，但覆盖于一致性 SQLite 备份；兼容图显式允许既有 v49/v63–v69→v70，不接受未知未来 schema（见 ADR-004–026）。
+- SQLite 当前为 schema 71：v11–v51 交付核心业务；v52–v60 增加 AI/知识库/citation；v61–v62 增加无正文 run steps 与 Provider token；v63–v67 增加评测 Run/Result、dataset/suite 和不可变人工审计。v68 增加 Provider/Run/Review 配置身份，v69 增加请求身份、消息确认摘要、记忆决定和部分压缩水位线，不新增 AI 表；v70（ADR-026）把知识库来源类型扩展到 PDF 并为 chunk 增加页码范围；v71（ADR-027）新增 agent_runs 执行事实与 agent Actor 的 Adapter 关联。ADR-024 的 UTC 趋势仍只从根步骤派生。AI/知识库操作态排除便携业务导出，但覆盖于一致性 SQLite 备份；兼容图显式允许既有 v49/v63–v70→v71，不接受未知未来 schema（见 ADR-004–026）。
 - Client Activity 继续以 `client_activities` 为唯一事实；`GET /api/v1/client-activities` 只读分页聚合所有客户未删除的 note/meeting/system_reference，按规范 UTC 纳秒键和 ID 稳定排序，并附带当前客户名称/状态。RightOverview 只取最近 3 条并深链客户详情，不复制活动、不生成 Inbox，也不推断邮件或提案下载等线上行为。
 - Roadmap Milestone 继续以 `roadmap_milestones`、关联 Project 与派生 Task 汇总为唯一事实；列表白名单 `sort=target_date` 在分页前按纯日期和 ID 稳定排序，缺省仍保留季度手工顺序。RightOverview 分别读取 planned/active 各 3 条，再按目标日期/ID 合并取最近 3 条，显示 Project 与已完成/总 Task 数；任一路失败整体显示重试，不把局部结果当完整概览，也不写 Today 副本。每条和路线图卡片都以 `?milestone=<id>` 打开同一个最新详情读模型，关闭/编辑只清理该参数并保留其他 URL 上下文。
 - 根级质量门禁与运行架构解耦：`check:source` 验证仓库可移植源码、文档和 Sidecar/Web 产物，`check:rust` 验证需要平台原生工具链的 Tauri/Rust 层，`check` 严格组合两者。源码门禁通过不等于桌面链接、安装包或三平台验收通过。
@@ -329,7 +329,7 @@ React Query 的派生缓存按项目、日期和页码隔离，失效边界固�
   → 设置展示三个未通过闸门，启用与 agent 分派继续关闭
 ```
 
-登记和诊断写入 `agent_adapter_registered / agent_adapter_health_checked` Workflow Event；业务导出/导入只接受代码所有身份及 unknown/blocked 安全状态。该流不创建 agent Actor、Assignment、Run，也不启动任何进程。
+登记和诊断写入 `agent_adapter_registered / agent_adapter_health_checked` Workflow Event。ADR-027 起内置执行器的信任分层生效：verified-Windows 构建上 builtin Adapter 登记/诊断即确认 `execution_ready`，启用时幂等创建 agent Actor，Assignment 才接受 agent；Run 经 Sidecar 子进程 + 单次匿名管道 `opc-agent-pipe-v1` 执行，结果暂存 Run 记录并写入 agent_run_* 事件。业务导出包含 Adapter 元数据并按导入平台重新门控就绪状态；`agent_runs` 本体排除便携导出。external Adapter 与未验证平台的执行保持关闭，macOS/Linux 矩阵未验证。
 
 下图仍是 v0.2-B/C 目标流程，不表示当前代码已实现 Runner 或 Run：
 

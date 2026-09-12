@@ -25,13 +25,13 @@ import (
 )
 
 const (
-	maxKnowledgeSourceBytes   int64 = 16 << 20
-	maxKnowledgeRequestBytes  int64 = maxKnowledgeSourceBytes + (1 << 20)
-	maxKnowledgeQueryRunes          = 256
-	knowledgeChunkRunes             = 1200
-	knowledgeChunkOverlap           = 160
-	knowledgeExtractorVersion       = "plain-text-v1"
-	knowledgePDFExtractorVersion    = "pdf-text-v1"
+	maxKnowledgeSourceBytes      int64 = 16 << 20
+	maxKnowledgeRequestBytes     int64 = maxKnowledgeSourceBytes + (1 << 20)
+	maxKnowledgeQueryRunes             = 256
+	knowledgeChunkRunes                = 1200
+	knowledgeChunkOverlap              = 160
+	knowledgeExtractorVersion          = "plain-text-v1"
+	knowledgePDFExtractorVersion       = "pdf-text-v1"
 )
 
 type knowledgeSourceRow struct {

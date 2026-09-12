@@ -6,16 +6,17 @@ const (
 )
 
 type Actor struct {
-	ID           string `gorm:"column:id;primaryKey" json:"id"`
-	Type         string `gorm:"column:type" json:"type"`
-	DisplayName  string `gorm:"column:display_name" json:"display_name"`
-	Status       string `gorm:"column:status" json:"status"`
-	IsBuiltin    bool   `gorm:"column:is_builtin" json:"is_builtin"`
-	Notes        string `gorm:"column:notes" json:"notes"`
-	MetadataJSON string `gorm:"column:metadata_json" json:"-"`
-	Version      int64  `gorm:"column:version" json:"version"`
-	CreatedAt    string `gorm:"column:created_at" json:"created_at"`
-	UpdatedAt    string `gorm:"column:updated_at" json:"updated_at"`
+	ID             string  `gorm:"column:id;primaryKey" json:"id"`
+	Type           string  `gorm:"column:type" json:"type"`
+	DisplayName    string  `gorm:"column:display_name" json:"display_name"`
+	Status         string  `gorm:"column:status" json:"status"`
+	IsBuiltin      bool    `gorm:"column:is_builtin" json:"is_builtin"`
+	Notes          string  `gorm:"column:notes" json:"notes"`
+	MetadataJSON   string  `gorm:"column:metadata_json" json:"-"`
+	AgentAdapterID *string `gorm:"column:agent_adapter_id" json:"agent_adapter_id"`
+	Version        int64   `gorm:"column:version" json:"version"`
+	CreatedAt      string  `gorm:"column:created_at" json:"created_at"`
+	UpdatedAt      string  `gorm:"column:updated_at" json:"updated_at"`
 }
 
 func (Actor) TableName() string { return "actors" }

@@ -37,8 +37,8 @@ func TestAIMessageCitationsMigrationPreservesV59AndConstrainsSnapshots(t *testin
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 70 {
-		t.Fatalf("SchemaVersion=%d, want 70", store.SchemaVersion)
+	if store.SchemaVersion != 71 {
+		t.Fatalf("SchemaVersion=%d, want 71", store.SchemaVersion)
 	}
 	var existing *string
 	if err := store.SQL.QueryRow("SELECT citations_snapshot FROM ai_messages WHERE id = ?", assistantID).Scan(&existing); err != nil {

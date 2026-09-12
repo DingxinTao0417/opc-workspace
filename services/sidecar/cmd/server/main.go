@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
 	"github.com/opc-workspace/opc-sidecar/internal/api"
 	"github.com/opc-workspace/opc-sidecar/internal/config"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
@@ -56,6 +57,12 @@ func writeStartupStage(writer io.Writer, stage string) error {
 }
 
 func main() {
+	// Reserved builtin executor subcommand (ADR-027): the sidecar re-executes
+	// itself so desktop packages never carry a second binary. The child only
+	// speaks opc-agent-pipe-v1 on stdin/stdout.
+	if len(os.Args) > 1 && os.Args[1] == "agent-executor" {
+		os.Exit(agentexec.ExecutorMain())
+	}
 	os.Exit(run(os.Args[1:]))
 }
 

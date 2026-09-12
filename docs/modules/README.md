@@ -21,7 +21,7 @@
 
 ## v0.2 本地编排
 
-- [本地 Agent Runtime](local-agents.md)（T-19 v0.2-A 已交付 schema v34、代码所有 Adapter 登记/诊断、设置模块和隔离未验证即禁用；Runner/Run/agent Actor 尚未实现）
+- [本地 Agent Runtime](local-agents.md)（T-19 v0.2-A Adapter 登记/诊断与 v0.2-B 首片（ADR-027：agent_runs、Runner、builtin 本地模型文本执行器、agent Actor/Assignment 门控）已交付；macOS/Linux 矩阵、Artifact/验收接入与 Web UI 待后续）
 - [预设自动化](automation.md)（schema v33、三个可用预设、两个依赖不可用预设、设置预览/启停、Run/重试、IANA/DST 与离线折叠已交付；Agent/发票/自由规则待开发）
 
 任务看板已交付读取、筛选、分页、选择、详情入口及跨列受控生命周期交互；人工验收仍必须在任务详情完成，详见 [任务管理](tasks.md)。
