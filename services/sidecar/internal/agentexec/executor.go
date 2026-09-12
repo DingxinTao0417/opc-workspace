@@ -3,7 +3,6 @@ package agentexec
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 )
+
 
 // Executor error codes surface as agent run error codes; they never include
 // model output or endpoint details.
@@ -47,7 +47,7 @@ func RunExecutor(stdin io.Reader, stdout io.Writer, dialTimeout time.Duration) e
 	if len(input.Capabilities) == 0 || input.Instruction == "" || input.Input.TaskID == "" {
 		return fail(ErrorCodeInvalidInput, errors.New("executor input frame missing capabilities or instruction"))
 	}
-	endpoint, err := NormalizeLoopbackEndpoint(input.ModelEndpoint)
+	endpoint, err := ValidateModelEndpoint(input.ModelEndpoint)
 	if err != nil {
 		return fail(ErrorCodeModelEndpoint, err)
 	}
@@ -55,7 +55,7 @@ func RunExecutor(stdin io.Reader, stdout io.Writer, dialTimeout time.Duration) e
 	if maxResult <= 0 || maxResult > MaxResultBytes {
 		maxResult = MaxResultBytes
 	}
-	text, err := callLocalModel(dialTimeout, endpoint, input.Model, buildPrompt(input), maxResult)
+	text, err := callLocalModel(dialTimeout, endpoint, input.Model, input.ModelAPIKey, buildPrompt(input), maxResult)
 	if err != nil {
 		code := ErrorCodeModelFailed
 		if errors.Is(err, ErrModelUnavailable) {
@@ -124,7 +124,7 @@ type chatResponse struct {
 	} `json:"error"`
 }
 
-func callLocalModel(dialTimeout time.Duration, endpoint *url.URL, model, prompt string, maxResult int) (string, error) {
+func callLocalModel(dialTimeout time.Duration, endpoint *url.URL, model, apiKey, prompt string, maxResult int) (string, error) {
 	if model == "" {
 		return "", errors.New("model name missing")
 	}
@@ -138,27 +138,23 @@ func callLocalModel(dialTimeout time.Duration, endpoint *url.URL, model, prompt 
 	if err != nil {
 		return "", err
 	}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return nil, err
-			}
-			ip := net.ParseIP(host)
-			if ip == nil || !isLoopbackIP(ip) {
-				return nil, errors.New("non-loopback dial blocked")
-			}
-			var dialer net.Dialer
-			return dialer.DialContext(ctx, network, address)
+	client := &http.Client{
+		Timeout: dialTimeout,
+		// The executor must not follow redirects: the Authorization header is
+		// bound to the declared endpoint and must never leak elsewhere.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
 		},
 	}
-	client := &http.Client{Transport: transport, Timeout: dialTimeout}
 	target := *endpoint
 	request, err := http.NewRequest(http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		request.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrModelUnavailable, err)
@@ -184,26 +180,40 @@ func callLocalModel(dialTimeout time.Duration, endpoint *url.URL, model, prompt 
 	return decoded.Choices[0].Message.Content, nil
 }
 
-// NormalizeLoopbackEndpoint validates the frame-supplied chat endpoint: http
-// scheme, IP-literal loopback host, and a /chat/completions-compatible path.
-// Hostnames are rejected outright so DNS cannot smuggle a non-loopback target.
-func NormalizeLoopbackEndpoint(raw string) (*url.URL, error) {
+// ValidateModelEndpoint validates the frame-supplied chat endpoint: http(s)
+// scheme with an explicit host. Local providers are additionally restricted
+// to loopback IP literals by the Sidecar; the executor never follows
+// redirects so the credential stays bound to the declared endpoint.
+func ValidateModelEndpoint(raw string) (*url.URL, error) {
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		return nil, err
 	}
-	if parsed.Scheme != "http" {
-		return nil, fmt.Errorf("endpoint scheme must be http: %s", parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("endpoint scheme must be http or https: %s", parsed.Scheme)
 	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !isLoopbackIP(ip) {
-		return nil, errors.New("endpoint host must be a loopback IP literal")
+	if parsed.Hostname() == "" {
+		return nil, errors.New("endpoint host is missing")
 	}
 	return parsed, nil
 }
 
-func isLoopbackIP(ip net.IP) bool {
-	return ip.IsLoopback()
+// ValidateLoopbackModelEndpoint is the Sidecar-side gate for local providers:
+// only http with a loopback IP literal is accepted, so DNS cannot smuggle a
+// non-loopback target behind a local kind.
+func ValidateLoopbackModelEndpoint(raw string) (*url.URL, error) {
+	parsed, err := ValidateModelEndpoint(raw)
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Scheme != "http" {
+		return nil, errors.New("local endpoint scheme must be http")
+	}
+	ip := net.ParseIP(parsed.Hostname())
+	if ip == nil || !ip.IsLoopback() {
+		return nil, errors.New("local endpoint host must be a loopback IP literal")
+	}
+	return parsed, nil
 }
 
 // ExecutorMain implements the `agent-executor` reserved subcommand of the

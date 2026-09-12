@@ -40,6 +40,10 @@ type InputFrame struct {
 	Input           TaskSnapshot `json:"input"`
 	ModelEndpoint   string       `json:"model_endpoint"`
 	Model           string       `json:"model"`
+	// ModelAPIKey carries a run-scoped provider credential for online models.
+	// It exists only in the pipe and both processes' memory; it is never
+	// persisted, logged, or included in snapshots (ADR-027).
+	ModelAPIKey     string       `json:"model_api_key,omitempty"`
 	DeadlineMS      int64        `json:"deadline_ms"`
 	MaxResultBytes  int          `json:"max_result_bytes"`
 	Instruction     string       `json:"instruction"`

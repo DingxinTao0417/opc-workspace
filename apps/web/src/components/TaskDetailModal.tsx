@@ -14,6 +14,7 @@ import type {
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 import { ProjectSelect } from "./ProjectSelect";
+import { TaskAgentRunsSection } from "./TaskAgentRunsSection";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskEventsSection } from "./TaskEventsSection";
 import { TaskFocusHistorySection } from "./TaskFocusHistorySection";
@@ -524,6 +525,7 @@ export function TaskDetailModal() {
             task={task}
           />
 
+          <TaskAgentRunsSection task={task} />
           <TaskOutputsSection
             disabled={
               taskWriteBusy ||

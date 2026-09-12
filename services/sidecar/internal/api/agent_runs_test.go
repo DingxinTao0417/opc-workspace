@@ -11,15 +11,19 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
-type agentRunTestModelServer struct{ hits int }
-
-func startAgentRunModelServer(t *testing.T) *httptest.Server {
+func startAgentRunModelServer(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
+	authorizations := &[]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "online-test"}}})
+			return
+		}
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
+		*authorizations = append(*authorizations, r.Header.Get("Authorization"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
 				"message": map[string]any{"content": "任务已完成：结论、要点与下一步建议。"},
@@ -27,7 +31,7 @@ func startAgentRunModelServer(t *testing.T) *httptest.Server {
 		})
 	}))
 	t.Cleanup(server.Close)
-	return server
+	return server, authorizations
 }
 
 func waitAgentRunStatus(t *testing.T, router http.Handler, runID, wantStatus string) agentRunResponse {
@@ -55,7 +59,7 @@ func waitAgentRunStatus(t *testing.T, router http.Handler, runID, wantStatus str
 
 func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 	router, store := newKnowledgeTestAPI(t)
-	modelServer := startAgentRunModelServer(t)
+	modelServer, _ := startAgentRunModelServer(t)
 
 	// 1. Register the builtin adapter; on a verified-Windows build it must
 	// come back execution ready.
@@ -162,6 +166,99 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 		Where("aggregate_type = 'agent_run' AND aggregate_id = ? AND action = 'agent_run_succeeded'", run.ID).
 		Count(&eventCount).Error; err != nil || eventCount != 1 {
 		t.Fatalf("succeeded events=%d err=%v", eventCount, err)
+	}
+}
+
+func TestAgentRunSupportsOnlineProviderWithKey(t *testing.T) {
+	router, store := newKnowledgeTestAPI(t)
+	modelServer, authorizations := startAgentRunModelServer(t)
+
+	registered := performRequest(router, http.MethodPost, "/api/v1/agent-adapters",
+		[]byte(`{"preset_key":"builtin-local-text-v1"}`), nil)
+	if registered.Code != http.StatusCreated {
+		t.Fatalf("register builtin adapter = %d", registered.Code)
+	}
+	var adapterEnvelope struct {
+		Data struct {
+			ID             string `json:"id"`
+			ExecutionReady bool   `json:"execution_ready"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(registered.Body.Bytes(), &adapterEnvelope)
+	if !adapterEnvelope.Data.ExecutionReady {
+		t.Skip("builtin execution matrix is not verified on this platform")
+	}
+	if enabled := performRequest(router, http.MethodPost,
+		"/api/v1/agent-adapters/"+adapterEnvelope.Data.ID+"/enable", nil,
+		map[string]string{"If-Match": `"1"`}); enabled.Code != http.StatusOK {
+		t.Fatalf("enable = %d: %s", enabled.Code, enabled.Body.String())
+	}
+
+	createdTask := performRequest(router, http.MethodPost, "/api/v1/tasks",
+		[]byte(`{"title":"在线模型执行"}`), nil)
+	var taskEnvelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(createdTask.Body.Bytes(), &taskEnvelope)
+	if assigned := performRequest(router, http.MethodPost,
+		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/assignments",
+		[]byte(fmt.Sprintf(`{"role":"assignee","actor_id":%q}`, agentAdapterBuiltinActorID)),
+		map[string]string{"If-Match": `"1"`}); assigned.Code != http.StatusCreated {
+		t.Fatalf("assign = %d: %s", assigned.Code, assigned.Body.String())
+	}
+
+	provider := models.AIProvider{
+		ID: "018f0000-0000-7000-8000-00000000c001", Name: "online-model", Kind: "remote",
+		Protocol: "openai_chat", BaseURL: modelServer.URL + "/v1", Model: "online-test",
+		Status: "ready", HealthStatus: "healthy", HasKey: true, Version: 1,
+		LastHealthAt: aiStringPtr("2026-09-12T12:00:00Z"),
+		CreatedAt: "2026-09-12T12:00:00Z", UpdatedAt: "2026-09-12T12:00:00Z",
+	}
+	if err := store.DB.Create(&provider).Error; err != nil {
+		t.Fatalf("create online provider: %v", err)
+	}
+	keyed := performRequest(router, http.MethodPost,
+		"/api/v1/ai/providers/"+provider.ID+"/key",
+		[]byte(`{"api_key":"test-key-123"}`),
+		map[string]string{"If-Match": `"1"`})
+	if keyed.Code != http.StatusOK {
+		t.Fatalf("set provider key = %d: %s", keyed.Code, keyed.Body.String())
+	}
+	var keyedEnvelope struct {
+		Data struct {
+			Version int64 `json:"version"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(keyed.Body.Bytes(), &keyedEnvelope)
+	if checked := performRequest(router, http.MethodPost,
+		"/api/v1/ai/providers/"+provider.ID+"/health", nil,
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, keyedEnvelope.Data.Version)}); checked.Code != http.StatusOK {
+		t.Fatalf("re-check provider health = %d: %s", checked.Code, checked.Body.String())
+	}
+
+	var checkProvider models.AIProvider
+	if err := store.DB.First(&checkProvider, "id = ?", provider.ID).Error; err != nil {
+		t.Fatalf("reload provider: %v", err)
+	}
+	t.Logf("provider before run: kind=%q status=%q health=%q", checkProvider.Kind, checkProvider.Status, checkProvider.HealthStatus)
+	queued := performRequest(router, http.MethodPost,
+		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/agent-runs",
+		[]byte(fmt.Sprintf(`{"provider_id":%q}`, provider.ID)), nil)
+	if queued.Code != http.StatusCreated {
+		t.Fatalf("create run = %d: %s", queued.Code, queued.Body.String())
+	}
+	var runEnvelope struct {
+		Data agentRunResponse `json:"data"`
+	}
+	_ = json.Unmarshal(queued.Body.Bytes(), &runEnvelope)
+	finished := waitAgentRunStatus(t, router, runEnvelope.Data.ID, "succeeded")
+	if finished.ResultText == nil || *finished.ResultText == "" {
+		t.Fatalf("online run result missing: %#v", finished)
+	}
+	if len(*authorizations) == 0 || (*authorizations)[0] != "Bearer test-key-123" {
+		t.Fatalf("executor did not send the run-scoped credential: %v", *authorizations)
 	}
 }
 

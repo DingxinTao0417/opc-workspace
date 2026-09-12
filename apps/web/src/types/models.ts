@@ -3070,3 +3070,26 @@ export type AiChatStreamEvent =
       detail?: string;
       partialText?: string;
     };
+
+export type AgentRunStatus =
+  "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+export interface AgentRun {
+  id: string;
+  taskId: string;
+  assignmentId: string;
+  actorId: string;
+  adapterId: string;
+  createdByActorId: string;
+  parentRunId: string | null;
+  attempt: number;
+  status: AgentRunStatus;
+  providerId: string;
+  model: string;
+  resultText: string | null;
+  resultBytes: number | null;
+  errorCode: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}

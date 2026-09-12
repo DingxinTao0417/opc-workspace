@@ -1,5 +1,7 @@
 import type {
   Actor,
+  AgentRun,
+  AgentRunStatus,
   AppSettingItem,
   AppSettingKey,
   AppSettingsResult,
@@ -13325,4 +13327,100 @@ export async function attachTaskToAiMessage(
     citations: citation.items,
     created_at: stringField(row, "created_at") ?? "",
   };
+}
+
+const BUILTIN_AGENT_ACTOR_ID = "018f0000-0000-5000-8000-000000003411";
+export { BUILTIN_AGENT_ACTOR_ID };
+
+function agentRunFromRecord(value: unknown): AgentRun {
+  if (!isRecord(value)) return invalidResponse("Agent 执行记录响应格式无效");
+  const status = stringField(value, "status");
+  if (
+    ![
+      "queued",
+      "running",
+      "succeeded",
+      "failed",
+      "cancelled",
+      "interrupted",
+    ].includes(status ?? "")
+  ) {
+    return invalidResponse("Agent 执行状态无效");
+  }
+  return {
+    id: stringField(value, "id") ?? "",
+    taskId: stringField(value, "task_id", "taskId") ?? "",
+    assignmentId: stringField(value, "assignment_id", "assignmentId") ?? "",
+    actorId: stringField(value, "actor_id", "actorId") ?? "",
+    adapterId: stringField(value, "adapter_id", "adapterId") ?? "",
+    createdByActorId:
+      stringField(value, "created_by_actor_id", "createdByActorId") ?? "",
+    parentRunId: nullableString(
+      fieldValue(value, "parent_run_id", "parentRunId"),
+    ),
+    attempt: positiveInteger(
+      fieldValue(value, "attempt"),
+      "Agent 执行尝试次数",
+    ),
+    status: status as AgentRunStatus,
+    providerId: stringField(value, "provider_id", "providerId") ?? "",
+    model: stringField(value, "model") ?? "",
+    resultText: nullableString(fieldValue(value, "result_text", "resultText")),
+    resultBytes: nullableNonNegativeInteger(
+      fieldValue(value, "result_bytes", "resultBytes"),
+      "Agent 执行产出字节数",
+    ),
+    errorCode: nullableString(fieldValue(value, "error_code", "errorCode")),
+    startedAt: nullableString(fieldValue(value, "started_at", "startedAt")),
+    completedAt: nullableString(
+      fieldValue(value, "completed_at", "completedAt"),
+    ),
+    createdAt: stringField(value, "created_at", "createdAt") ?? "",
+  };
+}
+
+export async function getTaskAgentRuns(taskId: string): Promise<AgentRun[]> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/agent-runs`,
+  );
+  if (!isRecord(payload) || !Array.isArray(payload.data)) {
+    return invalidResponse("Agent 执行列表响应格式无效");
+  }
+  return payload.data.map(agentRunFromRecord);
+}
+
+export async function createAgentRun(
+  taskId: string,
+  providerId: string,
+): Promise<AgentRun> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/agent-runs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider_id: providerId }),
+    },
+  );
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : null;
+  if (!body) return invalidResponse("Agent 执行创建响应格式无效");
+  return agentRunFromRecord(body);
+}
+
+export async function cancelAgentRun(runId: string): Promise<void> {
+  await apiRequest<unknown>(
+    `/api/v1/agent-runs/${encodeURIComponent(runId)}/cancel`,
+    { method: "POST" },
+  );
+}
+
+export async function retryAgentRun(runId: string): Promise<AgentRun> {
+  const payload = await apiRequest<unknown>(
+    `/api/v1/agent-runs/${encodeURIComponent(runId)}/retry`,
+    { method: "POST" },
+  );
+  const body =
+    isRecord(payload) && isRecord(payload.data) ? payload.data : null;
+  if (!body) return invalidResponse("Agent 执行重试响应格式无效");
+  return agentRunFromRecord(body);
 }

@@ -87,3 +87,4 @@ Desktop.ini
 *.tmp
 *.temp
 *.bak
+npm-cache/
