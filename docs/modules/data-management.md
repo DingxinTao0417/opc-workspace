@@ -66,6 +66,7 @@
 - 同 schema 且 `key_conflicts=0` 时，空目标返回 `apply_mode=replace_empty`，非空目标返回 `apply_mode=append`。append 使用独立确认词并在维护锁内重跑预检；目标 owner/system Actor、既有 person、设置和其他事实不被覆盖。源 person 与普通业务行只做 `INSERT`；源 Automation Rule 只允许覆盖目标仍为 disabled/version 1 的代码默认行，目标已定制规则会作为主键冲突阻断。最终仍由单事务、SQLite 唯一/外键约束、`foreign_key_check` 和 `quick_check` 兜底；任一失败整批回滚，导入前回滚包保留。
 - 源 schema 小于/大于当前 schema 时，preview 在基础格式、API、时间、表/列声明、标量行（ZIP 另含容器/哈希）校验后返回 `source_schema_older / source_schema_newer`。它只说明迁移方向，不声称当前列、关系或受控文件元数据兼容；apply 对两类 blocker 均继续返回 `IMPORT_VERSION_UNSUPPORTED`，且在容量探测/回滚包/业务写入之前退出。
 - 设置“数据与备份”提供业务 JSON 与含文件 ZIP 的下载和安全导入，以及备份说明、创建、加载/空/错误状态、摘要、重新校验、恢复演练、二次确认恢复和永久删除。手动创建遇到空间不足时提示清理备份位置或旧备份，容量无法确认时提示刷新容量状态并确认本地存储可用；失败保留尚未成功提交的 note 草稿，不显示成功，也不自动重试。导入先显示 schema/总行数；非空零冲突目标展示追加策略和逐表目标清单，主键或文件冲突展示只读清单并禁用确认。ZIP 额外显示文件数与字节数，确认后才应用。长操作使用 180 秒客户端窗口。实际备份创建失败 Inbox Item 的详情可打开同一设置模块；容量准入拒绝不会生成该事项。
+- `GET /api/v1/files` 提供受控文件只读 union 索引（artifact / client_attachment / project_attachment / knowledge_document），在单个只读事务返回 id、scope、名称、mime、size、sha256、归属标签、路由化 content 引用与更新时间；不返回正文与受控相对路径，正文仍走既有鉴权 content 端点，未知 scope 以 `INVALID_FILE_SCOPE` 失败关闭。工作区头像是单一设置受控图片，不纳入该索引。概览文件页签只做只读浏览与文本产出内联预览，不提供上传/删除/重命名。
 
 ### 仍未实现
 

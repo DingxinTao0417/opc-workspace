@@ -1,401 +1,600 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUpRight,
-  CalendarDays,
+  ArrowLeft,
+  BellRing,
+  BookOpenText,
+  Bot,
+  CheckSquare2,
+  Cpu,
+  DatabaseBackup,
+  ExternalLink,
   FileText,
-  Flag,
-  Pause,
-  Play,
-  RefreshCw,
-  Zap,
+  Globe,
+  Inbox,
+  Sparkles,
+  TimerReset,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  useActiveFocusSessionQuery,
-  useIncomeStatsQuery,
-  usePauseFocusSession,
-  useRecentClientActivitiesQuery,
-  useRoadmapMilestonesQuery,
-  useResumeFocusSession,
+  cancelAgentRun,
+  getKnowledgeSources,
+  retryAgentRun,
+} from "../api/client";
+import {
+  agentRunListQueryKey,
+  useAgentRunsQuery,
+  useAiProvidersQuery,
+  useBackupsQuery,
+  useControlledFilesQuery,
+  useHealthQuery,
+  useInboxStatsQuery,
+  useRemindersQuery,
+  useTaskArtifactQuery,
+  useTodayStatsQuery,
 } from "../api/hooks";
-import {
-  formatFocusTime,
-  useBreakClock,
-  useFocusClock,
-  useFocusCycleStore,
-} from "../store/focus";
-import {
-  localDateFromKey,
-  localDateKey,
-  useLocalCalendar,
-} from "../lib/localCalendar";
-import { useSettingsStore } from "../store/settings";
+import type {
+  AgentRunSummary,
+  ControlledFile,
+  ControlledFileScope,
+} from "../types/models";
+import { useLocalCalendar } from "../lib/localCalendar";
+import { openExternalBrowserWindow } from "../api/desktop";
+import { useUiStore, type RightPanelTab } from "../store/ui";
 
-function currentMonthBounds(dateKey: string) {
-  const date = localDateFromKey(dateKey);
-  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  return { dateFrom: localDateKey(firstDay), dateTo: localDateKey(lastDay) };
+function relativeLabel(iso: string, nowMs: number) {
+  const diff = Math.max(0, nowMs - new Date(iso).getTime());
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.floor(hours / 24)} 天前`;
 }
 
-function formatCny(amountMinor: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: 2,
-  }).format(amountMinor / 100);
+function formatTrigger(iso: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
 }
 
-function milestoneDateLabel(targetDate: string, todayKey: string) {
-  if (targetDate < todayKey) return "已逾期";
-  if (targetDate === todayKey) return "今天";
-  const [, month, day] = targetDate.split("-");
-  return `${Number(month)}月${Number(day)}日`;
+function isLoopbackUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    return ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
-export function RightOverview() {
-  const { dateKey: todayKey } = useLocalCalendar();
-  const focusQuery = useActiveFocusSessionQuery();
-  const incomeStatsQuery = useIncomeStatsQuery({
-    currency: "CNY",
-    ...currentMonthBounds(todayKey),
-  });
-  const recentActivitiesQuery = useRecentClientActivitiesQuery(3);
-  const plannedMilestonesQuery = useRoadmapMilestonesQuery({
-    page: 1,
-    pageSize: 3,
-    sort: "target_date",
-    status: "planned",
-  });
-  const activeMilestonesQuery = useRoadmapMilestonesQuery({
-    page: 1,
-    pageSize: 3,
-    sort: "target_date",
-    status: "active",
-  });
-  const pauseFocus = usePauseFocusSession();
-  const resumeFocus = useResumeFocusSession();
-  const focusMinutes = useSettingsStore(
-    (state) => state.preview?.focus.focusMinutes ?? state.focusMinutes,
+interface RowProps {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  to?: string;
+  onClick?: () => void;
+  title?: string;
+}
+
+function OverviewRow({
+  icon: Icon,
+  label,
+  value,
+  to,
+  onClick,
+  title,
+}: RowProps) {
+  const content = (
+    <>
+      <span className="ov-row-icon" aria-hidden="true">
+        <Icon size={14} />
+      </span>
+      <span className="ov-label">{label}</span>
+      <span className="ov-value">{value}</span>
+    </>
   );
-  const clock = useFocusClock(focusQuery.data);
-  const breakClock = useBreakClock();
-  const cyclePhase = useFocusCycleStore((state) => state.phase);
-  const cycleTaskTitle = useFocusCycleStore((state) => state.taskTitle);
-  const breakDurationSeconds = useFocusCycleStore(
-    (state) => state.breakDurationSeconds,
+  if (to) {
+    return (
+      <Link className="ov-row" title={title ?? label} to={to}>
+        {content}
+      </Link>
+    );
+  }
+  return (
+    <button
+      className="ov-row"
+      onClick={onClick}
+      title={title ?? label}
+      type="button"
+    >
+      {content}
+    </button>
   );
-  const breakEndsAtMs = useFocusCycleStore((state) => state.breakEndsAtMs);
-  const pauseBreak = useFocusCycleStore((state) => state.pauseBreak);
-  const resumeBreak = useFocusCycleStore((state) => state.resumeBreak);
-  const session = focusQuery.data?.session;
-  const inBreak = !session && cyclePhase === "break";
-  const plannedSeconds =
-    session?.plannedSeconds ??
-    (inBreak ? breakDurationSeconds : focusMinutes * 60);
-  const remainingSeconds = session
-    ? clock.remainingSeconds
-    : inBreak
-      ? breakClock.remainingSeconds
-      : plannedSeconds;
-  const ringOffset =
-    326.7 *
-    (1 - (session ? clock.progress : inBreak ? breakClock.progress : 0));
-  const running = session?.status === "active";
-  const paused = session?.status === "paused";
-  const recoveryPending = session?.status === "recovery_pending";
-  const busy = pauseFocus.isPending || resumeFocus.isPending;
-  const upcomingMilestones = [
-    ...(plannedMilestonesQuery.data?.items ?? []),
-    ...(activeMilestonesQuery.data?.items ?? []),
-  ]
-    .sort(
-      (left, right) =>
-        left.targetDate.localeCompare(right.targetDate) ||
-        left.id.localeCompare(right.id),
-    )
-    .slice(0, 3);
-  const milestonesPending =
-    plannedMilestonesQuery.isPending || activeMilestonesQuery.isPending;
-  const milestonesError =
-    plannedMilestonesQuery.isError || activeMilestonesQuery.isError;
+}
 
-  const toggle = () => {
-    if (!session) return;
-    const input = { id: session.id, expectedVersion: session.version };
-    if (running) pauseFocus.mutate(input);
-    if (paused) resumeFocus.mutate(input);
+function SummaryTab() {
+  const { dateKey } = useLocalCalendar();
+  const healthQuery = useHealthQuery();
+  const backupsQuery = useBackupsQuery();
+  const todayStatsQuery = useTodayStatsQuery(dateKey);
+  const inboxStatsQuery = useInboxStatsQuery();
+  const nextReminderQuery = useRemindersQuery({
+    page: 1,
+    pageSize: 1,
+    sort: "trigger_at",
+    status: "scheduled",
+  });
+  const providersQuery = useAiProvidersQuery();
+  const knowledgeCountQuery = useQuery({
+    queryKey: ["knowledge", "sources", "count"],
+    queryFn: () => getKnowledgeSources({ pageSize: 1 }),
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
+
+  const health = healthQuery.data;
+  const latestBackup = backupsQuery.data?.[0];
+  const tasks = todayStatsQuery.data?.tasks;
+  const focus = todayStatsQuery.data?.focus;
+  const inbox = inboxStatsQuery.data;
+  const nextReminder = nextReminderQuery.data?.items[0];
+
+  return (
+    <>
+      <section className="ov-group">
+        <div className="ov-group-title">本地运行</div>
+        <OverviewRow
+          icon={Cpu}
+          label="版本"
+          value={
+            health
+              ? `v${health.app.version} · API ${health.api.version} · schema ${health.schema.version}`
+              : healthQuery.isError
+                ? "读取失败"
+                : "读取中"
+          }
+          onClick={() => setSettingsOpen(true, "about")}
+        />
+        <OverviewRow
+          icon={DatabaseBackup}
+          label="最近备份"
+          value={
+            backupsQuery.isError
+              ? "读取失败"
+              : latestBackup
+                ? relativeLabel(latestBackup.createdAt, Date.now())
+                : "暂无备份"
+          }
+          onClick={() => setSettingsOpen(true, "data")}
+        />
+      </section>
+      <section className="ov-group">
+        <div className="ov-group-title">今日</div>
+        <OverviewRow
+          icon={CheckSquare2}
+          label="任务"
+          value={
+            todayStatsQuery.isError
+              ? "读取失败"
+              : tasks
+                ? `${tasks.completed}/${tasks.total} · 逾期${tasks.overdue}`
+                : "读取中"
+          }
+          to="/today"
+        />
+        <OverviewRow
+          icon={TimerReset}
+          label="专注"
+          value={
+            todayStatsQuery.isError
+              ? "读取失败"
+              : focus
+                ? `${focus.sessions} 段 · ${focus.minutes} 分`
+                : "读取中"
+          }
+          to="/focus"
+        />
+      </section>
+      <section className="ov-group">
+        <div className="ov-group-title">收件箱</div>
+        <OverviewRow
+          icon={Inbox}
+          label="待处理 / 未读"
+          value={
+            inboxStatsQuery.isError
+              ? "读取失败"
+              : inbox
+                ? `${inbox.pending} / ${inbox.unread}`
+                : "读取中"
+          }
+          to="/inbox"
+        />
+        <OverviewRow
+          icon={BellRing}
+          label="下一提醒"
+          value={
+            nextReminderQuery.isError
+              ? "读取失败"
+              : nextReminder
+                ? formatTrigger(nextReminder.triggerAt)
+                : "无排程"
+          }
+          onClick={() => setSettingsOpen(true, "automation")}
+        />
+      </section>
+      <section className="ov-group">
+        <div className="ov-group-title">来源</div>
+        <OverviewRow
+          icon={BookOpenText}
+          label="知识库"
+          value={
+            knowledgeCountQuery.isError
+              ? "读取失败"
+              : `${knowledgeCountQuery.data?.meta.total ?? 0} 个来源`
+          }
+          to="/knowledge"
+        />
+        <OverviewRow
+          icon={Sparkles}
+          label="AI Provider"
+          value={
+            providersQuery.isError
+              ? "读取失败"
+              : `${providersQuery.data?.length ?? 0} 已配置`
+          }
+          to="/ai"
+        />
+      </section>
+    </>
+  );
+}
+
+function AgentRunDetail({
+  run,
+  onBack,
+}: {
+  run: AgentRunSummary;
+  onBack: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
+  const retry = useMutation({
+    mutationFn: () => retryAgentRun(run.id),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["agent-runs"] }),
+  });
+  const cancel = useMutation({
+    mutationFn: () => cancelAgentRun(run.id),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["agent-runs"] }),
+  });
+  const terminal =
+    run.status === "succeeded" ||
+    run.status === "failed" ||
+    run.status === "cancelled" ||
+    run.status === "interrupted";
+
+  return (
+    <div className="ov-detail">
+      <button className="ov-back" onClick={onBack} type="button">
+        <ArrowLeft size={14} /> 返回列表
+      </button>
+      <div className="ov-detail-title" title={run.taskTitle}>
+        {run.taskTitle}
+      </div>
+      <div className="ov-detail-meta">
+        状态 {run.status} · 尝试 {run.attempt} · 模型 {run.model}
+      </div>
+      <div className="ov-detail-meta">
+        开始 {run.startedAt ?? "—"} · 结束 {run.completedAt ?? "—"}
+      </div>
+      {run.errorCode ? (
+        <div className="ov-detail-error">错误：{run.errorCode}</div>
+      ) : null}
+      {run.resultText ? (
+        <pre className="ov-detail-result">{run.resultText}</pre>
+      ) : (
+        <div className="ov-detail-meta">暂无产出文本</div>
+      )}
+      <div className="ov-detail-actions">
+        <button
+          className="button button-secondary"
+          onClick={() => setTaskDetailId(run.taskId)}
+          type="button"
+        >
+          打开任务
+        </button>
+        {terminal ? (
+          <button
+            className="button button-secondary"
+            disabled={retry.isPending}
+            onClick={() => retry.mutate()}
+            type="button"
+          >
+            重试
+          </button>
+        ) : null}
+        {run.status === "queued" ? (
+          <button
+            className="button button-secondary"
+            disabled={cancel.isPending}
+            onClick={() => cancel.mutate()}
+            type="button"
+          >
+            取消
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AgentsTab() {
+  const runsQuery = useAgentRunsQuery({ pageSize: 50 });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const runs = runsQuery.data?.items ?? [];
+  const selected = runs.find((run) => run.id === selectedId) ?? null;
+
+  if (selected) {
+    return <AgentRunDetail run={selected} onBack={() => setSelectedId(null)} />;
+  }
+
+  return (
+    <section className="ov-group">
+      <div className="ov-group-title">子智能体（Agent Runs）</div>
+      {runsQuery.isPending ? (
+        <div className="ov-empty">正在读取执行记录…</div>
+      ) : runsQuery.isError ? (
+        <div className="ov-empty">
+          读取失败 ·{" "}
+          <button
+            className="form-inline-action"
+            onClick={() => void runsQuery.refetch()}
+            type="button"
+          >
+            重试
+          </button>
+        </div>
+      ) : runs.length === 0 ? (
+        <div className="ov-empty">暂无 Agent 执行记录</div>
+      ) : (
+        runs.map((run) => (
+          <button
+            className="ov-row"
+            key={run.id}
+            onClick={() => setSelectedId(run.id)}
+            type="button"
+          >
+            <span className="ov-row-icon" aria-hidden="true">
+              <Bot size={14} />
+            </span>
+            <span className="ov-label" title={run.taskTitle}>
+              {run.taskTitle}
+            </span>
+            <span className="ov-value">{run.status}</span>
+          </button>
+        ))
+      )}
+    </section>
+  );
+}
+
+const fileScopes: { id: ControlledFileScope; label: string }[] = [
+  { id: "artifact", label: "任务产出" },
+  { id: "client_attachment", label: "客户附件" },
+  { id: "project_attachment", label: "项目附件" },
+  { id: "knowledge_document", label: "知识库" },
+];
+
+function FilesTab() {
+  const [scope, setScope] = useState<ControlledFileScope>("artifact");
+  const [selected, setSelected] = useState<ControlledFile | null>(null);
+  const filesQuery = useControlledFilesQuery({ pageSize: 50, scope });
+  const artifactQuery = useTaskArtifactQuery(
+    selected?.scope === "artifact" ? selected.id : null,
+  );
+  const files = filesQuery.data?.items ?? [];
+
+  return (
+    <>
+      <div className="ov-scope-bar">
+        {fileScopes.map((item) => (
+          <button
+            className={`ov-scope${scope === item.id ? " ov-scope-active" : ""}`}
+            key={item.id}
+            onClick={() => {
+              setScope(item.id);
+              setSelected(null);
+            }}
+            type="button"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <section className="ov-group">
+        <div className="ov-group-title">文件（只读）</div>
+        {filesQuery.isPending ? (
+          <div className="ov-empty">正在读取文件…</div>
+        ) : filesQuery.isError ? (
+          <div className="ov-empty">
+            读取失败 ·{" "}
+            <button
+              className="form-inline-action"
+              onClick={() => void filesQuery.refetch()}
+              type="button"
+            >
+              重试
+            </button>
+          </div>
+        ) : files.length === 0 ? (
+          <div className="ov-empty">该范围暂无文件</div>
+        ) : (
+          files.map((file) => (
+            <button
+              className="ov-row"
+              key={file.id}
+              onClick={() => setSelected(file)}
+              type="button"
+            >
+              <span className="ov-row-icon" aria-hidden="true">
+                <FileText size={14} />
+              </span>
+              <span className="ov-label" title={file.name}>
+                {file.name}
+              </span>
+              <span className="ov-value">{file.ownerLabel}</span>
+            </button>
+          ))
+        )}
+      </section>
+      {selected ? (
+        <div className="ov-detail">
+          <button
+            className="ov-back"
+            onClick={() => setSelected(null)}
+            type="button"
+          >
+            <ArrowLeft size={14} /> 返回列表
+          </button>
+          <div className="ov-detail-title" title={selected.name}>
+            {selected.name}
+          </div>
+          <div className="ov-detail-meta">
+            范围 {selected.scope} · 归属 {selected.ownerLabel || "—"}
+          </div>
+          <div className="ov-detail-meta">
+            类型 {selected.mimeType ?? "—"} · 大小 {selected.sizeBytes ?? "—"}{" "}
+            字节
+          </div>
+          <div className="ov-detail-meta">SHA-256 {selected.sha256 ?? "—"}</div>
+          {selected.scope === "artifact" ? (
+            artifactQuery.isPending ? (
+              <div className="ov-empty">正在读取产出…</div>
+            ) : artifactQuery.data?.contentText ? (
+              <pre className="ov-detail-result">
+                {artifactQuery.data.contentText}
+              </pre>
+            ) : (
+              <div className="ov-empty">该产出不含可内联预览的文本</div>
+            )
+          ) : (
+            <div className="ov-empty">该类型暂不支持内联预览，仅显示元数据</div>
+          )}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function BrowserTab() {
+  const [address, setAddress] = useState("http://127.0.0.1:5173");
+  const [target, setTarget] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const submit = () => {
+    const raw = address.trim();
+    if (!raw) return;
+    setNotice(null);
+    if (isLoopbackUrl(raw)) {
+      setTarget(raw);
+      return;
+    }
+    setTarget(null);
+    void openExternalBrowserWindow(raw).then((opened) => {
+      if (opened) {
+        setNotice("已在独立原生窗口打开外部页面");
+      } else {
+        window.open(raw, "_blank", "noopener");
+        setNotice("当前为浏览器开发模式，已在新标签打开");
+      }
+    });
   };
 
   return (
-    <aside className="right-sidebar" aria-label="今日概览">
-      <section className="overview-card focus-overview">
-        <div className="card-heading">
-          <span>
-            <Zap size={15} /> 专注模式
-          </span>
-          <span
-            className={
-              running
-                ? "status-badge status-green"
-                : recoveryPending
-                  ? "status-badge status-red"
-                  : inBreak
-                    ? "status-badge status-green"
-                    : "status-badge"
-            }
-          >
-            {focusQuery.isPending
-              ? "同步中"
-              : running
-                ? "进行中"
-                : paused
-                  ? "已暂停"
-                  : recoveryPending
-                    ? "待恢复"
-                    : inBreak
-                      ? breakEndsAtMs === null
-                        ? "休息暂停"
-                        : "休息中"
-                      : cyclePhase === "ready"
-                        ? "待下一块"
-                        : cyclePhase === "complete"
-                          ? "本轮完成"
-                          : "待开始"}
-          </span>
-        </div>
-        <div
-          className="focus-ring"
-          data-running={running}
-          style={{ "--ring-offset": ringOffset } as React.CSSProperties}
+    <section className="ov-group">
+      <div className="ov-group-title">内置浏览器</div>
+      <div className="ov-browser-bar">
+        <input
+          className="ov-browser-input"
+          onChange={(event) => setAddress(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") submit();
+          }}
+          placeholder="http://127.0.0.1:5173"
+          value={address}
+        />
+        <button
+          aria-label="打开地址"
+          className="icon-button"
+          onClick={submit}
+          title="打开地址"
+          type="button"
         >
-          <svg aria-hidden="true" viewBox="0 0 120 120">
-            <circle className="ring-track" cx="60" cy="60" r="52" />
-            <circle className="ring-value" cx="60" cy="60" r="52" />
-          </svg>
-          <div className="ring-copy">
-            <strong>{formatFocusTime(remainingSeconds)}</strong>
-            <span>/ {formatFocusTime(plannedSeconds)}</span>
-          </div>
-        </div>
-        <div className="overview-focus-task">
-          {session?.taskTitle ??
-            (session
-              ? "未绑定任务的专注"
-              : (cycleTaskTitle ??
-                (inBreak ? "未绑定任务的休息" : "尚未选择专注任务")))}
-        </div>
+          <ExternalLink size={14} />
+        </button>
+      </div>
+      {notice ? <div className="ov-empty">{notice}</div> : null}
+      <div className="ov-empty">
+        仅回环地址（127.0.0.1 /
+        localhost）在面板内内嵌；外部页面在桌面端以独立原生窗口打开。
+      </div>
+      {target ? (
+        <iframe
+          className="ov-browser-frame"
+          src={target}
+          title="内置浏览器预览"
+        />
+      ) : null}
+    </section>
+  );
+}
 
-        {focusQuery.isError ? (
-          <button
-            className="button button-secondary button-full"
-            onClick={() => void focusQuery.refetch()}
-            type="button"
-          >
-            <RefreshCw size={14} /> 重试读取
-          </button>
-        ) : running || paused ? (
-          <button
-            className="button button-secondary button-full"
-            disabled={busy}
-            onClick={toggle}
-            type="button"
-          >
-            {running ? <Pause size={14} /> : <Play size={14} />}
-            {running ? "暂停计时" : "继续专注"}
-          </button>
-        ) : inBreak ? (
-          <button
-            className="button button-secondary button-full"
-            onClick={() =>
-              breakEndsAtMs === null ? resumeBreak() : pauseBreak()
-            }
-            type="button"
-          >
-            {breakEndsAtMs === null ? <Play size={14} /> : <Pause size={14} />}
-            {breakEndsAtMs === null ? "开始休息" : "暂停休息"}
-          </button>
-        ) : (
-          <Link className="button button-secondary button-full" to="/focus">
-            <Play size={14} />
-            {recoveryPending
-              ? "处理上次会话"
-              : cyclePhase === "ready"
-                ? "开始下一块"
-                : cyclePhase === "complete"
-                  ? "查看本轮"
-                  : "选择任务并开始"}
-          </Link>
-        )}
-      </section>
+const tabs: { id: RightPanelTab; label: string; icon: LucideIcon }[] = [
+  { id: "summary", label: "概要", icon: Cpu },
+  { id: "agents", label: "子智能体", icon: Bot },
+  { id: "files", label: "文件", icon: FileText },
+  { id: "browser", label: "浏览器", icon: Globe },
+];
 
-      <section className="overview-card">
-        <div className="card-heading">
-          <span>临近项目节点</span>
-          <Link className="text-link" to="/roadmap">
-            查看全部
-          </Link>
-        </div>
-        {milestonesPending ? (
-          <div className="overview-footnote overview-activity-state">
-            正在读取路线图节点…
-          </div>
-        ) : milestonesError ? (
-          <button
-            className="overview-activity-retry"
-            onClick={() =>
-              void Promise.all([
-                plannedMilestonesQuery.refetch(),
-                activeMilestonesQuery.refetch(),
-              ])
-            }
-            type="button"
-          >
-            <RefreshCw size={12} /> 节点读取失败，重试
-          </button>
-        ) : upcomingMilestones.length === 0 ? (
-          <div className="overview-footnote overview-activity-state">
-            暂无未完成的路线图节点
-          </div>
-        ) : (
-          <div className="milestone-overview-list">
-            {upcomingMilestones.map((milestone) => {
-              const projectLabel =
-                milestone.projects.length === 0
-                  ? "未关联项目"
-                  : `${milestone.projects[0].name}${
-                      milestone.projects.length > 1
-                        ? ` +${milestone.projects.length - 1}`
-                        : ""
-                    }`;
-              const taskLabel =
-                milestone.taskSummary.total === 0
-                  ? "暂无关联任务"
-                  : `${milestone.taskSummary.completed}/${milestone.taskSummary.total} 任务`;
-              return (
-                <Link
-                  aria-label={`查看路线图节点：${milestone.title}`}
-                  className="milestone-overview-row"
-                  key={milestone.id}
-                  to={`/roadmap?milestone=${encodeURIComponent(milestone.id)}`}
-                >
-                  <span
-                    className="activity-icon activity-blue"
-                    aria-hidden="true"
-                  >
-                    <Flag size={13} />
-                  </span>
-                  <span className="milestone-overview-copy">
-                    <strong>{milestone.title}</strong>
-                    <span>
-                      {projectLabel} · {taskLabel}
-                    </span>
-                  </span>
-                  <time
-                    className={
-                      milestone.targetDate < todayKey ? "is-overdue" : ""
-                    }
-                    dateTime={milestone.targetDate}
-                  >
-                    {milestoneDateLabel(milestone.targetDate, todayKey)}
-                  </time>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </section>
+export function RightOverview() {
+  const activeTab = useUiStore((state) => state.rightPanelTab);
+  const setRightPanelTab = useUiStore((state) => state.setRightPanelTab);
 
-      <section className="overview-card">
-        <div className="overview-label">本月收入</div>
-        {incomeStatsQuery.isPending ? (
-          <div className="overview-footnote">正在读取本月收入…</div>
-        ) : incomeStatsQuery.isError ? (
+  return (
+    <aside aria-label="今日概览" className="right-sidebar" id="right-overview">
+      <div className="ov-tabs" role="tablist" aria-label="概览页签">
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
-            className="overview-activity-retry"
-            onClick={() => void incomeStatsQuery.refetch()}
+            aria-selected={activeTab === id}
+            className={`ov-tab${activeTab === id ? " ov-tab-active" : ""}`}
+            key={id}
+            onClick={() => setRightPanelTab(id)}
+            role="tab"
             type="button"
           >
-            <RefreshCw size={12} /> 收入读取失败，重试
+            <Icon size={13} />
+            {label}
           </button>
+        ))}
+      </div>
+      <div className="ov-tab-panel">
+        {activeTab === "summary" ? (
+          <SummaryTab />
+        ) : activeTab === "agents" ? (
+          <AgentsTab />
+        ) : activeTab === "files" ? (
+          <FilesTab />
         ) : (
-          <>
-            <div className="income-number-row">
-              <strong>
-                {formatCny(incomeStatsQuery.data.confirmedIncomeMinor)}
-              </strong>
-            </div>
-            <div className="overview-footnote">
-              {incomeStatsQuery.data.entryCount === 0
-                ? "暂无收入记录"
-                : `${incomeStatsQuery.data.confirmedIncomeCount} 笔已确认`}
-            </div>
-          </>
+          <BrowserTab />
         )}
-        <Link className="overview-link" to="/income">
-          查看收入 <ArrowUpRight size={13} />
-        </Link>
-      </section>
-
-      <section className="overview-card">
-        <div className="card-heading">
-          <span>客户动态</span>
-          <Link className="text-link" to="/clients">
-            查看全部
-          </Link>
-        </div>
-        {recentActivitiesQuery.isPending ? (
-          <div className="overview-footnote overview-activity-state">
-            正在读取本地动态…
-          </div>
-        ) : recentActivitiesQuery.isError ? (
-          <button
-            className="overview-activity-retry"
-            onClick={() => void recentActivitiesQuery.refetch()}
-            type="button"
-          >
-            <RefreshCw size={12} /> 读取失败，重试
-          </button>
-        ) : recentActivitiesQuery.data.items.length === 0 ? (
-          <div className="overview-footnote overview-activity-state">
-            暂无客户动态
-          </div>
-        ) : (
-          <div className="activity-list">
-            {recentActivitiesQuery.data.items.map((activity) => (
-              <Link
-                aria-label={`查看客户 ${activity.clientName}：${activity.title}`}
-                className="activity-row"
-                key={activity.id}
-                to={`/clients/${activity.clientId}`}
-              >
-                <span
-                  className={`activity-icon ${
-                    activity.kind === "meeting"
-                      ? "activity-green"
-                      : "activity-blue"
-                  }`}
-                  aria-hidden="true"
-                >
-                  {activity.kind === "meeting" ? (
-                    <CalendarDays size={13} />
-                  ) : (
-                    <FileText size={13} />
-                  )}
-                </span>
-                <span className="activity-copy">
-                  <strong>{activity.clientName}</strong> · {activity.title}
-                </span>
-                <time dateTime={activity.occurredAt}>
-                  {new Intl.DateTimeFormat("zh-CN", {
-                    month: "numeric",
-                    day: "numeric",
-                  }).format(new Date(activity.occurredAt))}
-                </time>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
+      </div>
     </aside>
   );
 }

@@ -108,6 +108,8 @@ GET    /api/v1/agent-adapters/:id
 POST   /api/v1/agent-adapters/:id/check
 POST   /api/v1/agent-adapters/:id/enable
 POST   /api/v1/agent-adapters/:id/disable
+GET    /api/v1/agent-runs
+GET    /api/v1/files
 GET    /api/v1/ai/providers
 POST   /api/v1/ai/providers
 GET    /api/v1/ai/providers/:id
@@ -303,6 +305,12 @@ Router startup synchronously projects overdue scheduled rows before readiness, t
 `GET /api/v1/automations/rules` exposes five stable presets in code order. Configuration preview is server-authoritative; PATCH and enable/disable require `If-Match`. Three presets are currently usable: Project completion creates a local invoice-check Inbox Item, and daily/weekly schedules create local Reminder facts. Every attempt writes an immutable terminal Run with a stable logical/dedupe key; failed local actions retry at most twice after the initial attempt. Rule actions are limited to allow-listed local Inbox/Reminder writes: there is no Shell, SQL, HTTP, external send, AI/LLM, or Agent Runtime execution.
 
 `GET /api/v1/agent-adapters` lists only explicitly registered code-owned manifests. `POST /api/v1/agent-adapters` accepts the stable `builtin-local-text-v1` preset and optional `Idempotency-Key`; it never accepts a path or command. Detail and diagnostic responses omit the internal executable reference. Check, enable, and disable require `If-Match`. The current check validates the immutable built-in manifest and records `blocked / PLATFORM_ISOLATION_UNVERIFIED / execution_ready=false`; enable therefore fails closed with 409. No request starts a process or creates an agent Actor, Assignment, or Run.
+
+### Global agent run and controlled file read contract
+
+`GET /api/v1/agent-runs?page=&page_size=&status=` is a read-only, paginated view over the `agent_runs` ledger for the workspace overview's sub-agent panel. It joins the owning task title, orders by `created_at DESC, id DESC`, accepts only the six stable run statuses as a filter, and never returns executor input snapshots. Single-run detail, cancel and retry keep their existing per-run routes.
+
+`GET /api/v1/files?page=&page_size=&scope=` is a read-only union index of browsable controlled files across `artifact`, `client_attachment`, `project_attachment` and `knowledge_document` scopes, computed in one read-only transaction. Each row carries id, scope, name, mime, size, sha256, an owner label, a routed content reference and an update time; bodies and controlled relative paths are never returned and remain behind the existing authenticated content endpoints. Unknown scopes fail closed with `INVALID_FILE_SCOPE`. The workspace avatar is intentionally excluded because it is a single settings-controlled image, not a browsable collection.
 
 ### Client facts contract
 

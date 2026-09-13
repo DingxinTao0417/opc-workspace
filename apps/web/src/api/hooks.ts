@@ -132,6 +132,8 @@ import {
   getReminder,
   getReminders,
   getSearchResults,
+  getAgentRuns,
+  getControlledFiles,
   getTags,
   getTask,
   getTaskAgentRuns,
@@ -217,6 +219,8 @@ import {
 } from "./client";
 import type {
   ActorListParams,
+  AgentRunListParams,
+  ControlledFileListParams,
   AiBusinessContextType,
   AiBusinessContextSelection,
   AiEvaluationSuiteKey,
@@ -2719,6 +2723,41 @@ export function useTaskAgentRunsQuery(taskId: string | null, enabled = true) {
       )
         ? 2_000
         : false,
+  });
+}
+
+export const agentRunListQueryKey = (input: AgentRunListParams = {}) =>
+  ["agent-runs", "list", input] as const;
+
+export function useAgentRunsQuery(input: AgentRunListParams = {}) {
+  return useQuery({
+    queryKey: [...agentRunListQueryKey(input)],
+    queryFn: ({ signal }) => getAgentRuns(input, signal),
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (run) => run.status === "queued" || run.status === "running",
+      )
+        ? 5_000
+        : false,
+  });
+}
+
+export const controlledFileListQueryKey = (
+  input: ControlledFileListParams = {},
+) => ["files", "list", input] as const;
+
+export function useControlledFilesQuery(input: ControlledFileListParams = {}) {
+  return useQuery({
+    queryKey: [...controlledFileListQueryKey(input)],
+    queryFn: ({ signal }) => getControlledFiles(input, signal),
+    placeholderData: keepPreviousData,
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
   });
 }
 

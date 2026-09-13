@@ -18,11 +18,15 @@ export interface AgentRunDrawerState {
   runId: string | null;
 }
 
+export type RightPanelTab = "summary" | "agents" | "files" | "browser";
+
 interface UiState {
   commandPaletteOpen: boolean;
   newTaskOpen: boolean;
   newTaskProjectId: string | null;
   sidebarCollapsed: boolean;
+  rightOverviewCollapsed: boolean;
+  rightPanelTab: RightPanelTab;
   settingsOpen: boolean;
   settingsModule: SettingsModule;
   taskDetailId: string | null;
@@ -31,6 +35,8 @@ interface UiState {
   setNewTaskOpen: (open: boolean) => void;
   openNewTaskForProject: (projectId: string) => void;
   toggleSidebarCollapsed: () => void;
+  toggleRightOverviewCollapsed: () => void;
+  setRightPanelTab: (tab: RightPanelTab) => void;
   setSettingsOpen: (open: boolean, module?: SettingsModule) => void;
   setTaskDetailId: (id: string | null) => void;
   openAgentRunDrawer: (taskId: string, runId?: string | null) => void;
@@ -42,6 +48,8 @@ export const useUiStore = create<UiState>((set) => ({
   newTaskOpen: false,
   newTaskProjectId: null,
   sidebarCollapsed: false,
+  rightOverviewCollapsed: false,
+  rightPanelTab: "summary",
   settingsOpen: false,
   settingsModule: "general",
   taskDetailId: null,
@@ -56,6 +64,11 @@ export const useUiStore = create<UiState>((set) => ({
     set({ newTaskOpen: true, newTaskProjectId }),
   toggleSidebarCollapsed: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  toggleRightOverviewCollapsed: () =>
+    set((state) => ({
+      rightOverviewCollapsed: !state.rightOverviewCollapsed,
+    })),
+  setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
   setSettingsOpen: (settingsOpen, settingsModule = "general") =>
     set({ settingsOpen, settingsModule }),
   setTaskDetailId: (taskDetailId) => set({ taskDetailId }),

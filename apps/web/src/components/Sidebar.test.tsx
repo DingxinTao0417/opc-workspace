@@ -1,18 +1,16 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 
+vi.mock("./FocusMiniCard", () => ({
+  FocusMiniCard: () => <div data-testid="focus-mini-card" />,
+}));
+
 const hooks = vi.hoisted(() => ({
   inbox: {
     data: {
-      serverNow: "2026-08-28T10:00:00Z",
+      serverNow: "2026-09-13T10:00:00Z",
       pending: 12,
       unread: 7,
       tracking: 4,
@@ -22,21 +20,9 @@ const hooks = vi.hoisted(() => ({
     isError: false,
     isPending: false,
   },
-  weekInput: vi.fn(),
-  week: {
-    data: undefined as
-      | {
-          plannedFrom: string;
-          plannedTo: string;
-          taskCount: number;
-          completedCount: number;
-          completedPercent: number;
-        }
-      | undefined,
-    isError: false,
-    isPending: false,
-    refetch: vi.fn(),
-  },
+  income: vi.fn(),
+  recent: vi.fn(),
+  roadmap: vi.fn(),
 }));
 
 const ui = vi.hoisted(() => ({
@@ -46,23 +32,24 @@ const ui = vi.hoisted(() => ({
 
 vi.mock("../api/hooks", () => ({
   useInboxStatsQuery: () => hooks.inbox,
-  useSidebarWeekTasksQuery: (input: unknown) => {
-    hooks.weekInput(input);
-    return hooks.week;
-  },
+  useIncomeStatsQuery: hooks.income,
+  useRecentClientActivitiesQuery: hooks.recent,
+  useRoadmapMilestonesQuery: hooks.roadmap,
 }));
 
 vi.mock("../store/settings", () => ({
-  useSettingsStore: (selector: (state: unknown) => unknown) =>
-    selector({ displayName: "OPC", avatarDataUrl: "", preview: null }),
+  useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({ avatarDataUrl: null, displayName: "TAO", preview: null }),
 }));
 
 vi.mock("../store/ui", () => ({
-  useUiStore: (selector: (state: unknown) => unknown) =>
+  useUiStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       setCommandPaletteOpen: vi.fn(),
       setSettingsOpen: vi.fn(),
-      sidebarCollapsed: ui.sidebarCollapsed,
+      get sidebarCollapsed() {
+        return ui.sidebarCollapsed;
+      },
       toggleSidebarCollapsed: ui.toggleSidebarCollapsed,
     }),
 }));
@@ -75,28 +62,50 @@ function renderSidebar() {
   );
 }
 
-describe("Sidebar", () => {
-  beforeEach(() => {
-    hooks.week.data = {
-      plannedFrom: "2026-08-24",
-      plannedTo: "2026-08-30",
-      taskCount: 0,
-      completedCount: 0,
-      completedPercent: 0,
-    };
-    hooks.week.isError = false;
-    hooks.week.isPending = false;
-    hooks.week.refetch.mockReset();
-    hooks.weekInput.mockReset();
-    ui.sidebarCollapsed = false;
-    ui.toggleSidebarCollapsed.mockReset();
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 8, 13, 10, 0, 0));
 
-  afterEach(() => {
-    cleanup();
-    vi.useRealTimers();
-  });
+  ui.sidebarCollapsed = false;
+  ui.toggleSidebarCollapsed.mockReset();
 
+  hooks.income.mockReturnValue({
+    data: { confirmedIncomeCount: 2, confirmedIncomeMinor: 246912 },
+    isError: false,
+    isPending: false,
+  });
+  hooks.recent.mockReturnValue({
+    data: {
+      items: [
+        { id: "a1", occurredAt: "2026-09-12T00:00:00Z" },
+        { id: "a2", occurredAt: "2026-09-10T00:00:00Z" },
+        { id: "a3", occurredAt: "2026-08-01T00:00:00Z" },
+      ],
+    },
+    isError: false,
+    isPending: false,
+  });
+  hooks.roadmap.mockImplementation((input: { status: string }) => ({
+    data: {
+      items:
+        input.status === "planned"
+          ? [
+              { id: "m1", targetDate: "2026-09-15" },
+              { id: "m2", targetDate: "2026-12-01" },
+            ]
+          : [{ id: "m3", targetDate: "2026-09-18" }],
+    },
+    isError: false,
+    isPending: false,
+  }));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("Sidebar navigation", () => {
   it("shows the current actionable Inbox count", () => {
     renderSidebar();
 
@@ -130,7 +139,7 @@ describe("Sidebar", () => {
   it("shows delivered Roadmap and Content Calendar navigation without future badges", () => {
     renderSidebar();
 
-    const roadmapLink = screen.getByRole("link", { name: "路线图" });
+    const roadmapLink = screen.getByRole("link", { name: /路线图/ });
     const contentLink = screen.getByRole("link", { name: "内容日历" });
     expect(screen.getByText("规划与内容")).toBeVisible();
     expect(roadmapLink).toHaveAttribute("href", "/roadmap");
@@ -142,86 +151,47 @@ describe("Sidebar", () => {
     expect(screen.queryByText("后续")).toBeNull();
   });
 
-  it("requests the browser-local Monday through Sunday across a month boundary", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 2, 1, 12, 0, 0));
-
+  it("replaces the weekly execution card with the compact focus widget", () => {
     renderSidebar();
 
-    expect(hooks.weekInput).toHaveBeenCalledWith({
-      plannedFrom: "2026-02-23",
-      plannedTo: "2026-03-01",
-    });
+    expect(screen.getByTestId("focus-mini-card")).toBeInTheDocument();
+    expect(screen.queryByText("本周执行")).not.toBeInTheDocument();
   });
+});
 
-  it("moves the weekly query range when local Monday begins", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 2, 1, 23, 59, 59));
-
+describe("Sidebar notification badges", () => {
+  it("shows due-soon roadmap milestones as a nav badge", () => {
     renderSidebar();
 
-    expect(hooks.weekInput).toHaveBeenLastCalledWith({
-      plannedFrom: "2026-02-23",
-      plannedTo: "2026-03-01",
-    });
-
-    act(() => vi.advanceTimersByTime(1_002));
-
-    expect(hooks.weekInput).toHaveBeenLastCalledWith({
-      plannedFrom: "2026-03-02",
-      plannedTo: "2026-03-08",
-    });
+    expect(screen.getByTitle("2 个临期或逾期节点")).toHaveTextContent("2");
   });
 
-  it("renders weekly progress from the dedicated read model", () => {
-    hooks.week.data = {
-      plannedFrom: "2026-08-24",
-      plannedTo: "2026-08-30",
-      taskCount: 4,
-      completedCount: 3,
-      completedPercent: 75,
-    };
-
+  it("shows recent client activities as a nav badge", () => {
     renderSidebar();
 
-    expect(screen.getByLabelText("本周完成度 75%")).toBeVisible();
-    expect(screen.getByText("3 / 4 项")).toBeVisible();
+    expect(screen.getByTitle("2 条近 7 天客户动态")).toHaveTextContent("2");
   });
 
-  it("distinguishes loading, retryable errors, and an empty week", () => {
-    hooks.week.data = undefined;
-    hooks.week.isPending = true;
-    const view = renderSidebar();
+  it("shows the current month confirmed income as a nav badge", () => {
+    renderSidebar();
 
-    expect(screen.getByRole("status")).toHaveTextContent("正在加载本周任务");
-    expect(screen.queryByText("暂无任务")).toBeNull();
-
-    hooks.week.isPending = false;
-    hooks.week.isError = true;
-    view.rerender(
-      <MemoryRouter>
-        <Sidebar />
-      </MemoryRouter>,
+    expect(screen.getByTitle("本月已确认收入 ¥2,469.12")).toHaveTextContent(
+      "¥2.5k",
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("无法读取本周任务");
-    expect(screen.queryByText("暂无任务")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    expect(hooks.week.refetch).toHaveBeenCalledOnce();
+  });
 
-    hooks.week.isError = false;
-    hooks.week.data = {
-      plannedFrom: "2026-08-24",
-      plannedTo: "2026-08-30",
-      taskCount: 0,
-      completedCount: 0,
-      completedPercent: 0,
-    };
-    view.rerender(
-      <MemoryRouter>
-        <Sidebar />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("status")).toHaveTextContent("本周暂无已排期任务");
-    expect(screen.queryByText("暂无任务")).toBeNull();
+  it("hides badges that have nothing to report", () => {
+    hooks.roadmap.mockReturnValue({ data: { items: [] }, isError: false });
+    hooks.recent.mockReturnValue({ data: { items: [] }, isError: false });
+    hooks.income.mockReturnValue({
+      data: { confirmedIncomeCount: 0, confirmedIncomeMinor: 0 },
+      isError: false,
+    });
+
+    renderSidebar();
+
+    expect(screen.queryByTitle(/临期或逾期节点/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/客户动态/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/本月已确认收入/)).not.toBeInTheDocument();
   });
 });

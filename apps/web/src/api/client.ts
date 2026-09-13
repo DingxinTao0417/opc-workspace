@@ -1,12 +1,19 @@
 import type {
   Actor,
   AgentRun,
+  AgentRunListParams,
+  AgentRunListResult,
   AgentRunStatus,
+  AgentRunSummary,
   AppSettingItem,
   AppSettingKey,
   AppSettingsResult,
   AppSettingUpdate,
   AppearanceSettingValue,
+  ControlledFile,
+  ControlledFileListParams,
+  ControlledFileListResult,
+  ControlledFileScope,
   ActorListParams,
   ActorListResult,
   ActorSummary,
@@ -13396,6 +13403,108 @@ export async function getTaskAgentRuns(taskId: string): Promise<AgentRun[]> {
     return invalidResponse("Agent 执行列表响应格式无效");
   }
   return payload.data.map(agentRunFromRecord);
+}
+
+function agentRunSummaryFromRecord(value: unknown): AgentRunSummary {
+  const run = agentRunFromRecord(value);
+  if (!isRecord(value)) return invalidResponse("Agent 执行列表响应格式无效");
+  return {
+    ...run,
+    taskTitle: stringField(value, "task_title", "taskTitle") ?? "",
+  };
+}
+
+export async function getAgentRuns(
+  input: AgentRunListParams = {},
+  signal?: AbortSignal,
+): Promise<AgentRunListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 20),
+  });
+  if (input.status) params.set("status", input.status);
+  const payload = await apiRequest<unknown>(`/api/v1/agent-runs?${params}`, {
+    signal,
+  });
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("Agent 执行列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(agentRunSummaryFromRecord),
+    meta: {
+      page: numeric(payload.meta.page, input.page ?? 1),
+      pageSize: numeric(
+        payload.meta.page_size ?? payload.meta.pageSize,
+        input.pageSize ?? 20,
+      ),
+      total: numeric(payload.meta.total),
+    },
+  };
+}
+
+const controlledFileScopes: readonly string[] = [
+  "artifact",
+  "client_attachment",
+  "project_attachment",
+  "knowledge_document",
+];
+
+function controlledFileFromRecord(value: unknown): ControlledFile {
+  if (!isRecord(value)) return invalidResponse("受控文件列表响应格式无效");
+  const scope = stringField(value, "scope") ?? "";
+  if (!controlledFileScopes.includes(scope)) {
+    return invalidResponse("受控文件范围无效");
+  }
+  return {
+    id: stringField(value, "id") ?? "",
+    scope: scope as ControlledFileScope,
+    name: stringField(value, "name") ?? "",
+    mimeType: nullableString(fieldValue(value, "mime_type", "mimeType")),
+    sizeBytes: nullableNonNegativeInteger(
+      fieldValue(value, "size_bytes", "sizeBytes"),
+      "受控文件字节数",
+    ),
+    sha256: nullableString(fieldValue(value, "sha256")),
+    ownerLabel: stringField(value, "owner_label", "ownerLabel") ?? "",
+    contentRoute: stringField(value, "content_route", "contentRoute") ?? "",
+    updatedAt: stringField(value, "updated_at", "updatedAt") ?? "",
+  };
+}
+
+export async function getControlledFiles(
+  input: ControlledFileListParams = {},
+  signal?: AbortSignal,
+): Promise<ControlledFileListResult> {
+  const params = new URLSearchParams({
+    page: String(input.page ?? 1),
+    page_size: String(input.pageSize ?? 50),
+  });
+  if (input.scope) params.set("scope", input.scope);
+  const payload = await apiRequest<unknown>(`/api/v1/files?${params}`, {
+    signal,
+  });
+  if (
+    !isRecord(payload) ||
+    !Array.isArray(payload.data) ||
+    !isRecord(payload.meta)
+  ) {
+    return invalidResponse("受控文件列表响应格式无效");
+  }
+  return {
+    items: payload.data.map(controlledFileFromRecord),
+    meta: {
+      page: numeric(payload.meta.page, input.page ?? 1),
+      pageSize: numeric(
+        payload.meta.page_size ?? payload.meta.pageSize,
+        input.pageSize ?? 50,
+      ),
+      total: numeric(payload.meta.total),
+    },
+  };
 }
 
 export async function createAgentRun(

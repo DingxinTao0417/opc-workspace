@@ -26,8 +26,8 @@
 - Sidecar 默认每 15 秒刷新 active Session 的 `last_heartbeat_at`，且心跳不递增业务 `version`。Sidecar 启动时把旧进程遗留的 active Session 原子转为 `recovery_pending`，paused 保持暂停。
 - stop 会在同一事务关闭 interval、完成 Session、累计 Task Focus 精确秒数、把新增整分钟加到 `tasks.actual_minutes`、每次结算递增 Task version、写 Workflow Event 和幂等快照；只有 `actual_minutes` 实际增加时，既有 trigger 才递增关联 Project 聚合版本。任何一步失败全部回滚。
 - 活动 Session 关联的 Task 不允许硬删除，返回 `TASK_HAS_OPEN_FOCUS_SESSION`；终态 Session 在 Task 删除后按外键 `SET NULL` 保留历史。
-- React 使用共享 TanStack Query 快照驱动 FocusPage、RightOverview、全局 ticker 和不可关闭的恢复对话框。刷新和普通路由切换不再依赖内存递减保存事实。
-- FocusPage 支持选择任一未取消 Task；不绑定任务需要再次确认。RightOverview 展示真实 Session 任务，不再猜测第一条进行中任务。
+- React 使用共享 TanStack Query 快照驱动 FocusPage、左侧 FocusMiniCard、全局 ticker 和不可关闭的恢复对话框。刷新和普通路由切换不再依赖内存递减保存事实。
+- FocusPage 支持选择任一未取消 Task；不绑定任务需要再次确认。左侧 FocusMiniCard 展示真实 Session 任务与剩余时间，不再猜测第一条进行中任务。
 - 工作块自动到时由前端使用稳定幂等键触发 stop；服务端结算始终封顶 `planned_seconds`。休息、轮次、自动开始和提示音由本地持久化的 presentation coordinator 保留，每个工作块单独创建 Session，休息不计工时。
 - 设置入口可直接打开“专注”模块；Modal 草稿/预览与 committed 设置分离。预览可改变未开始界面的展示，但创建 Session、自动下一轮和提示音只读取 committed 设置；修改、保存或取消均不改写活动 Session。
 - `/stats/today` 已按 IANA 时区的当地日边界对 completed Session 的 interval 做 overlap 聚合，支持跨午夜和 DST；返回 distinct Session 数、精确秒数和向下取整的展示分钟。
@@ -227,7 +227,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 ## 与其他模块协作
 
 - [任务](tasks.md)：选择未取消 Task；stop 递增 `actual_minutes` 与 Task version。活动 Session 阻止 Task 硬删除，Focus 不改变 Task 状态。
-- [今日](today.md)：RightOverview 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
+- [今日](today.md)：左侧 FocusMiniCard 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
 - [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Project 详情另以可选 `project_id` 按 Task 当前归属读取报告和终态历史，Session 不复制 Project 状态或历史归属。
 - [设置](settings.md)：committed 参数用于新 Session 与自动下一轮；draft/preview 不改写活动 Session。
 - [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，并可让“专注设置”直达 focus 模块；从命令结果直接绑定任务仍未交付。
@@ -249,7 +249,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 ### v0.1-C：前端接入与恢复（已完成）
 
 - 共享 Session Query、纯显示 ticker、任务选择、未绑定确认、恢复 Modal、错误重试和缓存失效已完成。
-- RightOverview 已接真实 Session；专注设置入口定向和草稿不破坏活动 Session 已修复。
+- 左侧 FocusMiniCard 已接真实 Session；专注设置入口定向和草稿不破坏活动 Session 已修复。
 - 本地番茄循环继续提供休息、轮次、自动开始和提示音。
 
 ### v0.1-D1：历史与七日报告（已完成）
@@ -292,7 +292,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - IANA 时区、跨午夜、DST 23/25 小时边界、completed-only 和 distinct Session 统计。
 - Project 过滤覆盖 canonical UUID 400、不存在 404、归档/空 Project、当前 Task 项目重分类、Task 删除/无项目排除、终态历史分页，以及 completed-only 报告的跨午夜/DST/零事实序列。
 - Project 详情覆盖 7 天/30 天/本月、总时长/完成数/Streak、终态历史、分页收敛、两路独立加载/空/错误/重试和归档只读；缓存测试覆盖必要失效与改期/排序等无关写入不失效。
-- 前端快照规范化、稳定幂等重试、缓存失效、刷新恢复、设置草稿隔离、恢复对话框、RightOverview 与番茄循环。
+- 前端快照规范化、稳定幂等重试、缓存失效、刷新恢复、设置草稿隔离、恢复对话框、左侧 FocusMiniCard 与番茄循环。
 
 ## 相关代码/PRD 链接
 
@@ -309,4 +309,4 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [Task 详情专注记录](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [Project 详情专注分析](../../apps/web/src/components/ProjectFocusSection.tsx)
 - [恢复对话框](../../apps/web/src/components/FocusRecoveryModal.tsx)
-- [右侧概览](../../apps/web/src/components/RightOverview.tsx)
+- [左侧专注小组件](../../apps/web/src/components/FocusMiniCard.tsx)

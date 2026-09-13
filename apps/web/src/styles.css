@@ -57,6 +57,9 @@
   --modal-backdrop: rgba(0, 0, 0, 0.68);
   --modal-border: rgba(255, 255, 255, 0.11);
   --modal-shadow: rgba(0, 0, 0, 0.58);
+  --workspace-canvas: #101116;
+  --workspace-frame-border: rgba(255, 255, 255, 0.09);
+  --workspace-frame-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -100,6 +103,9 @@
   --modal-backdrop: rgba(31, 32, 36, 0.34);
   --modal-border: rgba(31, 32, 36, 0.14);
   --modal-shadow: rgba(31, 32, 36, 0.2);
+  --workspace-canvas: #eceef1;
+  --workspace-frame-border: rgba(31, 32, 36, 0.1);
+  --workspace-frame-shadow: 0 10px 28px rgba(31, 32, 36, 0.07);
 }
 
 * {
@@ -169,8 +175,10 @@ button:disabled {
   grid-template-columns: 220px minmax(0, 1fr) 280px;
   width: 100%;
   height: 100dvh;
+  gap: 12px;
+  padding: 12px;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--workspace-canvas);
 }
 
 .app-shell-no-overview {
@@ -196,9 +204,10 @@ button:disabled {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 16px 14px;
-  border-right: 1px solid var(--border);
-  background: var(--bg-deep);
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: transparent;
 }
 
 .brand-block {
@@ -415,19 +424,58 @@ kbd {
   color: var(--text);
 }
 
-.weekly-card {
+.focus-mini-card {
   margin-top: auto;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--panel);
   color: var(--text-muted);
 }
 
-.weekly-title {
+.focus-mini-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.focus-mini-dot[data-state="active"] {
+  background: var(--green-light);
+}
+
+.focus-mini-dot[data-state="paused"] {
+  background: var(--text-secondary);
+}
+
+.focus-mini-dot[data-state="alert"] {
+  background: var(--danger-text);
+}
+
+.focus-mini-time {
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.focus-mini-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.focus-mini-action {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
 }
 
 .progress-track,
@@ -452,10 +500,6 @@ kbd {
   background: linear-gradient(90deg, var(--accent), var(--accent-light));
 }
 
-.weekly-copy {
-  font-size: 10px;
-}
-
 .sidebar-settings {
   flex: 0 0 34px;
   width: 100%;
@@ -471,13 +515,34 @@ kbd {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  border: 1px solid var(--workspace-frame-border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--workspace-frame-shadow);
+}
+
+.workspace-frame-chrome {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 8px 0;
+}
+
+.workspace-overview-toggle {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.workspace-overview-toggle:hover {
+  border-color: var(--border-hover);
 }
 
 .page-scroll {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  border-radius: inherit;
 }
 
 .page {
@@ -651,9 +716,10 @@ kbd {
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
-  padding: 16px;
-  border-left: 1px solid var(--border);
-  background: var(--bg-deep);
+  padding: 6px 2px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background: transparent;
 }
 
 .overview-card,
@@ -670,6 +736,232 @@ kbd {
 
 .overview-card {
   padding: 14px;
+}
+
+.ov-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-group + .ov-group {
+  margin-top: 14px;
+}
+
+.ov-group-title {
+  padding: 0 4px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ov-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+a.ov-row:hover,
+button.ov-row:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.ov-row-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.ov-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-value {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.right-floating-card {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  z-index: 40;
+  width: 250px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.ov-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--empty-bg);
+}
+
+.ov-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ov-tab-active {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.ov-tab-panel {
+  margin-top: 10px;
+}
+
+.ov-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ov-scope {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.ov-scope-active {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ov-empty {
+  padding: 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ov-detail {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--empty-bg);
+}
+
+.ov-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 11px;
+  padding: 0;
+}
+
+.ov-detail-title {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-detail-meta {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.ov-detail-error {
+  margin-top: 6px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.ov-detail-result {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ov-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ov-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-browser-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.ov-browser-frame {
+  width: 100%;
+  height: 320px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+@media (max-width: 1180px) {
+  .right-floating-card {
+    display: none;
+  }
 }
 
 .card-heading,
@@ -12624,6 +12916,8 @@ kbd {
 @media (max-width: 1180px) {
   .app-shell {
     grid-template-columns: 220px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
   }
 
   .app-shell.app-shell-sidebar-collapsed {
@@ -12631,6 +12925,10 @@ kbd {
   }
 
   .right-sidebar {
+    display: none;
+  }
+
+  .workspace-frame-chrome {
     display: none;
   }
 }
@@ -12734,11 +13032,13 @@ kbd {
 
   .app-shell {
     grid-template-columns: 64px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
   }
 
   .left-sidebar {
     align-items: center;
-    padding: 14px 8px;
+    padding: 8px;
   }
 
   .sidebar-copy {

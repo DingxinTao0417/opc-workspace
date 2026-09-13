@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -223,6 +224,78 @@ func (a *API) listTaskAgentRuns(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"data": results})
+}
+
+type agentRunSummaryResponse struct {
+	agentRunResponse
+	TaskTitle string `json:"task_title"`
+}
+
+var agentRunStatusSet = map[string]struct{}{
+	"queued": {}, "running": {}, "succeeded": {},
+	"failed": {}, "cancelled": {}, "interrupted": {},
+}
+
+// listAgentRuns exposes a read-only, paginated global view of the agent_runs
+// ledger so the workspace overview can surface sub-agents without iterating
+// every task. It joins the owning task title and never returns input snapshots.
+func (a *API) listAgentRuns(c *gin.Context) {
+	page, ok := queryInt(c, "page", 1, 1, 1000)
+	if !ok {
+		return
+	}
+	pageSize, ok := queryInt(c, "page_size", 20, 1, 100)
+	if !ok {
+		return
+	}
+	status := strings.TrimSpace(c.Query("status"))
+	if status != "" {
+		if _, allowed := agentRunStatusSet[status]; !allowed {
+			writeError(c, http.StatusBadRequest, "INVALID_AGENT_RUN_STATUS",
+				"status must be one of queued, running, succeeded, failed, cancelled, interrupted")
+			return
+		}
+	}
+	type row struct {
+		models.AgentRun
+		TaskTitle string `gorm:"column:task_title"`
+	}
+	build := func(tx *gorm.DB) *gorm.DB {
+		query := tx.Table("agent_runs AS run").
+			Joins("JOIN tasks AS task ON task.id = run.task_id")
+		if status != "" {
+			query = query.Where("run.status = ?", status)
+		}
+		return query
+	}
+	var rows []row
+	var total int64
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := build(tx).Count(&total).Error; err != nil {
+			return err
+		}
+		return build(tx).
+			Select("run.*, task.title AS task_title").
+			Order("run.created_at DESC").Order("run.id DESC").
+			Offset((page - 1) * pageSize).Limit(pageSize).
+			Scan(&rows).Error
+	}, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	items := make([]agentRunSummaryResponse, len(rows))
+	for index := range rows {
+		items[index] = agentRunSummaryResponse{
+			agentRunResponse: agentRunResponseFromModel(rows[index].AgentRun),
+			TaskTitle:        rows[index].TaskTitle,
+		}
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{
+		"data": items,
+		"meta": pageMeta{Page: page, PageSize: pageSize, Total: total},
+	})
 }
 
 func (a *API) getAgentRun(c *gin.Context) {

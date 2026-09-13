@@ -87,6 +87,27 @@ export async function setCloseToTrayEnabled(
   return true;
 }
 
+export async function openExternalBrowserWindow(
+  url: string,
+  invokeCommand?: InvokeCommand,
+): Promise<boolean> {
+  if (!invokeCommand && !isDesktopRuntime()) return false;
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  await invoke("open_external_browser", { url });
+  return true;
+}
+
+export async function closeExternalBrowserWindow(
+  invokeCommand?: InvokeCommand,
+): Promise<boolean> {
+  if (!invokeCommand && !isDesktopRuntime()) return false;
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  await invoke("close_external_browser");
+  return true;
+}
+
 function optionalVersion(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }

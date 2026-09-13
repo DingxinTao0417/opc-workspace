@@ -1,387 +1,211 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { RightOverview } from "./RightOverview";
+import { useUiStore } from "../store/ui";
 
 const mocks = vi.hoisted(() => ({
-  recent: vi.fn(),
-  refetch: vi.fn(),
-  income: vi.fn(),
-  incomeRefetch: vi.fn(),
-  roadmap: vi.fn(),
-  roadmapRefetch: vi.fn(),
+  knowledge: vi.fn(),
+  openExternal: vi.fn(),
+}));
+
+vi.mock("../api/client", () => ({
+  cancelAgentRun: vi.fn(),
+  getKnowledgeSources: mocks.knowledge,
+  retryAgentRun: vi.fn(),
+}));
+
+vi.mock("../api/desktop", () => ({
+  openExternalBrowserWindow: mocks.openExternal,
 }));
 
 vi.mock("../api/hooks", () => ({
-  useActiveFocusSessionQuery: () => ({
-    data: { session: null },
+  useAgentRunsQuery: () => ({
+    data: {
+      items: [
+        {
+          id: "run-1",
+          taskId: "task-1",
+          taskTitle: "落地页任务",
+          status: "succeeded",
+          attempt: 1,
+          model: "local-model",
+          resultText: "交付正文",
+          errorCode: null,
+          startedAt: "2026-09-13T01:00:00Z",
+          completedAt: "2026-09-13T01:05:00Z",
+          createdAt: "2026-09-13T01:00:00Z",
+        },
+      ],
+      meta: { page: 1, pageSize: 50, total: 1 },
+    },
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useAiProvidersQuery: () => ({ data: [{ id: "provider-1" }], isError: false }),
+  useBackupsQuery: () => ({
+    data: [{ id: "backup-1", createdAt: "2026-09-12T02:00:00Z" }],
+    isError: false,
+  }),
+  useControlledFilesQuery: () => ({
+    data: {
+      items: [
+        {
+          id: "artifact-1",
+          scope: "artifact",
+          name: "报告.md",
+          mimeType: "text/markdown",
+          sizeBytes: 10,
+          sha256: "ab",
+          ownerLabel: "落地页任务",
+          contentRoute: "/api/v1/artifacts/artifact-1",
+          updatedAt: "2026-09-12T02:00:00Z",
+        },
+      ],
+      meta: { page: 1, pageSize: 50, total: 1 },
+    },
+    isError: false,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useHealthQuery: () => ({
+    data: {
+      status: "ok",
+      app: { name: "opc-workspace", version: "0.1.1", commit: "abc" },
+      api: { version: "v1" },
+      schema: { version: 71 },
+    },
+    isError: false,
+  }),
+  useInboxStatsQuery: () => ({
+    data: { pending: 4, unread: 2 },
+    isError: false,
+  }),
+  useRemindersQuery: () => ({
+    data: { items: [{ id: "reminder-1", triggerAt: "2026-09-14T01:30:00Z" }] },
+    isError: false,
+  }),
+  useTaskArtifactQuery: () => ({
+    data: { contentText: "预览正文" },
     isError: false,
     isPending: false,
   }),
-  usePauseFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
-  useResumeFocusSession: () => ({ isPending: false, mutate: vi.fn() }),
-  useIncomeStatsQuery: mocks.income,
-  useRecentClientActivitiesQuery: mocks.recent,
-  useRoadmapMilestonesQuery: mocks.roadmap,
+  useTodayStatsQuery: () => ({
+    data: {
+      tasks: { total: 5, completed: 2, overdue: 1 },
+      focus: { sessions: 3, minutes: 45 },
+    },
+    isError: false,
+  }),
 }));
 
-vi.mock("../store/focus", () => ({
-  formatFocusTime: (seconds: number) => `${seconds}s`,
-  useBreakClock: () => ({ progress: 0, remainingSeconds: 0 }),
-  useFocusClock: () => ({ progress: 0, remainingSeconds: 1500 }),
-  useFocusCycleStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      breakDurationSeconds: 300,
-      breakEndsAtMs: null,
-      pauseBreak: vi.fn(),
-      phase: "idle",
-      resumeBreak: vi.fn(),
-      taskTitle: null,
-    }),
-}));
-
-vi.mock("../store/settings", () => ({
-  useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ focusMinutes: 25, preview: null }),
-}));
+function renderOverview() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  mocks.knowledge.mockResolvedValue({
+    items: [],
+    meta: { page: 1, pageSize: 1, total: 7 },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <RightOverview />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 afterEach(() => {
   cleanup();
-  vi.useRealTimers();
+  useUiStore.setState({ rightPanelTab: "summary" });
 });
 
-beforeEach(() => {
-  mocks.refetch.mockReset();
-  mocks.income.mockReset();
-  mocks.incomeRefetch.mockReset();
-  mocks.income.mockReturnValue({
-    data: {
-      averageIncomeMinor: 0,
-      confirmedExpenseCount: 0,
-      confirmedExpenseMinor: 0,
-      confirmedIncomeCount: 0,
-      confirmedIncomeMinor: 0,
-      currency: "CNY",
-      entryCount: 0,
-      netCashFlowMinor: 0,
-      pendingExpenseMinor: 0,
-      pendingIncomeMinor: 0,
-    },
-    isError: false,
-    isPending: false,
-    refetch: mocks.incomeRefetch,
+describe("RightOverview summary tab", () => {
+  it("exposes a stable landmark and the tab bar", () => {
+    renderOverview();
+
+    expect(screen.getByLabelText("今日概览")).toHaveAttribute(
+      "id",
+      "right-overview",
+    );
+    for (const label of ["概要", "子智能体", "文件", "浏览器"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("tab", { name: "概要" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
-  mocks.recent.mockReset();
-  mocks.recent.mockReturnValue({
-    data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
-    isError: false,
-    isPending: false,
-    refetch: mocks.refetch,
-  });
-  mocks.roadmap.mockReset();
-  mocks.roadmapRefetch.mockReset();
-  mocks.roadmap.mockReturnValue({
-    data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
-    isError: false,
-    isPending: false,
-    refetch: mocks.roadmapRefetch,
+
+  it("shows version, backup, task, focus and inbox facts as compact rows", async () => {
+    renderOverview();
+
+    expect(screen.getByText("v0.1.1 · API v1 · schema 71")).toBeInTheDocument();
+    expect(screen.getByText("2/5 · 逾期1")).toBeInTheDocument();
+    expect(screen.getByText("4 / 2")).toBeInTheDocument();
+    expect(await screen.findByText("7 个来源")).toBeInTheDocument();
   });
 });
 
-function milestone(
-  id: string,
-  title: string,
-  targetDate: string,
-  status: "planned" | "active",
-) {
-  return {
-    id,
-    title,
-    description: null,
-    year: Number(targetDate.slice(0, 4)),
-    quarter: 4,
-    targetDate,
-    status,
-    manualOrder: 1024,
-    archivedFromStatus: null,
-    version: 1,
-    createdAt: "2026-08-29T09:00:00Z",
-    updatedAt: "2026-08-29T09:00:00Z",
-    projects: [{ id: "project-1", name: "桌面交付", status: "active" }],
-    taskSummary: {
-      total: 4,
-      completed: 2,
-      inProgress: 1,
-      progressPercent: 50,
-    },
-  };
-}
+describe("RightOverview agents tab", () => {
+  it("lists runs and opens a run detail with its deliverable", () => {
+    renderOverview();
 
-describe("RightOverview monthly income", () => {
-  it("shows confirmed CNY income from the local ledger", () => {
-    mocks.income.mockReturnValue({
-      data: {
-        averageIncomeMinor: 123456,
-        confirmedExpenseCount: 0,
-        confirmedExpenseMinor: 0,
-        confirmedIncomeCount: 2,
-        confirmedIncomeMinor: 246912,
-        currency: "CNY",
-        entryCount: 3,
-        netCashFlowMinor: 246912,
-        pendingExpenseMinor: 0,
-        pendingIncomeMinor: 8000,
-      },
-      isError: false,
-      isPending: false,
-      refetch: mocks.incomeRefetch,
-    });
+    fireEvent.click(screen.getByRole("tab", { name: "子智能体" }));
+    fireEvent.click(screen.getByRole("button", { name: /落地页任务/ }));
 
-    render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
+    expect(screen.getByText("交付正文")).toBeInTheDocument();
+    expect(screen.getByText(/状态 succeeded/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "打开任务" }),
+    ).toBeInTheDocument();
 
-    expect(screen.getByText("¥2,469.12")).toBeInTheDocument();
-    expect(screen.getByText("2 笔已确认")).toBeInTheDocument();
-  });
-
-  it("keeps explicit loading and retry states", () => {
-    mocks.income.mockReturnValue({
-      data: undefined,
-      isError: true,
-      isPending: false,
-      refetch: mocks.incomeRefetch,
-    });
-    const { rerender } = render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "收入读取失败，重试" }));
-    expect(mocks.incomeRefetch).toHaveBeenCalledTimes(1);
-
-    mocks.income.mockReturnValue({
-      data: undefined,
-      isError: false,
-      isPending: true,
-      refetch: mocks.incomeRefetch,
-    });
-    rerender(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("正在读取本月收入…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /返回列表/ }));
+    expect(screen.queryByText("交付正文")).toBeNull();
   });
 });
 
-describe("RightOverview recent client activities", () => {
-  it("shows real local activity facts and links to the owning client", () => {
-    mocks.recent.mockReturnValue({
-      data: {
-        items: [
-          {
-            id: "activity-1",
-            clientId: "client-1",
-            clientName: "示例客户",
-            clientStatus: "active",
-            kind: "meeting",
-            title: "复盘会议",
-            body: "下一步",
-            occurredAt: "2026-08-29T09:00:00Z",
-            createdBy: {
-              id: "owner-1",
-              type: "owner",
-              displayName: "Owner",
-            },
-            sourceType: null,
-            sourceId: null,
-            version: 1,
-            deletedAt: null,
-            deletedByActorId: null,
-            deleteReason: null,
-            createdAt: "2026-08-29T09:00:00Z",
-            updatedAt: "2026-08-29T09:00:00Z",
-            clientVersion: 2,
-          },
-        ],
-        meta: { page: 1, pageSize: 3, total: 1 },
-      },
-      isError: false,
-      isPending: false,
-      refetch: mocks.refetch,
-    });
+describe("RightOverview files tab", () => {
+  it("lists scoped files and previews artifact text", () => {
+    renderOverview();
 
-    render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
+    fireEvent.click(screen.getByRole("tab", { name: "文件" }));
+    expect(screen.getByRole("button", { name: /报告.md/ })).toBeInTheDocument();
 
-    const link = screen.getByRole("link", {
-      name: "查看客户 示例客户：复盘会议",
-    });
-    expect(link).toHaveAttribute("href", "/clients/client-1");
-    expect(screen.getByText("示例客户")).toBeInTheDocument();
-    expect(screen.queryByText("暂无客户动态")).not.toBeInTheDocument();
-  });
-
-  it("keeps explicit empty and retry states", () => {
-    mocks.recent.mockReturnValue({
-      data: undefined,
-      isError: true,
-      isPending: false,
-      refetch: mocks.refetch,
-    });
-    const { rerender } = render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "读取失败，重试" }));
-    expect(mocks.refetch).toHaveBeenCalledTimes(1);
-
-    mocks.recent.mockReturnValue({
-      data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
-      isError: false,
-      isPending: false,
-      refetch: mocks.refetch,
-    });
-    rerender(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("暂无客户动态")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /报告.md/ }));
+    expect(screen.getByText("预览正文")).toBeInTheDocument();
+    expect(screen.getByText(/SHA-256 ab/)).toBeInTheDocument();
   });
 });
 
-describe("RightOverview upcoming roadmap milestones", () => {
-  it("merges planned and active facts by target date and shows ownership", () => {
-    mocks.roadmap.mockImplementation(
-      (input: { status: "planned" | "active" }) => ({
-        data: {
-          items:
-            input.status === "planned"
-              ? [milestone("later", "后续节点", "2099-12-20", "planned")]
-              : [milestone("near", "最近节点", "2099-12-10", "active")],
-          meta: { page: 1, pageSize: 3, total: 1 },
-        },
-        isError: false,
-        isPending: false,
-        refetch: mocks.roadmapRefetch,
-      }),
-    );
+describe("RightOverview browser tab", () => {
+  it("embeds loopback addresses in-panel", () => {
+    renderOverview();
 
-    render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
+    fireEvent.click(screen.getByRole("tab", { name: "浏览器" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开地址" }));
 
-    const links = screen.getAllByRole("link", { name: /查看路线图节点/ });
-    expect(links.map((link) => link.textContent)).toEqual([
-      expect.stringContaining("最近节点"),
-      expect.stringContaining("后续节点"),
-    ]);
-    expect(links[0]).toHaveAttribute("href", "/roadmap?milestone=near");
-    expect(screen.getAllByText("桌面交付 · 2/4 任务")).toHaveLength(2);
-    expect(mocks.roadmap).toHaveBeenCalledWith({
-      page: 1,
-      pageSize: 3,
-      sort: "target_date",
-      status: "planned",
-    });
+    expect(screen.getByTitle("内置浏览器预览")).toHaveAttribute(
+      "src",
+      "http://127.0.0.1:5173",
+    );
+    expect(mocks.openExternal).not.toHaveBeenCalled();
   });
 
-  it("keeps explicit loading, empty, and aggregate retry states", () => {
-    mocks.roadmap.mockReturnValue({
-      data: undefined,
-      isError: true,
-      isPending: false,
-      refetch: mocks.roadmapRefetch,
+  it("delegates external addresses to the native window", () => {
+    mocks.openExternal.mockResolvedValue(true);
+    renderOverview();
+
+    fireEvent.click(screen.getByRole("tab", { name: "浏览器" }));
+    fireEvent.change(screen.getByPlaceholderText("http://127.0.0.1:5173"), {
+      target: { value: "https://example.com/docs" },
     });
-    const { rerender } = render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "节点读取失败，重试" }));
-    expect(mocks.roadmapRefetch).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "打开地址" }));
 
-    mocks.roadmap.mockReturnValue({
-      data: { items: [], meta: { page: 1, pageSize: 3, total: 0 } },
-      isError: false,
-      isPending: false,
-      refetch: mocks.roadmapRefetch,
-    });
-    rerender(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("暂无未完成的路线图节点")).toBeInTheDocument();
-
-    mocks.roadmap.mockReturnValue({
-      data: undefined,
-      isError: false,
-      isPending: true,
-      refetch: mocks.roadmapRefetch,
-    });
-    rerender(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("正在读取路线图节点…")).toBeInTheDocument();
-  });
-
-  it("refreshes the month query and roadmap date status at local midnight", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 31, 23, 59, 59));
-    mocks.roadmap.mockImplementation(
-      (input: { status: "planned" | "active" }) => ({
-        data: {
-          items:
-            input.status === "planned"
-              ? [milestone("month-end", "月末节点", "2026-08-31", "planned")]
-              : [],
-          meta: { page: 1, pageSize: 3, total: 1 },
-        },
-        isError: false,
-        isPending: false,
-        refetch: mocks.roadmapRefetch,
-      }),
-    );
-
-    render(
-      <MemoryRouter>
-        <RightOverview />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.income).toHaveBeenLastCalledWith({
-      currency: "CNY",
-      dateFrom: "2026-08-01",
-      dateTo: "2026-08-31",
-    });
-    expect(screen.getByText("今天")).toBeInTheDocument();
-
-    act(() => vi.advanceTimersByTime(1_002));
-
-    expect(mocks.income).toHaveBeenLastCalledWith({
-      currency: "CNY",
-      dateFrom: "2026-09-01",
-      dateTo: "2026-09-30",
-    });
-    expect(screen.getByText("已逾期")).toHaveClass("is-overdue");
+    expect(mocks.openExternal).toHaveBeenCalledWith("https://example.com/docs");
+    expect(screen.queryByTitle("内置浏览器预览")).toBeNull();
   });
 });

@@ -206,6 +206,8 @@
 - desktop_shortcut_status：只返回两个固定原生快捷键的 `registered / unavailable` 状态。
 - desktop_capabilities：只返回托盘、原生通知、自启、原生文件对话框和离线更新的 `available / unavailable / not_implemented` 白名单枚举；当前只有托盘可在初始化成功后为 available。
 - set_close_to_tray_enabled：只接受 `enabled: bool`，更新当前进程内的关闭决策；持久事实仍由 SQLite `app_settings.general.close_to_tray` 拥有，启动与设置预览负责同步。
+- open_external_browser：只接受 http/https URL，复用单一 `external-browser` 原生子 WebviewWindow（重复调用对同 label 导航并聚焦）；供概览浏览器页签在桌面端稳定查看外部页面，不做面板内像素级贴合。
+- close_external_browser：关闭上述子窗口；不存在时为无操作。浏览器开发模式两个 command 均安全 no-op，前端回退新标签。
 
 规划 command 或事件职责：
 

@@ -1,5 +1,6 @@
 mod desktop_log;
 mod desktop_tray;
+mod external_browser;
 mod global_shortcuts;
 mod sidecar;
 
@@ -8,6 +9,7 @@ use desktop_tray::{
     DesktopTrayState, desktop_capabilities, hide_main_window_to_tray, install_desktop_tray,
     set_close_to_tray_enabled,
 };
+use external_browser::{close_external_browser, open_external_browser};
 use global_shortcuts::{
     DesktopShortcutRegistry, desktop_shortcut_status, handle_global_shortcut,
     register_global_shortcuts,
@@ -45,7 +47,9 @@ pub fn run() {
             open_log_directory,
             desktop_shortcut_status,
             desktop_capabilities,
-            set_close_to_tray_enabled
+            set_close_to_tray_enabled,
+            open_external_browser,
+            close_external_browser
         ])
         .setup(move |app| {
             let logger = app

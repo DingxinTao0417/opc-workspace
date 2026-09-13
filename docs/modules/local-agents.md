@@ -69,20 +69,21 @@
 
 本次只给 Actor 读模型增加可空 `agent_adapter_id`，不新增数据库迁移、不改变 API v1 或 schema 71。非 agent 返回 null；兼容旧响应缺失字段时前端规范化为 null，因缺少关联无法证实可执行，必须关闭启动而非猜测。
 
-| 方法与路径                              | 用途                                            |
-| --------------------------------------- | ----------------------------------------------- |
-| GET / POST /api/v1/agent-adapters       | 查询、幂等登记代码内置 Adapter                  |
-| GET /api/v1/agent-adapters/:id          | 详情、ETag 与实际健康/就绪状态                  |
-| POST /api/v1/agent-adapters/:id/check   | If-Match 诊断；不自动启用                       |
-| POST /api/v1/agent-adapters/:id/enable  | 版本化、健康和 Actor 一致性门控的显式启用       |
-| POST /api/v1/agent-adapters/:id/disable | 版本化显式停用，保留历史                        |
-| GET /api/v1/actors                      | 查询真实 Actor 及可空 agent_adapter_id          |
-| POST /api/v1/tasks/:id/assignments      | 复用 Task If-Match 创建分派；不是直接数据库补行 |
-| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或创建 Run；创建支持幂等重放            |
-| GET /api/v1/agent-runs/:id              | Run 状态、文本和稳定错误码                      |
-| POST /api/v1/agent-runs/:id/cancel      | 请求取消；不是任务取消命令                      |
-| POST /api/v1/agent-runs/:id/retry       | 基于终态新建 attempt；不覆盖历史                |
-| POST /api/v1/tasks/:id/review           | owner 接受或要求返工                            |
+| 方法与路径                              | 用途                                                            |
+| --------------------------------------- | --------------------------------------------------------------- |
+| GET / POST /api/v1/agent-adapters       | 查询、幂等登记代码内置 Adapter                                  |
+| GET /api/v1/agent-adapters/:id          | 详情、ETag 与实际健康/就绪状态                                  |
+| POST /api/v1/agent-adapters/:id/check   | If-Match 诊断；不自动启用                                       |
+| POST /api/v1/agent-adapters/:id/enable  | 版本化、健康和 Actor 一致性门控的显式启用                       |
+| POST /api/v1/agent-adapters/:id/disable | 版本化显式停用，保留历史                                        |
+| GET /api/v1/actors                      | 查询真实 Actor 及可空 agent_adapter_id                          |
+| POST /api/v1/tasks/:id/assignments      | 复用 Task If-Match 创建分派；不是直接数据库补行                 |
+| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或创建 Run；创建支持幂等重放                            |
+| GET /api/v1/agent-runs                  | 全局只读分页 Run 列表（含任务标题），供概览子智能体页签与悬浮卡 |
+| GET /api/v1/agent-runs/:id              | Run 状态、文本和稳定错误码                                      |
+| POST /api/v1/agent-runs/:id/cancel      | 请求取消；不是任务取消命令                                      |
+| POST /api/v1/agent-runs/:id/retry       | 基于终态新建 attempt；不覆盖历史                                |
+| POST /api/v1/tasks/:id/review           | owner 接受或要求返工                                            |
 
 Adapter 与 Assignment 的写入使用各自版本契约，不能宣称所有 Run 命令都已有统一 If-Match/幂等保证。Run schema 定义 queued/running/succeeded/failed/cancelled/interrupted；具体未收口限制见下节。
 

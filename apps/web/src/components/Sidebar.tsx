@@ -3,7 +3,6 @@ import {
   CalendarDays,
   CheckSquare2,
   CircleDollarSign,
-  Clock3,
   FolderKanban,
   Focus,
   Inbox,
@@ -19,7 +18,13 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import { useInboxStatsQuery, useSidebarWeekTasksQuery } from "../api/hooks";
+import {
+  useInboxStatsQuery,
+  useIncomeStatsQuery,
+  useRecentClientActivitiesQuery,
+  useRoadmapMilestonesQuery,
+} from "../api/hooks";
+import { FocusMiniCard } from "./FocusMiniCard";
 import {
   localDateFromKey,
   localDateKey,
@@ -79,34 +84,55 @@ const groups: { label: string; items: NavItem[] }[] = [
   },
 ];
 
-function currentLocalWeekRange(dateKey: string): {
-  plannedFrom: string;
-  plannedTo: string;
-} {
-  const now = localDateFromKey(dateKey);
-  const daysSinceMonday = now.getDay() === 0 ? 6 : now.getDay() - 1;
-  const monday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() - daysSinceMonday,
+function currentMonthBounds(dateKey: string) {
+  const date = localDateFromKey(dateKey);
+  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return { dateFrom: localDateKey(firstDay), dateTo: localDateKey(lastDay) };
+}
+
+function dueSoonDateKey(dateKey: string, days: number) {
+  const date = localDateFromKey(dateKey);
+  return localDateKey(
+    new Date(date.getFullYear(), date.getMonth(), date.getDate() + days),
   );
-  const sunday = new Date(
-    monday.getFullYear(),
-    monday.getMonth(),
-    monday.getDate() + 6,
-  );
-  return {
-    plannedFrom: localDateKey(monday),
-    plannedTo: localDateKey(sunday),
-  };
+}
+
+function compactCny(amountMinor: number) {
+  const yuan = amountMinor / 100;
+  if (yuan >= 10000) return `¥${(yuan / 10000).toFixed(1)}万`;
+  if (yuan >= 1000) return `¥${(yuan / 1000).toFixed(1)}k`;
+  return `¥${Math.round(yuan)}`;
+}
+
+function formatCny(amountMinor: number) {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: "CNY",
+    minimumFractionDigits: 2,
+  }).format(amountMinor / 100);
 }
 
 export function Sidebar() {
   const { dateKey } = useLocalCalendar();
-  const weeklyExecutionQuery = useSidebarWeekTasksQuery(
-    currentLocalWeekRange(dateKey),
-  );
   const inboxStatsQuery = useInboxStatsQuery();
+  const plannedMilestonesQuery = useRoadmapMilestonesQuery({
+    page: 1,
+    pageSize: 100,
+    sort: "target_date",
+    status: "planned",
+  });
+  const activeMilestonesQuery = useRoadmapMilestonesQuery({
+    page: 1,
+    pageSize: 100,
+    sort: "target_date",
+    status: "active",
+  });
+  const recentActivitiesQuery = useRecentClientActivitiesQuery(50);
+  const incomeStatsQuery = useIncomeStatsQuery({
+    currency: "CNY",
+    ...currentMonthBounds(dateKey),
+  });
   const displayName = useSettingsStore(
     (state) => state.preview?.profile.displayName ?? state.displayName,
   );
@@ -121,11 +147,50 @@ export function Sidebar() {
   const toggleSidebarCollapsed = useUiStore(
     (state) => state.toggleSidebarCollapsed,
   );
-  const inboxBadge = inboxStatsQuery.data?.pending
-    ? inboxStatsQuery.data.pending > 99
-      ? "99+"
-      : String(inboxStatsQuery.data.pending)
-    : undefined;
+  const dueSoonKey = dueSoonDateKey(dateKey, 7);
+  const roadmapDueCount = [
+    ...(plannedMilestonesQuery.data?.items ?? []),
+    ...(activeMilestonesQuery.data?.items ?? []),
+  ].filter((milestone) => milestone.targetDate <= dueSoonKey).length;
+  const weekAgoIso = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const clientRecentCount = (recentActivitiesQuery.data?.items ?? []).filter(
+    (activity) => activity.occurredAt >= weekAgoIso,
+  ).length;
+  const incomeConfirmedMinor = incomeStatsQuery.data?.confirmedIncomeMinor ?? 0;
+  const incomeConfirmedCount = incomeStatsQuery.data?.confirmedIncomeCount ?? 0;
+  const navBadges: Record<string, { text: string; title: string } | undefined> =
+    {
+      "/inbox": inboxStatsQuery.data?.pending
+        ? {
+            text:
+              inboxStatsQuery.data.pending > 99
+                ? "99+"
+                : String(inboxStatsQuery.data.pending),
+            title: `${inboxStatsQuery.data.pending} 项待处理`,
+          }
+        : undefined,
+      "/roadmap":
+        roadmapDueCount > 0
+          ? {
+              text: roadmapDueCount > 99 ? "99+" : String(roadmapDueCount),
+              title: `${roadmapDueCount} 个临期或逾期节点`,
+            }
+          : undefined,
+      "/clients":
+        clientRecentCount > 0
+          ? {
+              text: clientRecentCount > 99 ? "99+" : String(clientRecentCount),
+              title: `${clientRecentCount} 条近 7 天客户动态`,
+            }
+          : undefined,
+      "/income":
+        incomeConfirmedCount > 0
+          ? {
+              text: compactCny(incomeConfirmedMinor),
+              title: `本月已确认收入 ${formatCny(incomeConfirmedMinor)}`,
+            }
+          : undefined,
+    };
 
   return (
     <aside
@@ -180,79 +245,39 @@ export function Sidebar() {
         {groups.map((group) => (
           <div className="nav-group" key={group.label}>
             <div className="nav-label sidebar-copy">{group.label}</div>
-            {group.items.map(({ label, to, icon: Icon, badge }) => (
-              <NavLink
-                aria-label={sidebarCollapsed ? label : undefined}
-                className={({ isActive }) =>
-                  `nav-item${isActive ? " nav-item-active" : ""}`
-                }
-                key={to}
-                title={sidebarCollapsed ? label : undefined}
-                to={to}
-              >
-                <Icon className="nav-icon" size={17} />
-                <span className="sidebar-copy nav-text">{label}</span>
-                {(to === "/inbox" ? inboxBadge : badge) ? (
-                  <span
-                    aria-label={
-                      to === "/inbox"
-                        ? `${inboxStatsQuery.data?.pending ?? 0} 项待处理`
-                        : undefined
-                    }
-                    className="sidebar-copy nav-badge"
-                  >
-                    {to === "/inbox" ? inboxBadge : badge}
-                  </span>
-                ) : null}
-              </NavLink>
-            ))}
+            {group.items.map(({ label, to, icon: Icon, badge }) => {
+              const resolvedBadge =
+                navBadges[to] ??
+                (badge ? { text: badge, title: badge } : undefined);
+              return (
+                <NavLink
+                  aria-label={sidebarCollapsed ? label : undefined}
+                  className={({ isActive }) =>
+                    `nav-item${isActive ? " nav-item-active" : ""}`
+                  }
+                  key={to}
+                  title={sidebarCollapsed ? label : undefined}
+                  to={to}
+                >
+                  <Icon className="nav-icon" size={17} />
+                  <span className="sidebar-copy nav-text">{label}</span>
+                  {resolvedBadge ? (
+                    <span
+                      aria-label={resolvedBadge.title}
+                      className="sidebar-copy nav-badge"
+                      title={resolvedBadge.title}
+                    >
+                      {resolvedBadge.text}
+                    </span>
+                  ) : null}
+                </NavLink>
+              );
+            })}
           </div>
         ))}
       </nav>
 
-      <div className="weekly-card sidebar-copy">
-        <div className="flex items-center justify-between">
-          <span className="weekly-title">本周执行</span>
-          <Clock3 size={14} />
-        </div>
-        {weeklyExecutionQuery.isPending ? (
-          <div className="weekly-copy" role="status">
-            正在加载本周任务…
-          </div>
-        ) : weeklyExecutionQuery.isError ? (
-          <div className="weekly-copy" role="alert">
-            无法读取本周任务 ·{" "}
-            <button
-              className="form-inline-action"
-              onClick={() => void weeklyExecutionQuery.refetch()}
-              type="button"
-            >
-              重试
-            </button>
-          </div>
-        ) : weeklyExecutionQuery.data?.taskCount ? (
-          <>
-            <div
-              className="progress-track"
-              aria-label={`本周完成度 ${weeklyExecutionQuery.data.completedPercent}%`}
-            >
-              <span
-                style={{
-                  width: `${weeklyExecutionQuery.data.completedPercent}%`,
-                }}
-              />
-            </div>
-            <div className="weekly-copy">
-              {weeklyExecutionQuery.data.completedCount} /{" "}
-              {weeklyExecutionQuery.data.taskCount} 项
-            </div>
-          </>
-        ) : (
-          <div className="weekly-copy" role="status">
-            本周暂无已排期任务
-          </div>
-        )}
-      </div>
+      <FocusMiniCard />
 
       <button
         aria-label="打开设置"

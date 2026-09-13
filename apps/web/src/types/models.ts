@@ -3095,3 +3095,47 @@ export interface AgentRun {
   completedAt: string | null;
   createdAt: string;
 }
+
+export interface AgentRunSummary extends AgentRun {
+  taskTitle: string;
+}
+
+export interface AgentRunListParams {
+  page?: number;
+  pageSize?: number;
+  status?: AgentRunStatus;
+}
+
+export interface AgentRunListResult {
+  items: AgentRunSummary[];
+  meta: PageMeta;
+}
+
+export type ControlledFileScope =
+  | "artifact"
+  | "client_attachment"
+  | "project_attachment"
+  | "knowledge_document";
+
+export interface ControlledFile {
+  id: string;
+  scope: ControlledFileScope;
+  name: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  sha256: string | null;
+  ownerLabel: string;
+  contentRoute: string;
+  updatedAt: string;
+}
+
+export interface ControlledFileListParams {
+  page?: number;
+  pageSize?: number;
+  scope?: ControlledFileScope;
+}
+
+export interface ControlledFileListResult {
+  items: ControlledFile[];
+  meta: PageMeta;
+}
