@@ -913,6 +913,11 @@ export function normalizeActor(value: unknown): Actor {
   const updatedAt = stringField(value, "updated_at", "updatedAt");
   const isBuiltin = fieldValue(value, "is_builtin", "isBuiltin");
   const metadata = value.metadata;
+  const agentAdapterId = fieldValue(
+    value,
+    "agent_adapter_id",
+    "agentAdapterId",
+  );
   if (
     !id ||
     !displayName ||
@@ -926,6 +931,12 @@ export function normalizeActor(value: unknown): Actor {
   if (typeof value.notes !== "string") {
     return invalidResponse("责任主体备注响应无效");
   }
+  if (
+    agentAdapterId != null &&
+    (typeof agentAdapterId !== "string" || !agentAdapterId.trim())
+  ) {
+    return invalidResponse("责任主体适配器关联响应无效");
+  }
   return {
     id,
     type: asActorType(value.type),
@@ -934,6 +945,7 @@ export function normalizeActor(value: unknown): Actor {
     isBuiltin,
     notes: value.notes,
     metadata,
+    agentAdapterId: agentAdapterId ?? null,
     version: positiveInteger(value.version, "责任主体版本"),
     createdAt,
     updatedAt,
@@ -13328,9 +13340,6 @@ export async function attachTaskToAiMessage(
     created_at: stringField(row, "created_at") ?? "",
   };
 }
-
-const BUILTIN_AGENT_ACTOR_ID = "018f0000-0000-5000-8000-000000003411";
-export { BUILTIN_AGENT_ACTOR_ID };
 
 function agentRunFromRecord(value: unknown): AgentRun {
   if (!isRecord(value)) return invalidResponse("Agent 执行记录响应格式无效");

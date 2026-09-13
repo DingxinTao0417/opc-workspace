@@ -62,6 +62,31 @@ afterEach(() => {
 });
 
 describe("Agent Adapter API contract", () => {
+  it("accepts the verified Windows builtin lifecycle response", () => {
+    expect(
+      normalizeAgentAdapter(
+        adapterPayload({
+          health_status: "healthy",
+          isolation_status: "verified",
+          execution_ready: true,
+          last_health_at: "2026-09-12T12:00:00Z",
+          readiness: {
+            can_enable: true,
+            required_gates: [
+              "process_isolation",
+              "network_block",
+              "process_tree_cleanup",
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      healthStatus: "healthy",
+      executionReady: true,
+      isolationStatus: "verified",
+    });
+  });
+
   it("normalizes the list and sends controlled registration/check commands", async () => {
     const payload = adapterPayload();
     const fetchMock = vi.fn().mockResolvedValue(response({ data: [payload] }));

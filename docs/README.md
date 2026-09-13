@@ -24,14 +24,14 @@
 | 客户管理       | 部分完成（基础资料、共享分页搜索选择器、Project 关联、人工活动/附件/person、回访 API/到期 Inbox 投影及详情管理已交付）           | v0.1；回访/财务 v0.4        | [clients.md](modules/clients.md)     |
 | 收件箱工作编排 | 部分完成（人工闭环含来源 Project 继承/清除、完成条件、person 本地责任、共享 Task 详情、缓存失效与 automatic resolved/100% 金链） | 人工闭环 v0.1；Agent v0.2   | [inbox.md](modules/inbox.md)         |
 | 本地提醒       | 一次性及 daily/weekly/weekdays/monthly Reminder、启动补偿与到期 Inbox 投影已完成                                                 | v0.1；复杂规则/原生通知后续 | [reminders.md](modules/reminders.md) |
-| Actor 与分派   | 部分完成（Actor、Assignment、生命周期与 D2 产出责任已交付；Agent 未实现）                                                        | v0.1                        | [actors.md](modules/actors.md)       |
+| Actor 与分派   | 人工闭环已交付；v0.2 增加受 Adapter 门控的真实 agent 关联与任务启动前初始化检查                                                  | v0.1 / v0.2                 | [actors.md](modules/actors.md)       |
 | 专注与工时     | Core A+B+C+D1+D2a、日期范围回顾与项目详情 Focus 读取已完成；原生反馈延后                                                         | v0.1                        | [focus.md](modules/focus.md)         |
 
 ## 平台与共享能力
 
 | 模块                       | 当前状态                                                                                                                                                                               | 目标版本            | 文档                                               |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| 本地 Agent Runtime         | 安全 ADR、受限 Adapter 登记与诊断已交付；Runner、Agent Run 与执行尚未实现                                                                                                              | v0.2                | [local-agents.md](modules/local-agents.md)         |
+| 本地 Agent Runtime         | Windows 内置 Runner、Run 界面、条件式文本提交与初始化/显式启停已交付；其他平台、external、文件流仍待                                                                                   | v0.2                | [local-agents.md](modules/local-agents.md)         |
 | 设置                       | 部分完成                                                                                                                                                                               | v0.1 / v0.2         | [settings.md](modules/settings.md)                 |
 | 命令面板与搜索             | 核心本地搜索、详情直达、本地最近使用、脱敏运行诊断/诊断包和全局渲染错误恢复完成；OS 快捷键待后续                                                                                       | v0.1                | [command-search.md](modules/command-search.md)     |
 | 数据、受控文件、备份与恢复 | 迁移、Artifact store、备份/恢复完整闭环、每日计划/启动补偿/自动包安全保留、业务 JSON/含文件 ZIP 空目标及同 schema 零主键冲突追加已交付；启动前备份选择、外部目录、冲突合并及升级待实现 | v0.1；高级配置 v0.3 | [data-management.md](modules/data-management.md)   |

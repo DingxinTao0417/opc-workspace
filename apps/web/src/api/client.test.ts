@@ -721,6 +721,20 @@ function submissionPayload(overrides: Record<string, unknown> = {}) {
 }
 
 describe("actor requests", () => {
+  it("preserves the read-only agent adapter link and accepts legacy missing links", () => {
+    expect(
+      normalizeActor({
+        ...actorPayload,
+        type: "agent",
+        agent_adapter_id: "adapter-1",
+      }).agentAdapterId,
+    ).toBe("adapter-1");
+    expect(normalizeActor(actorPayload).agentAdapterId).toBeNull();
+    expect(() =>
+      normalizeActor({ ...actorPayload, agent_adapter_id: 123 }),
+    ).toThrow(ApiError);
+  });
+
   it("strictly normalizes actors and lists them with supported filters", async () => {
     expect(normalizeActor(actorPayload)).toMatchObject({
       displayName: "陈设计",

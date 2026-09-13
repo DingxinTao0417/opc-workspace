@@ -134,6 +134,7 @@ import {
   getSearchResults,
   getTags,
   getTask,
+  getTaskAgentRuns,
   getTaskArtifact,
   getTaskArtifacts,
   getTaskAssignments,
@@ -2063,7 +2064,10 @@ export function useSetAgentAdapterEnabled() {
         ? enableAgentAdapter(id, expectedVersion)
         : disableAgentAdapter(id, expectedVersion),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: agentAdaptersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: actorQueryKey }),
+      ]);
     },
   });
 }
@@ -2698,6 +2702,23 @@ export function useTaskQuery(id: string | null) {
     queryFn: () => getTask(id!),
     enabled: Boolean(id),
     retry: 1,
+  });
+}
+
+export const taskAgentRunsQueryKey = (taskId: string) =>
+  ["task-agent-runs", taskId] as const;
+
+export function useTaskAgentRunsQuery(taskId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: taskAgentRunsQueryKey(taskId ?? "closed"),
+    queryFn: () => getTaskAgentRuns(taskId!),
+    enabled: enabled && Boolean(taskId),
+    refetchInterval: (query) =>
+      query.state.data?.some(
+        (run) => run.status === "queued" || run.status === "running",
+      )
+        ? 2_000
+        : false,
   });
 }
 

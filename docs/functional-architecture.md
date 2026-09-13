@@ -318,33 +318,43 @@ React Query 的派生缓存按项目、日期和页码隔离，失效边界固�
 
 ### 6.7 本地 Agent 执行（v0.2）
 
-传输与安全边界已由 [ADR-003](adr/003-local-agent-runtime-security.md) 冻结。当前 v0.2-A 只实现下面的诊断流；平台隔离未验证时必须在这里停止：
+传输与安全边界由 [ADR-003](adr/003-local-agent-runtime-security.md) 与 [ADR-027](adr/027-builtin-agent-executor-and-run-lifecycle.md) 共同约束。当前已实现 Windows builtin 文本 Runner、任务详情 Run 界面及条件式人工验收提交；external 与未验证平台仍禁止执行。首次使用需要用户显式登记和启用，读取设置或打开任务不会自动创建 Adapter、Actor、Assignment 或 Run：
 
 ```text
 设置登记 builtin-local-text-v1
   → Sidecar 保存代码所有 manifest（无路径、无凭据）
-  → owner 以 If-Match 请求安全检查
-  → 校验稳定 Adapter 身份与协议
-  → 保存 blocked / PLATFORM_ISOLATION_UNVERIFIED / execution_ready=false
-  → 设置展示三个未通过闸门，启用与 agent 分派继续关闭
+  → owner 请求安全检查，设置显示 API 返回的真实健康和就绪状态
+  → 已验证 Windows builtin 可 healthy / verified / execution_ready=true
+  → owner 显式启用，以 If-Match 校验 Adapter 版本
+  → 同一事务校验身份、健康与就绪，并创建或校验关联 agent Actor
+  → 任一步冲突整笔回滚；未验证平台/external 保持关闭
 ```
 
-登记和诊断写入 `agent_adapter_registered / agent_adapter_health_checked` Workflow Event。ADR-027 起内置执行器的信任分层生效：verified-Windows 构建上 builtin Adapter 登记/诊断即确认 `execution_ready`，启用时幂等创建 agent Actor，Assignment 才接受 agent；Run 经 Sidecar 子进程 + 单次匿名管道 `opc-agent-pipe-v1` 执行，结果暂存 Run 记录并写入 agent_run_* 事件。业务导出包含 Adapter 元数据并按导入平台重新门控就绪状态；`agent_runs` 本体排除便携导出。external Adapter 与未验证平台的执行保持关闭，macOS/Linux 矩阵未验证。
+登记和诊断写入 `agent_adapter_registered / agent_adapter_health_checked` Workflow Event。启用与停用是独立于普通应用设置保存的显式操作；固定 Actor ID 冲突、Actor 停用/关联错误，或已启用 Adapter 缺失 Actor，返回 `409 AGENT_ADAPTER_ACTOR_CONFLICT`，不静默补种或改写责任人。Actor 读取 API 增加可空只读 `agent_adapter_id`；旧响应缺失时前端归一化为 `null`，不能凭显示名称或固定 ID 推断可执行。当前仍为 schema 71 / API v1，本轮不新增迁移。
 
-下图仍是 v0.2-B/C 目标流程，不表示当前代码已实现 Runner 或 Run：
+任务详情的当前执行链为：
 
 ```text
-Task 已分派给健康 agent Actor
-  → owner 创建 Agent Run
-  → Sidecar 校验 Adapter、Assignment、路径和能力
-  → 发放短时单次能力令牌或受控进程管道
-  → Adapter 本地执行并写入受控 Artifact 目录
-  → Run succeeded / failed / interrupted
-  → succeeded 通过与人工提交一致的 Submission/Artifact 领域命令进入 waiting_review
-  → owner accept 或 request_changes
+启动前刷新 Adapter / Actor / Assignment / Provider / Run
+  → Task 必须为 todo/in_progress，Adapter enabled/healthy/execution_ready
+  → 真实 active agent Actor 必须关联该 Adapter，否则禁用并引导设置
+  → 无 assignee：明示将先分派，使用现有 Assignment 命令和其 task_version
+  → 已有其他 assignee：提示先处理责任分派，不静默改派
+  → owner 选择 ready/healthy 的 openai_chat 模型并创建 Run
+  → Sidecar 再校验 Assignment/Adapter，固化快照，经一次性匿名管道执行
+  → Run 保存文本和终态、追加 agent_run_* 事件
+  → 满足 manual-review 条件：建立 Submission + text Artifact，Task → waiting_review
+  → 不满足条件：文本仅保留在 Run，记录 agent_run_submission_skipped
+  → owner accept 或 request_changes；Run succeeded 不等于 Task done
 ```
 
-若 Task 已被活动 Inbox Item 跟踪，Agent 输出只更新该工作项；只有未被收件箱跟踪的 Agent Task 才生成一条去重的验收项。
+执行器经 `opc-agent-pipe-v1` 获得单次输入和模型请求配置，支持显式选择的本地回环或在线 OpenAI 兼容模型，不是任意协议或默认全程离线；凭据仅由 Sidecar 从 keyring 传入子进程内存，不向其开放 WebView Token、数据库或 Shell。当前产出为 ≤64 KiB 文本；满足 Task 状态、manual review、agent assignee 与 owner reviewer 条件时，Sidecar 创建 `origin=manual`、由 agent 提交的 Submission，以及 agent 产出、system 登记的 text Artifact。文件下载是前端对该文本的导出，不等于受控文件产出链已经交付。
+
+终态重试创建带 `parent_run_id` 的新 Run，沿用原输入快照和模型选择；界面同样预检环境、Task 状态及现有 Assignment，但不为重试补分派。取消已有 Run 不受初始化未就绪阻断；停用 Adapter 不等于取消已有 Run。Sidecar 启动将遗留 queued/running Run 标记 `interrupted`。业务导出包含 Adapter 元数据，并在导入平台重新门控就绪状态；Run 本体不进入便携导出。
+
+任务详情的“查看执行过程”和启动成功后的自动打开均指向右侧抽屉。它复用现有 Run 列表数据，仅有 queued/running Run 时每 2 秒轮询，可切换历史 Run，展示状态、时间、模型、错误码与最终文本，并提供打开任务和下载。抽屉是现有运行事实的展示，不新增执行控制、协议或数据表；关闭不取消 Run、不清除历史，也不改变 Task、Assignment 或验收状态。它不展示模型内部思考、Token 流、工具调用或伪进度；Run succeeded 仍不代表任务完成或验收成功。
+
+v0.2-C 后续仍包括受控文件产出和 Inbox 去重验收联动；macOS/Linux 生命周期矩阵与 external 执行仍待。完成条件尚未拼入执行器提示词、运行中取消终态及超限文本处理的已知差距见 [本地 Agent 模块](modules/local-agents.md)，不属于本轮初始化修复。
 
 ### 6.8 备份操作失败的系统维护来源
 

@@ -109,6 +109,8 @@ export interface Actor {
   isBuiltin: boolean;
   notes: string;
   metadata: Record<string, unknown>;
+  /** Read-only link; older API responses may omit it. */
+  agentAdapterId?: string | null;
   version: number;
   createdAt: string;
   updatedAt: string;

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
+import { AgentRunDrawer } from "./components/AgentRunDrawer";
 import { AiGenerationMonitor } from "./components/AiGenerationMonitor";
 import { RoutedAppErrorBoundary } from "./components/AppErrorBoundary";
 import { CommandPalette } from "./components/CommandPalette";
@@ -71,6 +72,7 @@ export default function App() {
       <CommandPalette />
       <NewTaskModal />
       <TaskDetailModal />
+      <AgentRunDrawer />
       <SettingsModal />
     </>
   );

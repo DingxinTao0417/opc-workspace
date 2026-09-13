@@ -13,6 +13,11 @@ export type SettingsModule =
   | "diagnostics"
   | "about";
 
+export interface AgentRunDrawerState {
+  taskId: string;
+  runId: string | null;
+}
+
 interface UiState {
   commandPaletteOpen: boolean;
   newTaskOpen: boolean;
@@ -21,12 +26,15 @@ interface UiState {
   settingsOpen: boolean;
   settingsModule: SettingsModule;
   taskDetailId: string | null;
+  agentRunDrawer: AgentRunDrawerState | null;
   setCommandPaletteOpen: (open: boolean) => void;
   setNewTaskOpen: (open: boolean) => void;
   openNewTaskForProject: (projectId: string) => void;
   toggleSidebarCollapsed: () => void;
   setSettingsOpen: (open: boolean, module?: SettingsModule) => void;
   setTaskDetailId: (id: string | null) => void;
+  openAgentRunDrawer: (taskId: string, runId?: string | null) => void;
+  closeAgentRunDrawer: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -37,6 +45,7 @@ export const useUiStore = create<UiState>((set) => ({
   settingsOpen: false,
   settingsModule: "general",
   taskDetailId: null,
+  agentRunDrawer: null,
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setNewTaskOpen: (newTaskOpen) =>
     set({
@@ -50,4 +59,7 @@ export const useUiStore = create<UiState>((set) => ({
   setSettingsOpen: (settingsOpen, settingsModule = "general") =>
     set({ settingsOpen, settingsModule }),
   setTaskDetailId: (taskDetailId) => set({ taskDetailId }),
+  openAgentRunDrawer: (taskId, runId = null) =>
+    set({ agentRunDrawer: { taskId, runId } }),
+  closeAgentRunDrawer: () => set({ agentRunDrawer: null }),
 }));

@@ -22,6 +22,9 @@ export function Modal({
   footer,
   width = "520px",
   dismissible = true,
+  panelClassName,
+  bodyClassName,
+  closeLabel = "关闭",
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,6 +33,9 @@ export function Modal({
   footer?: ReactNode;
   width?: string;
   dismissible?: boolean;
+  panelClassName?: string;
+  bodyClassName?: string;
+  closeLabel?: string;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -146,7 +152,9 @@ export function Modal({
       <section
         aria-labelledby={titleId}
         aria-modal={isTopmost ? "true" : undefined}
-        className="modal-panel"
+        className={
+          panelClassName ? `modal-panel ${panelClassName}` : "modal-panel"
+        }
         ref={panelRef}
         role="dialog"
         style={{ width }}
@@ -156,7 +164,7 @@ export function Modal({
           <h2 id={titleId}>{title}</h2>
           {dismissible ? (
             <button
-              aria-label="关闭"
+              aria-label={closeLabel}
               className="icon-button"
               onClick={onClose}
               type="button"
@@ -165,7 +173,13 @@ export function Modal({
             </button>
           ) : null}
         </header>
-        <div className="modal-body">{children}</div>
+        <div
+          className={
+            bodyClassName ? `modal-body ${bodyClassName}` : "modal-body"
+          }
+        >
+          {children}
+        </div>
         {footer ? <footer className="modal-footer">{footer}</footer> : null}
       </section>
     </div>,

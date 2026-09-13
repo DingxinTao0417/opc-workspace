@@ -1,10 +1,10 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.0 / API v1 / SQLite schema v35（2026-08-29）；Actor/D2 结构仍分别由 schema v7/v9 引入；v16 的 app_settings、v18 的客户活动、v19 的客户附件、v21 的项目笔记和 v22 的项目附件引用 active Actor，v20 新增 Client–person 显式关联及停用保护；v23–v29 不改变 Actor 契约，v30 增加 Task Submission 来源，v31 的 Project→Client 系统活动固定由内置 system 创建，v32 扩展 Reminder，v33 新增受限 Automation Rule/Run，v34 新增不关联 Actor 的 Adapter 诊断事实；v35 的 Client Followup 允许 active owner/person 作为计划负责人，并阻止仍有 `planned` 回访的 person 停用，均不改变 Actor 表结构。
+> 实现基线：app v0.1.1 / API v1 / SQLite schema 71。Actor/D2 分别由 schema v7/v9 引入；v20 Client–person 关联、v35 回访停用保护继续有效。schema 071 为 agent 增加可空 `agent_adapter_id`；本次只补 Actor 读取响应及初始化门控，不新增迁移。
 >
-> 版本边界：T-18A Actor/Event、T-18B person 管理、T-18C Assignment、T-18D D1 生命周期与 D2 Submission/Artifact 验收均已交付。`agent` 类型仍只是数据库边界；Adapter、Run、能力令牌和自动执行属于 v0.2。
+> 版本边界：T-18A–D 人工闭环已交付；T-19 v0.2 已有 Windows 内置 Agent 的 Adapter/Actor/Run 与条件式文本提交。未验证平台、external 执行器及其他执行能力仍关闭，详见 [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v9.44](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD](../opc-workspace-PRD.md) · [任务模块](tasks.md) · [本地 Agent](local-agents.md)
 
 ## 定位与边界
 
@@ -13,11 +13,11 @@ Actor 统一表达本地责任主体，而不是在线账号：
 - `owner`：当前设备的唯一操作者，负责代录、审核、撤回和删除；固定 UUID `00000000-0000-5000-8000-000000000001`。
 - `person`：本机责任记录，可表示客户联系人、外包者或协作者；没有登录、权限、消息或同步能力。
 - `system`：迁移、规则和系统动作；固定 UUID `00000000-0000-5000-8000-000000000002`。
-- `agent`：未来本地 Agent 身份；v0.1 不开放创建、编辑、分派或执行。
+- `agent`：v0.2 的受控执行身份，仅由显式启用 Adapter 的服务端事务建立；普通 Actor POST/PATCH 不开放创建或编辑 agent。
 
 Assignment 保存某个 Task 在某段时间内的角色事实：
 
-- `assignee`：当前负责人；v0.1 只允许 active owner/person。
+- `assignee`：当前负责人；v0.1 人工路径为 active owner/person，v0.2 Agent 路径还要求真实 active agent 关联 enabled/healthy/execution_ready 的 Adapter。
 - `reviewer`：验收人；v0.1 只允许 active owner。
 
 这套模型不等于多人协作系统。person 不会收到任务，owner 代录 person 的线下产出也不会冒充 person 发起 API 请求。
@@ -27,29 +27,31 @@ Assignment 保存某个 Task 在某段时间内的角色事实：
 - schema v7 幂等创建唯一 owner/system，保护内置类型、固定 ID、唯一性和不可停用规则。
 - 历史 Task 按完成状态回填 owner assignee Assignment，并写 system 的 `migration_assignment_backfill`，重复迁移不产生重复记录。
 - Actor API 支持分页、筛选、person 幂等创建、详情、`ETag / If-Match` 更新与停用；设置页“人员与责任”使用真实本地数据。
+- Actor 列表/详情返回只读可空 `agent_adapter_id`；非 agent 为 null。前端兼容旧响应缺失该字段为 null，但不能凭缺失关联或固定 ID 推断 Agent 已初始化。
 - Assignment API/UI 支持当前 assignee/reviewer、分页结束历史、首次分派、改派和结束。
+- 任务 Agent 入口先验证 Adapter 状态和真实 Actor 的 type/status/关联；无 assignee 时明示启动将分派并复用既有 Assignment hook，已有他人 assignee 必须先显式改派。页面读取、初始化缺失或启动失败均不自动启用 Adapter、补 Actor 或静默改派。
 - Task start 要求 active assignee；complete/cancel/accept 在同一事务结束全部活动 Assignment；reopen 不恢复旧分派。
-- manual 输出提交要求 active assignee 和 active owner reviewer。Artifact producer 由服务端取当前 assignee，recorder 固定 owner；Submission submitter、reviewer、withdrawer 和 Artifact deleter 也固定 owner。
+- 人工 manual 输出提交要求 active assignee 和 active owner reviewer。Artifact producer 由服务端取当前 assignee，recorder 固定 owner；人工 Submission submitter、reviewer、withdrawer 和 Artifact deleter 也固定 owner。Agent Run 条件式提交的身份语义见下表。
 - Workflow Event 已覆盖 Actor、Assignment、Task 生命周期、策略修改、输出提交、验收、返工、撤回、Artifact 删除和迁移回填，并带可空 Assignment/Submission/Artifact 关联。
 - Client 详情可显式关联已有 active person，或在一个事务中新建 person 后关联。每个 Client 同时最多一个 active contact；解除保留不可变原因与操作者历史，active Client 关联会阻止 person 停用。待回访 Client Followup 也会阻止其负责人停用，终态回访仅保留历史，不会阻止停用。
 
 ## Actor 归属语义
 
-| 事实                      | 当前 Actor 来源                | 用户可指定吗                                     |
-| ------------------------- | ------------------------------ | ------------------------------------------------ |
-| Task assignee             | active owner/person Assignment | 通过受控 Assignment 命令指定                     |
-| Task reviewer             | active owner Assignment        | 通过受控 Assignment 命令指定；仅 owner           |
-| Submission `submitted_by` | 内置 owner                     | 否                                               |
-| Artifact `produced_by`    | 提交瞬间的 active assignee     | 否；服务端派生                                   |
-| Artifact `recorded_by`    | 内置 owner                     | 否                                               |
-| Submission `reviewed_by`  | 内置 owner                     | 否                                               |
-| Submission `withdrawn_by` | 内置 owner                     | 否                                               |
-| Artifact `deleted_by`     | 内置 owner                     | 否                                               |
-| v7/v9 迁移事件 actor      | 内置 system                    | 否                                               |
-| Client contact person     | active person                  | owner 显式选择或确认新建，不从联系人字段自动推断 |
-| Client link/unlink actor  | 内置 owner                     | 否                                               |
+| 事实                      | 当前 Actor 来源                               | 用户可指定吗                                     |
+| ------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| Task assignee             | active owner/person 或就绪 agent Assignment   | 通过受控 Assignment 命令指定                     |
+| Task reviewer             | active owner Assignment                       | 通过受控 Assignment 命令指定；仅 owner           |
+| Submission `submitted_by` | 人工提交为 owner；Agent Run 提交为 agent      | 否；由对应受控提交路径派生                       |
+| Artifact `produced_by`    | 提交瞬间的 active assignee                    | 否；服务端派生                                   |
+| Artifact `recorded_by`    | 人工代录为 owner；Agent Run 自动提交为 system | 否                                               |
+| Submission `reviewed_by`  | 内置 owner                                    | 否                                               |
+| Submission `withdrawn_by` | 内置 owner                                    | 否                                               |
+| Artifact `deleted_by`     | 内置 owner                                    | 否                                               |
+| v7/v9 迁移事件 actor      | 内置 system                                   | 否                                               |
+| Client contact person     | active person                                 | owner 显式选择或确认新建，不从联系人字段自动推断 |
+| Client link/unlink actor  | 内置 owner                                    | 否                                               |
 
-UI 应表达为“负责人产出 / 我代录”。`submitted_by` 与 `produced_by` 可以不同，这是刻意的审计设计，不是数据错误。
+人工提交 UI 表达为“负责人产出 / 我代录”。Agent Run 条件式提交另记录 agent producer/submitter 与 system recorder；任务仍由 owner 验收。`submitted_by` 与 `produced_by` 可以不同，不允许客户端伪造任意身份。
 
 ## 关键用户流程
 
@@ -88,15 +90,19 @@ UI 应表达为“负责人产出 / 我代录”。`submitted_by` 与 `produced_
 3. 关联或解除递增 Client 版本，不递增已有 Actor 版本；解除原因和双方 Actor 快照进入不可变历史。
 4. Client 永久删除级联关系历史但保留 person；关系只表达本地责任，不创建账号、消息或访问权限。
 
-### 启动本地 Agent（v0.2，未实现）
+### 启动本地 Agent（v0.2，Windows 内置路径）
 
-未来必须先注册 Adapter、健康检查能力、创建 agent Actor 并使用独立 Run 鉴权。不得把 person 或 WebView 会话令牌复用为 Agent 身份，也不得把 D2 的手工 Artifact 提交误写成自动执行。
+1. 用户在“设置 → 本地 Agent”显式登记、检查并启用 Adapter；只有受平台矩阵支持、健康和就绪时才能成功启用。
+2. 启用事务幂等建立关联的 active agent Actor；版本、Actor 类型/状态/关联冲突不得覆盖，失败回滚 Adapter 更新。固定 ID 冲突、Actor 停用/关联错误或已启用但缺 Actor 返回 `409 AGENT_ADAPTER_ACTOR_CONFLICT`。
+3. 任务页刷新真实 Actor、Adapter、Assignment、Provider 和 Run；缺登记、未启用、缺 Actor、关联不符或读取失败时禁用启动并用文字指明设置路径。
+4. 仅 todo/in_progress 任务允许启动/重试。无负责人时，启动前明示将分派给 Agent；通过已有 Assignment `If-Match`/hook 及读取返回的 `task_version` 完成。已有其他负责人时先由用户显式改派，不能靠捕获启动错误偷偷重试分派；重试不补分派。
+5. Run 使用单次进程管道，不复用 person 或 WebView 会话令牌。符合 manual-review 条件时文本进入 waiting_review，owner 验收后才完成；否则产出留在 Run 记录。
 
 ## 数据与 API
 
-### schema v9 已实现数据
+### 已实现数据（schema 71）
 
-- `actors`：类型、展示名、状态、备注、受限 metadata、内置标记、version 与时间。
+- `actors`：类型、展示名、状态、备注、受限 metadata、内置标记、version 与时间；schema 071 另有只读可空 `agent_adapter_id`。本次 API 加字段不新增数据库版本。
 - `task_assignments`：Task、Actor、role、分派/结束 Actor、原因、时间与 active 唯一性。
 - `workflow_events`：聚合、action、actor、assignment/submission/artifact、request、不可变快照、command_seq 与时间。
 - `task_submissions`：submit/review/withdraw Actor 和批次状态。
@@ -130,7 +136,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [收件箱](inbox.md)：单条已有 Task 关系只连接事实，不隐式创建 Assignment；T-11C 拆分命令已可为新建 Task 原子创建 owner/person 初始 Assignment 和 manual owner reviewer。
 - [项目](projects.md)：Task 责任或产出变化通过 Task/Project cache 与版本关系呈现，不直接修改 Project 状态。
 - [客户](clients.md)：Client contact 只能显式关联 active person；活动关系阻止停用，解除后历史仍可审计。
-- [本地 Agent](local-agents.md)：未来 agent Actor 只表达身份，实际执行必须由 Adapter/Run 管理。
+- [本地 Agent](local-agents.md)：agent Actor 只表达身份；初始化、启停和真实执行由 Adapter/Run 管理，不以固定 Actor ID 或 UI 占位代替健康门控。
 - [数据管理](data-management.md)：历史 Actor 引用与受控 Artifact 文件必须一起纳入未来备份/恢复。
 
 ## 分阶段实施
@@ -142,7 +148,7 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 5. **T-18D D2（已完成）**：schema v9、manual policy、Submission/Artifact、受控文件、提交/接受/返工/撤回/软删。
 6. **Inbox/Reminder（当前人工闭环已实现）**：独立手工 Inbox Item、人工分诊、已有 Task 关系、一次性 Reminder、T-11C Task 拆分/owner-person 分派/系统自动结清，以及已登记的 follow-up Artifact、Task 阻塞/临期、Project 完成和系统维护来源均已交付；未来 Client/Invoice/里程碑来源与 Agent 仍未实现。
 7. **Client contact（已完成）**：schema v20 显式关联、原子新建 person、单 active contact、带原因解除、不可变历史和 person 停用保护。
-8. **T-19 v0.2（未实现）**：agent Adapter、Run、能力令牌、取消/重试与崩溃恢复。
+8. **T-19 v0.2（部分交付）**：Windows builtin Adapter/Actor/Run、管道能力、文本提交及初始化门控；跨平台、external 与 Agent 专属 Inbox 投影仍待。
 
 ## 验收状态
 
@@ -152,7 +158,8 @@ Actor 和 Assignment 均没有 DELETE 路由。Task 聚合硬删除会级联 Ass
 - [x] manual 提交明确区分 producer 与 owner submitter/recorder。
 - [x] owner reviewer 前置、接受/返工、取消撤回与终态 Assignment 联动均为事务化实现。
 - [x] Workflow Event 关联 Assignment/Submission/Artifact 并保持追加式历史。
-- [ ] agent Actor、Adapter/Run、能力令牌、权限撤销和实际本地执行。
+- [x] Windows builtin Adapter 显式启用建立 agent Actor，Run 和文本提交已有代码；平台证据与限制见 ADR-027。
+- [x] 本轮初始化回归覆盖 Actor 关联字段兼容、缺失/不一致禁发、启用回滚与版本冲突、不静默改派；通过隔离 API/组件测试，不视为真实模型测试。
 - [x] 独立的手工 Inbox Item 与人工分诊，不隐式创建 Assignment。
 - [x] Inbox 可关联/解除已有 Task，关系动作不隐式创建 Assignment。
 - [x] 一次性 Reminder 的 owner 创建/取消与 system 到期触发审计。

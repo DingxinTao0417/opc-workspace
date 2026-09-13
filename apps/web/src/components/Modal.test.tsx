@@ -100,6 +100,32 @@ afterEach(() => {
 });
 
 describe("Modal stack", () => {
+  it("supports a named close control and presentation classes for a side drawer", () => {
+    const { unmount } = render(
+      <Modal
+        bodyClassName="drawer-body"
+        closeLabel="收起执行过程"
+        onClose={() => undefined}
+        open
+        panelClassName="drawer-panel"
+        title="执行过程"
+      >
+        内容
+      </Modal>,
+    );
+
+    expect(screen.getByRole("dialog", { name: "执行过程" })).toHaveClass(
+      "drawer-panel",
+    );
+    expect(
+      screen
+        .getByRole("dialog", { name: "执行过程" })
+        .querySelector(".modal-body"),
+    ).toHaveClass("drawer-body");
+    expect(screen.getByRole("button", { name: "收起执行过程" })).toBeVisible();
+    unmount();
+  });
+
   it("lets only the topmost dialog handle Escape and restores focus and body lock", async () => {
     document.body.style.overflow = "auto";
     render(<NestedModalHarness />);

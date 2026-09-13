@@ -7,12 +7,12 @@
 ## v0.1 核心闭环
 
 - [今日工作台](today.md)（T-06A–H 日期分组、导航、按钮排序、同日/跨日期拖拽、空精确日期/未排期落点、行内任意日期安排、安全执行快捷操作、编辑/确认删除入口、截止风险快捷筛选、客户回访待办，以及右侧真实本地客户动态/临近路线图节点已交付）
-- [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、共享服务端搜索 Client 筛选，以及 Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用的 Project 选择器已交付；六状态看板、直属子任务汇总自动待验收、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；Agent 待开发）
+- [任务管理](tasks.md)（事实层、D1/D2、筛选/保存视图/计划组拖拽、共享服务端搜索 Client 筛选，以及 Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用的 Project 选择器已交付；六状态看板、直属子任务汇总自动待验收、Inbox 编排、follow-up Artifact、Task 阻塞和 Task 临期来源已交付；v0.2 Agent Run 区与条件式文本提交见本地 Agent 模块）
 - [项目管理](projects.md)（基础纵切、任务浏览器、共享选择器、笔记/附件、Task Artifact 聚合及 nullable follow-up/实时 required 进度、产出区四种跟进状态与 Inbox 深链、活动时间线、来源投影、Client 系统活动及项目 Focus 已交付；财务与里程碑增强待开发）
 - [客户管理](clients.md)（基础资料 CRUD、共享分页搜索选择器、Project 关联、人工活动时间线、Project 生命周期只读系统活动、跨客户最近动态读模型、受控附件、person 显式关联、客户回访详情管理及完成时原子下一次计划已交付；真实浏览器/窄屏/大数据量专项及外部来源/财务仍待验收或开发）
 - [收件箱工作编排](inbox.md)（人工受理、关系/Reminder、来源投影、拆分/自动解决及客户回访来源上下文已交付；split 继承但可清除/改选可信来源 Project，写入独立完成条件并明确 person 本地责任，关系行打开共享 Task；成功 mutation 失效来源 Project，split 另失效 Task/Today/Project。required 仍是显式独立关系事实；Agent 待开发）
 - [本地提醒](reminders.md)（T-11A3 一次性与每日/每周/工作日/每月本地 Reminder、启动补偿、跨 DST/月末递推和到期 Inbox 投影已交付；法定节假日/自定义规则与原生/远程通知待开发）
-- [Actor 与任务分派](actors.md)（owner/person/system、Assignment 与 D2 产出责任已交付；agent 执行仍待开发）
+- [Actor 与任务分派](actors.md)（人工 Assignment/D2 已交付；schema 071 agent_adapter_id、受控 Agent 身份与初始化门控，不以固定 ID 代替真实关联）
 - [专注与工时](focus.md)（Core A+B+C、D1 历史/报告、Task 与 Project 详情记录及 D2b 分析已交付；通用托盘不改变 Focus，专注状态/动作与原生通知延后）
 - [设置](settings.md)（SQLite 设置 schema v2、草稿预览、受控头像、关闭到托盘、Actor、备份导入、无路径容量检查/7 天趋势、每日计划/自动包保留、脱敏诊断与关于入口）
 - [命令面板与搜索](command-search.md)（Task/Project/Client/活动 Inbox 统一本地搜索、可刷新详情直达、本地最近使用、运行诊断直达、全局渲染错误恢复及命令面板/新建任务 OS 快捷键已交付）
@@ -21,7 +21,7 @@
 
 ## v0.2 本地编排
 
-- [本地 Agent Runtime](local-agents.md)（T-19 v0.2-A Adapter 登记/诊断与 v0.2-B 首片（ADR-027：agent_runs、Runner、builtin 本地模型文本执行器、agent Actor/Assignment 门控）已交付；macOS/Linux 矩阵、Artifact/验收接入与 Web UI 待后续）
+- [本地 Agent Runtime](local-agents.md)（ADR-027：Windows 内置文本 Runner、Run 界面、条件式 manual-review 文本提交、设置显式启停与真实 Adapter/Actor/Assignment 初始化门控；本地/在线 OpenAI 兼容模型。macOS/Linux、external、文件流和 Agent Inbox 投影仍待，既知执行器缺口与真机验收不因初始化修复而完成）
 - [预设自动化](automation.md)（schema v33、三个可用预设、两个依赖不可用预设、设置预览/启停、Run/重试、IANA/DST 与离线折叠已交付；Agent/发票/自由规则待开发）
 
 任务看板已交付读取、筛选、分页、选择、详情入口及跨列受控生命周期交互；人工验收仍必须在任务详情完成，详见 [任务管理](tasks.md)。

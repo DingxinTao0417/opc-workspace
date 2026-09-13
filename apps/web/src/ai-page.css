@@ -1761,6 +1761,11 @@
   display: block;
 }
 
+/* The composer supplies the focus ring; override the global textarea outline. */
+.ai-composer-textarea:focus-visible {
+  outline: none;
+}
+
 .ai-composer-textarea::placeholder {
   color: var(--text-muted);
 }

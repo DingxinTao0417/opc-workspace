@@ -13,6 +13,7 @@ import {
   useAgentAdaptersQuery,
   useCheckAgentAdapter,
   useRegisterAgentAdapter,
+  useSetAgentAdapterEnabled,
 } from "../api/hooks";
 
 const capabilityLabels: Record<string, string> = {
@@ -21,26 +22,45 @@ const capabilityLabels: Record<string, string> = {
   write_structured_artifact: "提交结构化产出",
 };
 
-const gateLabels: Record<string, string> = {
-  process_isolation: "进程隔离",
-  network_block: "网络阻断",
-  process_tree_cleanup: "进程树清理",
+// ADR-027 gives the code-owned builtin a lifecycle gate, not an OS sandbox gate.
+const builtinLifecycleGates = [
+  "管道协议往返",
+  "进程树回收",
+  "超时与取消",
+  "启动中断恢复",
+];
+
+const healthLabels = {
+  unknown: "未检查",
+  blocked: "受阻",
+  healthy: "健康",
+  unhealthy: "异常",
 };
 
 function agentAdapterError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.code === "VERSION_CONFLICT") {
-      return "适配器状态已变化，已刷新最新结果，请重试。";
+      return "适配器状态已变化，请查看刷新后的状态再重试。";
+    }
+    if (error.code === "AGENT_ADAPTER_NOT_EXECUTION_READY") {
+      return "内置执行器尚未就绪，请重新检查运行条件后再启用。";
+    }
+    if (error.code === "AGENT_ADAPTER_ALREADY_REGISTERED") {
+      return "内置适配器已登记，请刷新设置后继续。";
+    }
+    if (error.code === "AGENT_ADAPTER_ACTOR_CONFLICT") {
+      return "Agent 身份关联冲突，无法启用此适配器；请检查现有 Agent 的关联配置。";
     }
     return `${error.message}${error.requestId ? ` · 请求 ${error.requestId}` : ""}`;
   }
-  return "本地 Agent 诊断失败，请确认 Sidecar 已就绪后重试。";
+  return "本地 Agent 操作失败，请确认 Sidecar 已就绪后重试。";
 }
 
 export function AgentAdapterSettings() {
   const adapters = useAgentAdaptersQuery();
   const register = useRegisterAgentAdapter();
   const check = useCheckAgentAdapter();
+  const setEnabled = useSetAgentAdapterEnabled();
   const [feedback, setFeedback] = useState<string | null>(null);
 
   if (adapters.isPending) {
@@ -72,28 +92,67 @@ export function AgentAdapterSettings() {
     );
   }
 
-  const adapter = adapters.data[0] ?? null;
-  const actionError = register.error ?? check.error;
+  const adapter =
+    adapters.data.find((item) => item.adapterKey === "builtin-local-text-v1") ??
+    null;
+  const actionError = register.error ?? check.error ?? setEnabled.error;
+  const busy = register.isPending || check.isPending || setEnabled.isPending;
+  const isEnabled = adapter?.status === "enabled";
+  const canEnable =
+    adapter?.readiness.canEnable &&
+    adapter.executionReady &&
+    adapter.healthStatus === "healthy";
+
+  function resetActionState() {
+    setFeedback(null);
+    register.reset();
+    check.reset();
+    setEnabled.reset();
+  }
 
   async function registerPreset() {
+    if (busy) return;
     try {
-      setFeedback(null);
+      resetActionState();
       await register.mutateAsync();
-      setFeedback("内置诊断适配器已登记");
+      setFeedback("内置适配器已登记，尚未启用。");
     } catch {
       // Mutation state renders a safe error below.
     }
   }
 
   async function runCheck() {
-    if (!adapter) return;
+    if (!adapter || busy) return;
     try {
-      setFeedback(null);
-      await check.mutateAsync({
+      resetActionState();
+      const result = await check.mutateAsync({
         id: adapter.id,
         expectedVersion: adapter.version,
       });
-      setFeedback("安全诊断已完成");
+      setFeedback(
+        result.executionReady && result.healthStatus === "healthy"
+          ? "内置执行器生命周期检查已通过。"
+          : "检查已完成，当前运行条件尚未就绪。",
+      );
+    } catch {
+      // Mutation state renders a safe error below.
+    }
+  }
+
+  async function changeEnabled() {
+    if (!adapter || busy || (!isEnabled && !canEnable)) return;
+    try {
+      resetActionState();
+      const result = await setEnabled.mutateAsync({
+        id: adapter.id,
+        enabled: !isEnabled,
+        expectedVersion: adapter.version,
+      });
+      setFeedback(
+        result.status === "enabled"
+          ? "适配器已启用；请到任务详情启动执行。"
+          : "适配器已停用，不再接受新的 Agent 分派或执行。",
+      );
     } catch {
       // Mutation state renders a safe error below.
     }
@@ -103,15 +162,14 @@ export function AgentAdapterSettings() {
     <div className="agent-adapter-settings">
       <header className="settings-content-header">
         <h3>本地 Agent</h3>
-        <p>
-          登记代码内置适配器并检查运行前安全闸门；当前阶段不执行任何 Agent。
-        </p>
+        <p>登记、检查并显式启用内置执行器；启用后可在任务详情启动执行。</p>
       </header>
 
       <div className="agent-adapter-boundary-note">
         <ShieldCheck size={16} />
         <span>
-          Sidecar 只登记受控清单；不接受路径、Shell、SQL、HTTP 或任意命令。
+          Sidecar 只接受代码内置适配器，不接受自定义路径、Shell、SQL、HTTP
+          或任意命令；模型访问受代码端点校验约束。
         </span>
       </div>
 
@@ -120,11 +178,12 @@ export function AgentAdapterSettings() {
           <Bot size={22} />
           <strong>尚未登记本地 Agent 适配器</strong>
           <span>
-            可先登记内置诊断清单。登记不会创建 Agent 身份、任务分派或运行进程。
+            登记不会创建 Agent
+            身份、任务分派或运行进程；运行条件就绪后仍需手动启用。
           </span>
           <button
             className="button button-primary"
-            disabled={register.isPending}
+            disabled={busy}
             onClick={() => void registerPreset()}
             type="button"
           >
@@ -133,7 +192,7 @@ export function AgentAdapterSettings() {
             ) : (
               <Bot size={14} />
             )}
-            登记内置诊断适配器
+            {register.isPending ? "正在登记…" : "登记内置适配器"}
           </button>
         </section>
       ) : (
@@ -147,7 +206,8 @@ export function AgentAdapterSettings() {
               <p>{adapter.protocolVersion} · 短生命周期进程协议</p>
             </div>
             <span data-status={adapter.healthStatus}>
-              {adapter.healthStatus === "unknown" ? "未检查" : "受阻"}
+              {isEnabled ? "已启用" : "未启用"} ·{" "}
+              {healthLabels[adapter.healthStatus]}
             </span>
           </div>
 
@@ -163,38 +223,50 @@ export function AgentAdapterSettings() {
               </ul>
             </div>
             <div>
-              <span>启用闸门</span>
+              <span>内置执行器生命周期闸门</span>
               <ul>
-                {adapter.readiness.requiredGates.map((gate) => (
+                {builtinLifecycleGates.map((gate) => (
                   <li data-ready={adapter.executionReady} key={gate}>
                     {adapter.executionReady ? (
                       <CheckCircle2 size={12} />
                     ) : (
                       <ShieldAlert size={12} />
                     )}
-                    {gateLabels[gate] ?? gate}
+                    {gate}
                   </li>
                 ))}
               </ul>
             </div>
           </div>
 
-          {adapter.healthStatus === "blocked" ? (
+          <p>
+            生命周期检查不代表已通过操作系统沙箱或禁网验证；外部执行器仍不可用。
+          </p>
+
+          {!canEnable ? (
             <div className="agent-adapter-blocked" role="status">
               <ShieldAlert size={15} />
               <div>
                 <strong>暂不可启用</strong>
                 <span>
-                  当前平台尚未验证进程隔离、网络阻断和进程树清理；未启动任何执行器。
+                  {adapter.healthStatus === "unknown"
+                    ? "请先检查内置执行器运行条件；未就绪时不能启用。"
+                    : "内置执行器运行条件尚未就绪，请重新检查；未验证的平台保持禁用。"}
                 </span>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <p>
+              {isEnabled
+                ? "已启用，可在任务详情分派并启动 Agent；启用本身不会启动任务。"
+                : "运行条件已就绪。启用会创建对应 Agent 身份，不会自动分派或启动任务。"}
+            </p>
+          )}
 
           <div className="agent-adapter-actions">
             <button
               className="button button-secondary"
-              disabled={check.isPending}
+              disabled={busy}
               onClick={() => void runCheck()}
               type="button"
             >
@@ -203,15 +275,33 @@ export function AgentAdapterSettings() {
               ) : (
                 <RefreshCw size={14} />
               )}
-              {adapter.lastHealthAt ? "重新检查" : "检查安全闸门"}
+              {check.isPending
+                ? "正在检查…"
+                : adapter.lastHealthAt
+                  ? "重新检查"
+                  : "检查运行条件"}
             </button>
             <button
               className="button button-primary"
-              disabled={!adapter.readiness.canEnable}
-              title="安全闸门全部验证后才可启用"
+              disabled={busy || (!isEnabled && !canEnable)}
+              onClick={() => void changeEnabled()}
+              title={
+                isEnabled
+                  ? "停用后不再接受新的分派或执行"
+                  : "内置执行器生命周期检查通过后才可启用"
+              }
               type="button"
             >
-              启用适配器
+              {setEnabled.isPending ? (
+                <LoaderCircle className="animate-spin" size={14} />
+              ) : null}
+              {setEnabled.isPending
+                ? setEnabled.variables?.enabled
+                  ? "正在启用…"
+                  : "正在停用…"
+                : isEnabled
+                  ? "停用适配器"
+                  : "启用适配器"}
             </button>
           </div>
         </section>

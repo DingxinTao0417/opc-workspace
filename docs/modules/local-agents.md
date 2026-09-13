@@ -1,233 +1,113 @@
 # 本地 Agent 执行模块
 
-> 文档状态：T-19 v0.2-A Adapter 登记与安全诊断、v0.2-B Runner 首片（[ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)）已完成；目标版本为 v0.2。内置文本执行器在 Windows 上具备真实可执行链路；Artifact/验收接入、Web UI、macOS/Linux 矩阵与 external 闸门仍待。
+> 当前基线：app v0.1.1 / API v1 / SQLite schema 71。T-19 v0.2-A Adapter 登记/诊断、v0.2-B Windows 内置 Runner，以及 v0.2-C 条件式文本提交和任务详情 Run 界面已交付。初始化与显式启停遵循下述门控契约；跨平台、external 执行器、文件流与 Agent Inbox 投影仍未交付。决策见 [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)。
 
 ## 定位与边界
 
-本模块负责让已注册的本地执行器在明确的任务、当前分派和最小能力范围内完成一次受控执行，并把产出送回任务验收链路。它是任务执行基础设施，不是通用聊天助手，也不是可以自由操作电脑的自治代理。
+本模块把明确分派的任务交给代码所有的内置文本执行器，记录一次 Run，并在符合任务验收条件时提交产出。它不是 AI 聊天页面，也不是可以自由操作电脑的自治代理。
 
-必须遵守以下边界：
+- 执行器在本机短生命周期子进程内运行；可显式选择本地或在线的 OpenAI 兼容模型。在线 Provider 会接收任务提示，不等于全部离线。
+- 生产能力仅为读取 Task 快照并返回文本；不接受任意 Shell、SQL、执行路径、目录访问或 WebView Bearer Token。
+- Run 的 succeeded 只代表有输出，不等于 Task done。只有 manual-review 条件满足时才创建 Submission/Artifact 并进入 waiting_review，owner 接受或要求返工。
+- 删除业务数据、发送消息/发票、确认付款和其他高风险动作不交给执行器。
+- builtin 按 ADR-027 的代码信任及平台生命周期矩阵门控；Windows 已有矩阵证据，macOS/Linux 未验证。external 仍须满足 ADR-003 全部沙箱/禁网/进程树闸门，当前不可执行。
+- 初始化不自动启用 Adapter、不写演示 Actor/Assignment、不因打开设置或任务页调用模型。登记、启用、分派、启动是可区分的用户动作。
 
-- 完全在本机运行，不依赖线上模型、远程 Agent、云同步或多人账号。
-- v0.1 只交付 owner、person、system 的人工编排；实际 agent Actor、Adapter 和 Agent Run 到 v0.2 才启用。
-- Agent 只能执行当前活动 Assignment 指向自己的任务，不能领取未授权任务。
-- Agent Run 的 succeeded 只表示本次执行产生了可读取的输出，不表示任务已经完成。
-- Agent 任务强制使用 manual 验收策略，不能配置为 none；成功后进入 waiting_review，只有 owner 可以验收为 done。
-- 不允许任意 Shell、SQLite 直连、任意目录访问或复用 WebView Bearer Token。
-- 删除业务数据、对外发送消息或发票、确认付款等高风险动作不能委托给 Agent。
-- “本地禁网”必须在目标平台通过进程沙箱与网络阻断验证；无法强制隔离的平台可以登记 Adapter 供诊断，但正式执行保持禁用并明确原因。
-- 面向用户的 AI 助手与知识库是独立后续模块，不得绕过本模块的能力、分派、产出和验收约束。
+## 当前实现
 
-## 当前实现状态
+### Adapter、Actor 与任务门控
 
-当前状态为**v0.2-A 诊断纵切已完成、执行能力未开始**：
+- schema 034 的 `agent_adapters` 保存代码所有 manifest、状态、健康、隔离与 `execution_ready`。唯一受控预设为 `builtin-local-text-v1`，响应不暴露内部执行器引用。
+- 登记后保持 disabled。Windows builtin 可由已验证构建矩阵返回 healthy/verified/ready；其他平台返回真实 unknown/blocked 等状态，不将所有健康结果硬编码为隔离未验证。健康观察不递增用户配置版本。
+- 设置中的检查、显式启用和显式停用调用真实 API，使用 Adapter 的 `If-Match`，不经过 `app_settings` 或设置全局保存。
+- 启用必须在事务内重新校验版本、健康和就绪条件；更新行数或 Actor 一致性异常时拒绝并回滚，不能只依据之前的 Query 快照创建 Actor。明确启用成功才幂等建立匹配的 agent Actor；固定 ID 冲突、inactive、关联错误、已 enabled 却缺 Actor 返回 `409 AGENT_ADAPTER_ACTOR_CONFLICT`，不静默修复。
+- 任务页同时读取 Adapter、Actor 与当前 Assignment。只有 Adapter enabled/healthy/execution_ready、Actor type=agent/status=active 且 `agent_adapter_id` 与该 Adapter 一致时，才允许后续启动。
+- 缺少登记、未启用、健康不可用、缺 Actor、身份不匹配或读取失败均关闭启动入口，并引导进入“设置 → 本地 Agent”处理；不能用固定 UUID 当作已存在的 Actor，也不通过捕获启动失败后偷偷补分派。
+- 无 assignee 时，界面明示“启动会分派给该 Agent”，用户启动后通过既有 Assignment 领域 hook 提交并刷新关联缓存，再创建 Run；已有他人 assignee 时不静默改派，须先由用户在责任区显式调整。并发版本冲突不覆盖较新分派。
+- 启动前重读 Adapter/Actor/Assignment/Provider/Run，并使用 Assignment 响应中的 Task version。启动和重试只对 todo/in_progress 开放；重试要求已有匹配 assignee，不代为补分派。读取/执行错误有中文反馈和刷新；取消不因 Adapter 或 Provider 未就绪而禁用。
 
-- [ADR-003](../adr/003-local-agent-runtime-security.md) 已冻结首版 Runtime 边界：每个 Run 一个短生命周期子进程；Sidecar 匿名 stdin/stdout 管道是唯一能力通道；不开放 Runtime HTTP、不传 WebView Token、不接受任意命令/路径；资源只用业务 ID 和单次 staging；各平台进程沙箱与禁网未验证时 `execution_ready=false`，不得创建可分派 agent Actor 或启动 Run。
+### Run 与文本产出
 
-- 当前 SQLite schema v35；其中 schema v34 新增空的 `agent_adapters`，保存代码所有清单、协议、启停、诊断、隔离和 `execution_ready`，schema v35 仅新增 Client Followup，不改变 Adapter 契约。迁移不创建 Adapter、agent Actor、Assignment 或 Run。身份字段不可变，未达到 healthy + verified 时数据库拒绝 enabled，诊断观察不递增用户版本。
-- Sidecar 已提供 Adapter 列表、幂等登记、详情、手动诊断、启用拒绝和停用 API。唯一预设为 `builtin-local-text-v1`；响应不暴露 `executable_ref`。当前诊断只验证代码清单并记录 `blocked / PLATFORM_ISOLATION_UNVERIFIED`，不会启动进程。
-- 设置新增独立“本地 Agent”模块和命令面板入口，覆盖加载、空、错误、登记、能力/安全闸门、诊断反馈与禁用启用入口；当前没有 agent 负责人选项、Run 详情、输出预览或 Agent 验收入口。
-- 业务 JSON/ZIP 导入导出包含 Adapter 行，并严格接受代码所有身份、disabled、version=1、`execution_ready=false` 以及 unknown 或固定 blocked 诊断状态；普通备份随 SQLite 自动包含该事实，恢复后仍必须重新诊断。
-- [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md) 把 Adapter 信任分为 builtin（代码所有、随 Sidecar 自再执行分发）与 external（导入对象，维持 ADR-003 全部闸门）两级；builtin 的 `execution_ready` 由生命周期验证矩阵决定（Windows 已实测：管道往返、Job Object 子树回收、超时/取消），external 在三平台验证前永不启用。
-- schema 071 新增 `agent_runs` 与 `actors.agent_adapter_id`（agent Actor 必须指向 Adapter）。Sidecar 已交付 Run 状态机 `queued -> running -> succeeded|failed|cancelled|interrupted`、单次管道协议 `opc-agent-pipe-v1`（4 字节大端长度前缀 JSON、1 MiB 帧上限、未知字段拒绝、64 KiB 结果预算）、启用时幂等创建 agent Actor、Assignment 门控、创建/列表/详情/取消/重试 API 与追加事件；Sidecar 启动把遗留 queued/running Run 标 `interrupted`。
-- builtin-local-text-v1 执行器经保留子命令 `agent-executor` 自再执行，读取脱敏 Task 快照与回环 http 模型端点（仅 IP 字面量回环，拒绝主机名），调用 OpenAI 兼容 `/chat/completions`，产出不超过 64 KiB 的交付文本存入 Run 记录。Run 创建必须引用 `kind=local` 的健康 Provider。
-- v0.2-C 产出与验收闭环已交付（2026-09-12）：Run 成功后经既有 manual-review 提交链创建 text Artifact（producer=agent Actor，origin 保持 manual），任务进入 `waiting_review`，owner 验收/返工是唯一完成路径；领域前置不满足时追加 `agent_run_submission_skipped` 事件。重试对任意终态开放。
-- Run 的 Web 区块（任务详情内启动/列表/取消/重试/查看产出）与在线模型支持已交付；macOS/Linux 矩阵验证与 external 导入仍未实现。Agent 必须复用已交付的 Submission/Artifact 验收领域命令，不能另建绕过 owner 的完成路径。
-- Tauri 当前只管理 Go Sidecar；Agent 子进程由 Sidecar 的 kill-on-close Job Object 直接治理，Sidecar 退出即回收整棵执行树。
-
-因此，界面在没有已注册且健康的本地 Adapter 时必须隐藏或禁用 agent 分派，不能用占位 Actor 暗示功能已经可用。
-
-## 目标功能
-
-### Adapter 注册与健康
-
-- 当前只登记代码内置清单；用户文件选择和外部可执行文件注册必须在独立威胁评审后再决定，不属于 v0.2-A。
-- 保存稳定 adapter_key、展示名称、版本、输入输出协议、声明能力和平台要求。
-- 支持启用、停用、手动健康检查和运行前强制复检。
-- Adapter 可先注册供诊断；只有健康、manifest 兼容且平台隔离条件满足时，才能创建可执行 agent Actor 和接受分派。
-- 敏感凭据不得写入 manifest、普通 SQLite、日志、命令行或前端状态。
-
-### 能力与资源授权
-
-- 为每类 Adapter 定义可枚举的能力白名单，不接受任意命令字符串。
-- 每次 Run 固化脱敏输入快照、允许读取的资源 ID、允许写入的受控 Artifact 目录和资源上限。
-- Sidecar 为单次 Run 发放短时、不可复用、可撤销的能力令牌，或通过受控进程管道传输等价能力。
-- Agent Runtime 不开放 HTTP；每个 Run 使用 Sidecar 创建的短生命周期子进程和匿名 stdin/stdout 管道，普通业务 API 不接受进程内 nonce，Agent 也不能获得 WebView 令牌。
-- 路径授权使用规范化后的受控引用，防止路径穿越、符号链接逃逸和越权读取。
-
-### Run 生命周期
-
-- owner 从任务或收件箱详情启动一次 Run。
-- Sidecar 原子校验任务状态、当前活动 Assignment、Agent Actor、Adapter 健康和能力范围。
-- 支持排队、运行、超时、用户取消、结构化失败和应用异常后的 interrupted 恢复。
-- 重试永远创建新的 Run，并通过 parent_run_id 与 attempt 保留完整历史。
-- 对可能产生副作用的步骤不做静默自动重试。
-
-### 产出与验收
-
-- 文本、结构化结果和文件都登记为 Task Artifact。
-- 文件先写入应用控制的临时位置，校验大小、类型和 SHA-256 后再原子移入受控目录。
-- 产出记录实际 produced_by_actor_id、录入者、Agent Run、任务和创建时间。
-- Run succeeded 后提交产出并把任务推进到 waiting_review。
-- owner 可以接受、要求返工、阻塞或取消；返工后再次执行会产生新的 Run 和新产出，旧记录不可覆盖。
-- 只有项目交付类产出或 owner 显式标记 requires_followup 的产出可以幂等触发新的收件箱项，避免递归制造工单。
-
-### 可观测性与恢复
-
-- Run 详情显示输入摘要、能力范围、时间、输出清单、结构化错误和审计时间线。
-- Sidecar 或应用重启后，将遗留 running Run 标记为 interrupted，不得静默判定成功。
-- 支持取消时的宽限期和精确子进程终止，退出后不得遗留 Agent 进程。
-- 日志只记录 request ID、Run ID、阶段、耗时和错误码，不记录令牌、完整任务正文或产出正文。
+- schema 071 新增 `agent_runs` 与 `actors.agent_adapter_id`。Sidecar 提供创建、列表、详情、取消和终态重试 API；先保存 queued，再由受控子进程执行。
+- 内置执行器经 Sidecar 保留子命令 `agent-executor` 自再执行；`opc-agent-pipe-v1` 使用 4 字节大端长度前缀 JSON，1 MiB 帧、64 KiB 结果上限，校验身份/nonce/未知字段/尾随内容。父进程总时限 10 分钟；Windows Job Object 管理子树回收。
+- 当前模型协议是非流式 OpenAI 兼容 `/chat/completions`，不能将 AI 助手的 Anthropic 支持视为此执行器也已支持。本地端点要求 HTTP 回环 IP 字面量；在线模型凭据仅在父子进程内存管道传递，禁止重定向，不进入 Run 快照或前端。
+- 任务详情已提供 ready/healthy 且 openai_chat 的模型选择、Run 列表、活动时每 2 秒轮询、取消、终态重试（含 succeeded，另受当前任务状态与分派前置约束）、展开文本及 HTML/Markdown 下载。下载不会执行产出，也不是文件流执行能力。
+- 任务详情 Agent 区提供“查看执行过程”，启动成功后自动打开右侧抽屉。抽屉复用现有 Run 列表数据，仅有 queued/running Run 时每 2 秒轮询；可切换历史 Run，查看状态、时间、模型、错误码和最终文本，并提供打开任务和下载。关闭抽屉不取消执行、不清除历史；抽屉不新增启动、重试或取消控制，也不展示模型内部思考、Token 流、工具调用或伪进度。
+- 成功 Run 的文本保留在记录中。Task 为 manual review、todo/in_progress 且负责人/owner reviewer 等条件满足时，Sidecar 创建 pending_review Submission + text Artifact，并更新 Task 为 waiting_review；producer 为 agent Actor，recorder 为 system，Submission origin 仍为 manual。
+- 提交前置不满足时，Run 产出保留，追加 `agent_run_submission_skipped` 原因事件，不能把“执行成功”显示成“已经提交/已经完成”。成功提交以 `agent_run_output_submitted` 关联 Submission/Artifact。
+- 重试创建新 Run，记录 parent_run_id/attempt 并复用原快照，不覆盖历史；不是自动续跑或自动重新读取全部任务事实。Sidecar 启动把遗留 queued/running 标为 interrupted。
+- 普通备份包含 SQLite 中的 Adapter、Actor、Run、文本产出和事件；便携业务导出不包含 `agent_runs`，Adapter 导入仍按平台与代码清单重新门控。
 
 ## 关键用户流程
 
-### 首次配置本地 Agent
+### 首次配置与显式启停
 
-1. owner 在设置的“本地 Agent”页登记代码所有的内置诊断适配器。
-2. 应用展示稳定 manifest、协议、请求能力和三个安全闸门；请求不携带文件路径或命令。
-3. owner 点击检查，Sidecar 以 `If-Match` 重新校验代码清单并保存脱敏诊断。
-4. 当前平台隔离尚未验证，结果固定为 blocked，Adapter 保持 disabled，不创建 agent Actor 或 Run。
-5. 未来只有平台隔离全部验证后，才进入创建 agent Actor、运行前复检和 Run 流程；历史健康结果不能替代当前保证。
+1. 打开设置的“本地 Agent”，读取真实 Adapter；空状态可明确登记受控预设。
+2. 阅读能力与平台状态，需要时点击“检查运行条件”或“重新检查”；结果显示服务端实际健康/隔离/就绪原因。
+3. 只有服务端认为可启用时才能明确点击“启用适配器”。成功响应确认 enabled，并由服务端事务建立匹配 Actor。
+4. 若启用失败或发生版本冲突，界面保留错误并重读当前事实；不会把失败视作成功，不补 seed、不自动调用模型。
+5. 已启用时可以明确停用；停用关闭新的分派/启动条件，但不删除历史 Actor、Assignment 或 Run。已有 Run 的取消仍是独立动作。
 
-### 从任务启动执行
+### 从任务启动与验收
 
-1. owner 为任务设置完成条件和 manual 验收策略。
-2. owner 将任务分派给一个健康的 agent Actor。
-3. owner 点击“启动 Agent”，确认本次输入、授权资源和允许的输出范围。
-4. Sidecar 创建 queued Run，校验后启动本地执行器并进入 running。
-5. 执行器提交产出；Sidecar 校验、登记 Artifact，并将 Run 标记为 succeeded。
-6. 任务进入 waiting_review，owner 查看差异和证据。
-7. owner 验收通过后任务进入 done；若要求返工，则任务回到 in_progress，下一次执行创建新 Run。
+1. 任务详情先读取 Adapter/Actor/Assignment。初始化未完成时显示原因和“设置 → 本地 Agent”路径文字指引，禁止先发送 Run 请求再补救；不直接跳转关闭尚未保存的任务草稿。
+2. 用户选择可用模型。没有负责人时显示将分派的真实 Agent；已有其他负责人则引导显式改派，不自动替换。
+3. 用户点击启动；若需首次分派，通过既有 Task `If-Match`/Assignment hook 完成，再请求创建 Run。
+4. 启动成功后自动打开右侧执行过程抽屉，也可由“查看执行过程”打开并切换历史 Run。抽屉展示状态、错误和最终文本，关闭只改变界面；启动、取消与重试仍在原任务 Agent 区操作。
+5. 成功后仅在 manual-review 提交条件满足时进入 waiting_review。owner 在既有产出/验收区接受或返工；不满足条件时仅有 Run 文本，不产生已验收任务。
 
-### 失败、取消与恢复
+## 数据与 API
 
-1. 超时或运行错误将 Run 标记为 failed，并保留结构化错误。
-2. 用户取消时先请求受控终止，超过宽限期后终止精确子进程，Run 标记为 cancelled。
-3. 应用异常退出后，下次启动把遗留 running Run 标记为 interrupted。
-4. owner 查看已有产出和可能的副作用后决定是否重试；重试不覆盖原记录。
+| 对象                              | 当前事实                                                                           |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| agent_adapters                    | schema 034；代码所有身份、版本化启停、诊断与执行门控                               |
+| actors                            | schema 071 增加可空 agent_adapter_id；agent 必须关联 Adapter，普通 Actor 保持 NULL |
+| task_assignments                  | 现有 Task 领域分派与历史；Task 版本保护并发                                        |
+| agent_runs                        | schema 071；任务、分派、Actor、Adapter、输入快照、结果、错误与重试链               |
+| task_submissions / task_artifacts | 现有 manual-review 和文本产出事实；不另建自动完成路径                              |
+| workflow_events                   | Adapter/Run 动作和成功提交或跳过原因的追加式审计                                   |
 
-## 数据/API/状态与事件
+本次只给 Actor 读模型增加可空 `agent_adapter_id`，不新增数据库迁移、不改变 API v1 或 schema 71。非 agent 返回 null；兼容旧响应缺失字段时前端规范化为 null，因缺少关联无法证实可执行，必须关闭启动而非猜测。
 
-### 规划数据
+| 方法与路径                              | 用途                                            |
+| --------------------------------------- | ----------------------------------------------- |
+| GET / POST /api/v1/agent-adapters       | 查询、幂等登记代码内置 Adapter                  |
+| GET /api/v1/agent-adapters/:id          | 详情、ETag 与实际健康/就绪状态                  |
+| POST /api/v1/agent-adapters/:id/check   | If-Match 诊断；不自动启用                       |
+| POST /api/v1/agent-adapters/:id/enable  | 版本化、健康和 Actor 一致性门控的显式启用       |
+| POST /api/v1/agent-adapters/:id/disable | 版本化显式停用，保留历史                        |
+| GET /api/v1/actors                      | 查询真实 Actor 及可空 agent_adapter_id          |
+| POST /api/v1/tasks/:id/assignments      | 复用 Task If-Match 创建分派；不是直接数据库补行 |
+| GET / POST /api/v1/tasks/:id/agent-runs | 查询历史或创建 Run；创建支持幂等重放            |
+| GET /api/v1/agent-runs/:id              | Run 状态、文本和稳定错误码                      |
+| POST /api/v1/agent-runs/:id/cancel      | 请求取消；不是任务取消命令                      |
+| POST /api/v1/agent-runs/:id/retry       | 基于终态新建 attempt；不覆盖历史                |
+| POST /api/v1/tasks/:id/review           | owner 接受或要求返工                            |
 
-| 对象             | 关键事实                                                                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| actors           | type=agent、状态、Adapter 引用和能力摘要；历史引用后只能停用                                                                                                     |
-| agent_adapters   | **schema v34 已实现**：稳定代码所有标识、内部执行器引用、manifest、启停、隔离、就绪和最近脱敏诊断；当前不保存路径或凭据                                          |
-| task_assignments | Task 当前 assignee；启动 Run 时必须指向同一个 agent Actor                                                                                                        |
-| agent_runs       | 一次执行的任务、分派、Agent、输入快照、状态、尝试次数、输出摘要和错误                                                                                            |
-| task_artifacts   | 当前 D2 已有受控文本/文件/链接/结构化产出、相对路径、SHA-256 与 producer/recorder；未来 Run 来源通过新增显式关联或 Workflow Event 表达，不回写已发布的 schema v9 |
-| workflow_events  | 注册、分派、启动、取消、失败、产出、验收和返工的追加式审计                                                                                                       |
+Adapter 与 Assignment 的写入使用各自版本契约，不能宣称所有 Run 命令都已有统一 If-Match/幂等保证。Run schema 定义 queued/running/succeeded/failed/cancelled/interrupted；具体未收口限制见下节。
 
-敏感凭据和单次能力令牌不进入上述表。
+## 后续范围与已知限制
 
-### 当前与规划 API
+- **v0.2-C 后续**：受控文件流、staging/文件哈希、Agent 专属 Inbox 投影及完整产出联动；当前只自动提交 text Artifact，不把下载按钮算作文件执行器。
+- **v0.2-D**：macOS/Linux 生命周期矩阵、external 沙箱/禁网/导入、跨平台发布验收。未验证平台保持关闭，不以 Windows 证据代替。
+- **当前执行器待修复**：CompletionCriteria 已在输入 frame 中但尚未由 buildPrompt 拼入；超长文本目前先截断，不能宣称无损或超限必失败；running 取消的最终状态仍可能记录 failed/AGENT_RUN_CANCELLED。初始化修复不等于这些问题已解决。
+- 本轮不在用户开发库创建 Run 或手工补数据，不调用真实模型；运行链路使用隔离夹具验证。隔离 API/组件测试不替代真实模型质量、网络故障和原生界面验收。
 
-| 方法与路径                              | 用途                                                  |
-| --------------------------------------- | ----------------------------------------------------- |
-| GET / POST /api/v1/agent-adapters       | **已实现**：查询或幂等登记代码内置 Adapter            |
-| GET /api/v1/agent-adapters/:id          | **已实现**：详情与数值 ETag，不返回内部执行器引用     |
-| POST /api/v1/agent-adapters/:id/check   | **已实现**：版本化诊断；当前固定返回隔离未验证        |
-| POST /api/v1/agent-adapters/:id/enable  | **已实现拒绝路径**：未就绪时返回 409，不改变事实      |
-| POST /api/v1/agent-adapters/:id/disable | **已实现**：版本化停用；当前 disabled 时稳定返回      |
-| GET / POST /api/v1/tasks/:id/agent-runs | **已实现**：查询历史或由 owner 启动 Run（幂等键重放） |
-| GET /api/v1/agent-runs/:id              | **已实现**：查看 Run、结果与稳定错误码                |
-| POST /api/v1/agent-runs/:id/cancel      | **已实现**：queued 直接取消，running 经取消传播回收   |
-| POST /api/v1/agent-runs/:id/retry       | **已实现**：基于终态 Run 创建新 attempt               |
-| POST /api/v1/tasks/:id/review           | owner 接受产出或要求返工                              |
+## 本次初始化验收口径
 
-Agent Runtime 的传输、令牌撤销、Origin 处理和进程管道协议已由 [ADR-003](../adr/003-local-agent-runtime-security.md) 冻结为单次匿名管道方案；实现仍必须通过平台隔离、禁网、进程树清理和协议验收，不能仅凭 ADR 标记为可执行。
+- 未登记、未启用、不健康、未就绪、缺 Actor、关联不一致和加载失败均禁止启动；只提供明确设置引导。
+- 打开页面、健康检查、读取旧 Actor 响应均不隐式启用、分派或调用模型。
+- 启用/停用成功来自真实响应；并发旧版本拒绝，Actor 建立失败时 Adapter 更新一并回滚，身份冲突不覆盖。
+- 无负责人时明确告知并通过领域 hook 分派；已有他人负责人不静默改派，版本冲突不覆盖，失败可恢复。
+- 成功只表示 Run 产出；提交与 owner 验收分别取服务端事实。外部执行器与未验证平台不因 UI 修复放宽安全。
+- 本次测试记录以最终 API/组件门禁结果为准，不沿用历史矩阵冒充本轮真机测试。
 
-### 状态与事件
+## 相关文档与代码
 
-Agent Run 状态为：
-
-| 状态        | 含义                       | 允许的后续                                |
-| ----------- | -------------------------- | ----------------------------------------- |
-| queued      | 已创建，等待最终校验或资源 | running、failed、cancelled                |
-| running     | 本地执行器正在运行         | succeeded、failed、cancelled、interrupted |
-| succeeded   | 输出已校验并登记           | 不直接改变为任务 done                     |
-| failed      | 执行失败                   | owner 可创建新重试                        |
-| cancelled   | owner 已取消               | owner 可按需创建新重试                    |
-| interrupted | 进程或应用异常中断         | owner 检查后决定是否重试                  |
-
-当前已写 `agent_adapter_registered / agent_adapter_health_checked`。未来关键 Workflow Event 还至少包括 agent_adapter_disabled、agent_assigned、agent_run_queued、agent_run_started、agent_run_succeeded、agent_run_failed、agent_run_cancelled、agent_run_interrupted、task_output_submitted、task_review_accepted 和 task_rework_requested。
-
-所有创建、取消、重试和验收写入都使用幂等键与 expected_version；版本冲突返回 409，不覆盖较新的分派或验收。
-
-## 与其他模块协作
-
-- [任务](tasks.md)：Task 是执行目标和完成状态的唯一事实源；Agent 不能直接修改为 done。
-- [Actor 与分派](actors.md)：只有当前活动的 agent Assignment 才能启动 Run；改派后旧 Agent 不再获得新能力。
-- [收件箱](inbox.md)：展示 Run 进度、失败与待验收；已有活动 Inbox Item 时只更新时间线，不重复创建验收项。
-- [项目](projects.md)：项目交付类 Artifact 可触发后续拆分工单，但必须使用 source_event_key 去重。
-- [设置](settings.md)：维护 Adapter、Agent Actor、能力范围、健康和停用；敏感配置走操作系统安全存储。
-- [数据管理](data-management.md)：备份必须覆盖 Adapter 注册、Run 元数据、Artifact 和审计；恢复后重新校验执行文件与平台能力。
-- [桌面平台](desktop-platform.md)：提供文件选择、受控进程、沙箱、取消、退出清理和本地日志能力。
-- 通知：只发送应用内或原生本地状态提醒，不向外部人员或服务发送任务。
-
-## 分阶段实施
-
-### 前置条件：v0.1 人工编排闭环
-
-- 在已交付 Task 六状态/乐观锁之上完成 Artifact、manual 提交验收与返工。
-- 复用已完成的 Actor 与 Assignment；继续完成 Artifact、受控 Workflow Event 时间线与收件箱人工跟进。
-- 完成基础备份恢复、日志与 Sidecar 故障恢复。
-
-### v0.2-A：安全与 Adapter 契约
-
-- [x] 编写 Adapter、专用传输、单次管道能力、路径授权、沙箱和网络阻断 ADR。
-- [x] 完成 schema v34 Adapter 表、代码所有 manifest、列表/幂等登记/详情/停用/健康诊断和未就绪启用拒绝 API。
-- [x] v0.2-B 首片（ADR-027，2026-09-12）：Windows 生命周期矩阵实测（管道往返、kill-on-close Job Object 子树回收含孙进程、超时/取消）、schema 071 agent_runs、Runner 与单次管道协议、builtin 本地模型文本执行器、agent Actor/Assignment 门控、Run API 与事件、启动 interrupted 恢复。
-- [x] 设置增加本地 Agent 模块，不能验证的隔离能力明确标注并保持执行关闭。
-- [x] Windows：进程树回收（Job Object）与取消/超时已实测；builtin 层网络边界由回环代码校验承担，external 层仍要求 OS 级禁网。
-- [ ] macOS、Linux 生命周期矩阵；external 层沙箱/禁网（AppContainer/namespace）仍全部未验证。
-
-### v0.2-B：Runner 与生命周期
-
-- 实现 Agent Run 迁移、状态命令、任务 Assignment 校验和幂等。
-- 实现受控子进程启动、输入快照、超时、取消、精确清理和 interrupted 恢复。
-- 增加 Run 列表、详情、错误和健康不可用状态。
-
-### v0.2-C：产出、验收与收件箱
-
-- 接入受控 Artifact 目录、SHA-256、大小和路径校验。
-- Run 成功后统一走 submit-output 与 waiting_review。
-- 接通 owner 验收、返工、失败提醒、项目后续工单和完整时间线。
-
-### v0.2-D：跨平台硬化
-
-- 在 Windows、macOS、Linux 分别验证权限、禁网边界、取消、崩溃和孤儿进程。
-- 补充资源上限、诊断日志、备份恢复和升级兼容测试。
-- 只有全部发布闸门通过后，才在正式界面启用可执行 Agent。
-
-## 验收标准
-
-- 断开外部网络后，已配置的本地 Adapter 仍能完成允许范围内的执行。
-- 未注册、不健康、已停用或隔离条件不满足的 Adapter 不能被分派或启动。
-- Agent 令牌不能调用普通业务 API，WebView 令牌不能冒充 Agent Runtime。
-- Agent 无法直接访问 SQLite、未授权目录、任意 Shell 或未声明能力。
-- 启动 Run 时 Assignment、Actor 和 Adapter 不一致会被拒绝。
-- succeeded Run 只把任务推进到 waiting_review；未经 owner 验收不能进入 done。
-- 返工和重试创建新 Run，历史输入、输出、错误和 Artifact 完整保留。
-- 取消、超时、Sidecar 崩溃和应用退出均不遗留运行进程；遗留记录正确标记为 interrupted。
-- 文件产出保存在受控目录，路径、大小、类型和 SHA-256 可验证。
-- 幂等重放不重复启动执行或创建产出；并发旧写入返回 409。
-- 日志、数据库、进程参数和前端状态中不出现会话令牌或单次能力令牌。
-- 若某平台无法强制禁网或沙箱隔离，可保留禁用的 Adapter 诊断信息，但正式 Agent 执行、分派和启动入口保持关闭。
-
-## 相关代码/PRD链接
-
-- [PRD：收件箱与本地工作编排中心](../opc-workspace-PRD.md#56-收件箱与本地工作编排中心)
-- [PRD：本地工作编排数据表](../opc-workspace-PRD.md#本地工作编排数据表taskactord2-已实现inboxagent-仍规划)
-- [PRD：T-19 本地 Agent 执行](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)
-- [PRD：API 约定](../opc-workspace-PRD.md#c-api-约定)
-- [当前 Sidecar 路由](../../services/sidecar/internal/api/router.go)
-- [schema v34 Agent Adapter 迁移](../../services/sidecar/internal/database/migrations/034_agent_adapters.sql)
-- [Agent Adapter API](../../services/sidecar/internal/api/agent_adapters.go)
-- [Agent Adapter API 测试](../../services/sidecar/internal/api/agent_adapters_test.go)
-- [本地 Agent 设置模块](../../apps/web/src/components/AgentAdapterSettings.tsx)
-- [本地 Agent 设置测试](../../apps/web/src/components/AgentAdapterSettings.test.tsx)
-- [当前 WebView 鉴权与 Origin 中间件](../../services/sidecar/internal/api/middleware.go)
-- [当前 Tauri Sidecar 生命周期](../../apps/desktop/src-tauri/src/sidecar.rs)
-- [ADR-003：本地 Agent Runtime 安全与传输边界](../adr/003-local-agent-runtime-security.md)
+- [PRD T-19](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)、[功能架构](../functional-architecture.md#67-本地-agent-执行v02)
+- [Actor 与分派](actors.md)、[任务](tasks.md)、[设置](settings.md)、[数据管理](data-management.md)
+- [ADR-003](../adr/003-local-agent-runtime-security.md)、[ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)
+- [Adapter API](../../services/sidecar/internal/api/agent_adapters.go)、[Actor API](../../services/sidecar/internal/api/actors.go)、[Run API](../../services/sidecar/internal/api/agent_runs.go)
+- [Assignment API](../../services/sidecar/internal/api/assignments.go)、[Runner](../../services/sidecar/internal/agentrunner/runner.go)、[执行器](../../services/sidecar/internal/agentexec/executor.go)
+- [Adapter 设置](../../apps/web/src/components/AgentAdapterSettings.tsx)、[任务 Run 区](../../apps/web/src/components/TaskAgentRunsSection.tsx)
+- [schema 034](../../services/sidecar/internal/database/migrations/034_agent_adapters.sql)、[schema 071](../../services/sidecar/internal/database/migrations/071_agent_runs.sql)

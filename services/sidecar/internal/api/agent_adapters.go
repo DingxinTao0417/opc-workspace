@@ -270,32 +270,51 @@ func (a *API) enableAgentAdapter(c *gin.Context) {
 	if !ok {
 		return
 	}
-	row, err := loadAgentAdapter(a.db.WithContext(c.Request.Context()), id)
-	if err != nil {
-		writeAgentAdapterLoadError(c, err)
-		return
-	}
-	if row.Version != expectedVersion {
-		writeProjectRequestError(c, taskVersionConflict())
-		return
-	}
-	if !row.ExecutionReady {
-		writeError(c, http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY", "Platform isolation, network blocking, and process-tree cleanup must be verified before this Agent Adapter can be enabled")
-		return
-	}
-	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	var response agentAdapterResponse
-	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&models.AgentAdapter{}).
-			Where("id = ? AND version = ? AND status = 'disabled' AND execution_ready = 1", row.ID, row.Version).
-			Updates(map[string]any{"status": "enabled", "version": row.Version + 1, "updated_at": now}).Error; err != nil {
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		row, err := loadAgentAdapter(tx, id)
+		if err != nil {
 			return err
 		}
-		var actorCount int64
-		if err := tx.Model(&models.Actor{}).Where("id = ?", agentAdapterBuiltinActorID).Count(&actorCount).Error; err != nil {
+		if row.Version != expectedVersion {
+			return taskVersionConflict()
+		}
+		if err := verifyAgentAdapterIdentity(row); err != nil {
 			return err
 		}
-		if actorCount == 0 {
+		platformReady, _ := builtinExecutionReady()
+		if !platformReady || !row.ExecutionReady || row.HealthStatus != "healthy" || row.IsolationStatus != "verified" {
+			return newProjectRequestError(http.StatusConflict, "AGENT_ADAPTER_NOT_EXECUTION_READY", "Platform readiness and a healthy, verified Agent Adapter are required before enabling execution")
+		}
+		var actor models.Actor
+		actorErr := tx.Where("id = ?", agentAdapterBuiltinActorID).First(&actor).Error
+		actorMissing := errors.Is(actorErr, gorm.ErrRecordNotFound)
+		if actorErr != nil && !actorMissing {
+			return actorErr
+		}
+		if (!actorMissing && (actor.Type != "agent" || actor.Status != "active" || actor.AgentAdapterID == nil || *actor.AgentAdapterID != row.ID)) ||
+			(actorMissing && row.Status == "enabled") {
+			return newProjectRequestError(http.StatusConflict, "AGENT_ADAPTER_ACTOR_CONFLICT", "The Agent Adapter actor is missing or does not match an active agent linked to this adapter")
+		}
+		if row.Status == "enabled" {
+			response, err = agentAdapterResponseFromModel(row)
+			return err
+		}
+		previous, err := agentAdapterResponseFromModel(row)
+		if err != nil {
+			return err
+		}
+		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		result := tx.Model(&models.AgentAdapter{}).
+			Where("id = ? AND version = ? AND status = 'disabled' AND execution_ready = 1", row.ID, expectedVersion).
+			Updates(map[string]any{"status": "enabled", "version": gorm.Expr("version + 1"), "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return taskVersionConflict()
+		}
+		if actorMissing {
 			adapterID := row.ID
 			if err := tx.Create(&models.Actor{
 				ID: agentAdapterBuiltinActorID, Type: "agent",
@@ -305,13 +324,6 @@ func (a *API) enableAgentAdapter(c *gin.Context) {
 				return err
 			}
 		}
-		response, err = agentAdapterResponseFromModel(row)
-		if err != nil {
-			return err
-		}
-		if err := recordAgentAdapterWorkflowEvent(tx, "agent_adapter_enabled", row.ID, nil, response, requestIDFromContext(c), now); err != nil {
-			return err
-		}
 		reloaded, err := loadAgentAdapter(tx, row.ID)
 		if err != nil {
 			return err
@@ -320,10 +332,10 @@ func (a *API) enableAgentAdapter(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		return nil
+		return recordAgentAdapterWorkflowEvent(tx, "agent_adapter_enabled", row.ID, &previous, response, requestIDFromContext(c), now)
 	})
 	if err != nil {
-		if writeProjectRequestError(c, err) {
+		if writeAgentAdapterRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)

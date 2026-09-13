@@ -63,16 +63,17 @@ type updateActorRequest struct {
 }
 
 type actorResponse struct {
-	ID          string          `json:"id"`
-	Type        string          `json:"type"`
-	DisplayName string          `json:"display_name"`
-	Status      string          `json:"status"`
-	IsBuiltin   bool            `json:"is_builtin"`
-	Notes       string          `json:"notes"`
-	Metadata    json.RawMessage `json:"metadata"`
-	Version     int64           `json:"version"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	ID             string          `json:"id"`
+	Type           string          `json:"type"`
+	DisplayName    string          `json:"display_name"`
+	Status         string          `json:"status"`
+	IsBuiltin      bool            `json:"is_builtin"`
+	Notes          string          `json:"notes"`
+	Metadata       json.RawMessage `json:"metadata"`
+	AgentAdapterID *string         `json:"agent_adapter_id"`
+	Version        int64           `json:"version"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
 }
 
 func (a *API) listActors(c *gin.Context) {
@@ -716,7 +717,7 @@ func actorResponseFromModel(actor models.Actor) (actorResponse, error) {
 	return actorResponse{
 		ID: actor.ID, Type: actor.Type, DisplayName: actor.DisplayName,
 		Status: actor.Status, IsBuiltin: actor.IsBuiltin, Notes: actor.Notes,
-		Metadata: json.RawMessage(metadataJSON), Version: actor.Version,
+		Metadata: json.RawMessage(metadataJSON), AgentAdapterID: actor.AgentAdapterID, Version: actor.Version,
 		CreatedAt: normalizeTimestamp(actor.CreatedAt), UpdatedAt: normalizeTimestamp(actor.UpdatedAt),
 	}, nil
 }

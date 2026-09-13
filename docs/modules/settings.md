@@ -1,6 +1,6 @@
 # 设置模块
 
-> 文档状态：部分实现；当前 schema v44。schema v42 将 `app_settings` 契约升为 v2 并增加关闭到托盘，schema v43 加法新增无路径容量历史，schema v44 新增默认关闭的计划备份策略。设置持久化、受控头像、低空间阈值/即时检查/7 天趋势、计划备份与自动包保留、Actor、自动化、Adapter 诊断、备份/导入导出、同 schema 零主键冲突追加和脱敏运行诊断均已交付；实际冲突合并/UUID 重映射、跨 schema 升级、启动前备份选择、外部备份目录和可执行 Agent Runner 仍是后续范围。
+> 文档状态：部分实现；当前 schema 71。schema v42 将 `app_settings` 契约升为 v2，v43/v44 引入容量历史与计划备份；schema 071 的 Agent 关联不改变设置值 schema。本地 Agent 已有 Windows 内置 Runner，本次设置只补真实健康展示与显式启停，不自动创建 Run。其他设置功能与限制见各节。
 
 ## 定位与边界
 
@@ -27,7 +27,7 @@
 - 专注：时长、休息时长、循环次数、自动开始休息/专注和结束提示音。
 - 人员与责任：从真实 `/api/v1/actors` 读取固定 owner/system 与 person，支持新建/编辑/启用/停用 person，并可单独编辑 owner 展示名称。该模块每次操作独立保存，不经过设置弹窗的全局保存按钮。
 - 自动化：从真实 `/api/v1/automations` 读取五个稳定预设；支持依赖状态、优先级或当地时间/IANA 时区即时服务端预览、规则配置独立保存、启停、下一次运行、最近 Run、空/加载/错误和失败手动重试。发票/Agent 预设明确 unavailable；该模块使用独立规则版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
-- 本地 Agent：从真实 `/api/v1/agent-adapters` 读取代码所有清单；支持空状态幂等登记、能力/安全闸门、手动诊断、加载/错误重试和未就绪启用禁用。当前诊断固定为隔离未验证，不启动进程、不创建 agent Actor/Assignment/Run；该模块使用 Adapter 自身版本，不经过 `app_settings` 或设置弹窗全局保存按钮。
+- 本地 Agent：从真实 `/api/v1/agent-adapters` 读取代码所有清单，支持登记、实际健康/安全闸门、诊断、显式启用与停用、加载和错误重试。Windows builtin 依据 ADR-027 矩阵可返回 healthy/verified/ready；不把健康结果固定显示为隔离未验证。登记/诊断不自动启用，启用事务才幂等建立关联 agent Actor；打开设置不分派、不创建 Run、不调用模型。该模块使用 Adapter 自身 `If-Match`，不经过 `app_settings` 或全局保存。
 - 数据与备份：可预览并保存 1–100 GiB 低空间提醒阈值，默认 1 GiB、下一轮扫描生效；可手动刷新数据库/受控文件/备份三个逻辑位置的容量，展示健康、低空间和局部不可用状态但不展示路径或探测错误。可即时预览并版本化保存每日时间、IANA 时区和 1–365 份自动保留数；取消恢复 committed，默认关闭。从真实 `/api/v1/backups` 读取本机备份并完成创建、计划、校验、演练、恢复、删除；手工/计划创建和导入/恢复内部回滚包在写入备份 staging 前通过仅探测 backup root 的容量准入。计划保留只清理超限 scheduled 包，不清理手工/回滚/pending restore。启动恢复诊断显示待重启、本次已应用、清理残留、失败隔离或无效记录。可分别下载或导入版本化业务 JSON 与包含 manifest/活动受控文件的 ZIP；当前 schema 空目标或零主键冲突目标可安全应用。
 - 关于：按需读取真实 `/health`，展示 Sidecar、应用名/运行版本/commit、API 版本、schema 与 SQLite 可用性；具备加载、错误、request ID、重试、手动重新检查和最近成功结果降级展示。该只读模块不显示保存/恢复默认操作。
 - 运行诊断：联合 `/health`、桌面 `sidecar_status` 与 `desktop_capabilities` 展示浏览器开发/Tauri 环境、生命周期、app/API/schema、版本兼容和托盘运行时可用性；支持重新检查、错误重试、复制脱敏摘要和下载诊断包 v1。桌面返回先经白名单规范化，能力只接受 `available / unavailable / not_implemented`，`sessionToken`、`baseUrl`、原始 `message` 和底层平台错误不进入诊断对象、UI 或 ZIP；能力读取失败不阻断生命周期诊断。
@@ -56,7 +56,7 @@
 - 五个非敏感设置模块和工作区头像引用均以 SQLite/受控文件为事实源；Blob URL 只用于当前 WebView 展示，不是持久事实。
 - 版本冲突会刷新 Query 并保留当前 draft，要求用户基于最新值再次确认；当前没有字段级三方合并。
 - 默认首页草稿会立即导航；取消虽然返回原路由，但预览与运行状态耦合较紧。
-- 已有 Actor、自动化、Agent Adapter 诊断、低空间阈值、备份/导入导出、同 schema 零主键冲突追加、只读导入冲突清单、脱敏诊断和数据库打开前白名单启动进度；但仍没有通知、主键冲突实际合并/UUID 重映射、跨 schema 升级、快捷键自定义、启动前备份选择或可执行 Agent Runner。Adapter 设置只登记代码清单并显示 blocked，不等于 agent 身份、分派或执行能力。
+- 已有 Actor、自动化、Agent Adapter 设置、低空间阈值、备份/导入导出、同 schema 零主键冲突追加、只读导入冲突清单、脱敏诊断和数据库打开前白名单启动进度；通知、主键冲突实际合并/UUID 重映射、快捷键自定义和启动前备份选择仍有后续工作。Agent 的登记、健康、启用、Actor 关联和任务分派是独立事实；缺少任何前置条件不能以设置成功替代可执行。
 - 通用 Modal 已支持 Escape、背景关闭、初始聚焦、Tab 焦点圈闭和关闭后焦点恢复；关闭到托盘开关已在真实浏览器验证预览、取消恢复与保存刷新持久化，完整键盘/焦点、窄屏和桌面 WebView 原生行为仍需专项验收。
 
 ## 目标功能
@@ -88,8 +88,16 @@
 - 明确提示 person 只记录本地责任，不发送任务、不创建账号、不授予访问权限。
 - 客户联系人只有用户显式创建或关联后才成为 person Actor。
 - person 存在活动 Assignment 时，API 与数据库共同拒绝停用并提示先改派；任务详情已提供 Assignment 创建、改派和结束入口。
-- v0.2-A 已增加代码所有 Adapter 登记、能力摘要、健康诊断、启停边界和隔离未验证提示；agent Actor 管理和实际执行仍待 Runner 安全闸门通过后实现。
-- 未注册或不健康的本地执行器不能创建可分派 Agent。
+- v0.2 的本地 Agent 设置显式调用登记、检查、启用和停用 API，展示真实 enabled/disabled 与 healthy/unknown/blocked/unhealthy，不自动跳过不支持平台。后端启用在事务中重验版本、健康、就绪和 Actor 一致性；失败回滚，版本冲突要求基于最新事实重试。
+- 启用成功后任务页仍读取真实 active agent 与 `agent_adapter_id` 关联；缺 Actor、关联不符、未启用或健康不可用时禁用启动并引导回设置。旧 Actor 响应缺字段按 null 处理，不能猜测已初始化。
+- 任务页只有在无 assignee 且已明示“启动会分派”后，才通过既有领域 hook 分派；已有他人负责人不静默改派。启停不删除历史，停止已有 Run 仍需使用 Run 取消入口。
+
+### 首次配置本地 Agent
+
+1. 在“本地 Agent”模块显式登记受控预设，阅读实际平台与健康结果，必要时点击“检查运行条件”或“重新检查”。
+2. 健康和就绪条件满足后，用户点击启用；服务端返回 enabled 并建立真实关联 Actor。失败展示错误并重读，不写本地成功占位。
+3. 返回任务详情，缺少前置条件时仍关闭启动并提供设置引导；不会因为曾启用过就跳过当前状态读取。
+4. 不再使用时可显式停用；保留历史 Actor/Assignment/Run，不将停用等同于取消正在运行的任务。
 
 ### 通知、快捷键与启动
 
@@ -285,9 +293,9 @@
 
 ### v0.2 与 v0.3
 
-- [x] v0.2-A 增加本地 Agent Adapter 登记、健康诊断和能力/闸门设置；Runner 与 agent Actor 分派继续延期。
+- [x] v0.2 已有本地 Agent Adapter、Windows 内置 Runner、agent Actor 与任务 Run；设置显式启停和初始化门控按 [本地 Agent 模块](local-agents.md) 验收，不等于跨平台/external 已开放。
 - v0.3 已增加本地计划与自动包保留；外部目录、高级导入和快捷键自定义仍待。
-- 任何远程 Provider、在线 Updater 或云同步设置都需要新的 ADR 与用户明确授权，不属于当前路线。
+- Agent 可显式使用 ADR-027 已接受的在线 OpenAI 兼容 Provider；在线 Updater、云同步和新增外发能力仍需独立 ADR 与用户明确授权。
 
 ## 验收标准
 
