@@ -570,12 +570,12 @@ describe("AiAssistantPage", () => {
     ];
     renderPage();
 
-    const selector = screen.getByLabelText("移动端选择会话");
+    const selector = screen.getByLabelText("选择会话");
     expect(selector).toHaveValue("session-1");
     fireEvent.change(selector, { target: { value: "session-2" } });
     expect(selector).toHaveValue("session-2");
     expect(screen.getAllByText("另一会话").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "移动端新会话" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
   });
 
   it("shows the suggestion chip for a task block and strips the raw block from display", () => {

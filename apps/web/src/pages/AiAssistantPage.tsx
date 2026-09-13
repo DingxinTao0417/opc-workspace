@@ -768,7 +768,7 @@ export function AiAssistantPage() {
           <header className="ai-chat-header">
             <div className="ai-mobile-session-controls">
               <select
-                aria-label="移动端选择会话"
+                aria-label="选择会话"
                 disabled={chat.isStreaming}
                 onChange={(event) => {
                   setActiveSessionId(event.target.value);
@@ -785,7 +785,7 @@ export function AiAssistantPage() {
                 ))}
               </select>
               <button
-                aria-label="移动端新会话"
+                aria-label="新建会话"
                 disabled={createSession.isPending || chat.isStreaming}
                 onClick={() => {
                   setPendingCard(null);

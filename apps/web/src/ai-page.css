@@ -4,6 +4,9 @@
 .ai-page {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
   height: 100%;
   min-height: 0;
   /* 设计稿：聊天工作区满幅贴边，清零 .page 默认内边距（不用负 margin，负值会被
@@ -92,7 +95,7 @@
   grid-template-columns: 240px minmax(0, 1fr);
   flex: 1;
   min-height: 0;
-  background: var(--bg);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -101,7 +104,7 @@
 }
 
 .ai-session-rail {
-  background: var(--bg-deep);
+  background: var(--panel-2);
   border-right: 1px solid var(--border);
   padding: 12px;
   overflow-y: auto;
@@ -289,7 +292,7 @@
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--panel);
 }
 
 .ai-chat-header {
@@ -304,7 +307,9 @@
   position: relative;
 }
 
-@media (max-width: 560px) {
+/* Once the application shell becomes compact, reserve the full main pane for
+   the conversation instead of leaving the session rail to squeeze it. */
+@media (max-width: 960px) {
   .ai-layout {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -350,7 +355,7 @@
   .ai-chat-header {
     height: auto;
     min-height: 52px;
-    padding: 8px 10px;
+    padding: 8px 14px;
     flex-wrap: wrap;
   }
 
@@ -368,6 +373,12 @@
     right: 0;
     width: 100%;
     max-width: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .ai-chat-header {
+    padding: 8px 10px;
   }
 
   .ai-chat-messages {
@@ -1724,7 +1735,7 @@
   flex-shrink: 0;
   padding: 14px 20px 16px;
   border-top: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--panel-2);
 }
 
 .ai-composer-inner {
