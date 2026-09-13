@@ -82,6 +82,10 @@ Desktop.ini
 # Local AI assistant workspace metadata
 .trae/
 .remember/
+.qoder/
+
+# Local working notes (not part of the repo)
+design-qa.md
 
 # Temporary files
 *.tmp
