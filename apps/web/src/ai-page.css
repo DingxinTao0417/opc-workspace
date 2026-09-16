@@ -2849,3 +2849,102 @@
     max-width: 92%;
   }
 }
+
+/* ===== 金样：对齐 dsh-session-conductor 的克制配色与圆角 =====
+   范围仅限 /ai 页面子树：这里的令牌覆盖不会外泄到 :root，其他页面保持原样。
+   描边与悬停底色改为 currentColor 派生，明暗两套主题共用同一份规则；
+   品牌紫只保留在发送按钮、焦点环与当前会话指示三处。 */
+
+.ai-page {
+  --border: color-mix(in srgb, currentColor 10%, transparent);
+  --border-subtle: color-mix(in srgb, currentColor 6%, transparent);
+  --border-hover: color-mix(in srgb, currentColor 18%, transparent);
+  --surface-soft: color-mix(in srgb, currentColor 3%, transparent);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-card: 16px;
+}
+
+/* 会话栏：主操作改中性描边按钮，选中态不再填充品牌色 */
+.ai-session-rail {
+  padding: 12px 10px;
+}
+
+.ai-new-chat-btn {
+  height: 34px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ai-new-chat-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+}
+
+.ai-session-row[data-active="true"] {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* 消息：用户气泡与助手标识改中性，圆角按 conductor 的阶梯放大 */
+.ai-bubble-user {
+  border: 1px solid var(--border);
+  border-radius: 14px 14px 6px 14px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.ai-avatar,
+.ai-hero-avatar {
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent-text);
+}
+
+.ai-msg-text {
+  line-height: 1.68;
+}
+
+.ai-chat-messages-inner {
+  gap: 20px;
+}
+
+/* 空态建议卡：图标不再染色，只保留中性描边悬停 */
+.ai-suggest-card {
+  border-radius: var(--radius-card);
+  color: var(--text-secondary);
+}
+
+.ai-suggest-card:hover {
+  border-color: var(--border-hover);
+}
+
+/* 输入区：圆角放大，发送键改圆形 */
+.ai-composer-box {
+  border-radius: var(--radius-card);
+}
+
+.ai-composer-tool-row {
+  padding: 0 12px 12px;
+}
+
+.ai-send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+/* 用量浮层：更大圆角，展开态改用中性描边而非品牌色 */
+.ai-usage-summary-panel {
+  border-radius: var(--radius-card);
+}
+
+.ai-usage-summary-toggle:hover,
+.ai-usage-summary-toggle[aria-expanded="true"] {
+  border-color: var(--border-hover);
+}

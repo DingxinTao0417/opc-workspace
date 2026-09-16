@@ -20,12 +20,25 @@ export interface AgentRunDrawerState {
 
 export type RightPanelTab = "summary" | "agents" | "files" | "browser";
 
+export const RIGHT_OVERVIEW_DEFAULT_WIDTH = 280;
+export const RIGHT_OVERVIEW_MIN_WIDTH = 240;
+export const RIGHT_OVERVIEW_MAX_WIDTH = 480;
+
+function clampRightOverviewWidth(width: number) {
+  if (!Number.isFinite(width)) return RIGHT_OVERVIEW_DEFAULT_WIDTH;
+  return Math.min(
+    RIGHT_OVERVIEW_MAX_WIDTH,
+    Math.max(RIGHT_OVERVIEW_MIN_WIDTH, Math.round(width)),
+  );
+}
+
 interface UiState {
   commandPaletteOpen: boolean;
   newTaskOpen: boolean;
   newTaskProjectId: string | null;
   sidebarCollapsed: boolean;
   rightOverviewCollapsed: boolean;
+  rightOverviewWidth: number;
   rightPanelTab: RightPanelTab;
   settingsOpen: boolean;
   settingsModule: SettingsModule;
@@ -36,6 +49,7 @@ interface UiState {
   openNewTaskForProject: (projectId: string) => void;
   toggleSidebarCollapsed: () => void;
   toggleRightOverviewCollapsed: () => void;
+  setRightOverviewWidth: (width: number) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
   setSettingsOpen: (open: boolean, module?: SettingsModule) => void;
   setTaskDetailId: (id: string | null) => void;
@@ -49,6 +63,7 @@ export const useUiStore = create<UiState>((set) => ({
   newTaskProjectId: null,
   sidebarCollapsed: false,
   rightOverviewCollapsed: false,
+  rightOverviewWidth: RIGHT_OVERVIEW_DEFAULT_WIDTH,
   rightPanelTab: "summary",
   settingsOpen: false,
   settingsModule: "general",
@@ -68,6 +83,8 @@ export const useUiStore = create<UiState>((set) => ({
     set((state) => ({
       rightOverviewCollapsed: !state.rightOverviewCollapsed,
     })),
+  setRightOverviewWidth: (rightOverviewWidth) =>
+    set({ rightOverviewWidth: clampRightOverviewWidth(rightOverviewWidth) }),
   setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
   setSettingsOpen: (settingsOpen, settingsModule = "general") =>
     set({ settingsOpen, settingsModule }),

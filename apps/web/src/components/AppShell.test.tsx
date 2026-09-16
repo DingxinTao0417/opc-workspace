@@ -7,6 +7,8 @@ const state = vi.hoisted(() => ({
   sidebarCollapsed: false,
   rightOverviewCollapsed: false,
   showRightOverview: true,
+  rightOverviewWidth: 280,
+  setRightOverviewWidth: vi.fn(),
   toggleRightOverviewCollapsed: vi.fn(),
 }));
 
@@ -21,10 +23,15 @@ vi.mock("../store/settings", () => ({
 }));
 
 vi.mock("../store/ui", () => ({
+  RIGHT_OVERVIEW_DEFAULT_WIDTH: 280,
+  RIGHT_OVERVIEW_MAX_WIDTH: 480,
+  RIGHT_OVERVIEW_MIN_WIDTH: 240,
   useUiStore: (selector: (value: unknown) => unknown) =>
     selector({
       sidebarCollapsed: state.sidebarCollapsed,
       rightOverviewCollapsed: state.rightOverviewCollapsed,
+      rightOverviewWidth: state.rightOverviewWidth,
+      setRightOverviewWidth: state.setRightOverviewWidth,
       toggleRightOverviewCollapsed: state.toggleRightOverviewCollapsed,
     }),
 }));
@@ -73,6 +80,8 @@ describe("AppShell", () => {
     state.sidebarCollapsed = false;
     state.rightOverviewCollapsed = false;
     state.showRightOverview = true;
+    state.rightOverviewWidth = 280;
+    state.setRightOverviewWidth.mockReset();
     state.toggleRightOverviewCollapsed.mockReset();
   });
 
@@ -141,5 +150,64 @@ describe("AppShell", () => {
     state.rightOverviewCollapsed = true;
     renderShellAt("/");
     expect(screen.queryByText("悬浮卡")).toBeNull();
+  });
+
+  it("drives the overview width from the shell variable and the resize handle", () => {
+    state.rightOverviewWidth = 320;
+    renderShell();
+
+    expect(screen.getByText("页面").closest(".app-shell")).toHaveStyle({
+      "--right-overview-width": "320px",
+    });
+
+    const handle = screen.getByRole("separator", {
+      name: "调整右侧概览宽度",
+    });
+    expect(handle).toHaveAttribute("aria-valuenow", "320");
+    expect(handle).toHaveAttribute("aria-valuemin", "240");
+    expect(handle).toHaveAttribute("aria-valuemax", "480");
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(332);
+
+    fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(272);
+
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(280);
+  });
+
+  it("resizes the overview by dragging the separator", () => {
+    state.rightOverviewWidth = 300;
+    renderShell();
+
+    const handle = screen.getByRole("separator", {
+      name: "调整右侧概览宽度",
+    });
+    // jsdom has no PointerEvent, so its fallback Event drops coordinates.
+    // Assign them so the real handler path runs.
+    const pointer = (type: string, init: Record<string, number>) => {
+      const event = new Event(type, { bubbles: true });
+      Object.assign(event, init);
+      fireEvent(handle, event);
+    };
+
+    pointer("pointerdown", { button: 0, clientX: 500, pointerId: 1 });
+    pointer("pointermove", { clientX: 460, pointerId: 1 });
+    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(340);
+
+    pointer("pointerup", { pointerId: 1 });
+    state.setRightOverviewWidth.mockClear();
+    pointer("pointermove", { clientX: 300, pointerId: 1 });
+    expect(state.setRightOverviewWidth).not.toHaveBeenCalled();
+  });
+
+  it("omits the resize handle when the overview is hidden", () => {
+    state.showRightOverview = false;
+    renderShell();
+
+    expect(
+      screen.queryByRole("separator", { name: "调整右侧概览宽度" }),
+    ).toBeNull();
   });
 });

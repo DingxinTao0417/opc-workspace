@@ -4,6 +4,7 @@ import {
   BookOpenText,
   Bot,
   CheckSquare2,
+  ChevronRight,
   Cpu,
   DatabaseBackup,
   Sparkles,
@@ -83,7 +84,7 @@ export function RightFloatingCard() {
         <div className="ov-group-title">环境信息</div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <Cpu size={14} />
+            <Cpu size={16} />
           </span>
           <span className="ov-label">版本</span>
           <span className="ov-value">
@@ -96,7 +97,7 @@ export function RightFloatingCard() {
         </div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <DatabaseBackup size={14} />
+            <DatabaseBackup size={16} />
           </span>
           <span className="ov-label">最近备份</span>
           <span className="ov-value">
@@ -113,13 +114,16 @@ export function RightFloatingCard() {
         <div className="ov-group-title">子智能体</div>
         <button className="ov-row" onClick={openAgents} type="button">
           <span className="ov-row-icon" aria-hidden="true">
-            <Bot size={14} />
+            <Bot size={16} />
           </span>
           <span className="ov-label">Agent Runs</span>
           <span className="ov-value">
             {agentRunsQuery.isError
               ? "读取失败"
               : `${runningAgents} 运行 · ${doneAgents} 完成`}
+          </span>
+          <span className="ov-chevron" aria-hidden="true">
+            <ChevronRight size={14} />
           </span>
         </button>
       </section>
@@ -128,7 +132,7 @@ export function RightFloatingCard() {
         <div className="ov-group-title">后台进程</div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <TimerReset size={14} />
+            <TimerReset size={16} />
           </span>
           <span className="ov-label">运行中作业</span>
           <span className="ov-value">
@@ -137,7 +141,7 @@ export function RightFloatingCard() {
         </div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <BellRing size={14} />
+            <BellRing size={16} />
           </span>
           <span className="ov-label">专注会话</span>
           <span className="ov-value">
@@ -154,7 +158,7 @@ export function RightFloatingCard() {
         <div className="ov-group-title">来源</div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <BookOpenText size={14} />
+            <BookOpenText size={16} />
           </span>
           <span className="ov-label">知识库</span>
           <span className="ov-value">
@@ -165,7 +169,7 @@ export function RightFloatingCard() {
         </div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <Sparkles size={14} />
+            <Sparkles size={16} />
           </span>
           <span className="ov-label">AI Provider</span>
           <span className="ov-value">
@@ -176,7 +180,7 @@ export function RightFloatingCard() {
         </div>
         <div className="ov-row">
           <span className="ov-row-icon" aria-hidden="true">
-            <CheckSquare2 size={14} />
+            <CheckSquare2 size={16} />
           </span>
           <span className="ov-label">评测</span>
           <span className="ov-value">

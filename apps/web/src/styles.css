@@ -171,8 +171,9 @@ button:disabled {
 }
 
 .app-shell {
+  position: relative;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  grid-template-columns: 220px minmax(0, 1fr);
   width: 100%;
   height: 100dvh;
   gap: 12px;
@@ -181,16 +182,32 @@ button:disabled {
   background: var(--workspace-canvas);
 }
 
-.app-shell-no-overview {
-  grid-template-columns: 220px minmax(0, 1fr);
+.app-shell.app-shell-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .app-shell.app-shell-sidebar-collapsed {
-  grid-template-columns: 64px minmax(0, 1fr) 280px;
+  grid-template-columns: 64px minmax(0, 1fr);
 }
 
-.app-shell.app-shell-no-overview.app-shell-sidebar-collapsed {
-  grid-template-columns: 64px minmax(0, 1fr);
+/* The main surface and the overview share one frame: a single border, radius
+   and shadow with an internal hairline, instead of two separate cards. */
+.workspace-frame {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--right-overview-width, 280px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--workspace-frame-border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--workspace-frame-shadow);
+}
+
+.app-shell-no-overview .workspace-frame {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .left-sidebar,
@@ -515,10 +532,6 @@ kbd {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--workspace-frame-border);
-  border-radius: 18px;
-  background: var(--panel);
-  box-shadow: var(--workspace-frame-shadow);
 }
 
 .workspace-frame-chrome {
@@ -714,12 +727,63 @@ kbd {
 .right-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   overflow-y: auto;
-  padding: 6px 2px;
-  border: 1px solid transparent;
-  border-radius: 16px;
+  padding: 14px 12px;
+  border-left: 1px solid var(--border);
   background: transparent;
+}
+
+/* Drag handle for the docked overview. It is absolutely positioned inside the
+   shell so it never adds a grid track or widens the gutter; its offset is
+   derived from the same width variable that drives the grid. The shell padding
+   is part of the offset because absolute offsets resolve against the shell's
+   border box, while the overview column ends at the shell's content edge. */
+.ov-resizer {
+  position: absolute;
+  z-index: 30;
+  top: 0;
+  bottom: 0;
+  right: var(--right-overview-width, 280px);
+  width: 16px;
+  transform: translateX(50%);
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ov-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--border-hover);
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    width 0.15s;
+}
+
+.ov-resizer:hover::after,
+.ov-resizer:focus-visible::after,
+.ov-resizer[data-dragging="true"]::after {
+  background: var(--accent-light);
+}
+
+/* Keep the focus ring on the grip itself; outlining the full-height hit area
+   would paint a tall stray box in the gutter. */
+.ov-resizer:focus-visible {
+  outline: none;
+}
+
+.ov-resizer:focus-visible::after {
+  width: 6px;
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
 .overview-card,
@@ -741,32 +805,39 @@ kbd {
 .ov-group {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .ov-group + .ov-group {
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .ov-group-title {
-  padding: 0 4px 4px;
+  padding: 0 8px 6px;
   color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .ov-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 8px;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
-  width: 100%;
+}
+
+button.ov-row,
+a.ov-row {
+  cursor: pointer;
 }
 
 a.ov-row:hover,
@@ -778,7 +849,15 @@ button.ov-row:hover {
 
 .ov-row-icon {
   display: inline-flex;
+  flex-shrink: 0;
   color: var(--text-muted);
+}
+
+.ov-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 2px;
+  color: var(--text-dim);
 }
 
 .ov-label {
@@ -791,7 +870,7 @@ button.ov-row:hover {
 
 .ov-value {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -801,23 +880,21 @@ button.ov-row:hover {
   top: 64px;
   right: 16px;
   z-index: 40;
-  width: 250px;
+  width: 260px;
   max-height: calc(100vh - 96px);
   overflow-y: auto;
-  padding: 12px;
+  padding: 14px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  border-radius: 18px;
   background: var(--panel);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--workspace-frame-shadow);
 }
 
 .ov-tabs {
   display: flex;
-  gap: 4px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--empty-bg);
+  gap: 2px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .ov-tab {
@@ -825,22 +902,27 @@ button.ov-row:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 5px 4px;
+  padding: 7px 4px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ov-tab:hover {
+  color: var(--text-secondary);
 }
 
 .ov-tab-active {
-  background: var(--panel-hover);
+  border-bottom-color: currentColor;
   color: var(--text);
 }
 
 .ov-tab-panel {
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .ov-scope-bar {
@@ -960,6 +1042,11 @@ button.ov-row:hover {
 
 @media (max-width: 1180px) {
   .right-floating-card {
+    display: none;
+  }
+
+  /* The overview column collapses here, so the drag handle must not linger. */
+  .ov-resizer {
     display: none;
   }
 }
@@ -12915,17 +13002,17 @@ button.ov-row:hover {
 
 @media (max-width: 1180px) {
   .app-shell {
-    grid-template-columns: 220px minmax(0, 1fr);
     gap: 10px;
     padding: 10px;
   }
 
-  .app-shell.app-shell-sidebar-collapsed {
-    grid-template-columns: 64px minmax(0, 1fr);
-  }
-
   .right-sidebar {
     display: none;
+  }
+
+  /* The overview column is hidden here, so the frame keeps a single track. */
+  .workspace-frame {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .workspace-frame-chrome {

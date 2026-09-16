@@ -1,11 +1,45 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useHealthQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
-import { useUiStore } from "../store/ui";
+import {
+  RIGHT_OVERVIEW_DEFAULT_WIDTH,
+  RIGHT_OVERVIEW_MAX_WIDTH,
+  RIGHT_OVERVIEW_MIN_WIDTH,
+  useUiStore,
+} from "../store/ui";
 import { RightOverview } from "./RightOverview";
 import { RightFloatingCard } from "./RightFloatingCard";
 import { Sidebar } from "./Sidebar";
+
+/**
+ * Pointer capture is unavailable in jsdom and some embedded webviews; the
+ * resize must keep working there instead of throwing on pointerdown.
+ */
+function capturePointer(target: HTMLElement, pointerId: number) {
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    /* Explicit capture is optional for this interaction. */
+  }
+}
+
+function releasePointer(target: HTMLElement, pointerId: number) {
+  try {
+    if (target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId);
+    }
+  } catch {
+    /* Mirror capturePointer: cleanup never breaks the drag. */
+  }
+}
 
 export function AppShell() {
   useHealthQuery();
@@ -17,9 +51,20 @@ export function AppShell() {
   const rightOverviewCollapsed = useUiStore(
     (state) => state.rightOverviewCollapsed,
   );
+  const rightOverviewWidth = useUiStore((state) => state.rightOverviewWidth);
+  const setRightOverviewWidth = useUiStore(
+    (state) => state.setRightOverviewWidth,
+  );
   const toggleRightOverviewCollapsed = useUiStore(
     (state) => state.toggleRightOverviewCollapsed,
   );
+  const [resizingRightOverview, setResizingRightOverview] = useState(false);
+  const resize = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
   const showRightOverview = configuredRightOverview && !rightOverviewCollapsed;
   const location = useLocation();
   const isAiPage =
@@ -27,42 +72,119 @@ export function AppShell() {
   const showFloatingCard =
     configuredRightOverview && !showRightOverview && isAiPage;
 
+  const handleOverviewResizeKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+  ) => {
+    const step = event.shiftKey ? 48 : 12;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setRightOverviewWidth(rightOverviewWidth + step);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setRightOverviewWidth(rightOverviewWidth - step);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setRightOverviewWidth(RIGHT_OVERVIEW_DEFAULT_WIDTH);
+    }
+  };
+
+  const handleOverviewResizePointerDown = (
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    // Only the primary button starts a drag; middle/right clicks are ignored.
+    if (event.button > 0) return;
+    capturePointer(event.currentTarget, event.pointerId);
+    resize.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: rightOverviewWidth,
+    };
+    setResizingRightOverview(true);
+  };
+
+  const handleOverviewResizePointerMove = (
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    const active = resize.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    setRightOverviewWidth(active.startWidth - (event.clientX - active.startX));
+  };
+
+  const handleOverviewResizePointerEnd = (
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    if (resize.current?.pointerId !== event.pointerId) return;
+    resize.current = null;
+    setResizingRightOverview(false);
+    releasePointer(event.currentTarget, event.pointerId);
+  };
+
   return (
     <div
       className={[
         "app-shell",
         showRightOverview ? "" : "app-shell-no-overview",
         sidebarCollapsed ? "app-shell-sidebar-collapsed" : "",
+        resizingRightOverview ? "app-shell-resizing" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      style={
+        {
+          "--right-overview-width": `${rightOverviewWidth}px`,
+        } as CSSProperties
+      }
     >
       <Sidebar />
-      <main className="main-column">
-        {configuredRightOverview ? (
-          <div className="workspace-frame-chrome">
-            <button
-              aria-controls={showRightOverview ? "right-overview" : undefined}
-              aria-expanded={showRightOverview}
-              aria-label={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
-              className="icon-button workspace-overview-toggle"
-              onClick={toggleRightOverviewCollapsed}
-              title={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
-              type="button"
-            >
-              {showRightOverview ? (
-                <PanelRightClose aria-hidden="true" size={16} />
-              ) : (
-                <PanelRightOpen aria-hidden="true" size={16} />
-              )}
-            </button>
+      <div className="workspace-frame">
+        <main className="main-column">
+          {configuredRightOverview ? (
+            <div className="workspace-frame-chrome">
+              <button
+                aria-controls={showRightOverview ? "right-overview" : undefined}
+                aria-expanded={showRightOverview}
+                aria-label={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
+                className="icon-button workspace-overview-toggle"
+                onClick={toggleRightOverviewCollapsed}
+                title={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
+                type="button"
+              >
+                {showRightOverview ? (
+                  <PanelRightClose aria-hidden="true" size={16} />
+                ) : (
+                  <PanelRightOpen aria-hidden="true" size={16} />
+                )}
+              </button>
+            </div>
+          ) : null}
+          <div className="page-scroll">
+            <Outlet />
           </div>
+        </main>
+        {showRightOverview ? (
+          <div
+            aria-label="调整右侧概览宽度"
+            aria-orientation="vertical"
+            aria-valuemax={RIGHT_OVERVIEW_MAX_WIDTH}
+            aria-valuemin={RIGHT_OVERVIEW_MIN_WIDTH}
+            aria-valuenow={rightOverviewWidth}
+            className="ov-resizer"
+            data-dragging={resizingRightOverview ? "true" : undefined}
+            onKeyDown={handleOverviewResizeKeyDown}
+            onPointerCancel={handleOverviewResizePointerEnd}
+            onPointerDown={handleOverviewResizePointerDown}
+            onPointerMove={handleOverviewResizePointerMove}
+            onPointerUp={handleOverviewResizePointerEnd}
+            role="separator"
+            tabIndex={0}
+          />
         ) : null}
-        <div className="page-scroll">
-          <Outlet />
-        </div>
-      </main>
-      {showRightOverview ? <RightOverview /> : null}
+        {showRightOverview ? <RightOverview /> : null}
+      </div>
       {showFloatingCard ? <RightFloatingCard /> : null}
     </div>
   );

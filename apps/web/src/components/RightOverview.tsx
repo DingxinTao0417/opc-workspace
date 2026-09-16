@@ -5,11 +5,11 @@ import {
   BookOpenText,
   Bot,
   CheckSquare2,
+  ChevronRight,
   Cpu,
   DatabaseBackup,
   ExternalLink,
   FileText,
-  Globe,
   Inbox,
   Sparkles,
   TimerReset,
@@ -92,10 +92,13 @@ function OverviewRow({
   const content = (
     <>
       <span className="ov-row-icon" aria-hidden="true">
-        <Icon size={14} />
+        <Icon size={16} />
       </span>
       <span className="ov-label">{label}</span>
       <span className="ov-value">{value}</span>
+      <span className="ov-chevron" aria-hidden="true">
+        <ChevronRight size={14} />
+      </span>
     </>
   );
   if (to) {
@@ -556,11 +559,11 @@ function BrowserTab() {
   );
 }
 
-const tabs: { id: RightPanelTab; label: string; icon: LucideIcon }[] = [
-  { id: "summary", label: "概要", icon: Cpu },
-  { id: "agents", label: "子智能体", icon: Bot },
-  { id: "files", label: "文件", icon: FileText },
-  { id: "browser", label: "浏览器", icon: Globe },
+const tabs: { id: RightPanelTab; label: string }[] = [
+  { id: "summary", label: "概要" },
+  { id: "agents", label: "子智能体" },
+  { id: "files", label: "文件" },
+  { id: "browser", label: "浏览器" },
 ];
 
 export function RightOverview() {
@@ -570,7 +573,7 @@ export function RightOverview() {
   return (
     <aside aria-label="今日概览" className="right-sidebar" id="right-overview">
       <div className="ov-tabs" role="tablist" aria-label="概览页签">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label }) => (
           <button
             aria-selected={activeTab === id}
             className={`ov-tab${activeTab === id ? " ov-tab-active" : ""}`}
@@ -579,7 +582,6 @@ export function RightOverview() {
             role="tab"
             type="button"
           >
-            <Icon size={13} />
             {label}
           </button>
         ))}
