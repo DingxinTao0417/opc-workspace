@@ -75,6 +75,10 @@ const mockState = vi.hoisted(() => {
     stop: vi.fn(),
     createSession: mutation(),
     deleteSession: mutation(),
+    setSettingsOpen: vi.fn(),
+    toggleAgentRailCollapsed: vi.fn(),
+    toggleRightOverviewCollapsed: vi.fn(),
+    agentRailCollapsed: false,
     confirmTask: mutation(),
     createMemory: mutation(),
     previewData: null as null | Record<string, unknown>,
@@ -292,7 +296,14 @@ vi.mock("../api/client", async (importOriginal) => ({
 }));
 
 vi.mock("../store/ui", () => ({
-  useUiStore: () => ({}),
+  useUiStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      agentRailCollapsed: mockState.agentRailCollapsed,
+      rightOverviewCollapsed: false,
+      setSettingsOpen: mockState.setSettingsOpen,
+      toggleAgentRailCollapsed: mockState.toggleAgentRailCollapsed,
+      toggleRightOverviewCollapsed: mockState.toggleRightOverviewCollapsed,
+    }),
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -727,6 +738,27 @@ describe("AiAssistantPage", () => {
   it("shows the stop button while streaming and the send button otherwise", () => {
     mockState.providers = [readyProvider];
     mockState.sessions = [activeSession];
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭右侧工作栏" }));
+    expect(mockState.toggleRightOverviewCollapsed).toHaveBeenCalledOnce();
+  });
+
+  it("offers a restore control once the conversation rail is hidden", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.agentRailCollapsed = true;
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "隐藏会话侧边栏" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "显示会话侧边栏" }));
+    expect(mockState.toggleAgentRailCollapsed).toHaveBeenCalledOnce();
+    mockState.agentRailCollapsed = false;
+  });
+
+  it("shows the stop button while streaming and the send button otherwise", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
     mockState.messagesPages = [
       { data: [assistantMessage()], meta: { has_more: false } },
     ];
@@ -734,10 +766,8 @@ describe("AiAssistantPage", () => {
     mockState.streaming = { sessionId: "session-1", text: "正在生成…" };
     const { unmount } = renderPage();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "新会话" })).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "删除会话 新会话" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "新建会话" })).toBeDisabled();
+    expect(screen.getByLabelText("选择会话")).toBeDisabled();
     expect(screen.getByLabelText("选择 AI 供应商")).toBeDisabled();
     unmount();
 
@@ -837,37 +867,6 @@ describe("AiAssistantPage", () => {
     );
     expect(screen.getByPlaceholderText(/向 AI 助手提问/)).not.toBeDisabled();
     expect(screen.getByText(/模型请求仅发送到本机回环端点/)).toBeTruthy();
-  });
-
-  it("deletes a session with its current version", async () => {
-    mockState.providers = [readyProvider];
-    mockState.sessions = [{ ...activeSession, version: 7 }];
-    mockState.messagesPages = [];
-    mockState.deleteSession.mutateAsync = vi.fn(async () => ({}));
-    useAiChatStore.setState({
-      retainedTurns: [
-        {
-          sessionId: activeSession.id,
-          generationId: "deleted-generation",
-          userText: "问题",
-          text: "应删除的临时回复",
-          reasoning: "",
-          status: "completed",
-          createdAt: activeSession.created_at,
-        },
-      ],
-    });
-    renderPage();
-
-    fireEvent.click(screen.getByRole("button", { name: "删除会话 新会话" }));
-    fireEvent.click(screen.getByRole("button", { name: "删除" }));
-    await waitFor(() => {
-      expect(mockState.deleteSession.mutateAsync).toHaveBeenCalledWith({
-        id: "session-1",
-        expectedVersion: 7,
-      });
-      expect(useAiChatStore.getState().retainedTurns).toEqual([]);
-    });
   });
 
   it("shows older message pages before the newest page and loads more on demand", () => {

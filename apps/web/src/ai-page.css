@@ -88,11 +88,11 @@
   gap: 8px;
 }
 
-/* ===== Chat shell: session rail + chat main ===== */
+/* ===== Chat shell: session rail (rendered by the app shell) + chat main ===== */
 
 .ai-layout {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   background: transparent;
@@ -103,36 +103,95 @@
   display: none;
 }
 
+/* In agent mode this rail occupies the app's navigation column, so it borrows
+   that column's plain canvas treatment instead of its own panel chrome. */
 .ai-session-rail {
-  background: var(--panel-2);
-  border-right: 1px solid var(--border);
-  padding: 12px;
+  background: transparent;
+  border-right: 0;
+  padding: 0;
   overflow-y: auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
-.ai-new-chat-btn {
-  width: 100%;
-  height: 32px;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  display: inline-flex;
+.ai-rail-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  transition: background 0.15s;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
-.ai-new-chat-btn:hover {
-  background: var(--accent-deep);
+.ai-rail-head-label {
+  padding-left: 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.ai-rail-collapse {
+  flex: 0 0 auto;
+}
+
+/* Rail rows follow the reference sidebar: a flat icon + label row that fills
+   the rail width and highlights on hover, with no filled call-to-action. */
+.ai-rail-primary,
+.ai-rail-actions button,
+.ai-rail-settings {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.ai-rail-primary,
+.ai-rail-settings {
+  color: var(--text);
+}
+
+.ai-rail-primary:hover,
+.ai-rail-actions button:hover,
+.ai-rail-settings:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+  color: var(--text);
+}
+
+.ai-rail-primary:disabled,
+.ai-rail-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-rail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+.ai-rail-section {
+  margin: 14px 10px 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.ai-rail-settings {
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .ai-session-create-error {
@@ -307,17 +366,13 @@
   position: relative;
 }
 
+.ai-sidebar-toggle {
+  flex: 0 0 auto;
+}
+
 /* Once the application shell becomes compact, reserve the full main pane for
    the conversation instead of leaving the session rail to squeeze it. */
 @media (max-width: 960px) {
-  .ai-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .ai-session-rail {
-    display: none;
-  }
-
   .ai-mobile-session-controls {
     display: inline-flex;
     min-width: 0;
@@ -325,6 +380,10 @@
     flex: 1 0 100%;
     align-items: center;
     gap: 5px;
+  }
+
+  .ai-mobile-session-controls .mode-switch {
+    flex: 0 0 auto;
   }
 
   .ai-mobile-session-controls select {
@@ -379,6 +438,10 @@
 @media (max-width: 560px) {
   .ai-chat-header {
     padding: 8px 10px;
+  }
+
+  .ai-mobile-session-controls .mode-switch-label {
+    display: none;
   }
 
   .ai-chat-messages {
@@ -1052,40 +1115,16 @@
 
 .ai-msg {
   display: flex;
-  gap: 10px;
   align-items: flex-start;
 }
 
-.ai-avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, var(--accent-light), var(--accent));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  flex-shrink: 0;
-}
-
 .ai-msg-body {
-  max-width: 620px;
+  max-width: 100%;
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-
-.ai-name-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.ai-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
 }
 
 .ai-msg-text {
@@ -2872,19 +2911,6 @@
   padding: 12px 10px;
 }
 
-.ai-new-chat-btn {
-  height: 34px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, currentColor 6%, transparent);
-  color: var(--text);
-  font-weight: 500;
-}
-
-.ai-new-chat-btn:hover {
-  border-color: var(--border-hover);
-  background: var(--panel-hover);
-}
-
 .ai-session-row[data-active="true"] {
   background: color-mix(in srgb, currentColor 8%, transparent);
 }
@@ -2947,4 +2973,19 @@
 .ai-usage-summary-toggle:hover,
 .ai-usage-summary-toggle[aria-expanded="true"] {
   border-color: var(--border-hover);
+}
+
+/* Only while the overview floats over the conversation does it need a reserved
+   gutter; a docked panel already owns its own column, so the conversation
+   stays centred in the space it has. */
+@media (min-width: 1181px) {
+  .app-shell-agent.app-shell-no-overview .ai-chat-messages,
+  .app-shell-agent.app-shell-no-overview .ai-composer {
+    padding-right: 336px;
+  }
+
+  .app-shell-agent.app-shell-no-overview .ai-chat-messages-inner,
+  .app-shell-agent.app-shell-no-overview .ai-composer-inner {
+    max-width: 640px;
+  }
 }

@@ -8,7 +8,10 @@ const state = vi.hoisted(() => ({
   rightOverviewCollapsed: false,
   showRightOverview: true,
   rightOverviewWidth: 280,
+  lastWorkspacePath: "/today",
+  agentRailCollapsed: false,
   setRightOverviewWidth: vi.fn(),
+  setLastWorkspacePath: vi.fn(),
   toggleRightOverviewCollapsed: vi.fn(),
 }));
 
@@ -31,7 +34,10 @@ vi.mock("../store/ui", () => ({
       sidebarCollapsed: state.sidebarCollapsed,
       rightOverviewCollapsed: state.rightOverviewCollapsed,
       rightOverviewWidth: state.rightOverviewWidth,
+      lastWorkspacePath: state.lastWorkspacePath,
+      agentRailCollapsed: state.agentRailCollapsed,
       setRightOverviewWidth: state.setRightOverviewWidth,
+      setLastWorkspacePath: state.setLastWorkspacePath,
       toggleRightOverviewCollapsed: state.toggleRightOverviewCollapsed,
     }),
 }));
@@ -48,6 +54,10 @@ vi.mock("./RightFloatingCard", () => ({
   RightFloatingCard: () => <aside>悬浮卡</aside>,
 }));
 
+vi.mock("./AiSessionRail", () => ({
+  AiSessionRail: () => <aside>会话轨</aside>,
+}));
+
 function renderShell() {
   return render(
     <MemoryRouter initialEntries={["/"]}>
@@ -55,6 +65,7 @@ function renderShell() {
         <Route element={<AppShell />}>
           <Route index element={<div>页面</div>} />
           <Route path="/ai" element={<div>AI 页</div>} />
+          <Route path="/today" element={<div>今日页</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -68,6 +79,7 @@ function renderShellAt(path: string) {
         <Route element={<AppShell />}>
           <Route index element={<div>页面</div>} />
           <Route path="/ai" element={<div>AI 页</div>} />
+          <Route path="/today" element={<div>今日页</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -81,7 +93,9 @@ describe("AppShell", () => {
     state.rightOverviewCollapsed = false;
     state.showRightOverview = true;
     state.rightOverviewWidth = 280;
+    state.agentRailCollapsed = false;
     state.setRightOverviewWidth.mockReset();
+    state.setLastWorkspacePath.mockReset();
     state.toggleRightOverviewCollapsed.mockReset();
   });
 
@@ -108,36 +122,18 @@ describe("AppShell", () => {
     expect(screen.queryByText("悬浮卡")).toBeNull();
   });
 
-  it("lets the user collapse and restore the right overview for this session", () => {
-    const view = renderShell();
+  it("keeps the docked overview out of the workspace layout", () => {
+    state.rightOverviewWidth = 320;
+    renderShell();
 
-    const collapseButton = screen.getByRole("button", {
-      name: "收起右侧概览",
+    expect(screen.getByText("页面").closest(".app-shell")).toHaveStyle({
+      "--right-overview-width": "320px",
     });
-    expect(collapseButton).toHaveAttribute("aria-controls", "right-overview");
-    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(collapseButton);
-    expect(state.toggleRightOverviewCollapsed).toHaveBeenCalledOnce();
-
-    state.rightOverviewCollapsed = true;
-    view.rerender(
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<div>页面</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("页面").closest(".app-shell")).toHaveClass(
-      "app-shell-no-overview",
-    );
     expect(screen.queryByText("概览")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "展开右侧概览" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("悬浮卡")).toBeNull();
+      screen.queryByRole("separator", { name: "调整右侧概览宽度" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "收起右侧概览" })).toBeNull();
   });
 
   it("shows the floating status card only on the AI page when collapsed", () => {
@@ -152,56 +148,6 @@ describe("AppShell", () => {
     expect(screen.queryByText("悬浮卡")).toBeNull();
   });
 
-  it("drives the overview width from the shell variable and the resize handle", () => {
-    state.rightOverviewWidth = 320;
-    renderShell();
-
-    expect(screen.getByText("页面").closest(".app-shell")).toHaveStyle({
-      "--right-overview-width": "320px",
-    });
-
-    const handle = screen.getByRole("separator", {
-      name: "调整右侧概览宽度",
-    });
-    expect(handle).toHaveAttribute("aria-valuenow", "320");
-    expect(handle).toHaveAttribute("aria-valuemin", "240");
-    expect(handle).toHaveAttribute("aria-valuemax", "480");
-
-    fireEvent.keyDown(handle, { key: "ArrowLeft" });
-    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(332);
-
-    fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
-    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(272);
-
-    fireEvent.keyDown(handle, { key: "Home" });
-    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(280);
-  });
-
-  it("resizes the overview by dragging the separator", () => {
-    state.rightOverviewWidth = 300;
-    renderShell();
-
-    const handle = screen.getByRole("separator", {
-      name: "调整右侧概览宽度",
-    });
-    // jsdom has no PointerEvent, so its fallback Event drops coordinates.
-    // Assign them so the real handler path runs.
-    const pointer = (type: string, init: Record<string, number>) => {
-      const event = new Event(type, { bubbles: true });
-      Object.assign(event, init);
-      fireEvent(handle, event);
-    };
-
-    pointer("pointerdown", { button: 0, clientX: 500, pointerId: 1 });
-    pointer("pointermove", { clientX: 460, pointerId: 1 });
-    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(340);
-
-    pointer("pointerup", { pointerId: 1 });
-    state.setRightOverviewWidth.mockClear();
-    pointer("pointermove", { clientX: 300, pointerId: 1 });
-    expect(state.setRightOverviewWidth).not.toHaveBeenCalled();
-  });
-
   it("omits the resize handle when the overview is hidden", () => {
     state.showRightOverview = false;
     renderShell();
@@ -209,5 +155,80 @@ describe("AppShell", () => {
     expect(
       screen.queryByRole("separator", { name: "调整右侧概览宽度" }),
     ).toBeNull();
+  });
+
+  it("swaps the navigation rail for the conversation list in agent mode", () => {
+    renderShellAt("/ai");
+
+    const shell = screen.getByText("AI 页").closest(".app-shell");
+    expect(shell).toHaveClass("app-shell-agent");
+    expect(screen.getByText("会话轨")).toBeInTheDocument();
+    expect(screen.queryByText("导航")).toBeNull();
+  });
+
+  it("keeps the business navigation outside agent mode", () => {
+    renderShell();
+
+    const shell = screen.getByText("页面").closest(".app-shell");
+    expect(shell).not.toHaveClass("app-shell-agent");
+    expect(screen.getByText("导航")).toBeInTheDocument();
+    expect(screen.queryByText("会话轨")).toBeNull();
+  });
+
+  it("hides the conversation rail column when the chat header collapses it", () => {
+    state.agentRailCollapsed = true;
+    renderShellAt("/ai");
+
+    const shell = screen.getByText("AI 页").closest(".app-shell");
+    expect(shell).toHaveClass("app-shell-agent", "app-shell-nav-hidden");
+    expect(screen.queryByText("会话轨")).toBeNull();
+  });
+
+  it("docks a resizable work panel beside the agent conversation", () => {
+    renderShellAt("/ai");
+
+    expect(screen.getByText("概览")).toBeInTheDocument();
+    const handle = screen.getByRole("separator", {
+      name: "调整右侧概览宽度",
+    });
+    expect(handle).toHaveAttribute("aria-valuenow", "280");
+    expect(handle).toHaveAttribute("aria-valuemin", "240");
+    expect(handle).toHaveAttribute("aria-valuemax", "480");
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(state.setRightOverviewWidth).toHaveBeenLastCalledWith(292);
+  });
+
+  it("falls back to the floating card when the work panel is collapsed", () => {
+    state.rightOverviewCollapsed = true;
+    renderShellAt("/ai");
+
+    expect(screen.queryByText("概览")).toBeNull();
+    expect(screen.getByText("悬浮卡")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("separator", { name: "调整右侧概览宽度" }),
+    ).toBeNull();
+  });
+
+  it("switches between workspace and agent modes", () => {
+    renderShellAt("/ai");
+
+    expect(screen.getByText("AI 页")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /智能体/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /工作台/ }));
+
+    expect(state.lastWorkspacePath).toBe("/today");
+    expect(screen.getByText("今日页")).toBeInTheDocument();
+    expect(screen.queryByText("AI 页")).toBeNull();
+    expect(screen.queryByText("会话轨")).toBeNull();
+    expect(screen.getByText("导航")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /工作台/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });

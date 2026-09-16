@@ -1,4 +1,3 @@
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   useRef,
   useState,
@@ -6,6 +5,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useHealthQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
@@ -17,6 +17,8 @@ import {
 } from "../store/ui";
 import { RightOverview } from "./RightOverview";
 import { RightFloatingCard } from "./RightFloatingCard";
+import { AiSessionRail } from "./AiSessionRail";
+import { ModeSwitch, isAgentRoute } from "./ModeSwitch";
 import { Sidebar } from "./Sidebar";
 
 /**
@@ -48,6 +50,7 @@ export function AppShell() {
       state.preview?.general.showRightOverview ?? state.showRightOverview,
   );
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
+  const agentRailCollapsed = useUiStore((state) => state.agentRailCollapsed);
   const rightOverviewCollapsed = useUiStore(
     (state) => state.rightOverviewCollapsed,
   );
@@ -55,8 +58,8 @@ export function AppShell() {
   const setRightOverviewWidth = useUiStore(
     (state) => state.setRightOverviewWidth,
   );
-  const toggleRightOverviewCollapsed = useUiStore(
-    (state) => state.toggleRightOverviewCollapsed,
+  const setLastWorkspacePath = useUiStore(
+    (state) => state.setLastWorkspacePath,
   );
   const [resizingRightOverview, setResizingRightOverview] = useState(false);
   const resize = useRef<{
@@ -65,12 +68,21 @@ export function AppShell() {
     startWidth: number;
   } | null>(null);
 
-  const showRightOverview = configuredRightOverview && !rightOverviewCollapsed;
   const location = useLocation();
-  const isAiPage =
-    location.pathname === "/ai" || location.pathname.startsWith("/ai/");
+  const agentMode = isAgentRoute(location.pathname);
+  const isAiPage = agentMode;
+  const hideAgentRail = agentMode && agentRailCollapsed;
+  // The docked overview belongs to agent mode only: business pages keep the
+  // full width, while the conversation can dock the panel or fall back to the
+  // floating card when it is collapsed.
+  const showRightOverview =
+    configuredRightOverview && !rightOverviewCollapsed && agentMode;
   const showFloatingCard =
     configuredRightOverview && !showRightOverview && isAiPage;
+
+  useEffect(() => {
+    if (!agentMode) setLastWorkspacePath(location.pathname);
+  }, [agentMode, location.pathname, setLastWorkspacePath]);
 
   const handleOverviewResizeKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
@@ -128,7 +140,9 @@ export function AppShell() {
       className={[
         "app-shell",
         showRightOverview ? "" : "app-shell-no-overview",
-        sidebarCollapsed ? "app-shell-sidebar-collapsed" : "",
+        agentMode ? "app-shell-agent" : "",
+        hideAgentRail ? "app-shell-nav-hidden" : "",
+        !agentMode && sidebarCollapsed ? "app-shell-sidebar-collapsed" : "",
         resizingRightOverview ? "app-shell-resizing" : "",
       ]
         .filter(Boolean)
@@ -139,28 +153,18 @@ export function AppShell() {
         } as CSSProperties
       }
     >
-      <Sidebar />
+      {hideAgentRail ? null : (
+        <div
+          className={`app-nav${
+            !agentMode && sidebarCollapsed ? " is-collapsed" : ""
+          }`}
+        >
+          <ModeSwitch />
+          {agentMode ? <AiSessionRail /> : <Sidebar />}
+        </div>
+      )}
       <div className="workspace-frame">
         <main className="main-column">
-          {configuredRightOverview ? (
-            <div className="workspace-frame-chrome">
-              <button
-                aria-controls={showRightOverview ? "right-overview" : undefined}
-                aria-expanded={showRightOverview}
-                aria-label={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
-                className="icon-button workspace-overview-toggle"
-                onClick={toggleRightOverviewCollapsed}
-                title={showRightOverview ? "收起右侧概览" : "展开右侧概览"}
-                type="button"
-              >
-                {showRightOverview ? (
-                  <PanelRightClose aria-hidden="true" size={16} />
-                ) : (
-                  <PanelRightOpen aria-hidden="true" size={16} />
-                )}
-              </button>
-            </div>
-          ) : null}
           <div className="page-scroll">
             <Outlet />
           </div>

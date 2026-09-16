@@ -130,9 +130,9 @@ describe("Sidebar navigation", () => {
       "aria-expanded",
       "false",
     );
-    expect(screen.getByRole("link", { name: "AI 助手" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "知识库" })).toHaveAttribute(
       "title",
-      "AI 助手",
+      "知识库",
     );
   });
 

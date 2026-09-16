@@ -48,8 +48,12 @@ interface ChatStore {
   sentMessage: string | null;
   activeGenerations: AiGeneration[];
   lastSessionId: string;
+  activeSessionId: string;
+  sessionFilter: string;
   input: string;
   inputRevision: number;
+  setActiveSessionId: (sessionId: string) => void;
+  setSessionFilter: (filter: string) => void;
   setInput: (value: string | ((current: string) => string)) => void;
   send: (input: ChatInput) => Promise<AiChatStreamOutcome>;
   stop: () => Promise<void>;
@@ -195,8 +199,12 @@ export const useAiChatStore = create<ChatStore>((set, get) => ({
   sentMessage: null,
   activeGenerations: [],
   lastSessionId: "",
+  activeSessionId: "",
+  sessionFilter: "",
   input: "",
   inputRevision: 0,
+  setActiveSessionId: (activeSessionId) => set({ activeSessionId }),
+  setSessionFilter: (sessionFilter) => set({ sessionFilter }),
   setInput: (value) =>
     set((state) => ({
       input: typeof value === "function" ? value(state.input) : value,
@@ -215,6 +223,8 @@ export const useAiChatStore = create<ChatStore>((set, get) => ({
         state.interrupted?.sessionId === sessionId ? null : state.interrupted,
       lastSessionId:
         state.lastSessionId === sessionId ? "" : state.lastSessionId,
+      activeSessionId:
+        state.activeSessionId === sessionId ? "" : state.activeSessionId,
     }));
   },
   send: async (requestedInput) => {

@@ -37,8 +37,10 @@ interface UiState {
   newTaskOpen: boolean;
   newTaskProjectId: string | null;
   sidebarCollapsed: boolean;
+  agentRailCollapsed: boolean;
   rightOverviewCollapsed: boolean;
   rightOverviewWidth: number;
+  lastWorkspacePath: string;
   rightPanelTab: RightPanelTab;
   settingsOpen: boolean;
   settingsModule: SettingsModule;
@@ -48,8 +50,10 @@ interface UiState {
   setNewTaskOpen: (open: boolean) => void;
   openNewTaskForProject: (projectId: string) => void;
   toggleSidebarCollapsed: () => void;
+  toggleAgentRailCollapsed: () => void;
   toggleRightOverviewCollapsed: () => void;
   setRightOverviewWidth: (width: number) => void;
+  setLastWorkspacePath: (path: string) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
   setSettingsOpen: (open: boolean, module?: SettingsModule) => void;
   setTaskDetailId: (id: string | null) => void;
@@ -62,8 +66,10 @@ export const useUiStore = create<UiState>((set) => ({
   newTaskOpen: false,
   newTaskProjectId: null,
   sidebarCollapsed: false,
+  agentRailCollapsed: false,
   rightOverviewCollapsed: false,
   rightOverviewWidth: RIGHT_OVERVIEW_DEFAULT_WIDTH,
+  lastWorkspacePath: "/today",
   rightPanelTab: "summary",
   settingsOpen: false,
   settingsModule: "general",
@@ -79,12 +85,15 @@ export const useUiStore = create<UiState>((set) => ({
     set({ newTaskOpen: true, newTaskProjectId }),
   toggleSidebarCollapsed: () =>
     set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  toggleAgentRailCollapsed: () =>
+    set((state) => ({ agentRailCollapsed: !state.agentRailCollapsed })),
   toggleRightOverviewCollapsed: () =>
     set((state) => ({
       rightOverviewCollapsed: !state.rightOverviewCollapsed,
     })),
   setRightOverviewWidth: (rightOverviewWidth) =>
     set({ rightOverviewWidth: clampRightOverviewWidth(rightOverviewWidth) }),
+  setLastWorkspacePath: (lastWorkspacePath) => set({ lastWorkspacePath }),
   setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
   setSettingsOpen: (settingsOpen, settingsModule = "general") =>
     set({ settingsOpen, settingsModule }),

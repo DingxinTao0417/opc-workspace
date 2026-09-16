@@ -12,7 +12,6 @@ import {
   ReceiptText,
   Search,
   Settings2,
-  Sparkles,
   Sun,
   Users,
 } from "lucide-react";
@@ -67,7 +66,6 @@ const groups: { label: string; items: NavItem[] }[] = [
     label: "执行",
     items: [
       { label: "专注", to: "/focus", icon: Focus },
-      { label: "AI 助手", to: "/ai", icon: Sparkles },
       { label: "知识库", to: "/knowledge", icon: BookOpenText },
     ],
   },

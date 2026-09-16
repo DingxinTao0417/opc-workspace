@@ -191,6 +191,73 @@ button:disabled {
   grid-template-columns: 64px minmax(0, 1fr);
 }
 
+/* Agent mode swaps the business navigation for the conversation list, so the
+   rail never inherits the workspace collapse behaviour. */
+.app-shell-agent {
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+
+/* Hiding the agent rail keeps the conversation in a single full-width column;
+   the chat header keeps the toggle so the rail can come back. */
+.app-shell.app-shell-agent.app-shell-nav-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-nav > .left-sidebar,
+.app-nav > .ai-session-rail {
+  flex: 1;
+  min-height: 0;
+}
+
+.mode-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-soft);
+}
+
+.mode-switch-item {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mode-switch-item:hover {
+  color: var(--text);
+}
+
+.mode-switch-item.is-active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.app-nav.is-collapsed .mode-switch-label {
+  display: none;
+}
+
 /* The main surface and the overview share one frame: a single border, radius
    and shadow with an internal hairline, instead of two separate cards. */
 .workspace-frame {
@@ -534,23 +601,6 @@ kbd {
   overflow: hidden;
 }
 
-.workspace-frame-chrome {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 6px 8px 0;
-}
-
-.workspace-overview-toggle {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-}
-
-.workspace-overview-toggle:hover {
-  border-color: var(--border-hover);
-}
-
 .page-scroll {
   min-height: 0;
   flex: 1;
@@ -878,9 +928,9 @@ button.ov-row:hover {
 .right-floating-card {
   position: fixed;
   top: 64px;
-  right: 16px;
+  right: 20px;
   z-index: 40;
-  width: 260px;
+  width: 300px;
   max-height: calc(100vh - 96px);
   overflow-y: auto;
   padding: 14px 12px;
@@ -13014,10 +13064,6 @@ button.ov-row:hover {
   .workspace-frame {
     grid-template-columns: minmax(0, 1fr);
   }
-
-  .workspace-frame-chrome {
-    display: none;
-  }
 }
 
 @media (max-width: 860px) {
@@ -14214,5 +14260,25 @@ button.ov-row:hover {
 
   .agent-run-drawer-facts {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Agent mode keeps a single conversation column once the navigation rail no
+   longer fits; the chat header then carries the session and mode controls. */
+@media (max-width: 960px) {
+  .app-shell.app-shell-agent {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell-agent .app-nav {
+    display: none;
+  }
+}
+
+/* The navigation column falls back to icon width here, so the mode switch
+   drops its labels instead of overflowing the rail. */
+@media (max-width: 860px) {
+  .app-nav .mode-switch-label {
+    display: none;
   }
 }

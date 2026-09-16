@@ -10,12 +10,14 @@ import {
   Lightbulb,
   ListChecks,
   LoaderCircle,
+  PanelRightClose,
+  PanelRightOpen,
+  PanelLeftOpen,
   Plus,
   Search,
   Send,
   Sparkles,
   Square,
-  Trash2,
   X,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -42,13 +44,13 @@ import {
   useAiSessionsQuery,
   useConfirmAiMessageTask,
   useCreateAiSession,
-  useDeleteAiSession,
   usePreviewAiBusinessContext,
   useTaskQuery,
 } from "../api/hooks";
 import { ErrorState, LoadingState } from "../components/feedback";
 import { ClientSelect } from "../components/ClientSelect";
 import { Modal } from "../components/Modal";
+import { ModeSwitch } from "../components/ModeSwitch";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { TaskSelect } from "../components/TaskSelect";
 import {
@@ -84,11 +86,6 @@ interface DraftTaskForm {
   description: string;
   dueDate: string;
   projectId: string | null;
-}
-
-interface SessionGroup {
-  label: string;
-  sessions: AiSession[];
 }
 
 // 极简只读 markdown 渲染：段落、有序/无序列表、**加粗**、`code`。
@@ -184,45 +181,6 @@ function draftFromSuggestion(suggestion: AiTaskSuggestion): DraftTaskForm {
   };
 }
 
-function sessionBucket(updatedAt: string): "today" | "yesterday" | "earlier" {
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return "earlier";
-  const now = new Date();
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-  ).getTime();
-  if (date.getTime() >= startOfToday) return "today";
-  if (date.getTime() >= startOfToday - 86_400_000) return "yesterday";
-  return "earlier";
-}
-
-function sessionTimeLabel(updatedAt: string): string {
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return "";
-  const bucket = sessionBucket(updatedAt);
-  if (bucket === "yesterday") return "昨天";
-  if (bucket === "earlier") {
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  }
-  return date.toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function messageTimeLabel(createdAt: string): string {
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 6) return "夜深了";
@@ -277,23 +235,31 @@ export function AiAssistantPage() {
   const providers = useAiProvidersQuery();
   const sessions = useAiSessionsQuery();
   const createSession = useCreateAiSession();
-  const deleteSession = useDeleteAiSession();
   const previewContext = usePreviewAiBusinessContext();
   const chat = useAiChatStream();
   const setSettingsOpen = useUiStore((store) => store.setSettingsOpen);
+  const agentRailCollapsed = useUiStore((store) => store.agentRailCollapsed);
+  const toggleAgentRailCollapsed = useUiStore(
+    (store) => store.toggleAgentRailCollapsed,
+  );
+  const rightOverviewCollapsed = useUiStore(
+    (store) => store.rightOverviewCollapsed,
+  );
+  const toggleRightOverviewCollapsed = useUiStore(
+    (store) => store.toggleRightOverviewCollapsed,
+  );
 
-  const [activeSessionId, setActiveSessionId] = useState(
-    () => useAiChatStore.getState().lastSessionId,
+  const activeSessionId = useAiChatStore((state) => state.activeSessionId);
+  const setActiveSessionId = useAiChatStore(
+    (state) => state.setActiveSessionId,
   );
   const [selectedProviderId, setSelectedProviderId] = useState("");
   const input = useAiChatStore((state) => state.input);
   const setInput = useAiChatStore((state) => state.setInput);
   const retainedTurns = useAiChatStore((state) => state.retainedTurns);
-  const [sessionFilter, setSessionFilter] = useState("");
   const [pendingCard, setPendingCard] = useState<PendingTaskCard | null>(null);
   const [draft, setDraft] = useState<DraftTaskForm | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
-  const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [contextTaskId, setContextTaskId] = useState("");
@@ -402,6 +368,19 @@ export function AiAssistantPage() {
       useAiChatStore.setState({ lastSessionId: activeSessionId });
   }, [activeSessionId]);
 
+  // The session list lives in the shell rail, so this pane adopts the last
+  // used session and clears per-session task drafts whenever it changes.
+  useEffect(() => {
+    if (activeSessionId) return;
+    const lastSessionId = useAiChatStore.getState().lastSessionId;
+    if (lastSessionId) setActiveSessionId(lastSessionId);
+  }, [activeSessionId, setActiveSessionId]);
+
+  useEffect(() => {
+    setPendingCard(null);
+    setDraft(null);
+  }, [activeSessionId]);
+
   useEffect(() => {
     if (!activeSessionId && sessions.data && sessions.data.length > 0) {
       setActiveSessionId(sessions.data[0].id);
@@ -429,33 +408,6 @@ export function AiAssistantPage() {
   ]);
 
   const streamedText = chat.streaming?.text ?? "";
-  const sessionList = useMemo(() => {
-    const all = sessions.data ?? [];
-    const keyword = sessionFilter.trim().toLowerCase();
-    const filtered = keyword
-      ? all.filter((session) => session.title.toLowerCase().includes(keyword))
-      : all;
-    const buckets: Record<string, AiSession[]> = {
-      today: [],
-      yesterday: [],
-      earlier: [],
-    };
-    for (const session of filtered) {
-      buckets[sessionBucket(session.updated_at)].push(session);
-    }
-    const groups: SessionGroup[] = [];
-    if (buckets.today.length > 0) {
-      groups.push({ label: "今天", sessions: buckets.today });
-    }
-    if (buckets.yesterday.length > 0) {
-      groups.push({ label: "昨天", sessions: buckets.yesterday });
-    }
-    if (buckets.earlier.length > 0) {
-      groups.push({ label: "更早", sessions: buckets.earlier });
-    }
-    return groups;
-  }, [sessions.data, sessionFilter]);
-
   const activeSession = sessions.data?.find(
     (session) => session.id === activeSessionId,
   );
@@ -674,96 +626,6 @@ export function AiAssistantPage() {
       ) : null}
 
       <div className="ai-layout">
-        <aside className="ai-session-rail" aria-label="会话列表">
-          <button
-            className="ai-new-chat-btn"
-            disabled={createSession.isPending || chat.isStreaming}
-            onClick={() => {
-              setPendingCard(null);
-              setDraft(null);
-              void createSession
-                .mutateAsync()
-                .then((session) => {
-                  setActiveSessionId(session.id);
-                })
-                .catch(() => {
-                  // mutation state renders the safe error below
-                });
-            }}
-            type="button"
-          >
-            <Plus size={15} />
-            新会话
-          </button>
-          {createSession.error ? (
-            <div className="ai-session-create-error" role="alert">
-              无法新建会话，请重试
-            </div>
-          ) : null}
-          <div className="ai-rail-search">
-            <Search size={14} />
-            <input
-              aria-label="搜索会话"
-              onChange={(event) => setSessionFilter(event.target.value)}
-              placeholder="搜索会话"
-              value={sessionFilter}
-            />
-          </div>
-          {sessions.isPending ? (
-            <LoadingState label="正在读取会话…" />
-          ) : sessions.isError ? (
-            <ErrorState
-              compact
-              message="无法读取会话列表"
-              onRetry={() => void sessions.refetch()}
-            />
-          ) : sessionList.length === 0 ? (
-            <p className="ai-session-empty">
-              {sessionFilter
-                ? "没有匹配的会话。"
-                : "还没有会话，发送第一条消息开始。"}
-            </p>
-          ) : (
-            sessionList.map((group) => (
-              <div key={group.label}>
-                <div className="ai-rail-group-label">{group.label}</div>
-                {group.sessions.map((session) => (
-                  <div
-                    className="ai-session-row"
-                    data-active={session.id === activeSessionId}
-                    key={session.id}
-                  >
-                    <button
-                      disabled={chat.isStreaming}
-                      onClick={() => {
-                        setActiveSessionId(session.id);
-                        setPendingCard(null);
-                        setDraft(null);
-                      }}
-                      title={session.title}
-                      type="button"
-                    >
-                      <span className="ai-session-title">{session.title}</span>
-                      <span className="ai-session-time">
-                        {sessionTimeLabel(session.updated_at)}
-                      </span>
-                    </button>
-                    <button
-                      aria-label={`删除会话 ${session.title}`}
-                      className="ai-session-delete"
-                      disabled={chat.isStreaming}
-                      onClick={() => setDeletingSession(session.id)}
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ))
-          )}
-        </aside>
-
         <section className="ai-chat-main">
           <header className="ai-chat-header">
             <div className="ai-mobile-session-controls">
@@ -801,6 +663,7 @@ export function AiAssistantPage() {
               >
                 <Plus size={14} />
               </button>
+              <ModeSwitch />
             </div>
             <div className="min-w-0">
               <div className="ai-chat-header-title">
@@ -818,6 +681,38 @@ export function AiAssistantPage() {
               ) : null}
             </div>
             <AiUsageSummaryPanel sessionId={activeSessionId} />
+            {agentRailCollapsed ? (
+              <button
+                aria-controls="agent-sidebar"
+                aria-expanded={false}
+                aria-label="显示会话侧边栏"
+                className="icon-button ai-sidebar-toggle"
+                onClick={toggleAgentRailCollapsed}
+                title="显示会话侧边栏"
+                type="button"
+              >
+                <PanelLeftOpen aria-hidden="true" size={16} />
+              </button>
+            ) : null}
+            <button
+              aria-controls="right-overview"
+              aria-expanded={!rightOverviewCollapsed}
+              aria-label={
+                rightOverviewCollapsed ? "打开右侧工作栏" : "关闭右侧工作栏"
+              }
+              className="icon-button ai-sidebar-toggle"
+              onClick={toggleRightOverviewCollapsed}
+              title={
+                rightOverviewCollapsed ? "打开右侧工作栏" : "关闭右侧工作栏"
+              }
+              type="button"
+            >
+              {rightOverviewCollapsed ? (
+                <PanelRightOpen aria-hidden="true" size={16} />
+              ) : (
+                <PanelRightClose aria-hidden="true" size={16} />
+              )}
+            </button>
           </header>
 
           <div className="ai-chat-messages" ref={scrollRef}>
@@ -998,13 +893,7 @@ export function AiAssistantPage() {
                     </div>
                   ) : null}
                   <div className="ai-msg">
-                    <div className="ai-avatar">
-                      <Sparkles size={15} />
-                    </div>
                     <div className="ai-msg-body">
-                      <div className="ai-name-row">
-                        <span className="ai-name">AI 助手</span>
-                      </div>
                       {(chat.streaming?.reasoning ?? "").length > 0 ? (
                         <AiThinkingProcess
                           live={streamedText === ""}
@@ -1492,58 +1381,6 @@ export function AiAssistantPage() {
       >
         {previewContext.data ? (
           <AiBusinessContextPreviewContent preview={previewContext.data} />
-        ) : null}
-      </Modal>
-
-      <Modal
-        footer={
-          <>
-            <button
-              className="button button-secondary"
-              onClick={() => setDeletingSession(null)}
-              type="button"
-            >
-              取消
-            </button>
-            <button
-              className="button button-primary"
-              onClick={() => {
-                const sessionId = deletingSession;
-                if (!sessionId) return;
-                void deleteSession
-                  .mutateAsync({
-                    id: sessionId,
-                    expectedVersion:
-                      sessions.data?.find((session) => session.id === sessionId)
-                        ?.version ?? 1,
-                  })
-                  .then(() => {
-                    useAiChatStore.getState().forgetSession(sessionId);
-                    if (sessionId === activeSessionId) {
-                      setActiveSessionId("");
-                    }
-                    setDeletingSession(null);
-                  })
-                  .catch(() => {
-                    // Mutation state renders the conflict/failure below.
-                  });
-              }}
-              type="button"
-            >
-              删除
-            </button>
-          </>
-        }
-        onClose={() => setDeletingSession(null)}
-        open={deletingSession !== null}
-        title="删除会话"
-        width="420px"
-      >
-        <p>删除后该会话的全部本地消息不可恢复。确定删除？</p>
-        {deleteSession.error ? (
-          <p className="ai-task-card-error" role="alert">
-            会话删除失败，已刷新最新状态，请重试。
-          </p>
         ) : null}
       </Modal>
     </div>
@@ -2132,7 +1969,6 @@ function AiMessageBlock({
   if (role === "user") {
     return (
       <div className="ai-msg-user">
-        <span className="ai-msg-time">{messageTimeLabel(createdAt)}</span>
         <div className="ai-user-message-stack">
           <div className="ai-bubble-user">{content}</div>
           {contextSources.length > 0 || contextKnowledge.length > 0 ? (
@@ -2162,14 +1998,7 @@ function AiMessageBlock({
         : displayAiReply(content);
   return (
     <div className="ai-msg">
-      <div className="ai-avatar">
-        <Sparkles size={15} />
-      </div>
       <div className="ai-msg-body">
-        <div className="ai-name-row">
-          <span className="ai-name">AI 助手</span>
-          <span className="ai-msg-time">{messageTimeLabel(createdAt)}</span>
-        </div>
         {reasoning ? (
           <AiThinkingProcess reasoning={reasoning} live={false} />
         ) : null}
