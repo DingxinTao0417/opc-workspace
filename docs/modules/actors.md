@@ -1,6 +1,8 @@
 # Actor 与本地责任分派模块
 
-> 实现基线：app v0.1.1 / API v1 / SQLite schema 71。Actor/D2 分别由 schema v7/v9 引入；v20 Client–person 关联、v35 回访停用保护继续有效。schema 071 为 agent 增加可空 `agent_adapter_id`；本次只补 Actor 读取响应及初始化门控，不新增迁移。
+H2-W9（2026-09-21）：AI 独立轨道现支持按 `task_ids` 精确批量读取 1–20 个已有 Task 的活动责任（单任务历史读取不变），并在一张 `task.batch_update` 卡中统一设置或结束负责人/审核人。每项冻结 Task 版本与 Actor 安全身份，确认重验资格、责任事实与预览，在原生 Assignment 事务中整批成功或回滚。原因必填，审核人仍仅 owner；person 不收到消息，agent 分派不启动 Run。无 schema/API 迁移，见 [AI 责任批量命令](ai-assistant.md#已有任务成组责任变更h2-w92026-09-21)。
+
+> 实现基线：app v0.1.1 / API v1 / SQLite schema 78。Actor/D2 分别由 schema v7/v9 引入；v20 Client–person 关联、v35 回访停用保护继续有效。schema 071 为 agent 增加可空 `agent_adapter_id`，schema 074 在 Agent Run 中冻结 Actor/Assignment/Adapter 等执行身份，schema 075 增加 Run 交付状态，schema 076 增加 AI 会话计划；后续 schema 077/078 不改 Actor 表。
 >
 > 版本边界：T-18A–D 人工闭环已交付；T-19 v0.2 已有 Windows 内置 Agent 的 Adapter/Actor/Run 与条件式文本提交。未验证平台、external 执行器及其他执行能力仍关闭，详见 [ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)。
 
@@ -34,6 +36,32 @@ Assignment 保存某个 Task 在某段时间内的角色事实：
 - 人工 manual 输出提交要求 active assignee 和 active owner reviewer。Artifact producer 由服务端取当前 assignee，recorder 固定 owner；人工 Submission submitter、reviewer、withdrawer 和 Artifact deleter 也固定 owner。Agent Run 条件式提交的身份语义见下表。
 - Workflow Event 已覆盖 Actor、Assignment、Task 生命周期、策略修改、输出提交、验收、返工、撤回、Artifact 删除和迁移回填，并带可空 Assignment/Submission/Artifact 关联。
 - Client 详情可显式关联已有 active person，或在一个事务中新建 person 后关联。每个 Client 同时最多一个 active contact；解除保留不可变原因与操作者历史，active Client 关联会阻止 person 停用。待回访 Client Followup 也会阻止其负责人停用，终态回访仅保留历史，不会阻止停用。
+
+### AI 独立轨道的责任分派（H2-C2 / H2-D）
+
+ADR-029 的 work 范围可通过 workspace_task_options 分页读取可分派 active owner/person 及就绪 agent 的 ID、名称、类型、版本；可选 role=reviewer 仅返回 active owner，tag 查询不能使用 role。不读取备注、metadata、联系方式、客户关联或 Adapter 配置。work+actions 的 inbox.split 保存整批拆分建议，经人工确认后才创建初始 Assignment；manual reviewer 固定 active owner。
+
+H2-W8 的 `task.batch_create` 也可在每个项目任务草案中可选指定一个上述真实 `assignee_actor_id`，经一张完整确认卡原子创建任务和初始 Assignment；若该草案为 `manual` 且指定了负责人，同时由 active owner 担任 reviewer。预览冻结 Actor 身份名称/状态/版本，确认重验候选资格与 Adapter 就绪，任何失败整批回滚。未指定负责人不隐式分派或加审核人。该批次仍不启动 Agent Run、不联系 person；后续改派、执行各需独立权限和确认，见 [批量任务初始分派](ai-assistant.md#批量建任务的可选初始分派h2-w82026-09-21)。
+
+H2-J 在显式 `work+clients+actions` 下复用同一 Actor 候选白名单来选择客户联系人，但服务端只接受 `type=person,status=active`；owner、agent 与 inactive person 即使出现在其他任务场景的候选中也不能关联。Client 安全详情只返回当前联系人 link/person 身份与 person 版本，不返回人员备注或 metadata。关联/解除逐项人工确认并复用原生事务；解除保留 person 和关系历史，不创建、删除、停用人员，也不发送消息。
+
+H2-K 在保存会话的 `work+actions` 下增加 `workspace_search/get(person)` 和 `person.create/update`。读取只返回 person 的 ID、名称、状态、版本，不搜索或返回备注/metadata。创建固定为 active 本地 person；更新只接受名称、状态、备注，备注必须来自用户本轮明确输入。模型不能编辑 owner/system/agent、创建账号、删除人员或发送消息。每项在人工确认前零写入；确认重新读取版本和完整预览，并与 Actor HTTP API 共用创建/更新事务。停用继续由既有数据库与领域门禁阻止仍有活动 Assignment、active Client contact 或 planned Followup 的人员，不自动改派或解除关系。
+
+H4-AH 将设置页“人员与责任”的已保存 person 行接入“交给智能体”：入口只暂存 person ID、当前显示名称/状态、`/ai?settings=actors` 和固定提示词，推荐 `work+actions`；不会复制备注、metadata、客户关系、任务责任、联系方式、会话或授权。进入 `/ai` 后仍需用户手动带入问题、重新授权并发送；模型必须先用 `workspace_get(type=person,id=...)` 或精确匹配的 `workspace_search(type=person)` 读取最新身份，才能起草待确认的 `person.create/update`。新建/编辑表单或写入中禁用交接，交接本身不创建、修改、停用、改派、解绑、取消回访、删除人员、联系人员或授予访问权限。
+
+H2-D 新增 workspace_task_assignments：单项查询使用实际 task_id、可选 state=active/history（默认 active）、role、limit 1–20、offset 0–1000；只返回责任记录 ID、角色、当前 Actor 名称/类型/状态/版本、起止时间，以及同一读事务内的 Task 版本、状态、review_policy 和详情地址。历史不等于当前责任，不返回结束原因、操作者或人员私有资料。分页明确 has_more/next_offset/window_limited。H2-W9 另可只传 `task_ids`（1–20 个不重复的精确 UUID）及可选 role，返回同一快照的逐 Task 当前责任和版本；不能混用单项/历史/分页参数。
+
+保存会话的 work+actions 可提出三种操作，均由人逐项确认：
+
+- task.assign：task_id/expected_version；changes 必须为 role、真实 actor_id，只能首次分派空缺角色。
+- task.reassign：同上，另须 changes.assignment_id（该任务/角色当前活动记录）与 1–1000 字符 reason，保留旧记录并新建责任。
+- task.unassign：task_id/expected_version；changes 为 role、assignment_id、reason，不接受 actor_id，只结束指定活动责任。
+
+预览绑定 Task 标题/版本、原责任 ID、双方 Actor 名称/类型/版本、当前验收策略/批次及子任务数量。确认重验当前角色、Actor/Adapter 可用性并比较完整预览，改名、停用或资料变化不能悄然替换确认目标。原生 Assignment API 与审批共用 assignment_commands.go；分派、Task 升版本、领域事件、父任务待验收协调及审批在同一事务提交，失败全部回滚，重复确认不重复分派。父任务可按既有规则发起/撤回待验收或重开，不自动接受产出。
+
+主/侧对话复用确认卡与 Task 详情链接，确认或模糊失败回读后刷新任务聚合、分派、产出、事件及相关工作台缓存；下轮只回传审批/Task 结果身份，不自动续授权限。人员不可用、责任已变化、角色不允许及任务已结束提供具体提示，需重新读取后提议，不自动改派或把分派失败误报为任务创建失败。person 不收消息；责任分派动作本身只分派，不启动 Run、不启用 Adapter。H5-A 已提供独立的 `agent_execution` 单次授权与第二次人工确认链路；它复用当前 active agent Assignment，并将 Actor/Assignment/Adapter 版本冻结进 schema 074 的 Run，不能把一次分派确认当成执行确认。
+
+源码证据：[共享分派事务](../../services/sidecar/internal/api/assignment_commands.go)、[AI 读取/提议](../../services/sidecar/internal/api/ai_assignment_actions.go)、[隔离验收](../../services/sidecar/internal/api/ai_assignment_actions_test.go)、[前端契约](../../apps/web/src/api/aiAssignmentActions.ts)。确定性测试不代替真实模型/桌面验收。
 
 ## Actor 归属语义
 
@@ -100,9 +128,9 @@ Assignment 保存某个 Task 在某段时间内的角色事实：
 
 ## 数据与 API
 
-### 已实现数据（schema 71）
+### 已实现数据（当前 schema 76；Actor 表自 schema 71 未变）
 
-- `actors`：类型、展示名、状态、备注、受限 metadata、内置标记、version 与时间；schema 071 另有只读可空 `agent_adapter_id`。本次 API 加字段不新增数据库版本。
+- `actors`：类型、展示名、状态、备注、受限 metadata、内置标记、version 与时间；schema 071 另有只读可空 `agent_adapter_id`。schema 074 不改 Actor 表，只把创建 Run 时观察到的 Actor/Assignment/Adapter 版本冻结在 `agent_runs`。
 - `task_assignments`：Task、Actor、role、分派/结束 Actor、原因、时间与 active 唯一性。
 - `workflow_events`：聚合、action、actor、assignment/submission/artifact、request、不可变快照、command_seq 与时间。
 - `task_submissions`：submit/review/withdraw Actor 和批次状态。

@@ -1,15 +1,29 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
+	"github.com/opc-workspace/opc-sidecar/internal/agentrunner"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
+	"gorm.io/gorm"
 )
+
+func assertAgentRunDomainCode(t *testing.T, err error, want string) {
+	t.Helper()
+	var domain *projectRequestError
+	if !errors.As(err, &domain) || domain.code != want {
+		t.Fatalf("domain error = %#v, want %s", err, want)
+	}
+}
 
 func startAgentRunModelServer(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
@@ -26,7 +40,8 @@ func startAgentRunModelServer(t *testing.T) (*httptest.Server, *[]string) {
 		*authorizations = append(*authorizations, r.Header.Get("Authorization"))
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{
-				"message": map[string]any{"content": "任务已完成：结论、要点与下一步建议。"},
+				"finish_reason": "stop",
+				"message":       map[string]any{"content": "任务已完成：结论、要点与下一步建议。"},
 			}},
 		})
 	}))
@@ -92,7 +107,7 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 
 	// 3. Create a task and assign the agent actor.
 	createdTask := performRequest(router, http.MethodPost, "/api/v1/tasks",
-		[]byte(`{"title":"撰写季度复盘","review_policy":"manual"}`), nil)
+		[]byte(`{"title":"撰写季度复盘","description":"汇总事实并形成报告","completion_criteria":"包含结论与三个证据","review_policy":"manual","priority":"P1","estimated_minutes":45}`), nil)
 	if createdTask.Code != http.StatusCreated {
 		t.Fatalf("create task = %d: %s", createdTask.Code, createdTask.Body.String())
 	}
@@ -133,7 +148,8 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 
 	queued := performRequest(router, http.MethodPost,
 		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/agent-runs",
-		[]byte(fmt.Sprintf(`{"provider_id":%q}`, provider.ID)), nil)
+		[]byte(fmt.Sprintf(`{"provider_id":%q}`, provider.ID)),
+		map[string]string{"Idempotency-Key": "agent-run-lifecycle"})
 	if queued.Code != http.StatusCreated {
 		t.Fatalf("create agent run = %d: %s", queued.Code, queued.Body.String())
 	}
@@ -150,40 +166,69 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 	if run.ResultBytes == nil || *run.ResultBytes == 0 || run.Attempt != 1 {
 		t.Fatalf("run metadata = %#v", run)
 	}
-
-	// 5. Retry creates a new attempt linked to the failed… succeeded parent.
-	retried := performRequest(router, http.MethodPost,
-		"/api/v1/agent-runs/"+run.ID+"/retry", nil, nil)
-	if retried.Code != http.StatusCreated {
-		t.Fatalf("retry agent run = %d: %s", retried.Code, retried.Body.String())
+	if run.OutputDeliveryStatus != agentRunOutputSubmitted || run.OutputDeliveryErrorCode != nil ||
+		run.SubmissionID == nil || run.ArtifactID == nil {
+		t.Fatalf("run output delivery = %#v", run)
 	}
-	var retryEnvelope struct {
+	if run.TaskVersion < 1 || run.AssignmentAssignedAt == "" || run.ActorVersion < 1 ||
+		run.AdapterVersion < 1 || run.ProviderVersion < 1 || run.ProviderConfigVersion < 1 ||
+		run.ExecutionContractVersion != agentRunExecutionContractVersion {
+		t.Fatalf("run frozen identity = %#v", run)
+	}
+	var stored models.AgentRun
+	if err := store.DB.First(&stored, "id = ?", run.ID).Error; err != nil {
+		t.Fatalf("load stored run: %v", err)
+	}
+	var snapshot struct {
+		TaskID             string `json:"task_id"`
+		Title              string `json:"title"`
+		Description        string `json:"description"`
+		CompletionCriteria string `json:"completion_criteria"`
+		Status             string `json:"status"`
+		Kind               string `json:"kind"`
+	}
+	if err := json.Unmarshal([]byte(stored.InputSnapshotJSON), &snapshot); err != nil {
+		t.Fatalf("decode frozen task snapshot: %v", err)
+	}
+	if snapshot.TaskID != taskEnvelope.Data.ID || snapshot.Title != "撰写季度复盘" ||
+		snapshot.Description != "汇总事实并形成报告" || snapshot.CompletionCriteria != "包含结论与三个证据" ||
+		snapshot.Status != "todo" || snapshot.Kind != "work" {
+		t.Fatalf("frozen task snapshot = %#v", snapshot)
+	}
+	var rawSnapshot map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stored.InputSnapshotJSON), &rawSnapshot); err != nil {
+		t.Fatalf("decode frozen task snapshot shape: %v", err)
+	}
+	for _, forbidden := range []string{"review_policy", "priority", "estimated_minutes", "version", "project_id"} {
+		if _, exists := rawSnapshot[forbidden]; exists {
+			t.Fatalf("legacy v1 snapshot unexpectedly contains %q: %s", forbidden, stored.InputSnapshotJSON)
+		}
+	}
+	replayed := performRequest(router, http.MethodPost,
+		"/api/v1/tasks/"+taskEnvelope.Data.ID+"/agent-runs",
+		[]byte(fmt.Sprintf(`{"provider_id":%q}`, provider.ID)),
+		map[string]string{"Idempotency-Key": "agent-run-lifecycle"})
+	if replayed.Code != http.StatusCreated || replayed.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("replay Agent Run = %d replay=%q: %s", replayed.Code,
+			replayed.Header().Get("Idempotency-Replayed"), replayed.Body.String())
+	}
+	var replayEnvelope struct {
 		Data agentRunResponse `json:"data"`
 	}
-	if err := json.Unmarshal(retried.Body.Bytes(), &retryEnvelope); err != nil {
-		t.Fatalf("decode retry: %v", err)
+	if err := json.Unmarshal(replayed.Body.Bytes(), &replayEnvelope); err != nil || replayEnvelope.Data.ID != run.ID {
+		t.Fatalf("replayed Agent Run = %#v err=%v", replayEnvelope.Data, err)
 	}
-	if retryEnvelope.Data.Attempt != 2 || retryEnvelope.Data.ParentRunID == nil || *retryEnvelope.Data.ParentRunID != run.ID {
-		t.Fatalf("retry run metadata = %#v", retryEnvelope.Data)
+
+	// 5. A successful run submits the task for manual review. It can no longer
+	// be retried because only todo/in-progress task snapshots are executable.
+	retried := performRequest(router, http.MethodPost,
+		"/api/v1/agent-runs/"+run.ID+"/retry", nil, nil)
+	if retried.Code != http.StatusConflict || responseErrorCode(t, retried.Body.Bytes()) != agentRunIdentityChanged {
+		t.Fatalf("retry submitted task = %d: %s", retried.Code, retried.Body.String())
 	}
-	retryFinished := waitAgentRunStatus(t, router, retryEnvelope.Data.ID, "succeeded")
-	var skipReason string
-	_ = store.DB.Table("workflow_events").Select("current_json").
-		Where("aggregate_type = 'agent_run' AND action = 'agent_run_submission_skipped'").
-		Order("created_at DESC").Limit(1).Scan(&skipReason)
-	t.Logf("SKIP REASON: %s", skipReason)
-	var assignments []struct {
-		Role         string
-		ActorID      string
-		UnassignedAt *string
-	}
-	_ = store.DB.Table("task_assignments").Select("role, actor_id, unassigned_at").
-		Where("task_id = ?", taskEnvelope.Data.ID).Scan(&assignments).Error
-	t.Logf("ASSIGNMENTS: %+v", assignments)
 
 	// v0.2-C: the first successful run submitted its output through the
-	// manual-review chain and moved the task to waiting_review; the second
-	// run's submission is skipped because the task is no longer actionable.
+	// manual-review chain and moved the task to waiting_review.
 	var taskRow struct {
 		Status              string
 		CurrentSubmissionID *string
@@ -197,19 +242,29 @@ func TestAgentRunBuiltinTextExecutorLifecycle(t *testing.T) {
 	if taskRow.Status != "waiting_review" || taskRow.CurrentSubmissionID == nil {
 		t.Fatalf("task after run = %#v, want waiting_review with submission", taskRow)
 	}
+	if *taskRow.CurrentSubmissionID != *run.SubmissionID {
+		t.Fatalf("Task submission=%s Run submission=%v", *taskRow.CurrentSubmissionID, run.SubmissionID)
+	}
 	var artifact models.TaskArtifact
 	if err := store.DB.First(&artifact, "submission_id = ?", *taskRow.CurrentSubmissionID).Error; err != nil ||
 		artifact.StorageKind != "text" || artifact.ProducedByActorID != agentAdapterBuiltinActorID ||
-		artifact.ContentText == nil || *artifact.ContentText != *retryFinished.ResultText && *artifact.ContentText != *run.ResultText {
+		artifact.ContentText == nil || *artifact.ContentText != *run.ResultText {
 		t.Fatalf("submitted artifact = %#v err=%v", artifact, err)
 	}
-	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'agent_run' AND action = 'agent_run_submission_skipped'", 1)
+	if artifact.ID != *run.ArtifactID || artifact.RecordedByActorID != models.BuiltinSystemActorID {
+		t.Fatalf("Run-linked artifact = %#v", artifact)
+	}
 
 	var eventCount int64
 	if err := store.DB.Table("workflow_events").
 		Where("aggregate_type = 'agent_run' AND aggregate_id = ? AND action = 'agent_run_succeeded'", run.ID).
 		Count(&eventCount).Error; err != nil || eventCount != 1 {
 		t.Fatalf("succeeded events=%d err=%v", eventCount, err)
+	}
+	if err := store.DB.Table("workflow_events").
+		Where("action = 'task_output_submitted' AND submission_id = ? AND agent_run_id = ?", *run.SubmissionID, run.ID).
+		Count(&eventCount).Error; err != nil || eventCount != 1 {
+		t.Fatalf("shared output events=%d err=%v", eventCount, err)
 	}
 }
 
@@ -355,4 +410,259 @@ func TestAgentRunRejectsUnreadyAdapterAssignment(t *testing.T) {
 	if runCreated.Code != http.StatusConflict || responseErrorCode(t, runCreated.Body.Bytes()) != agentRunNotExecutable {
 		t.Fatalf("agent run without executable chain = %d: %s", runCreated.Code, runCreated.Body.String())
 	}
+}
+
+func TestPrepareAgentRunFreezesIdentityAndDatabaseArbitratesConcurrency(t *testing.T) {
+	router, store := newKnowledgeTestAPI(t)
+	const (
+		taskID       = "018f0000-0000-7000-8000-00000000d001"
+		adapterID    = "018f0000-0000-7000-8000-00000000d002"
+		actorID      = "018f0000-0000-7000-8000-00000000d003"
+		assignmentID = "018f0000-0000-7000-8000-00000000d004"
+		providerID   = "018f0000-0000-7000-8000-00000000d005"
+		now          = "2026-09-18T12:00:00Z"
+	)
+	lastHealth := now
+	estimatedMinutes := 30
+	adapter := models.AgentAdapter{
+		ID: adapterID, AdapterKey: "domain-freeze-adapter", Kind: "builtin", DisplayName: "领域冻结代理",
+		ExecutableRef: "builtin:domain-freeze", ManifestJSON: "{}", ProtocolVersion: "opc-agent-pipe-v1",
+		Status: "enabled", HealthStatus: "healthy", IsolationStatus: "verified", ExecutionReady: true,
+		LastHealthAt: &lastHealth, Version: 3, CreatedAt: now, UpdatedAt: now,
+	}
+	actor := models.Actor{
+		ID: actorID, Type: "agent", DisplayName: "领域代理", Status: "active", MetadataJSON: "{}",
+		AgentAdapterID: &adapter.ID, Version: 4, CreatedAt: now, UpdatedAt: now,
+	}
+	task := models.Task{
+		ID: taskID, Title: "冻结完整任务事实", Description: "只依据冻结事实执行", Kind: "work",
+		Status: "in_progress", ReviewPolicy: "manual", Priority: "P0",
+		CompletionCriteria: "必须包含可复核结果", EstimatedMinutes: &estimatedMinutes,
+		Version: 7, CreatedAt: now, UpdatedAt: now,
+	}
+	assignment := models.TaskAssignment{
+		ID: assignmentID, TaskID: taskID, ActorID: actorID, Role: "assignee",
+		AssignedByActorID: models.BuiltinOwnerActorID, AssignedAt: now,
+	}
+	provider := models.AIProvider{
+		ID: providerID, Name: "domain-freeze-provider", Kind: "remote", Protocol: "openai_chat",
+		BaseURL: "https://example.invalid/v1", Model: "frozen-model", Status: "ready",
+		HealthStatus: "healthy", HasKey: true, LastHealthAt: &lastHealth,
+		Version: 5, ConfigVersion: 6, CreatedAt: now, UpdatedAt: now,
+	}
+	for _, fixture := range []struct {
+		name  string
+		value any
+	}{
+		{"adapter", &adapter}, {"actor", &actor}, {"task", &task},
+		{"assignment", &assignment}, {"provider", &provider},
+	} {
+		if err := store.DB.Create(fixture.value).Error; err != nil {
+			t.Fatalf("create %s: %v", fixture.name, err)
+		}
+	}
+
+	prepared, err := prepareAgentRun(store.DB, prepareAgentRunInput{TaskID: taskID, ProviderID: providerID})
+	if err != nil {
+		t.Fatalf("prepareAgentRun() error = %v", err)
+	}
+	if prepared.Identity != (agentRunIdentity{
+		TaskVersion: 7, AssignmentID: assignmentID, AssignmentAssignedAt: now,
+		ActorID: actorID, ActorVersion: 4, AdapterID: adapterID, AdapterVersion: 3,
+		ProviderID: providerID, ProviderVersion: 5, ProviderConfigVersion: 6,
+	}) || prepared.Attempt != 1 {
+		t.Fatalf("prepared identity = %#v attempt=%d", prepared.Identity, prepared.Attempt)
+	}
+	if prepared.Snapshot.CompletionCriteria != task.CompletionCriteria ||
+		prepared.Snapshot.ReviewPolicy != "manual" || prepared.Snapshot.Priority != "P0" ||
+		prepared.Snapshot.Version != 7 || prepared.Snapshot.EstimatedMinutes == nil ||
+		*prepared.Snapshot.EstimatedMinutes != 30 {
+		t.Fatalf("prepared snapshot = %#v", prepared.Snapshot)
+	}
+
+	var run models.AgentRun
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		run, createErr = createAgentRunInTransaction(
+			tx, prepared, models.BuiltinOwnerActorID, "domain-freeze", now,
+		)
+		return createErr
+	}); err != nil {
+		t.Fatalf("createAgentRunInTransaction() error = %v", err)
+	}
+	if run.ExecutionContractVersion != agentRunExecutionContractVersion || run.TaskVersion != 7 ||
+		run.ProviderConfigVersion != 6 || run.AssignmentAssignedAt != now {
+		t.Fatalf("stored run identity = %#v", run)
+	}
+
+	activePrepared := prepared
+	activePrepared.Attempt = 2
+	err = store.DB.Transaction(func(tx *gorm.DB) error {
+		_, createErr := createAgentRunInTransaction(
+			tx, activePrepared, models.BuiltinOwnerActorID, "active-conflict", now,
+		)
+		return createErr
+	})
+	assertAgentRunDomainCode(t, err, agentRunAlreadyActive)
+
+	if err := store.DB.Model(&models.AgentRun{}).Where("id = ?", run.ID).Updates(map[string]any{
+		"status": "running", "started_at": now,
+	}).Error; err != nil {
+		t.Fatalf("start prepared run: %v", err)
+	}
+	(&API{db: store.DB}).finalizeAgentRun(run, "", agentrunner.CodeCancelled, now)
+	var cancelled models.AgentRun
+	if err := store.DB.First(&cancelled, "id = ?", run.ID).Error; err != nil {
+		t.Fatalf("load cancelled run: %v", err)
+	}
+	if cancelled.Status != "cancelled" || cancelled.ErrorCode != nil || cancelled.CompletedAt == nil {
+		t.Fatalf("cancelled run = %#v", cancelled)
+	}
+	var cancelledEvents int64
+	if err := store.DB.Table("workflow_events").Where(
+		"aggregate_type = 'agent_run' AND aggregate_id = ? AND action = 'agent_run_cancelled'", run.ID,
+	).Count(&cancelledEvents).Error; err != nil || cancelledEvents != 1 {
+		t.Fatalf("cancelled events=%d err=%v", cancelledEvents, err)
+	}
+	err = store.DB.Transaction(func(tx *gorm.DB) error {
+		_, createErr := createAgentRunInTransaction(
+			tx, prepared, models.BuiltinOwnerActorID, "attempt-conflict", now,
+		)
+		return createErr
+	})
+	assertAgentRunDomainCode(t, err, agentRunIdentityChanged)
+
+	next, err := prepareAgentRun(store.DB, prepareAgentRunInput{TaskID: taskID, ProviderID: providerID})
+	if err != nil || next.Attempt != 2 {
+		t.Fatalf("prepare next attempt = %#v err=%v", next, err)
+	}
+	var timedOut models.AgentRun
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		timedOut, createErr = createAgentRunInTransaction(
+			tx, next, models.BuiltinOwnerActorID, "timeout-control", now,
+		)
+		return createErr
+	}); err != nil {
+		t.Fatalf("create timeout control run: %v", err)
+	}
+	if err := store.DB.Model(&models.AgentRun{}).Where("id = ?", timedOut.ID).
+		Updates(map[string]any{"status": "running", "started_at": now}).Error; err != nil {
+		t.Fatalf("start timeout control run: %v", err)
+	}
+	(&API{db: store.DB}).finalizeAgentRun(timedOut, "", agentrunner.CodeTimedOut, now)
+	if err := store.DB.First(&timedOut, "id = ?", timedOut.ID).Error; err != nil {
+		t.Fatalf("reload timeout control run: %v", err)
+	}
+	if timedOut.Status != "failed" || timedOut.ErrorCode == nil || *timedOut.ErrorCode != agentrunner.CodeTimedOut {
+		t.Fatalf("timeout control run = %#v", timedOut)
+	}
+	retried := performRequest(router, http.MethodPost, "/api/v1/agent-runs/"+timedOut.ID+"/retry", nil, nil)
+	if retried.Code != http.StatusCreated {
+		t.Fatalf("retry identity-safe run = %d: %s", retried.Code, retried.Body.String())
+	}
+	var retryEnvelope struct {
+		Data agentRunResponse `json:"data"`
+	}
+	if err := json.Unmarshal(retried.Body.Bytes(), &retryEnvelope); err != nil {
+		t.Fatalf("decode retry response: %v", err)
+	}
+	if retryEnvelope.Data.Attempt != 3 || retryEnvelope.Data.ParentRunID == nil ||
+		*retryEnvelope.Data.ParentRunID != timedOut.ID || retryEnvelope.Data.TaskVersion != run.TaskVersion ||
+		retryEnvelope.Data.ProviderConfigVersion != run.ProviderConfigVersion {
+		t.Fatalf("identity-safe retry = %#v", retryEnvelope.Data)
+	}
+	waitAgentRunStatus(t, router, retryEnvelope.Data.ID, "failed")
+}
+
+func TestPrepareAgentRunRejectsProviderAndIdentityDrift(t *testing.T) {
+	_, store := newKnowledgeTestAPI(t)
+	const (
+		taskID       = "018f0000-0000-7000-8000-00000000e001"
+		adapterID    = "018f0000-0000-7000-8000-00000000e002"
+		actorID      = "018f0000-0000-7000-8000-00000000e003"
+		assignmentID = "018f0000-0000-7000-8000-00000000e004"
+		providerID   = "018f0000-0000-7000-8000-00000000e005"
+		now          = "2026-09-18T12:00:00Z"
+	)
+	lastHealth := now
+	adapter := models.AgentAdapter{
+		ID: adapterID, AdapterKey: "identity-drift-adapter", Kind: "builtin", DisplayName: "漂移检测代理",
+		ExecutableRef: "builtin:identity-drift", ManifestJSON: "{}", ProtocolVersion: agentexec.ProtocolVersion,
+		Status: "enabled", HealthStatus: "healthy", IsolationStatus: "verified", ExecutionReady: true,
+		LastHealthAt: &lastHealth, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	actor := models.Actor{
+		ID: actorID, Type: "agent", DisplayName: "漂移代理", Status: "active", MetadataJSON: "{}",
+		AgentAdapterID: &adapter.ID, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	task := models.Task{
+		ID: taskID, Title: "检测执行身份漂移", Kind: "work", Status: "todo", ReviewPolicy: "manual",
+		Priority: "P2", CompletionCriteria: "身份必须稳定", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	assignment := models.TaskAssignment{
+		ID: assignmentID, TaskID: taskID, ActorID: actorID, Role: "assignee",
+		AssignedByActorID: models.BuiltinOwnerActorID, AssignedAt: now,
+	}
+	provider := models.AIProvider{
+		ID: providerID, Name: "identity-drift-provider", Kind: "remote", Protocol: "openai_chat",
+		BaseURL: "https://example.invalid/v1", Model: "drift-model", Status: "ready",
+		HealthStatus: "healthy", HasKey: false, LastHealthAt: &lastHealth,
+		Version: 1, ConfigVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	for _, fixture := range []struct {
+		name  string
+		value any
+	}{
+		{"adapter", &adapter}, {"actor", &actor}, {"task", &task},
+		{"assignment", &assignment}, {"provider", &provider},
+	} {
+		if err := store.DB.Create(fixture.value).Error; err != nil {
+			t.Fatalf("create %s: %v", fixture.name, err)
+		}
+	}
+	_, err := prepareAgentRun(store.DB, prepareAgentRunInput{TaskID: taskID, ProviderID: providerID})
+	assertAgentRunDomainCode(t, err, "AGENT_PROVIDER_INVALID")
+
+	if err := store.DB.Model(&models.AIProvider{}).Where("id = ?", providerID).
+		Updates(map[string]any{"has_key": true, "version": 2, "config_version": 2}).Error; err != nil {
+		t.Fatalf("make provider executable: %v", err)
+	}
+	prepared, err := prepareAgentRun(store.DB, prepareAgentRunInput{TaskID: taskID, ProviderID: providerID})
+	if err != nil {
+		t.Fatalf("prepare executable run: %v", err)
+	}
+	var run models.AgentRun
+	if err := store.DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		run, createErr = createAgentRunInTransaction(
+			tx, prepared, models.BuiltinOwnerActorID, "identity-drift", now,
+		)
+		return createErr
+	}); err != nil {
+		t.Fatalf("create frozen run: %v", err)
+	}
+	if err := store.DB.Model(&models.Actor{}).Where("id = ?", actorID).
+		Updates(map[string]any{"notes": "changed", "version": 2, "updated_at": "2026-09-18T12:01:00Z"}).Error; err != nil {
+		t.Fatalf("drift actor identity: %v", err)
+	}
+	_, err = validateFrozenAgentRunIdentity(store.DB, run)
+	assertAgentRunDomainCode(t, err, agentRunIdentityChanged)
+	api := &API{
+		db: store.DB, options: Options{Now: func() time.Time {
+			return time.Date(2026, 9, 18, 12, 2, 0, 0, time.UTC)
+		}}, maintenance: &sync.RWMutex{},
+	}
+	api.executeAgentRun(context.Background(), run.ID)
+	if err := store.DB.First(&run, "id = ?", run.ID).Error; err != nil {
+		t.Fatalf("reload drift-rejected run: %v", err)
+	}
+	if run.Status != "failed" || run.ErrorCode == nil || *run.ErrorCode != agentRunIdentityChanged ||
+		run.StartedAt == nil || run.CompletedAt == nil {
+		t.Fatalf("drift-rejected run = %#v", run)
+	}
+	_, err = prepareAgentRun(store.DB, prepareAgentRunInput{
+		TaskID: taskID, ProviderID: providerID, Expected: &prepared.Identity,
+	})
+	assertAgentRunDomainCode(t, err, agentRunIdentityChanged)
 }

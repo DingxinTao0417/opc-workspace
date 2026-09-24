@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -358,6 +359,16 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 		}
 		if row.DeletedAt != nil {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_ATTACHMENT_ALREADY_DELETED", "The project attachment is already deleted")
+		}
+		referenced, err := activeAgentRunReferencesControlledFile(
+			tx, agentexec.FileSourceProjectAttachment, row.ID,
+		)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return newProjectRequestError(http.StatusConflict, agentRunFileReferencedByActiveRunCode,
+				"Wait for or cancel the active Agent Run before deleting this input Project Attachment")
 		}
 		if row.ProjectStatus == "archived" {
 			return newProjectRequestError(http.StatusConflict, "PROJECT_ARCHIVED", "Archived projects are read-only")

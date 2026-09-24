@@ -1,11 +1,18 @@
 import { CalendarDays, Plus, Search } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useState, type SetStateAction } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useProjectsQuery } from "../api/hooks";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
 import { ClientSelect } from "../components/ClientSelect";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
+import { projectPortfolioHandoff } from "../lib/aiIssueHandoff";
+import {
+  projectPortfolioHref,
+  readProjectPortfolioLocation,
+  type ProjectPortfolioView,
+} from "../lib/projectPortfolioLocation";
 import { useSettledPage } from "../lib/useSettledPage";
 import type { Project, ProjectStatus } from "../types/models";
 
@@ -75,11 +82,42 @@ function ProjectCard({ project }: { project: Project }) {
 }
 
 export function ProjectsPage() {
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<ProjectStatus | "">("");
-  const [clientId, setClientId] = useState("");
-  const [page, setPage] = useState(1);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = readProjectPortfolioLocation(searchParams);
+  const { query: search, status, clientId, page } = view;
   const [creating, setCreating] = useState(false);
+  const updateView = useCallback(
+    (patch: Partial<ProjectPortfolioView>, replace = false) => {
+      setSearchParams(
+        (currentParams) => {
+          const current = readProjectPortfolioLocation(currentParams);
+          const href = projectPortfolioHref({ ...current, ...patch });
+          return href
+            ? new URLSearchParams(href.split("?")[1] ?? "")
+            : currentParams;
+        },
+        { replace },
+      );
+    },
+    [setSearchParams],
+  );
+  const setPage = useCallback(
+    (next: SetStateAction<number>) => {
+      setSearchParams(
+        (currentParams) => {
+          const current = readProjectPortfolioLocation(currentParams);
+          const pageValue =
+            typeof next === "function" ? next(current.page) : next;
+          const href = projectPortfolioHref({ ...current, page: pageValue });
+          return href
+            ? new URLSearchParams(href.split("?")[1] ?? "")
+            : currentParams;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
   const query = useProjectsQuery({
     page,
     pageSize: 12,
@@ -107,17 +145,24 @@ export function ProjectsPage() {
   });
 
   return (
-    <div className="page">
+    <div className="page projects-page">
       <PageHeader
         actions={
-          <button
-            className="button button-primary"
-            onClick={() => setCreating(true)}
-            type="button"
-          >
-            <Plus size={15} />
-            新建项目
-          </button>
+          <>
+            <AiIssueHandoffButton
+              content={projectPortfolioHandoff(view)}
+              disabled={creating}
+              label="梳理项目组合"
+            />
+            <button
+              className="button button-primary"
+              onClick={() => setCreating(true)}
+              type="button"
+            >
+              <Plus size={15} />
+              新建项目
+            </button>
+          </>
         }
         meta={
           <span className="page-count">
@@ -136,9 +181,9 @@ export function ProjectsPage() {
           <Search size={15} />
           <input
             aria-label="搜索项目"
+            maxLength={200}
             onChange={(event) => {
-              setSearch(event.target.value);
-              setPage(1);
+              updateView({ query: event.target.value, page: 1 }, true);
             }}
             placeholder="搜索项目名称或描述…"
             value={search}
@@ -148,8 +193,10 @@ export function ProjectsPage() {
           <span className="sr-only">项目状态</span>
           <select
             onChange={(event) => {
-              setStatus(event.target.value as ProjectStatus | "");
-              setPage(1);
+              updateView({
+                status: event.target.value as ProjectStatus | "",
+                page: 1,
+              });
             }}
             value={status}
           >
@@ -165,8 +212,7 @@ export function ProjectsPage() {
           ariaLabel="关联客户"
           emptyLabel="全部客户"
           onChange={(value) => {
-            setClientId(value);
-            setPage(1);
+            updateView({ clientId: value, page: 1 });
           }}
           value={clientId}
           variant="toolbar"
@@ -188,10 +234,7 @@ export function ProjectsPage() {
               <button
                 className="button button-secondary"
                 onClick={() => {
-                  setSearch("");
-                  setStatus("");
-                  setClientId("");
-                  setPage(1);
+                  updateView({ query: "", status: "", clientId: "", page: 1 });
                 }}
                 type="button"
               >

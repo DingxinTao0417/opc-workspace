@@ -31,7 +31,7 @@ function relativeLabel(iso: string, nowMs: number) {
   return `${Math.floor(hours / 24)} 天前`;
 }
 
-export function RightFloatingCard() {
+export function RightFloatingCard({ inline = false }: { inline?: boolean }) {
   const healthQuery = useHealthQuery();
   const backupsQuery = useBackupsQuery();
   const agentRunsQuery = useAgentRunsQuery({ pageSize: 50 });
@@ -54,11 +54,10 @@ export function RightFloatingCard() {
 
   const health = healthQuery.data;
   const latestBackup = backupsQuery.data?.[0];
-  const runs = agentRunsQuery.data?.items ?? [];
-  const runningAgents = runs.filter(
-    (run) => run.status === "queued" || run.status === "running",
-  ).length;
-  const doneAgents = runs.filter((run) => run.status === "succeeded").length;
+  const agentRunMeta = agentRunsQuery.data?.meta;
+  const runningAgents = agentRunMeta?.activeTotal ?? 0;
+  const pendingDeliveryAgents = agentRunMeta?.pendingDeliveryTotal ?? 0;
+  const doneAgents = agentRunMeta?.succeededTotal ?? 0;
   const focusSession = focusQuery.data?.session;
   const runningEvaluations = (evaluationsQuery.data?.items ?? []).filter(
     (evaluation) =>
@@ -79,7 +78,10 @@ export function RightFloatingCard() {
   };
 
   return (
-    <aside aria-label="工作区状态" className="right-floating-card">
+    <aside
+      aria-label="工作区状态"
+      className={inline ? "ws-environment" : "right-floating-card"}
+    >
       <section className="ov-group">
         <div className="ov-group-title">环境信息</div>
         <div className="ov-row">
@@ -111,7 +113,7 @@ export function RightFloatingCard() {
       </section>
 
       <section className="ov-group">
-        <div className="ov-group-title">子智能体</div>
+        <div className="ov-group-title">Agent 执行</div>
         <button className="ov-row" onClick={openAgents} type="button">
           <span className="ov-row-icon" aria-hidden="true">
             <Bot size={16} />
@@ -120,7 +122,11 @@ export function RightFloatingCard() {
           <span className="ov-value">
             {agentRunsQuery.isError
               ? "读取失败"
-              : `${runningAgents} 运行 · ${doneAgents} 完成`}
+              : `${runningAgents} 运行${
+                  pendingDeliveryAgents > 0
+                    ? ` · ${pendingDeliveryAgents} 待登记`
+                    : ""
+                } · ${doneAgents} 完成`}
           </span>
           <span className="ov-chevron" aria-hidden="true">
             <ChevronRight size={14} />

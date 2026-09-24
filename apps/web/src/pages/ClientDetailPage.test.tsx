@@ -2,11 +2,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Client, Project } from "../types/models";
 import { ClientDetailPage } from "./ClientDetailPage";
 
 const activeClient: Client = {
-  id: "client-1",
+  id: "018f0000-0000-7000-8000-000000006101",
   name: "星河工作室",
   contactName: "陶先生",
   email: "hello@example.com",
@@ -162,9 +163,10 @@ vi.mock("../api/hooks", () => ({
 
 function renderDetail() {
   return render(
-    <MemoryRouter initialEntries={["/clients/client-1"]}>
+    <MemoryRouter initialEntries={[`/clients/${activeClient.id}`]}>
       <Routes>
         <Route element={<ClientDetailPage />} path="/clients/:clientId" />
+        <Route element={<p>AI 对话</p>} path="/ai" />
       </Routes>
     </MemoryRouter>,
   );
@@ -178,7 +180,10 @@ describe("ClientDetailPage", () => {
     state.remove.error = null;
   });
 
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
+  });
 
   it("shows real related projects, local activity, followup history and attachment entry", () => {
     renderDetail();
@@ -218,9 +223,10 @@ describe("ClientDetailPage", () => {
 
     state.client = { ...activeClient, status: "inactive", version: 4 };
     view.rerender(
-      <MemoryRouter initialEntries={["/clients/client-1"]}>
+      <MemoryRouter initialEntries={[`/clients/${activeClient.id}`]}>
         <Routes>
           <Route element={<ClientDetailPage />} path="/clients/:clientId" />
+          <Route element={<p>AI 对话</p>} path="/ai" />
         </Routes>
       </MemoryRouter>,
     );
@@ -235,6 +241,30 @@ describe("ClientDetailPage", () => {
         onSuccess: expect.any(Function),
       }),
     );
+  });
+
+  it("hands off the precise client without copying client fields or running actions", () => {
+    renderDetail();
+
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "客户",
+      route: `/clients/${activeClient.id}`,
+      scopes: ["work", "clients", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=client");
+    expect(pending?.prompt).toContain(`id=${activeClient.id}`);
+    expect(pending?.prompt).toContain("workspace_client_records");
+    expect(pending?.prompt).toContain("client.*");
+    expect(pending?.prompt).toContain("client_contact.*");
+    expect(pending?.prompt).toContain("不要把页面上看到的联系字段");
+    expect(pending?.prompt).toContain("不要联系客户");
+    expect(state.update.mutate).not.toHaveBeenCalled();
+    expect(state.remove.mutate).not.toHaveBeenCalled();
   });
 
   it.each([

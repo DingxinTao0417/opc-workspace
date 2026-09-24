@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,6 +15,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import type { InboxItem, ReminderStatus } from "../types/models";
+import { useAiChatStore } from "../store/aiChat";
 import { InboxPage } from "./InboxPage";
 
 const item: InboxItem = {
@@ -268,6 +270,7 @@ describe("InboxPage", () => {
         <Routes>
           <Route element={<InboxPage />} path="/inbox" />
           <Route element={<InboxPage />} path="/inbox/:inboxItemId" />
+          <Route element={null} path="/ai" />
         </Routes>
         <LocationHarness />
       </MemoryRouter>,
@@ -279,6 +282,7 @@ describe("InboxPage", () => {
         <Routes>
           <Route element={<InboxPage />} path="/inbox" />
           <Route element={<InboxPage />} path="/inbox/:inboxItemId" />
+          <Route element={null} path="/ai" />
         </Routes>
         <LocationHarness />
       </MemoryRouter>,
@@ -314,6 +318,7 @@ describe("InboxPage", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    useAiChatStore.setState({ activeSessionId: "" });
   });
 
   it("renders the prototype hierarchy with real unread facts and opens details", () => {
@@ -329,6 +334,30 @@ describe("InboxPage", () => {
     );
     expect(screen.getByRole("dialog", { name: "收件箱详情" })).toBeTruthy();
     expect(screen.getAllByText("整理需要人工确认的边界")).toHaveLength(2);
+  });
+
+  it("identifies an Agent diagnostic row without creating another queue or marking it read", () => {
+    const existing = hooks.items.getMockImplementation()!();
+    const diagnostic = {
+      ...item,
+      kind: "event" as const,
+      sourceEntityType: "agent_run_failed" as const,
+      title: "Agent 执行失败待排查",
+      summary: "",
+    };
+    hooks.items.mockReturnValue({
+      ...existing,
+      data: { ...existing.data, items: [diagnostic] },
+    });
+    renderInbox();
+    const row = screen.getByRole("button", {
+      name: "查看 Agent 执行失败待排查",
+    });
+    expect(within(row).getByText("Agent 执行失败诊断")).toBeVisible();
+    expect(row.querySelector(".lucide-triangle-alert")).toBeTruthy();
+    expect(hooks.create.mutate).not.toHaveBeenCalled();
+    expect(hooks.markAll.mutate).not.toHaveBeenCalled();
+    expect(hooks.command.mutate).not.toHaveBeenCalled();
   });
 
   it("uses the Invoice icon and stage summary when an Invoice event has no summary", () => {
@@ -393,6 +422,29 @@ describe("InboxPage", () => {
     expect(hooks.detail).toHaveBeenCalledWith(item.id);
   });
 
+  it.each([false, true])(
+    "returns from the addressed Inbox modal (read failure: %s)",
+    async (missing) => {
+      const sessionId = "018f0000-0000-7000-8000-000000000022";
+      if (missing)
+        hooks.detail.mockReturnValue({
+          data: undefined,
+          isPending: false,
+          isError: true,
+          refetch: vi.fn(),
+        });
+      useAiChatStore.setState({ activeSessionId: item.id });
+      renderInbox(`/inbox/${item.id}?return_session=${sessionId}`);
+      const modal = await screen.findByRole("dialog", { name: "收件箱详情" });
+      fireEvent.click(within(modal).getByRole("link", { name: "返回原对话" }));
+      expect(currentInboxLocation().pathname).toBe("/ai");
+      expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+      expect(hooks.update.mutate).not.toHaveBeenCalled();
+      expect(hooks.command.mutate).not.toHaveBeenCalled();
+      expect(hooks.markAll.mutate).not.toHaveBeenCalled();
+    },
+  );
+
   it("passes view, search, priority, and paging facts to the server query", () => {
     renderInbox();
 
@@ -422,6 +474,28 @@ describe("InboxPage", () => {
     expect(hooks.markAll.mutate).toHaveBeenCalledWith({
       throughCreatedAt: "2026-08-28T10:05:00.123456789Z",
     });
+  });
+
+  it("returns from an Inbox snapshot link to the exact source conversation", () => {
+    const sessionId = "018f0000-0000-7000-8000-000000005833";
+    useAiChatStore.setState({ activeSessionId: "another-session" });
+    renderInbox(`/inbox?return_session=${sessionId}`);
+
+    const link = screen.getByRole("link", { name: "返回原对话" });
+    expect(link).toHaveAttribute("href", "/ai");
+    fireEvent.click(link);
+
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    expect(screen.getByTestId("inbox-location")).toHaveTextContent("/ai");
+  });
+
+  it.each([
+    "/inbox?return_session=javascript%3Aalert%281%29",
+    "/inbox?return_session=018f0000-0000-7000-8000-000000005833&return_session=018f0000-0000-7000-8000-000000005834",
+  ])("rejects an invalid or repeated return-session parameter in %s", (url) => {
+    renderInbox(url);
+
+    expect(screen.queryByRole("link", { name: "返回原对话" })).toBeNull();
   });
 
   it("returns to the last valid page when mutations shrink the result set", async () => {

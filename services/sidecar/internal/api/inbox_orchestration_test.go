@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -18,6 +19,30 @@ func decodeInboxSplitResponse(t *testing.T, body []byte) splitInboxItemResponse 
 		t.Fatalf("decode Inbox split response: %v: %s", err, body)
 	}
 	return envelope.Data
+}
+
+func TestInboxSplitAppendsAfterSparseActivePositions(t *testing.T) {
+	router, store := newInboxTestAPI(t, &inboxTestClock{now: time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)})
+	item := createInboxItemForTest(t, router, `{"title":"解除后继续拆分"}`, "")
+	body := `{"tasks":[{"key":"one","title":"第一项工作","is_required":true,"assignee_actor_id":"` + models.BuiltinOwnerActorID + `"},{"key":"two","title":"第二项工作","is_required":true,"assignee_actor_id":"` + models.BuiltinOwnerActorID + `"}]}`
+	r := performRequest(router, "POST", "/api/v1/inbox-items/"+item.ID+"/split", []byte(body), map[string]string{"If-Match": `"1"`})
+	if r.Code != 201 {
+		t.Fatal(r.Body.String())
+	}
+	first := decodeInboxSplitResponse(t, r.Body.Bytes())
+	r = performRequest(router, "DELETE", "/api/v1/inbox-items/"+item.ID+"/tasks/"+first.Created[0].Task.ID, []byte(`{"reason":"改由其他事项跟进"}`), map[string]string{"If-Match": `"2"`})
+	if r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	body = fmt.Sprintf(`{"tasks":[{"key":"three","title":"追加拆分工作","is_required":true,"assignee_actor_id":%q}]}`, models.BuiltinOwnerActorID)
+	r = performRequest(router, "POST", "/api/v1/inbox-items/"+item.ID+"/split", []byte(body), map[string]string{"If-Match": `"3"`})
+	if r.Code != 201 {
+		t.Fatalf("split after unlink: %d %s", r.Code, r.Body.String())
+	}
+	if got := decodeInboxSplitResponse(t, r.Body.Bytes()).Created[0].Relation.Position; got != 3 {
+		t.Fatalf("position=%d, want 3", got)
+	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_item_tasks WHERE inbox_item_id=? AND unlinked_at IS NOT NULL", 1, item.ID)
 }
 
 func TestInboxSplitCreatesHierarchyAssignmentsRelationsAndReplays(t *testing.T) {

@@ -181,34 +181,12 @@ func (a *API) createClientActorLink(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		var client models.Client
-		if err := tx.Select("id", "version").First(&client, "id = ?", clientIDValue).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
-			}
-			return err
-		}
-		if client.Version != expectedVersion {
-			return clientVersionConflict()
-		}
-		actorIDValue, err := a.resolveClientLinkActor(tx, normalized, requestIDFromContext(c))
-		if err != nil {
-			return err
-		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		link := models.ClientActorLink{
-			ID: uuid.NewString(), ClientID: clientIDValue, ActorID: actorIDValue, Role: normalized.Role,
-			LinkedByActorID: models.BuiltinOwnerActorID, LinkedAt: now,
-		}
-		if err := tx.Create(&link).Error; err != nil {
-			return mapClientActorLinkConstraintError(err)
-		}
-		row, err := loadClientActorLinkRow(tx, link.ID)
+		response, err = a.createClientActorLinkInTransaction(tx, clientIDValue, expectedVersion, normalized, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		response = clientActorLinkResponseFromRow(row)
-		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, link.ID, requestHash, http.StatusCreated, response, now)
+		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, response.ID, requestHash, http.StatusCreated, response, now)
 	})
 	if err != nil {
 		if writeProjectRequestError(c, mapClientActorLinkConstraintError(err)) {
@@ -265,37 +243,12 @@ func (a *API) deleteClientActorLink(c *gin.Context) {
 			replayed = true
 			return nil
 		}
-		row, err := loadClientActorLinkRow(tx, id)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_ACTOR_LINK_NOT_FOUND", "Client actor link not found")
-			}
-			return err
-		}
-		if row.UnlinkedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTOR_LINK_ALREADY_UNLINKED", "Client actor link is already unlinked")
-		}
-		if row.ClientVersion != expectedVersion {
-			return clientVersionConflict()
-		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.ClientActorLink{}).
-			Where("id = ? AND unlinked_at IS NULL", id).
-			Updates(map[string]any{
-				"unlinked_at": now, "unlinked_by_actor_id": models.BuiltinOwnerActorID, "unlink_reason": reason,
-			})
-		if result.Error != nil {
-			return mapClientActorLinkConstraintError(result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTOR_LINK_ALREADY_UNLINKED", "Client actor link is already unlinked")
-		}
-		row, err = loadClientActorLinkRow(tx, id)
+		response, err = unlinkClientActorLinkInTransaction(tx, id, expectedVersion, reason, now)
 		if err != nil {
 			return err
 		}
-		response = clientActorLinkResponseFromRow(row)
-		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, row.ClientID, requestHash, http.StatusOK, response, now)
+		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, response.ClientID, requestHash, http.StatusOK, response, now)
 	})
 	if err != nil {
 		if writeProjectRequestError(c, mapClientActorLinkConstraintError(err)) {
@@ -346,7 +299,68 @@ func normalizeClientActorLinkInput(input createClientActorLinkRequest) (normaliz
 	return normalized, nil
 }
 
-func (a *API) resolveClientLinkActor(tx *gorm.DB, input normalizedClientActorLinkInput, requestID string) (string, error) {
+func (a *API) createClientActorLinkInTransaction(tx *gorm.DB, clientID string, expectedVersion int64, input normalizedClientActorLinkInput, requestID, now string) (clientActorLinkResponse, error) {
+	var client models.Client
+	if err := tx.Select("id", "version").First(&client, "id = ?", clientID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return clientActorLinkResponse{}, newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
+		}
+		return clientActorLinkResponse{}, err
+	}
+	if client.Version != expectedVersion {
+		return clientActorLinkResponse{}, clientVersionConflict()
+	}
+	actorID, err := a.resolveClientLinkActor(tx, input, requestID, now)
+	if err != nil {
+		return clientActorLinkResponse{}, err
+	}
+	link := models.ClientActorLink{
+		ID: uuid.NewString(), ClientID: clientID, ActorID: actorID, Role: input.Role,
+		LinkedByActorID: models.BuiltinOwnerActorID, LinkedAt: now,
+	}
+	if err := tx.Create(&link).Error; err != nil {
+		return clientActorLinkResponse{}, mapClientActorLinkConstraintError(err)
+	}
+	row, err := loadClientActorLinkRow(tx, link.ID)
+	if err != nil {
+		return clientActorLinkResponse{}, err
+	}
+	return clientActorLinkResponseFromRow(row), nil
+}
+
+func unlinkClientActorLinkInTransaction(tx *gorm.DB, id string, expectedVersion int64, reason, now string) (clientActorLinkResponse, error) {
+	row, err := loadClientActorLinkRow(tx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return clientActorLinkResponse{}, newProjectRequestError(http.StatusNotFound, "CLIENT_ACTOR_LINK_NOT_FOUND", "Client actor link not found")
+		}
+		return clientActorLinkResponse{}, err
+	}
+	if row.UnlinkedAt != nil {
+		return clientActorLinkResponse{}, newProjectRequestError(http.StatusConflict, "CLIENT_ACTOR_LINK_ALREADY_UNLINKED", "Client actor link is already unlinked")
+	}
+	if row.ClientVersion != expectedVersion {
+		return clientActorLinkResponse{}, clientVersionConflict()
+	}
+	result := tx.Model(&models.ClientActorLink{}).
+		Where("id = ? AND unlinked_at IS NULL", id).
+		Updates(map[string]any{
+			"unlinked_at": now, "unlinked_by_actor_id": models.BuiltinOwnerActorID, "unlink_reason": reason,
+		})
+	if result.Error != nil {
+		return clientActorLinkResponse{}, mapClientActorLinkConstraintError(result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return clientActorLinkResponse{}, newProjectRequestError(http.StatusConflict, "CLIENT_ACTOR_LINK_ALREADY_UNLINKED", "Client actor link is already unlinked")
+	}
+	row, err = loadClientActorLinkRow(tx, id)
+	if err != nil {
+		return clientActorLinkResponse{}, err
+	}
+	return clientActorLinkResponseFromRow(row), nil
+}
+
+func (a *API) resolveClientLinkActor(tx *gorm.DB, input normalizedClientActorLinkInput, requestID, now string) (string, error) {
 	if input.ActorID != nil {
 		var actor models.Actor
 		if err := tx.Select("id", "type", "status").First(&actor, "id = ?", *input.ActorID).Error; err != nil {
@@ -360,19 +374,11 @@ func (a *API) resolveClientLinkActor(tx *gorm.DB, input normalizedClientActorLin
 		}
 		return actor.ID, nil
 	}
-	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	actor := models.Actor{
 		ID: uuid.NewString(), Type: "person", DisplayName: *input.CreateDisplayName, Status: "active",
 		IsBuiltin: false, Notes: *input.CreateNotes, MetadataJSON: "{}", Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if err := tx.Create(&actor).Error; err != nil {
-		return "", fmt.Errorf("create linked person actor: %w", err)
-	}
-	actorResponseValue, err := actorResponseFromModel(actor)
-	if err != nil {
-		return "", err
-	}
-	if err := recordActorWorkflowEvent(tx, "actor_created", actor.ID, nil, actorResponseValue, requestID, now); err != nil {
+	if _, err := createActorInTransaction(tx, actor, requestID); err != nil {
 		return "", err
 	}
 	return actor.ID, nil

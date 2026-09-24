@@ -11,7 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { ApiError } from "../api/client";
+import { ApiError, getTask, getTaskSavedViews } from "../api/client";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
 import {
   useBatchUpdateTasks,
   useMoveTaskWithinPlan,
@@ -33,8 +34,16 @@ import {
 } from "../components/TaskBoardTransitionModal";
 import { TaskList } from "../components/TaskList";
 import { TaskSavedViewsControl } from "../components/TaskSavedViewsControl";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { taskSelectionHandoff } from "../lib/aiIssueHandoff";
+import {
+  parseAgentRunLocation,
+  parseTaskSavedViewLocation,
+  parseTaskWorkspaceLocation,
+} from "../lib/aiWorkspaceLinks";
 import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type {
   BatchUpdateTasksInput,
   Task,
@@ -110,31 +119,108 @@ function apiErrorText(error: unknown): string | null {
 
 export function TasksPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
-  const [view, setView] = useState<"list" | "board">("list");
-  const [searchInput, setSearchInput] = useState("");
-  const [queryText, setQueryText] = useState("");
+  const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
+  const openAgentRunDrawer = useUiStore((state) => state.openAgentRunDrawer);
+  const locatedAgentRun = parseAgentRunLocation(
+    window.location.pathname,
+    window.location.search,
+  );
+  const locatedTask = locatedAgentRun
+    ? null
+    : parseTaskWorkspaceLocation(
+        window.location.pathname,
+        window.location.search,
+      );
+  const locatedSavedView = parseTaskSavedViewLocation(
+    window.location.pathname,
+    window.location.search,
+  );
+  const invalidSavedViewLink =
+    window.location.pathname === "/tasks" &&
+    new URLSearchParams(window.location.search).has("task_view") &&
+    !locatedSavedView;
+  const returnSession =
+    locatedAgentRun?.returnSession ??
+    locatedTask?.returnSession ??
+    locatedSavedView?.returnSession ??
+    null;
+  const [returnSelection] = useState(() =>
+    window.location.pathname === "/tasks" &&
+    !parseTaskSavedViewLocation(
+      window.location.pathname,
+      window.location.search,
+    )
+      ? useAiWorkbenchHandoff.getState().taskSelectionReturn
+      : null,
+  );
+  const [savedViewLoad, setSavedViewLoad] = useState<{
+    id: string;
+    state: "ready" | "missing" | "error";
+    name?: string;
+  } | null>(null);
+  const [savedViewRetry, setSavedViewRetry] = useState(0);
+  const [view, setView] = useState<"list" | "board">(
+    returnSelection?.view ?? "list",
+  );
+  const [searchInput, setSearchInput] = useState(
+    returnSelection?.definition.q ?? "",
+  );
+  const [queryText, setQueryText] = useState(
+    returnSelection?.definition.q ?? "",
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
-  const [status, setStatus] = useState<TaskStatus | "active" | "">("");
-  const [priority, setPriority] = useState<TaskPriority | "">("");
-  const [kind, setKind] = useState<TaskKind | "">("");
-  const [projectId, setProjectId] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [tagIds, setTagIds] = useState<string[]>([]);
-  const [plannedDate, setPlannedDate] = useState("");
-  const [plannedFrom, setPlannedFrom] = useState("");
-  const [plannedTo, setPlannedTo] = useState("");
-  const [dueFrom, setDueFrom] = useState("");
-  const [dueTo, setDueTo] = useState("");
-  const [sort, setSort] = useState("");
+  const [status, setStatus] = useState<TaskStatus | "active" | "">(
+    returnSelection?.definition.status ?? "",
+  );
+  const [priority, setPriority] = useState<TaskPriority | "">(
+    returnSelection?.definition.priority ?? "",
+  );
+  const [kind, setKind] = useState<TaskKind | "">(
+    returnSelection?.definition.kind ?? "",
+  );
+  const [projectId, setProjectId] = useState(
+    returnSelection?.definition.projectId ?? "",
+  );
+  const [clientId, setClientId] = useState(
+    returnSelection?.definition.clientId ?? "",
+  );
+  const [tagIds, setTagIds] = useState<string[]>(
+    returnSelection?.definition.tagIds ?? [],
+  );
+  const [plannedDate, setPlannedDate] = useState(
+    returnSelection?.definition.plannedDate ?? "",
+  );
+  const [plannedFrom, setPlannedFrom] = useState(
+    returnSelection?.definition.plannedFrom ?? "",
+  );
+  const [plannedTo, setPlannedTo] = useState(
+    returnSelection?.definition.plannedTo ?? "",
+  );
+  const [dueFrom, setDueFrom] = useState(
+    returnSelection?.definition.dueFrom ?? "",
+  );
+  const [dueTo, setDueTo] = useState(returnSelection?.definition.dueTo ?? "");
+  const [sort, setSort] = useState(returnSelection?.definition.sort ?? "");
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TaskStatus>>(
     () => new Set(["cancelled"]),
   );
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(returnSelection?.page ?? 1);
   const [selectedTasks, setSelectedTasks] = useState<Record<string, Task>>({});
+  const [restoringSelection, setRestoringSelection] = useState(
+    returnSelection !== null,
+  );
+  const [selectionReturnNotice, setSelectionReturnNotice] = useState<{
+    kind: "success" | "error";
+    text: string;
+  } | null>(null);
   const [batchAction, setBatchAction] = useState<BatchAction>("set_project");
   const [batchProjectId, setBatchProjectId] = useState("");
   const [batchPlannedDate, setBatchPlannedDate] = useState("");
+  const [batchDueDate, setBatchDueDate] = useState("");
+  const [batchPriority, setBatchPriority] = useState<"P0" | "P1" | "P2" | "P3">(
+    "P2",
+  );
   const [batchTagId, setBatchTagId] = useState("");
   const [batchReason, setBatchReason] = useState("");
   const [batchConfirmationPending, setBatchConfirmationPending] =
@@ -149,12 +235,69 @@ export function TasksPage() {
   >(null);
 
   useEffect(() => {
+    if (searchInput.trim() === queryText) return;
     const timer = window.setTimeout(() => {
       setQueryText(searchInput.trim());
       setPage(1);
     }, 280);
     return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  }, [searchInput, queryText]);
+
+  useEffect(() => {
+    if (!returnSelection) return;
+    let active = true;
+    void Promise.all(returnSelection.ids.map((id) => getTask(id)))
+      .then((tasks) => {
+        if (!active) return;
+        if (
+          tasks.some((task, index) => task.id !== returnSelection.ids[index])
+        ) {
+          throw new Error("Task identity changed during selection restore");
+        }
+        setSelectedTasks(
+          Object.fromEntries(tasks.map((task) => [task.id, task])),
+        );
+        setSelectionReturnNotice({
+          kind: "success",
+          text: `已重新读取并恢复 ${tasks.length} 项选择；批量操作前请再次核对。`,
+        });
+      })
+      .catch(() => {
+        if (!active) return;
+        setSelectedTasks({});
+        setSelectionReturnNotice({
+          kind: "error",
+          text: "原选择中的任务无法全部重新读取，未恢复勾选；请重新选择。",
+        });
+      })
+      .finally(() => {
+        if (!active) return;
+        setRestoringSelection(false);
+        useAiWorkbenchHandoff.getState().clearTaskSelectionReturn();
+      });
+    return () => {
+      active = false;
+    };
+  }, [returnSelection]);
+
+  useEffect(() => {
+    if (locatedAgentRun) {
+      openAgentRunDrawer(
+        locatedAgentRun.taskId,
+        locatedAgentRun.runId,
+        locatedAgentRun.returnSession,
+      );
+    } else if (locatedTask) {
+      setTaskDetailId(locatedTask.taskId);
+    }
+  }, [
+    locatedAgentRun?.runId,
+    locatedAgentRun?.taskId,
+    locatedAgentRun?.returnSession,
+    locatedTask?.taskId,
+    openAgentRunDrawer,
+    setTaskDetailId,
+  ]);
 
   const tagKey = tagIds.join(",");
   const dateRangeError =
@@ -164,6 +307,11 @@ export function TasksPage() {
         ? "截止日期起点不能晚于终点。"
         : null;
   const filtersValid = dateRangeError === null;
+  const savedViewReady =
+    !locatedSavedView ||
+    (savedViewLoad?.id === locatedSavedView.viewId &&
+      savedViewLoad.state === "ready");
+  const taskDataReady = filtersValid && savedViewReady && !invalidSavedViewLink;
   const savedViewDefinition = useMemo<TaskSavedViewDefinition>(
     () => ({
       q: searchInput.trim(),
@@ -230,15 +378,15 @@ export function TasksPage() {
       rootOnly: hierarchical,
       sort: sort || undefined,
     },
-    filtersValid,
+    taskDataReady,
   );
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
   const moveMutation = useMoveTaskWithinPlan();
   const dragMutation = useReorderTaskWithinPlanStatus();
   const resetOrderMutation = useResetTaskOrder();
-  const tasks = query.data?.items ?? [];
-  const total = query.data?.meta.total ?? 0;
+  const tasks = taskDataReady ? (query.data?.items ?? []) : [];
+  const total = taskDataReady ? (query.data?.meta.total ?? 0) : 0;
   const totalPages = Math.max(
     1,
     Math.ceil(total / (query.data?.meta.pageSize ?? 50)),
@@ -279,7 +427,9 @@ export function TasksPage() {
   const allowReorder =
     view === "list" && sort === "manual_order" && onlyPlanFilter;
   const writeReady =
-    filtersValid &&
+    taskDataReady &&
+    !restoringSelection &&
+    searchInput.trim() === queryText &&
     query.isSuccess &&
     !query.isPlaceholderData &&
     !query.isFetching &&
@@ -299,10 +449,10 @@ export function TasksPage() {
 
   useSettledPage({
     page,
-    meta: query.data?.meta,
-    isFetching: query.isFetching,
+    meta: taskDataReady ? query.data?.meta : undefined,
+    isFetching: taskDataReady && query.isFetching,
     isPlaceholderData: query.isPlaceholderData,
-    isSuccess: query.isSuccess,
+    isSuccess: taskDataReady && query.isSuccess,
     setPage,
   });
 
@@ -367,6 +517,30 @@ export function TasksPage() {
     setPage(1);
   };
 
+  useEffect(() => {
+    if (!locatedSavedView) return;
+    let active = true;
+    const viewId = locatedSavedView.viewId;
+    void getTaskSavedViews()
+      .then((views) => {
+        if (!active) return;
+        const selected = views.find((view) => view.id === viewId);
+        if (!selected) {
+          setSavedViewLoad({ id: viewId, state: "missing" });
+          return;
+        }
+        applySavedView(selected.definition);
+        setFiltersOpen(true);
+        setSavedViewLoad({ id: viewId, state: "ready", name: selected.name });
+      })
+      .catch(() => {
+        if (active) setSavedViewLoad({ id: viewId, state: "error" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [locatedSavedView?.viewId, savedViewRetry]);
+
   const toggleTag = (id: string) => {
     setTagIds((current) =>
       current.includes(id)
@@ -383,7 +557,17 @@ export function TasksPage() {
     }));
     if (items.length === 0) return;
     let input: BatchUpdateTasksInput;
-    if (batchAction === "set_project") {
+    if (batchAction === "set_priority") {
+      input = { action: "set_priority", items, priority: batchPriority };
+    } else if (batchAction === "set_due_date") {
+      const parsed = batchDueDate ? new Date(batchDueDate) : null;
+      if (parsed && Number.isNaN(parsed.getTime())) return;
+      input = {
+        action: "set_due_date",
+        items,
+        dueDate: parsed ? parsed.toISOString() : null,
+      };
+    } else if (batchAction === "set_project") {
       input = {
         action: "set_project",
         items,
@@ -463,28 +647,91 @@ export function TasksPage() {
     <div className="page">
       <PageHeader
         actions={
-          <button
-            className="button button-primary"
-            onClick={() => setNewTaskOpen(true)}
-            type="button"
-          >
-            <Plus size={15} />
-            新建任务
-          </button>
+          <>
+            <ReturnToAiChat sessionId={returnSession} />
+            <button
+              className="button button-primary"
+              onClick={() => setNewTaskOpen(true)}
+              type="button"
+            >
+              <Plus size={15} />
+              新建任务
+            </button>
+          </>
         }
         meta={
           <span className="page-count">
-            {query.isPending
-              ? filtersValid
-                ? "读取中"
-                : "筛选条件无效"
-              : query.isSuccess && filtersValid
-                ? `${total} ${hierarchical ? "个根任务" : "项"}${query.isFetching ? " · 更新中" : ""}`
-                : "数据不可用"}
+            {invalidSavedViewLink
+              ? "视图链接无效"
+              : !savedViewReady
+                ? "视图读取中"
+                : query.isPending
+                  ? filtersValid
+                    ? "读取中"
+                    : "筛选条件无效"
+                  : query.isSuccess && filtersValid
+                    ? `${total} ${hierarchical ? "个根任务" : "项"}${query.isFetching ? " · 更新中" : ""}`
+                    : "数据不可用"}
           </span>
         }
         title="任务"
       />
+
+      {invalidSavedViewLink ? (
+        <p
+          className="task-selection-return-notice task-selection-return-notice-error"
+          role="alert"
+        >
+          保存视图链接无效，未显示任务结果。请返回任务页重新选择视图。
+        </p>
+      ) : null}
+
+      {locatedSavedView && !savedViewReady ? (
+        <p
+          className="task-selection-return-notice"
+          role={
+            savedViewLoad?.id === locatedSavedView.viewId &&
+            savedViewLoad.state !== "ready"
+              ? "alert"
+              : "status"
+          }
+        >
+          {savedViewLoad?.id === locatedSavedView.viewId &&
+          savedViewLoad.state === "missing"
+            ? "该保存视图已不存在，未应用任何筛选。"
+            : savedViewLoad?.id === locatedSavedView.viewId &&
+                savedViewLoad.state === "error"
+              ? "保存视图读取失败，未显示任务结果。"
+              : "正在重新读取保存视图…"}
+          {savedViewLoad?.id === locatedSavedView.viewId &&
+          savedViewLoad.state === "error" ? (
+            <button
+              className="form-inline-action"
+              onClick={() => setSavedViewRetry((value) => value + 1)}
+              type="button"
+            >
+              重试
+            </button>
+          ) : null}
+        </p>
+      ) : locatedSavedView && savedViewLoad?.id === locatedSavedView.viewId ? (
+        <p className="task-selection-return-notice" role="status">
+          已从保存视图“{savedViewLoad.name}”载入当前筛选条件。
+        </p>
+      ) : null}
+
+      {restoringSelection ? (
+        <p className="task-selection-return-notice" role="status">
+          正在重新读取先前选中的任务…
+        </p>
+      ) : selectionReturnNotice ? (
+        <p
+          className={`task-selection-return-notice${selectionReturnNotice.kind === "error" ? " task-selection-return-notice-error" : ""}`}
+          role={selectionReturnNotice.kind === "error" ? "alert" : "status"}
+        >
+          {selectionReturnNotice.text}
+        </p>
+      ) : null}
 
       <div className="toolbar task-toolbar">
         <label className="toolbar-search">
@@ -800,6 +1047,29 @@ export function TasksPage() {
           {selectedItems.length >= 100 ? (
             <span>每次批量操作最多选择 100 项。</span>
           ) : null}
+          {selectedItems.length > 20 ? (
+            <span>交给智能体每次最多 20 项，请减少选择。</span>
+          ) : (
+            <AiIssueHandoffButton
+              content={taskSelectionHandoff(
+                selectedItems.map((task) => task.id),
+              )}
+              disabled={
+                !writeReady ||
+                batchConfirmationPending ||
+                boardTransition !== null
+              }
+              label="交给智能体（已选任务）"
+              onNavigate={() => {
+                useAiWorkbenchHandoff.getState().rememberTaskSelectionReturn({
+                  ids: selectedItems.map((task) => task.id),
+                  definition: savedViewDefinition,
+                  page,
+                  view,
+                });
+              }}
+            />
+          )}
           <select
             aria-label="批量操作类型"
             onChange={(event) => {
@@ -811,6 +1081,8 @@ export function TasksPage() {
             value={batchAction}
           >
             <optgroup label="任务事实">
+              <option value="set_priority">设置优先级</option>
+              <option value="set_due_date">设置截止时间</option>
               <option value="set_project">移动到项目</option>
               <option value="set_planned_date">设置计划日期</option>
               <option value="add_tags">添加标签</option>
@@ -832,6 +1104,31 @@ export function TasksPage() {
               onChange={setBatchProjectId}
               value={batchProjectId}
               variant="toolbar"
+            />
+          ) : null}
+          {batchAction === "set_priority" ? (
+            <select
+              aria-label="批量目标优先级"
+              onChange={(event) =>
+                setBatchPriority(
+                  event.target.value as "P0" | "P1" | "P2" | "P3",
+                )
+              }
+              value={batchPriority}
+            >
+              <option value="P0">P0</option>
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
+              <option value="P3">P3</option>
+            </select>
+          ) : null}
+          {batchAction === "set_due_date" ? (
+            <input
+              aria-label="批量截止时间，按本机时区填写；留空表示清除"
+              onChange={(event) => setBatchDueDate(event.target.value)}
+              title="按本机时区填写，留空表示清除截止时间"
+              type="datetime-local"
+              value={batchDueDate}
             />
           ) : null}
           {batchAction === "set_planned_date" ? (
@@ -947,15 +1244,15 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {filtersValid && query.isError ? (
+      {taskDataReady && query.isError ? (
         <ErrorState
           message="无法连接任务 API；请确认本地服务已启动后重试。"
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      {filtersValid && query.isPending ? <SkeletonRows count={7} /> : null}
+      {taskDataReady && query.isPending ? <SkeletonRows count={7} /> : null}
 
-      {filtersValid && query.isSuccess && tasks.length === 0 ? (
+      {taskDataReady && query.isSuccess && tasks.length === 0 ? (
         <EmptyState
           action={
             hasFilters ? (
@@ -986,7 +1283,7 @@ export function TasksPage() {
         />
       ) : null}
 
-      {filtersValid && tasks.length > 0 && view === "board" ? (
+      {taskDataReady && tasks.length > 0 && view === "board" ? (
         <>
           {boardTransitionNotice ? (
             <div className="task-order-banner" role="status">
@@ -1028,7 +1325,7 @@ export function TasksPage() {
         </>
       ) : null}
 
-      {filtersValid && tasks.length > 0 && view === "list" ? (
+      {taskDataReady && tasks.length > 0 && view === "list" ? (
         <div className="task-groups">
           {groups.map((group) => {
             const groupedTasks = applyTaskOrder(
@@ -1118,7 +1415,7 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {filtersValid && query.isSuccess && totalPages > 1 ? (
+      {taskDataReady && query.isSuccess && totalPages > 1 ? (
         <nav aria-label="任务分页" className="pagination task-pagination">
           <button
             className="button button-secondary"

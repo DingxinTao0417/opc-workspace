@@ -314,11 +314,15 @@ func (a *API) consumeClaimedAutomationEventDelivery(
 				ID: current.RuleID, PresetKey: current.PresetKey, Enabled: true,
 				Version: current.RuleVersion, ConfigJSON: current.ConfigSnapshotJSON,
 			}
-			if _, err := executeAutomationAttempt(tx, automationAttemptInput{
+			input := automationAttemptInput{
 				Rule: rule, TriggerType: "event", SourceEventID: &sourceEventID,
 				LogicalKey: current.LogicalKey, Attempt: 1, Config: config,
 				ActionSnapshot: action, Now: now.UTC(),
-			}); err != nil {
+			}
+			if current.PresetKey == automationPresetAgentRunFailed {
+				input.ActionSnapshotJSON = current.ActionSnapshotJSON
+			}
+			if _, err := executeAutomationAttempt(tx, input); err != nil {
 				return err
 			}
 		} else {
@@ -380,7 +384,14 @@ func (a *API) recordAutomationEventDeliveryFailure(
 }
 
 func (a *API) consumeAutomationEventDeliveriesBestEffort(reason string) {
-	if err := a.consumeDueAutomationEventDeliveries(context.Background(), a.options.Now().UTC()); err != nil && a.options.Logger != nil {
+	// Router initialization normally supplies Now, but terminal lifecycle
+	// operations also support a directly constructed API. A post-commit scan
+	// must not panic after the source transaction has already succeeded.
+	now := time.Now
+	if a.options.Now != nil {
+		now = a.options.Now
+	}
+	if err := a.consumeDueAutomationEventDeliveries(context.Background(), now().UTC()); err != nil && a.options.Logger != nil {
 		a.options.Logger.Printf("Automation event delivery %s scan failed: %v", reason, err)
 	}
 }

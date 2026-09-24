@@ -182,24 +182,11 @@ func (a *API) createProjectNote(c *gin.Context) {
 				return fmt.Errorf("read project note idempotency key: %w", err)
 			}
 		}
-		var status string
-		if err := tx.Raw("SELECT status FROM projects WHERE id = ?", projectIDValue).Row().Scan(&status); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
-			}
-			return err
-		}
-		if status == "archived" {
-			return newProjectRequestError(http.StatusConflict, "PROJECT_ARCHIVED", "Archived projects are read-only")
-		}
-		if err := tx.Create(&note).Error; err != nil {
-			return fmt.Errorf("create project note: %w", err)
-		}
-		row, err := loadProjectNoteRow(tx, note.ID)
+		var err error
+		response, err = createProjectNoteInTransaction(tx, note)
 		if err != nil {
 			return err
 		}
-		response = projectNoteResponseFromRow(row)
 		if idempotencyKey != "" {
 			encoded, err := json.Marshal(response)
 			if err != nil {
@@ -273,37 +260,9 @@ func (a *API) updateProjectNote(c *gin.Context) {
 
 	var response projectNoteResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var note models.ProjectNote
-		if err := tx.First(&note, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOTE_NOT_FOUND", "Project note not found")
-			}
-			return err
-		}
-		if note.Version != expectedVersion {
-			return projectNoteVersionConflict()
-		}
-		if note.DeletedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "PROJECT_NOTE_DELETED", "Deleted project notes cannot be changed")
-		}
-		if err := requireMutableProject(tx, note.ProjectID); err != nil {
-			return err
-		}
-		updates["updated_at"] = a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.ProjectNote{}).Where("id = ? AND version = ? AND deleted_at IS NULL", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return projectNoteVersionConflict()
-		}
-		row, err := loadProjectNoteRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = projectNoteResponseFromRow(row)
-		return nil
+		var err error
+		response, err = changeProjectNoteInTransaction(tx, id, expectedVersion, updates, a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -342,41 +301,12 @@ func (a *API) deleteProjectNote(c *gin.Context) {
 
 	var response projectNoteResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var note models.ProjectNote
-		if err := tx.First(&note, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOTE_NOT_FOUND", "Project note not found")
-			}
-			return err
-		}
-		if note.Version != expectedVersion {
-			return projectNoteVersionConflict()
-		}
-		if note.DeletedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "PROJECT_NOTE_DELETED", "Project note is already deleted")
-		}
-		if err := requireMutableProject(tx, note.ProjectID); err != nil {
-			return err
-		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.ProjectNote{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", id, expectedVersion).
-			Updates(map[string]any{
-				"deleted_at": now, "deleted_by_actor_id": models.BuiltinOwnerActorID,
-				"delete_reason": reason, "updated_at": now, "version": gorm.Expr("version + 1"),
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return projectNoteVersionConflict()
-		}
-		row, err := loadProjectNoteRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = projectNoteResponseFromRow(row)
-		return nil
+		var err error
+		response, err = changeProjectNoteInTransaction(tx, id, expectedVersion, map[string]any{
+			"deleted_at": now, "deleted_by_actor_id": models.BuiltinOwnerActorID, "delete_reason": reason,
+		}, now)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -390,6 +320,10 @@ func (a *API) deleteProjectNote(c *gin.Context) {
 }
 
 func (a *API) projectNoteFromCreateRequest(projectIDValue string, input createProjectNoteRequest) (models.ProjectNote, error) {
+	return projectNoteFromCreateRequestAt(projectIDValue, input, a.options.Now())
+}
+
+func projectNoteFromCreateRequestAt(projectIDValue string, input createProjectNoteRequest, clock time.Time) (models.ProjectNote, error) {
 	title, err := cleanClientActivityText(input.Title, "title", 200, false)
 	if err != nil {
 		return models.ProjectNote{}, err
@@ -398,11 +332,11 @@ func (a *API) projectNoteFromCreateRequest(projectIDValue string, input createPr
 	if err != nil {
 		return models.ProjectNote{}, err
 	}
-	occurredAt, err := cleanClientActivityOccurredAt(input.OccurredAt, a.options.Now())
+	occurredAt, err := cleanClientActivityOccurredAt(input.OccurredAt, clock)
 	if err != nil {
 		return models.ProjectNote{}, err
 	}
-	now := a.options.Now().UTC().Format(time.RFC3339Nano)
+	now := clock.UTC().Format(time.RFC3339Nano)
 	return models.ProjectNote{
 		ID: uuid.NewString(), ProjectID: projectIDValue, Title: title, Body: body,
 		OccurredAt: occurredAt, CreatedByActorID: models.BuiltinOwnerActorID,
@@ -411,6 +345,10 @@ func (a *API) projectNoteFromCreateRequest(projectIDValue string, input createPr
 }
 
 func (a *API) projectNoteUpdates(input updateProjectNoteRequest) (map[string]any, error) {
+	return projectNoteUpdatesAt(input, a.options.Now())
+}
+
+func projectNoteUpdatesAt(input updateProjectNoteRequest, clock time.Time) (map[string]any, error) {
 	updates := make(map[string]any)
 	for _, field := range []struct {
 		name       string
@@ -437,7 +375,7 @@ func (a *API) projectNoteUpdates(input updateProjectNoteRequest) (map[string]any
 		if input.OccurredAt.Value == nil {
 			return nil, errors.New("occurred_at cannot be null")
 		}
-		occurredAt, err := cleanClientActivityOccurredAt(*input.OccurredAt.Value, a.options.Now())
+		occurredAt, err := cleanClientActivityOccurredAt(*input.OccurredAt.Value, clock)
 		if err != nil {
 			return nil, err
 		}

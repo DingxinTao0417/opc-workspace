@@ -265,56 +265,14 @@ func (a *API) createTaskAssignment(c *gin.Context) {
 			return nil
 		}
 
-		task, err := loadAssignmentTask(tx, taskIDValue, expectedVersion, true)
-		if err != nil {
-			return err
-		}
-		if err := requireAssignmentActor(tx, actorIDValue, role); err != nil {
-			return err
-		}
-		var activeCount int64
-		if err := tx.Model(&models.TaskAssignment{}).
-			Where("task_id = ? AND role = ? AND unassigned_at IS NULL", taskIDValue, role).
-			Count(&activeCount).Error; err != nil {
-			return err
-		}
-		if activeCount > 0 {
-			return assignmentAlreadyActiveError()
-		}
-
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		if err := bumpTaskForAssignment(tx, taskIDValue, expectedVersion, now); err != nil {
-			return err
-		}
-		assignment := models.TaskAssignment{
-			ID: uuid.NewString(), TaskID: taskIDValue, ActorID: actorIDValue, Role: role,
-			AssignedByActorID: models.BuiltinOwnerActorID, AssignedAt: now, Reason: "",
-		}
-		if err := tx.Create(&assignment).Error; err != nil {
-			return mapAssignmentConstraintError(err)
-		}
-		created, err := loadAssignmentResponse(tx, assignment.ID)
+		var err error
+		response, err = createAssignmentInTransaction(tx, taskIDValue, expectedVersion, role, actorIDValue, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		loadedTask, err := loadTask(tx, task.ID)
-		if err != nil {
-			return err
-		}
-		response = assignmentMutationResponse{Assignment: created, Task: loadedTask}
-		if err := recordAssignmentWorkflowEvent(
-			tx, "assignment_created", taskIDValue, assignment.ID, nil, created,
-			requestIDFromContext(c), now,
-		); err != nil {
-			return err
-		}
-		loadedTask, err = reconcileTaskParentProgress(tx, taskIDValue, requestIDFromContext(c), now)
-		if err != nil {
-			return taskParentProgressError("reconcile assigned parent Task", err)
-		}
-		response.Task = loadedTask
 		return recordAssignmentIdempotency(
-			tx, idempotencyKey, endpoint, assignment.ID, requestHash,
+			tx, idempotencyKey, endpoint, response.Assignment.ID, requestHash,
 			http.StatusCreated, response, now,
 		)
 	})
@@ -384,76 +342,14 @@ func (a *API) reassignTask(c *gin.Context) {
 			return nil
 		}
 
-		task, err := loadAssignmentTask(tx, taskIDValue, expectedVersion, true)
-		if err != nil {
-			return err
-		}
-		if err := requireAssignmentActor(tx, actorIDValue, role); err != nil {
-			return err
-		}
-		var current models.TaskAssignment
-		if err := tx.Where("task_id = ? AND role = ? AND unassigned_at IS NULL", taskIDValue, role).
-			Take(&current).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "There is no active assignment for this role")
-			}
-			return err
-		}
-		if current.ActorID == actorIDValue {
-			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_UNCHANGED", "The selected actor already has this assignment")
-		}
-		previous, err := loadAssignmentResponse(tx, current.ID)
-		if err != nil {
-			return err
-		}
-
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		if err := bumpTaskForAssignment(tx, taskIDValue, expectedVersion, now); err != nil {
-			return err
-		}
-		result := tx.Model(&models.TaskAssignment{}).
-			Where("id = ? AND unassigned_at IS NULL", current.ID).
-			Updates(map[string]any{"unassigned_at": now, "reason": reason})
-		if result.Error != nil {
-			return mapAssignmentConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "The assignment is no longer active")
-		}
-		newAssignment := models.TaskAssignment{
-			ID: uuid.NewString(), TaskID: taskIDValue, ActorID: actorIDValue, Role: role,
-			AssignedByActorID: models.BuiltinOwnerActorID, AssignedAt: now, Reason: "",
-		}
-		if err := tx.Create(&newAssignment).Error; err != nil {
-			return mapAssignmentConstraintError(err)
-		}
-		ended, err := loadAssignmentResponse(tx, current.ID)
+		var err error
+		response, err = reassignInTransaction(tx, taskIDValue, expectedVersion, role, actorIDValue, reason, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		created, err := loadAssignmentResponse(tx, newAssignment.ID)
-		if err != nil {
-			return err
-		}
-		loadedTask, err := loadTask(tx, task.ID)
-		if err != nil {
-			return err
-		}
-		response = reassignMutationResponse{PreviousAssignment: ended, Assignment: created, Task: loadedTask}
-		if err := recordAssignmentWorkflowEvent(
-			tx, "assignment_reassigned", taskIDValue, newAssignment.ID,
-			previous, reassignEventCurrent{EndedAssignment: ended, Assignment: created},
-			requestIDFromContext(c), now,
-		); err != nil {
-			return err
-		}
-		loadedTask, err = reconcileTaskParentProgress(tx, taskIDValue, requestIDFromContext(c), now)
-		if err != nil {
-			return taskParentProgressError("reconcile reassigned parent Task", err)
-		}
-		response.Task = loadedTask
 		return recordAssignmentIdempotency(
-			tx, idempotencyKey, endpoint, newAssignment.ID, requestHash,
+			tx, idempotencyKey, endpoint, response.Assignment.ID, requestHash,
 			http.StatusOK, response, now,
 		)
 	})
@@ -511,60 +407,14 @@ func (a *API) endAssignment(c *gin.Context) {
 			return nil
 		}
 
-		var assignment models.TaskAssignment
-		if err := tx.First(&assignment, "id = ?", assignmentIDValue).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "ASSIGNMENT_NOT_FOUND", "Assignment not found")
-			}
-			return err
-		}
-		task, err := loadAssignmentTask(tx, assignment.TaskID, expectedVersion, false)
-		if err != nil {
-			return err
-		}
-		if assignment.UnassignedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "The assignment is no longer active")
-		}
-		previous, err := loadAssignmentResponse(tx, assignment.ID)
-		if err != nil {
-			return err
-		}
-
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		if err := bumpTaskForAssignment(tx, task.ID, expectedVersion, now); err != nil {
-			return err
-		}
-		result := tx.Model(&models.TaskAssignment{}).
-			Where("id = ? AND unassigned_at IS NULL", assignment.ID).
-			Updates(map[string]any{"unassigned_at": now, "reason": reason})
-		if result.Error != nil {
-			return mapAssignmentConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return newProjectRequestError(http.StatusConflict, "ASSIGNMENT_NOT_ACTIVE", "The assignment is no longer active")
-		}
-		ended, err := loadAssignmentResponse(tx, assignment.ID)
+		var err error
+		response, err = endAssignmentInTransaction(tx, assignmentIDValue, expectedVersion, reason, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		loadedTask, err := loadTask(tx, task.ID)
-		if err != nil {
-			return err
-		}
-		response = assignmentMutationResponse{Assignment: ended, Task: loadedTask}
-		if err := recordAssignmentWorkflowEvent(
-			tx, "assignment_ended", task.ID, assignment.ID, previous, ended,
-			requestIDFromContext(c), now,
-		); err != nil {
-			return err
-		}
-		loadedTask, err = reconcileTaskParentProgress(tx, task.ID, requestIDFromContext(c), now)
-		if err != nil {
-			return taskParentProgressError("reconcile unassigned parent Task", err)
-		}
-		response.Task = loadedTask
 		return recordAssignmentIdempotency(
-			tx, idempotencyKey, endpoint, assignment.ID, requestHash,
+			tx, idempotencyKey, endpoint, response.Assignment.ID, requestHash,
 			http.StatusOK, response, now,
 		)
 	})

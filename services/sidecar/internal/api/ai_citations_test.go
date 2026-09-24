@@ -1,9 +1,53 @@
 package api
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
+
+func TestDecodeAICitationSnapshotPDFAndLegacyPages(t *testing.T) {
+	for _, sourceType := range []string{"text", "markdown", "pdf"} {
+		t.Run(sourceType, func(t *testing.T) {
+			allowed := aiCitationKnowledgeFixture()[:1]
+			allowed[0].SourceType = sourceType
+			allowed[0].StartPage, allowed[0].EndPage = 2, 3
+			_, encoded, _, err := validateAIResponseCitations(`[opc:citations]{"chunk_ids":["`+allowed[0].ChunkID+`"]}[/opc:citations]`, allowed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, items, err := decodeAICitationSnapshot(encoded)
+			if err != nil || status != "validated" || len(items) != 1 || items[0].StartPage != 2 || items[0].EndPage != 3 {
+				t.Fatalf("page round trip: status=%s items=%#v err=%v", status, items, err)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(*encoded), &raw); err != nil {
+				t.Fatal(err)
+			}
+			item := raw["items"].([]any)[0].(map[string]any)
+			for _, pages := range [][2]any{{nil, nil}, {float64(0), float64(0)}, {float64(2), nil}, {float64(3), float64(2)}, {float64(-1), float64(2)}} {
+				item["start_page"], item["end_page"] = pages[0], pages[1]
+				if pages[0] == nil {
+					delete(item, "start_page")
+				}
+				if pages[1] == nil {
+					delete(item, "end_page")
+				}
+				data, _ := json.Marshal(raw)
+				value := string(data)
+				_, items, err = decodeAICitationSnapshot(&value)
+				legacy := sourceType != "pdf" && (pages == [2]any{nil, nil} || pages == [2]any{float64(0), float64(0)})
+				if legacy {
+					if err != nil || len(items) != 1 || items[0].StartPage != 1 || items[0].EndPage != 1 {
+						t.Fatalf("legacy pages not normalized: %#v %v", items, err)
+					}
+				} else if err == nil {
+					t.Fatalf("invalid pages accepted: %s %v", sourceType, pages)
+				}
+			}
+		})
+	}
+}
 
 func aiCitationKnowledgeFixture() []aiKnowledgeContextSource {
 	return []aiKnowledgeContextSource{

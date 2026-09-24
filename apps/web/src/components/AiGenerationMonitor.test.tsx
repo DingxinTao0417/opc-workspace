@@ -12,6 +12,9 @@ import { AiGenerationMonitor } from "./AiGenerationMonitor";
 import { useAiChatStore } from "../store/aiChat";
 import { resetRuntimeConnection } from "../api/client";
 
+const firstSessionId = "018f0000-0000-7000-8000-00000000abcd";
+const secondSessionId = "018f0000-0000-7000-8000-00000000abce";
+
 afterEach(() => {
   cleanup();
   useAiChatStore.setState({
@@ -19,6 +22,7 @@ afterEach(() => {
     activeGenerations: [],
     streamError: null,
     lastSessionId: "",
+    activeSessionId: "",
   });
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -31,7 +35,7 @@ it.each(["/invoices", "/ai"])(
     let cancelled = false;
     const row = {
       id: "generation-1",
-      session_id: "session-1",
+      session_id: firstSessionId,
       provider_id: "provider-1",
       content: "部分回复",
       reasoning: "",
@@ -61,6 +65,8 @@ it.each(["/invoices", "/ai"])(
         mutations: { retry: false },
       },
     });
+    if (route === "/ai")
+      useAiChatStore.setState({ activeSessionId: secondSessionId });
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[route]}>
@@ -69,15 +75,112 @@ it.each(["/invoices", "/ai"])(
       </QueryClientProvider>,
     );
     await screen.findByText("AI 助手正在生成回复");
-    if (route !== "/ai")
-      expect(screen.getByRole("link", { name: "返回会话" })).toHaveAttribute(
-        "href",
-        "/ai",
-      );
+    expect(screen.getByRole("link", { name: "返回会话" })).toHaveAttribute(
+      "href",
+      `/ai?session=${firstSessionId}`,
+    );
     fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("AI 生成状态")).toBeNull(),
     );
     expect(cancelled).toBe(true);
+  },
+);
+
+it("links each other persisted generation to its own exact session", async () => {
+  const json = (data: unknown) =>
+    new Response(JSON.stringify({ data }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: unknown) => {
+      if (String(url).endsWith("/active-generations"))
+        return json([
+          {
+            id: "generation-1",
+            session_id: firstSessionId,
+            provider_id: "provider-1",
+            status: "streaming",
+            content: "",
+            reasoning: "",
+            client_request_id: "request-1",
+            persist: true,
+          },
+          {
+            id: "generation-2",
+            session_id: secondSessionId,
+            provider_id: "provider-1",
+            status: "streaming",
+            content: "",
+            reasoning: "",
+            client_request_id: "request-2",
+            persist: true,
+          },
+        ]);
+      return json({});
+    }),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/ai"]}>
+        <AiGenerationMonitor />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByRole("link", { name: "查看会话" })).toHaveAttribute(
+    "href",
+    `/ai?session=${secondSessionId}`,
+  );
+});
+
+it.each([
+  ["temporary", firstSessionId, false],
+  ["malformed", "session-1", true],
+])(
+  "does not expose a deep link for a %s generation",
+  async (_, sessionId, persist) => {
+    const json = (data: unknown) =>
+      new Response(JSON.stringify({ data }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) =>
+        String(url).endsWith("/active-generations")
+          ? json([
+              {
+                id: "generation-1",
+                session_id: sessionId,
+                provider_id: "provider-1",
+                status: "streaming",
+                content: "",
+                reasoning: "",
+                client_request_id: "request-1",
+                persist,
+              },
+            ])
+          : json({}),
+      ),
+    );
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/invoices"]}>
+          <AiGenerationMonitor />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(
+      await screen.findByRole("link", { name: "返回会话" }),
+    ).toHaveAttribute("href", "/ai");
   },
 );

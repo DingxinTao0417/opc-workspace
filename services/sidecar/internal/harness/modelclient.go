@@ -25,12 +25,19 @@ func NewModelClient(inner *http.Client) *ModelClient {
 func (m *ModelClient) Stream(ctx context.Context, request Request, onDelta func(string), onReasoning func(string)) (Turn, error) {
 	var turn Turn
 	promptContext := modelclient.PromptContext{
-		ResponseByteLimit: request.ResponseByteLimit,
-		OnResponseBytes:   func(value int) { turn.OutputBytes = value },
-		SystemPrompt:      request.SystemPrompt, Memories: request.Memories,
+		DisableTransientRetries: request.DisableTransientRetries,
+		ResponseByteLimit:       request.ResponseByteLimit,
+		OnResponseBytes:         func(value int) { turn.OutputBytes = value },
+		OnRetry: func(attempt int, reason string) {
+			turn.RetryCount = attempt
+			turn.RetryReason = reason
+		},
+		SystemPrompt: request.SystemPrompt, Memories: request.Memories,
 		Summary: request.Summary, Facts: request.Facts,
 		BusinessContext: request.BusinessContext, KnowledgeContext: request.KnowledgeContext,
-		Tools: request.Tools,
+		ProjectFiles:   request.ProjectFiles,
+		ActionReceipts: request.ActionReceipts,
+		Tools:          request.Tools,
 	}
 	inputBytes, err := modelclient.PromptSize(
 		modelclient.Protocol(request.Protocol), request.Model, request.History, promptContext,

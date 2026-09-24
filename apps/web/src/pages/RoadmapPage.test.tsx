@@ -5,12 +5,15 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import type { RoadmapMilestone } from "../types/models";
 import { RoadmapPage } from "./RoadmapPage";
+import { useAiChatStore } from "../store/aiChat";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 
 const hooks = vi.hoisted(() => ({
   milestones: vi.fn(),
@@ -119,6 +122,8 @@ function LocationProbe() {
 describe("RoadmapPage", () => {
   afterEach(() => {
     cleanup();
+    useAiChatStore.setState({ activeSessionId: "" });
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     vi.useRealTimers();
   });
 
@@ -317,6 +322,115 @@ describe("RoadmapPage", () => {
       "/roadmap?source=today-overview",
     );
     expect(hooks.detail).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps the conversation through milestone details, linked projects and closing", () => {
+    const id = "018f0000-0000-7000-8000-000000000031";
+    const sessionId = "018f0000-0000-7000-8000-000000000022";
+    const projectId = "018f0000-0000-7000-8000-000000000032";
+    hooks.detail.mockImplementation((requested: string | null) => ({
+      data: requested
+        ? {
+            ...milestone,
+            id,
+            projects: [
+              { id: projectId, name: "关联项目", status: "in_progress" },
+            ],
+          }
+        : undefined,
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    }));
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/roadmap?milestone=${id}&return_session=${sessionId}`,
+        ]}
+      >
+        <RoadmapPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    expect(hooks.detail).toHaveBeenLastCalledWith(id);
+    const modal = screen.getByRole("dialog", { name: "里程碑详情" });
+    expect(
+      within(modal).getByRole("link", { name: "返回原对话" }),
+    ).toBeInTheDocument();
+    expect(
+      within(modal).getByRole("link", { name: "关联项目" }),
+    ).toHaveAttribute(
+      "href",
+      `/projects/${projectId}?return_session=${sessionId}`,
+    );
+    fireEvent.click(within(modal).getAllByRole("button", { name: "关闭" })[0]);
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/roadmap?return_session=${sessionId}`,
+    );
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+    for (const mutation of [hooks.update, hooks.remove, hooks.reorder])
+      expect(mutation).not.toHaveBeenCalled();
+  });
+
+  it("hands a precise milestone to the agent without editing roadmap facts", () => {
+    const id = "018f0000-0000-7000-8000-000000000031";
+    hooks.detail.mockImplementation((requested: string | null) => ({
+      data: requested ? { ...milestone, id } : undefined,
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    }));
+    render(
+      <MemoryRouter initialEntries={[`/roadmap?milestone=${id}`]}>
+        <RoadmapPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    const modal = screen.getByRole("dialog", { name: "里程碑详情" });
+    fireEvent.click(within(modal).getByRole("button", { name: "交给智能体" }));
+
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "路线图里程碑",
+      route: `/roadmap?milestone=${id}`,
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=roadmap_milestone");
+    expect(pending?.prompt).toContain(`id=${id}`);
+    expect(pending?.prompt).toContain("roadmap_milestone.*");
+    expect(pending?.prompt).toContain("不要改写项目或任务状态");
+    for (const mutation of [hooks.update, hooks.remove, hooks.reorder])
+      expect(mutation).not.toHaveBeenCalled();
+  });
+
+  it("can return from an unavailable milestone without replacing it with a list record", () => {
+    const id = "018f0000-0000-7000-8000-000000000031";
+    const sessionId = "018f0000-0000-7000-8000-000000000022";
+    hooks.detail.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/roadmap?milestone=${id}&return_session=${sessionId}`,
+        ]}
+      >
+        <RoadmapPage />
+      </MemoryRouter>,
+    );
+    const modal = screen.getByRole("dialog", { name: "里程碑详情" });
+    expect(within(modal).queryByText(milestone.title)).toBeNull();
+    fireEvent.click(within(modal).getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
   });
 
   it("requires a second action before deleting an archived milestone", () => {

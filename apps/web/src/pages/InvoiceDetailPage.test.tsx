@@ -8,6 +8,7 @@ import {
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Invoice } from "../types/models";
 import { InvoiceDetailPage } from "./InvoiceDetailPage";
 
@@ -78,6 +79,7 @@ const paidInvoice: Invoice = {
   createdAt: "2026-08-29T00:00:00Z",
   updatedAt: "2026-09-03T00:00:00Z",
 };
+const invoiceUuid = "018f0000-0000-7000-8000-000000001810";
 
 const refetch = vi.fn();
 
@@ -87,6 +89,7 @@ function detailResult(
     error: unknown;
     isError: boolean;
     isPending: boolean;
+    isFetching: boolean;
     refetch: typeof refetch;
   }> = {},
 ) {
@@ -104,6 +107,7 @@ function renderDetail(path = "/invoices/invoice-1") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
+        <Route element={<div>AI 目标</div>} path="/ai" />
         <Route element={<div>发票列表目标</div>} path="/invoices" />
         <Route element={<InvoiceDetailPage />} path="/invoices/:invoiceId" />
       </Routes>
@@ -126,12 +130,13 @@ describe("InvoiceDetailPage", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
   });
 
   it("reads only the routed invoice and renders every current field", () => {
     renderDetail();
 
-    expect(hooks.detail).toHaveBeenCalledWith("invoice-1");
+    expect(hooks.detail).toHaveBeenCalledWith("invoice-1", false);
     expect(
       screen.getByRole("heading", { name: "INV-202608-001" }),
     ).toBeTruthy();
@@ -153,6 +158,10 @@ describe("InvoiceDetailPage", () => {
     expect(screen.getByText("2026-09-28")).toBeTruthy();
     expect(screen.getByText("2026-09-03")).toBeTruthy();
     expect(screen.getByText("entry-1")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "entry-1" })).toHaveAttribute(
+      "href",
+      "/income/entry-1",
+    );
     expect(screen.getByText("首付款")).toBeTruthy();
     expect(screen.getByText("4")).toBeTruthy();
     expect(screen.getAllByText("已付款").length).toBeGreaterThan(0);
@@ -190,7 +199,7 @@ describe("InvoiceDetailPage", () => {
 
     renderDetail("/invoices/direct-refresh");
 
-    expect(hooks.detail).toHaveBeenCalledWith("direct-refresh");
+    expect(hooks.detail).toHaveBeenCalledWith("direct-refresh", false);
     expect(screen.getByLabelText("正在加载")).toBeTruthy();
   });
 
@@ -315,4 +324,46 @@ describe("InvoiceDetailPage", () => {
     await waitFor(() => expect(refetch).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
+
+  it("hands the exact invoice to the agent with invoice action scope", () => {
+    hooks.detail.mockReturnValue(
+      detailResult({
+        data: { ...paidInvoice, id: invoiceUuid },
+      }),
+    );
+    renderDetail(`/invoices/${invoiceUuid}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending?.label).toBe("发票");
+    expect(pending?.route).toBe(`/invoices/${invoiceUuid}`);
+    expect(pending?.scopes).toEqual(["finance", "invoice_actions"]);
+    expect(pending?.prompt).toContain("workspace_finance");
+    expect(pending?.prompt).toContain(`id=${invoiceUuid}`);
+    expect(pending?.prompt).toContain("不要假设已经发送");
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+  });
+
+  it.each(["fetching", "error"])(
+    "keeps the source conversation link without showing stale invoice while %s",
+    (state) => {
+      hooks.detail.mockReturnValue(
+        detailResult({
+          isFetching: state === "fetching",
+          isError: state === "error",
+        }),
+      );
+      renderDetail(
+        "/invoices/invoice-1?return_session=018f0000-0000-7000-8000-000000001711",
+      );
+      expect(hooks.detail).toHaveBeenCalledWith("invoice-1", true);
+      expect(screen.getByRole("link", { name: "返回原对话" })).toHaveAttribute(
+        "href",
+        "/ai",
+      );
+      expect(screen.queryByText("¥1,280.45")).not.toBeInTheDocument();
+      expect(hooks.transition.mutateAsync).not.toHaveBeenCalled();
+      expect(hooks.remove.mutateAsync).not.toHaveBeenCalled();
+    },
+  );
 });

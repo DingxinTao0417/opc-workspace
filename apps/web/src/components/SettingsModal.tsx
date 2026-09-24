@@ -68,6 +68,7 @@ import {
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore, type SettingsModule } from "../store/ui";
+import { runtimeDiagnosticsHandoff } from "../lib/aiIssueHandoff";
 import type {
   AppSettingUpdate,
   StorageCapacityHistoryPoint,
@@ -78,6 +79,7 @@ import { AgentAdapterSettings } from "./AgentAdapterSettings";
 import { AiProviderSettings } from "./AiProviderSettings";
 import { AutomationSettings } from "./AutomationSettings";
 import { BackupSettings } from "./BackupSettings";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { Modal } from "./Modal";
 
 interface SettingsModalProps {
@@ -1315,12 +1317,29 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             : runtimeDiagnostics.desktopCapabilities.tray === "available"
               ? "可用 · 关闭窗口时隐藏"
               : "不可用 · 不拦截关闭窗口";
+      const diagnosticsHandoff = runtimeDiagnosticsHandoff({
+        environment: runtimeDiagnostics.environment,
+        phase: runtimeDiagnostics.phase,
+        apiStatus: health.status,
+        compatibility: compatibilityLabel,
+        appVersion: runtimeDiagnostics.appVersion,
+        apiVersion: runtimeDiagnostics.apiVersion,
+        schemaVersion: runtimeDiagnostics.schemaVersion,
+      });
 
       return (
         <>
           <header className="settings-content-header">
             <h3>运行诊断</h3>
             <p>只展示可安全分享的版本和状态，不读取业务正文。</p>
+            <AiIssueHandoffButton
+              content={diagnosticsHandoff}
+              disabled={
+                diagnosticPackageMutation.isPending ||
+                healthQuery.isFetching ||
+                runtimeDiagnosticsPending
+              }
+            />
           </header>
           <div className="settings-about">
             <div className="settings-about-row">

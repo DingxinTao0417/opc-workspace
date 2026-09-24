@@ -137,6 +137,10 @@ func validAutomationImportFailureEvidence(run automationImportRun, inboxSourceKe
 		return true
 	}
 	if run.rule.preset.PresetKey != automationPresetProjectCompleted {
+		if run.rule.preset.PresetKey == automationPresetAgentRunFailed {
+			action, err := automationAgentRunFailureActionFromSnapshot(run.actionSnapshot)
+			return err == nil && inboxSourceKeyCounts[agentRunFailedEventKey(action.AgentRunID)] == 1
+		}
 		return false
 	}
 	return inboxSourceKeyCounts["automation:"+run.logicalKey] == 1
@@ -444,7 +448,7 @@ func validAutomationImportRunOutcome(
 		if *errorCode != "ACTION_WRITE_FAILED" {
 			return !retryable && retryAt == nil && (*errorCode == "SOURCE_EVENT_CONFLICT" ||
 				*errorCode == "ACTION_SNAPSHOT_INVALID" || *errorCode == "ATTEMPT_CONTRACT_INVALID" ||
-				*errorCode == "SOURCE_EVENT_INVALID")
+				*errorCode == "SOURCE_EVENT_INVALID" || *errorCode == "SOURCE_UNAVAILABLE")
 		}
 		if attempt >= automationMaxAttempts {
 			return !retryable && retryAt == nil
@@ -468,7 +472,7 @@ func validAutomationImportRunOutcome(
 func validAutomationImportSuccessSummary(resultType, summary string) bool {
 	switch resultType {
 	case "inbox_item":
-		return summary == "已创建本地核对事项。"
+		return summary == "已创建本地核对事项。" || summary == automationAgentRunFailureResultSummary
 	case "task":
 		return summary == "已创建本地发票逾期跟进任务。"
 	case "reminder":
@@ -508,6 +512,17 @@ func validAutomationImportSafetyFailure(
 		}
 	case automationPresetProjectCompleted:
 		return *errorCode == "SOURCE_EVENT_CONFLICT" && actionValid
+	case automationPresetAgentRunFailed:
+		switch *errorCode {
+		case "ACTION_SNAPSHOT_INVALID":
+			return !actionValid
+		case "ATTEMPT_CONTRACT_INVALID":
+			return actionValid && !attemptContractValid
+		case "SOURCE_EVENT_INVALID", "SOURCE_UNAVAILABLE", "SOURCE_EVENT_CONFLICT":
+			return attemptContractValid
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -589,6 +604,9 @@ func automationImportWorkflowEvents(table businessExportTable) (automationImport
 }
 
 func validAutomationImportSourceEvent(run automationImportRun, events automationImportEventIndex) bool {
+	if run.rule.preset.PresetKey == automationPresetAgentRunFailed {
+		return validAutomationImportAgentFailureSource(run, events)
+	}
 	if run.triggerType == "schedule" {
 		if run.status == "failed" && run.errorCode != nil {
 			if run.rule.preset.PresetKey == automationPresetInvoiceOverdue &&
@@ -776,7 +794,10 @@ func validAutomationImportResult(
 	switch *run.resultType {
 	case "inbox_item":
 		row, exists := inboxItems[*run.resultID]
-		if !exists || row["source_entity_type"] != automationInboxSourceType || row["source_entity_id"] != run.id ||
+		if run.rule.preset.PresetKey == automationPresetAgentRunFailed {
+			return exists && validAutomationImportAgentFailureResult(run, row, events, tasks)
+		}
+		if !exists || run.resultSummary != "已创建本地核对事项。" || row["source_entity_type"] != automationInboxSourceType || row["source_entity_id"] != run.id ||
 			row["source_event_key"] != "automation:"+run.logicalKey {
 			return false
 		}
@@ -938,6 +959,17 @@ func validAutomationImportReverseRelations(
 		}
 	}
 	for _, row := range inboxItems {
+		if row["source_entity_type"] == agentRunFailedInboxSourceType {
+			payloadJSON, ok := row["payload_json"].(string)
+			payload, err := automationAgentRunFailurePayloadFromJSON(payloadJSON)
+			run, exists := runs[payload.AutomationRunID]
+			if !ok || err != nil || !exists || run.rule.preset.PresetKey != automationPresetAgentRunFailed ||
+				run.status != "succeeded" || run.resultType == nil || *run.resultType != "inbox_item" ||
+				run.resultID == nil || row["id"] != *run.resultID {
+				return false
+			}
+			continue
+		}
 		if sourceKey, ok := row["source_event_key"].(string); ok {
 			if _, conflict := conflictKeys[sourceKey]; conflict {
 				continue
@@ -1127,6 +1159,12 @@ func automationImportAction(raw string, preset automationPresetDefinition, confi
 		return object, string(canonical), true, action.Priority == config.Priority
 	case automationPresetInvoiceOverdue:
 		action, err := automationInvoiceOverdueActionFromSnapshot(object)
+		if err != nil {
+			return object, string(canonical), false, false
+		}
+		return object, string(canonical), true, action.Priority == config.Priority
+	case automationPresetAgentRunFailed:
+		action, err := automationAgentRunFailureActionFromJSON(raw)
 		if err != nil {
 			return object, string(canonical), false, false
 		}

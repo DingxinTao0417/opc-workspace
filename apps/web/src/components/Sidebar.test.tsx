@@ -3,10 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 
-vi.mock("./FocusMiniCard", () => ({
-  FocusMiniCard: () => <div data-testid="focus-mini-card" />,
-}));
-
 const hooks = vi.hoisted(() => ({
   inbox: {
     data: {
@@ -151,10 +147,17 @@ describe("Sidebar navigation", () => {
     expect(screen.queryByText("后续")).toBeNull();
   });
 
-  it("replaces the weekly execution card with the compact focus widget", () => {
-    renderSidebar();
+  it("omits the sidebar focus timer while retaining focus navigation", () => {
+    const { container } = renderSidebar();
 
-    expect(screen.getByTestId("focus-mini-card")).toBeInTheDocument();
+    expect(container.querySelector(".focus-mini-card")).toBeNull();
+    expect(screen.getByRole("link", { name: "专注" })).toHaveAttribute(
+      "href",
+      "/focus",
+    );
+    expect(
+      screen.getByRole("button", { name: "打开设置" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("本周执行")).not.toBeInTheDocument();
   });
 });
@@ -169,7 +172,43 @@ describe("Sidebar notification badges", () => {
   it("shows recent client activities as a nav badge", () => {
     renderSidebar();
 
+    expect(hooks.recent).toHaveBeenCalledWith(20);
     expect(screen.getByTitle("2 条近 7 天客户动态")).toHaveTextContent("2");
+  });
+
+  it("marks a full recent-activity page as a lower bound", () => {
+    hooks.recent.mockReturnValue({
+      data: {
+        items: Array.from({ length: 20 }, (_, index) => ({
+          id: `a${index}`,
+          occurredAt: "2026-09-12T00:00:00Z",
+        })),
+        meta: { page: 1, pageSize: 20, total: 31 },
+      },
+      isError: false,
+      isPending: false,
+    });
+
+    renderSidebar();
+
+    expect(screen.getByTitle("至少 20 条近 7 天客户动态")).toHaveTextContent(
+      "20+",
+    );
+  });
+
+  it("does not turn a failed recent-activity read into a count", () => {
+    hooks.recent.mockReturnValue({
+      data: {
+        items: [{ id: "stale", occurredAt: "2026-09-12T00:00:00Z" }],
+        meta: { page: 1, pageSize: 20, total: 1 },
+      },
+      isError: true,
+      isPending: false,
+    });
+
+    renderSidebar();
+
+    expect(screen.queryByTitle(/客户动态/)).not.toBeInTheDocument();
   });
 
   it("shows the current month confirmed income as a nav badge", () => {

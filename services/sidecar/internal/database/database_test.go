@@ -10,8 +10,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LatestSchemaVersion() error = %v", err)
 	}
-	if latest != 71 {
-		t.Fatalf("LatestSchemaVersion() = %d, want 71", latest)
+	if latest != 79 {
+		t.Fatalf("LatestSchemaVersion() = %d, want 79", latest)
 	}
 	store, err := Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
@@ -19,8 +19,8 @@ func TestOpenAppliesMigrationsAndPragmas(t *testing.T) {
 	}
 	defer store.Close()
 
-	if store.SchemaVersion != 71 {
-		t.Fatalf("SchemaVersion = %d, want 71", store.SchemaVersion)
+	if store.SchemaVersion != 79 {
+		t.Fatalf("SchemaVersion = %d, want 79", store.SchemaVersion)
 	}
 
 	checks := map[string]int{

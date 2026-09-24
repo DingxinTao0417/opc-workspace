@@ -4,6 +4,10 @@ import { useRoadmapMilestoneQuery } from "../api/hooks";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
+import { ReturnToAiChat } from "./ClientRecordLocation";
+import { aiWorkspaceHref } from "../lib/aiWorkspaceLinks";
+import { roadmapMilestoneHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 const statusLabels: Record<RoadmapMilestoneStatus, string> = {
   planned: "计划中",
@@ -32,10 +36,12 @@ export function RoadmapMilestoneDetailModal({
   milestoneId,
   onClose,
   onEdit,
+  returnSession,
 }: {
   milestoneId: string | null;
   onClose: () => void;
   onEdit: (milestone: RoadmapMilestone) => void;
+  returnSession?: string | null;
 }) {
   const query = useRoadmapMilestoneQuery(milestoneId);
   const milestone = query.data;
@@ -44,6 +50,17 @@ export function RoadmapMilestoneDetailModal({
     <Modal
       footer={
         <>
+          <ReturnToAiChat sessionId={returnSession} />
+          {milestone ? (
+            <AiIssueHandoffButton
+              content={roadmapMilestoneHandoff(
+                milestone.id,
+                milestone.title,
+                milestone.status,
+              )}
+              onNavigate={onClose}
+            />
+          ) : null}
           <button
             className="button button-secondary"
             onClick={onClose}
@@ -143,7 +160,13 @@ export function RoadmapMilestoneDetailModal({
             {milestone.projects.length > 0 ? (
               <div className="roadmap-project-links">
                 {milestone.projects.map((project) => (
-                  <Link key={project.id} to={`/projects/${project.id}`}>
+                  <Link
+                    key={project.id}
+                    to={aiWorkspaceHref(
+                      `/projects/${project.id}`,
+                      returnSession ?? undefined,
+                    )}
+                  >
                     <FolderKanban size={13} />
                     {project.name}
                   </Link>

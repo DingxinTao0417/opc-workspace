@@ -419,30 +419,8 @@ func (a *API) deleteRoadmapMilestone(c *gin.Context) {
 	}
 	now := formatInboxTimestamp(a.options.Now().UTC())
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var milestone models.RoadmapMilestone
-		if err := tx.First(&milestone, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "ROADMAP_MILESTONE_NOT_FOUND", "Roadmap milestone not found")
-			}
-			return err
-		}
-		if milestone.Version != expectedVersion {
-			return roadmapMilestoneVersionConflict()
-		}
-		if milestone.Status != "archived" {
-			return newProjectRequestError(http.StatusConflict, "ROADMAP_MILESTONE_NOT_ARCHIVED", "Only archived roadmap milestones can be permanently deleted")
-		}
-		if err := coordinateRoadmapMilestoneInboxSourceDeletion(tx, id, requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.RoadmapMilestone{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return roadmapMilestoneVersionConflict()
-		}
-		return nil
+		_, _, err := deleteRoadmapMilestoneInTransaction(tx, id, expectedVersion, requestIDFromContext(c), now)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -480,48 +458,9 @@ func (a *API) reorderRoadmapMilestones(c *gin.Context) {
 	}
 	var response []roadmapMilestoneResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var periodYear, periodQuarter int
-		for index, item := range input.Items {
-			var milestone models.RoadmapMilestone
-			if err := tx.First(&milestone, "id = ?", item.ID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return newProjectRequestError(http.StatusNotFound, "ROADMAP_MILESTONE_NOT_FOUND", "Roadmap milestone not found")
-				}
-				return err
-			}
-			if milestone.Version != item.ExpectedVersion {
-				return roadmapMilestoneVersionConflict()
-			}
-			if milestone.Status == "archived" {
-				return newProjectRequestError(http.StatusConflict, "ROADMAP_MILESTONE_ARCHIVED", "Archived roadmap milestones cannot be reordered")
-			}
-			if index == 0 {
-				periodYear, periodQuarter = milestone.Year, milestone.Quarter
-			} else if milestone.Year != periodYear || milestone.Quarter != periodQuarter {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "all reordered milestones must be in the same year and quarter")
-			}
-		}
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		for index, item := range input.Items {
-			result := tx.Model(&models.RoadmapMilestone{}).Where("id = ? AND version = ?", item.ID, item.ExpectedVersion).Updates(map[string]any{
-				"manual_order": int64(index+1) * roadmapMilestoneOrderStep,
-				"updated_at":   updatedAt,
-				"version":      gorm.Expr("version + 1"),
-			})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected == 0 {
-				return roadmapMilestoneVersionConflict()
-			}
-		}
-		var milestones []models.RoadmapMilestone
-		for _, item := range input.Items {
-			var milestone models.RoadmapMilestone
-			if err := tx.First(&milestone, "id = ?", item.ID).Error; err != nil {
-				return err
-			}
-			milestones = append(milestones, milestone)
+		milestones, err := reorderRoadmapMilestonesInTransaction(tx, input.Items, time.Now().UTC())
+		if err != nil {
+			return err
 		}
 		loaded, err := loadRoadmapMilestoneResponses(tx, milestones)
 		if err != nil {
@@ -538,6 +477,56 @@ func (a *API) reorderRoadmapMilestones(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// Shared by the human reorder endpoint and the approved AI proposal. The AI
+// path supplies the complete current quarter; the existing HTTP contract still
+// accepts its caller-provided set and retains the same validation/response.
+func reorderRoadmapMilestonesInTransaction(tx *gorm.DB, items []reorderRoadmapMilestoneItem, clock time.Time) ([]models.RoadmapMilestone, error) {
+	var periodYear, periodQuarter int
+	for index, item := range items {
+		var milestone models.RoadmapMilestone
+		if err := tx.First(&milestone, "id = ?", item.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, newProjectRequestError(http.StatusNotFound, "ROADMAP_MILESTONE_NOT_FOUND", "Roadmap milestone not found")
+			}
+			return nil, err
+		}
+		if milestone.Version != item.ExpectedVersion {
+			return nil, roadmapMilestoneVersionConflict()
+		}
+		if milestone.Status == "archived" {
+			return nil, newProjectRequestError(http.StatusConflict, "ROADMAP_MILESTONE_ARCHIVED", "Archived roadmap milestones cannot be reordered")
+		}
+		if index == 0 {
+			periodYear, periodQuarter = milestone.Year, milestone.Quarter
+		} else if milestone.Year != periodYear || milestone.Quarter != periodQuarter {
+			return nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "all reordered milestones must be in the same year and quarter")
+		}
+	}
+	updatedAt := clock.UTC().Format(time.RFC3339Nano)
+	for index, item := range items {
+		result := tx.Model(&models.RoadmapMilestone{}).Where("id = ? AND version = ?", item.ID, item.ExpectedVersion).Updates(map[string]any{
+			"manual_order": int64(index+1) * roadmapMilestoneOrderStep,
+			"updated_at":   updatedAt,
+			"version":      gorm.Expr("version + 1"),
+		})
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil, roadmapMilestoneVersionConflict()
+		}
+	}
+	milestones := make([]models.RoadmapMilestone, 0, len(items))
+	for _, item := range items {
+		var milestone models.RoadmapMilestone
+		if err := tx.First(&milestone, "id = ?", item.ID).Error; err != nil {
+			return nil, err
+		}
+		milestones = append(milestones, milestone)
+	}
+	return milestones, nil
 }
 
 func roadmapMilestoneListFilters(c *gin.Context) (int, int, string, string, string, bool, bool) {

@@ -37,7 +37,7 @@ type automationRunDetailEnvelope struct {
 	Data automationRunDetailOutput `json:"data"`
 }
 
-func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
+func TestAutomationCatalogPreviewAndExplicitlyEnabledDependencies(t *testing.T) {
 	router := newTestAPI(t)
 	listed := performRequest(router, http.MethodGet, "/api/v1/automations/rules", nil, nil)
 	if listed.Code != http.StatusOK {
@@ -78,7 +78,7 @@ func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
 			t.Fatalf("invoice permissions = %#v", invoice.Permissions)
 		}
 	}
-	if agent == nil || agent.Available || agent.Status != "unavailable" || agent.UnavailableReason == "" {
+	if agent == nil || !agent.Available || agent.Status != "disabled" || agent.UnavailableReason != "" {
 		t.Fatalf("agent preset = %#v", agent)
 	}
 
@@ -103,8 +103,10 @@ func TestAutomationCatalogPreviewAndUnavailableDependency(t *testing.T) {
 		t.Fatalf("enabled Invoice automation = %#v err=%v", enabledInvoiceRule.Data, err)
 	}
 
-	unavailable := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+agent.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
-	assertAPIError(t, unavailable, http.StatusConflict, "AUTOMATION_DEPENDENCY_UNAVAILABLE")
+	enabledAgent := performRequest(router, http.MethodPost, "/api/v1/automations/rules/"+agent.ID+"/enable", nil, map[string]string{"If-Match": `"1"`})
+	if enabledAgent.Code != http.StatusOK {
+		t.Fatalf("enable Agent failure notification = %d: %s", enabledAgent.Code, enabledAgent.Body.String())
+	}
 }
 
 func TestRepeatedScheduleAutomationCommandsAreIdempotent(t *testing.T) {

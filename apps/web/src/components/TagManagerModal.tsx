@@ -7,7 +7,9 @@ import {
   useTagOptionsQuery,
   useUpdateTag,
 } from "../api/hooks";
+import { tagHandoff } from "../lib/aiIssueHandoff";
 import type { Tag } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
 
@@ -23,7 +25,13 @@ function mutationError(error: unknown): string | null {
   return "标签操作失败，请重试。";
 }
 
-function TagManagerRow({ tag }: { tag: Tag }) {
+function TagManagerRow({
+  onHandoffNavigate,
+  tag,
+}: {
+  onHandoffNavigate: () => void;
+  tag: Tag;
+}) {
   const updateMutation = useUpdateTag();
   const deleteMutation = useDeleteTag();
   const [name, setName] = useState(tag.name);
@@ -31,6 +39,7 @@ function TagManagerRow({ tag }: { tag: Tag }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const changed = name.trim() !== tag.name || color !== tag.color;
   const busy = updateMutation.isPending || deleteMutation.isPending;
+  const handoffContent = tagHandoff(tag.id, tag.name, tag.color);
   const error =
     mutationError(updateMutation.error) ?? mutationError(deleteMutation.error);
 
@@ -112,6 +121,11 @@ function TagManagerRow({ tag }: { tag: Tag }) {
           <Trash2 size={13} />
         </button>
       )}
+      <AiIssueHandoffButton
+        content={handoffContent}
+        disabled={busy || changed || confirmingDelete}
+        onNavigate={onHandoffNavigate}
+      />
       {error ? (
         <span className="tag-manager-error" role="alert">
           {error}
@@ -224,7 +238,7 @@ export function TagManagerModal({
       {(query.data ?? []).length > 0 ? (
         <div className="tag-manager-list">
           {(query.data ?? []).map((tag) => (
-            <TagManagerRow key={tag.id} tag={tag} />
+            <TagManagerRow key={tag.id} onHandoffNavigate={onClose} tag={tag} />
           ))}
         </div>
       ) : null}

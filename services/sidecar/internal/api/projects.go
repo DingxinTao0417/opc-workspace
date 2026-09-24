@@ -201,21 +201,7 @@ func (a *API) listProjects(c *gin.Context) {
 	var rows []projectRow
 	invalidSort := false
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		query := tx.Table("projects")
-		if status == "" {
-			if !includeArchived {
-				query = query.Where("projects.status <> ?", "archived")
-			}
-		} else {
-			query = query.Where("projects.status = ?", status)
-		}
-		if clientID != "" {
-			query = query.Where("projects.client_id = ?", clientID)
-		}
-		if search != "" {
-			like := "%" + escapeLike(search) + "%"
-			query = query.Where("(projects.name LIKE ? ESCAPE '\\' OR projects.description LIKE ? ESCAPE '\\')", like, like)
-		}
+		query := filteredProjectsQuery(tx, status, clientID, search, includeArchived)
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
@@ -244,6 +230,27 @@ func (a *API) listProjects(c *gin.Context) {
 		projects[index] = projectResponseFromRow(rows[index])
 	}
 	c.JSON(http.StatusOK, gin.H{"data": projects, "meta": pageMeta{Page: page, PageSize: pageSize, Total: total}})
+}
+
+// Keep the native Projects page and the consented AI read on the same filter
+// semantics. Callers validate filters and choose their own disclosure-safe SELECT.
+func filteredProjectsQuery(tx *gorm.DB, status, clientID, search string, includeArchived bool) *gorm.DB {
+	query := tx.Table("projects")
+	if status == "" {
+		if !includeArchived {
+			query = query.Where("projects.status <> ?", "archived")
+		}
+	} else {
+		query = query.Where("projects.status = ?", status)
+	}
+	if clientID != "" {
+		query = query.Where("projects.client_id = ?", clientID)
+	}
+	if search != "" {
+		like := "%" + escapeLike(search) + "%"
+		query = query.Where("(projects.name LIKE ? ESCAPE '\\' OR projects.description LIKE ? ESCAPE '\\')", like, like)
+	}
+	return query
 }
 
 func (a *API) createProject(c *gin.Context) {
@@ -305,30 +312,10 @@ func (a *API) createProject(c *gin.Context) {
 				return fmt.Errorf("read idempotency key: %w", err)
 			}
 		}
-		if project.ClientID != nil {
-			if err := requireClient(tx, *project.ClientID); err != nil {
-				return err
-			}
-		}
-		if err := tx.Create(&project).Error; err != nil {
-			return fmt.Errorf("create project: %w", err)
-		}
-		if err := recordProjectWorkflowEvent(
-			tx,
-			project.ID,
-			"project_created",
-			nil,
-			projectEventState(project),
-			requestIDFromContext(c),
-			project.CreatedAt,
-		); err != nil {
+		response, err = createProjectInTransaction(tx, project, requestIDFromContext(c))
+		if err != nil {
 			return err
 		}
-		row, err := loadProjectRow(tx, project.ID)
-		if err != nil {
-			return fmt.Errorf("load created project: %w", err)
-		}
-		response = projectResponseFromRow(row)
 		if idempotencyKey != "" {
 			responseBody, err := json.Marshal(response)
 			if err != nil {
@@ -458,73 +445,9 @@ func (a *API) updateProject(c *gin.Context) {
 
 	var response projectResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var project models.Project
-		if err := tx.First(&project, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
-			}
-			return err
-		}
-		if project.Version != expectedVersion {
-			return projectVersionConflict()
-		}
-		if project.Status == "archived" {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"PROJECT_ARCHIVED",
-				"Restore the project before editing it",
-			)
-		}
-
-		updates, err := projectUpdates(tx, project, input)
-		if err != nil {
-			return err
-		}
-		nameChanged := false
-		if name, exists := updates["name"].(string); exists {
-			nameChanged = name != project.Name
-		}
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		updates["updated_at"] = updatedAt
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.Project{}).
-			Where("id = ? AND version = ?", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			if strings.Contains(result.Error.Error(), "PROJECT_CLIENT_CHANGE_BLOCKED_BY_INVOICES") {
-				return newProjectRequestError(
-					http.StatusConflict,
-					"PROJECT_CLIENT_CHANGE_BLOCKED_BY_INVOICES",
-					"Project client cannot be changed while invoices reference this project",
-				)
-			}
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return projectVersionConflict()
-		}
-		if nameChanged {
-			if _, err := bumpTasksForProject(tx, id, updatedAt); err != nil {
-				return err
-			}
-		}
-		row, err := loadProjectRow(tx, id)
-		if err != nil {
-			return err
-		}
-		if err := recordProjectWorkflowEvent(
-			tx,
-			id,
-			"project_updated",
-			projectEventState(project),
-			projectEventState(row.Project),
-			requestIDFromContext(c),
-			updatedAt,
-		); err != nil {
-			return err
-		}
-		response = projectResponseFromRow(row)
-		return nil
+		var err error
+		response, err = updateProjectInTransaction(tx, id, expectedVersion, input, requestIDFromContext(c), time.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -559,93 +482,9 @@ func (a *API) transitionProject(c *gin.Context) {
 
 	var response projectResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var project models.Project
-		if err := tx.First(&project, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
-			}
-			return err
-		}
-		if project.Version != expectedVersion {
-			return projectVersionConflict()
-		}
-
-		target, archivedFrom, err := projectTransition(project, input.Action)
-		if err != nil {
-			return err
-		}
-		var incompleteTaskCount int64
-		if input.Action == "complete" {
-			if err := tx.Table("tasks").Where("project_id = ? AND status <> ?", id, "done").Count(&incompleteTaskCount).Error; err != nil {
-				return err
-			}
-			if incompleteTaskCount > 0 && !input.ConfirmIncompleteTasks {
-				return newProjectRequestError(
-					http.StatusConflict,
-					"INCOMPLETE_TASKS_CONFIRMATION_REQUIRED",
-					fmt.Sprintf("Project has %d incomplete task(s); explicit confirmation is required", incompleteTaskCount),
-				)
-			}
-		}
-
-		updatedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates := map[string]any{
-			"status":               target,
-			"archived_from_status": archivedFrom,
-			"updated_at":           updatedAt,
-			"version":              gorm.Expr("version + 1"),
-		}
-		result := tx.Model(&models.Project{}).
-			Where("id = ? AND version = ?", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return projectVersionConflict()
-		}
-		row, err := loadProjectRow(tx, id)
-		if err != nil {
-			return err
-		}
-		action := map[string]string{
-			"start": "project_started", "pause": "project_paused", "resume": "project_resumed",
-			"complete": "project_completed", "reopen": "project_reopened",
-			"archive": "project_archived", "restore": "project_restored",
-		}[input.Action]
-		eventID, err := recordProjectWorkflowEventWithID(
-			tx,
-			id,
-			action,
-			projectEventState(project),
-			projectEventState(row.Project),
-			requestIDFromContext(c),
-			updatedAt,
-		)
-		if err != nil {
-			return err
-		}
-		if input.Action == "complete" || input.Action == "reopen" {
-			if err := projectClientActivity(tx, row.Project, input.Action, eventID, updatedAt); err != nil {
-				return err
-			}
-		}
-		if input.Action == "complete" {
-			if err := projectProjectCompletionInboxItem(
-				tx,
-				row.Project,
-				incompleteTaskCount,
-				requestIDFromContext(c),
-				updatedAt,
-			); err != nil {
-				return err
-			}
-			if err := enqueueProjectCompletionAutomationDelivery(tx, eventID, row.Project, updatedAt); err != nil {
-				return err
-			}
-		}
-		response = projectResponseFromRow(row)
-		return nil
+		var err error
+		response, err = transitionProjectInTransaction(tx, id, expectedVersion, input, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -675,129 +514,20 @@ func (a *API) deleteProject(c *gin.Context) {
 		return
 	}
 
-	deleted := deletedProjectResponse{DeletedID: id}
+	var deleted deletedProjectResponse
 	var movedAttachmentFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var project models.Project
-		if err := tx.First(&project, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
-			}
-			return err
-		}
-		if project.Version != expectedVersion {
-			return projectVersionConflict()
-		}
-		if project.Status != "archived" {
-			return newProjectRequestError(http.StatusConflict, "PROJECT_NOT_ARCHIVED", "Only archived projects can be permanently deleted")
-		}
-		var roadmapMilestoneCount int64
-		if err := tx.Table("roadmap_milestone_projects").Where("project_id = ?", id).Count(&roadmapMilestoneCount).Error; err != nil {
-			return err
-		}
-		if roadmapMilestoneCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"PROJECT_ROADMAP_MILESTONES_EXIST",
-				"Remove the project's roadmap milestone associations before permanently deleting it",
-			)
-		}
-		var contentItemCount int64
-		if err := tx.Table("content_items").Where("project_id = ?", id).Count(&contentItemCount).Error; err != nil {
-			return err
-		}
-		if contentItemCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"PROJECT_CONTENT_ITEMS_EXIST",
-				"Remove the project's content item associations before permanently deleting it",
-			)
-		}
-		var invoiceCount int64
-		if err := tx.Table("invoices").Where("project_id = ? AND status <> 'draft'", id).Count(&invoiceCount).Error; err != nil {
-			return err
-		}
-		if invoiceCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"PROJECT_HAS_INVOICES",
-				fmt.Sprintf("Project is referenced by %d invoice(s) and cannot be deleted", invoiceCount),
-			)
-		}
-		var financialEntryCount int64
-		if err := tx.Table("financial_entries").
-			Where("project_id = ? AND (status = 'voided' OR invoice_id IS NOT NULL)", id).
-			Count(&financialEntryCount).Error; err != nil {
-			return err
-		}
-		if financialEntryCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"PROJECT_HAS_FINANCIAL_ENTRIES",
-				fmt.Sprintf("Project is referenced by %d financial entry record(s) and cannot be deleted", financialEntryCount),
-			)
-		}
-		if err := tx.Table("invoices").Where("project_id = ? AND status = 'draft'", id).Count(&deleted.DetachedInvoices).Error; err != nil {
-			return err
-		}
-		if err := tx.Table("financial_entries").
-			Where("project_id = ? AND invoice_id IS NULL AND status IN ('pending', 'confirmed')", id).
-			Count(&deleted.DetachedFinancialEntries).Error; err != nil {
-			return err
-		}
-		deletedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		if err := coordinateProjectCompletionInboxSourceDeletion(
-			tx,
-			id,
-			requestIDFromContext(c),
-			deletedAt,
-		); err != nil {
-			return err
-		}
 		var err error
-		movedAttachmentFiles, err = a.trashProjectAttachmentFiles(tx, id, deletedAt)
-		if err != nil {
-			return err
-		}
-		detachedTasks, err := bumpTasksForProject(tx, id, deletedAt)
-		if err != nil {
-			return err
-		}
-		deleted.DetachedTasks = detachedTasks
-		if err := recordProjectWorkflowEvent(
-			tx,
-			id,
-			"project_deleted",
-			projectEventState(project),
-			nil,
-			requestIDFromContext(c),
-			deletedAt,
-		); err != nil {
-			return err
-		}
-		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.Project{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return projectVersionConflict()
-		}
-		return nil
+		_, _, deleted, movedAttachmentFiles, err = a.deleteProjectInTransaction(tx, id, expectedVersion, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
+	a.finishProjectDeletion(id, movedAttachmentFiles, err)
 	if err != nil {
-		if restoreErr := a.restoreProjectAttachmentFiles(movedAttachmentFiles); restoreErr != nil && a.options.Logger != nil {
-			a.options.Logger.Printf("restore project attachment files after delete rollback failed project_id=%s error=%v", id, restoreErr)
-		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
-	}
-	if a.artifactStore != nil {
-		for _, moved := range movedAttachmentFiles {
-			a.artifactStore.purgeTrashedFile(moved)
-		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": deleted})
 }

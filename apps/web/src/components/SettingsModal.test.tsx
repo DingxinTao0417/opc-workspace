@@ -18,6 +18,7 @@ import {
   useSettingsStore,
 } from "../store/settings";
 import { useUiStore } from "../store/ui";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { SettingsModal } from "./SettingsModal";
 import { applyTheme, ThemeController } from "./ThemeController";
 
@@ -265,12 +266,14 @@ describe("SettingsModal", () => {
       preview: null,
     });
     useUiStore.setState({ settingsOpen: true, settingsModule: "general" });
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     applyTheme(DEFAULT_THEME);
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     applyTheme(DEFAULT_THEME);
   });
 
@@ -610,6 +613,25 @@ describe("SettingsModal", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "生成诊断包" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+  });
+
+  it("hands runtime diagnostics to the agent without exposing or invoking desktop actions", async () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "运行诊断" }));
+    await screen.findByText("浏览器开发模式");
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toMatchObject({
+      label: "运行诊断",
+      route: "/ai?settings=diagnostics",
+      routeLabel: "打开运行诊断设置",
+      scopes: [],
+    });
+    expect(useAiWorkbenchHandoff.getState().pendingIssue?.prompt).toContain(
+      "不要自动重启",
+    );
+    expect(desktopApi.getRuntimeDiagnostics).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the active settings module visible in a scrollable navigation", async () => {

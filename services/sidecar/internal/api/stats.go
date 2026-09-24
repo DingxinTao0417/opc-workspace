@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type taskStats struct {
@@ -25,6 +27,12 @@ type focusStats struct {
 	Sessions int   `json:"sessions" gorm:"column:sessions"`
 	Seconds  int64 `json:"seconds" gorm:"column:seconds"`
 	Minutes  int   `json:"minutes" gorm:"column:minutes"`
+}
+
+type todayStatsSnapshot struct {
+	Date  string     `json:"date"`
+	Tasks taskStats  `json:"tasks"`
+	Focus focusStats `json:"focus"`
 }
 
 type inboxStats struct {
@@ -88,17 +96,27 @@ func (a *API) todayStats(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_DATE", "date must use YYYY-MM-DD")
 		return
 	}
+	snapshot, err := readTodayStats(c.Request.Context(), a.db, date, location, now)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": snapshot})
+}
+
+// The native Today page and the consented AI summary use exactly the same
+// clock, task risk predicates, and completed-Focus interval accounting.
+func readTodayStats(ctx context.Context, db *gorm.DB, date string, location *time.Location, now time.Time) (todayStatsSnapshot, error) {
+	var snapshot todayStatsSnapshot
 	localDate, parseErr := time.ParseInLocation("2006-01-02", date, location)
 	if parseErr != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_DATE", "date must use YYYY-MM-DD")
-		return
+		return snapshot, parseErr
 	}
 	dayStartUTC := localDate.UTC()
 	dayEndUTC := localDate.AddDate(0, 0, 1).UTC()
 	nowTimestamp := now.Format(taskDueTimeKeyLayout)
 	dueSoonTimestamp := now.Add(taskDueLeadTime).Format(taskDueTimeKeyLayout)
 
-	var tasks taskStats
 	statsQuery := fmt.Sprintf(`
 		SELECT
 			COALESCE(SUM(CASE WHEN planned_date = ? AND status <> 'cancelled' THEN 1 ELSE 0 END), 0) AS total,
@@ -110,13 +128,12 @@ func (a *API) todayStats(c *gin.Context) {
 			COALESCE(SUM(CASE WHEN planned_date = ? THEN actual_minutes ELSE 0 END), 0) AS actual_minutes
 		FROM tasks
 	`, taskOverduePredicate, taskDueSoonPredicate)
-	err := a.db.WithContext(c.Request.Context()).Raw(
+	err := db.WithContext(ctx).Raw(
 		statsQuery,
 		date, date, date, nowTimestamp, nowTimestamp, dueSoonTimestamp, date, date,
-	).Scan(&tasks).Error
+	).Scan(&snapshot.Tasks).Error
 	if err != nil {
-		writeDatabaseError(c)
-		return
+		return snapshot, err
 	}
 
 	type focusIntervalRow struct {
@@ -126,7 +143,7 @@ func (a *API) todayStats(c *gin.Context) {
 		DurationSeconds int64  `gorm:"column:duration_seconds"`
 	}
 	var intervals []focusIntervalRow
-	if err := a.db.WithContext(c.Request.Context()).Raw(`
+	if err := db.WithContext(ctx).Raw(`
 		SELECT interval.session_id, interval.started_at, interval.ended_at, interval.duration_seconds
 		FROM focus_session_intervals AS interval
 		JOIN focus_sessions AS session ON session.id = interval.session_id
@@ -136,8 +153,7 @@ func (a *API) todayStats(c *gin.Context) {
 		  AND julianday(interval.ended_at) > julianday(?)
 		  AND julianday(interval.started_at) < julianday(?)
 	`, dayStartUTC.Format(time.RFC3339Nano), dayEndUTC.Format(time.RFC3339Nano)).Scan(&intervals).Error; err != nil {
-		writeDatabaseError(c)
-		return
+		return snapshot, err
 	}
 	focusSeconds := int64(0)
 	sessions := make(map[string]struct{})
@@ -145,8 +161,7 @@ func (a *API) todayStats(c *gin.Context) {
 		startedAt, startErr := parseFocusTimestamp(interval.StartedAt)
 		endedAt, endErr := parseFocusTimestamp(interval.EndedAt)
 		if startErr != nil || endErr != nil || !endedAt.After(startedAt) {
-			writeDatabaseError(c)
-			return
+			return snapshot, fmt.Errorf("invalid Focus interval")
 		}
 		// duration_seconds is the capped accounting fact. API-created intervals
 		// end exactly at start + duration, while the minimum below also keeps a
@@ -173,15 +188,9 @@ func (a *API) todayStats(c *gin.Context) {
 		focusSeconds += seconds
 		sessions[interval.SessionID] = struct{}{}
 	}
-	focus := focusStats{Sessions: len(sessions), Seconds: focusSeconds, Minutes: int(focusSeconds / 60)}
-
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"date":  date,
-			"tasks": tasks,
-			"focus": focus,
-		},
-	})
+	snapshot.Date = date
+	snapshot.Focus = focusStats{Sessions: len(sessions), Seconds: focusSeconds, Minutes: int(focusSeconds / 60)}
+	return snapshot, nil
 }
 
 func statsLocation(c *gin.Context) (*time.Location, bool) {

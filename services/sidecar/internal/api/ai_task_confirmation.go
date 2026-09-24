@@ -84,6 +84,17 @@ func (a *API) confirmAIMessageTask(c *gin.Context) {
 			replayed = true
 			return err
 		}
+		// A tool-backed generation has one approval lane, even if the model
+		// also emits a legacy task block. Rejection/expiry must not reopen it.
+		if message.GenerationID != nil {
+			var proposals int64
+			if err := tx.Model(&models.AIActionProposal{}).Where("generation_id = ?", *message.GenerationID).Count(&proposals).Error; err != nil {
+				return err
+			}
+			if proposals > 0 {
+				return newProjectRequestError(409, "AI_ACTION_USE_PROPOSAL", "Use this generation's workspace action proposals; the legacy task suggestion cannot create another task")
+			}
+		}
 		object, ok := aiControlObject(message.Content, aiTaskControlPattern)
 		var title string
 		if !ok || json.Unmarshal(object["title"], &title) != nil || strings.TrimSpace(title) == "" {

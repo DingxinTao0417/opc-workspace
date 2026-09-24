@@ -6,12 +6,15 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import * as localCalendar from "../lib/localCalendar";
 import type { ContentItem } from "../types/models";
 import { ContentCalendarPage } from "./ContentCalendarPage";
+import { renderAiRichText } from "../components/AiRichText";
+import { useAiChatStore } from "../store/aiChat";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 
 const hooks = vi.hoisted(() => ({
   items: vi.fn(),
@@ -23,11 +26,17 @@ const hooks = vi.hoisted(() => ({
   createPending: false,
   createReset: vi.fn(),
   update: vi.fn(),
+  updatePending: false,
+  updateError: null as Error | null,
   schedule: vi.fn(),
+  schedulePending: false,
   scheduleReset: vi.fn(),
   publish: vi.fn(),
+  publishPending: false,
   link: vi.fn(),
+  linkPending: false,
   unlink: vi.fn(),
+  unlinkPending: false,
   remove: vi.fn(),
   removeReset: vi.fn(),
   removeError: null as Error | null,
@@ -46,29 +55,29 @@ vi.mock("../api/hooks", () => ({
     reset: hooks.createReset,
   }),
   useUpdateContentItem: () => ({
-    isPending: false,
-    error: null,
+    isPending: hooks.updatePending,
+    error: hooks.updateError,
     mutate: hooks.update,
   }),
   useScheduleContentItem: () => ({
-    isPending: false,
+    isPending: hooks.schedulePending,
     isError: false,
     error: null,
     reset: hooks.scheduleReset,
     mutate: hooks.schedule,
   }),
   usePublishContentItem: () => ({
-    isPending: false,
+    isPending: hooks.publishPending,
     error: null,
     mutate: hooks.publish,
   }),
   useLinkContentItemTask: () => ({
-    isPending: false,
+    isPending: hooks.linkPending,
     error: null,
     mutate: hooks.link,
   }),
   useUnlinkContentItemTask: () => ({
-    isPending: false,
+    isPending: hooks.unlinkPending,
     error: null,
     mutate: hooks.unlink,
   }),
@@ -182,9 +191,23 @@ function LocationProbe() {
   );
 }
 
+const detailReturnSession = "018f0000-0000-7000-8000-000000000022";
+const detailEntry = `/content-calendar?item=content-1&campaign=launch&return_session=${detailReturnSession}`;
+
+function addressedContentPage() {
+  return (
+    <MemoryRouter initialEntries={[detailEntry]}>
+      <ContentCalendarPage />
+      <LocationProbe />
+    </MemoryRouter>
+  );
+}
+
 describe("ContentCalendarPage", () => {
   afterEach(() => {
     cleanup();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
+    useAiChatStore.setState({ activeSessionId: "" });
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -197,11 +220,17 @@ describe("ContentCalendarPage", () => {
       hooks.createError = null;
     });
     hooks.update.mockReset();
+    hooks.updatePending = false;
+    hooks.updateError = null;
     hooks.schedule.mockReset();
+    hooks.schedulePending = false;
     hooks.scheduleReset.mockReset();
     hooks.publish.mockReset();
+    hooks.publishPending = false;
     hooks.link.mockReset();
+    hooks.linkPending = false;
     hooks.unlink.mockReset();
+    hooks.unlinkPending = false;
     hooks.remove.mockReset();
     hooks.removeReset.mockReset();
     hooks.removeError = null;
@@ -231,6 +260,296 @@ describe("ContentCalendarPage", () => {
       isPending: false,
     });
   });
+  it.each([
+    ["内容标题", "未保存标题", item.title],
+    ["平台", "博客", item.platform],
+    ["状态", "in_review", item.status],
+    ["关联项目", "project-1", ""],
+    ["备注", "不应被返回导航丢失的备注", ""],
+    ["计划发布时间", "2026-09-05T10:00", "2026-09-04T09:00"],
+    ["外部链接文本（可选，不会自动访问）", "https://example.test/draft", ""],
+    ["选择准备任务", "task-2", ""],
+  ])(
+    "protects the %s draft from return navigation",
+    (label, value, original) => {
+      hooks.projects.mockReturnValue({
+        data: { items: [{ id: "project-1", name: "项目" }] },
+        isPending: false,
+      });
+      render(addressedContentPage());
+      const modal = screen.getByRole("dialog", { name: "内容详情与排期" });
+      const input = within(modal).getByLabelText(label);
+      fireEvent.change(input, { target: { value } });
+      const back = within(modal).getByRole("button", { name: "返回原对话" });
+      expect(back).toBeDisabled();
+      expect(within(modal).getByText(/请先保存或舍弃未保存更改/)).toBeVisible();
+      fireEvent.click(back);
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        detailEntry,
+      );
+      expect(input).toHaveValue(value);
+      expect(useAiChatStore.getState().activeSessionId).toBe("");
+      fireEvent.change(input, { target: { value: original } });
+      fireEvent.click(within(modal).getByRole("link", { name: "返回原对话" }));
+      expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+      expect(useAiChatStore.getState().activeSessionId).toBe(
+        detailReturnSession,
+      );
+      for (const mutation of [
+        hooks.update,
+        hooks.schedule,
+        hooks.publish,
+        hooks.link,
+      ]) {
+        expect(mutation).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(["footer", "header", "escape", "backdrop"])(
+    "requires explicit discard through the %s close path",
+    (entry) => {
+      render(addressedContentPage());
+      const modal = screen.getByRole("dialog", { name: "内容详情与排期" });
+      fireEvent.change(within(modal).getByLabelText("备注"), {
+        target: { value: "保留这个未保存的私人草稿" },
+      });
+      const requestClose = () => {
+        if (entry === "escape") fireEvent.keyDown(document, { key: "Escape" });
+        else if (entry === "backdrop") {
+          fireEvent.click(screen.getByRole("button", { name: "关闭弹窗" }));
+        } else {
+          fireEvent.click(
+            within(modal).getAllByRole("button", { name: "关闭" })[
+              entry === "header" ? 0 : 1
+            ],
+          );
+        }
+      };
+      requestClose();
+      const confirm = screen.getByRole("dialog", { name: "舍弃未保存更改？" });
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        detailEntry,
+      );
+      fireEvent.click(
+        within(confirm).getByRole("button", { name: "继续编辑" }),
+      );
+      expect(within(modal).getByLabelText("备注")).toHaveValue(
+        "保留这个未保存的私人草稿",
+      );
+      requestClose();
+      fireEvent.click(screen.getByRole("button", { name: "舍弃更改并关闭" }));
+      expect(
+        screen.queryByRole("dialog", { name: "内容详情与排期" }),
+      ).toBeNull();
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        `/content-calendar?campaign=launch&return_session=${detailReturnSession}`,
+      );
+      expect(hooks.update).not.toHaveBeenCalled();
+      expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+      fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+      expect(useAiChatStore.getState().activeSessionId).toBe(
+        detailReturnSession,
+      );
+    },
+  );
+
+  it.each([
+    "updatePending",
+    "schedulePending",
+    "publishPending",
+    "linkPending",
+    "unlinkPending",
+    "removePending",
+  ] as const)("blocks all detail dismissal during %s", (pending) => {
+    const view = render(addressedContentPage());
+    hooks[pending] = true;
+    view.rerender(addressedContentPage());
+    const modal = screen.getByRole("dialog", { name: "内容详情与排期" });
+    expect(
+      within(modal).getByRole("button", { name: "返回原对话" }),
+    ).toBeDisabled();
+    expect(within(modal).getByRole("button", { name: "关闭" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
+    fireEvent.click(within(modal).getByRole("button", { name: "关闭" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(modal).toBeVisible();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(detailEntry);
+    expect(
+      within(modal).getByText(/操作正在进行，请等待完成后再关闭或返回/),
+    ).toBeVisible();
+    expect(within(modal).getByLabelText("内容标题")).toBeDisabled();
+    expect(within(modal).getByLabelText("选择准备任务")).toBeDisabled();
+  });
+
+  it("retains a failed save and permits an explicit successful close without a discard prompt", () => {
+    const view = render(addressedContentPage());
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "保存失败仍需保留的标题" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存信息" }));
+    expect(hooks.update).toHaveBeenCalledTimes(1);
+    hooks.updateError = new Error("保存失败，请重试");
+    view.rerender(addressedContentPage());
+    expect(screen.getByLabelText("内容标题")).toHaveValue(
+      "保存失败仍需保留的标题",
+    );
+    expect(screen.getByText("保存失败，请重试")).toBeVisible();
+    expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存信息" }));
+    const options = hooks.update.mock.lastCall![1];
+    act(() => options.onSuccess());
+    expect(screen.queryByRole("dialog", { name: "内容详情与排期" })).toBeNull();
+    expect(
+      screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+    ).toBeNull();
+    expect(screen.getByTestId("location-probe")).toHaveTextContent(
+      `/content-calendar?campaign=launch&return_session=${detailReturnSession}`,
+    );
+  });
+
+  it.each(["escape", "header", "backdrop"])(
+    "keeps the draft when discard confirmation is dismissed through %s",
+    (entry) => {
+      render(addressedContentPage());
+      fireEvent.change(screen.getByLabelText("备注"), {
+        target: { value: "关闭确认也不丢草稿" },
+      });
+      fireEvent.keyDown(document, { key: "Escape" });
+      const confirmation = screen.getByRole("dialog", {
+        name: "舍弃未保存更改？",
+      });
+      if (entry === "escape") fireEvent.keyDown(document, { key: "Escape" });
+      else if (entry === "header") {
+        fireEvent.click(
+          within(confirmation).getByRole("button", { name: "关闭" }),
+        );
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "关闭弹窗" }));
+      }
+      expect(
+        screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+      ).toBeNull();
+      expect(screen.getByLabelText("备注")).toHaveValue("关闭确认也不丢草稿");
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        detailEntry,
+      );
+      expect(hooks.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["schedule", "保存排期"],
+    ["publish", "确认已发布"],
+    ["link", "关联"],
+    ["unlink", "解除"],
+  ] as const)(
+    "closes after a successful %s without requesting a discard",
+    (mutation, label) => {
+      hooks.detail.mockImplementation((id: string | null) => ({
+        data: id
+          ? {
+              ...item,
+              tasks: [
+                {
+                  id: "task-linked",
+                  title: "已关联任务",
+                  status: "todo",
+                  isRequired: true,
+                },
+              ],
+            }
+          : undefined,
+        isPending: false,
+        isError: false,
+        refetch: vi.fn(),
+      }));
+      render(addressedContentPage());
+      if (mutation === "schedule") {
+        fireEvent.change(screen.getByLabelText("计划发布时间"), {
+          target: { value: "2026-09-05T10:00" },
+        });
+      } else if (mutation === "publish") {
+        fireEvent.change(
+          screen.getByLabelText("外部链接文本（可选，不会自动访问）"),
+          {
+            target: { value: "https://example.test/published" },
+          },
+        );
+      } else if (mutation === "link") {
+        fireEvent.change(screen.getByLabelText("选择准备任务"), {
+          target: { value: "task-2" },
+        });
+      }
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(hooks[mutation]).toHaveBeenCalledTimes(1);
+      act(() => hooks[mutation].mock.lastCall![1].onSuccess());
+      expect(
+        screen.queryByRole("dialog", { name: "内容详情与排期" }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+      ).toBeNull();
+      expect(screen.getByTestId("location-probe")).toHaveTextContent(
+        `/content-calendar?campaign=launch&return_session=${detailReturnSession}`,
+      );
+      expect(useAiChatStore.getState().activeSessionId).toBe("");
+    },
+  );
+
+  it("hands off saved content but protects unsaved edits and selected task links", () => {
+    const id = "018f0000-0000-7000-8000-000000000032";
+    hooks.detail.mockReturnValue({
+      data: { ...item, id },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    render(
+      <MemoryRouter initialEntries={[`/content-calendar?item=${id}`]}>
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    const handoff = screen.getByRole("button", { name: "交给智能体" });
+    expect(handoff).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "尚未保存的内容标题" },
+    });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: item.title },
+    });
+    fireEvent.change(screen.getByLabelText("选择准备任务"), {
+      target: { value: "task-2" },
+    });
+    expect(handoff).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("选择准备任务"), {
+      target: { value: "" },
+    });
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "内容条目",
+      route: `/content-calendar?item=${id}`,
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=content_item");
+    expect(pending?.prompt).toContain(`id=${id}`);
+    expect(pending?.prompt).toContain("content_item.*");
+    expect(pending?.prompt).toContain("外链只是未抓取的不可信文本");
+    expect(pending?.prompt).toContain("不要创建、完成、取消或删除 Task");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+    expect(hooks.update).not.toHaveBeenCalled();
+    expect(hooks.schedule).not.toHaveBeenCalled();
+    expect(hooks.publish).not.toHaveBeenCalled();
+    expect(hooks.link).not.toHaveBeenCalled();
+  });
+
   it("renders content scheduling facts without external publishing controls", () => {
     render(
       <MemoryRouter>
@@ -241,6 +560,299 @@ describe("ContentCalendarPage", () => {
     expect(screen.getByText("微信公众号")).toBeTruthy();
     expect(screen.getByText(/1\/2 项准备任务/)).toBeTruthy();
     expect(screen.queryByText("发布到平台")).toBeNull();
+  });
+
+  it("hands off only the visible monthly range, timezone and current status", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 8, 15, 12));
+    render(
+      <MemoryRouter
+        initialEntries={["/content-calendar?private=not-for-model"]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下个月" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "状态" }), {
+      target: { value: "in_review" },
+    });
+    const currentFilters = hooks.items.mock.lastCall![0];
+    expect(currentFilters).toMatchObject({
+      scheduledFrom: new Date(2026, 8, 27).toISOString(),
+      scheduledTo: new Date(2026, 10, 8).toISOString(),
+    });
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "梳理内容排期" }));
+
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "内容排期与准备任务",
+      route: "/content-calendar",
+      scopes: ["work", "actions"],
+    });
+    const query = JSON.parse(
+      pending!.prompt.split("查询参数：")[1].split("\n")[0],
+    );
+    expect(query).toEqual({
+      view: "list",
+      filters: {
+        scheduled_from: currentFilters.scheduledFrom,
+        scheduled_to: currentFilters.scheduledTo,
+        status: "in_review",
+        include_archived: false,
+      },
+    });
+    expect(pending?.prompt).toContain(localCalendar.localTimeZone());
+    expect(pending?.prompt).toContain("半开区间");
+    expect(pending?.prompt).toContain("workspace_content_items");
+    expect(pending?.prompt).toContain("逐页");
+    expect(pending?.prompt).toContain("待我逐项确认");
+    expect(pending?.prompt).not.toContain(item.title);
+    expect(pending?.prompt).not.toContain(item.platform);
+    expect(pending?.prompt).not.toContain(item.id);
+    expect(pending?.prompt).not.toContain("not-for-model");
+    expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+    expect(hooks.schedule).not.toHaveBeenCalled();
+    expect(hooks.publish).not.toHaveBeenCalled();
+    expect(hooks.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "无排期",
+      "unscheduled",
+      { schedule_state: "unscheduled", include_archived: false },
+    ],
+    ["已归档", "archived", { status: "archived", include_archived: true }],
+  ])(
+    "hands off the %s view without stale monthly filters",
+    (button, view, filters) => {
+      render(
+        <MemoryRouter>
+          <ContentCalendarPage />
+        </MemoryRouter>,
+      );
+      fireEvent.change(screen.getByRole("combobox", { name: "状态" }), {
+        target: { value: "cancelled" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: button }));
+      fireEvent.click(screen.getByRole("button", { name: "梳理内容排期" }));
+      const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+      expect(pending?.route).toBe(`/content-calendar?view=${view}`);
+      expect(
+        JSON.parse(pending!.prompt.split("查询参数：")[1].split("\n")[0]),
+      ).toEqual({
+        view: "list",
+        filters,
+      });
+      expect(pending?.prompt).not.toContain("scheduled_from");
+      expect(pending?.prompt).not.toContain("cancelled");
+    },
+  );
+
+  it("blocks page handoff while creation or detail drafts are open", () => {
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    const handoff = screen.getByRole("button", { name: "梳理内容排期" });
+    fireEvent.click(screen.getByRole("button", { name: "新建内容" }));
+    fireEvent.change(screen.getByLabelText("内容标题"), {
+      target: { value: "尚未保存的排期草稿" },
+    });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(handoff).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "编辑 发布产品更新" }));
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+  });
+
+  it("blocks page handoff during a scheduling write", () => {
+    hooks.schedulePending = true;
+    render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    const handoff = screen.getByRole("button", { name: "梳理内容排期" });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+  });
+
+  it("waits for the saved schedule to be read back before page handoff", () => {
+    const view = render(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "编辑 发布产品更新" }),
+      {
+        altKey: true,
+        key: "ArrowRight",
+      },
+    );
+    const handoff = screen.getByRole("button", { name: "梳理内容排期" });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+    hooks.items.mockReturnValue(
+      contentItemsResult([
+        { ...item, scheduledAt: "2026-09-05T01:00:00.000Z", version: 2 },
+      ]),
+    );
+    view.rerender(
+      <MemoryRouter>
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(handoff).toBeEnabled();
+  });
+
+  it.each(["empty", "loading", "error"])(
+    "prepares a fresh view query for an %s local list without copying results",
+    (state) => {
+      hooks.items.mockReturnValue(
+        contentItemsResult([], {
+          hasData: state === "empty",
+          isPending: state === "loading",
+          isError: state === "error",
+        }),
+      );
+      render(
+        <MemoryRouter>
+          <ContentCalendarPage />
+        </MemoryRouter>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "梳理内容排期" }));
+      const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+      expect(pending?.scopes).toEqual(["work", "actions"]);
+      expect(Object.keys(pending ?? {}).sort()).toEqual([
+        "label",
+        "prompt",
+        "requestId",
+        "route",
+        "scopes",
+      ]);
+    },
+  );
+
+  it.each([false, true])(
+    "returns to the displaying conversation after opening an out-of-view content item (close first: %s)",
+    (closeFirst) => {
+      const id = "018f0000-0000-7000-8000-000000000031";
+      const sessionId = closeFirst
+        ? "018f0000-0000-7000-8000-000000000021"
+        : "018f0000-0000-7000-8000-000000000022";
+      hooks.items.mockReturnValue(contentItemsResult([]));
+      hooks.detail.mockImplementation((requested: string | null) => ({
+        data: requested
+          ? {
+              ...item,
+              id,
+              title: "不在当前月份的内容",
+              scheduledAt: "2020-01-01T00:00:00Z",
+            }
+          : undefined,
+        isPending: false,
+        isError: false,
+        refetch: vi.fn(),
+      }));
+      useAiChatStore.setState({ activeSessionId: id });
+      render(
+        <MemoryRouter initialEntries={["/ai"]}>
+          <Routes>
+            <Route
+              path="/ai"
+              element={
+                <>
+                  {renderAiRichText(
+                    `[查看内容](/content-calendar?item=${id})`,
+                    sessionId,
+                  )}
+                </>
+              }
+            />
+            <Route path="/content-calendar" element={<ContentCalendarPage />} />
+          </Routes>
+          <LocationProbe />
+        </MemoryRouter>,
+      );
+      fireEvent.click(screen.getByRole("link", { name: "查看内容" }));
+      expect(hooks.detail).toHaveBeenLastCalledWith(id);
+      const modal = screen.getByRole("dialog", { name: "内容详情与排期" });
+      expect(
+        within(modal).getByDisplayValue("不在当前月份的内容"),
+      ).toBeInTheDocument();
+      expect(
+        within(modal).getByRole("link", { name: "返回原对话" }),
+      ).toBeInTheDocument();
+      if (closeFirst) {
+        fireEvent.click(
+          within(modal).getAllByRole("button", { name: "关闭" })[0],
+        );
+        expect(screen.getByTestId("location-probe")).toHaveTextContent(
+          `/content-calendar?return_session=${sessionId}`,
+        );
+      }
+      fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+      expect(screen.getByTestId("location-probe")).toHaveTextContent("/ai");
+      expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+      for (const mutation of [
+        hooks.create,
+        hooks.update,
+        hooks.schedule,
+        hooks.publish,
+        hooks.link,
+        hooks.unlink,
+        hooks.remove,
+      ])
+        expect(mutation).not.toHaveBeenCalled();
+    },
+  );
+
+  it("can return when content details are missing and ignores duplicate return identities", () => {
+    const id = "018f0000-0000-7000-8000-000000000031";
+    const sessionId = "018f0000-0000-7000-8000-000000000022";
+    hooks.detail.mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      refetch: vi.fn(),
+    });
+    const view = render(
+      <MemoryRouter
+        initialEntries={[
+          `/content-calendar?item=${id}&return_session=${sessionId}`,
+        ]}
+      >
+        <ContentCalendarPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByText("无法读取内容详情，请确认本地服务已连接。"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    view.unmount();
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/content-calendar?item=${id}&return_session=${sessionId}&return_session=${id}`,
+        ]}
+      >
+        <ContentCalendarPage />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole("link", { name: "返回原对话" })).toBeNull();
   });
 
   it("keeps the existing month range, status filter, and rescheduling affordances", () => {

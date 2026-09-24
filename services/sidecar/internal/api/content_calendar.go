@@ -95,24 +95,26 @@ func (a *API) listContentItems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	start, end, platform, status, projectID, scheduleState, includeArchived, ok := contentItemListFilters(c)
-	if !ok {
+	filters, err := parseContentItemQueryFilters(c.Request.URL.Query())
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
 		return
 	}
 	var total int64
 	var items []models.ContentItem
-	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		query := contentItemFilteredQuery(tx, start, end, platform, status, projectID, scheduleState, includeArchived)
+	var responses []contentItemResponse
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		query := contentItemFilteredQuery(tx, filters)
 		if err := query.Count(&total).Error; err != nil {
 			return err
 		}
-		return query.Order("CASE WHEN content_items.scheduled_at IS NULL THEN 1 ELSE 0 END ASC").Order("content_items.scheduled_at ASC").Order("content_items.manual_order ASC").Order("content_items.id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error
+		if err := contentItemOrderedQuery(query).Offset((page - 1) * pageSize).Limit(pageSize).Find(&items).Error; err != nil {
+			return err
+		}
+		var err error
+		responses, err = loadContentItemResponses(tx, items)
+		return err
 	}, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		writeDatabaseError(c)
-		return
-	}
-	responses, err := loadContentItemResponses(a.db.WithContext(c.Request.Context()), items)
 	if err != nil {
 		writeDatabaseError(c)
 		return
@@ -319,49 +321,12 @@ func (a *API) confirmContentItemPublished(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
 		return
 	}
-	publishedAt := time.Now().UTC().Format(time.RFC3339Nano)
-	if input.PublishedAt != nil {
-		parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*input.PublishedAt))
-		if err != nil {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "published_at must be RFC 3339 when provided")
-			return
-		}
-		publishedAt = parsed.UTC().Format(time.RFC3339Nano)
-	}
-	link, err := normalizeContentOptional(input.ExternalLink.Value, 2048, "external_link")
-	if err != nil {
-		writeProjectRequestError(c, err)
-		return
-	}
+	publishedClock := time.Now().UTC()
 	var response contentItemResponse
-	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var item models.ContentItem
-		if err := tx.First(&item, "id = ?", id).Error; err != nil {
-			return contentItemNotFoundError(err)
-		}
-		if item.Version != expected {
-			return contentItemVersionConflict()
-		}
-		if item.Status == "archived" || item.Status == "cancelled" {
-			return newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_STATE_INVALID", "Archived or cancelled content cannot be published")
-		}
-		now := formatInboxTimestamp(a.options.Now().UTC())
-		if err := resolveContentItemInboxSources(tx, id, "content_item_published", requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		updates := map[string]any{"status": "published", "published_at": publishedAt, "updated_at": time.Now().UTC().Format(time.RFC3339Nano), "version": gorm.Expr("version + 1")}
-		if input.ExternalLink.Set {
-			updates["external_link"] = link
-		}
-		result := tx.Model(&models.ContentItem{}).Where("id = ? AND version = ?", id, expected).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return contentItemVersionConflict()
-		}
-		response, err = loadContentItemResponse(tx, id)
-		return err
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var commandErr error
+		response, commandErr = publishContentItemInTransaction(tx, id, expected, input, requestIDFromContext(c), publishedClock, a.options.Now())
+		return commandErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -372,6 +337,50 @@ func (a *API) confirmContentItemPublished(c *gin.Context) {
 	}
 	setContentItemETag(c, response.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// The native endpoint and a separately consented AI proposal share the same
+// authoritative status, version, Inbox-source and content update transaction.
+func publishContentItemInTransaction(tx *gorm.DB, id string, expected int64, input publishContentItemRequest, requestID string, publishedClock, inboxClock time.Time) (contentItemResponse, error) {
+	var response contentItemResponse
+	publishedAt := publishedClock.UTC().Format(time.RFC3339Nano)
+	if input.PublishedAt != nil {
+		parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*input.PublishedAt))
+		if err != nil {
+			return response, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "published_at must be RFC 3339 when provided")
+		}
+		publishedAt = parsed.UTC().Format(time.RFC3339Nano)
+	}
+	link, err := normalizeContentOptional(input.ExternalLink.Value, 2048, "external_link")
+	if err != nil {
+		return response, err
+	}
+	var item models.ContentItem
+	if err := tx.First(&item, "id = ?", id).Error; err != nil {
+		return response, contentItemNotFoundError(err)
+	}
+	if item.Version != expected {
+		return response, contentItemVersionConflict()
+	}
+	if item.Status == "archived" || item.Status == "cancelled" {
+		return response, newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_STATE_INVALID", "Archived or cancelled content cannot be published")
+	}
+	now := formatInboxTimestamp(inboxClock.UTC())
+	if err := resolveContentItemInboxSources(tx, id, "content_item_published", requestID, now); err != nil {
+		return response, err
+	}
+	updates := map[string]any{"status": "published", "published_at": publishedAt, "updated_at": publishedClock.UTC().Format(time.RFC3339Nano), "version": gorm.Expr("version + 1")}
+	if input.ExternalLink.Set {
+		updates["external_link"] = link
+	}
+	result := tx.Model(&models.ContentItem{}).Where("id = ? AND version = ?", id, expected).Updates(updates)
+	if result.Error != nil {
+		return response, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return response, contentItemVersionConflict()
+	}
+	return loadContentItemResponse(tx, id)
 }
 
 func (a *API) listContentItemTasks(c *gin.Context) {
@@ -416,37 +425,17 @@ func (a *API) linkContentItemTask(c *gin.Context) {
 	}
 	var response contentItemResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var item models.ContentItem
-		if err := tx.First(&item, "id = ?", id).Error; err != nil {
-			return contentItemNotFoundError(err)
-		}
-		if item.Version != expected {
-			return contentItemVersionConflict()
-		}
-		now := formatInboxTimestamp(a.options.Now().UTC())
-		if err := resolveContentItemInboxSources(tx, id, "content_item_tasks_changed", requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		var count int64
-		if err := tx.Model(&models.Task{}).Where("id = ?", taskID).Count(&count).Error; err != nil {
-			return err
-		}
-		if count != 1 {
-			return newProjectRequestError(http.StatusUnprocessableEntity, "TASK_NOT_FOUND", "task_id must reference an existing task")
-		}
-		link := models.ContentItemTask{ContentItemID: id, TaskID: taskID, IsRequired: required, LinkedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-		if err := tx.Where("content_item_id = ? AND task_id = ?", id, taskID).Assign(map[string]any{"is_required": required, "linked_at": link.LinkedAt}).FirstOrCreate(&link).Error; err != nil {
-			return err
-		}
-		result := tx.Model(&models.ContentItem{}).Where("id = ? AND version = ?", id, expected).Updates(map[string]any{"updated_at": link.LinkedAt, "version": gorm.Expr("version + 1")})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return contentItemVersionConflict()
-		}
-		response, err = loadContentItemResponse(tx, id)
-		return err
+		var commandErr error
+		response, _, commandErr = mutateContentItemTaskInTransaction(
+			tx,
+			id,
+			expected,
+			contentItemTaskCommand{TaskID: taskID, IsRequired: &required},
+			"upsert",
+			requestIDFromContext(c),
+			a.options.Now(),
+		)
+		return commandErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -475,34 +464,17 @@ func (a *API) unlinkContentItemTask(c *gin.Context) {
 	}
 	var response contentItemResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var item models.ContentItem
-		if err := tx.First(&item, "id = ?", id).Error; err != nil {
-			return contentItemNotFoundError(err)
-		}
-		if item.Version != expected {
-			return contentItemVersionConflict()
-		}
-		now := formatInboxTimestamp(a.options.Now().UTC())
-		if err := resolveContentItemInboxSources(tx, id, "content_item_tasks_changed", requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		result := tx.Where("content_item_id = ? AND task_id = ?", id, taskID).Delete(&models.ContentItemTask{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return newProjectRequestError(http.StatusNotFound, "CONTENT_ITEM_TASK_NOT_FOUND", "Content item task link not found")
-		}
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		result = tx.Model(&models.ContentItem{}).Where("id = ? AND version = ?", id, expected).Updates(map[string]any{"updated_at": updatedAt, "version": gorm.Expr("version + 1")})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return contentItemVersionConflict()
-		}
-		response, err = loadContentItemResponse(tx, id)
-		return err
+		var commandErr error
+		response, _, commandErr = mutateContentItemTaskInTransaction(
+			tx,
+			id,
+			expected,
+			contentItemTaskCommand{TaskID: taskID},
+			"unlink",
+			requestIDFromContext(c),
+			a.options.Now(),
+		)
+		return commandErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -529,28 +501,9 @@ func (a *API) deleteContentItem(c *gin.Context) {
 		return
 	}
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var item models.ContentItem
-		if err := tx.First(&item, "id = ?", id).Error; err != nil {
-			return contentItemNotFoundError(err)
-		}
-		if item.Version != expected {
-			return contentItemVersionConflict()
-		}
-		if item.Status != "archived" {
-			return newProjectRequestError(http.StatusConflict, "CONTENT_ITEM_NOT_ARCHIVED", "Only archived content items can be permanently deleted")
-		}
 		now := formatInboxTimestamp(a.options.Now().UTC())
-		if err := coordinateContentItemInboxSourceDeletion(tx, id, requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		result := tx.Where("id = ? AND version = ?", id, expected).Delete(&models.ContentItem{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return contentItemVersionConflict()
-		}
-		return nil
+		_, _, err := deleteContentItemInTransaction(tx, id, expected, requestIDFromContext(c), now)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -560,104 +513,6 @@ func (a *API) deleteContentItem(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted_id": id}})
-}
-
-func contentItemListFilters(c *gin.Context) (*string, *string, string, string, string, string, bool, bool) {
-	parseBound := func(key string) (*string, bool) {
-		raw := strings.TrimSpace(c.Query(key))
-		if raw == "" {
-			return nil, true
-		}
-		parsed, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
-			writeError(c, http.StatusBadRequest, "INVALID_FILTER", key+" must be RFC 3339")
-			return nil, false
-		}
-		value := parsed.UTC().Format(time.RFC3339Nano)
-		return &value, true
-	}
-	start, ok := parseBound("scheduled_from")
-	if !ok {
-		return nil, nil, "", "", "", "", false, false
-	}
-	end, ok := parseBound("scheduled_to")
-	if !ok {
-		return nil, nil, "", "", "", "", false, false
-	}
-	if start != nil && end != nil && *start >= *end {
-		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "scheduled_from must be before scheduled_to")
-		return nil, nil, "", "", "", "", false, false
-	}
-	scheduleState := ""
-	if values, exists := c.Request.URL.Query()["schedule_state"]; exists {
-		if len(values) != 1 {
-			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "schedule_state filter must be provided exactly once")
-			return nil, nil, "", "", "", "", false, false
-		}
-		scheduleState = values[0]
-		if _, exists := contentItemScheduleStates[scheduleState]; !exists {
-			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "schedule_state filter is invalid")
-			return nil, nil, "", "", "", "", false, false
-		}
-	}
-	if scheduleState == "unscheduled" && (c.Request.URL.Query().Has("scheduled_from") || c.Request.URL.Query().Has("scheduled_to")) {
-		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "unscheduled schedule_state cannot be combined with scheduled_from or scheduled_to")
-		return nil, nil, "", "", "", "", false, false
-	}
-	platform := strings.TrimSpace(c.Query("platform"))
-	if utf8.RuneCountInString(platform) > 64 {
-		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "platform filter is too long")
-		return nil, nil, "", "", "", "", false, false
-	}
-	status := strings.TrimSpace(c.Query("status"))
-	if status != "" {
-		if _, exists := contentItemStatuses[status]; !exists {
-			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "status filter is invalid")
-			return nil, nil, "", "", "", "", false, false
-		}
-	}
-	projectID := ""
-	if raw := strings.TrimSpace(c.Query("project_id")); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil {
-			writeError(c, http.StatusBadRequest, "INVALID_FILTER", "project_id filter must be a UUID")
-			return nil, nil, "", "", "", "", false, false
-		}
-		projectID = parsed.String()
-	}
-	includeArchived, err := optionalBooleanQuery(c, "include_archived")
-	if err != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_FILTER", err.Error())
-		return nil, nil, "", "", "", "", false, false
-	}
-	return start, end, platform, status, projectID, scheduleState, includeArchived, true
-}
-
-func contentItemFilteredQuery(tx *gorm.DB, start, end *string, platform, status, projectID, scheduleState string, includeArchived bool) *gorm.DB {
-	query := tx.Model(&models.ContentItem{})
-	if scheduleState == "scheduled" {
-		query = query.Where("content_items.scheduled_at IS NOT NULL")
-	} else if scheduleState == "unscheduled" {
-		query = query.Where("content_items.scheduled_at IS NULL")
-	}
-	if start != nil {
-		query = query.Where("content_items.scheduled_at >= ?", *start)
-	}
-	if end != nil {
-		query = query.Where("content_items.scheduled_at < ?", *end)
-	}
-	if platform != "" {
-		query = query.Where("content_items.platform = ?", platform)
-	}
-	if status != "" {
-		query = query.Where("content_items.status = ?", status)
-	} else if !includeArchived {
-		query = query.Where("content_items.status <> 'archived'")
-	}
-	if projectID != "" {
-		query = query.Where("content_items.project_id = ?", projectID)
-	}
-	return query
 }
 
 func contentItemFromCreateRequest(input createContentItemRequest) (models.ContentItem, error) {
@@ -857,14 +712,12 @@ func loadContentItemResponse(tx *gorm.DB, id string) (contentItemResponse, error
 	if err := tx.Table("content_item_tasks").Select("tasks.id, tasks.title, tasks.status, content_item_tasks.is_required").Joins("JOIN tasks ON tasks.id = content_item_tasks.task_id").Where("content_item_tasks.content_item_id = ?", id).Order("content_item_tasks.linked_at ASC").Scan(&tasks).Error; err != nil {
 		return contentItemResponse{}, err
 	}
-	var summary struct {
-		Total int64
-		Done  int64
-	}
-	if err := tx.Table("content_item_tasks").Select("COUNT(*) AS total, SUM(CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END) AS done").Joins("JOIN tasks ON tasks.id = content_item_tasks.task_id").Where("content_item_tasks.content_item_id = ? AND content_item_tasks.is_required = 1", id).Scan(&summary).Error; err != nil {
+	progress, err := loadContentItemTaskProgressByIDs(tx, []string{id})
+	if err != nil {
 		return contentItemResponse{}, err
 	}
-	return contentItemResponse{ID: item.ID, Title: item.Title, Platform: item.Platform, Status: item.Status, ScheduledAt: item.ScheduledAt, ScheduledTimezone: item.ScheduledTimezone, PublishedAt: item.PublishedAt, ProjectID: item.ProjectID, Notes: item.Notes, ExternalLink: item.ExternalLink, ManualOrder: item.ManualOrder, ArchivedFromStatus: item.ArchivedFromStatus, Version: item.Version, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, Tasks: tasks, RequiredTaskTotal: summary.Total, RequiredTaskDone: summary.Done}, nil
+	summary := progress[id]
+	return contentItemResponse{ID: item.ID, Title: item.Title, Platform: item.Platform, Status: item.Status, ScheduledAt: item.ScheduledAt, ScheduledTimezone: item.ScheduledTimezone, PublishedAt: item.PublishedAt, ProjectID: item.ProjectID, Notes: item.Notes, ExternalLink: item.ExternalLink, ManualOrder: item.ManualOrder, ArchivedFromStatus: item.ArchivedFromStatus, Version: item.Version, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, Tasks: tasks, RequiredTaskTotal: summary.RequiredTaskTotal, RequiredTaskDone: summary.RequiredTaskDone}, nil
 }
 func contentItemID(c *gin.Context) (string, bool) {
 	id, err := contentItemUUID(c.Param("id"), "content item id")

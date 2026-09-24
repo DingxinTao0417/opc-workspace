@@ -168,46 +168,11 @@ func (a *API) createFocusSession(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		if err := validateFocusTask(tx, taskIDValue); err != nil {
-			return err
-		}
-		var openCount int64
-		if err := tx.Model(&models.FocusSession{}).
-			Where("status IN ?", []string{"active", "paused", "recovery_pending"}).
-			Count(&openCount).Error; err != nil {
-			return err
-		}
-		if openCount > 0 {
-			return activeFocusSessionConflict()
-		}
-		timestamp := now.Format(time.RFC3339Nano)
-		session := models.FocusSession{
-			ID: uuid.NewString(), TaskID: taskIDValue, StartedAt: timestamp,
-			Status: "active", PlannedSeconds: input.PlannedSeconds,
-			AccumulatedSeconds: 0, LastResumedAt: &timestamp, LastHeartbeatAt: &timestamp,
-			Version: 1, CreatedAt: timestamp, UpdatedAt: timestamp,
-		}
-		if err := tx.Create(&session).Error; err != nil {
-			return mapFocusConstraintError(err)
-		}
-		if err := createOpenFocusInterval(tx, session.ID, timestamp); err != nil {
-			return mapFocusConstraintError(err)
-		}
-		row, err := loadFocusSessionRow(tx, session.ID)
+		snapshot, err = executeStartFocusInTransaction(tx, createFocusSessionRequest{TaskID: taskIDValue, PlannedSeconds: input.PlannedSeconds}, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		snapshot, err = focusSessionSnapshotFromRow(row, now)
-		if err != nil {
-			return err
-		}
-		if err := recordFocusWorkflowEvent(
-			tx, "focus_session", session.ID, "focus_started", nil,
-			focusSessionEventState(row.FocusSession), requestIDFromContext(c), timestamp, 1,
-		); err != nil {
-			return err
-		}
-		return recordFocusSessionSnapshot(tx, idempotencyKey, createFocusSessionEndpoint, session.ID, requestHash, statusCode, snapshot, timestamp)
+		return recordFocusSessionSnapshot(tx, idempotencyKey, createFocusSessionEndpoint, snapshot.Session.ID, requestHash, statusCode, snapshot, now.Format(time.RFC3339Nano))
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -248,68 +213,8 @@ func (a *API) executeSimpleFocusSessionCommand(c *gin.Context, command string) {
 	now := a.focusNow()
 	var snapshot focusSessionSnapshot
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		row, err := loadFocusSessionRow(tx, id)
-		if err != nil {
-			return focusSessionLoadError(err)
-		}
-		if row.Version != expectedVersion {
-			return focusVersionConflict()
-		}
-		timestamp := now.Format(time.RFC3339Nano)
-		updates := map[string]any{"version": gorm.Expr("version + 1"), "updated_at": timestamp}
-		switch command {
-		case "pause":
-			if row.Status != "active" {
-				return invalidFocusState("Only an active Focus Session can be paused")
-			}
-			accumulated, err := closeOpenFocusInterval(tx, row.FocusSession, now)
-			if err != nil {
-				return err
-			}
-			updates["status"] = "paused"
-			updates["accumulated_seconds"] = accumulated
-			updates["last_resumed_at"] = nil
-			updates["last_heartbeat_at"] = timestamp
-		case "resume":
-			if row.Status != "paused" {
-				return invalidFocusState("Only a paused Focus Session can be resumed")
-			}
-			updates["status"] = "active"
-			updates["last_resumed_at"] = timestamp
-			updates["last_heartbeat_at"] = timestamp
-		default:
-			return errors.New("unsupported Focus Session command")
-		}
-		result := tx.Model(&models.FocusSession{}).
-			Where("id = ? AND version = ? AND status = ?", id, expectedVersion, row.Status).
-			Updates(updates)
-		if result.Error != nil {
-			return mapFocusConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return focusVersionConflict()
-		}
-		if command == "resume" {
-			if err := createOpenFocusInterval(tx, id, timestamp); err != nil {
-				return mapFocusConstraintError(err)
-			}
-		}
-		updated, err := loadFocusSessionRow(tx, id)
-		if err != nil {
-			return err
-		}
-		action := "focus_paused"
-		if command == "resume" {
-			action = "focus_resumed"
-		}
-		if err := recordFocusWorkflowEvent(
-			tx, "focus_session", id, action,
-			focusSessionEventState(row.FocusSession), focusSessionEventState(updated.FocusSession),
-			requestIDFromContext(c), timestamp, 1,
-		); err != nil {
-			return err
-		}
-		snapshot, err = focusSessionSnapshotFromRow(updated, now)
+		var err error
+		snapshot, err = executeSimpleFocusInTransaction(tx, id, expectedVersion, command, requestIDFromContext(c), now)
 		return err
 	})
 	writeFocusSessionCommandResponse(c, snapshot, err)
@@ -337,84 +242,9 @@ func (a *API) recoverFocusSession(c *gin.Context) {
 	now := a.focusNow()
 	var snapshot focusSessionSnapshot
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		row, err := loadFocusSessionRow(tx, id)
-		if err != nil {
-			return focusSessionLoadError(err)
-		}
-		if row.Version != expectedVersion {
-			return focusVersionConflict()
-		}
-		if row.Status != "recovery_pending" {
-			return invalidFocusState("Only a recovery_pending Focus Session can be recovered")
-		}
-		timestamp := now.Format(time.RFC3339Nano)
-		updates := map[string]any{
-			"version":    gorm.Expr("version + 1"),
-			"updated_at": timestamp,
-		}
-		var accumulated int64
-		switch input.Action {
-		case "include_gap_resume":
-			accumulated, err = closeOpenFocusInterval(tx, row.FocusSession, now)
-			if err != nil {
-				return err
-			}
-			updates["status"] = "active"
-			updates["accumulated_seconds"] = accumulated
-			updates["last_resumed_at"] = timestamp
-			updates["last_heartbeat_at"] = timestamp
-		case "exclude_gap_resume", "interrupt":
-			cutoff, cutoffErr := focusHeartbeatCutoff(row.FocusSession, now)
-			if cutoffErr != nil {
-				return cutoffErr
-			}
-			accumulated, err = closeOpenFocusInterval(tx, row.FocusSession, cutoff)
-			if err != nil {
-				return err
-			}
-			updates["accumulated_seconds"] = accumulated
-			if input.Action == "exclude_gap_resume" {
-				updates["status"] = "active"
-				updates["last_resumed_at"] = timestamp
-				updates["last_heartbeat_at"] = timestamp
-			} else {
-				updates["status"] = "interrupted"
-				updates["ended_at"] = timestamp
-				updates["end_reason"] = "crash_recovery"
-				updates["last_resumed_at"] = nil
-			}
-		}
-		result := tx.Model(&models.FocusSession{}).
-			Where("id = ? AND version = ? AND status = 'recovery_pending'", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return mapFocusConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return focusVersionConflict()
-		}
-		if input.Action == "include_gap_resume" || input.Action == "exclude_gap_resume" {
-			if err := createOpenFocusInterval(tx, id, timestamp); err != nil {
-				return mapFocusConstraintError(err)
-			}
-		}
-		updated, err := loadFocusSessionRow(tx, id)
-		if err != nil {
-			return err
-		}
-		action := "focus_resumed"
-		if input.Action == "interrupt" {
-			action = "focus_interrupted"
-		}
-		if err := recordFocusWorkflowEvent(
-			tx, "focus_session", id, action,
-			focusSessionEventState(row.FocusSession), focusSessionEventState(updated.FocusSession),
-			requestIDFromContext(c), timestamp, 1,
-		); err != nil {
-			return err
-		}
-		snapshot, err = focusSessionSnapshotFromRow(updated, now)
-		return err
+		var commandErr error
+		snapshot, commandErr = executeRecoverFocusInTransaction(tx, id, expectedVersion, input.Action, requestIDFromContext(c), now)
+		return commandErr
 	})
 	writeFocusSessionCommandResponse(c, snapshot, err)
 }
@@ -464,111 +294,11 @@ func (a *API) executeTerminalFocusSessionCommand(c *gin.Context, command string)
 			statusCode = replayStatus
 			return nil
 		}
-		row, err := loadFocusSessionRow(tx, id)
-		if err != nil {
-			return focusSessionLoadError(err)
-		}
-		terminal := row.Status == "completed" || row.Status == "cancelled" || row.Status == "interrupted"
-		matchingTerminal := (command == "stop" && row.Status == "completed") || (command == "cancel" && row.Status == "cancelled")
-		if terminal {
-			if !matchingTerminal {
-				return invalidFocusState("The terminal Focus Session cannot run a different end command")
-			}
-			snapshot, err = focusSessionSnapshotFromRow(row, now)
-			if err != nil {
-				return err
-			}
-			return recordFocusSessionSnapshot(tx, idempotencyKey, endpoint, id, requestHash, statusCode, snapshot, now.Format(time.RFC3339Nano))
-		}
-		if row.Version != expectedVersion {
-			return focusVersionConflict()
-		}
-		if row.Status != "active" && row.Status != "paused" {
-			return invalidFocusState("Only an active or paused Focus Session can run this end command")
-		}
-		accumulated := row.AccumulatedSeconds
-		if row.Status == "active" {
-			accumulated, err = closeOpenFocusInterval(tx, row.FocusSession, now)
-			if err != nil {
-				return err
-			}
-		}
-		timestamp := now.Format(time.RFC3339Nano)
-		updates := map[string]any{
-			"accumulated_seconds": accumulated,
-			"ended_at":            timestamp,
-			"last_resumed_at":     nil,
-			"version":             gorm.Expr("version + 1"),
-			"updated_at":          timestamp,
-		}
-		if row.Status == "active" {
-			updates["last_heartbeat_at"] = timestamp
-		}
-		if command == "stop" {
-			updates["status"] = "completed"
-			if accumulated >= row.PlannedSeconds {
-				updates["end_reason"] = "completed"
-			} else {
-				updates["end_reason"] = "user_stop"
-			}
-		} else {
-			updates["status"] = "cancelled"
-			updates["end_reason"] = "cancelled"
-		}
-		result := tx.Model(&models.FocusSession{}).
-			Where("id = ? AND version = ? AND status = ?", id, expectedVersion, row.Status).
-			Updates(updates)
-		if result.Error != nil {
-			return mapFocusConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return focusVersionConflict()
-		}
-		creditedMinutes := int64(0)
-		if command == "stop" && row.TaskID != nil {
-			creditedMinutes, err = creditFocusSecondsToTask(tx, *row.TaskID, accumulated, timestamp)
-			if err != nil {
-				return err
-			}
-			if err := tx.Model(&models.FocusSession{}).
-				Where("id = ?", id).
-				Update("credited_minutes", creditedMinutes).Error; err != nil {
-				return err
-			}
-		}
-		updated, err := loadFocusSessionRow(tx, id)
+		snapshot, err = executeTerminalFocusInTransaction(tx, id, expectedVersion, command, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		focusAction := "focus_completed"
-		if command == "cancel" {
-			focusAction = "focus_cancelled"
-		}
-		if err := recordFocusWorkflowEvent(
-			tx, "focus_session", id, focusAction,
-			focusSessionEventState(row.FocusSession), focusSessionEventState(updated.FocusSession),
-			requestIDFromContext(c), timestamp, 1,
-		); err != nil {
-			return err
-		}
-		if command == "stop" && row.TaskID != nil {
-			if err := recordFocusWorkflowEvent(
-				tx, "task", *row.TaskID, "task_actual_time_added", nil,
-				map[string]any{
-					"focus_session_id":    id,
-					"exact_seconds_added": accumulated,
-					"minutes_added":       creditedMinutes,
-				},
-				requestIDFromContext(c), timestamp, 2,
-			); err != nil {
-				return err
-			}
-		}
-		snapshot, err = focusSessionSnapshotFromRow(updated, now)
-		if err != nil {
-			return err
-		}
-		return recordFocusSessionSnapshot(tx, idempotencyKey, endpoint, id, requestHash, statusCode, snapshot, timestamp)
+		return recordFocusSessionSnapshot(tx, idempotencyKey, endpoint, id, requestHash, statusCode, snapshot, now.Format(time.RFC3339Nano))
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {

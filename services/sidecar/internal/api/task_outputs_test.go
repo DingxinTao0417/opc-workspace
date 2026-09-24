@@ -26,7 +26,7 @@ const testArtifactDatabaseID = "018f0000-0000-7000-8000-000000000999"
 func newTaskOutputTestAPI(t *testing.T) (*gin.Engine, *database.Store, string) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := database.Open(filepath.Join(root, "output.db"))
+	store, err := openAPITestDatabase(filepath.Join(root, "output.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

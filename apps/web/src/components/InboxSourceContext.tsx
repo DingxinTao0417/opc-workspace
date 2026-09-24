@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import type { InboxItem } from "../types/models";
+import { aiWorkspaceHref } from "../lib/aiWorkspaceLinks";
+import {
+  agentRunFailureReason,
+  parseAgentRunFailurePayload,
+} from "../lib/agentRunFailureSource";
+import { automationLocationHref } from "../lib/automationLocation";
+import { taskSubmissionHref } from "../lib/taskSubmissionLocation";
 import { useUiStore } from "../store/ui";
 import { formatInvoiceAmount } from "./invoicePresentation";
 
@@ -145,7 +152,8 @@ function stringValue(
 function taskArtifactSnapshot(
   item: InboxItem,
 ): TaskArtifactSourceSnapshot | null {
-  if (item.sourceEntityType !== "task_artifact") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "task_artifact")
+    return null;
   const payload = item.payloadJson;
   const artifactId = stringValue(payload, "artifact_id");
   const artifactName = stringValue(payload, "artifact_name");
@@ -155,13 +163,16 @@ function taskArtifactSnapshot(
   const submissionId = stringValue(payload, "submission_id");
   const submissionSequence = payload.submission_sequence;
   if (
-    !artifactId ||
+    !canonicalUUID(artifactId) ||
+    artifactId !== item.sourceEntityId ||
+    item.sourceEventKey !== `task-artifact:${artifactId}:followup` ||
     !artifactName ||
     !storageKind ||
-    !taskId ||
+    !["text", "link", "structured", "file"].includes(storageKind) ||
+    !canonicalUUID(taskId) ||
     !taskTitle ||
-    !submissionId ||
-    !Number.isInteger(submissionSequence) ||
+    !canonicalUUID(submissionId) ||
+    !Number.isSafeInteger(submissionSequence) ||
     (submissionSequence as number) < 1
   ) {
     return null;
@@ -182,7 +193,7 @@ function taskArtifactSnapshot(
 function taskBlockedSnapshot(
   item: InboxItem,
 ): TaskBlockedSourceSnapshot | null {
-  if (item.sourceEntityType !== "task") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "task") return null;
   const payload = item.payloadJson;
   const taskId = stringValue(payload, "task_id");
   const taskTitle = stringValue(payload, "task_title");
@@ -191,14 +202,16 @@ function taskBlockedSnapshot(
   const blockedFromStatus = payload.blocked_from_status;
   const blockVersion = payload.block_version;
   if (
-    !taskId ||
+    !canonicalUUID(taskId) ||
+    taskId !== item.sourceEntityId ||
+    item.sourceEventKey !== `task:${taskId}:blocked:${String(blockVersion)}` ||
     !taskTitle ||
     !blockedReason ||
     !blockedAt ||
     (blockedFromStatus !== "todo" &&
       blockedFromStatus !== "in_progress" &&
       blockedFromStatus !== "waiting_review") ||
-    !Number.isInteger(blockVersion) ||
+    !Number.isSafeInteger(blockVersion) ||
     (blockVersion as number) < 2
   ) {
     return null;
@@ -216,7 +229,8 @@ function taskBlockedSnapshot(
 }
 
 function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
-  if (item.sourceEntityType !== "task_due") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "task_due")
+    return null;
   const payload = item.payloadJson;
   const taskId = stringValue(payload, "task_id");
   const taskTitle = stringValue(payload, "task_title");
@@ -224,7 +238,9 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
   const projectedAt = stringValue(payload, "projected_at");
   const dueState = payload.due_state;
   if (
-    !taskId ||
+    !canonicalUUID(taskId) ||
+    taskId !== item.sourceEntityId ||
+    item.sourceEventKey !== `task:${taskId}:due:${dueAt}` ||
     !taskTitle ||
     !dueAt ||
     !projectedAt ||
@@ -245,7 +261,8 @@ function taskDueSnapshot(item: InboxItem): TaskDueSourceSnapshot | null {
 }
 
 function invoiceDueSnapshot(item: InboxItem): InvoiceDueSourceSnapshot | null {
-  if (item.sourceEntityType !== "invoice_due") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "invoice_due")
+    return null;
   const payload = item.payloadJson;
   const invoiceId = stringValue(payload, "invoice_id");
   const invoiceNumber = stringValue(payload, "invoice_number");
@@ -267,8 +284,10 @@ function invoiceDueSnapshot(item: InboxItem): InvoiceDueSourceSnapshot | null {
       typeof projectName === "string" &&
       projectName.trim().length > 0);
   if (
-    !invoiceId ||
+    !canonicalUUID(invoiceId) ||
     invoiceId !== item.sourceEntityId ||
+    item.sourceEventKey !==
+      `invoice:${invoiceId}:${String(dueState)}:${dueState === "overdue" ? occurrenceDate : dueDate}` ||
     !invoiceNumber ||
     !clientId ||
     !clientName ||
@@ -307,7 +326,8 @@ function invoiceDueSnapshot(item: InboxItem): InvoiceDueSourceSnapshot | null {
 function clientFollowupSnapshot(
   item: InboxItem,
 ): ClientFollowupSourceSnapshot | null {
-  if (item.sourceEntityType !== "client_followup") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "client_followup")
+    return null;
   const payload = item.payloadJson;
   const clientFollowupId = stringValue(payload, "client_followup_id");
   const clientId = stringValue(payload, "client_id");
@@ -315,8 +335,11 @@ function clientFollowupSnapshot(
   const timezone = stringValue(payload, "timezone");
   const channel = stringValue(payload, "channel");
   if (
-    !clientFollowupId ||
-    !clientId ||
+    !canonicalUUID(clientFollowupId) ||
+    !canonicalUUID(clientId) ||
+    !new RegExp(`^followup:${clientFollowupId}:due:[1-9]\\d*$`).test(
+      item.sourceEventKey ?? "",
+    ) ||
     !scheduledAt ||
     !timezone ||
     !channel ||
@@ -331,7 +354,8 @@ function clientFollowupSnapshot(
 function projectCompletionSnapshot(
   item: InboxItem,
 ): ProjectCompletionSourceSnapshot | null {
-  if (item.sourceEntityType !== "project_completion") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "project_completion")
+    return null;
   const payload = item.payloadJson;
   const projectId = stringValue(payload, "project_id");
   const projectName = stringValue(payload, "project_name");
@@ -339,10 +363,13 @@ function projectCompletionSnapshot(
   const completionVersion = payload.completion_version;
   const incompleteTaskCount = payload.incomplete_task_count;
   if (
-    !projectId ||
+    !canonicalUUID(projectId) ||
+    projectId !== item.sourceEntityId ||
+    item.sourceEventKey !==
+      `project:${projectId}:completed:${String(completionVersion)}` ||
     !projectName ||
     !completedAt ||
-    !Number.isInteger(completionVersion) ||
+    !Number.isSafeInteger(completionVersion) ||
     (completionVersion as number) < 2 ||
     !Number.isInteger(incompleteTaskCount) ||
     (incompleteTaskCount as number) < 0
@@ -416,7 +443,8 @@ function reminderSnapshot(item: InboxItem): ReminderSourceSnapshot | null {
 }
 
 function automationSnapshot(item: InboxItem): AutomationSourceSnapshot | null {
-  if (item.sourceEntityType !== "automation") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "automation")
+    return null;
   const payload = item.payloadJson;
   const automationRuleId = stringValue(payload, "automation_rule_id");
   const automationRunId = stringValue(payload, "automation_run_id");
@@ -453,7 +481,8 @@ function automationSnapshot(item: InboxItem): AutomationSourceSnapshot | null {
 function contentItemSnapshot(
   item: InboxItem,
 ): ContentItemSourceSnapshot | null {
-  if (item.sourceEntityType !== "content_item") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "content_item")
+    return null;
   const payload = item.payloadJson;
   const contentItemId = stringValue(payload, "content_item_id");
   const eventType = payload.event_type;
@@ -461,9 +490,11 @@ function contentItemSnapshot(
   const scheduledAt = stringValue(payload, "scheduled_at");
   const scheduledTimezone = stringValue(payload, "scheduled_timezone");
   if (
-    !contentItemId ||
+    !canonicalUUID(contentItemId) ||
+    item.sourceEventKey !==
+      `content:${contentItemId}:${String(eventType)}:${String(contentVersion)}` ||
     (eventType !== "review_due" && eventType !== "publish_due") ||
-    !Number.isInteger(contentVersion) ||
+    !Number.isSafeInteger(contentVersion) ||
     (contentVersion as number) < 1 ||
     !scheduledAt ||
     !scheduledTimezone ||
@@ -484,7 +515,8 @@ function contentItemSnapshot(
 function roadmapMilestoneSnapshot(
   item: InboxItem,
 ): RoadmapMilestoneSourceSnapshot | null {
-  if (item.sourceEntityType !== "roadmap_milestone") return null;
+  if (item.kind !== "event" || item.sourceEntityType !== "roadmap_milestone")
+    return null;
   const payload = item.payloadJson;
   const roadmapMilestoneId = stringValue(payload, "roadmap_milestone_id");
   const eventType = payload.event_type;
@@ -493,10 +525,12 @@ function roadmapMilestoneSnapshot(
   const year = payload.year;
   const quarter = payload.quarter;
   if (
-    !roadmapMilestoneId ||
+    !canonicalUUID(roadmapMilestoneId) ||
     roadmapMilestoneId !== item.sourceEntityId ||
+    item.sourceEventKey !==
+      `roadmap:${roadmapMilestoneId}:${String(eventType)}:${String(milestoneVersion)}` ||
     (eventType !== "due" && eventType !== "achieved") ||
-    !Number.isInteger(milestoneVersion) ||
+    !Number.isSafeInteger(milestoneVersion) ||
     (milestoneVersion as number) < 1 ||
     !targetDate ||
     !Number.isInteger(year) ||
@@ -519,7 +553,12 @@ function roadmapMilestoneSnapshot(
 function systemMaintenanceSnapshot(
   item: InboxItem,
 ): SystemMaintenanceSourceSnapshot | null {
-  if (item.sourceEntityType !== "system_maintenance") return null;
+  if (
+    item.kind !== "event" ||
+    item.sourceEntityType !== "system_maintenance" ||
+    item.sourceDeletedAt !== null
+  )
+    return null;
   const payload = item.payloadJson;
   const component = payload.component;
   const operation = payload.operation;
@@ -538,6 +577,14 @@ function systemMaintenanceSnapshot(
     "sidecar:startup": "sidecar_startup_failed",
   } as const;
   const key = `${String(component)}:${String(operation)}`;
+  const eventPrefix = `system:${key}:`;
+  if (
+    Object.keys(payload).length !== 5 ||
+    item.sourceEntityId !== key ||
+    !item.sourceEventKey?.startsWith(eventPrefix) ||
+    !canonicalUUID(item.sourceEventKey.slice(eventPrefix.length))
+  )
+    return null;
   const expectedFailureCode = definitions[key as keyof typeof definitions];
   if (!expectedFailureCode || failureCode !== expectedFailureCode) return null;
   if (!occurredAt || !message) return null;
@@ -564,11 +611,71 @@ const storageKindLabels: Record<string, string> = {
   file: "文件",
 };
 
-function ReminderSourceDetails({ source }: { source: ReminderSourceSnapshot }) {
+function SourceLink({
+  href,
+  label,
+  disabled,
+}: {
+  href: string;
+  label: string;
+  disabled: boolean;
+}) {
+  // A disabled link must not retain an href that can bypass the pending/draft
+  // guard via keyboard or a new tab. This is navigation, not a source proof.
+  return disabled ? (
+    <button
+      className="button button-secondary"
+      disabled
+      type="button"
+      title="请先完成当前操作或处理未保存的更改，再查看来源。"
+    >
+      {label}
+      <ExternalLink aria-hidden="true" size={13} />
+    </button>
+  ) : (
+    <Link className="button button-secondary" to={href}>
+      {label}
+      <ExternalLink aria-hidden="true" size={13} />
+    </Link>
+  );
+}
+
+function ReminderSourceDetails({
+  source,
+  returnSession,
+  navigationDisabled,
+}: {
+  source: ReminderSourceSnapshot;
+  returnSession?: string | null;
+  navigationDisabled: boolean;
+}) {
   const location = useLocation();
-  const reminderSearch = new URLSearchParams(location.search);
+  const currentSearch = new URLSearchParams(location.search);
+  const reminderSearch = new URLSearchParams();
+  // Carry only native Inbox filters, never raw return/session or extra targets.
+  for (const [key, allowed] of [
+    ["risk", ["tracking", "blocked", "waiting_review"]],
+    ["view", ["inbox", "snoozed", "archive"]],
+  ] as const) {
+    const value = currentSearch.get(key);
+    if (
+      currentSearch.getAll(key).length === 1 &&
+      value &&
+      allowed.some((item) => item === value)
+    ) {
+      reminderSearch.set(key, value);
+    }
+  }
   reminderSearch.set("reminders", "fired");
   reminderSearch.set("reminder", source.reminderId);
+  const returnParams = new URLSearchParams(
+    aiWorkspaceHref(
+      `/inbox?reminder=${source.reminderId}`,
+      returnSession ?? undefined,
+    ).split("?")[1],
+  );
+  const session = returnParams.get("return_session");
+  if (session) reminderSearch.set("return_session", session);
   return (
     <section aria-label="来源上下文" className="inbox-source-context">
       <div className="inbox-source-context-heading">
@@ -586,23 +693,115 @@ function ReminderSourceDetails({ source }: { source: ReminderSourceSnapshot }) {
           <dd>{localTimestamp(source.triggerAt)}</dd>
         </div>
       </dl>
-      <Link
-        className="button button-secondary"
-        to={{ pathname: "/inbox", search: reminderSearch.toString() }}
-      >
-        查看来源提醒
-        <ExternalLink aria-hidden="true" size={13} />
-      </Link>
+      <SourceLink
+        href={`/inbox?${reminderSearch.toString()}`}
+        label="查看来源提醒"
+        disabled={navigationDisabled}
+      />
     </section>
   );
 }
 
-export function InboxSourceContext({ item }: { item: InboxItem }) {
+export function InboxSourceContext({
+  item,
+  returnSession,
+  navigationDisabled = false,
+}: {
+  item: InboxItem;
+  returnSession?: string | null;
+  navigationDisabled?: boolean;
+}) {
   const openDataSettings = useUiStore((state) => state.setSettingsOpen);
+  const sourceLink = (route: string, label: string) =>
+    item.sourceDeletedAt ? null : (
+      <SourceLink
+        href={aiWorkspaceHref(route, returnSession ?? undefined)}
+        label={label}
+        disabled={navigationDisabled}
+      />
+    );
+
+  if (item.sourceEntityType === "agent_run_failed") {
+    const source = parseAgentRunFailurePayload(item.payloadJson);
+    if (
+      !source ||
+      item.kind !== "event" ||
+      item.sourceEntityId !== source.agent_run_id ||
+      item.sourceEventKey !== `agent-run:${source.agent_run_id}:failed`
+    )
+      return null;
+    return (
+      <section aria-label="来源上下文" className="inbox-source-context">
+        <div className="inbox-source-context-heading">
+          <span aria-hidden="true">
+            <TriangleAlert size={15} />
+          </span>
+          <div>
+            <strong>Agent 执行失败诊断</strong>
+            <small>仅本地诊断通知</small>
+          </div>
+        </div>
+        <p>
+          以下是失败时的安全元数据，不是当前执行状态证明。查看、解决或忽略通知不会重跑
+          Agent、调用模型或恢复产出登记。
+        </p>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            来源执行已不可用；导入的业务数据不包含执行记录，不能从通知重新创建执行。
+          </p>
+        ) : null}
+        <dl>
+          <div>
+            <dt>失败执行 ID</dt>
+            <dd>
+              <code>{source.agent_run_id}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>来源任务 ID</dt>
+            <dd>
+              <code>{source.task_id}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>执行次数</dt>
+            <dd>第 {source.attempt} 次</dd>
+          </div>
+          <div>
+            <dt>安全错误码</dt>
+            <dd>
+              <code>{source.error_code}</code>
+              {agentRunFailureReason(source.error_code) ? (
+                <p>{agentRunFailureReason(source.error_code)}</p>
+              ) : null}
+            </dd>
+          </div>
+          <div>
+            <dt>失败时间</dt>
+            <dd>{localTimestamp(source.failed_at)}</dd>
+          </div>
+        </dl>
+        {sourceLink(
+          `/tasks/${source.task_id}?agent_run=${source.agent_run_id}`,
+          "查看失败执行",
+        )}
+        {sourceLink(
+          automationLocationHref("run", source.automation_run_id),
+          "查看通知运行",
+        )}
+      </section>
+    );
+  }
 
   const reminderSource = reminderSnapshot(item);
   if (reminderSource) {
-    return <ReminderSourceDetails source={reminderSource} />;
+    return (
+      <ReminderSourceDetails
+        source={reminderSource}
+        returnSession={returnSession}
+        navigationDisabled={navigationDisabled}
+      />
+    );
   }
 
   const invoiceDueSource = invoiceDueSnapshot(item);
@@ -667,15 +866,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             </div>
           ) : null}
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link
-            className="button button-secondary"
-            to={"/invoices/" + invoiceDueSource.invoiceId}
-          >
-            查看来源发票
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
-        )}
+        {sourceLink(`/invoices/${invoiceDueSource.invoiceId}`, "查看来源发票")}
       </section>
     );
   }
@@ -722,11 +913,9 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>v{roadmapSource.milestoneVersion}</dd>
           </div>
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link className="button button-secondary" to="/roadmap">
-            查看路线图
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
+        {sourceLink(
+          `/roadmap?milestone=${roadmapSource.roadmapMilestoneId}`,
+          "查看路线图",
         )}
       </section>
     );
@@ -766,14 +955,9 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>v{contentSource.contentVersion}</dd>
           </div>
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link
-            className="button button-secondary"
-            to={`/content-calendar?item=${encodeURIComponent(contentSource.contentItemId)}`}
-          >
-            查看内容日历
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
+        {sourceLink(
+          `/content-calendar?item=${contentSource.contentItemId}`,
+          "查看内容日历",
         )}
       </section>
     );
@@ -806,13 +990,16 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>仅创建本地核对事项，不会生成或发送发票</dd>
           </div>
         </dl>
-        <Link
-          className="button button-secondary"
-          to={`/projects/${automationSource.projectId}`}
-        >
-          查看来源项目
-          <ExternalLink aria-hidden="true" size={13} />
-        </Link>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            来源自动化运行已删除；以上历史快照继续保留。
+          </p>
+        ) : null}
+        {sourceLink(
+          automationLocationHref("run", automationSource.automationRunId),
+          "查看自动化运行",
+        )}
+        {sourceLink(`/projects/${automationSource.projectId}`, "查看来源项目")}
       </section>
     );
   }
@@ -866,6 +1053,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
         {maintenanceSource.component !== "sidecar" ? (
           <button
             className="button button-secondary"
+            disabled={navigationDisabled}
             onClick={() => openDataSettings(true, "data")}
             type="button"
           >
@@ -909,15 +1097,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>{projectSource.incompleteTaskCount} 项</dd>
           </div>
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link
-            className="button button-secondary"
-            to={`/projects/${projectSource.projectId}`}
-          >
-            查看来源项目
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
-        )}
+        {sourceLink(`/projects/${projectSource.projectId}`, "查看来源项目")}
       </section>
     );
   }
@@ -949,13 +1129,15 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             <dd>{followupSource.channel}</dd>
           </div>
         </dl>
-        <Link
-          className="button button-secondary"
-          to={`/clients/${followupSource.clientId}`}
-        >
-          查看客户回访
-          <ExternalLink aria-hidden="true" size={13} />
-        </Link>
+        {item.sourceDeletedAt ? (
+          <p className="inbox-source-missing" role="status">
+            来源回访已删除；以上计划快照继续保留。
+          </p>
+        ) : null}
+        {sourceLink(
+          `/clients/${followupSource.clientId}?followup=${followupSource.clientFollowupId}`,
+          "查看客户回访",
+        )}
       </section>
     );
   }
@@ -1001,15 +1183,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             </div>
           ) : null}
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link
-            className="button button-secondary"
-            to={`/tasks/${dueSource.taskId}`}
-          >
-            查看来源任务
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
-        )}
+        {sourceLink(`/tasks/${dueSource.taskId}`, "查看来源任务")}
       </section>
     );
   }
@@ -1059,15 +1233,7 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
             </div>
           ) : null}
         </dl>
-        {item.sourceDeletedAt ? null : (
-          <Link
-            className="button button-secondary"
-            to={`/tasks/${blockedSource.taskId}`}
-          >
-            查看来源任务
-            <ExternalLink aria-hidden="true" size={13} />
-          </Link>
-        )}
+        {sourceLink(`/tasks/${blockedSource.taskId}`, "查看来源任务")}
       </section>
     );
   }
@@ -1112,14 +1278,12 @@ export function InboxSourceContext({ item }: { item: InboxItem }) {
           </div>
         ) : null}
       </dl>
-      {item.sourceDeletedAt ? null : (
-        <Link
-          className="button button-secondary"
-          to={`/tasks/${source.taskId}`}
-        >
-          查看来源任务
-          <ExternalLink aria-hidden="true" size={13} />
-        </Link>
+      <p className="muted">
+        按历史快照定位提交批次，当前记录以详情读取结果为准。
+      </p>
+      {sourceLink(
+        taskSubmissionHref(source.taskId, source.submissionId),
+        "查看来源提交",
       )}
     </section>
   );

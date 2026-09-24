@@ -1,5 +1,6 @@
 [package]
 name = "opc-workspace-desktop"
+default-run = "opc-workspace-desktop"
 version = "0.1.1"
 description = "Native desktop shell for opc-workspace"
 authors = ["opc-workspace contributors"]
@@ -14,16 +15,27 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
+portable-pty = "0.9"
+rfd = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon"] }
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-global-shortcut = "2"
 tokio = { version = "1", features = ["time"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38.2"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Pipes", "Win32_System_IO", "Win32_Security", "Win32_Security_Authorization", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.61", features = ["Win32_System_IO", "Win32_System_Ioctl", "Win32_Security_Authorization"] }
 
 [profile.release]
 codegen-units = 1

@@ -1,15 +1,13 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -215,20 +213,11 @@ func (a *API) createFinancialEntry(c *gin.Context) {
 				return err
 			}
 		}
-		if err := normalizeFinancialEntryAssociations(tx, &entry); err != nil {
-			return err
-		}
-		if err := tx.Create(&entry).Error; err != nil {
-			return err
-		}
-		if err := recordFinancialEntryWorkflowEvent(tx, entry, "financial_entry_created", nil, requestIDFromContext(c)); err != nil {
-			return err
-		}
-		row, err := loadFinancialEntryRow(tx, entry.ID)
+		var err error
+		response, err = createFinancialEntryInTransaction(tx, entry, requestIDFromContext(c))
 		if err != nil {
 			return err
 		}
-		response = financialEntryResponseFromRow(row)
 		if idempotencyKey != "" {
 			encoded, err := json.Marshal(response)
 			if err != nil {
@@ -291,46 +280,9 @@ func (a *API) updateFinancialEntry(c *gin.Context) {
 	}
 	var response financialEntryResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var entry models.FinancialEntry
-		if err := tx.Where("id = ?", id).Take(&entry).Error; err != nil {
-			return err
-		}
-		if entry.Version != expectedVersion {
-			return financialEntryVersionConflict()
-		}
-		if entry.InvoiceID != nil {
-			return newFinancialEntryRequestError(http.StatusConflict, "INVOICE_LINKED_FINANCIAL_ENTRY_IMMUTABLE", "Invoice-linked financial entries can only be changed through the invoice workflow")
-		}
-		if entry.Status == "voided" {
-			return newFinancialEntryRequestError(http.StatusConflict, "FINANCIAL_ENTRY_VOIDED", "A voided financial entry cannot be edited")
-		}
-		previous := financialEntryEventState(entry)
-		updates, err := financialEntryUpdates(tx, entry, input)
-		if err != nil {
-			return err
-		}
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates["version"] = gorm.Expr("version + 1")
-		updates["updated_at"] = now
-		result := tx.Model(&models.FinancialEntry{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return financialEntryVersionConflict()
-		}
-		if err := tx.Where("id = ?", id).Take(&entry).Error; err != nil {
-			return err
-		}
-		if err := recordFinancialEntryWorkflowEvent(tx, entry, "financial_entry_updated", previous, requestIDFromContext(c)); err != nil {
-			return err
-		}
-		row, err := loadFinancialEntryRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = financialEntryResponseFromRow(row)
-		return nil
+		var err error
+		response, err = updateFinancialEntryInTransaction(tx, id, expectedVersion, input, requestIDFromContext(c), nowStamp(a))
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -372,43 +324,9 @@ func (a *API) voidFinancialEntry(c *gin.Context) {
 	}
 	var response financialEntryResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var entry models.FinancialEntry
-		if err := tx.Where("id = ?", id).Take(&entry).Error; err != nil {
-			return err
-		}
-		if entry.Version != expectedVersion {
-			return financialEntryVersionConflict()
-		}
-		if entry.InvoiceID != nil {
-			return newFinancialEntryRequestError(http.StatusConflict, "INVOICE_LINKED_FINANCIAL_ENTRY_IMMUTABLE", "Invoice-linked financial entries can only be changed through the invoice workflow")
-		}
-		if entry.Status == "voided" {
-			return newFinancialEntryRequestError(http.StatusConflict, "FINANCIAL_ENTRY_VOIDED", "Financial entry is already voided")
-		}
-		previous := financialEntryEventState(entry)
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.FinancialEntry{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(map[string]any{
-			"status": "voided", "voided_at": now, "voided_by_actor_id": models.BuiltinOwnerActorID,
-			"void_reason": reason, "version": gorm.Expr("version + 1"), "updated_at": now,
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return financialEntryVersionConflict()
-		}
-		if err := tx.Where("id = ?", id).Take(&entry).Error; err != nil {
-			return err
-		}
-		if err := recordFinancialEntryWorkflowEvent(tx, entry, "financial_entry_voided", previous, requestIDFromContext(c)); err != nil {
-			return err
-		}
-		row, err := loadFinancialEntryRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = financialEntryResponseFromRow(row)
-		return nil
+		var err error
+		response, err = voidFinancialEntryInTransaction(tx, id, expectedVersion, reason, requestIDFromContext(c), nowStamp(a))
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -444,6 +362,16 @@ func (a *API) getIncomeStats(c *gin.Context) {
 		writeFinancialEntryRequestError(c, err)
 		return
 	}
+	response, err := readIncomeStats(c.Request.Context(), a.db, currency, dateFrom, dateTo)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// The human report and consented AI query share currency/date/status semantics.
+func readIncomeStats(ctx context.Context, db *gorm.DB, currency, dateFrom, dateTo string) (incomeStatsResponse, error) {
 	var row struct {
 		ConfirmedIncome  int64 `gorm:"column:confirmed_income"`
 		ConfirmedExpense int64 `gorm:"column:confirmed_expense"`
@@ -452,7 +380,7 @@ func (a *API) getIncomeStats(c *gin.Context) {
 		ConfirmedCount   int64 `gorm:"column:confirmed_count"`
 		EntryCount       int64 `gorm:"column:entry_count"`
 	}
-	err = a.db.WithContext(c.Request.Context()).Table("financial_entries").Select(`
+	err := db.WithContext(ctx).Table("financial_entries").Select(`
 		COALESCE(SUM(CASE WHEN type = 'income' AND status = 'confirmed' THEN amount_minor ELSE 0 END), 0) AS confirmed_income,
 		COALESCE(SUM(CASE WHEN type = 'expense' AND status = 'confirmed' THEN amount_minor ELSE 0 END), 0) AS confirmed_expense,
 		COALESCE(SUM(CASE WHEN type = 'income' AND status = 'pending' THEN amount_minor ELSE 0 END), 0) AS pending_income,
@@ -461,8 +389,7 @@ func (a *API) getIncomeStats(c *gin.Context) {
 		COUNT(*) AS entry_count
 	`).Where("currency = ? AND occurred_on BETWEEN ? AND ? AND status <> 'voided'", currency, dateFrom, dateTo).Scan(&row).Error
 	if err != nil {
-		writeDatabaseError(c)
-		return
+		return incomeStatsResponse{}, err
 	}
 	average := int64(0)
 	if row.ConfirmedCount > 0 {
@@ -475,7 +402,7 @@ func (a *API) getIncomeStats(c *gin.Context) {
 		NetCashFlowMinor:     row.ConfirmedIncome - row.ConfirmedExpense,
 		ConfirmedIncomeCount: row.ConfirmedCount, AverageIncomeMinor: average, EntryCount: row.EntryCount,
 	}
-	c.JSON(http.StatusOK, gin.H{"data": response})
+	return response, nil
 }
 
 func (a *API) exportFinancialEntriesCSV(c *gin.Context) {
@@ -488,41 +415,19 @@ func (a *API) exportFinancialEntriesCSV(c *gin.Context) {
 		writeFinancialEntryRequestError(c, err)
 		return
 	}
-	ordered, valid := applyFinancialEntrySort(financialEntryRowsQuery(applyFinancialEntryFilters(a.db.WithContext(c.Request.Context()).Table("financial_entries AS entry"), filters)), c.Query("sort"))
-	if !valid {
-		writeError(c, http.StatusBadRequest, "INVALID_SORT", "sort contains an unsupported field")
-		return
-	}
-	var rows []financialEntryRow
-	if err := ordered.Limit(10_001).Scan(&rows).Error; err != nil {
-		writeDatabaseError(c)
-		return
-	}
-	if len(rows) > 10_000 {
-		writeError(c, http.StatusRequestEntityTooLarge, "EXPORT_TOO_LARGE", "CSV export is limited to 10000 matching entries; narrow the filters")
-		return
-	}
-	var buffer bytes.Buffer
-	buffer.Write([]byte{0xEF, 0xBB, 0xBF})
-	writer := csv.NewWriter(&buffer)
-	_ = writer.Write([]string{"id", "type", "status", "amount_minor", "currency", "occurred_on", "category", "client", "project", "invoice", "notes", "created_at", "updated_at"})
-	for _, row := range rows {
-		_ = writer.Write([]string{
-			row.ID, row.Type, row.Status, strconv.FormatInt(row.AmountMinor, 10), row.Currency, row.OccurredOn, row.Category,
-			stringValue(row.ClientName), stringValue(row.ProjectName), stringValue(row.InvoiceNumber), row.Notes,
-			normalizeTimestamp(row.CreatedAt), normalizeTimestamp(row.UpdatedAt),
-		})
-	}
-	writer.Flush()
-	if err := writer.Error(); err != nil {
-		writeError(c, http.StatusInternalServerError, "EXPORT_FAILED", "Financial entries could not be encoded")
+	file, err := readFinancialCSV(a.db.WithContext(c.Request.Context()), filters, c.Query("sort"))
+	if err != nil {
+		if !writeFinancialEntryRequestError(c, err) {
+			writeDatabaseError(c)
+		}
 		return
 	}
 	filename := "financial-entries-" + a.options.Now().Format("20060102") + ".csv"
 	c.Header("Content-Type", "text/csv; charset=utf-8")
 	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
 	c.Header("Cache-Control", "no-store")
-	c.Data(http.StatusOK, "text/csv; charset=utf-8", buffer.Bytes())
+	c.Header("X-Financial-CSV-SHA256", file.SHA256)
+	c.Data(http.StatusOK, "text/csv; charset=utf-8", file.Data)
 }
 
 func parseFinancialEntryFilters(c *gin.Context) (financialEntryFilters, error) {

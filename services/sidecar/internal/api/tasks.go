@@ -572,43 +572,57 @@ func (a *API) updateTask(c *gin.Context) {
 		return
 	}
 
+	var task models.Task
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var err error
+		task, err = updateTaskInTransaction(tx, id, expectedVersion, input, requestIDFromContext(c))
+		return err
+	})
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
+	setProjectETag(c, task.Version)
+	c.JSON(http.StatusOK, gin.H{"data": task})
+}
+
+// validateTaskUpdate is shared by manual edits and AI approval previews.
+func validateTaskUpdate(input updateTaskRequest) (map[string]any, []string, error) {
 	updates := make(map[string]any)
 	if input.Title != nil {
 		title := strings.TrimSpace(*input.Title)
 		if length := utf8.RuneCountInString(title); length < 2 || length > 200 {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title must contain 2 to 200 characters")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title must contain 2 to 200 characters")
 		}
 		updates["title"] = title
 	}
 	if input.Description != nil {
 		if utf8.RuneCountInString(*input.Description) > 10_000 {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "description cannot exceed 10000 characters")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "description cannot exceed 10000 characters")
 		}
 		updates["description"] = *input.Description
 	}
 	if input.Kind != nil {
 		kind := strings.TrimSpace(*input.Kind)
 		if _, valid := validTaskKinds[kind]; !valid {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "kind must be work, review, followup, or reminder")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "kind must be work, review, followup, or reminder")
 		}
 		updates["kind"] = kind
 	}
 	if input.Priority != nil {
 		priority := strings.TrimSpace(*input.Priority)
 		if _, valid := validPriorities[priority]; !valid {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "priority must be P0, P1, P2, or P3")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "priority must be P0, P1, P2, or P3")
 		}
 		updates["priority"] = priority
 	}
 	if input.ReviewPolicy != nil {
 		reviewPolicy := strings.TrimSpace(*input.ReviewPolicy)
 		if reviewPolicy != "none" && reviewPolicy != "manual" {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "review_policy must be none or manual")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "review_policy must be none or manual")
 		}
 		updates["review_policy"] = reviewPolicy
 	}
@@ -618,8 +632,7 @@ func (a *API) updateTask(c *gin.Context) {
 		} else {
 			projectID := strings.TrimSpace(*input.ProjectID.Value)
 			if _, err := uuid.Parse(projectID); err != nil {
-				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "project_id must be a UUID")
-				return
+				return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "project_id must be a UUID")
 			}
 			updates["project_id"] = projectID
 		}
@@ -630,16 +643,14 @@ func (a *API) updateTask(c *gin.Context) {
 		} else {
 			parentTaskID := strings.TrimSpace(*input.ParentTaskID.Value)
 			if _, err := uuid.Parse(parentTaskID); err != nil {
-				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "parent_task_id must be a UUID")
-				return
+				return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "parent_task_id must be a UUID")
 			}
 			updates["parent_task_id"] = parentTaskID
 		}
 	}
 	if input.CompletionCriteria != nil {
 		if utf8.RuneCountInString(*input.CompletionCriteria) > 10_000 {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "completion_criteria cannot exceed 10000 characters")
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "completion_criteria cannot exceed 10000 characters")
 		}
 		updates["completion_criteria"] = *input.CompletionCriteria
 	}
@@ -649,8 +660,7 @@ func (a *API) updateTask(c *gin.Context) {
 		} else {
 			parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*input.DueDate.Value))
 			if err != nil {
-				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "due_date must be an RFC 3339 timestamp")
-				return
+				return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "due_date must be an RFC 3339 timestamp")
 			}
 			updates["due_date"] = parsed.UTC().Format(time.RFC3339Nano)
 		}
@@ -661,8 +671,7 @@ func (a *API) updateTask(c *gin.Context) {
 		} else {
 			plannedDate := strings.TrimSpace(*input.PlannedDate.Value)
 			if !validDate(plannedDate) {
-				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "planned_date must use YYYY-MM-DD")
-				return
+				return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "planned_date must use YYYY-MM-DD")
 			}
 			updates["planned_date"] = plannedDate
 		}
@@ -672,8 +681,7 @@ func (a *API) updateTask(c *gin.Context) {
 			updates["estimated_minutes"] = nil
 		} else {
 			if *input.EstimatedMinutes.Value < 0 {
-				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "estimated_minutes cannot be negative")
-				return
+				return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "estimated_minutes cannot be negative")
 			}
 			updates["estimated_minutes"] = *input.EstimatedMinutes.Value
 		}
@@ -683,17 +691,43 @@ func (a *API) updateTask(c *gin.Context) {
 		var err error
 		tagIDs, err = validateTaskTagIDs(input.TagIDs.Value)
 		if err != nil {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			return
+			return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		}
 	}
 	if len(updates) == 0 && !input.TagIDs.Set {
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "at least one editable task field is required")
-		return
+		return nil, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "at least one editable task field is required")
 	}
 
+	return updates, tagIDs, nil
+}
+
+// validateTaskReviewPolicyChange is shared by native updates and AI previews.
+// Repeating the existing value is a facts edit, not a policy transition.
+func validateTaskReviewPolicyChange(tx *gorm.DB, current models.Task, targetPolicy string) error {
+	if targetPolicy == current.ReviewPolicy {
+		return nil
+	}
+	if current.Status != "todo" {
+		return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy can only be changed while the Task is todo")
+	}
+	var submissionCount int64
+	if err := tx.Model(&models.TaskSubmission{}).Where("task_id = ?", current.ID).Count(&submissionCount).Error; err != nil {
+		return err
+	}
+	if submissionCount != 0 {
+		return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy cannot change after a submission exists")
+	}
+	return nil
+}
+
+// updateTaskInTransaction preserves version, hierarchy, review and plan-order rules.
+func updateTaskInTransaction(tx *gorm.DB, id string, expectedVersion int64, input updateTaskRequest, requestID string) (models.Task, error) {
+	updates, tagIDs, err := validateTaskUpdate(input)
+	if err != nil {
+		return models.Task{}, err
+	}
 	var task models.Task
-	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = func() error {
 		var current models.Task
 		if err := tx.First(&current, "id = ?", id).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -705,18 +739,8 @@ func (a *API) updateTask(c *gin.Context) {
 			return taskVersionConflict()
 		}
 		if input.ReviewPolicy != nil {
-			targetPolicy := updates["review_policy"].(string)
-			if targetPolicy != current.ReviewPolicy {
-				if current.Status != "todo" {
-					return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy can only be changed while the Task is todo")
-				}
-				var submissionCount int64
-				if err := tx.Model(&models.TaskSubmission{}).Where("task_id = ?", id).Count(&submissionCount).Error; err != nil {
-					return err
-				}
-				if submissionCount != 0 {
-					return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_POLICY_LOCKED", "review_policy cannot change after a submission exists")
-				}
+			if err := validateTaskReviewPolicyChange(tx, current, updates["review_policy"].(string)); err != nil {
+				return err
 			}
 		}
 		if input.ProjectID.Set {
@@ -777,37 +801,29 @@ func (a *API) updateTask(c *gin.Context) {
 			_, err = recordTaskLifecycleEvent(
 				tx, "task_review_policy_changed", id,
 				taskLifecycleSnapshot(current, ""), taskLifecycleSnapshot(loaded, ""),
-				requestIDFromContext(c), now, 1,
+				requestID, now, 1,
 			)
 			if err != nil {
 				return err
 			}
-			if _, err := reconcileTaskParentProgress(tx, loaded.ID, requestIDFromContext(c), now); err != nil {
+			if _, err := reconcileTaskParentProgress(tx, loaded.ID, requestID, now); err != nil {
 				return taskParentProgressError("reconcile Task review policy", err)
 			}
 		}
 		if input.ParentTaskID.Set {
-			if err := reconcileTaskParentChain(tx, current.ParentTaskID, requestIDFromContext(c), now); err != nil {
+			if err := reconcileTaskParentChain(tx, current.ParentTaskID, requestID, now); err != nil {
 				return taskParentProgressError("reconcile previous Task parent", err)
 			}
 			if !sameNullableString(current.ParentTaskID, loaded.ParentTaskID) {
-				if err := reconcileTaskParentChain(tx, loaded.ParentTaskID, requestIDFromContext(c), now); err != nil {
+				if err := reconcileTaskParentChain(tx, loaded.ParentTaskID, requestID, now); err != nil {
 					return taskParentProgressError("reconcile new Task parent", err)
 				}
 			}
 		}
 		task, err = loadTask(tx, id)
 		return err
-	})
-	if err != nil {
-		if writeProjectRequestError(c, err) {
-			return
-		}
-		writeDatabaseError(c)
-		return
-	}
-	setProjectETag(c, task.Version)
-	c.JSON(http.StatusOK, gin.H{"data": task})
+	}()
+	return task, err
 }
 
 func (a *API) updateTaskStatus(c *gin.Context) {
@@ -830,117 +846,18 @@ func (a *API) deleteTask(c *gin.Context) {
 	}
 	var movedArtifactFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var task models.Task
-		if err := tx.First(&task, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-			}
-			return err
-		}
-		if task.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		var activeInboxRelations int64
-		if err := tx.Model(&models.InboxItemTask{}).
-			Where("task_id = ? AND unlinked_at IS NULL", id).
-			Count(&activeInboxRelations).Error; err != nil {
-			return err
-		}
-		if activeInboxRelations > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"TASK_HAS_ACTIVE_INBOX_RELATIONS",
-				"Unlink the Task from active Inbox Items before deleting it",
-			)
-		}
-		var openFocusSessions int64
-		if err := tx.Model(&models.FocusSession{}).
-			Where("task_id = ? AND status IN ?", id, []string{"active", "paused", "recovery_pending"}).
-			Count(&openFocusSessions).Error; err != nil {
-			return err
-		}
-		if openFocusSessions > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"TASK_HAS_OPEN_FOCUS_SESSION",
-				"Stop, cancel, or recover the open Focus Session before deleting this task",
-			)
-		}
-		var contentItemCount int64
-		if err := tx.Table("content_item_tasks").Where("task_id = ?", id).Count(&contentItemCount).Error; err != nil {
-			return err
-		}
-		if contentItemCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"TASK_CONTENT_ITEMS_EXIST",
-				"Unlink the Task from Content Items before deleting it",
-			)
-		}
 		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
-		if err := coordinateTaskBlockedInboxSourceDeletion(
-			tx,
-			id,
-			requestIDFromContext(c),
-			deletedAt,
-		); err != nil {
-			return err
-		}
-		if err := coordinateTaskDueInboxSourceDeletion(
-			tx,
-			id,
-			requestIDFromContext(c),
-			deletedAt,
-		); err != nil {
-			return err
-		}
-		var sourceArtifactIDs []string
-		if err := tx.Model(&models.TaskArtifact{}).
-			Where("task_id = ?", id).
-			Order("id ASC").
-			Pluck("id", &sourceArtifactIDs).Error; err != nil {
-			return err
-		}
-		if err := coordinateTaskArtifactInboxSourceDeletion(
-			tx,
-			sourceArtifactIDs,
-			"TASK_HAS_ACTIVE_INBOX_SOURCES",
-			"Resolve or dismiss all Artifact follow-up Inbox Items before deleting this Task",
-			requestIDFromContext(c),
-			deletedAt,
-		); err != nil {
-			return err
-		}
-		var err error
-		movedArtifactFiles, err = a.trashTaskArtifactFiles(tx, id, deletedAt)
-		if err != nil {
-			return err
-		}
-		parentTaskID := task.ParentTaskID
-		result := tx.Delete(&models.Task{}, "id = ?", id)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		if err := reconcileTaskParentChain(tx, parentTaskID, requestIDFromContext(c), deletedAt); err != nil {
-			return taskParentProgressError("reconcile deleted Task parent", err)
-		}
-		return nil
+		_, _, moved, err := a.deleteTaskInTransaction(tx, id, expectedVersion, requestIDFromContext(c), deletedAt)
+		movedArtifactFiles = moved
+		return err
 	})
+	a.finishTaskDeletion(movedArtifactFiles, err)
 	if err != nil {
-		if restoreErr := a.restoreTaskArtifactFiles(movedArtifactFiles); restoreErr != nil && a.options.Logger != nil {
-			a.options.Logger.Printf("Task delete Artifact compensation failed task_id=%s error=%v", id, restoreErr)
-		}
 		if writeProjectRequestError(c, mapInboxTaskConstraintError(err)) {
 			return
 		}
 		writeDatabaseError(c)
 		return
-	}
-	for _, moved := range movedArtifactFiles {
-		a.artifactStore.purgeTrashedFile(moved)
 	}
 	c.Status(http.StatusNoContent)
 }

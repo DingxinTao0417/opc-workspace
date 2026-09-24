@@ -36,6 +36,8 @@ type batchUpdateTasksRequest struct {
 	Action      string              `json:"action"`
 	ProjectID   nullableStringPatch `json:"project_id"`
 	PlannedDate nullableStringPatch `json:"planned_date"`
+	DueDate     nullableStringPatch `json:"due_date"`
+	Priority    *string             `json:"priority"`
 	TagIDs      []string            `json:"tag_ids"`
 	Reason      *string             `json:"reason"`
 }
@@ -64,12 +66,38 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 
 	var projectID *string
 	var plannedDate *string
+	var dueDate *string
+	var priority string
 	var tagIDs []string
 	var lifecycleCommand string
 	var lifecycleReason string
 	switch input.Action {
+	case "set_priority":
+		if input.Priority == nil || input.ProjectID.Set || input.PlannedDate.Set || input.DueDate.Set || len(input.TagIDs) > 0 || input.Reason != nil {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_priority requires only priority")
+			return
+		}
+		priority = strings.TrimSpace(*input.Priority)
+		if _, valid := validPriorities[priority]; !valid {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "priority must be P0, P1, P2, or P3")
+			return
+		}
+	case "set_due_date":
+		if !input.DueDate.Set || input.ProjectID.Set || input.PlannedDate.Set || input.Priority != nil || len(input.TagIDs) > 0 || input.Reason != nil {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_due_date requires only due_date, which may be null")
+			return
+		}
+		if input.DueDate.Value != nil {
+			parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*input.DueDate.Value))
+			if err != nil {
+				writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "due_date must be an RFC 3339 timestamp or null")
+				return
+			}
+			value := parsed.UTC().Format(time.RFC3339Nano)
+			dueDate = &value
+		}
 	case "set_project":
-		if !input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) > 0 || input.Reason != nil {
+		if !input.ProjectID.Set || input.PlannedDate.Set || input.DueDate.Set || input.Priority != nil || len(input.TagIDs) > 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_project requires only project_id, which may be null")
 			return
 		}
@@ -82,7 +110,7 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			projectID = &value
 		}
 	case "set_planned_date":
-		if !input.PlannedDate.Set || input.ProjectID.Set || len(input.TagIDs) > 0 || input.Reason != nil {
+		if !input.PlannedDate.Set || input.ProjectID.Set || input.DueDate.Set || input.Priority != nil || len(input.TagIDs) > 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "set_planned_date requires only planned_date, which may be null")
 			return
 		}
@@ -95,7 +123,7 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			plannedDate = &value
 		}
 	case "add_tags", "remove_tags":
-		if input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) == 0 || input.Reason != nil {
+		if input.ProjectID.Set || input.PlannedDate.Set || input.DueDate.Set || input.Priority != nil || len(input.TagIDs) == 0 || input.Reason != nil {
 			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" requires only a non-empty tag_ids array")
 			return
 		}
@@ -106,8 +134,8 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 			return
 		}
 	case taskLifecycleStart, taskLifecycleBlock, taskLifecycleUnblock, taskLifecycleComplete, taskLifecycleCancel, taskLifecycleReopen:
-		if input.ProjectID.Set || input.PlannedDate.Set || len(input.TagIDs) > 0 {
-			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" does not accept project_id, planned_date, or tag_ids")
+		if input.ProjectID.Set || input.PlannedDate.Set || input.DueDate.Set || input.Priority != nil || len(input.TagIDs) > 0 {
+			writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", input.Action+" does not accept priority, due_date, project_id, planned_date, or tag_ids")
 			return
 		}
 		lifecycleCommand = input.Action
@@ -249,6 +277,30 @@ func (a *API) batchUpdateTasks(c *gin.Context) {
 				continue
 			}
 			switch input.Action {
+			case "set_priority":
+				if task.Priority != priority {
+					result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", id, task.Version).
+						Updates(map[string]any{"priority": priority, "updated_at": now, "version": gorm.Expr("version + 1")})
+					if result.Error != nil {
+						return result.Error
+					}
+					if result.RowsAffected == 0 {
+						return taskVersionConflict()
+					}
+					changed = true
+				}
+			case "set_due_date":
+				if !sameNullableString(task.DueDate, dueDate) {
+					result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", id, task.Version).
+						Updates(map[string]any{"due_date": dueDate, "updated_at": now, "version": gorm.Expr("version + 1")})
+					if result.Error != nil {
+						return result.Error
+					}
+					if result.RowsAffected == 0 {
+						return taskVersionConflict()
+					}
+					changed = true
+				}
 			case "set_project":
 				if !sameNullableString(task.ProjectID, projectID) {
 					result := tx.Model(&models.Task{}).
@@ -388,8 +440,40 @@ func (a *API) reorderTasks(c *gin.Context) {
 		orderedIDs[index] = id
 	}
 
-	response := reorderedTasksResponse{Mode: input.Mode, PlannedDate: plannedDate}
+	var response reorderedTasksResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var commandErr error
+		response, commandErr = reorderTaskGroupInTransaction(tx, plannedDate, input.Mode, orderedIDs, versions, time.Now().UTC())
+		return commandErr
+	})
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
+		writeDatabaseError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+// Native and human-confirmed AI ordering share this single atomic command.
+// The caller supplies a complete planned-date group and observed versions;
+// the command rechecks both before it changes even one manual_order slot.
+func reorderTaskGroupInTransaction(tx *gorm.DB, plannedDate *string, mode string, orderedIDs []string, versions map[string]int64, now time.Time) (reorderedTasksResponse, error) {
+	response := reorderedTasksResponse{Mode: mode, PlannedDate: plannedDate}
+	if mode != "manual" && mode != "default" || len(orderedIDs) > 1000 || len(orderedIDs) != len(versions) {
+		return response, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "invalid task reorder group")
+	}
+	for _, id := range orderedIDs {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed.String() != id || versions[id] < 1 {
+			return response, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "invalid task reorder item")
+		}
+	}
+	if plannedDate != nil && !validDate(*plannedDate) {
+		return response, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "invalid planned date")
+	}
+	{
 		type currentTask struct {
 			ID          string `gorm:"column:id"`
 			Version     int64  `gorm:"column:version"`
@@ -403,10 +487,10 @@ func (a *API) reorderTasks(c *gin.Context) {
 		}
 		var current []currentTask
 		if err := query.Find(&current).Error; err != nil {
-			return err
+			return response, err
 		}
-		if len(current) != len(input.Items) {
-			return newProjectRequestError(http.StatusConflict, "TASK_REORDER_SET_CHANGED", "Tasks in this planned-date group changed; reload before reordering")
+		if len(current) != len(orderedIDs) {
+			return response, newProjectRequestError(http.StatusConflict, "TASK_REORDER_SET_CHANGED", "Tasks in this planned-date group changed; reload before reordering")
 		}
 		currentByID := make(map[string]currentTask, len(current))
 		for _, task := range current {
@@ -415,18 +499,18 @@ func (a *API) reorderTasks(c *gin.Context) {
 		for id, expectedVersion := range versions {
 			task, exists := currentByID[id]
 			if !exists {
-				return newProjectRequestError(http.StatusConflict, "TASK_REORDER_SET_CHANGED", "Tasks in this planned-date group changed; reload before reordering")
+				return response, newProjectRequestError(http.StatusConflict, "TASK_REORDER_SET_CHANGED", "Tasks in this planned-date group changed; reload before reordering")
 			}
 			if task.Version != expectedVersion {
-				return taskVersionConflict()
+				return response, taskVersionConflict()
 			}
 		}
 
-		now := time.Now().UTC().Format(time.RFC3339Nano)
+		nowText := now.UTC().Format(time.RFC3339Nano)
 		for index, id := range orderedIDs {
 			currentTask := currentByID[id]
 			var targetOrder *int
-			if input.Mode == "manual" {
+			if mode == "manual" {
 				value := (index + 1) * 1000
 				targetOrder = &value
 			}
@@ -437,14 +521,14 @@ func (a *API) reorderTasks(c *gin.Context) {
 				Where("id = ? AND version = ?", id, currentTask.Version).
 				Updates(map[string]any{
 					"manual_order": targetOrder,
-					"updated_at":   now,
+					"updated_at":   nowText,
 					"version":      gorm.Expr("version + 1"),
 				})
 			if result.Error != nil {
-				return result.Error
+				return response, result.Error
 			}
 			if result.RowsAffected == 0 {
-				return taskVersionConflict()
+				return response, taskVersionConflict()
 			}
 			response.Changed++
 		}
@@ -456,31 +540,23 @@ func (a *API) reorderTasks(c *gin.Context) {
 			orderedQuery = orderedQuery.Where("tasks.planned_date = ?", *plannedDate)
 		}
 		var ok bool
-		if input.Mode == "manual" {
+		if mode == "manual" {
 			orderedQuery, ok = applyTaskSort(orderedQuery, "manual_order")
 		} else {
 			orderedQuery, ok = applyTaskSort(orderedQuery, "")
 		}
 		if !ok {
-			return errors.New("apply task reorder sort")
+			return response, errors.New("apply task reorder sort")
 		}
 		if err := withTaskProject(orderedQuery).Find(&response.Tasks).Error; err != nil {
-			return fmt.Errorf("load reordered tasks: %w", err)
+			return response, fmt.Errorf("load reordered tasks: %w", err)
 		}
 		if err := hydrateTaskTags(tx, response.Tasks); err != nil {
-			return err
+			return response, err
 		}
 		normalizeTasks(response.Tasks)
-		return nil
-	})
-	if err != nil {
-		if writeProjectRequestError(c, err) {
-			return
-		}
-		writeDatabaseError(c)
-		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": response})
+	return response, nil
 }
 
 func sameNullableInt(left, right *int) bool {

@@ -40,7 +40,7 @@ func TestNonPersistentChatToolsDoNotLeakBodiesAcrossTerminalPaths(t *testing.T) 
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				if calls.Add(1) == 1 {
-					if len(payload.Tools) != 3 {
+					if len(payload.Tools) != 4 {
 						t.Errorf("production memory tools=%d", len(payload.Tools))
 					}
 					toolCalls := []map[string]any{}

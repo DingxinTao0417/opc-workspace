@@ -34,6 +34,66 @@ afterEach(() => {
 });
 
 describe("invoice PDF requests", () => {
+  it("downloads the exact saved asset and checks response hash and size", async () => {
+    const content = "%PDF-1.7\nlocal invoice";
+    const expected = {
+      assetId: "00000000-0000-4000-8000-000000000001",
+      sha256: "a".repeat(64),
+      sizeBytes: content.length,
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(content, {
+          headers: {
+            "Content-Type": "application/pdf",
+            "X-Invoice-PDF-SHA256": expected.sha256,
+          },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      downloadInvoicePdf("invoice-1", "invoice.pdf", expected),
+    ).resolves.toMatchObject({ fileName: "invoice.pdf" });
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      `?asset_id=${expected.assetId}&sha256=${expected.sha256}`,
+    );
+    await expect(
+      downloadInvoicePdf("invoice-1", "invoice.pdf", {
+        ...expected,
+        sizeBytes: 1,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    await expect(
+      downloadInvoicePdf("invoice-1", "invoice.pdf", {
+        ...expected,
+        sha256: "b".repeat(64),
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    const calls = fetchMock.mock.calls.length;
+    await expect(
+      downloadInvoicePdf("invoice-1", "invoice.pdf", {
+        ...expected,
+        assetId: "not-id",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+    expect(fetchMock).toHaveBeenCalledTimes(calls);
+  });
+  it("never falls back to the current asset when the historical PDF is replaced", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ code: "INVOICE_PDF_CHANGED", message: "replaced" }, 409),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      downloadInvoicePdf("invoice-1", "invoice.pdf", {
+        assetId: "00000000-0000-4000-8000-000000000001",
+        sha256: "a".repeat(64),
+        sizeBytes: 20,
+      }),
+    ).rejects.toMatchObject({ code: "INVOICE_PDF_CHANGED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it("strictly normalizes PDF metadata and integrity facts", () => {
     expect(normalizeInvoicePdfMetadata(metadataPayload)).toEqual({
       invoiceId: "invoice-1",

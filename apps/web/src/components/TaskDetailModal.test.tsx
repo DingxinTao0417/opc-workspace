@@ -11,6 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
+import { useAiChatStore } from "../store/aiChat";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Task } from "../types/models";
 import { TaskDetailModal } from "./TaskDetailModal";
 
@@ -124,6 +126,86 @@ function renderModal(initialEntry = "/tasks") {
 }
 
 describe("TaskDetailModal", () => {
+  it("passes explicit conversation to the execution drawer only after the task draft is saved or cleared", async () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    const session = "33333333-3333-4333-8333-333333333334";
+    apiMocks.getTask.mockResolvedValue({ ...task, id });
+    useUiStore.setState({ taskDetailId: id, agentRunDrawer: null });
+    renderModal(`/tasks/${id}?return_session=${session}`);
+    const input = await screen.findByLabelText("任务名称");
+    fireEvent.change(input, { target: { value: "未保存任务草稿" } });
+    expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+    expect(
+      screen.queryByRole("link", { name: "返回原对话" }),
+    ).not.toBeInTheDocument();
+    const open = screen.getByRole("button", { name: "查看执行过程" });
+    expect(open).toBeDisabled();
+    fireEvent.click(open);
+    expect(useUiStore.getState().agentRunDrawer).toBeNull();
+    fireEvent.change(input, { target: { value: task.title } });
+    fireEvent.click(open);
+    expect(useUiStore.getState().agentRunDrawer).toMatchObject({
+      taskId: id,
+      returnSession: session,
+    });
+    expect(apiMocks.updateTask).not.toHaveBeenCalled();
+  });
+  it.each(["", "?return_session=invalid"])(
+    "does not infer a return conversation on an ordinary task %s",
+    async (query) => {
+      const id = "33333333-3333-4333-8333-333333333333";
+      apiMocks.getTask.mockResolvedValue({ ...task, id });
+      useUiStore.setState({ taskDetailId: id });
+      renderModal(`/tasks/${id}${query}`);
+      await screen.findByLabelText("任务名称");
+      expect(
+        screen.queryByRole("link", { name: "返回原对话" }),
+      ).not.toBeInTheDocument();
+    },
+  );
+  it("returns from the ordinary Task modal without sending or changing the Task", async () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    const session = "33333333-3333-4333-8333-333333333334";
+    apiMocks.getTask.mockResolvedValue({ ...task, id });
+    useUiStore.setState({ taskDetailId: id });
+    useAiChatStore.setState({ activeSessionId: "before-task-return" });
+    renderModal(`/tasks/${id}?return_session=${session}`);
+    await screen.findByLabelText("任务名称");
+    expect(useAiChatStore.getState().activeSessionId).toBe(
+      "before-task-return",
+    );
+    const returnLink = screen.getByRole("link", { name: "返回原对话" });
+    for (const modifiers of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
+      document.addEventListener("click", (event) => event.preventDefault(), {
+        once: true,
+      });
+      fireEvent.click(returnLink, modifiers);
+      expect(useUiStore.getState().taskDetailId).toBe(id);
+      expect(useAiChatStore.getState().activeSessionId).toBe(
+        "before-task-return",
+      );
+      expect(screen.getByTestId("current-location")).not.toHaveTextContent(
+        "/ai",
+      );
+    }
+    fireEvent(
+      returnLink,
+      new MouseEvent("auxclick", { bubbles: true, button: 1 }),
+    );
+    expect(useUiStore.getState().taskDetailId).toBe(id);
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/ai");
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+    expect(useAiChatStore.getState().activeSessionId).toBe(session);
+    expect(apiMocks.updateTask).not.toHaveBeenCalled();
+    expect(apiMocks.executeTaskLifecycleCommand).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     apiMocks.getTask.mockResolvedValue(task);
     apiMocks.updateTask.mockResolvedValue({
@@ -170,8 +252,42 @@ describe("TaskDetailModal", () => {
 
   afterEach(() => {
     cleanup();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     vi.clearAllMocks();
     useUiStore.setState({ taskDetailId: null });
+  });
+
+  it("hands off the saved task identity only after its unsaved draft is cleared", async () => {
+    const id = "33333333-3333-4333-8333-333333333333";
+    apiMocks.getTask.mockResolvedValue({ ...task, id });
+    useUiStore.setState({ taskDetailId: id });
+    renderModal(`/tasks/${id}`);
+    const input = await screen.findByLabelText("任务名称");
+    const handoff = screen.getByRole("button", { name: "交给智能体" });
+    expect(handoff).toBeEnabled();
+    fireEvent.change(input, { target: { value: "尚未保存的新标题" } });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    fireEvent.change(input, { target: { value: task.title } });
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "任务",
+      route: `/tasks/${id}`,
+      scopes: ["work", "outputs", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=task");
+    expect(pending?.prompt).toContain(`id=${id}`);
+    expect(pending?.prompt).toContain("workspace_task_assignments");
+    expect(pending?.prompt).toContain("workspace_task_submissions");
+    expect(pending?.prompt).toContain("不要启动 Agent");
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+    expect(screen.getByTestId("current-location")).toHaveTextContent("/ai");
+    expect(apiMocks.updateTask).not.toHaveBeenCalled();
+    expect(apiMocks.executeTaskLifecycleCommand).not.toHaveBeenCalled();
   });
 
   it("loads and saves editable task fields", async () => {
@@ -291,7 +407,9 @@ describe("TaskDetailModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
 
     expect(apiMocks.deleteTask).not.toHaveBeenCalled();
-    expect(screen.getByText("删除后无法恢复，确定继续？")).toBeTruthy();
+    expect(
+      screen.getByText("删除后无法恢复；活动 Agent 作业会阻止删除。确定继续？"),
+    ).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
@@ -322,6 +440,27 @@ describe("TaskDetailModal", () => {
         "该任务仍被收件箱条目关联。请先到收件箱解除活动关联，再删除任务。",
       ),
     ).toBeInTheDocument();
+    expect(useUiStore.getState().taskDetailId).toBe(task.id);
+  });
+
+  it("explains how to resolve an active Agent run before deletion", async () => {
+    apiMocks.deleteTask.mockRejectedValueOnce(
+      new ApiError("actor run is active", {
+        status: 409,
+        code: "TASK_HAS_ACTIVE_AGENT_RUN",
+      }),
+    );
+    renderModal();
+
+    await screen.findByLabelText("任务名称");
+    fireEvent.click(screen.getByRole("button", { name: "删除任务" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
+
+    expect(
+      await screen.findByText(
+        "该任务仍有执行中的 Agent 作业。请先等待或取消执行；若产出登记待恢复，请先在执行过程中重试登记。",
+      ),
+    ).toBeVisible();
     expect(useUiStore.getState().taskDetailId).toBe(task.id);
   });
 

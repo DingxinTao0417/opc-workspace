@@ -20,7 +20,7 @@ import (
 
 func newProjectTestAPI(t *testing.T) (*gin.Engine, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "projects-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "projects-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

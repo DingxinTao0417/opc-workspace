@@ -200,27 +200,12 @@ func (a *API) createReminder(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		id := uuid.NewString()
-		reminder := models.Reminder{
-			ID: id, SourceEntityType: "manual", Title: normalized.Title,
-			Summary: normalized.Summary, Priority: normalized.Priority,
-			TriggerAt: normalized.TriggerAt, Status: "scheduled",
-			SourceEventKey:   "reminder:" + id + ":due",
-			CreatedByActorID: models.BuiltinOwnerActorID,
-			SeriesID:         id, RecurrenceType: normalized.RecurrenceType,
-			RecurrenceInterval: normalized.RecurrenceInterval,
-			RecurrenceTimezone: normalized.RecurrenceTimezone, OccurrenceNumber: 1,
-			RecurrenceAnchorDay: normalized.RecurrenceAnchorDay,
-			Version:             1, CreatedAt: nowText, UpdatedAt: nowText,
-		}
-		if err := tx.Create(&reminder).Error; err != nil {
-			return fmt.Errorf("create Reminder: %w", err)
-		}
-		response = reminderOutputFromModel(reminder)
-		if err := recordReminderWorkflowEvent(tx, reminder.ID, "reminder_created", nil, reminderEventState(reminder, ""), models.BuiltinOwnerActorID, requestIDFromContext(c), nowText); err != nil {
+		var err error
+		response, err = createReminderInTransaction(tx, normalized, requestIDFromContext(c), nowText)
+		if err != nil {
 			return err
 		}
-		return recordReminderSnapshot(tx, idempotencyKey, createReminderEndpoint, reminder.ID, requestHash, statusCode, response, nowText)
+		return recordReminderSnapshot(tx, idempotencyKey, createReminderEndpoint, response.ID, requestHash, statusCode, response, nowText)
 	})
 	if err != nil {
 		if writeProjectRequestError(c, mapReminderConstraintError(err)) {
@@ -283,55 +268,9 @@ func (a *API) updateReminder(c *gin.Context) {
 	var response reminderOutput
 	nowText := formatInboxTimestamp(now)
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		current, err := loadReminder(tx, id)
-		if err != nil {
-			return reminderLoadError(err)
-		}
-		if current.Version != expectedVersion {
-			return reminderVersionConflict()
-		}
-		if current.Status != "scheduled" {
-			return reminderTerminalConflict()
-		}
-		next := current
-		applyReminderPatch(&next, patch)
-		if reminderPatchChangesAnchor(patch) {
-			anchorDay, err := reminderRecurrenceAnchorDay(next.RecurrenceType, next.TriggerAt, next.RecurrenceTimezone)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-			next.RecurrenceAnchorDay = anchorDay
-		}
-		if err := validateReminderRecurrence(next.RecurrenceType, next.RecurrenceInterval, next.RecurrenceTimezone, next.RecurrenceAnchorDay); err != nil {
-			return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-		}
-		if reminderEditableEqual(current, next) {
-			response = reminderOutputFromModel(current)
-			return nil
-		}
-		next.Version++
-		next.UpdatedAt = nowText
-		updates := map[string]any{
-			"title": next.Title, "summary": next.Summary, "priority": next.Priority,
-			"trigger_at": next.TriggerAt, "version": next.Version, "updated_at": next.UpdatedAt,
-			"recurrence_type": next.RecurrenceType, "recurrence_interval": next.RecurrenceInterval,
-			"recurrence_timezone":   next.RecurrenceTimezone,
-			"recurrence_anchor_day": next.RecurrenceAnchorDay,
-		}
-		result := tx.Model(&models.Reminder{}).
-			Where("id = ? AND version = ? AND status = 'scheduled'", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return reminderVersionConflict()
-		}
-		if err := recordReminderWorkflowEvent(tx, id, "reminder_updated", reminderEventState(current, ""), reminderEventState(next, ""), models.BuiltinOwnerActorID, requestIDFromContext(c), nowText); err != nil {
-			return err
-		}
-		response = reminderOutputFromModel(next)
-		return nil
+		var err error
+		response, err = updateReminderInTransaction(tx, id, expectedVersion, patch, requestIDFromContext(c), nowText)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, mapReminderConstraintError(err)) {
@@ -358,9 +297,9 @@ func (a *API) cancelReminder(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_JSON", err.Error())
 		return
 	}
-	reason := strings.TrimSpace(input.Reason)
-	if utf8.RuneCountInString(reason) < 1 || utf8.RuneCountInString(reason) > 1000 {
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "reason must contain 1 to 1000 characters")
+	reason, err := normalizeReminderCancelReason(input.Reason)
+	if err != nil {
+		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		return
 	}
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
@@ -387,41 +326,11 @@ func (a *API) cancelReminder(c *gin.Context) {
 			replayed = true
 			return nil
 		}
-		current, err := loadReminder(tx, id)
+		var err error
+		response, err = cancelReminderInTransaction(tx, id, expectedVersion, reason, requestIDFromContext(c), nowText)
 		if err != nil {
-			return reminderLoadError(err)
-		}
-		if current.Version != expectedVersion {
-			return reminderVersionConflict()
-		}
-		if current.Status != "scheduled" {
-			return reminderTerminalConflict()
-		}
-		ownerID := models.BuiltinOwnerActorID
-		next := current
-		next.Status = "cancelled"
-		next.CancelledByActorID = &ownerID
-		next.CancelledAt = &nowText
-		next.CancelReason = &reason
-		next.Version++
-		next.UpdatedAt = nowText
-		result := tx.Model(&models.Reminder{}).
-			Where("id = ? AND version = ? AND status = 'scheduled'", id, expectedVersion).
-			Updates(map[string]any{
-				"status": next.Status, "cancelled_by_actor_id": ownerID,
-				"cancelled_at": nowText, "cancel_reason": reason,
-				"version": next.Version, "updated_at": nowText,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return reminderVersionConflict()
-		}
-		if err := recordReminderWorkflowEvent(tx, id, "reminder_cancelled", reminderEventState(current, ""), reminderEventState(next, reason), ownerID, requestIDFromContext(c), nowText); err != nil {
 			return err
 		}
-		response = reminderOutputFromModel(next)
 		return recordReminderSnapshot(tx, idempotencyKey, endpoint, id, requestHash, http.StatusOK, response, nowText)
 	})
 	if err != nil {

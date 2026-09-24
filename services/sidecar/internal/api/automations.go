@@ -214,49 +214,8 @@ func (a *API) changeAutomationRule(c *gin.Context, enabled *bool) {
 
 	var response automationRuleOutput
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.AutomationRule
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "AUTOMATION_RULE_NOT_FOUND", "Automation rule not found")
-			}
-			return err
-		}
-		if current.Version != expectedVersion {
-			return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Automation rule changed in another window")
-		}
-		preset, exists := automationPresetByKey(current.PresetKey)
-		if !exists || preset.ID != current.ID {
-			return errors.New("automation preset identity is invalid")
-		}
-		config, err := decodeAutomationConfig(current.PresetKey, current.ConfigJSON)
-		if err != nil {
-			return err
-		}
-		if requestedConfig != nil {
-			config, err = normalizeAutomationConfig(current.PresetKey, *requestedConfig)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-		}
-		nextEnabled := current.Enabled
-		action := "automation_rule_updated"
-		reason := "configuration changed"
-		if enabled != nil {
-			nextEnabled = *enabled
-			if nextEnabled && !preset.Available {
-				return newProjectRequestError(http.StatusConflict, "AUTOMATION_DEPENDENCY_UNAVAILABLE", preset.UnavailableReason)
-			}
-			if nextEnabled {
-				action, reason = "automation_rule_enabled", "enabled by owner"
-			} else {
-				action, reason = "automation_rule_disabled", "disabled by owner"
-			}
-		}
-		next, err := saveAutomationRule(tx, current, config, nextEnabled, expectedVersion, a.options.Now().UTC(), action, reason)
-		if err != nil {
-			return err
-		}
-		response, err = automationRuleOutputFromModel(next)
+		var err error
+		response, err = changeAutomationRuleInTransaction(tx, id, expectedVersion, requestedConfig, enabled, a.options.Now())
 		return err
 	})
 	if err != nil {

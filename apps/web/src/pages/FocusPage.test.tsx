@@ -2,10 +2,15 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as renderTesting,
   screen,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
+import { Link, MemoryRouter, useLocation, useNavigate } from "react-router-dom";
+import { focusReportLocationHref } from "../lib/focusReportLocation";
+import { useAiChatStore } from "../store/aiChat";
+import { ApiError } from "../api/client";
 import type {
   FocusReport,
   FocusSessionListResult,
@@ -45,6 +50,7 @@ const mocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   reportQuery: {
+    error: null as unknown,
     data: {
       dateFrom: "2026-08-22",
       dateTo: "2026-08-28",
@@ -86,6 +92,41 @@ const mocks = vi.hoisted(() => ({
   stop: vi.fn(),
   cancel: vi.fn(),
 }));
+
+const sourceSession = "018f0000-0000-7000-8000-000000005834";
+const sourceProject = "018f0000-0000-7000-8000-000000005833";
+const linkedReportHref = focusReportLocationHref({
+  dateFrom: "2026-11-01",
+  dateTo: "2026-11-02",
+  timezone: "America/Los_Angeles",
+  projectId: sourceProject,
+  view: "heatmap",
+});
+const initialReport = structuredClone(mocks.reportQuery.data);
+function LocationProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="当前位置">
+        {location.pathname}
+        {location.search}
+      </output>
+      <button onClick={() => navigate(-1)}>后退</button>
+      <Link to={linkedReportHref.replace("2026-11-02", "2026-11-03")}>
+        另一报告
+      </Link>
+    </>
+  );
+}
+function render(node: ReactElement, route = "/focus") {
+  return renderTesting(
+    <MemoryRouter initialEntries={[route]}>
+      {node}
+      <LocationProbe />
+    </MemoryRouter>,
+  );
+}
 
 function mutation(mutate: ReturnType<typeof vi.fn>) {
   return { mutate, isPending: false, isError: false, error: null };
@@ -160,6 +201,11 @@ beforeEach(() => {
   mocks.taskQuery.data = [];
   mocks.taskQuery.isPending = false;
   mocks.taskQuery.isError = false;
+  mocks.reportQuery.data = structuredClone(initialReport);
+  mocks.reportQuery.isPending = false;
+  mocks.reportQuery.isError = false;
+  mocks.reportQuery.error = null;
+  useAiChatStore.setState({ activeSessionId: "", streaming: null });
   useFocusCycleStore.getState().resetCycle();
   useSettingsStore.getState().resetSettings();
   useUiStore.setState({ settingsOpen: false, settingsModule: "general" });
@@ -171,6 +217,145 @@ afterEach(() => {
 });
 
 describe("FocusPage", () => {
+  it("opens the exact report and returns to its source conversation without focus commands", () => {
+    const view = render(
+      <FocusPage />,
+      `${linkedReportHref}&return_session=${sourceSession}`,
+    );
+    expect(mocks.reportHook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-11-01",
+        dateTo: "2026-11-02",
+        timezone: "America/Los_Angeles",
+        projectId: sourceProject,
+      }),
+      true,
+    );
+    expect(
+      mocks.reportHook.mock.calls.every(
+        ([input]) => input.dateFrom === "2026-11-01",
+      ),
+    ).toBe(true);
+    expect(screen.getByText(/America\/Los_Angeles/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "指定项目" })).toHaveAttribute(
+      "href",
+      `/projects/${sourceProject}`,
+    );
+    expect(screen.getByText(/不是对话时的冻结快照/)).toBeInTheDocument();
+    expect(screen.getByLabelText("专注报告")).toHaveFocus(); // Empty data locates the report, not a nonexistent heatmap.
+    useAiChatStore.setState({ activeSessionId: "another-session" });
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sourceSession);
+    expect(screen.getByLabelText("当前位置")).toHaveTextContent("/ai");
+    for (const command of [
+      mocks.create,
+      mocks.pause,
+      mocks.resume,
+      mocks.stop,
+      mocks.cancel,
+    ])
+      expect(command).not.toHaveBeenCalled();
+    expect(useFocusCycleStore.getState().phase).toBe("idle");
+    view.unmount();
+  });
+
+  it("locates the requested dimension after data loads and does not steal date-input focus", () => {
+    mocks.reportQuery.isPending = true;
+    const view = render(<FocusPage />, linkedReportHref);
+    mocks.reportQuery.isPending = false;
+    mocks.reportQuery.data.totals = { sessions: 1, seconds: 60, minutes: 1 };
+    // Same mounted route, as when the asynchronous query resolves.
+    view.rerender(
+      <MemoryRouter initialEntries={[linkedReportHref]}>
+        <FocusPage />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+    expect(screen.getByLabelText("周几与小时专注热力图")).toHaveFocus();
+    const end = screen.getByLabelText("专注回顾结束日期");
+    end.focus();
+    fireEvent.change(end, { target: { value: "2026-11-03" } });
+    expect(end).toHaveFocus();
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateTo: "2026-11-03",
+        projectId: sourceProject,
+        timezone: "America/Los_Angeles",
+      }),
+      true,
+    );
+  });
+
+  it("follows another report and browser back without showing a default-window query", () => {
+    render(<FocusPage />, linkedReportHref);
+    fireEvent.click(screen.getByRole("link", { name: "另一报告" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dateTo: "2026-11-03" }),
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "后退" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dateTo: "2026-11-02" }),
+      true,
+    );
+  });
+
+  it("retains linked zone/project for presets even when that zone is on a different day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-19T01:00:00Z"));
+    render(<FocusPage />, linkedReportHref);
+    fireEvent.click(screen.getByRole("button", { name: "7 天" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        dateFrom: "2026-09-12",
+        dateTo: "2026-09-18",
+        timezone: "America/Los_Angeles",
+        projectId: sourceProject,
+      }),
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "清除链接筛选" }));
+    expect(mocks.reportHook.mock.lastCall![0].projectId).toBeUndefined();
+    expect(screen.queryByText(/按链接条件查看/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    "/focus?report=days",
+    `${linkedReportHref}&timezone=UTC`,
+    linkedReportHref.replace("2026-11-02", "2026-02-30"),
+  ])("rejects invalid report navigation %s", (route) => {
+    render(<FocusPage />, route);
+    expect(screen.getByText("报告链接无效")).toBeInTheDocument();
+    expect(
+      mocks.reportHook.mock.calls.every(([, enabled]) => enabled === false),
+    ).toBe(true);
+    expect(
+      screen.queryByText(/还没有已完成的专注记录/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "清除链接筛选" }));
+    expect(mocks.reportHook).toHaveBeenLastCalledWith(expect.any(Object), true);
+  });
+
+  it("keeps the report independent of active-session errors and hides unavailable project data", () => {
+    mocks.focusQuery.isError = true;
+    mocks.reportQuery.isError = true;
+    mocks.reportQuery.error = new ApiError("missing", {
+      code: "PROJECT_NOT_FOUND",
+      status: 404,
+    });
+    render(
+      <FocusPage />,
+      `${linkedReportHref}&return_session=https://evil.invalid`,
+    );
+    expect(screen.getByText(/链接中的项目已不存在/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "返回原对话" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/还没有已完成的专注记录/),
+    ).not.toBeInTheDocument();
+  });
+
   it("requires a second confirmation before starting without a task", () => {
     render(<FocusPage />);
 

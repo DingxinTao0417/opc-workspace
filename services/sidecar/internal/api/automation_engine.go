@@ -135,7 +135,10 @@ type automationAttemptInput struct {
 	RetryOfRunID   *string
 	Config         automationConfig
 	ActionSnapshot map[string]any
-	Now            time.Time
+	// Only the Agent failure preset retains the immutable raw snapshot. Decoding
+	// through a map first would erase duplicate keys before its strict validation.
+	ActionSnapshotJSON string
+	Now                time.Time
 }
 
 type automationActionResult struct {
@@ -252,6 +255,9 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 	if err != nil {
 		return models.AutomationRun{}, err
 	}
+	if input.Rule.PresetKey == automationPresetAgentRunFailed && input.ActionSnapshotJSON != "" {
+		actionJSON = []byte(input.ActionSnapshotJSON)
+	}
 	nowText := formatInboxTimestamp(input.Now.UTC())
 	runID := uuid.NewString()
 	savepoint := "automation_action"
@@ -298,6 +304,9 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 	case errors.Is(actionErr, errAutomationSourceEventInvalid):
 		errorCode = "SOURCE_EVENT_INVALID"
 		retryable = false
+	case errors.Is(actionErr, errAutomationSourceUnavailable):
+		errorCode = "SOURCE_UNAVAILABLE"
+		retryable = false
 	}
 	var retryAt *string
 	if retryable {
@@ -328,6 +337,9 @@ func executeAutomationAttempt(tx *gorm.DB, input automationAttemptInput) (models
 }
 
 func executeAutomationAction(tx *gorm.DB, runID string, input automationAttemptInput, nowText string) (automationActionResult, error) {
+	if input.Rule.PresetKey == automationPresetAgentRunFailed {
+		return createAutomationAgentRunFailureInboxItem(tx, runID, input, nowText)
+	}
 	actionType, _ := input.ActionSnapshot["action_type"].(string)
 	if input.Rule.PresetKey == automationPresetInvoiceOverdue && actionType != "task" {
 		return automationActionResult{}, errAutomationActionSnapshotInvalid
@@ -809,53 +821,69 @@ func (a *API) projectDueAutomationRetries(now time.Time) error {
 
 func (a *API) retryAutomationRunByID(id string, now time.Time) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
-		var previous models.AutomationRun
-		if err := tx.First(&previous, "id = ?", id).Error; err != nil {
-			return err
-		}
-		if previous.Status != "failed" || !previous.Retryable || previous.Attempt >= automationMaxAttempts {
-			return newProjectRequestError(http.StatusConflict, "AUTOMATION_RUN_NOT_RETRYABLE", "Automation run cannot be retried")
-		}
-		var existing int64
-		if err := tx.Model(&models.AutomationRun{}).Where("retry_of_run_id = ?", previous.ID).Count(&existing).Error; err != nil {
-			return err
-		}
-		if existing > 0 {
-			return newProjectRequestError(http.StatusConflict, "AUTOMATION_RETRY_ALREADY_EXISTS", "A retry attempt already exists")
-		}
-		var rule models.AutomationRule
-		if err := tx.First(&rule, "id = ?", previous.RuleID).Error; err != nil {
-			return err
-		}
-		if !rule.Enabled && previous.TriggerType != "event" {
-			return newProjectRequestError(http.StatusConflict, "AUTOMATION_RULE_DISABLED", "Enable the automation rule before retrying")
-		}
-		// A retry is another attempt of the original immutable run. Keep the
-		// captured rule version even if its editable configuration has since
-		// advanced; config and action snapshots already come from that run.
-		rule.Version = previous.RuleVersion
-		if previous.TriggerType == "event" {
-			// Event runs are retries of an immutable capture. Disabling or
-			// editing the rule after capture cannot revoke that delivery.
-			rule.Enabled = true
-		}
-		config, err := decodeAutomationConfig(previousRulePresetKey(rule), previous.ConfigSnapshotJSON)
-		if err != nil {
-			return err
-		}
-		var action map[string]any
-		if err := json.Unmarshal([]byte(previous.ActionSnapshotJSON), &action); err != nil {
-			return err
-		}
-		retryOf := previous.ID
-		_, err = executeAutomationAttempt(tx, automationAttemptInput{
-			Rule: rule, TriggerType: previous.TriggerType,
-			SourceEventID: previous.SourceEventID, ScheduledFor: previous.ScheduledFor,
-			LogicalKey: previous.LogicalKey, Attempt: previous.Attempt + 1, RetryOfRunID: &retryOf,
-			Config: config, ActionSnapshot: action, Now: now.UTC(),
-		})
+		_, err := retryAutomationRunInTransaction(tx, id, now)
 		return err
 	})
+}
+
+// Preparation is read-only and shared with human approval previews. Neither the
+// current rule configuration nor a model-supplied action replaces the capture.
+func prepareAutomationRetry(tx *gorm.DB, id string, now time.Time) (models.AutomationRun, models.AutomationRule, automationAttemptInput, error) {
+	var previous models.AutomationRun
+	var current models.AutomationRule
+	var input automationAttemptInput
+	if err := tx.First(&previous, "id = ?", id).Error; err != nil {
+		return previous, current, input, err
+	}
+	if previous.Status != "failed" || !previous.Retryable || previous.Attempt >= automationMaxAttempts {
+		return previous, current, input, newProjectRequestError(http.StatusConflict, "AUTOMATION_RUN_NOT_RETRYABLE", "Automation run cannot be retried")
+	}
+	var existing int64
+	if err := tx.Model(&models.AutomationRun{}).Where("retry_of_run_id = ?", previous.ID).Count(&existing).Error; err != nil {
+		return previous, current, input, err
+	}
+	if existing > 0 {
+		return previous, current, input, newProjectRequestError(http.StatusConflict, "AUTOMATION_RETRY_ALREADY_EXISTS", "A retry attempt already exists")
+	}
+	if err := tx.First(&current, "id = ?", previous.RuleID).Error; err != nil {
+		return previous, current, input, err
+	}
+	if !current.Enabled && previous.TriggerType != "event" {
+		return previous, current, input, newProjectRequestError(http.StatusConflict, "AUTOMATION_RULE_DISABLED", "Enable the automation rule before retrying")
+	}
+	rule := current
+	rule.Version = previous.RuleVersion
+	if previous.TriggerType == "event" {
+		// Disabling a rule cannot revoke an already captured event delivery.
+		rule.Enabled = true
+	}
+	config, err := decodeAutomationConfig(previousRulePresetKey(rule), previous.ConfigSnapshotJSON)
+	if err != nil {
+		return previous, current, input, err
+	}
+	var action map[string]any
+	if err := json.Unmarshal([]byte(previous.ActionSnapshotJSON), &action); err != nil {
+		return previous, current, input, err
+	}
+	retryOf := previous.ID
+	input = automationAttemptInput{
+		Rule: rule, TriggerType: previous.TriggerType,
+		SourceEventID: previous.SourceEventID, ScheduledFor: previous.ScheduledFor,
+		LogicalKey: previous.LogicalKey, Attempt: previous.Attempt + 1, RetryOfRunID: &retryOf,
+		Config: config, ActionSnapshot: action, Now: now.UTC(),
+	}
+	if rule.PresetKey == automationPresetAgentRunFailed {
+		input.ActionSnapshotJSON = previous.ActionSnapshotJSON
+	}
+	return previous, current, input, nil
+}
+
+func retryAutomationRunInTransaction(tx *gorm.DB, id string, now time.Time) (models.AutomationRun, error) {
+	_, _, input, err := prepareAutomationRetry(tx, id, now)
+	if err != nil {
+		return models.AutomationRun{}, err
+	}
+	return executeAutomationAttempt(tx, input)
 }
 
 func previousRulePresetKey(rule models.AutomationRule) string { return rule.PresetKey }

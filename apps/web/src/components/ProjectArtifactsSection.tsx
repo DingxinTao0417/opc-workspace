@@ -2,6 +2,10 @@ import { ArrowUpRight, FileOutput, History, Paperclip } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useProjectArtifactsQuery } from "../api/hooks";
+import {
+  projectOutputsHandoff,
+  taskArtifactHandoff,
+} from "../lib/aiIssueHandoff";
 import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type {
@@ -10,6 +14,7 @@ import type {
   TaskArtifactStorageKind,
   TaskStatus,
 } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 
 const storageLabels: Record<TaskArtifactStorageKind, string> = {
@@ -94,6 +99,10 @@ export function ProjectArtifactsSection({ projectId }: { projectId: string }) {
           <p>汇总项目任务的真实交付物；查看和验收仍在所属任务中完成。</p>
         </div>
         <div className="project-artifact-heading-actions">
+          <AiIssueHandoffButton
+            content={projectOutputsHandoff(projectId)}
+            label="梳理项目跟进"
+          />
           <label className="project-history-toggle">
             <input
               checked={includeDeleted}
@@ -198,6 +207,20 @@ export function ProjectArtifactsSection({ projectId }: { projectId: string }) {
                 >
                   打开任务
                 </button>
+                {!artifact.deletedAt ? (
+                  <AiIssueHandoffButton
+                    content={taskArtifactHandoff(
+                      artifact.id,
+                      task.id,
+                      artifact.submissionId,
+                      artifact.name,
+                      task.title,
+                      submissionSequence,
+                      artifact.storageKind,
+                      artifact.submissionStatus,
+                    )}
+                  />
+                ) : null}
                 {followup ? (
                   <Link
                     aria-label={`${

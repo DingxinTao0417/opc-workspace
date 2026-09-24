@@ -11,10 +11,13 @@ import { resetRuntimeConnection } from "../api/client";
 import {
   getRuntimeDiagnostics,
   isDesktopRuntime,
+  listStartupRestoreChoices,
   openDesktopLogDirectory,
   requestApplicationRestart,
-  type StartupStage,
+  scheduleStartupRestore,
   type RuntimeDiagnostics,
+  type StartupRestoreChoice,
+  type StartupStage,
 } from "../api/desktop";
 
 type RuntimeGateState =
@@ -28,6 +31,10 @@ interface ServiceRecoveryGateProps {
   restart?: () => Promise<boolean>;
   resetConnection?: () => void;
   pollIntervalMs?: number;
+  listBackups?: () => Promise<StartupRestoreChoice[]>;
+  scheduleRestore?: (
+    backupId: string,
+  ) => Promise<{ backupId: string; restartRequired: boolean }>;
 }
 
 const readyPollIntervalMs = 3_000;
@@ -55,6 +62,8 @@ export function ServiceRecoveryGate({
   restart = requestApplicationRestart,
   resetConnection = resetRuntimeConnection,
   pollIntervalMs = 500,
+  listBackups = listStartupRestoreChoices,
+  scheduleRestore = scheduleStartupRestore,
 }: ServiceRecoveryGateProps) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<RuntimeGateState>(
@@ -70,6 +79,17 @@ export function ServiceRecoveryGate({
   const managedReady = useRef(false);
   const lastReadyGeneration = useRef<number | null | undefined>(undefined);
   const recoveryCleanup = useRef<Promise<void> | null>(null);
+  const [showRestorePicker, setShowRestorePicker] = useState(false);
+  const [restoreChoices, setRestoreChoices] = useState<
+    StartupRestoreChoice[] | null
+  >(null);
+  const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
+  const [restoreConsent, setRestoreConsent] = useState(false);
+  const [restoreAction, setRestoreAction] = useState<
+    "load" | "schedule" | null
+  >(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreScheduled, setRestoreScheduled] = useState(false);
 
   useEffect(() => {
     if (!desktop) {
@@ -217,6 +237,35 @@ export function ServiceRecoveryGate({
     }
   };
 
+  const openRestorePicker = async () => {
+    setRestoreError(null);
+    setShowRestorePicker(true);
+    setRestoreAction("load");
+    try {
+      const choices = await listBackups();
+      setRestoreChoices(choices);
+    } catch {
+      setRestoreChoices([]);
+      setRestoreError("无法读取本地备份列表。");
+    } finally {
+      setRestoreAction(null);
+    }
+  };
+
+  const confirmRestore = async () => {
+    if (!selectedBackupId || !restoreConsent) return;
+    setRestoreAction("schedule");
+    setRestoreError(null);
+    try {
+      await scheduleRestore(selectedBackupId);
+      setRestoreScheduled(true);
+    } catch {
+      setRestoreError("启动前恢复准备失败，当前数据未被替换。");
+    } finally {
+      setRestoreAction(null);
+    }
+  };
+
   return (
     <main className="service-recovery-page" role="alert">
       <div className="service-recovery-card">
@@ -226,8 +275,7 @@ export function ServiceRecoveryGate({
         <p className="eyebrow">本地服务恢复</p>
         <h1>本地服务未能正常启动</h1>
         <p>
-          业务页面已暂停显示，本地数据不会被自动替换。可以重新检查状态、打开脱敏日志，或重启应用后再次启动
-          Sidecar。
+          业务页面已暂停显示，本地数据不会被自动替换。可以重新检查状态、打开脱敏日志，从已有备份安排恢复，或跳过后重启。
         </p>
         {versionFacts.length ? (
           <p className="service-recovery-facts">{versionFacts.join(" · ")}</p>
@@ -258,14 +306,131 @@ export function ServiceRecoveryGate({
           </button>
           <button
             className="button button-secondary"
+            disabled={action !== null || restoreScheduled}
+            onClick={() => void openRestorePicker()}
+            type="button"
+          >
+            从备份恢复
+          </button>
+          <button
+            className="button button-secondary"
             disabled={action !== null}
             onClick={() => void runAction("restart")}
             type="button"
           >
             <RotateCcw size={14} />
-            {action === "restart" ? "正在重启…" : "重启并重试"}
+            {action === "restart" ? "正在重启…" : "跳过并重启"}
           </button>
         </div>
+        {showRestorePicker ? (
+          <div className="service-recovery-restore-picker">
+            <p>
+              选择一份已有本地备份后安排恢复；跳过则保持当前数据。不会展示本机路径。
+            </p>
+            {restoreScheduled ? (
+              <p className="service-recovery-facts">
+                已安排恢复。请重启应用以在打开业务数据前应用该备份。
+              </p>
+            ) : (
+              <>
+                {restoreAction === "load" ? (
+                  <p>正在读取本地备份…</p>
+                ) : restoreChoices && restoreChoices.length === 0 ? (
+                  <p>没有可展示的本地备份。</p>
+                ) : (
+                  <ul className="service-recovery-restore-list">
+                    {(restoreChoices ?? []).map((choice) => {
+                      const selectable =
+                        choice.verificationStatus !== "invalid";
+                      return (
+                        <li key={choice.id}>
+                          <label>
+                            <input
+                              checked={selectedBackupId === choice.id}
+                              disabled={!selectable || restoreScheduled}
+                              name="startup-restore-backup"
+                              onChange={() => {
+                                setSelectedBackupId(choice.id);
+                                setRestoreConsent(false);
+                              }}
+                              type="radio"
+                              value={choice.id}
+                            />
+                            <span>
+                              {choice.createdAt
+                                ? new Date(choice.createdAt).toLocaleString()
+                                : "时间未知"}
+                              {" · "}
+                              {choice.kind}
+                              {" · "}
+                              {choice.verificationStatus}
+                              {choice.schemaVersion
+                                ? ` · schema ${choice.schemaVersion}`
+                                : ""}
+                              {selectable ? "" : " · 不可恢复"}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <label className="service-recovery-restore-consent">
+                  <input
+                    checked={restoreConsent}
+                    disabled={
+                      !selectedBackupId ||
+                      restoreScheduled ||
+                      restoreAction !== null
+                    }
+                    onChange={(event) =>
+                      setRestoreConsent(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>
+                    我确认用所选备份替换当前本地数据，并理解需要重启后才会应用。
+                  </span>
+                </label>
+                {restoreError ? (
+                  <p className="service-recovery-action-error">
+                    {restoreError}
+                  </p>
+                ) : null}
+                <div className="service-recovery-actions">
+                  <button
+                    className="button button-primary"
+                    disabled={
+                      !selectedBackupId ||
+                      !restoreConsent ||
+                      restoreAction !== null ||
+                      restoreScheduled
+                    }
+                    onClick={() => void confirmRestore()}
+                    type="button"
+                  >
+                    {restoreAction === "schedule"
+                      ? "正在准备…"
+                      : "安排恢复并准备重启"}
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    disabled={restoreAction === "schedule"}
+                    onClick={() => {
+                      setShowRestorePicker(false);
+                      setSelectedBackupId(null);
+                      setRestoreConsent(false);
+                      setRestoreError(null);
+                    }}
+                    type="button"
+                  >
+                    跳过备份选择
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : null}
         <small>
           为避免泄露数据库路径、会话令牌或业务内容，恢复页不展示 Sidecar
           原始错误。

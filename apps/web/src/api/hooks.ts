@@ -6,9 +6,24 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { Query, QueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
+import { agentRunNeedsPolling } from "../lib/agentRunDelivery";
+import { useFocusCycleStore } from "../store/focus";
+import { useSettingsStore } from "../store/settings";
 import { configureAiChatRefresh, useAiChatStore } from "../store/aiChat";
 import { confirmAiMessageTask } from "./aiActions";
+import { getAiAgentInbox } from "./aiAgentInbox";
+import { getAiAgentFamily } from "./aiAgentFamily";
+import { getAiWorkPlanInbox } from "./aiWorkPlan";
+import {
+  activeContinuationsKey,
+  recentContinuationsKey,
+} from "./aiPlanContinuation";
+import {
+  getAiSessionDelegatedRuns,
+  type AiSessionDelegatedRunListParams,
+} from "./aiSessionAgentRuns";
+import type { AiActionProposal } from "./aiWorkspaceActions";
 import {
   attachTaskToAiMessage,
   cancelAiEvaluation,
@@ -132,7 +147,9 @@ import {
   getReminder,
   getReminders,
   getSearchResults,
+  getAgentRun,
   getAgentRuns,
+  retryAgentRunOutputDelivery,
   getControlledFiles,
   getTags,
   getTask,
@@ -219,6 +236,7 @@ import {
 } from "./client";
 import type {
   ActorListParams,
+  AgentRun,
   AgentRunListParams,
   ControlledFileListParams,
   AiBusinessContextType,
@@ -380,7 +398,10 @@ async function invalidateBackupIncident(
   error: unknown,
 ): Promise<void> {
   if (backupErrorMayProjectInbox(error)) {
-    await queryClient.invalidateQueries({ queryKey: inboxQueryKey });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+      queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+    ]);
   }
 }
 
@@ -888,37 +909,55 @@ export const incomeStatsQueryKey = ["income-stats"] as const;
 export function useFinancialEntriesQuery(
   input: FinancialEntryListParams = {},
   enabled = true,
+  fresh = false,
 ) {
   return useQuery({
     queryKey: [...financialEntryQueryKey, "list", input],
-    queryFn: () => getFinancialEntries(input),
+    queryFn: ({ signal }) => getFinancialEntries(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,
-    staleTime: 10_000,
+    staleTime: fresh ? 0 : 10_000,
+    ...(fresh ? { refetchOnMount: "always" as const } : {}),
   });
 }
 
-export function useFinancialEntryQuery(id: string | null) {
+export function useFinancialEntryQuery(id: string | null, fresh = false) {
   return useQuery({
     queryKey: financialEntryDetailQueryKey(id ?? "missing"),
-    queryFn: () => getFinancialEntry(id!),
+    queryFn: ({ signal }) => getFinancialEntry(id!, signal),
     enabled: Boolean(id),
     retry: 1,
+    ...(fresh
+      ? { refetchOnMount: "always" as const, staleTime: 0, gcTime: 0 }
+      : {}),
   });
 }
 
-export function useIncomeStatsQuery(input: IncomeStatsParams, enabled = true) {
+export function useIncomeStatsQuery(
+  input: IncomeStatsParams,
+  enabled = true,
+  fresh = false,
+) {
   return useQuery({
     queryKey: [...incomeStatsQueryKey, input],
-    queryFn: () => getIncomeStats(input),
+    queryFn: ({ signal }) => getIncomeStats(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,
-    staleTime: 10_000,
+    staleTime: fresh ? 0 : 10_000,
+    ...(fresh ? { refetchOnMount: "always" as const } : {}),
   });
+}
+
+export async function invalidateFinancialActionFacts(queryClient: QueryClient) {
+  const keys = [financialEntryQueryKey, incomeStatsQueryKey];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await invalidateFinancialReadModels(queryClient);
 }
 
 async function invalidateFinancialReadModels(queryClient: QueryClient) {
@@ -1019,12 +1058,15 @@ export function useInvoicesQuery(
   });
 }
 
-export function useInvoiceQuery(id: string | null) {
+export function useInvoiceQuery(id: string | null, fresh = false) {
   return useQuery({
     queryKey: invoiceDetailQueryKey(id ?? "missing"),
-    queryFn: () => getInvoice(id!),
+    queryFn: ({ signal }) => getInvoice(id!, signal),
     enabled: Boolean(id),
     retry: 1,
+    ...(fresh
+      ? { refetchOnMount: "always" as const, staleTime: 0, gcTime: 0 }
+      : {}),
   });
 }
 
@@ -1093,6 +1135,25 @@ export function useDownloadInvoicePdf() {
       });
     },
   });
+}
+
+export async function invalidateInvoiceActionFacts(
+  queryClient: QueryClient,
+  mayTriggerAutomation: boolean,
+) {
+  await Promise.all(
+    [
+      invoiceQueryKey,
+      financialEntryQueryKey,
+      incomeStatsQueryKey,
+      projectQueryKey,
+      inboxQueryKey,
+      searchQueryKey,
+    ].map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await invalidateInvoiceReadModels(queryClient);
+  if (mayTriggerAutomation)
+    await invalidateAutomationActionFacts(queryClient, true);
 }
 
 async function invalidateInvoiceReadModels(
@@ -1323,6 +1384,87 @@ function useInvalidateClientFollowups() {
       invalidateUnifiedSearch(queryClient),
     ]);
   };
+}
+
+export async function invalidateClientActivityActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // Client detail, timeline, recent cards and navigation badges share this prefix.
+  const keys = [clientQueryKey, searchQueryKey];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
+export async function invalidateClientActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // A client name/status/contact edit changes client lists and can change the
+  // labels projected into related project, invoice and ledger read models.
+  const keys = [
+    clientQueryKey,
+    projectQueryKey,
+    invoiceQueryKey,
+    financialEntryQueryKey,
+    searchQueryKey,
+  ];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
+export async function invalidateClientContactActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // The relationship is projected in Client detail and constrains whether the
+  // selected person can be deactivated. Search can also show Client facts.
+  const keys = [clientQueryKey, actorQueryKey, searchQueryKey];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
+export async function invalidatePersonActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // Person names/status are shared by responsibility, Client-contact and
+  // follow-up projections. Cancel stale reads before refreshing every owner.
+  const keys = [
+    actorQueryKey,
+    taskQueryKey,
+    clientQueryKey,
+    inboxQueryKey,
+    searchQueryKey,
+  ];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
+export async function invalidateClientFollowupActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // Approval can finish after navigation or with a lost response. Cancel old
+  // snapshots first, including inactive queries, before refreshing shared facts.
+  const keys = [clientQueryKey, inboxQueryKey, actorQueryKey, searchQueryKey];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
 }
 
 function isClientFollowupFactsStale(error: unknown): boolean {
@@ -1761,6 +1903,17 @@ export function useReminderQuery(id: string | null) {
   });
 }
 
+export async function invalidateReminderActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  // A scheduled occurrence may have fired while its approval card was open.
+  await Promise.all([
+    invalidateReminderFacts(queryClient),
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    queryClient.invalidateQueries({ queryKey: searchQueryKey }),
+  ]);
+}
+
 async function invalidateReminderFacts(
   queryClient: QueryClient,
   id?: string,
@@ -1879,14 +2032,15 @@ export const automationRunsQueryKey = [...automationQueryKey, "runs"] as const;
 export const automationRunDetailQueryKey = (id: string) =>
   [...automationRunsQueryKey, "detail", id] as const;
 
-export function useAutomationRulesQuery(enabled = true) {
+export function useAutomationRulesQuery(enabled = true, fresh = false) {
   return useQuery({
     queryKey: automationRulesQueryKey,
-    queryFn: getAutomationRules,
+    queryFn: ({ signal }) => getAutomationRules(signal),
     enabled,
     retry: 2,
     retryDelay: 500,
-    staleTime: 10_000,
+    staleTime: fresh ? 0 : 10_000,
+    ...(fresh ? { refetchOnMount: "always" as const } : {}),
   });
 }
 
@@ -1905,14 +2059,41 @@ export function useAutomationRunsQuery(
   });
 }
 
-export function useAutomationRunQuery(id: string | null) {
+export function useAutomationRunQuery(id: string | null, fresh = false) {
   return useQuery({
     queryKey: automationRunDetailQueryKey(id ?? "idle"),
     queryFn: ({ signal }) => getAutomationRun(id!, signal),
     enabled: Boolean(id),
     retry: 1,
-    staleTime: 5_000,
+    staleTime: fresh ? 0 : 5_000,
+    ...(fresh ? { refetchOnMount: "always" as const, gcTime: 0 } : {}),
   });
+}
+
+export async function invalidateAutomationActionFacts(
+  queryClient: QueryClient,
+  retryAttempt = false,
+): Promise<void> {
+  const keys: readonly (readonly string[])[] = [
+    automationQueryKey,
+    inboxQueryKey,
+    reminderQueryKey,
+    ...(retryAttempt
+      ? [
+          taskQueryKey,
+          projectQueryKey,
+          roadmapMilestoneQueryKey,
+          contentItemQueryKey,
+          searchQueryKey,
+          ["stats", "today"],
+        ]
+      : []),
+  ];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await invalidateAutomationFacts(queryClient);
+  if (retryAttempt) await invalidateTaskFacts(queryClient);
 }
 
 async function invalidateAutomationFacts(
@@ -2082,7 +2263,7 @@ export function useInboxItemsQuery(
 ) {
   return useQuery({
     queryKey: [...inboxQueryKey, "list", input],
-    queryFn: () => getInboxItems(input),
+    queryFn: ({ signal }) => getInboxItems(input, signal),
     enabled,
     placeholderData: keepPreviousData,
     retry: 2,
@@ -2095,7 +2276,7 @@ export function useInboxItemsQuery(
 export function useInboxItemQuery(id: string | null) {
   return useQuery({
     queryKey: inboxDetailQueryKey(id ?? "closed"),
-    queryFn: () => getInboxItem(id!),
+    queryFn: ({ signal }) => getInboxItem(id!, signal),
     enabled: Boolean(id),
     retry: 1,
   });
@@ -2109,8 +2290,8 @@ export function useInboxItemEventsQuery(
   const query = { pageSize: input.pageSize ?? 20 };
   return useInfiniteQuery({
     queryKey: [...inboxEventQueryKey(id ?? "closed"), "timeline", query],
-    queryFn: ({ pageParam }) =>
-      getInboxItemEvents(id!, { ...query, page: pageParam }),
+    queryFn: ({ pageParam, signal }) =>
+      getInboxItemEvents(id!, { ...query, page: pageParam }, signal),
     initialPageParam: 1,
     getNextPageParam: (lastPage) =>
       lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
@@ -2130,8 +2311,8 @@ export function useInboxItemTasksQuery(
   const query = { pageSize: input.pageSize ?? 20 };
   return useInfiniteQuery({
     queryKey: [...inboxTaskRelationQueryKey(id ?? "closed"), "history", query],
-    queryFn: ({ pageParam }) =>
-      getInboxItemTasks(id!, { ...query, page: pageParam }),
+    queryFn: ({ pageParam, signal }) =>
+      getInboxItemTasks(id!, { ...query, page: pageParam }, signal),
     initialPageParam: 1,
     getNextPageParam: (lastPage) =>
       lastPage.meta.page * lastPage.meta.pageSize < lastPage.meta.total
@@ -2146,6 +2327,21 @@ export function useInboxItemTasksQuery(
 async function refreshProjectFacts(queryClient: QueryClient): Promise<void> {
   await queryClient.cancelQueries({ queryKey: projectQueryKey });
   await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+}
+
+// AI proposals do not fetch raw source payloads into the approval card, so a
+// cached Inbox detail may be absent. Refresh all Project follow-up read models.
+export function invalidateInboxActionFacts(queryClient: QueryClient) {
+  return invalidateInboxFacts(queryClient, undefined, undefined, {
+    projectsMayChange: true,
+  });
+}
+
+// Snapshot read-all changes only Inbox read state. Keep this narrower than the
+// general AI Inbox invalidation, whose other commands may also affect Projects.
+export async function invalidateInboxReadAllFacts(queryClient: QueryClient) {
+  await queryClient.cancelQueries({ queryKey: inboxQueryKey });
+  await invalidateInboxFacts(queryClient);
 }
 
 async function invalidateInboxFacts(
@@ -2190,6 +2386,7 @@ async function invalidateInboxFacts(
         })
       : queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
     invalidateUnifiedSearch(queryClient),
+    queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
   ];
   if (options.preserveActiveDetailId) {
     invalidations.push(
@@ -2712,38 +2909,288 @@ export function useTaskQuery(id: string | null) {
 export const taskAgentRunsQueryKey = (taskId: string) =>
   ["task-agent-runs", taskId] as const;
 
+export function agentRunPollInterval(run: AgentRun | undefined) {
+  return run && agentRunNeedsPolling(run) ? 2_000 : false;
+}
+
+type AgentRunTerminalState = Pick<
+  AgentRun,
+  | "id"
+  | "taskId"
+  | "status"
+  | "outputDeliveryStatus"
+  | "outputDeliveryErrorCode"
+  | "submissionId"
+  | "artifactId"
+>;
+
+function agentRunTerminalSignature(run: AgentRunTerminalState): string | null {
+  if (agentRunNeedsPolling(run)) return null;
+  return [
+    run.id,
+    run.taskId,
+    run.status,
+    run.outputDeliveryStatus,
+    run.outputDeliveryErrorCode ?? "",
+    run.submissionId ?? "",
+    run.artifactId ?? "",
+  ].join(":");
+}
+
+const refreshedAgentRunTerminalStates = new WeakMap<QueryClient, Set<string>>();
+
+async function invalidateAgentRunTerminalFactsOnce(
+  queryClient: QueryClient,
+  runs: readonly AgentRunTerminalState[],
+) {
+  let refreshed = refreshedAgentRunTerminalStates.get(queryClient);
+  if (!refreshed) {
+    refreshed = new Set<string>();
+    refreshedAgentRunTerminalStates.set(queryClient, refreshed);
+  }
+  const taskIds = new Set<string>();
+  for (const run of runs) {
+    const signature = agentRunTerminalSignature(run);
+    if (!signature || refreshed.has(signature)) continue;
+    refreshed.add(signature);
+    taskIds.add(run.taskId);
+  }
+  if (taskIds.size > 0) {
+    await invalidateAgentRunDeliveryFactsForTasks(queryClient, [...taskIds]);
+  }
+}
+
 export function useTaskAgentRunsQuery(taskId: string | null, enabled = true) {
-  return useQuery({
+  const queryClient = useQueryClient();
+  const observedTerminalStates = useRef<{
+    taskId: string;
+    signatures: Map<string, string>;
+  } | null>(null);
+  const query = useQuery({
     queryKey: taskAgentRunsQueryKey(taskId ?? "closed"),
     queryFn: () => getTaskAgentRuns(taskId!),
     enabled: enabled && Boolean(taskId),
     refetchInterval: (query) =>
-      query.state.data?.some(
-        (run) => run.status === "queued" || run.status === "running",
-      )
-        ? 2_000
-        : false,
+      query.state.data?.some(agentRunNeedsPolling) ? 2_000 : false,
+  });
+  useEffect(() => {
+    if (!enabled || !taskId || !query.data) return;
+    const signatures = new Map<string, string>();
+    for (const run of query.data) {
+      const signature = agentRunTerminalSignature(run);
+      if (signature) signatures.set(run.id, signature);
+    }
+    const previous = observedTerminalStates.current;
+    observedTerminalStates.current = { taskId, signatures };
+    const newlyTerminal = query.data.filter((run) => {
+      const signature = signatures.get(run.id);
+      return Boolean(
+        signature &&
+        (previous?.taskId !== taskId ||
+          previous.signatures.get(run.id) !== signature),
+      );
+    });
+    if (newlyTerminal.length > 0) {
+      void invalidateAgentRunTerminalFactsOnce(queryClient, newlyTerminal);
+    }
+  }, [enabled, query.data, queryClient, taskId]);
+  return query;
+}
+
+export const agentRunQueryRootKey = ["agent-runs"] as const;
+
+export const agentRunDetailQueryKey = (runId: string, taskId: string) =>
+  [...agentRunQueryRootKey, "detail", runId, taskId] as const;
+
+export function useAgentRunQuery(
+  runId: string | null,
+  expectedTaskId: string | null,
+  enabled = true,
+) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: agentRunDetailQueryKey(
+      runId ?? "closed",
+      expectedTaskId ?? "unbound",
+    ),
+    queryFn: async ({ signal }) => {
+      const run = await getAgentRun(runId!, signal);
+      if (run.taskId !== expectedTaskId) {
+        throw new ApiError("执行记录不属于当前任务。", {
+          code: "AGENT_RUN_TASK_MISMATCH",
+        });
+      }
+      return run;
+    },
+    enabled: enabled && Boolean(runId) && Boolean(expectedTaskId),
+    retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: (query) => agentRunPollInterval(query.state.data),
+  });
+  useEffect(() => {
+    const run = query.data;
+    if (!run || agentRunNeedsPolling(run)) return;
+    void invalidateAgentRunTerminalFactsOnce(queryClient, [run]);
+  }, [query.data, queryClient]);
+  return query;
+}
+
+export function useRetryAgentRunOutputDelivery() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { runId: string; taskId: string }) => {
+      const run = await retryAgentRunOutputDelivery(input.runId);
+      if (run.taskId !== input.taskId) {
+        throw new ApiError("产出登记记录不属于当前任务。", {
+          code: "AGENT_RUN_TASK_MISMATCH",
+        });
+      }
+      return run;
+    },
+    onSuccess: async (run) => {
+      queryClient.setQueryData(agentRunDetailQueryKey(run.id, run.taskId), run);
+      queryClient.setQueryData<AgentRun[]>(
+        taskAgentRunsQueryKey(run.taskId),
+        (rows) => rows?.map((row) => (row.id === run.id ? run : row)) ?? [run],
+      );
+      await invalidateAgentRunDeliveryFacts(queryClient, run.taskId);
+    },
+    onError: async (_error, input) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: agentRunDetailQueryKey(input.runId, input.taskId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: taskAgentRunsQueryKey(input.taskId),
+        }),
+      ]);
+    },
   });
 }
 
 export const agentRunListQueryKey = (input: AgentRunListParams = {}) =>
-  ["agent-runs", "list", input] as const;
+  [...agentRunQueryRootKey, "list", input] as const;
 
-export function useAgentRunsQuery(input: AgentRunListParams = {}) {
-  return useQuery({
+export function useAgentRunsQuery(
+  input: AgentRunListParams = {},
+  enabled = true,
+) {
+  const queryClient = useQueryClient();
+  const observedRunStates = useRef<Map<string, string | null> | null>(null);
+  const query = useQuery({
     queryKey: [...agentRunListQueryKey(input)],
     queryFn: ({ signal }) => getAgentRuns(input, signal),
+    enabled,
     placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,
     refetchInterval: (query) =>
-      query.state.data?.items.some(
-        (run) => run.status === "queued" || run.status === "running",
-      )
+      (query.state.data?.meta.activeTotal ?? 0) > 0 ||
+      (query.state.data?.meta.pendingDeliveryTotal ?? 0) > 0
         ? 5_000
         : false,
   });
+  useEffect(() => {
+    if (!query.data) return;
+    const signatures = new Map<string, string | null>();
+    for (const run of query.data.items) {
+      signatures.set(run.id, agentRunTerminalSignature(run));
+    }
+    const previous = observedRunStates.current;
+    observedRunStates.current = signatures;
+    if (!previous) return;
+    const newlyTerminal = query.data.items.filter((run) => {
+      const signature = signatures.get(run.id);
+      return Boolean(
+        signature && previous.has(run.id) && previous.get(run.id) === null,
+      );
+    });
+    if (newlyTerminal.length > 0) {
+      void invalidateAgentRunTerminalFactsOnce(queryClient, newlyTerminal);
+    }
+  }, [query.data, queryClient]);
+  return query;
+}
+
+export const aiAgentFamilyQueryKey = (sessionId: string) =>
+  ["ai", "sessions", sessionId, "agent-family"] as const;
+
+export function useAiAgentFamilyQuery(sessionId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...aiAgentFamilyQueryKey(sessionId)],
+    queryFn: ({ signal }) => getAiAgentFamily(sessionId, signal),
+    enabled: enabled && Boolean(sessionId),
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 5_000,
+    refetchInterval: (query) =>
+      query.state.data?.children.some(
+        (child) => child.status === "queued" || child.status === "streaming",
+      )
+        ? 5_000
+        : query.state.data?.children.length
+          ? 15_000
+          : false,
+  });
+}
+
+export const aiSessionDelegatedRunsQueryKey = (
+  sessionId: string,
+  input: AiSessionDelegatedRunListParams = {},
+) => ["ai", "sessions", sessionId, "delegated-runs", input] as const;
+
+export function useAiSessionDelegatedRunsQuery(
+  sessionId: string,
+  input: AiSessionDelegatedRunListParams = {},
+  enabled = true,
+) {
+  const queryClient = useQueryClient();
+  const observedRunStates = useRef<{
+    sessionId: string;
+    signatures: Map<string, string | null>;
+  } | null>(null);
+  const query = useQuery({
+    queryKey: [...aiSessionDelegatedRunsQueryKey(sessionId, input)],
+    queryFn: ({ signal }) =>
+      getAiSessionDelegatedRuns(sessionId, input, signal),
+    enabled: enabled && Boolean(sessionId),
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+    refetchInterval: (current) =>
+      (current.state.data?.meta.activeTotal ?? 0) > 0 ||
+      (current.state.data?.meta.pendingDeliveryTotal ?? 0) > 0
+        ? 5_000
+        : false,
+  });
+  useEffect(() => {
+    if (!enabled || !query.data) return;
+    const runs = query.data.items.flatMap((item) =>
+      item.run ? [item.run] : [],
+    );
+    const signatures = new Map<string, string | null>();
+    for (const run of runs) {
+      signatures.set(run.id, agentRunTerminalSignature(run));
+    }
+    const previous = observedRunStates.current;
+    observedRunStates.current = { sessionId, signatures };
+    if (!previous || previous.sessionId !== sessionId) return;
+    const newlyTerminal = runs.filter((run) => {
+      const signature = signatures.get(run.id);
+      return Boolean(
+        signature &&
+        previous.signatures.has(run.id) &&
+        previous.signatures.get(run.id) === null,
+      );
+    });
+    if (newlyTerminal.length > 0) {
+      void invalidateAgentRunTerminalFactsOnce(queryClient, newlyTerminal);
+    }
+  }, [enabled, query.data, queryClient, sessionId]);
+  return query;
 }
 
 export const controlledFileListQueryKey = (
@@ -2777,8 +3224,9 @@ export const taskArtifactQueryRootKey = ["task-artifacts"] as const;
 export const taskArtifactQueryKey = (taskId: string) =>
   [...taskArtifactQueryRootKey, taskId] as const;
 
+export const taskArtifactDetailQueryRootKey = ["task-artifact"] as const;
 export const taskArtifactDetailQueryKey = (artifactId: string) =>
-  ["task-artifact", artifactId] as const;
+  [...taskArtifactDetailQueryRootKey, artifactId] as const;
 
 export function useTaskEventsQuery(
   taskId: string | null,
@@ -2850,12 +3298,14 @@ export function useTaskArtifactsQuery(
 export function useTaskArtifactQuery(
   artifactId: string | null,
   enabled = true,
+  fresh = false,
 ) {
   return useQuery({
     queryKey: taskArtifactDetailQueryKey(artifactId ?? "closed"),
-    queryFn: () => getTaskArtifact(artifactId!),
+    queryFn: ({ signal }) => getTaskArtifact(artifactId!, signal),
     enabled: Boolean(artifactId) && enabled,
     retry: 1,
+    ...(fresh ? { staleTime: 0, refetchOnMount: "always" as const } : {}),
   });
 }
 
@@ -3051,8 +3501,61 @@ function activeFocusSnapshot(
 function cacheFocusSnapshot(
   queryClient: QueryClient,
   snapshot: FocusSessionSnapshot,
+  before: FocusSessionSnapshot | undefined,
 ) {
+  const current =
+    queryClient.getQueryData<FocusSessionSnapshot>(focusSessionQueryKey);
+  const incoming = snapshot.session;
+  if (current?.session && incoming) {
+    // Commands describe one Session, not the current global slot. A late end
+    // receipt must never erase B; a late pause must never rewind A's version.
+    if (
+      current.session.id !== incoming.id ||
+      current.session.version > incoming.version
+    )
+      return false;
+    if (
+      current.session.version === incoming.version &&
+      Date.parse(current.serverNow) > Date.parse(snapshot.serverNow)
+    )
+      return false;
+  } else if (
+    current &&
+    (current !== before ||
+      Date.parse(current.serverNow) > Date.parse(snapshot.serverNow))
+  ) {
+    // A fresh null is authoritative too (the old create may be an idempotent
+    // replay). Do not resurrect it; refetch the active endpoint instead.
+    return false;
+  }
   queryClient.setQueryData(focusSessionQueryKey, activeFocusSnapshot(snapshot));
+  return true;
+}
+
+async function captureFocusMutation(queryClient: QueryClient) {
+  const cycleRevision = useFocusCycleStore.getState().revision;
+  const {
+    focusMinutes,
+    breakMinutes,
+    cycles,
+    autoStartBreak,
+    autoStartFocus,
+    soundEnabled,
+  } = useSettingsStore.getState();
+  await queryClient.cancelQueries({ queryKey: focusSessionQueryKey });
+  return {
+    before:
+      queryClient.getQueryData<FocusSessionSnapshot>(focusSessionQueryKey),
+    cycleRevision,
+    settings: {
+      focusMinutes,
+      breakMinutes,
+      cycles,
+      autoStartBreak,
+      autoStartFocus,
+      soundEnabled,
+    },
+  };
 }
 
 async function invalidateFocusDependents(queryClient: QueryClient) {
@@ -3066,9 +3569,24 @@ async function invalidateFocusDependents(queryClient: QueryClient) {
   ]);
 }
 
+// An approval may have succeeded even if its response was lost. Cancel old
+// snapshots before refetching authoritative facts; never replay local cycle
+// transitions from a historical decision card.
+export async function invalidateFocusActionFacts(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: ["focus-sessions"] }),
+    queryClient.cancelQueries({ queryKey: focusReportQueryKey }),
+  ]);
+  await invalidateFocusDependents(queryClient);
+}
+
 function focusErrorNeedsRefresh(error: unknown): boolean {
   return (
-    error instanceof ApiError && (error.status === 404 || error.status === 409)
+    error instanceof ApiError &&
+    (error.status === 404 ||
+      error.status === 409 ||
+      error.code === "NETWORK_ERROR" ||
+      error.code === "TIMEOUT")
   );
 }
 
@@ -3083,7 +3601,7 @@ function focusCommandCanRetry(failureCount: number, error: unknown): boolean {
 export function useActiveFocusSessionQuery() {
   return useQuery({
     queryKey: focusSessionQueryKey,
-    queryFn: getActiveFocusSession,
+    queryFn: ({ signal }) => getActiveFocusSession(signal),
     refetchInterval: (query) =>
       query.state.data?.session?.status === "active" ? 15_000 : false,
     refetchOnWindowFocus: true,
@@ -3123,6 +3641,10 @@ export function useCreateFocusSession() {
   const queryClient = useQueryClient();
   const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
   return useMutation({
+    onMutate: async (input: CreateFocusSessionInput) => {
+      const mayReplay = attempt.current?.fingerprint === JSON.stringify(input);
+      return { ...(await captureFocusMutation(queryClient)), mayReplay };
+    },
     mutationFn: (input: CreateFocusSessionInput) => {
       const fingerprint = JSON.stringify(input);
       if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
@@ -3130,9 +3652,39 @@ export function useCreateFocusSession() {
       }
       return createFocusSession(input, attempt.current.key);
     },
-    onSuccess: async (snapshot) => {
+    onSuccess: async (snapshot, _input, context) => {
       attempt.current = null;
-      cacheFocusSnapshot(queryClient, snapshot);
+      await queryClient.cancelQueries({ queryKey: focusSessionQueryKey });
+      // Retrying creation can return a historical idempotent snapshot, even
+      // after that Session ended within the same server-clock second. Read
+      // the live slot before publishing/rebinding it; timestamps cannot prove it.
+      const currentSnapshot = context?.mayReplay
+        ? await getActiveFocusSession().catch(() => undefined)
+        : snapshot;
+      if (!currentSnapshot) {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+        return;
+      }
+      const accepted = cacheFocusSnapshot(
+        queryClient,
+        currentSnapshot,
+        context?.before,
+      );
+      const cycle = useFocusCycleStore.getState();
+      const session = currentSnapshot.session;
+      if (
+        accepted &&
+        session?.status === "active" &&
+        session.id === snapshot.session?.id &&
+        cycle.revision === context?.cycleRevision
+      ) {
+        cycle.beginWork(
+          session.taskId,
+          context.settings.cycles,
+          session.taskTitle,
+          session.id,
+        );
+      }
       await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
     },
     onError: async (error) => {
@@ -3151,9 +3703,14 @@ function useSimpleFocusCommand(
 ) {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => captureFocusMutation(queryClient),
     mutationFn: ({ id, expectedVersion }: FocusSessionCommandInput) =>
       command(id, expectedVersion),
-    onSuccess: (snapshot) => cacheFocusSnapshot(queryClient, snapshot),
+    onSuccess: async (snapshot, _input, context) => {
+      await queryClient.cancelQueries({ queryKey: focusSessionQueryKey });
+      cacheFocusSnapshot(queryClient, snapshot, context?.before);
+      await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
+    },
     onError: async (error) => {
       if (focusErrorNeedsRefresh(error)) {
         await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
@@ -3173,12 +3730,17 @@ export function useResumeFocusSession() {
 export function useRecoverFocusSession() {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: () => captureFocusMutation(queryClient),
     mutationFn: ({ id, action, expectedVersion }: RecoverFocusSessionInput) =>
       recoverFocusSession(id, action, expectedVersion),
-    onSuccess: async (snapshot) => {
-      cacheFocusSnapshot(queryClient, snapshot);
+    onSuccess: async (snapshot, _input, context) => {
+      await queryClient.cancelQueries({ queryKey: focusSessionQueryKey });
+      cacheFocusSnapshot(queryClient, snapshot, context?.before);
       if (snapshot.session?.status === "interrupted") {
+        useFocusCycleStore.getState().resetCycle(snapshot.session.id);
         await invalidateFocusDependents(queryClient);
+      } else {
+        await queryClient.invalidateQueries({ queryKey: focusSessionQueryKey });
       }
     },
     onError: async (error) => {
@@ -3195,10 +3757,12 @@ function useIdempotentFocusEndCommand(
     expectedVersion: number,
     idempotencyKey: string,
   ) => Promise<FocusSessionSnapshot>,
+  completeCycle = false,
 ) {
   const queryClient = useQueryClient();
   const attempt = useRef<{ fingerprint: string; key: string } | null>(null);
   return useMutation({
+    onMutate: () => captureFocusMutation(queryClient),
     mutationFn: ({ id, expectedVersion }: FocusSessionCommandInput) => {
       const fingerprint = `${id}:${expectedVersion}`;
       if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
@@ -3206,9 +3770,31 @@ function useIdempotentFocusEndCommand(
       }
       return command(id, expectedVersion, attempt.current.key);
     },
-    onSuccess: async (snapshot) => {
+    onSuccess: async (snapshot, _input, context) => {
       attempt.current = null;
-      cacheFocusSnapshot(queryClient, snapshot);
+      await queryClient.cancelQueries({ queryKey: focusSessionQueryKey });
+      const current =
+        queryClient.getQueryData<FocusSessionSnapshot>(focusSessionQueryKey);
+      const accepted = cacheFocusSnapshot(
+        queryClient,
+        snapshot,
+        context?.before,
+      );
+      const session = snapshot.session;
+      if (session && (accepted || !current?.session)) {
+        const cycle = useFocusCycleStore.getState();
+        if (completeCycle && context && session.status === "completed") {
+          cycle.completeWork(
+            session.taskId,
+            context.settings,
+            session.taskTitle,
+            Date.now(),
+            session.id,
+          );
+        } else {
+          cycle.resetCycle(session.id);
+        }
+      }
       await invalidateFocusDependents(queryClient);
     },
     onError: async (error) => {
@@ -3221,8 +3807,8 @@ function useIdempotentFocusEndCommand(
   });
 }
 
-export function useStopFocusSession() {
-  return useIdempotentFocusEndCommand(stopFocusSession);
+export function useStopFocusSession(completeCycle = false) {
+  return useIdempotentFocusEndCommand(stopFocusSession, completeCycle);
 }
 
 export function useCancelFocusSession() {
@@ -3378,7 +3964,116 @@ function submitOutputFingerprint(
   });
 }
 
-async function invalidateTaskAggregates(
+// Submission/review can change ancestor tasks and Inbox follow-up projections.
+// Cancel even inactive queries first: an old response must not restore the
+// pre-decision status after confirmation or an ambiguous network failure.
+export async function invalidateTaskOutputActionFacts(
+  queryClient: QueryClient,
+) {
+  const keys = [
+    taskQueryKey,
+    taskSubmissionQueryRootKey,
+    taskArtifactQueryRootKey,
+    taskArtifactDetailQueryRootKey,
+    taskAssignmentQueryRootKey,
+    taskEventQueryRootKey,
+    projectQueryKey,
+    inboxQueryKey,
+    searchQueryKey,
+    roadmapMilestoneQueryKey,
+    contentItemQueryKey,
+    ["stats", "today"],
+  ];
+  await Promise.all(
+    keys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all([
+    invalidateTaskAggregates(queryClient),
+    queryClient.invalidateQueries({ queryKey: taskArtifactDetailQueryRootKey }),
+  ]);
+}
+
+function aiActionQueriesForAgentRunTasks(taskIds: string[]) {
+  const changedTasks = new Set(taskIds);
+  return {
+    queryKey: ["ai", "actions"] as const,
+    predicate: (query: Query) => {
+      const rows = query.state.data as AiActionProposal[] | undefined;
+      // Run metadata has no owning generation ID. Reuse the task association
+      // of already validated cached proposals to refresh every relevant group,
+      // not just a currently visible card. An initial/empty/incomplete read
+      // cannot exclude that association, so conservatively refresh it too.
+      if (!Array.isArray(rows) || rows.length === 0) return true;
+      return rows.some((proposal) => {
+        if (
+          !proposal ||
+          proposal.generation_id !== query.queryKey[2] ||
+          !proposal.action ||
+          typeof proposal.action.action !== "string" ||
+          (proposal.status === "pending" && !proposal.can_confirm)
+        )
+          return true;
+        return (
+          proposal.action.action.startsWith("agent_run.") &&
+          (!proposal.action.task_id ||
+            changedTasks.has(proposal.action.task_id))
+        );
+      });
+    },
+  };
+}
+
+async function invalidateAgentRunDeliveryFactsForTasks(
+  queryClient: QueryClient,
+  taskIds: string[],
+) {
+  const runListKeys = [...new Set(taskIds)].map(taskAgentRunsQueryKey);
+  const actionQueries = aiActionQueriesForAgentRunTasks(taskIds);
+  // A background Run transition changes the Task-side facts as well as the
+  // derived plan and continuation surfaces. Refreshing those projections here
+  // avoids showing stale queued/running/pending state until their next poll.
+  // This is cache invalidation only: it never creates a plan, Proposal, scope
+  // grant, Run action or recovery attempt.
+  const aiDerivedKeys = [
+    aiAgentInboxQueryKey,
+    aiWorkPlanInboxQueryKey,
+    ["ai", "work-plan"] as const,
+  ];
+  await Promise.all([
+    // A late pre-terminal receipt must not replace the fresh group used by
+    // post-approval continuation. This never fabricates a proposal outcome.
+    queryClient.cancelQueries(actionQueries),
+    ...runListKeys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+    ...aiDerivedKeys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+    queryClient.cancelQueries({
+      queryKey: agentRunQueryRootKey,
+      predicate: (query) => query.queryKey[1] !== "detail",
+    }),
+  ]);
+  await Promise.all([
+    queryClient.invalidateQueries(actionQueries),
+    invalidateTaskOutputActionFacts(queryClient),
+    ...runListKeys.map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey }),
+    ),
+    ...aiDerivedKeys.map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey }),
+    ),
+    queryClient.invalidateQueries({
+      queryKey: agentRunQueryRootKey,
+      predicate: (query) => query.queryKey[1] !== "detail",
+    }),
+  ]);
+}
+
+export async function invalidateAgentRunDeliveryFacts(
+  queryClient: QueryClient,
+  taskId: string,
+) {
+  await invalidateAgentRunDeliveryFactsForTasks(queryClient, [taskId]);
+}
+
+export async function invalidateTaskAggregates(
   queryClient: QueryClient,
   options: {
     preserveActiveAssignmentTaskId?: string;
@@ -3411,6 +4106,7 @@ async function invalidateTaskAggregates(
     invalidateTaskFacts(queryClient, options),
     queryClient.invalidateQueries({ queryKey: taskSubmissionQueryRootKey }),
     queryClient.invalidateQueries({ queryKey: taskArtifactQueryRootKey }),
+    queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
     ...assignmentQueries,
     queryClient.invalidateQueries({ queryKey: taskEventQueryRootKey }),
   ]);
@@ -3482,7 +4178,10 @@ export function useReviewTaskSubmission() {
     onSuccess: async (result) => {
       attempt.current = null;
       setTaskDetailIfNotOlder(queryClient, result.task);
-      await invalidateTaskAggregates(queryClient);
+      await Promise.all([
+        invalidateTaskAggregates(queryClient),
+        invalidateAiPlanReviewProjections(queryClient),
+      ]);
     },
     onError: async (error, variables) => {
       if (outputErrorNeedsRefresh(error)) {
@@ -3492,6 +4191,22 @@ export function useReviewTaskSubmission() {
       }
     },
   });
+}
+
+async function invalidateAiPlanReviewProjections(queryClient: QueryClient) {
+  const queryKeys = [
+    ["ai", "work-plan"] as const,
+    aiWorkPlanInboxQueryKey,
+    ["ai", "plan-continuation"] as const,
+    activeContinuationsKey,
+    recentContinuationsKey,
+  ];
+  await Promise.all(
+    queryKeys.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
+  await Promise.all(
+    queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
 }
 
 export function useDeleteTaskArtifact() {
@@ -3602,12 +4317,33 @@ export function useDeleteTask() {
     },
     onSuccess: async (_, variables) => {
       const id = typeof variables === "string" ? variables : variables.id;
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: taskAgentRunsQueryKey(id) }),
+        queryClient.cancelQueries({
+          queryKey: agentRunQueryRootKey,
+          predicate: (query) =>
+            query.queryKey[1] === "detail" && query.queryKey[3] === id,
+        }),
+      ]);
       queryClient.removeQueries({ queryKey: taskDetailQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskAssignmentQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskEventQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskSubmissionQueryKey(id) });
       queryClient.removeQueries({ queryKey: taskArtifactQueryKey(id) });
-      await invalidateTaskAggregates(queryClient);
+      queryClient.removeQueries({ queryKey: taskAgentRunsQueryKey(id) });
+      queryClient.removeQueries({
+        queryKey: agentRunQueryRootKey,
+        predicate: (query) =>
+          query.queryKey[1] === "detail" && query.queryKey[3] === id,
+      });
+      await Promise.all([
+        invalidateTaskAggregates(queryClient),
+        queryClient.invalidateQueries({ queryKey: ["ai", "actions"] }),
+        queryClient.invalidateQueries({
+          queryKey: agentRunQueryRootKey,
+          predicate: (query) => query.queryKey[1] === "list",
+        }),
+      ]);
       await invalidateFocusReadModels(queryClient, {
         history: true,
         report: true,
@@ -3673,6 +4409,8 @@ function batchCanReconcileTaskHierarchy(
   action: BatchUpdateTasksInput["action"],
 ): boolean {
   return (
+    action !== "set_priority" &&
+    action !== "set_due_date" &&
     action !== "set_project" &&
     action !== "set_planned_date" &&
     action !== "add_tags" &&
@@ -4573,6 +5311,22 @@ async function invalidateRoadmapReadModels(
   ]);
 }
 
+export async function invalidateRoadmapActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  await invalidateRoadmapReadModels(queryClient, true);
+}
+
+export async function invalidateContentItemActionFacts(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: contentItemQueryKey }),
+    queryClient.invalidateQueries({ queryKey: inboxQueryKey }),
+    invalidateUnifiedSearch(queryClient),
+  ]);
+}
+
 function isRoadmapFactsStale(error: unknown): boolean {
   return error instanceof ApiError && error.code === "VERSION_CONFLICT";
 }
@@ -4995,7 +5749,7 @@ async function invalidateProjectNoteConflict(
     }),
     queryClient.invalidateQueries({
       queryKey: noteKey,
-      refetchType: "none",
+      refetchType: "active",
     }),
   ]);
 }
@@ -5079,6 +5833,22 @@ export function useUpdateProject() {
       }
     },
   });
+}
+
+export async function invalidateProjectNoteActionFacts(
+  queryClient: QueryClient,
+) {
+  // Cancel even consumers that do not forward AbortSignal before invalidation.
+  await queryClient.cancelQueries({ queryKey: projectQueryKey });
+  await queryClient.invalidateQueries({ queryKey: projectQueryKey });
+}
+
+export async function invalidateProjectActionFacts(queryClient: QueryClient) {
+  await Promise.all([
+    invalidateProjectEditFacts(queryClient),
+    invalidateProjectCompletionFacts(queryClient),
+    invalidateTaskAggregates(queryClient),
+  ]);
 }
 
 async function invalidateProjectCompletionFacts(queryClient: QueryClient) {
@@ -5175,6 +5945,12 @@ export const aiProvidersQueryKey = ["ai", "providers"] as const;
 export const aiMemoriesQueryKey = ["ai", "memories"] as const;
 export const aiMemoryProposalsQueryKey = ["ai", "memory-proposals"] as const;
 export const aiSessionsQueryKey = ["ai", "sessions"] as const;
+export const aiAgentInboxQueryKey = ["ai", "agent-inbox"] as const;
+export const aiWorkPlanInboxQueryKey = [
+  "ai",
+  "work-plans",
+  "attention",
+] as const;
 export const aiMessagesQueryKey = (sessionId: string) =>
   ["ai", "messages", sessionId] as const;
 export const aiUsageSummaryQueryKey = (sessionId: string, trendDays = 7) =>
@@ -5498,10 +6274,16 @@ export function useCreateAiProvider() {
     },
     onSuccess: async () => {
       idempotencyKey.current = null;
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
     onError: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
   });
 }
@@ -5524,7 +6306,10 @@ export function useUpdateAiProvider() {
       };
     }) => updateAiProvider(id, input, expectedVersion),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
   });
 }
@@ -5540,7 +6325,10 @@ export function useDeleteAiProvider() {
       expectedVersion: number;
     }) => deleteAiProvider(id, expectedVersion),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
   });
 }
@@ -5556,7 +6344,10 @@ export function useCheckAiProviderHealth() {
       expectedVersion: number;
     }) => checkAiProviderHealth(id, expectedVersion),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
   });
 }
@@ -5574,7 +6365,10 @@ export function useSetAiProviderKey() {
       expectedVersion: number;
     }) => setAiProviderKey(id, apiKey, expectedVersion),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: aiProvidersQueryKey }),
+        queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      ]);
     },
   });
 }
@@ -5588,6 +6382,45 @@ export function useAiSessionsQuery(enabled = true) {
     retryDelay: 500,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAiWorkPlanInboxQuery(enabled = true) {
+  return useInfiniteQuery({
+    queryKey: aiWorkPlanInboxQueryKey,
+    queryFn: ({ pageParam, signal }) =>
+      getAiWorkPlanInbox("attention", 50, pageParam, signal),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.meta.next_offset ?? undefined,
+    enabled,
+    retry: 1,
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      const meta = query.state.data?.pages[0]?.meta;
+      return meta &&
+        (meta.running_total > 0 ||
+          meta.needs_approval_total > 0 ||
+          meta.needs_recovery_total > 0)
+        ? 5_000
+        : 15_000;
+    },
+    refetchIntervalInBackground: false,
+  });
+}
+
+export function useAiAgentInboxQuery(enabled = true) {
+  return useInfiniteQuery({
+    queryKey: aiAgentInboxQueryKey,
+    queryFn: ({ pageParam, signal }) =>
+      getAiAgentInbox("all", 50, pageParam, signal),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => lastPage.meta.next_offset ?? undefined,
+    enabled,
+    retry: 1,
+    staleTime: 5_000,
+    refetchInterval: (query) =>
+      (query.state.data?.pages[0]?.meta.total ?? 0) > 0 ? 5_000 : 15_000,
     refetchIntervalInBackground: false,
   });
 }
@@ -5614,6 +6447,10 @@ export function useDeleteAiSession() {
     }) => deleteAiSession(id, expectedVersion),
     onSuccess: async (_result, variables) => {
       await queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey });
+      await queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey });
+      await queryClient.invalidateQueries({
+        queryKey: aiWorkPlanInboxQueryKey,
+      });
       await queryClient.removeQueries({
         queryKey: aiMessagesQueryKey(variables.id),
       });
@@ -5676,6 +6513,11 @@ export function useAiChatStream() {
         queryKey: aiMessagesQueryKey(sessionId),
       }),
       queryClient.invalidateQueries({ queryKey: aiSessionsQueryKey }),
+      queryClient.invalidateQueries({ queryKey: aiAgentInboxQueryKey }),
+      queryClient.invalidateQueries({ queryKey: aiWorkPlanInboxQueryKey }),
+      queryClient.invalidateQueries({
+        queryKey: ["ai", "work-plan", sessionId],
+      }),
       queryClient.invalidateQueries({
         queryKey: aiUsageSummarySessionQueryKey(sessionId),
       }),

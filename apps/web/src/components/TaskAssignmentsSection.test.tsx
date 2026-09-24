@@ -6,8 +6,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Actor, Task, TaskAssignment } from "../types/models";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 
@@ -54,6 +56,11 @@ const task: Task = {
   reviewedAt: null,
   currentSubmissionId: null,
   tags: [],
+};
+
+const canonicalTask: Task = {
+  ...task,
+  id: "018f0000-0000-7000-8000-000000001930",
 };
 
 const owner: Actor = {
@@ -141,13 +148,16 @@ function renderSection(value: Task = task) {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <TaskAssignmentsSection task={value} />
+      <MemoryRouter>
+        <TaskAssignmentsSection task={value} />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
 describe("TaskAssignmentsSection", () => {
   beforeEach(() => {
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     apiMocks.getTaskAssignments.mockResolvedValue(assignmentPage());
     apiMocks.getAllActors.mockResolvedValue([owner, person, nextPerson]);
     apiMocks.createTaskAssignment.mockResolvedValue({
@@ -208,6 +218,39 @@ describe("TaskAssignmentsSection", () => {
       task.id,
       expect.objectContaining({ page: 2 }),
     );
+  });
+
+  it("hands task assignment context to the agent without mutating assignments", async () => {
+    apiMocks.getTaskAssignments.mockResolvedValue(
+      assignmentPage({
+        active: {
+          assignee: {
+            ...activeAssignment,
+            taskId: canonicalTask.id,
+          },
+          reviewer: null,
+        },
+      }),
+    );
+    renderSection(canonicalTask);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "交给智能体处理分派" }),
+    );
+
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "任务责任分派",
+      route: `/tasks/${canonicalTask.id}`,
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_task_assignments");
+    expect(pending?.prompt).toContain(`task_id=${canonicalTask.id}`);
+    expect(pending?.prompt).toContain("task.assign");
+    expect(apiMocks.createTaskAssignment).not.toHaveBeenCalled();
+    expect(apiMocks.reassignTaskAssignment).not.toHaveBeenCalled();
+    expect(apiMocks.endTaskAssignment).not.toHaveBeenCalled();
   });
 
   it.each([

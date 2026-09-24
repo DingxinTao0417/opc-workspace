@@ -5,6 +5,8 @@
 - 决策范围：AI Assistant AI6 / Knowledge Base K6
 - 相关文档：[AI 助手](../modules/ai-assistant.md)、[知识库](../modules/knowledge-base.md)、[实施计划](../plans/ai-knowledge-context-phases.md)、[ADR-008](008-ai-explicit-business-context.md)、[ADR-009](009-local-knowledge-base-ingestion-and-search.md)
 
+> 2026-09-18 接续：[ADR-029 H3-D2](029-agent-workspace-capabilities.md) 新增独立、按条消息的来源范围授权及 `knowledge_search/read`。下文“无知识工具/逐片段选择”是 AI6 手选上下文路径的基线，不再是整个智能体的能力上限。未授予 knowledge scope 时仍维持原边界；手选预览、双重版本重验和历史正文快照机制不变。动态工具只保存引用元数据，不复制正文到手选 context_snapshot。
+
 ## 背景
 
 本地知识库已经能独立导入、索引、检索、定位和删除 TXT/Markdown。AI6 需要让用户把少量检索结果作为某一条消息的证据，同时继续遵守 AI5 已确立的发送前预览、远程/本地披露、版本重验和历史可解释性。知识库正文可能含有类似系统指令的提示注入文本，因此“检索到了”不能等于“模型可以执行”。

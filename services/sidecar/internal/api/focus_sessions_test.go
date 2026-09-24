@@ -42,7 +42,7 @@ func (clock *focusTestClock) Add(duration time.Duration) {
 
 func newFocusTestAPI(t *testing.T, clock *focusTestClock) (*gin.Engine, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "focus-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "focus-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open(): %v", err)
 	}

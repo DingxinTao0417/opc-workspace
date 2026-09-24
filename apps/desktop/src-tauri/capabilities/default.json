@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
-  "description": "Minimal core capability for the opc-workspace main window",
-  "windows": ["main"],
+  "description": "Core capability for the trusted main webview only; browser children have no IPC permissions",
+  "webviews": ["main"],
   "permissions": ["core:default"]
 }

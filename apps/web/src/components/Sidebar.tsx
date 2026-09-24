@@ -23,7 +23,6 @@ import {
   useRecentClientActivitiesQuery,
   useRoadmapMilestonesQuery,
 } from "../api/hooks";
-import { FocusMiniCard } from "./FocusMiniCard";
 import {
   localDateFromKey,
   localDateKey,
@@ -111,6 +110,10 @@ function formatCny(amountMinor: number) {
   }).format(amountMinor / 100);
 }
 
+// GET /api/v1/client-activities rejects page_size above 20 and returns the
+// newest activities first.
+const recentClientActivityPageSize = 20;
+
 export function Sidebar() {
   const { dateKey } = useLocalCalendar();
   const inboxStatsQuery = useInboxStatsQuery();
@@ -126,7 +129,9 @@ export function Sidebar() {
     sort: "target_date",
     status: "active",
   });
-  const recentActivitiesQuery = useRecentClientActivitiesQuery(50);
+  const recentActivitiesQuery = useRecentClientActivitiesQuery(
+    recentClientActivityPageSize,
+  );
   const incomeStatsQuery = useIncomeStatsQuery({
     currency: "CNY",
     ...currentMonthBounds(dateKey),
@@ -151,9 +156,16 @@ export function Sidebar() {
     ...(activeMilestonesQuery.data?.items ?? []),
   ].filter((milestone) => milestone.targetDate <= dueSoonKey).length;
   const weekAgoIso = new Date(Date.now() - 7 * 86_400_000).toISOString();
-  const clientRecentCount = (recentActivitiesQuery.data?.items ?? []).filter(
+  const recentActivities = recentActivitiesQuery.isError
+    ? []
+    : (recentActivitiesQuery.data?.items ?? []);
+  const clientRecentCount = recentActivities.filter(
     (activity) => activity.occurredAt >= weekAgoIso,
   ).length;
+  const clientRecentAtLeast =
+    clientRecentCount === recentClientActivityPageSize &&
+    (recentActivitiesQuery.data?.meta.total ?? 0) >
+      recentClientActivityPageSize;
   const incomeConfirmedMinor = incomeStatsQuery.data?.confirmedIncomeMinor ?? 0;
   const incomeConfirmedCount = incomeStatsQuery.data?.confirmedIncomeCount ?? 0;
   const navBadges: Record<string, { text: string; title: string } | undefined> =
@@ -176,10 +188,15 @@ export function Sidebar() {
           : undefined,
       "/clients":
         clientRecentCount > 0
-          ? {
-              text: clientRecentCount > 99 ? "99+" : String(clientRecentCount),
-              title: `${clientRecentCount} 条近 7 天客户动态`,
-            }
+          ? clientRecentAtLeast
+            ? {
+                text: `${clientRecentCount}+`,
+                title: `至少 ${clientRecentCount} 条近 7 天客户动态`,
+              }
+            : {
+                text: String(clientRecentCount),
+                title: `${clientRecentCount} 条近 7 天客户动态`,
+              }
           : undefined,
       "/income":
         incomeConfirmedCount > 0
@@ -208,7 +225,6 @@ export function Sidebar() {
           <div className="brand-name" title={displayName}>
             {displayName}
           </div>
-          <span className="local-pill">v0.1.1</span>
         </div>
         <button
           aria-controls="primary-sidebar"
@@ -274,8 +290,6 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-
-      <FocusMiniCard />
 
       <button
         aria-label="打开设置"

@@ -9,7 +9,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { ApiError } from "../api/client";
+import { ApiError, getClientActivity } from "../api/client";
 import {
   useClientActivitiesQuery,
   useCreateClientActivity,
@@ -19,6 +19,12 @@ import {
 import { useSettledPage } from "../lib/useSettledPage";
 import type { ClientActivity, ClientActivityKind } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
+import {
+  ClientRecordLocation,
+  type ClientRecordLocationProps,
+} from "./ClientRecordLocation";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
+import { clientActivityHandoff } from "../lib/aiIssueHandoff";
 
 type EditableActivityKind = Exclude<ClientActivityKind, "system_reference">;
 
@@ -85,7 +91,12 @@ function activityError(error: unknown): string | null {
   return "客户活动操作失败，请重试。";
 }
 
-export function ClientActivitiesSection({ clientId }: { clientId: string }) {
+export function ClientActivitiesSection({
+  clientId,
+  selectedId,
+  returnSession,
+  onClearSelection,
+}: { clientId: string } & ClientRecordLocationProps) {
   const [page, setPage] = useState(1);
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const queryInput = useMemo(
@@ -246,6 +257,99 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
     );
   };
 
+  const renderRecord = (activity: ClientActivity) => {
+    const deleted = activity.deletedAt !== null;
+    const system = activity.kind === "system_reference";
+    const projectWorkflowEvent =
+      system && activity.sourceType === "project_workflow_event";
+    const Icon =
+      activity.kind === "meeting"
+        ? UsersRound
+        : system
+          ? CalendarClock
+          : MessageSquareText;
+    return (
+      <article className={deleted ? "is-deleted" : undefined} key={activity.id}>
+        <span className="client-activity-icon" aria-hidden="true">
+          <Icon size={14} />
+        </span>
+        <div className="client-activity-copy">
+          <div>
+            <strong>{activity.title}</strong>
+            <span>
+              {activity.kind === "meeting"
+                ? "会议记录"
+                : projectWorkflowEvent
+                  ? "项目生命周期"
+                  : system
+                    ? "系统引用"
+                    : "沟通笔记"}
+            </span>
+          </div>
+          {deleted ? (
+            <p>
+              已于 {formatActivityTime(activity.deletedAt!)} 删除
+              {activity.deleteReason ? `：${activity.deleteReason}` : ""}
+            </p>
+          ) : system ? (
+            projectWorkflowEvent ? (
+              <p>来源：项目状态变更 · 系统只读</p>
+            ) : (
+              <p>
+                引用 {activity.sourceType} · {activity.sourceId}
+              </p>
+            )
+          ) : (
+            <p>{activity.body}</p>
+          )}
+          <small>
+            {formatActivityTime(activity.occurredAt)} · 由{" "}
+            {activity.createdBy.displayName} 记录
+          </small>
+        </div>
+        <div className="client-activity-actions">
+          <AiIssueHandoffButton
+            content={clientActivityHandoff(
+              clientId,
+              activity.id,
+              activity.title,
+            )}
+            disabled={pending}
+          />
+          {!deleted && !system ? (
+            <>
+              <button
+                aria-label={`编辑活动 ${activity.title}`}
+                className="icon-button"
+                disabled={pending}
+                onClick={() => openEdit(activity)}
+                type="button"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                aria-label={`删除活动 ${activity.title}`}
+                className="icon-button icon-button-danger"
+                disabled={pending}
+                onClick={() => {
+                  resetFeedback();
+                  setEditing(null);
+                  setDeleteCandidate(activity);
+                  setDeleteReason("");
+                }}
+                type="button"
+              >
+                <Trash2 size={13} />
+              </button>
+            </>
+          ) : (
+            <FileText className="client-activity-readonly" size={13} />
+          )}
+        </div>
+      </article>
+    );
+  };
+
   return (
     <section className="project-detail-section client-activities-section">
       <div className="project-detail-heading">
@@ -266,6 +370,21 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
         </button>
       </div>
 
+      {selectedId ? (
+        <ClientRecordLocation
+          key={`${clientId}:${selectedId}`}
+          clientId={clientId}
+          recordId={selectedId}
+          kind="activity"
+          load={getClientActivity}
+          onClose={onClearSelection}
+          returnSession={returnSession}
+        >
+          {(record) => (
+            <div className="client-activity-list">{renderRecord(record)}</div>
+          )}
+        </ClientRecordLocation>
+      ) : null}
       <label className="client-activity-history-toggle">
         <input
           checked={includeDeleted}
@@ -401,93 +520,7 @@ export function ClientActivitiesSection({ clientId }: { clientId: string }) {
 
       {items.length > 0 ? (
         <div className="client-activity-list">
-          {items.map((activity) => {
-            const deleted = activity.deletedAt !== null;
-            const system = activity.kind === "system_reference";
-            const projectWorkflowEvent =
-              system && activity.sourceType === "project_workflow_event";
-            const Icon =
-              activity.kind === "meeting"
-                ? UsersRound
-                : system
-                  ? CalendarClock
-                  : MessageSquareText;
-            return (
-              <article
-                className={deleted ? "is-deleted" : undefined}
-                key={activity.id}
-              >
-                <span className="client-activity-icon" aria-hidden="true">
-                  <Icon size={14} />
-                </span>
-                <div className="client-activity-copy">
-                  <div>
-                    <strong>{activity.title}</strong>
-                    <span>
-                      {activity.kind === "meeting"
-                        ? "会议记录"
-                        : projectWorkflowEvent
-                          ? "项目生命周期"
-                          : system
-                            ? "系统引用"
-                            : "沟通笔记"}
-                    </span>
-                  </div>
-                  {deleted ? (
-                    <p>
-                      已于 {formatActivityTime(activity.deletedAt!)} 删除
-                      {activity.deleteReason
-                        ? `：${activity.deleteReason}`
-                        : ""}
-                    </p>
-                  ) : system ? (
-                    projectWorkflowEvent ? (
-                      <p>来源：项目状态变更 · 系统只读</p>
-                    ) : (
-                      <p>
-                        引用 {activity.sourceType} · {activity.sourceId}
-                      </p>
-                    )
-                  ) : (
-                    <p>{activity.body}</p>
-                  )}
-                  <small>
-                    {formatActivityTime(activity.occurredAt)} · 由{" "}
-                    {activity.createdBy.displayName} 记录
-                  </small>
-                </div>
-                {!deleted && !system ? (
-                  <div className="client-activity-actions">
-                    <button
-                      aria-label={`编辑活动 ${activity.title}`}
-                      className="icon-button"
-                      disabled={pending}
-                      onClick={() => openEdit(activity)}
-                      type="button"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      aria-label={`删除活动 ${activity.title}`}
-                      className="icon-button icon-button-danger"
-                      disabled={pending}
-                      onClick={() => {
-                        resetFeedback();
-                        setEditing(null);
-                        setDeleteCandidate(activity);
-                        setDeleteReason("");
-                      }}
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ) : (
-                  <FileText className="client-activity-readonly" size={13} />
-                )}
-              </article>
-            );
-          })}
+          {items.filter((item) => item.id !== selectedId).map(renderRecord)}
         </div>
       ) : null}
 

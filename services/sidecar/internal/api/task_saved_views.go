@@ -74,39 +74,127 @@ func (a *API) listTaskSavedViews(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": responses})
 }
 
+// Shared saved-view command layer. Native HTTP handlers and approved AI
+// proposals both call these helpers, so a confirmed proposal runs exactly the
+// same validation and single transaction as a human page action.
+func createTaskSavedViewInTransaction(tx *gorm.DB, name string, definition taskSavedViewDefinition, now string) (taskSavedViewResponse, error) {
+	normalizedName, err := validateTaskSavedViewName(name)
+	if err != nil {
+		return taskSavedViewResponse{}, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+	}
+	normalizedDefinition, encoded, err := normalizeTaskSavedViewDefinition(definition)
+	if err != nil {
+		return taskSavedViewResponse{}, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+	}
+	var count int64
+	if err := tx.Model(&models.TaskSavedView{}).Count(&count).Error; err != nil {
+		return taskSavedViewResponse{}, err
+	}
+	if count >= maxTaskSavedViews {
+		return taskSavedViewResponse{}, newProjectRequestError(http.StatusConflict, "TASK_SAVED_VIEW_LIMIT_REACHED", "At most 20 task saved views are allowed")
+	}
+	if err := requireUniqueTaskSavedViewName(tx, normalizedName, ""); err != nil {
+		return taskSavedViewResponse{}, err
+	}
+	row := models.TaskSavedView{
+		ID: uuid.NewString(), Name: normalizedName, DefinitionJSON: encoded,
+		SchemaVersion: taskSavedViewSchemaVersion, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := tx.Create(&row).Error; err != nil {
+		return taskSavedViewResponse{}, err
+	}
+	return taskSavedViewResponse{
+		ID: row.ID, Name: row.Name, Definition: normalizedDefinition, SchemaVersion: row.SchemaVersion,
+		Version: row.Version, CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),
+	}, nil
+}
+
+func loadTaskSavedViewInTransaction(tx *gorm.DB, id string) (models.TaskSavedView, taskSavedViewResponse, error) {
+	var row models.TaskSavedView
+	if err := tx.First(&row, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return row, taskSavedViewResponse{}, newProjectRequestError(http.StatusNotFound, "TASK_SAVED_VIEW_NOT_FOUND", "Task saved view not found")
+		}
+		return row, taskSavedViewResponse{}, err
+	}
+	response, err := taskSavedViewFromModel(row)
+	if err != nil {
+		return row, taskSavedViewResponse{}, err
+	}
+	return row, response, nil
+}
+
+func updateTaskSavedViewInTransaction(tx *gorm.DB, id string, expectedVersion int64, name *string, definition *taskSavedViewDefinition, now string) (taskSavedViewResponse, error) {
+	current, _, err := loadTaskSavedViewInTransaction(tx, id)
+	if err != nil {
+		return taskSavedViewResponse{}, err
+	}
+	if current.Version != expectedVersion {
+		return taskSavedViewResponse{}, taskVersionConflict()
+	}
+	updates := map[string]any{"version": gorm.Expr("version + 1"), "updated_at": now}
+	if name != nil {
+		normalizedName, err := validateTaskSavedViewName(*name)
+		if err != nil {
+			return taskSavedViewResponse{}, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		}
+		if err := requireUniqueTaskSavedViewName(tx, normalizedName, id); err != nil {
+			return taskSavedViewResponse{}, err
+		}
+		updates["name"] = normalizedName
+	}
+	if definition != nil {
+		_, encoded, err := normalizeTaskSavedViewDefinition(*definition)
+		if err != nil {
+			return taskSavedViewResponse{}, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		}
+		updates["definition_json"] = encoded
+		updates["schema_version"] = taskSavedViewSchemaVersion
+	}
+	result := tx.Model(&models.TaskSavedView{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
+	if result.Error != nil {
+		return taskSavedViewResponse{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return taskSavedViewResponse{}, taskVersionConflict()
+	}
+	_, updated, err := loadTaskSavedViewInTransaction(tx, id)
+	if err != nil {
+		return taskSavedViewResponse{}, err
+	}
+	return updated, nil
+}
+
+func deleteTaskSavedViewInTransaction(tx *gorm.DB, id string, expectedVersion int64) error {
+	result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.TaskSavedView{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 0 {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&models.TaskSavedView{}).Where("id = ?", id).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return newProjectRequestError(http.StatusNotFound, "TASK_SAVED_VIEW_NOT_FOUND", "Task saved view not found")
+	}
+	return taskVersionConflict()
+}
+
 func (a *API) createTaskSavedView(c *gin.Context) {
 	var input createTaskSavedViewRequest
 	if err := decodeJSON(c, &input); err != nil {
 		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
 		return
 	}
-	name, err := validateTaskSavedViewName(input.Name)
-	if err != nil {
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-		return
-	}
-	definition, definitionJSON, err := normalizeTaskSavedViewDefinition(input.Definition)
-	if err != nil {
-		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-		return
-	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
-	row := models.TaskSavedView{
-		ID: uuid.NewString(), Name: name, DefinitionJSON: definitionJSON,
-		SchemaVersion: taskSavedViewSchemaVersion, Version: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var count int64
-		if err := tx.Model(&models.TaskSavedView{}).Count(&count).Error; err != nil {
-			return err
-		}
-		if count >= maxTaskSavedViews {
-			return newProjectRequestError(http.StatusConflict, "TASK_SAVED_VIEW_LIMIT_REACHED", "At most 20 task saved views are allowed")
-		}
-		if err := requireUniqueTaskSavedViewName(tx, name, ""); err != nil {
-			return err
-		}
-		return tx.Create(&row).Error
+	var response taskSavedViewResponse
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		response, createErr = createTaskSavedViewInTransaction(tx, input.Name, input.Definition, now)
+		return createErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -114,10 +202,6 @@ func (a *API) createTaskSavedView(c *gin.Context) {
 		}
 		writeDatabaseError(c)
 		return
-	}
-	response := taskSavedViewResponse{
-		ID: row.ID, Name: row.Name, Definition: definition, SchemaVersion: row.SchemaVersion,
-		Version: row.Version, CreatedAt: normalizeTimestamp(row.CreatedAt), UpdatedAt: normalizeTimestamp(row.UpdatedAt),
 	}
 	setProjectETag(c, response.Version)
 	c.JSON(http.StatusCreated, gin.H{"data": response})
@@ -144,53 +228,11 @@ func (a *API) updateTaskSavedView(c *gin.Context) {
 
 	var response taskSavedViewResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.TaskSavedView
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_SAVED_VIEW_NOT_FOUND", "Task saved view not found")
-			}
-			return err
-		}
-		if current.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		updates := map[string]any{}
-		if input.Name != nil {
-			name, err := validateTaskSavedViewName(*input.Name)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-			if err := requireUniqueTaskSavedViewName(tx, name, id); err != nil {
-				return err
-			}
-			updates["name"] = name
-		}
-		if input.Definition != nil {
-			_, encoded, err := normalizeTaskSavedViewDefinition(*input.Definition)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-			updates["definition_json"] = encoded
-			updates["schema_version"] = taskSavedViewSchemaVersion
-		}
-		updates["version"] = gorm.Expr("version + 1")
-		updates["updated_at"] = a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.TaskSavedView{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return taskVersionConflict()
-		}
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			return err
-		}
-		parsed, err := taskSavedViewFromModel(current)
-		if err != nil {
-			return err
-		}
-		response = parsed
-		return nil
+		var updateErr error
+		response, updateErr = updateTaskSavedViewInTransaction(
+			tx, id, expectedVersion, input.Name, input.Definition, a.options.Now().UTC().Format(time.RFC3339Nano),
+		)
+		return updateErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -216,22 +258,14 @@ func (a *API) deleteTaskSavedView(c *gin.Context) {
 		writeError(c, http.StatusUnprocessableEntity, "CONFIRMATION_REQUIRED", "Task saved view deletion requires confirm=true")
 		return
 	}
-	result := a.db.WithContext(c.Request.Context()).Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.TaskSavedView{})
-	if result.Error != nil {
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		return deleteTaskSavedViewInTransaction(tx, id, expectedVersion)
+	})
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
 		writeDatabaseError(c)
-		return
-	}
-	if result.RowsAffected == 0 {
-		var count int64
-		if err := a.db.WithContext(c.Request.Context()).Model(&models.TaskSavedView{}).Where("id = ?", id).Count(&count).Error; err != nil {
-			writeDatabaseError(c)
-			return
-		}
-		if count == 0 {
-			writeError(c, http.StatusNotFound, "TASK_SAVED_VIEW_NOT_FOUND", "Task saved view not found")
-			return
-		}
-		writeProjectRequestError(c, taskVersionConflict())
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted_id": id}})

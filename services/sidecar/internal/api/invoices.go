@@ -186,25 +186,11 @@ func (a *API) createInvoice(c *gin.Context) {
 				return nil
 			}
 		}
-		if err := validateInvoiceAssociations(tx, invoice.ClientID, invoice.ProjectID); err != nil {
-			return err
-		}
-		number, err := nextInvoiceNumber(tx, invoice.IssueDate, invoice.CreatedAt)
+		var err error
+		response, err = createInvoiceInTransaction(tx, invoice, requestIDFromContext(c))
 		if err != nil {
 			return err
 		}
-		invoice.InvoiceNumber = number
-		if err := tx.Create(&invoice).Error; err != nil {
-			return invoiceDatabaseError(err)
-		}
-		if err := recordInvoiceWorkflowEvent(tx, invoice.ID, "invoice_created", models.BuiltinOwnerActorID, nil, invoiceEventState(invoice), requestIDFromContext(c), invoice.CreatedAt); err != nil {
-			return err
-		}
-		row, err := loadInvoiceRow(tx, invoice.ID)
-		if err != nil {
-			return err
-		}
-		response = invoiceResponseFromRow(row)
 		return recordInvoiceIdempotency(tx, key, createInvoiceEndpoint, invoice.ID, requestHash, http.StatusCreated, response, invoice.CreatedAt)
 	})
 	if err != nil {
@@ -257,46 +243,9 @@ func (a *API) updateInvoice(c *gin.Context) {
 
 	var response invoiceResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var invoice models.Invoice
-		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
-			return err
-		}
-		if invoice.Version != expectedVersion {
-			return invoiceVersionConflict()
-		}
-		if invoice.Status != "draft" {
-			return newInvoiceRequestError(http.StatusConflict, "INVOICE_NOT_DRAFT", "Only draft invoices can be edited")
-		}
-		previous := invoiceEventState(invoice)
-		updates, candidate, err := invoiceUpdates(invoice, input)
-		if err != nil {
-			return err
-		}
-		if err := validateInvoiceAssociations(tx, candidate.ClientID, candidate.ProjectID); err != nil {
-			return err
-		}
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates["version"] = gorm.Expr("version + 1")
-		updates["updated_at"] = now
-		result := tx.Model(&models.Invoice{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return invoiceDatabaseError(result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return invoiceVersionConflict()
-		}
-		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
-			return err
-		}
-		if err := recordInvoiceWorkflowEvent(tx, id, "invoice_updated", models.BuiltinOwnerActorID, previous, invoiceEventState(invoice), requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		row, err := loadInvoiceRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = invoiceResponseFromRow(row)
-		return nil
+		var err error
+		response, err = updateInvoiceInTransaction(tx, id, expectedVersion, input, requestIDFromContext(c), nowStamp(a))
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -334,55 +283,13 @@ func (a *API) deleteInvoice(c *gin.Context) {
 
 	var movedPDF *trashedInvoicePDF
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var invoice models.Invoice
-		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
-			return err
-		}
-		if invoice.Version != expectedVersion {
-			return invoiceVersionConflict()
-		}
-		if invoice.Status != "draft" {
-			return newInvoiceRequestError(http.StatusConflict, "INVOICE_NOT_DRAFT", "Only draft invoices can be deleted")
-		}
-		var entryCount int64
-		if err := tx.Table("financial_entries").Where("invoice_id = ?", id).Count(&entryCount).Error; err != nil {
-			return err
-		}
-		if entryCount > 0 {
-			return newInvoiceRequestError(http.StatusConflict, "INVOICE_FINANCIAL_ENTRY_EXISTS", "An invoice linked to a financial entry cannot be deleted")
-		}
-		asset, exists, err := invoicePDFAssetExists(tx, id)
-		if err != nil {
-			return err
-		}
-		if exists {
-			if store == nil {
-				return newInvoiceRequestError(http.StatusServiceUnavailable, "INVOICE_PDF_STORAGE_UNAVAILABLE", "Invoice PDF storage is unavailable")
-			}
-			movedPDF, err = store.moveToTrash(asset.RelativePath, asset.ID)
-			if err != nil {
-				return newInvoiceRequestError(http.StatusInternalServerError, "INVOICE_PDF_STORAGE_ERROR", "The invoice PDF could not be prepared for deletion safely")
-			}
-		}
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		if err := recordInvoiceWorkflowEvent(tx, id, "invoice_deleted", models.BuiltinOwnerActorID, invoiceEventState(invoice), nil, requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.Invoice{})
-		if result.Error != nil {
-			return invoiceDatabaseError(result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return invoiceVersionConflict()
-		}
-		return nil
+		var err error
+		movedPDF, err = deleteInvoiceInTransaction(tx, store, id, expectedVersion, requestIDFromContext(c), now)
+		return err
 	})
+	a.finishInvoiceDeletion(movedPDF, err)
 	if err != nil {
-		if store != nil {
-			if restoreErr := store.restoreTrashed(movedPDF); restoreErr != nil && a.options.Logger != nil {
-				a.options.Logger.Printf("invoice PDF delete compensation failed invoice_id=%s error=%v", id, restoreErr)
-			}
-		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeError(c, http.StatusNotFound, "INVOICE_NOT_FOUND", "Invoice not found")
 			return
@@ -392,9 +299,6 @@ func (a *API) deleteInvoice(c *gin.Context) {
 		}
 		writeDatabaseError(c)
 		return
-	}
-	if store != nil {
-		store.purgeTrashed(movedPDF)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted_id": id}})
 }
@@ -448,68 +352,12 @@ func (a *API) transitionInvoice(c *gin.Context) {
 				return nil
 			}
 		}
-		var invoice models.Invoice
-		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
-			return err
-		}
-		if invoice.Version != expectedVersion {
-			return invoiceVersionConflict()
-		}
-		target, eventAction, actorID, err := invoiceTransition(invoice, action, paidDate, a.options.Now())
+		var err error
+		response, err = transitionInvoiceInTransaction(tx, id, expectedVersion, action, paidDate, a.options.Now(), requestIDFromContext(c))
 		if err != nil {
 			return err
 		}
-		previous := invoiceEventState(invoice)
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		var financialEntry *models.FinancialEntry
-		if target == "paid" {
-			entry, err := createInvoicePaymentEntry(tx, invoice, *paidDate, now, requestIDFromContext(c))
-			if err != nil {
-				return err
-			}
-			financialEntry = &entry
-		}
-		updates := map[string]any{
-			"status": target, "version": gorm.Expr("version + 1"), "updated_at": now,
-		}
-		if target == "paid" {
-			updates["paid_date"] = *paidDate
-		}
-		result := tx.Model(&models.Invoice{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return invoiceDatabaseError(result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return invoiceVersionConflict()
-		}
-		if err := tx.Where("id = ?", id).Take(&invoice).Error; err != nil {
-			return err
-		}
-		event, err := recordInvoiceWorkflowEventWithID(
-			tx, id, eventAction, actorID, previous, invoiceEventState(invoice), requestIDFromContext(c), now,
-		)
-		if err != nil {
-			return err
-		}
-		if target == "paid" {
-			if err := resolveInvoiceDueInboxSources(tx, id, requestIDFromContext(c), now); err != nil {
-				return err
-			}
-		}
-		if eventAction == "invoice_overdue" {
-			if err := enqueueInvoiceOverdueAutomationDelivery(tx, event.ID, invoice, now); err != nil {
-				return err
-			}
-		}
-		row, err := loadInvoiceRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = invoiceResponseFromRow(row)
-		if financialEntry != nil && (response.FinancialEntryID == nil || *response.FinancialEntryID != financialEntry.ID) {
-			return errors.New("paid invoice did not resolve its financial entry")
-		}
-		return recordInvoiceIdempotency(tx, key, endpoint, id, requestHash, http.StatusOK, response, now)
+		return recordInvoiceIdempotency(tx, key, endpoint, id, requestHash, http.StatusOK, response, response.UpdatedAt)
 	})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

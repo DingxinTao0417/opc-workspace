@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opc-workspace/opc-sidecar/internal/database"
@@ -15,9 +16,9 @@ import (
 
 const frozenBusinessImportSchemaV49 = 49
 
-func TestBusinessImportSchemaContractAIOnly68To71(t *testing.T) {
-	for _, target := range []int{68, 69, 70, 71} {
-		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69, 70} {
+func TestBusinessImportSchemaContractAIOnly68To79(t *testing.T) {
+	for _, target := range []int{68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79} {
+		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79} {
 			if source > target {
 				continue
 			}
@@ -26,6 +27,16 @@ func TestBusinessImportSchemaContractAIOnly68To71(t *testing.T) {
 				expected = businessExportExcludedTablesSchema49
 			} else if source >= 63 && source <= 65 {
 				expected = businessExportExcludedTablesSchema65
+			} else if source >= 66 && source <= 70 {
+				expected = businessExportExcludedTablesSchema67
+			} else if source == 71 {
+				expected = businessExportExcludedTablesSchema71
+			} else if source >= 72 && source <= 75 {
+				expected = businessExportExcludedTablesSchema75
+			} else if source == 76 {
+				expected = businessExportExcludedTablesSchema76
+			} else if source == 77 {
+				expected = businessExportExcludedTablesSchema77
 			}
 			actual, ok := businessImportSchemaContract(source, target)
 			if !ok || !equalStrings(actual, expected) {
@@ -34,8 +45,198 @@ func TestBusinessImportSchemaContractAIOnly68To71(t *testing.T) {
 		}
 	}
 	if _, ok := businessImportSchemaContract(72, 71); ok {
+		t.Fatal("schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(76, 75); ok {
+		t.Fatal("plan schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(77, 76); ok {
+		t.Fatal("continuation schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(78, 77); ok {
+		t.Fatal("access request schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(79, 78); ok {
 		t.Fatal("future schema accepted")
 	}
+}
+
+func TestBusinessImportSchema77PackageUsesFrozenExclusionsAt78(t *testing.T) {
+	router, _, _, _ := newBackupTestAPI(t)
+	current := emptyBusinessExportFixture(t, router)
+	current.Source.SchemaVersion = 77
+	current.ExcludedOperationalTables = append([]string(nil), businessExportExcludedTablesSchema77...)
+	preview := performRequest(router, http.MethodPost, "/api/v1/imports/business-data/preview", encodeBusinessImportJSON(t, current), nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("schema77 preview=%d %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 77 || envelope.Data.TargetSchemaVersion != 79 {
+		t.Fatalf("schema77 compatibility=%+v err=%v", envelope.Data, err)
+	}
+}
+
+func TestBusinessImportSchemaContractUsesFrozenHistoricalExcludedTables(t *testing.T) {
+	base := []string{
+		"schema_migrations",
+		"workspace_identity",
+		"idempotency_keys",
+		"artifact_deletion_tombstones",
+		"client_attachment_deletion_tombstones",
+		"project_attachment_deletion_tombstones",
+		"workspace_avatar_deletion_tombstones",
+		"task_focus_totals",
+		"storage_capacity_samples",
+		"scheduled_backup_policy",
+		"invoice_number_sequences",
+		"automation_event_deliveries",
+		"business_import_project_completion_authorizations",
+		"ai_providers",
+		"ai_sessions",
+		"ai_generations",
+		"ai_messages",
+		"ai_memories",
+		"ai_memory_entries",
+		"ai_run_steps",
+	}
+	knowledge := []string{
+		"knowledge_sources",
+		"knowledge_documents",
+		"knowledge_chunks",
+		"knowledge_index_jobs",
+		"knowledge_chunks_fts",
+		"knowledge_chunks_fts_data",
+		"knowledge_chunks_fts_idx",
+		"knowledge_chunks_fts_content",
+		"knowledge_chunks_fts_docsize",
+		"knowledge_chunks_fts_config",
+	}
+	schema65 := append(append(append([]string{}, base...),
+		"ai_evaluation_runs", "ai_evaluation_results"), knowledge...)
+	schema67 := append(append(append([]string{}, base...),
+		"ai_evaluation_runs", "ai_evaluation_results", "ai_evaluation_reviews"), knowledge...)
+	schema71 := append(append([]string{}, schema67...), "agent_runs")
+	schema72 := append(append(append([]string{}, base...),
+		"ai_action_proposals", "ai_evaluation_runs", "ai_evaluation_results", "ai_evaluation_reviews"), knowledge...)
+	schema72 = append(schema72, "agent_runs")
+
+	for _, test := range []struct {
+		name     string
+		source   int
+		expected []string
+	}{
+		{name: "schema65 has no future reviews runs or proposals", source: 65, expected: schema65},
+		{name: "schema67 adds evaluation reviews", source: 67, expected: schema67},
+		{name: "schema71 adds agent runs", source: 71, expected: schema71},
+		{name: "schema72 adds action proposals", source: 72, expected: schema72},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			actual, ok := businessImportSchemaContract(test.source, businessImportSchema75)
+			if !ok || !equalStrings(actual, test.expected) {
+				t.Fatalf("schema %d -> 75 excluded tables = %#v, ok=%v; want %#v", test.source, actual, ok, test.expected)
+			}
+		})
+	}
+}
+
+func TestBusinessImportSchema76KeepsContinuationAuthorizationNonportable(t *testing.T) {
+	source, sourceStore, _, _ := newBackupTestAPI(t)
+	for _, statement := range []string{
+		`INSERT INTO clients(id,name) VALUES ('018f0000-0000-7000-8000-000000007701','Portable client')`,
+		`INSERT INTO ai_sessions(id,title,persist,created_at,updated_at) VALUES ('continuation-private-session','Private authorization',1,'2026-09-21T12:00:00Z','2026-09-21T12:00:00Z')`,
+		`INSERT INTO ai_providers(id,name,kind,protocol,base_url,model,status,health_status,has_key,version,config_version,last_health_at,created_at,updated_at) VALUES ('continuation-private-provider','Private authorization provider','local','openai_chat','http://127.0.0.1:1/v1','test','ready','healthy',0,1,1,'2026-09-21T12:00:00Z','2026-09-21T12:00:00Z','2026-09-21T12:00:00Z')`,
+		`INSERT INTO ai_generations(id,session_id,provider_id,status,created_at,updated_at) VALUES ('continuation-private-generation','continuation-private-session','continuation-private-provider','streaming','2026-09-21T12:00:00Z','2026-09-21T12:00:00Z')`,
+		`INSERT INTO ai_work_plan_revisions(session_id,version,generation_id,plan_json,created_at) VALUES ('continuation-private-session',1,'continuation-private-generation','{"title":"Private continuation plan","steps":[]}','2026-09-21T12:00:00Z')`,
+		`INSERT INTO ai_continuations(id,session_id,provider_id,provider_version,provider_config_version,provider_name,provider_kind,provider_protocol,provider_model,workspace_json,initial_plan_version,current_plan_version,max_turns,turns_started,status,reason,version,created_at,updated_at,expires_at) VALUES ('continuation-private-lease','continuation-private-session','continuation-private-provider',1,1,'Private authorization provider','local','openai_chat','test','{"provider_version":1,"scopes":["work","outputs","actions"]}',1,1,2,1,'running','generating',1,'2026-09-21T12:00:00Z','2026-09-21T12:00:00Z','2026-09-21T12:30:00Z')`,
+		`INSERT INTO ai_continuation_turns(continuation_id,turn_index,generation_id,plan_version,observation_hash,created_at) VALUES ('continuation-private-lease',1,'continuation-private-generation',1,'` + strings.Repeat("a", 64) + `','2026-09-21T12:00:00Z')`,
+	} {
+		if err := sourceStore.DB.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	exported := performRequest(source, http.MethodGet, "/api/v1/exports/business-data", nil, nil)
+	if exported.Code != http.StatusOK {
+		t.Fatalf("export=%d %s", exported.Code, exported.Body.String())
+	}
+	if strings.Contains(exported.Body.String(), "continuation-private-") || strings.Contains(exported.Body.String(), "Private authorization") {
+		t.Fatal("portable export contains authorization or turn data")
+	}
+	current := decodeBusinessImportJSON(t, exported.Body.Bytes())
+	if current.Source.SchemaVersion != 79 || !equalStrings(current.ExcludedOperationalTables, businessExportExcludedTables) {
+		t.Fatalf("current export contract=%+v", current.Source)
+	}
+	for _, name := range []string{"ai_continuations", "ai_continuation_turns"} {
+		found := false
+		for _, excluded := range current.ExcludedOperationalTables {
+			found = found || excluded == name
+		}
+		if !found {
+			t.Fatalf("missing exclusion %s", name)
+		}
+		for _, table := range current.Tables {
+			if table.Name == name {
+				t.Fatalf("runtime table exported: %s", name)
+			}
+		}
+	}
+	// Schema 077 changes no portable columns. Freeze the exact v76 envelope,
+	// including its old exclusion list, rather than rewriting the old contract.
+	frozen := cloneBusinessExportPackage(t, current)
+	frozen.Source.SchemaVersion = 76
+	frozen.ExcludedOperationalTables = append([]string(nil), businessExportExcludedTablesSchema76...)
+	for _, excluded := range frozen.ExcludedOperationalTables {
+		if excluded == "ai_continuations" || excluded == "ai_continuation_turns" {
+			t.Fatalf("v76 manifest was retroactively changed: %s", excluded)
+		}
+	}
+	target, targetStore, _, backupDir := newBackupTestAPI(t)
+	for _, changed := range []businessExportPackage{
+		func() businessExportPackage {
+			copy := cloneBusinessExportPackage(t, frozen)
+			copy.ExcludedOperationalTables = append(copy.ExcludedOperationalTables, "ai_continuations")
+			return copy
+		}(),
+		func() businessExportPackage {
+			copy := cloneBusinessExportPackage(t, frozen)
+			copy.Tables = append(copy.Tables, businessExportTable{Name: "ai_continuations", Columns: []string{"id"}, Rows: [][]any{{"smuggled-authorization"}}})
+			return copy
+		}(),
+	} {
+		bad := performRequest(target, http.MethodPost, "/api/v1/imports/business-data/preview", encodeBusinessImportJSON(t, changed), nil)
+		if bad.Code != http.StatusUnprocessableEntity || responseErrorCode(t, bad.Body.Bytes()) != "IMPORT_MANIFEST_INVALID" {
+			t.Fatalf("smuggled runtime contract=%d %s", bad.Code, bad.Body.String())
+		}
+	}
+	body := encodeBusinessImportJSON(t, frozen)
+	preview := performRequest(target, http.MethodPost, "/api/v1/imports/business-data/preview", body, nil)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("v76 preview=%d %s", preview.Code, preview.Body.String())
+	}
+	var envelope struct {
+		Data businessImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 76 || envelope.Data.TargetSchemaVersion != 79 {
+		t.Fatalf("v76 preview=%+v %v", envelope.Data, err)
+	}
+	assertDatabaseCount(t, targetStore, `SELECT COUNT(*) FROM clients`, 0)
+	if len(backupPackageDirectories(t, backupDir)) != 0 {
+		t.Fatal("read-only or rejected preview created backup")
+	}
+	apply := performRequest(target, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+	if apply.Code != http.StatusOK {
+		t.Fatalf("v76 apply=%d %s", apply.Code, apply.Body.String())
+	}
+	assertDatabaseCount(t, targetStore, `SELECT COUNT(*) FROM clients WHERE id='018f0000-0000-7000-8000-000000007701'`, 1)
+	for _, table := range []string{"ai_continuations", "ai_continuation_turns", "ai_sessions", "ai_generations"} {
+		assertDatabaseCount(t, targetStore, `SELECT COUNT(*) FROM `+table, 0)
+	}
+	if len(backupPackageDirectories(t, backupDir)) != 1 {
+		t.Fatal("approved import did not create its single rollback backup")
+	}
+	assertDatabaseCount(t, sourceStore, `SELECT COUNT(*) FROM ai_continuations WHERE turns_started=1`, 1)
+	assertDatabaseCount(t, sourceStore, `SELECT COUNT(*) FROM ai_continuation_turns`, 1)
 }
 
 var frozenBusinessExportV49ExcludedTables = []string{
@@ -89,7 +290,7 @@ func TestBusinessImportSchemaContractAllowsSchema65IntoCurrent(t *testing.T) {
 
 func TestBusinessImportSchemaContractAllowsSchema66Into67(t *testing.T) {
 	excluded, ok := businessImportSchemaContract(businessImportSchema66, businessImportSchema67)
-	if !ok || !equalStrings(excluded, businessExportExcludedTables) {
+	if !ok || !equalStrings(excluded, businessExportExcludedTablesSchema67) {
 		t.Fatalf("schema 66 to 67 contract = %#v, ok=%v", excluded, ok)
 	}
 }
@@ -193,7 +394,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 72, blocker: "source_schema_newer"},
+		{version: 80, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

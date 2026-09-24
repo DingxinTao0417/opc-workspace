@@ -159,6 +159,11 @@ func pathContains(parent, candidate string) bool {
 func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set(apiContextKey, a)
+		// These short continuation writes own their lock ordering, like chat.
+		if c.Request.Method == http.MethodPost && ((strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/sessions/") && strings.HasSuffix(c.Request.URL.Path, "/continuation")) || (strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/continuations/") && strings.HasSuffix(c.Request.URL.Path, "/stop"))) {
+			c.Next()
+			return
+		}
 		// Cancellation first addresses the in-memory registry and must not
 		// queue behind a backup writer or a pending restore.
 		if c.Request.Method == http.MethodPost && (strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/generations/") || strings.HasPrefix(c.Request.URL.Path, "/api/"+Version+"/ai/evaluations/")) && strings.HasSuffix(c.Request.URL.Path, "/cancel") {
@@ -167,10 +172,12 @@ func (a *API) maintenanceReadMiddleware() gin.HandlerFunc {
 		}
 		if a.restorePending.Load() {
 			backupRootPath := "/api/" + Version + "/backups"
+			isRestoreDiagnostics := c.Request.Method == http.MethodGet &&
+				c.Request.URL.Path == backupRootPath+"/restore-diagnostics"
 			isRestoreReplay := c.Request.Method == http.MethodPost &&
 				strings.HasPrefix(c.Request.URL.Path, backupRootPath+"/") &&
 				strings.HasSuffix(c.Request.URL.Path, "/restore")
-			if (c.Request.Method == http.MethodGet && c.Request.URL.Path == backupRootPath) || isRestoreReplay {
+			if (c.Request.Method == http.MethodGet && c.Request.URL.Path == backupRootPath) || isRestoreDiagnostics || isRestoreReplay {
 				c.Next()
 				return
 			}

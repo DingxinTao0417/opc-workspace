@@ -11,7 +11,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useDeleteProject,
@@ -28,7 +33,12 @@ import { ProjectFocusSection } from "../components/ProjectFocusSection";
 import { ProjectArtifactsSection } from "../components/ProjectArtifactsSection";
 import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSection";
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
 import { TaskList } from "../components/TaskList";
+import { focusReportReturnSession } from "../lib/focusReportLocation";
+import { projectHandoff } from "../lib/aiIssueHandoff";
+import { parseProjectNoteLocation } from "../lib/projectNoteLocation";
 import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import type {
@@ -98,6 +108,11 @@ function errorMessage(error: unknown): string | null {
 export function ProjectDetailPage() {
   const projectId = useParams().projectId ?? "";
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedNote = parseProjectNoteLocation(searchParams);
+  const returnSession = focusReportReturnSession(searchParams);
+  const invalidNoteSelection =
+    searchParams.has("note") && selectedNote === null;
   const projectQuery = useProjectQuery(projectId || null);
   const transitionMutation = useTransitionProject();
   const deleteMutation = useDeleteProject();
@@ -153,6 +168,12 @@ export function ProjectDetailPage() {
   const operationError =
     errorMessage(transitionMutation.error) ??
     errorMessage(deleteMutation.error);
+
+  const clearNoteSelection = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("note");
+    setSearchParams(next, { replace: true });
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -228,6 +249,7 @@ export function ProjectDetailPage() {
   if (projectQuery.isPending) {
     return (
       <div className="page">
+        <ReturnToAiChat sessionId={returnSession} />
         <SkeletonRows count={8} />
       </div>
     );
@@ -236,10 +258,13 @@ export function ProjectDetailPage() {
   if (projectQuery.isError || !project) {
     return (
       <div className="page">
-        <Link className="project-back-link" to="/projects">
-          <ArrowLeft size={14} />
-          返回项目
-        </Link>
+        <div className="project-action-row">
+          <Link className="project-back-link" to="/projects">
+            <ArrowLeft size={14} />
+            返回项目
+          </Link>
+          <ReturnToAiChat sessionId={returnSession} />
+        </div>
         <ErrorState
           message="无法读取该项目，项目可能已删除或本地服务暂不可用。"
           onRetry={() => void projectQuery.refetch()}
@@ -254,6 +279,13 @@ export function ProjectDetailPage() {
       <PageHeader
         actions={
           <>
+            {!selectedNote ? (
+              <ReturnToAiChat sessionId={returnSession} />
+            ) : null}
+            <AiIssueHandoffButton
+              content={projectHandoff(project.id, project.name, project.status)}
+              disabled={busy}
+            />
             <button
               className="button button-secondary"
               disabled={busy || project.status === "archived"}
@@ -292,6 +324,12 @@ export function ProjectDetailPage() {
         }
         title={project.name}
       />
+
+      {invalidNoteSelection ? (
+        <div className="form-error" role="alert">
+          项目笔记链接无效或包含重复参数，未读取任何笔记。
+        </div>
+      ) : null}
 
       <section className="project-detail-hero">
         <div>
@@ -655,7 +693,10 @@ export function ProjectDetailPage() {
 
       <ProjectNotesSection
         archived={project.status === "archived"}
+        onClearSelection={clearNoteSelection}
         projectId={project.id}
+        returnSession={returnSession}
+        selectedId={selectedNote?.id}
       />
 
       <ProjectAttachmentsSection

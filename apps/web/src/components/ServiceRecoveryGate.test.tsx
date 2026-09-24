@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, type ReactNode } from "react";
@@ -153,8 +154,12 @@ describe("ServiceRecoveryGate", () => {
       </ServiceRecoveryGate>,
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "正在验证待恢复备份",
+    // The initial checking screen already has role=status; wait for the
+    // asynchronous diagnostic content, not merely that existing element.
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "正在验证待恢复备份",
+      ),
     );
     expect(screen.queryByText("业务页面")).toBeNull();
   });
@@ -280,6 +285,80 @@ describe("ServiceRecoveryGate", () => {
     expect(resetConnection).toHaveBeenCalledTimes(1);
   });
 
+  it("offers bounded backup selection with explicit consent and skip", async () => {
+    const loadRuntime = vi
+      .fn<() => Promise<RuntimeDiagnostics>>()
+      .mockResolvedValue({
+        ...ready,
+        phase: "error",
+        generation: 1,
+        startupStage: null,
+      });
+    const listBackups = vi.fn().mockResolvedValue([
+      {
+        id: "018f0000-0000-7000-8000-00000000a001",
+        createdAt: "2026-09-23T10:00:00Z",
+        verificationStatus: "verified",
+        kind: "manual",
+        schemaVersion: 79,
+        note: "note-a",
+      },
+      {
+        id: "018f0000-0000-7000-8000-00000000a002",
+        createdAt: null,
+        verificationStatus: "invalid",
+        kind: "unknown",
+        schemaVersion: 0,
+        note: null,
+      },
+    ]);
+    const scheduleRestore = vi.fn().mockResolvedValue({
+      backupId: "018f0000-0000-7000-8000-00000000a001",
+      restartRequired: true,
+    });
+
+    renderWithQueryClient(
+      <ServiceRecoveryGate
+        desktop
+        listBackups={listBackups}
+        loadRuntime={loadRuntime}
+        scheduleRestore={scheduleRestore}
+      >
+        <p>业务页面</p>
+      </ServiceRecoveryGate>,
+    );
+
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole("button", { name: "从备份恢复" }));
+    await act(async () => undefined);
+    expect(listBackups).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/不可恢复/)).toBeVisible();
+
+    const scheduleButton = screen.getByRole("button", {
+      name: "安排恢复并准备重启",
+    }) as HTMLButtonElement;
+    expect(scheduleButton.disabled).toBe(true);
+
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[0]);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "安排恢复并准备重启",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "安排恢复并准备重启" }));
+    await act(async () => undefined);
+    expect(scheduleRestore).toHaveBeenCalledWith(
+      "018f0000-0000-7000-8000-00000000a001",
+    );
+    expect(screen.getByText(/已安排恢复/)).toBeVisible();
+    expect(screen.queryByText("业务页面")).toBeNull();
+  });
+
   it("shows only safe recovery actions and never renders a raw failure", async () => {
     const loadRuntime = vi
       .fn<() => Promise<RuntimeDiagnostics>>()
@@ -306,7 +385,7 @@ describe("ServiceRecoveryGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "打开日志目录" }));
     expect(openLogs).toHaveBeenCalledTimes(1);
     await act(async () => undefined);
-    fireEvent.click(screen.getByRole("button", { name: "重启并重试" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳过并重启" }));
     expect(restart).toHaveBeenCalledTimes(1);
   });
 

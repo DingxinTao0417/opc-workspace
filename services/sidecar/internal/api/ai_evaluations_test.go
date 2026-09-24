@@ -108,7 +108,7 @@ func goodEvaluationResponsesForSuite(t *testing.T, suiteKey string) []string {
 
 func newAIEvaluationTestRouter(t *testing.T, client harness.LLMClient) (*Router, *database.Store, models.AIProvider) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "ai-evaluation.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "ai-evaluation.db"))
 	if err != nil {
 		t.Fatalf("database.Open: %v", err)
 	}

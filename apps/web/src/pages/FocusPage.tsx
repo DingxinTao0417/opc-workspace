@@ -14,7 +14,8 @@ import {
   SkipForward,
   Square,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import type { FocusReportHour, FocusReportParams } from "../types/models";
 import { ApiError } from "../api/client";
 import {
@@ -37,6 +38,13 @@ import {
   useLocalCalendar,
 } from "../lib/localCalendar";
 import { useSettledPage } from "../lib/useSettledPage";
+import {
+  focusReportLocationKeys,
+  focusReportReturnSession,
+  focusReportViewLabels,
+  parseFocusReportLocation,
+} from "../lib/focusReportLocation";
+import { useAiChatStore } from "../store/aiChat";
 import {
   formatFocusTime,
   useBreakClock,
@@ -173,12 +181,23 @@ function focusError(...errors: unknown[]): string | null {
 
 export function FocusPage() {
   const { dateKey: todayKey, timeZone: timezone } = useLocalCalendar();
+  const [reportParams, setReportParams] = useSearchParams();
+  const reportSearch = reportParams.toString();
+  const linkedReportRequested = focusReportLocationKeys.some((key) =>
+    reportParams.has(key),
+  );
+  const linkedReport = useMemo(
+    () => parseFocusReportLocation(new URLSearchParams(reportSearch)),
+    [reportSearch],
+  );
+  const returnSession = focusReportReturnSession(reportParams);
+  const reportPanel = useRef<HTMLDivElement>(null);
+  const locatedReport = useRef<string | null>(null);
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
   const previewFocusMinutes = useSettingsStore(
     (state) => state.preview?.focus.focusMinutes ?? state.focusMinutes,
   );
   const committedFocusMinutes = useSettingsStore((state) => state.focusMinutes);
-  const committedCycles = useSettingsStore((state) => state.cycles);
   const focusQuery = useActiveFocusSessionQuery();
   const createFocus = useCreateFocusSession();
   const pauseFocus = usePauseFocusSession();
@@ -187,12 +206,72 @@ export function FocusPage() {
   const cancelFocus = useCancelFocusSession();
   const todayStats = useTodayStatsQuery(todayKey);
   const [historyPage, setHistoryPage] = useState(1);
-  const [reportRangeKind, setReportRangeKind] =
+  const [localRangeKind, setLocalRangeKind] =
     useState<FocusReportRangeKind>("seven_days");
-  const [customReportRange, setCustomReportRange] = useState(() =>
+  const [localCustomRange, setLocalCustomRange] = useState(() =>
     recentDateRange(localDateFromKey(todayKey)),
   );
+  const reportRangeKind = linkedReportRequested ? "custom" : localRangeKind;
+  const customReportRange = linkedReportRequested
+    ? {
+        dateFrom: reportParams.get("date_from") ?? "",
+        dateTo: reportParams.get("date_to") ?? "",
+      }
+    : localCustomRange;
+  const setCustomReportRange = (
+    update: (current: typeof customReportRange) => typeof customReportRange,
+  ) => {
+    if (!linkedReportRequested) {
+      setLocalCustomRange(update);
+      return;
+    }
+    const next = new URLSearchParams(reportParams);
+    const range = update(customReportRange);
+    next.set("date_from", range.dateFrom);
+    next.set("date_to", range.dateTo);
+    // Editing dates must not move keyboard focus back into a chart.
+    locatedReport.current = next.toString();
+    setReportParams(next, { replace: true });
+  };
+  const setReportRangeKind = (kind: FocusReportRangeKind) => {
+    if (!linkedReportRequested) {
+      setLocalRangeKind(kind);
+      return;
+    }
+    if (!linkedReport || kind === "custom") return;
+    // Presets retain the link's zone/project; today metrics and the active timer
+    // keep using the user's local calendar independently.
+    const parts = new Intl.DateTimeFormat("en", {
+      timeZone: linkedReport.timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const part = (name: string) =>
+      parts.find((item) => item.type === name)!.value;
+    const range = focusReportRange(
+      kind,
+      localDateFromKey(`${part("year")}-${part("month")}-${part("day")}`),
+    );
+    setCustomReportRange(() => range);
+  };
+  const clearReportLocation = () => {
+    setLocalRangeKind("seven_days");
+    setReportParams(returnSession ? { return_session: returnSession } : {}, {
+      replace: true,
+    });
+  };
   const selectedReportRange = useMemo(() => {
+    if (linkedReportRequested) {
+      const params = new URLSearchParams(reportSearch);
+      return {
+        dateFrom: params.get("date_from") ?? "",
+        dateTo: params.get("date_to") ?? "",
+        timezone: params.get("timezone") ?? "",
+        projectId: params.get("project_id") ?? undefined,
+        label: "链接报告",
+      };
+    }
     if (reportRangeKind === "custom") {
       return { ...customReportRange, timezone, label: "自定义范围" };
     }
@@ -200,7 +279,14 @@ export function FocusPage() {
       ...focusReportRange(reportRangeKind, localDateFromKey(todayKey)),
       timezone,
     };
-  }, [customReportRange, reportRangeKind, timezone, todayKey]);
+  }, [
+    customReportRange,
+    reportRangeKind,
+    timezone,
+    todayKey,
+    linkedReportRequested,
+    reportSearch,
+  ]);
   const customRangeDays = localDateDistance(
     customReportRange.dateFrom,
     customReportRange.dateTo,
@@ -217,8 +303,35 @@ export function FocusPage() {
             : null;
   const focusReport = useFocusReportQuery(
     selectedReportRange,
-    !customRangeError,
+    !customRangeError && (!linkedReportRequested || linkedReport !== null),
   );
+  useEffect(() => {
+    if (!linkedReportRequested) {
+      locatedReport.current = null;
+      return;
+    }
+    if (
+      (linkedReport && focusReport.isPending) ||
+      locatedReport.current === reportSearch ||
+      !reportPanel.current
+    )
+      return;
+    const target =
+      linkedReport && !focusReport.isError
+        ? (reportPanel.current.querySelector<HTMLElement>(
+            `[data-report-view="${linkedReport.view}"]`,
+          ) ?? reportPanel.current)
+        : reportPanel.current;
+    target.scrollIntoView?.({ block: "start" });
+    target.focus({ preventScroll: true });
+    locatedReport.current = reportSearch;
+  }, [
+    linkedReportRequested,
+    linkedReport,
+    reportSearch,
+    focusReport.isPending,
+    focusReport.isError,
+  ]);
   const focusHistory = useFocusSessionHistoryQuery({
     page: historyPage,
     pageSize: 6,
@@ -245,7 +358,6 @@ export function FocusPage() {
   const completedCycles = useFocusCycleStore((state) => state.completedCycles);
   const targetCycles = useFocusCycleStore((state) => state.targetCycles);
   const breakEndsAtMs = useFocusCycleStore((state) => state.breakEndsAtMs);
-  const beginWork = useFocusCycleStore((state) => state.beginWork);
   const pauseBreak = useFocusCycleStore((state) => state.pauseBreak);
   const resumeBreak = useFocusCycleStore((state) => state.resumeBreak);
   const finishBreak = useFocusCycleStore((state) => state.finishBreak);
@@ -291,12 +403,6 @@ export function FocusPage() {
       setConfirmUnbound(true);
       return;
     }
-    const cycles = continuing ? targetCycles : committedCycles;
-    const taskTitle = taskId
-      ? continuing
-        ? cycleTaskTitle
-        : selectedTaskTitle
-      : null;
     setConfirmCancel(false);
     createFocus.mutate(
       {
@@ -306,7 +412,6 @@ export function FocusPage() {
       {
         onSuccess: () => {
           setConfirmUnbound(false);
-          beginWork(taskId, cycles, taskTitle);
         },
       },
     );
@@ -318,13 +423,12 @@ export function FocusPage() {
     if (action === "pause") pauseFocus.mutate(input);
     if (action === "resume") resumeFocus.mutate(input);
     if (action === "stop") {
-      stopFocus.mutate(input, { onSuccess: resetCycle });
+      stopFocus.mutate(input);
     }
     if (action === "cancel") {
       cancelFocus.mutate(input, {
         onSuccess: () => {
           setConfirmCancel(false);
-          resetCycle();
         },
       });
     }
@@ -506,7 +610,7 @@ export function FocusPage() {
                   </button>
                   <button
                     className="button button-quiet"
-                    onClick={resetCycle}
+                    onClick={() => resetCycle()}
                     type="button"
                   >
                     结束本轮
@@ -521,7 +625,7 @@ export function FocusPage() {
                 <div className="focus-controls">
                   <button
                     className="button button-primary focus-primary"
-                    onClick={resetCycle}
+                    onClick={() => resetCycle()}
                     type="button"
                   >
                     <RotateCcw size={17} /> 开始新一轮
@@ -598,412 +702,473 @@ export function FocusPage() {
               onRetry={() => void todayStats.refetch()}
             />
           ) : null}
-
-          <section className="focus-insights" aria-label="专注回顾">
-            <div className="focus-panel focus-report-panel">
-              <div className="focus-panel-heading">
+        </>
+      )}
+      <section className="focus-insights" aria-label="专注回顾">
+        <div
+          className="focus-panel focus-report-panel"
+          ref={reportPanel}
+          tabIndex={-1}
+          aria-label="专注报告"
+        >
+          <div className="focus-panel-heading">
+            <div>
+              <span className="eyebrow">{selectedReportRange.label}</span>
+              <h2>专注趋势</h2>
+            </div>
+            {returnSession ? (
+              <Link
+                className="button button-secondary"
+                to="/ai"
+                onClick={() =>
+                  useAiChatStore.getState().setActiveSessionId(returnSession)
+                }
+              >
+                返回原对话
+              </Link>
+            ) : null}
+            <BarChart3 size={18} />
+          </div>
+          {linkedReportRequested ? (
+            <div className="focus-report-location">
+              <p>
+                按链接条件查看 ·{" "}
+                {linkedReport
+                  ? focusReportViewLabels[linkedReport.view]
+                  : "条件无效"}
+              </p>
+              {linkedReport ? (
+                <p>
+                  {linkedReport.dateFrom} — {linkedReport.dateTo} ·{" "}
+                  {linkedReport.timezone} ·{" "}
+                  {linkedReport.projectId ? (
+                    <Link to={`/projects/${linkedReport.projectId}`}>
+                      指定项目
+                    </Link>
+                  ) : (
+                    "全部项目"
+                  )}
+                </p>
+              ) : null}
+              <p>
+                重新读取当前事实，不是对话时的冻结快照；筛选仅作用于报告，不改变计时和下方历史。
+              </p>
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={clearReportLocation}
+              >
+                清除链接筛选
+              </button>
+            </div>
+          ) : null}
+          <div className="focus-report-range" aria-label="专注回顾范围">
+            {(
+              [
+                ["seven_days", "7 天"],
+                ["thirty_days", "30 天"],
+                ["month", "本月"],
+                ["custom", "自定义"],
+              ] as Array<[FocusReportRangeKind, string]>
+            ).map(([kind, label]) => (
+              <button
+                aria-pressed={reportRangeKind === kind}
+                className={
+                  reportRangeKind === kind
+                    ? "focus-report-range-button is-active"
+                    : "focus-report-range-button"
+                }
+                key={kind}
+                onClick={() => setReportRangeKind(kind)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {reportRangeKind === "custom" ? (
+            <div className="focus-report-custom-range">
+              <label>
+                开始日期
+                <input
+                  aria-label="专注回顾开始日期"
+                  max={customReportRange.dateTo}
+                  onChange={(event) =>
+                    setCustomReportRange((current) => ({
+                      ...current,
+                      dateFrom: event.target.value,
+                    }))
+                  }
+                  type="date"
+                  value={customReportRange.dateFrom}
+                />
+              </label>
+              <label>
+                结束日期
+                <input
+                  aria-label="专注回顾结束日期"
+                  min={customReportRange.dateFrom}
+                  onChange={(event) =>
+                    setCustomReportRange((current) => ({
+                      ...current,
+                      dateTo: event.target.value,
+                    }))
+                  }
+                  type="date"
+                  value={customReportRange.dateTo}
+                />
+              </label>
+              <span>
+                {customRangeDays && customRangeDays > 0
+                  ? `${customRangeDays} 天`
+                  : "等待有效范围"}
+              </span>
+            </div>
+          ) : null}
+          {linkedReportRequested && !linkedReport ? (
+            <ErrorState
+              compact
+              title="报告链接无效"
+              message="请核对日期（1–93 天）、IANA 时区、项目及报告维度，或清除链接筛选；不会改用默认范围查询。"
+            />
+          ) : customRangeError ? (
+            <p className="form-error focus-report-range-error" role="alert">
+              {customRangeError}
+            </p>
+          ) : focusReport.isPending ? (
+            <LoadingState label="正在统计本地专注记录…" />
+          ) : focusReport.isError ? (
+            <ErrorState
+              compact
+              message={
+                focusReport.error instanceof ApiError &&
+                focusReport.error.code === "PROJECT_NOT_FOUND"
+                  ? "链接中的项目已不存在，无法读取该项目报告。可清除链接筛选查看全部项目。"
+                  : "本地专注统计暂时不可用。"
+              }
+              onRetry={() => void focusReport.refetch()}
+            />
+          ) : focusReport.data ? (
+            <>
+              <div
+                className="focus-report-metrics"
+                data-report-view="summary"
+                tabIndex={-1}
+              >
                 <div>
-                  <span className="eyebrow">{selectedReportRange.label}</span>
-                  <h2>专注趋势</h2>
+                  <span>专注块</span>
+                  <strong>{focusReport.data.totals.sessions}</strong>
                 </div>
-                <BarChart3 size={18} />
+                <div>
+                  <span>已确认</span>
+                  <strong>{focusReport.data.totals.minutes} 分钟</strong>
+                </div>
+                <div>
+                  <span>连续专注</span>
+                  <strong>{focusReport.data.currentStreakDays} 天</strong>
+                </div>
+                <div>
+                  <span>本期最长</span>
+                  <strong>{focusReport.data.longestStreakDays} 天</strong>
+                </div>
               </div>
-              <div className="focus-report-range" aria-label="专注回顾范围">
-                {(
-                  [
-                    ["seven_days", "7 天"],
-                    ["thirty_days", "30 天"],
-                    ["month", "本月"],
-                    ["custom", "自定义"],
-                  ] as Array<[FocusReportRangeKind, string]>
-                ).map(([kind, label]) => (
-                  <button
-                    aria-pressed={reportRangeKind === kind}
-                    className={
-                      reportRangeKind === kind
-                        ? "focus-report-range-button is-active"
-                        : "focus-report-range-button"
-                    }
-                    key={kind}
-                    onClick={() => setReportRangeKind(kind)}
-                    type="button"
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {reportRangeKind === "custom" ? (
-                <div className="focus-report-custom-range">
-                  <label>
-                    开始日期
-                    <input
-                      aria-label="专注回顾开始日期"
-                      max={customReportRange.dateTo}
-                      onChange={(event) =>
-                        setCustomReportRange((current) => ({
-                          ...current,
-                          dateFrom: event.target.value,
-                        }))
-                      }
-                      type="date"
-                      value={customReportRange.dateFrom}
-                    />
-                  </label>
-                  <label>
-                    结束日期
-                    <input
-                      aria-label="专注回顾结束日期"
-                      min={customReportRange.dateFrom}
-                      onChange={(event) =>
-                        setCustomReportRange((current) => ({
-                          ...current,
-                          dateTo: event.target.value,
-                        }))
-                      }
-                      type="date"
-                      value={customReportRange.dateTo}
-                    />
-                  </label>
+              {focusReport.data.totals.seconds === 0 ? (
+                <div className="focus-empty-inline">
+                  <CalendarDays size={18} />
                   <span>
-                    {customRangeDays && customRangeDays > 0
-                      ? `${customRangeDays} 天`
-                      : "等待有效范围"}
+                    {selectedReportRange.label}还没有已完成的专注记录。
                   </span>
                 </div>
-              ) : null}
-              {customRangeError ? (
-                <p className="form-error focus-report-range-error" role="alert">
-                  {customRangeError}
-                </p>
-              ) : focusReport.isPending ? (
-                <LoadingState label="正在统计本地专注记录…" />
-              ) : focusReport.isError ? (
-                <ErrorState
-                  compact
-                  message="本地专注统计暂时不可用。"
-                  onRetry={() => void focusReport.refetch()}
-                />
-              ) : focusReport.data ? (
+              ) : (
                 <>
-                  <div className="focus-report-metrics">
-                    <div>
-                      <span>专注块</span>
-                      <strong>{focusReport.data.totals.sessions}</strong>
-                    </div>
-                    <div>
-                      <span>已确认</span>
-                      <strong>{focusReport.data.totals.minutes} 分钟</strong>
-                    </div>
-                    <div>
-                      <span>连续专注</span>
-                      <strong>{focusReport.data.currentStreakDays} 天</strong>
-                    </div>
-                    <div>
-                      <span>本期最长</span>
-                      <strong>{focusReport.data.longestStreakDays} 天</strong>
-                    </div>
-                  </div>
-                  {focusReport.data.totals.seconds === 0 ? (
-                    <div className="focus-empty-inline">
-                      <CalendarDays size={18} />
-                      <span>
-                        {selectedReportRange.label}还没有已完成的专注记录。
-                      </span>
-                    </div>
-                  ) : (
-                    <>
-                      <div
-                        className="focus-bars"
-                        aria-label="每日专注分钟数"
-                        style={
-                          {
-                            "--focus-days": focusReport.data.days.length,
-                          } as React.CSSProperties
-                        }
-                      >
-                        {focusReport.data.days.map((day) => {
-                          const maxMinutes = Math.max(
-                            ...focusReport.data.days.map(
-                              (item) => item.minutes,
-                            ),
-                            1,
-                          );
-                          return (
-                            <div className="focus-bar-column" key={day.date}>
-                              <span>{day.minutes || ""}</span>
-                              <div>
-                                <i
-                                  style={{
-                                    height: `${Math.max((day.minutes / maxMinutes) * 100, day.minutes ? 8 : 2)}%`,
-                                  }}
-                                />
-                              </div>
-                              <small>
-                                {focusReportDayLabel(
-                                  day.date,
-                                  focusReport.data.days.length,
-                                )}
-                              </small>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div
-                        aria-label="项目专注时间分布"
-                        className="focus-project-distribution"
-                      >
-                        <div className="focus-project-distribution-heading">
-                          <strong>项目分布</strong>
-                          <span>按任务当前归属统计</span>
-                        </div>
-                        {focusReport.data.projects.map((project) => (
-                          <article key={project.projectId ?? "unassigned"}>
-                            <div>
-                              <strong>
-                                {project.projectName ?? "未归项目"}
-                              </strong>
-                              <span>
-                                {project.sessions} 个专注块 · {project.minutes}{" "}
-                                分钟
-                              </span>
-                            </div>
-                            <div className="focus-project-distribution-track">
-                              <i
-                                style={{
-                                  width: `${Math.max(
-                                    (project.seconds /
-                                      focusReport.data.totals.seconds) *
-                                      100,
-                                    2,
-                                  )}%`,
-                                }}
-                              />
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                      <div
-                        aria-label="标签专注时间分布"
-                        className="focus-tag-distribution"
-                      >
-                        <div className="focus-tag-distribution-heading">
-                          <strong>标签分布</strong>
-                          <span>多标签任务会分别计入各标签</span>
-                        </div>
-                        {focusReport.data.tags.map((tag) => (
-                          <article key={tag.tagId ?? "untagged"}>
-                            <div>
-                              <strong>
-                                <i
-                                  aria-hidden="true"
-                                  style={{
-                                    background:
-                                      tag.tagColor ?? "var(--text-dim)",
-                                  }}
-                                />
-                                {tag.tagName ?? "未加标签"}
-                              </strong>
-                              <span>
-                                {tag.sessions} 个专注块 · {tag.minutes} 分钟
-                              </span>
-                            </div>
-                            <div className="focus-tag-distribution-track">
-                              <i
-                                style={{
-                                  background: tag.tagColor ?? undefined,
-                                  width: `${Math.max(
-                                    (tag.seconds /
-                                      focusReport.data.totals.seconds) *
-                                      100,
-                                    2,
-                                  )}%`,
-                                }}
-                              />
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                      <div
-                        aria-label="每日时段专注分布"
-                        className="focus-hour-distribution"
-                      >
-                        <div className="focus-hour-distribution-heading">
-                          <strong>时段分布</strong>
-                          <span>
-                            {bestFocusHour(focusReport.data.hours)
-                              ? `最佳 ${focusHourLabel(
-                                  bestFocusHour(focusReport.data.hours)!.hour,
-                                )}`
-                              : "暂无有效时段"}
-                          </span>
-                        </div>
-                        <div className="focus-hour-grid">
-                          {focusReport.data.hours.map((hour) => {
-                            const maxSeconds = Math.max(
-                              ...focusReport.data.hours.map(
-                                (item) => item.seconds,
-                              ),
-                              1,
-                            );
-                            return (
-                              <div
-                                aria-label={`${focusHourLabel(hour.hour)}，${hour.minutes} 分钟，${hour.sessions} 个专注块`}
-                                key={hour.hour}
-                                title={`${focusHourLabel(hour.hour)} · ${hour.minutes} 分钟 · ${hour.sessions} 个专注块`}
-                              >
-                                <i
-                                  style={{
-                                    opacity: hour.seconds
-                                      ? 0.25 +
-                                        (hour.seconds / maxSeconds) * 0.75
-                                      : 0.08,
-                                  }}
-                                />
-                                <small>
-                                  {hour.hour % 6 === 0
-                                    ? String(hour.hour).padStart(2, "0")
-                                    : ""}
-                                </small>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <div
-                        aria-label="周几与小时专注热力图"
-                        className="focus-heatmap"
-                      >
-                        <div className="focus-heatmap-heading">
-                          <strong>专注热力图</strong>
-                          <span>按当地星期与小时汇总</span>
-                        </div>
-                        <div className="focus-heatmap-scroll">
-                          <div className="focus-heatmap-grid">
-                            <span aria-hidden="true" />
-                            {focusReport.data.hours.map((hour) => (
-                              <small key={hour.hour}>
-                                {hour.hour % 3 === 0
-                                  ? String(hour.hour).padStart(2, "0")
-                                  : ""}
-                              </small>
-                            ))}
-                            {focusWeekdayLabels.map((label, weekdayIndex) => (
-                              <div className="focus-heatmap-row" key={label}>
-                                <strong>{label}</strong>
-                                {focusReport.data.heatmap
-                                  .slice(
-                                    weekdayIndex * 24,
-                                    (weekdayIndex + 1) * 24,
-                                  )
-                                  .map((cell) => {
-                                    const maxSeconds = Math.max(
-                                      ...focusReport.data.heatmap.map(
-                                        (item) => item.seconds,
-                                      ),
-                                      1,
-                                    );
-                                    return (
-                                      <i
-                                        aria-label={`${label} ${focusHourLabel(cell.hour)}，${cell.minutes} 分钟，${cell.sessions} 个专注块`}
-                                        key={cell.hour}
-                                        style={{
-                                          opacity: cell.seconds
-                                            ? 0.2 +
-                                              (cell.seconds / maxSeconds) * 0.8
-                                            : 0.06,
-                                        }}
-                                        title={`${label} ${focusHourLabel(cell.hour)} · ${cell.minutes} 分钟 · ${cell.sessions} 个专注块`}
-                                      />
-                                    );
-                                  })}
-                              </div>
-                            ))}
+                  <div
+                    className="focus-bars"
+                    data-report-view="days"
+                    tabIndex={-1}
+                    aria-label="每日专注分钟数"
+                    style={
+                      {
+                        "--focus-days": focusReport.data.days.length,
+                      } as React.CSSProperties
+                    }
+                  >
+                    {focusReport.data.days.map((day) => {
+                      const maxMinutes = Math.max(
+                        ...focusReport.data.days.map((item) => item.minutes),
+                        1,
+                      );
+                      return (
+                        <div className="focus-bar-column" key={day.date}>
+                          <span>{day.minutes || ""}</span>
+                          <div>
+                            <i
+                              style={{
+                                height: `${Math.max((day.minutes / maxMinutes) * 100, day.minutes ? 8 : 2)}%`,
+                              }}
+                            />
                           </div>
+                          <small>
+                            {focusReportDayLabel(
+                              day.date,
+                              focusReport.data.days.length,
+                            )}
+                          </small>
                         </div>
-                      </div>
-                    </>
-                  )}
-                </>
-              ) : null}
-            </div>
-
-            <div className="focus-panel focus-history-panel">
-              <div className="focus-panel-heading">
-                <div>
-                  <span className="eyebrow">本地记录</span>
-                  <h2>最近专注</h2>
-                </div>
-                <History size={18} />
-              </div>
-              {focusHistory.isPending ? (
-                <LoadingState label="正在读取专注历史…" />
-              ) : focusHistory.isError ? (
-                <ErrorState
-                  compact
-                  message="专注历史暂时不可用。"
-                  onRetry={() => void focusHistory.refetch()}
-                />
-              ) : focusHistory.data?.items.length ? (
-                <>
-                  <div className="focus-history-list">
-                    {focusHistory.data.items.map((item) => (
-                      <article key={item.id}>
-                        <span
-                          className="focus-history-status"
-                          data-status={item.status}
-                        >
-                          {focusHistoryStatus(item.status)}
-                        </span>
+                      );
+                    })}
+                  </div>
+                  <div
+                    aria-label="项目专注时间分布"
+                    className="focus-project-distribution"
+                    data-report-view="projects"
+                    tabIndex={-1}
+                  >
+                    <div className="focus-project-distribution-heading">
+                      <strong>项目分布</strong>
+                      <span>按任务当前归属统计</span>
+                    </div>
+                    {focusReport.data.projects.map((project) => (
+                      <article key={project.projectId ?? "unassigned"}>
                         <div>
-                          <strong>{item.taskTitle ?? "未绑定任务"}</strong>
+                          <strong>{project.projectName ?? "未归项目"}</strong>
                           <span>
-                            {focusHistoryTime(item.endedAt ?? item.updatedAt)}
+                            {project.sessions} 个专注块 · {project.minutes} 分钟
                           </span>
                         </div>
-                        <b>{formatFocusTime(item.accumulatedSeconds)}</b>
+                        <div className="focus-project-distribution-track">
+                          <i
+                            style={{
+                              width: `${Math.max(
+                                (project.seconds /
+                                  focusReport.data.totals.seconds) *
+                                  100,
+                                2,
+                              )}%`,
+                            }}
+                          />
+                        </div>
                       </article>
                     ))}
                   </div>
-                  {focusHistory.data.meta.total >
-                  focusHistory.data.meta.pageSize ? (
-                    <div className="focus-history-pagination">
-                      <button
-                        aria-label="上一页专注历史"
-                        className="icon-button"
-                        disabled={historyPage === 1 || focusHistory.isFetching}
-                        onClick={() => setHistoryPage((page) => page - 1)}
-                        type="button"
-                      >
-                        <ChevronLeft size={15} />
-                      </button>
-                      <span>
-                        {historyPage} / {focusHistoryPages}
-                      </span>
-                      <button
-                        aria-label="下一页专注历史"
-                        className="icon-button"
-                        disabled={
-                          historyPage >= focusHistoryPages ||
-                          focusHistory.isFetching
-                        }
-                        onClick={() => setHistoryPage((page) => page + 1)}
-                        type="button"
-                      >
-                        <ChevronRight size={15} />
-                      </button>
+                  <div
+                    aria-label="标签专注时间分布"
+                    className="focus-tag-distribution"
+                    data-report-view="tags"
+                    tabIndex={-1}
+                  >
+                    <div className="focus-tag-distribution-heading">
+                      <strong>标签分布</strong>
+                      <span>多标签任务会分别计入各标签</span>
                     </div>
-                  ) : null}
+                    {focusReport.data.tags.map((tag) => (
+                      <article key={tag.tagId ?? "untagged"}>
+                        <div>
+                          <strong>
+                            <i
+                              aria-hidden="true"
+                              style={{
+                                background: tag.tagColor ?? "var(--text-dim)",
+                              }}
+                            />
+                            {tag.tagName ?? "未加标签"}
+                          </strong>
+                          <span>
+                            {tag.sessions} 个专注块 · {tag.minutes} 分钟
+                          </span>
+                        </div>
+                        <div className="focus-tag-distribution-track">
+                          <i
+                            style={{
+                              background: tag.tagColor ?? undefined,
+                              width: `${Math.max(
+                                (tag.seconds /
+                                  focusReport.data.totals.seconds) *
+                                  100,
+                                2,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div
+                    aria-label="每日时段专注分布"
+                    className="focus-hour-distribution"
+                    data-report-view="hours"
+                    tabIndex={-1}
+                  >
+                    <div className="focus-hour-distribution-heading">
+                      <strong>时段分布</strong>
+                      <span>
+                        {bestFocusHour(focusReport.data.hours)
+                          ? `最佳 ${focusHourLabel(
+                              bestFocusHour(focusReport.data.hours)!.hour,
+                            )}`
+                          : "暂无有效时段"}
+                      </span>
+                    </div>
+                    <div className="focus-hour-grid">
+                      {focusReport.data.hours.map((hour) => {
+                        const maxSeconds = Math.max(
+                          ...focusReport.data.hours.map((item) => item.seconds),
+                          1,
+                        );
+                        return (
+                          <div
+                            aria-label={`${focusHourLabel(hour.hour)}，${hour.minutes} 分钟，${hour.sessions} 个专注块`}
+                            key={hour.hour}
+                            title={`${focusHourLabel(hour.hour)} · ${hour.minutes} 分钟 · ${hour.sessions} 个专注块`}
+                          >
+                            <i
+                              style={{
+                                opacity: hour.seconds
+                                  ? 0.25 + (hour.seconds / maxSeconds) * 0.75
+                                  : 0.08,
+                              }}
+                            />
+                            <small>
+                              {hour.hour % 6 === 0
+                                ? String(hour.hour).padStart(2, "0")
+                                : ""}
+                            </small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div
+                    aria-label="周几与小时专注热力图"
+                    className="focus-heatmap"
+                    data-report-view="heatmap"
+                    tabIndex={-1}
+                  >
+                    <div className="focus-heatmap-heading">
+                      <strong>专注热力图</strong>
+                      <span>按当地星期与小时汇总</span>
+                    </div>
+                    <div className="focus-heatmap-scroll">
+                      <div className="focus-heatmap-grid">
+                        <span aria-hidden="true" />
+                        {focusReport.data.hours.map((hour) => (
+                          <small key={hour.hour}>
+                            {hour.hour % 3 === 0
+                              ? String(hour.hour).padStart(2, "0")
+                              : ""}
+                          </small>
+                        ))}
+                        {focusWeekdayLabels.map((label, weekdayIndex) => (
+                          <div className="focus-heatmap-row" key={label}>
+                            <strong>{label}</strong>
+                            {focusReport.data.heatmap
+                              .slice(weekdayIndex * 24, (weekdayIndex + 1) * 24)
+                              .map((cell) => {
+                                const maxSeconds = Math.max(
+                                  ...focusReport.data.heatmap.map(
+                                    (item) => item.seconds,
+                                  ),
+                                  1,
+                                );
+                                return (
+                                  <i
+                                    aria-label={`${label} ${focusHourLabel(cell.hour)}，${cell.minutes} 分钟，${cell.sessions} 个专注块`}
+                                    key={cell.hour}
+                                    style={{
+                                      opacity: cell.seconds
+                                        ? 0.2 +
+                                          (cell.seconds / maxSeconds) * 0.8
+                                        : 0.06,
+                                    }}
+                                    title={`${label} ${focusHourLabel(cell.hour)} · ${cell.minutes} 分钟 · ${cell.sessions} 个专注块`}
+                                  />
+                                );
+                              })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </>
-              ) : (
-                <div className="focus-empty-inline">
-                  <History size={18} />
-                  <span>完成一次专注后，记录会出现在这里。</span>
-                </div>
               )}
+            </>
+          ) : null}
+        </div>
+
+        <div className="focus-panel focus-history-panel">
+          <div className="focus-panel-heading">
+            <div>
+              <span className="eyebrow">本地记录</span>
+              <h2>最近专注</h2>
             </div>
-          </section>
-        </>
-      )}
+            <History size={18} />
+          </div>
+          {focusHistory.isPending ? (
+            <LoadingState label="正在读取专注历史…" />
+          ) : focusHistory.isError ? (
+            <ErrorState
+              compact
+              message="专注历史暂时不可用。"
+              onRetry={() => void focusHistory.refetch()}
+            />
+          ) : focusHistory.data?.items.length ? (
+            <>
+              <div className="focus-history-list">
+                {focusHistory.data.items.map((item) => (
+                  <article key={item.id}>
+                    <span
+                      className="focus-history-status"
+                      data-status={item.status}
+                    >
+                      {focusHistoryStatus(item.status)}
+                    </span>
+                    <div>
+                      <strong>{item.taskTitle ?? "未绑定任务"}</strong>
+                      <span>
+                        {focusHistoryTime(item.endedAt ?? item.updatedAt)}
+                      </span>
+                    </div>
+                    <b>{formatFocusTime(item.accumulatedSeconds)}</b>
+                  </article>
+                ))}
+              </div>
+              {focusHistory.data.meta.total >
+              focusHistory.data.meta.pageSize ? (
+                <div className="focus-history-pagination">
+                  <button
+                    aria-label="上一页专注历史"
+                    className="icon-button"
+                    disabled={historyPage === 1 || focusHistory.isFetching}
+                    onClick={() => setHistoryPage((page) => page - 1)}
+                    type="button"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <span>
+                    {historyPage} / {focusHistoryPages}
+                  </span>
+                  <button
+                    aria-label="下一页专注历史"
+                    className="icon-button"
+                    disabled={
+                      historyPage >= focusHistoryPages ||
+                      focusHistory.isFetching
+                    }
+                    onClick={() => setHistoryPage((page) => page + 1)}
+                    type="button"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="focus-empty-inline">
+              <History size={18} />
+              <span>完成一次专注后，记录会出现在这里。</span>
+            </div>
+          )}
+        </div>
+      </section>
 
       <section className="focus-note">
         <ShieldCheck size={17} />

@@ -17,7 +17,7 @@ import (
 
 func newFilesTestRouter(t *testing.T) (*database.Store, http.Handler) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "files.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "files.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

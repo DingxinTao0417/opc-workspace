@@ -44,29 +44,39 @@ type Options struct {
 	ScheduledBackupScanInterval    time.Duration
 	StartupRestore                 StartupRestoreResult
 	HarnessClient                  harness.LLMClient
+	ContinuationScanInterval       time.Duration
+	AgentRunGateScanInterval       time.Duration
 }
 
 type API struct {
-	db                        *gorm.DB
-	options                   Options
-	keyStore                  keystore.Store
-	harnessClient             harness.LLMClient
-	aiGenerations             *aiGenerationRegistry
-	aiCompactions             *aiCompactionRegistry
-	artifactStore             *artifactStore
-	invoicePDFStore           *invoicePDFStore
-	backupStore               *backupStore
-	maintenance               *sync.RWMutex
-	restorePending            atomic.Bool
-	lowDiskActive             atomic.Bool
-	lowDiskThresholdBytes     atomic.Uint64
-	automationEventDeliveryMu sync.Mutex
-	aiProviderMu              sync.RWMutex
-	aiEvaluationMu            sync.Mutex
-	aiEvaluationRunner        *aiEvaluationRunner
-	knowledgeIndexer          *knowledgeIndexer
-	agentRunCancels           map[string]context.CancelFunc
-	agentRunCancelsMu         sync.Mutex
+	db                         *gorm.DB
+	options                    Options
+	keyStore                   keystore.Store
+	harnessClient              harness.LLMClient
+	aiGenerations              *aiGenerationRegistry
+	aiContinuations            *aiContinuationCoordinator
+	aiDelegations              *aiDelegationCoordinator
+	aiCompactions              *aiCompactionRegistry
+	artifactStore              *artifactStore
+	invoicePDFStore            *invoicePDFStore
+	backupStore                *backupStore
+	maintenance                *sync.RWMutex
+	restorePending             atomic.Bool
+	lowDiskActive              atomic.Bool
+	lowDiskThresholdBytes      atomic.Uint64
+	automationEventDeliveryMu  sync.Mutex
+	aiProviderMu               sync.RWMutex
+	aiWorkspaceAccessRequestMu sync.Mutex
+	aiEvaluationMu             sync.Mutex
+	aiEvaluationRunner         *aiEvaluationRunner
+	knowledgeIndexer           *knowledgeIndexer
+	agentRunCancels            map[string]context.CancelFunc
+	agentRunCancelsMu          sync.Mutex
+	agentRunProgress           *agentRunProgressRegistry
+	agentRunLifecycleContext   context.Context
+	agentRunLifecycleCancel    context.CancelFunc
+	agentRunWorkers            sync.WaitGroup
+	agentRunGates              *agentRunStartGateCoordinator
 }
 
 type Router struct {
@@ -86,6 +96,10 @@ type Router struct {
 	aiCompactions                *aiCompactionRegistry
 	aiEvaluationRunner           *aiEvaluationRunner
 	knowledgeIndexer             *knowledgeIndexer
+	agentRunShutdown             func()
+	aiContinuations              *aiContinuationCoordinator
+	aiDelegations                *aiDelegationCoordinator
+	agentRunGates                *agentRunStartGateCoordinator
 	closeOnce                    sync.Once
 	closeErr                     error
 }
@@ -95,6 +109,18 @@ func (r *Router) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		if r.aiDelegations != nil {
+			r.aiDelegations.close()
+		}
+		if r.aiContinuations != nil {
+			r.aiContinuations.close()
+		}
+		if r.agentRunGates != nil {
+			r.agentRunGates.close()
+		}
+		if r.agentRunShutdown != nil {
+			r.agentRunShutdown()
+		}
 		if r.aiEvaluationRunner != nil {
 			r.aiEvaluationRunner.close()
 		}
@@ -167,6 +193,12 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if options.ScheduledBackupScanInterval == 0 {
 		options.ScheduledBackupScanInterval = time.Minute
+	}
+	if options.ContinuationScanInterval == 0 {
+		options.ContinuationScanInterval = 3 * time.Second
+	}
+	if options.AgentRunGateScanInterval == 0 {
+		options.AgentRunGateScanInterval = agentRunStartGateDefaultScan
 	}
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -241,18 +273,35 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 			compactions.close()
 		}
 	}()
+	agentRunLifecycleContext, agentRunLifecycleCancel := context.WithCancel(context.Background())
 	service := &API{
 		db: db, options: options, keyStore: options.KeyStore, harnessClient: harnessClient,
 		aiGenerations: newAIGenerationRegistry(), aiCompactions: compactions,
 		artifactStore: artifacts, invoicePDFStore: invoicePDFs, backupStore: backups,
-		maintenance:     &sync.RWMutex{},
-		agentRunCancels: map[string]context.CancelFunc{},
+		maintenance:              &sync.RWMutex{},
+		agentRunCancels:          map[string]context.CancelFunc{},
+		agentRunProgress:         newAgentRunProgressRegistry(),
+		agentRunLifecycleContext: agentRunLifecycleContext,
+		agentRunLifecycleCancel:  agentRunLifecycleCancel,
 	}
 	if err := recoverAIGenerationsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
 		}
 		return nil, fmt.Errorf("recover AI generations: %w", err)
+	}
+	startupDelegations, err := recoverAIDelegationsOnStartup(db, options.Now().UTC())
+	if err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("recover AI delegations: %w", err)
+	}
+	if err := recoverAIContinuationsOnStartup(db, options.StartupRestore.Applied, options.Now()); err != nil {
+		if artifacts != nil {
+			_ = artifacts.close()
+		}
+		return nil, fmt.Errorf("interrupt AI continuations: %w", err)
 	}
 	if err := recoverAIEvaluationRunsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
@@ -266,7 +315,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		}
 		return nil, fmt.Errorf("recover knowledge index jobs: %w", err)
 	}
-	if err := recoverAgentRunsOnStartup(db, options.Now().UTC()); err != nil {
+	queuedAgentRunIDs, err := service.recoverAgentRunsOnStartup(options.Now().UTC())
+	if err != nil {
 		if artifacts != nil {
 			_ = artifacts.close()
 		}
@@ -366,11 +416,17 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/agent-adapters/:id/enable", service.enableAgentAdapter)
 		v1.POST("/agent-adapters/:id/disable", service.disableAgentAdapter)
 		v1.GET("/tasks/:id/agent-runs", service.listTaskAgentRuns)
+		v1.GET("/tasks/:id/agent-run-files", service.listAgentRunFiles)
+		v1.GET("/tasks/:id/agent-runs/project-task-files", service.listAgentRunProjectTaskFiles)
+		v1.POST("/tasks/:id/agent-runs/project-task-files/preview", service.previewAgentRunProjectTaskFiles)
 		v1.POST("/tasks/:id/agent-runs", service.createAgentRun)
+		v1.POST("/tasks/:id/agent-runs/rework-preview", service.previewAgentRunRework)
+		v1.POST("/tasks/:id/agent-runs/restart-preview", service.previewAgentRunRestart)
 		v1.GET("/agent-runs", service.listAgentRuns)
 		v1.GET("/agent-runs/:id", service.getAgentRun)
 		v1.POST("/agent-runs/:id/cancel", service.cancelAgentRun)
 		v1.POST("/agent-runs/:id/retry", service.retryAgentRun)
+		v1.POST("/agent-runs/:id/output-delivery/retry", service.retryAgentRunOutputDelivery)
 		v1.GET("/files", service.listControlledFiles)
 		v1.GET("/ai/providers", service.listAIProviders)
 		v1.POST("/ai/providers", service.createAIProvider)
@@ -387,10 +443,23 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.DELETE("/ai/memory-proposals/:id", service.rejectAIMemoryProposal)
 		v1.POST("/ai/context/preview", service.previewAIBusinessContext)
 		v1.GET("/ai/sessions", service.listAISessions)
+		v1.GET("/ai/work-plans", service.listAIWorkPlans)
+		v1.GET("/ai/inbox", service.listAIAgentInbox)
 		v1.POST("/ai/sessions", service.createAISession)
 		v1.GET("/ai/sessions/:id", service.getAISession)
+		v1.GET("/ai/sessions/:id/agent-family", service.getAIAgentFamily)
+		v1.POST("/ai/sessions/:id/agent-children/:child_id/generations/:generation_id/cancel", service.cancelAIAgentChildGeneration)
+		v1.POST("/ai/sessions/:id/agent-children/cancel", service.cancelAIAgentChildGenerations)
+		v1.GET("/ai/sessions/:id/delegated-runs", service.listAISessionDelegatedRuns)
 		v1.DELETE("/ai/sessions/:id", service.deleteAISession)
 		v1.GET("/ai/sessions/:id/messages", service.listAIMessages)
+		v1.GET("/ai/sessions/:id/plan", service.getAIWorkPlan)
+		v1.GET("/ai/sessions/:id/plan/continuation", service.getAIWorkPlanContinuation)
+		v1.POST("/ai/sessions/:id/plan/close", service.closeAIWorkPlan)
+		v1.GET("/ai/sessions/:id/continuation", service.getAIContinuation)
+		v1.POST("/ai/sessions/:id/continuation", service.createAIContinuation)
+		v1.GET("/ai/continuations", service.listAIContinuations)
+		v1.POST("/ai/continuations/:id/stop", service.stopAIContinuation)
 		v1.GET("/ai/sessions/:id/compaction", service.getAICompactionStatus)
 		v1.GET("/ai/evaluations", service.listAIEvaluations)
 		v1.POST("/ai/evaluations", service.createAIEvaluation)
@@ -406,9 +475,14 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.GET("/ai/generations/by-request/:key", service.getAIGenerationByRequest)
 		v1.GET("/ai/generations/:id", service.getAIGeneration)
 		v1.GET("/ai/generations/:id/steps", service.listAIRunSteps)
+		v1.POST("/ai/generations/:id/access-request/dismiss", service.dismissAIWorkspaceAccessRequest)
 		v1.POST("/ai/generations/:id/cancel", service.cancelAIGeneration)
 		v1.POST("/ai/messages/:id/task", service.attachTaskToAIMessage)
 		v1.POST("/ai/messages/:id/task-confirmation", service.confirmAIMessageTask)
+		v1.GET("/ai/generations/:id/actions", service.listAIWorkspaceActions)
+		v1.POST("/ai/generations/:id/agent-delegations/confirm", service.confirmAIAgentDelegationBatch)
+		v1.POST("/ai/actions/:id/decision", service.decideAIWorkspaceAction)
+		v1.GET("/ai/actions/:id/export.csv", service.downloadAIFinanceExport)
 		v1.GET("/ai/messages/:id/memory-decision", service.getAIMessageMemoryDecision)
 		v1.DELETE("/ai/messages/:id/memory-decision", service.rejectAIMessageMemoryDecision)
 		v1.GET("/search", service.search)
@@ -420,6 +494,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/knowledge/sources/:id/reindex", service.reindexKnowledgeSource)
 		v1.GET("/knowledge/documents", service.listKnowledgeDocuments)
 		v1.GET("/knowledge/documents/:id", service.getKnowledgeDocument)
+		v1.GET("/knowledge/chunks/:id", service.getKnowledgeChunk)
 		v1.DELETE("/knowledge/documents/:id", service.deleteKnowledgeDocument)
 		v1.POST("/knowledge/search", service.searchKnowledge)
 		v1.GET("/knowledge/index-jobs/:id", service.getKnowledgeIndexJob)
@@ -446,6 +521,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/tasks/:id/submit-output", service.submitTaskOutput)
 		v1.POST("/tasks/:id/review", service.reviewTaskOutput)
 		v1.GET("/tasks/:id/submissions", service.listTaskSubmissions)
+		v1.GET("/tasks/:id/submissions/:submissionId", service.getTaskSubmission)
 		v1.GET("/tasks/:id/artifacts", service.listTaskArtifacts)
 		v1.GET("/tasks/:id/events", service.listTaskWorkflowEvents)
 		v1.GET("/tasks/:id/assignments", service.listTaskAssignments)
@@ -586,10 +662,22 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	service.aiEvaluationRunner = newAIEvaluationRunner(service)
 	service.knowledgeIndexer = newKnowledgeIndexer(service)
+	service.aiContinuations = newAIContinuationCoordinator(service)
+	service.aiDelegations = newAIDelegationCoordinator(service)
+	if code := launchRecoveredAIDelegations(service, startupDelegations); code != "" {
+		options.Logger.Print("AI queued delegation recovery was not scheduled; durable launch tickets remain pending")
+	}
+	service.aiContinuations.wake()
+	service.agentRunGates = newAgentRunStartGateCoordinator(service, options.AgentRunGateScanInterval)
+	// Gates opened before a restart are re-settled against current facts; the
+	// dispatcher never launches a Run whose gate is still open.
+	service.agentRunGates.wake()
 	result := &Router{
 		Engine: router, artifactStore: artifacts, invoicePDFStore: invoicePDFs,
 		aiCompactions: service.aiCompactions, aiEvaluationRunner: service.aiEvaluationRunner,
-		knowledgeIndexer: service.knowledgeIndexer,
+		knowledgeIndexer: service.knowledgeIndexer, agentRunShutdown: service.shutdownAgentRuns,
+		aiContinuations: service.aiContinuations, aiDelegations: service.aiDelegations,
+		agentRunGates: service.agentRunGates,
 	}
 	if options.FocusHeartbeatInterval > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -749,6 +837,9 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	keepInvoicePDFs = true
 	keepCompactions = true
+	for _, runID := range queuedAgentRunIDs {
+		service.launchAgentRun(runID)
+	}
 	return result, nil
 }
 

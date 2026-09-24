@@ -26,7 +26,7 @@ var invoicePDFTestNow = time.Date(2026, 8, 29, 19, 30, 0, 123456789, time.UTC)
 func newInvoicePDFTestAPI(t *testing.T) (*gin.Engine, *database.Store, string) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := database.Open(filepath.Join(root, "invoice-pdf-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(root, "invoice-pdf-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

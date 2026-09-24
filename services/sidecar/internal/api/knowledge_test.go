@@ -18,7 +18,7 @@ import (
 
 func newKnowledgeTestAPI(t *testing.T) (*Router, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "knowledge-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "knowledge-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

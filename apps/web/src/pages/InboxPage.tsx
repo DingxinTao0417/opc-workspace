@@ -20,9 +20,11 @@ import { useInboxItemsQuery, useMarkAllInboxItemsRead } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { InboxItemDetailModal } from "../components/InboxItemDetailModal";
 import { InboxItemFormModal } from "../components/InboxItemFormModal";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
 import { PageHeader } from "../components/PageHeader";
 import { ReminderManagerModal } from "../components/ReminderManagerModal";
 import { useSettledPage } from "../lib/useSettledPage";
+import { isWorkspaceIdentity } from "../lib/focusReportLocation";
 import type {
   InboxItem,
   InboxItemPriority,
@@ -101,6 +103,7 @@ function defaultInboxSummary(item: InboxItem): string {
   }
   if (item.kind === "reminder") return "本地提醒";
   if (item.sourceEntityType === "automation") return "本地自动化事项";
+  if (item.sourceEntityType === "agent_run_failed") return "Agent 执行失败诊断";
   if (item.sourceEntityType === "system_maintenance") return "系统维护";
   if (item.kind === "event") return "任务产出跟进";
   return "手工记录";
@@ -151,7 +154,8 @@ function InboxRow({
         ) : item.sourceEntityType === "content_item" ||
           item.sourceEntityType === "roadmap_milestone" ? (
           <CalendarClock size={15} />
-        ) : item.sourceEntityType === "task" ? (
+        ) : item.sourceEntityType === "task" ||
+          item.sourceEntityType === "agent_run_failed" ? (
           <TriangleAlert size={15} />
         ) : item.sourceEntityType === "automation" ? (
           <Zap size={15} />
@@ -212,6 +216,12 @@ export function InboxPage() {
     searchParams.has("reminders") || searchParams.has("reminder");
   const reminderStatus = reminderStatusFromSearchParams(searchParams);
   const reminderId = searchParams.get("reminder")?.trim() || null;
+  const requestedReturnSession = searchParams.get("return_session");
+  const returnSession =
+    searchParams.getAll("return_session").length === 1 &&
+    isWorkspaceIdentity(requestedReturnSession)
+      ? requestedReturnSession
+      : null;
   const query = useInboxItemsQuery({
     view,
     q: search,
@@ -337,6 +347,9 @@ export function InboxPage() {
       <PageHeader
         actions={
           <div className="inbox-header-actions">
+            {!selectedId && !managingReminders ? (
+              <ReturnToAiChat sessionId={returnSession} />
+            ) : null}
             <button
               className="button button-secondary"
               onClick={() =>
@@ -568,6 +581,7 @@ export function InboxPage() {
       />
       <InboxItemDetailModal
         itemId={selectedId}
+        returnSession={returnSession}
         onClose={() => {
           setSelectedId(null);
           if (inboxItemId) {
@@ -595,6 +609,7 @@ export function InboxPage() {
           onStateChange={setReminderLocation}
           open
           reminderId={reminderId}
+          returnSession={returnSession}
           status={reminderStatus}
         />
       ) : null}

@@ -1,14 +1,13 @@
 import { AlertTriangle, Clock3, History, Play } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   useActiveFocusSessionQuery,
   useRecoverFocusSession,
 } from "../api/hooks";
 import { ApiError } from "../api/client";
-import {
-  formatFocusTime,
-  useFocusClock,
-  useFocusCycleStore,
-} from "../store/focus";
+import { focusRecoveryHandoff } from "../lib/aiIssueHandoff";
+import { formatFocusTime, useFocusClock } from "../store/focus";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { FocusRecoveryAction } from "../types/models";
 import { Modal } from "./Modal";
 
@@ -41,12 +40,15 @@ const recoveryOptions: {
 ];
 
 export function FocusRecoveryModal() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
   const focusQuery = useActiveFocusSessionQuery();
   const recover = useRecoverFocusSession();
-  const resetCycle = useFocusCycleStore((state) => state.resetCycle);
   const clock = useFocusClock(focusQuery.data);
   const session = focusQuery.data?.session;
-  const open = session?.status === "recovery_pending";
+  // Let the user consult/approve recovery in Agent mode. Hiding this dialog
+  // never changes the pending Session or grants workspace permissions.
+  const open = session?.status === "recovery_pending" && pathname !== "/ai";
   const error =
     recover.error instanceof ApiError
       ? recover.error.message
@@ -56,23 +58,40 @@ export function FocusRecoveryModal() {
 
   const run = (action: FocusRecoveryAction) => {
     if (!session || session.status !== "recovery_pending") return;
-    recover.mutate(
-      {
-        id: session.id,
-        action,
-        expectedVersion: session.version,
-      },
-      { onSuccess: () => action === "interrupt" && resetCycle() },
-    );
+    recover.mutate({
+      id: session.id,
+      action,
+      expectedVersion: session.version,
+    });
+  };
+  const handoffToAi = () => {
+    if (!session || session.status !== "recovery_pending") return;
+    const handoff = focusRecoveryHandoff(session, {
+      elapsedSeconds: clock.elapsedSeconds,
+      uncertainSeconds: clock.uncertainSeconds,
+    });
+    if (!handoff) return;
+    useAiWorkbenchHandoff.getState().stageIssue(handoff);
+    navigate("/ai");
   };
 
   return (
     <Modal
       dismissible={false}
       footer={
-        <span className="focus-recovery-footer-note">
-          必须明确选择后才能继续本次专注。
-        </span>
+        <>
+          <span className="focus-recovery-footer-note">
+            必须明确选择后才能继续本次专注。
+          </span>
+          <button
+            className="button button-secondary"
+            type="button"
+            disabled={recover.isPending}
+            onClick={handoffToAi}
+          >
+            在智能体中处理
+          </button>
+        </>
       }
       onClose={() => undefined}
       open={open}

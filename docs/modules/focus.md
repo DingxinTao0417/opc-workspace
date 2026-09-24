@@ -1,6 +1,6 @@
 # 专注与工时模块
 
-> 当前基线：app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）。Focus 结构仍由 schema v11 引入；后续迁移不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付。通用桌面托盘已接显示/隐藏/退出源码，但不读取 Focus 状态；专注控制、原生通知和勿扰仍属后续。
+> 当前基线：app v0.1.1 / API v1 / SQLite schema v76（2026-09-20）。Focus 结构仍由 schema v11 引入；后续迁移不改 Focus 表契约。Focus Core v0.1-A/B/C、v0.1-D1（历史与周期报告）、D2a（Task 详情记录）、项目详情的项目级报告/终态 Session 历史，以及 D2b 的本地日期范围回顾、项目/当前标签时间分布、最佳小时段与二维热力图已经交付。通用桌面托盘已接显示/隐藏/退出源码，但不读取 Focus 状态；专注控制、原生通知和勿扰仍属后续。
 
 ## 定位与边界
 
@@ -12,7 +12,7 @@
 - `focus_session_intervals` 保存实际计入的工作区间，用于暂停/恢复审计、跨午夜和用户时区统计；休息不写入该表。
 - Task 保存最终可展示的整数 `actual_minutes`，`task_focus_totals` 保存 Focus 精确秒数和已应用分钟，避免多个短 Session 分别向下取整造成丢失。
 - 开始或结束专注不会改变 Task 生命周期，也不会绕过 manual 验收。
-- 当前设置和本地番茄循环仍使用 WebView `localStorage`；它们只负责下一工作块参数和休息/轮次表现，不替代 Session 事实。
+- 专注设置保存于版本化 SQLite `app_settings`，本地番茄循环使用 WebView `localStorage`；前者提供下一工作块参数，后者保存休息/轮次表现，均不替代 Session 事实。
 - 白噪音、网站屏蔽、系统勿扰和原生通知均未交付。
 
 ## 当前实现状态
@@ -26,8 +26,8 @@
 - Sidecar 默认每 15 秒刷新 active Session 的 `last_heartbeat_at`，且心跳不递增业务 `version`。Sidecar 启动时把旧进程遗留的 active Session 原子转为 `recovery_pending`，paused 保持暂停。
 - stop 会在同一事务关闭 interval、完成 Session、累计 Task Focus 精确秒数、把新增整分钟加到 `tasks.actual_minutes`、每次结算递增 Task version、写 Workflow Event 和幂等快照；只有 `actual_minutes` 实际增加时，既有 trigger 才递增关联 Project 聚合版本。任何一步失败全部回滚。
 - 活动 Session 关联的 Task 不允许硬删除，返回 `TASK_HAS_OPEN_FOCUS_SESSION`；终态 Session 在 Task 删除后按外键 `SET NULL` 保留历史。
-- React 使用共享 TanStack Query 快照驱动 FocusPage、左侧 FocusMiniCard、全局 ticker 和不可关闭的恢复对话框。刷新和普通路由切换不再依赖内存递减保存事实。
-- FocusPage 支持选择任一未取消 Task；不绑定任务需要再次确认。左侧 FocusMiniCard 展示真实 Session 任务与剩余时间，不再猜测第一条进行中任务。
+- React 使用共享 TanStack Query 快照驱动 FocusPage、工作台右侧 WorkbenchOverview、全局 ticker 和需明确决策的恢复对话框（业务页可跳转智能体，/ai 不阻断聊天）。刷新和普通路由切换不再依赖内存递减保存事实。工作台环形卡复用已有暂停/继续命令并携带 Session 当前版本，不自行创建 Session 或累计工时；命令失败提供可见提示。
+- FocusPage 支持选择任一未取消 Task；不绑定任务需要再次确认。工作台右侧环形卡展示真实 Session 任务、计划时长与剩余时间，不猜测第一条进行中任务。左侧仅保留“专注”导航，不再显示重复计时器。
 - 工作块自动到时由前端使用稳定幂等键触发 stop；服务端结算始终封顶 `planned_seconds`。休息、轮次、自动开始和提示音由本地持久化的 presentation coordinator 保留，每个工作块单独创建 Session，休息不计工时。
 - 设置入口可直接打开“专注”模块；Modal 草稿/预览与 committed 设置分离。预览可改变未开始界面的展示，但创建 Session、自动下一轮和提示音只读取 committed 设置；修改、保存或取消均不改写活动 Session。
 - `/stats/today` 已按 IANA 时区的当地日边界对 completed Session 的 interval 做 overlap 聚合，支持跨午夜和 DST；返回 distinct Session 数、精确秒数和向下取整的展示分钟。
@@ -65,6 +65,44 @@
 - 报告与历史各自提供加载、空、错误、重试和分页状态，任一失败不阻塞 Project 主详情或另一卡；总页数回缩时前端收敛到有效页，归档 Project 保持只读可查。
 - 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型，本身不新增迁移；当前 schema v30–v35 的新增分别涉及 Task Submission、Client Activity、Reminder、Automation、Agent Adapter 与 Client Followup，不改变该 Focus 读模型。
 
+### AI 独立轨道：查询与受确认的会话操作（H3-A1/A2，schema 072）
+
+- 单次 `work` 授权提供 `workspace_focus`：`view=active` 返回唯一未结束会话或 null；`view=session` 按 canonical UUID 读取；`view=history` 读取 completed/cancelled/interrupted，支持 Task ID、状态及 1–20 条/offset 0–1000 的有界分页。返回真实版本、绑定任务名称、计划/累计/剩余秒数、开始/结束/心跳与入账分钟，以及 UTC `server_now`；不带 Task 正文或人员资料。查询直接读取共享快照，不调用会刷新心跳的人工 active HTTP 端点。
+- `local_cycle_included=false` 明确不含 WebView 休息和轮次；无未结束会话不能解释为本地循环空闲。recovery_pending 的工具显示秒数不含未结算区间，须明确选择未知间隔处理方式；不伪装成仍在准确计时。可在专注页处理，也可从恢复弹窗选择“在智能体中处理”：该入口只暂存 `workspace_focus(view=session,id=...)` 排查/恢复提示并跳到 `/ai`，不自动恢复、不发送消息、不授予权限。`/ai` 不挂出阻断式恢复弹窗，但会话继续保持待恢复。
+- `work+actions` 可提议 `focus.pause/resume`，绑定 `focus_session_id/expected_version`、空 changes；只在人工确认时执行。`focus_commands.go` 为原生 API 与审批的共享事务入口，预览/执行均校验状态和版本，确认另重验关联任务名称/计划快照。暂停按确认时刻关闭区间并封顶，继续从确认时刻创建区间；不结算 Task 工时、不改变任务状态。
+- 领域事件、区间、会话与审批同事务回滚；已执行卡重放只读原决定，不重新控制当前会话。前端取消旧 Focus 在途查询后刷新活动/历史/报告及关联缓存，不重置本地循环。结果与后续无正文回执链接到 `/focus` 页面，不虚构会话深链。
+- H3-A2 增加 `focus.start`：changes 必须显式给出 `task_id`（canonical UUID 或 null）及 `planned_seconds`（300–7200）；绑定任务另需 `expected_task_version`，不绑定时不能带任务版本。顶层不得带 Session ID/version。提议与确认均校验任务可用、任务版本和唯一未结束会话；已有 active/paused/recovery_pending 时不覆盖。人工 decision 必须另传 `confirm_focus_start:true`，缺失/false 返回 `422 FOCUS_START_CONFIRMATION_REQUIRED`。确认卡明确新循环会替代本地休息及旧轮次，不绑定任务需明确勾选；模型不能提供同意字段。
+- `focus.stop/cancel` 绑定 Session ID/version、空 changes，只接受 active/paused。stop 在确认时结算并封顶计划秒数，复用余秒账本累计 Task 工时；cancel 不入账，两者均不完成 Task、不创建休息或下一块。另一入口已结束会话时旧 pending 提议冲突，不借原生命令的终态幂等绕过预览验证。
+- `focus.recover` 仅接受 recovery_pending 和 changes 中唯一 `recovery_action`：`include_gap_resume` 计入至确认时刻的间隔并继续；`exclude_gap_resume` 仅计到最后心跳并从现在继续；`interrupt` 按最后心跳结束为中断且不入账。预览含最后心跳和已结算秒数，不冻结持续变化的未知间隔。计入间隔另需人工 `confirm_focus_gap:true`，缺失/false 返回 `422 FOCUS_GAP_CONFIRMATION_REQUIRED`；两种同意字段只能用于对应的人工 confirm，拒绝或其他动作不能携带。已经确认的重放只返回原决定。
+- 所有新动作均复用 `focus_commands.go`；领域事实、区间、工时和审批事件同事务。前端只在回读到最新活动事实后由全局 ticker 协调本地循环，历史确认卡不能复活旧 Session 或重置新的休息。AI 周期报告由下方 H3-A3 接续；本地休息的直接控制和原生反馈仍未开放，H3/整体强化尚未完成。
+- 验证入口：`ai_focus_test.go`、`ai_focus_lifecycle_test.go`、`focus_sessions_test.go`、`AiWorkspaceActions.test.tsx`、`aiWorkspaceActions.test.ts`、`focusHooks.test.tsx`、`FocusTicker.integration.test.tsx`。包括真实 Harness→隔离模拟模型→读取/提议→人工确认→下一次无授权回执、三种恢复/回滚、额外同意、响应丢失与旧卡不重放；不调用真实模型。
+
+### AI 独立轨道：专注周期报告（H3-A3，schema 072 不变）
+
+- 单次 `work` 授权增加 `workspace_focus_report`，必须显式提供 `date_from/date_to`（含首尾，1–93 个本地自然日）和用户确认的 IANA `timezone`；不默认采用服务端 UTC 或猜测用户时区。可选 `project_id` 必须为真实 canonical UUID，归档项目可查，归属按当前 Task 关系读取。
+- `view=summary` 返回整个范围的 distinct Session 数、秒数、向下取整分钟及截至 date_to/区间内连续天数；`days/projects/tags/hours/heatmap` 分维度返回上述总量和有界 `items`，支持 limit 1–20（默认 10）、offset 0–1000，并标注 total_items、has_more、next_offset、window_limited 和排序。summary 不接受分页字段，所有参数拒绝 null、未知字段和跨类型参数。
+- 人工 `GET /stats/focus` 与工具共用 `focus_history.go` 的 `readFocusPeriodStats`，在单个只读事务加载区间、Task/Project 和标签事实后计算，不进行 HTTP 自调用或复制聚合算法。原生默认最近七日、旧时区偏移兼容及错误码保持不变；只计 completed 的已关闭正时长区间，保留 DST、跨日、零值桶与非互斥标签语义，不刷新心跳、不累计 Task 工时、不生成审批。
+- 结果明确 `project_and_tag_attribution=current_task_relationships_not_historical`、标签秒数和各桶 Session 数不可相加、分钟按桶取整、连续天数仅在请求范围内。小时固定 0–23，热力图按周一 1 至周日 7 再按小时；未归项目/标签用 null 表示。分页是每次查询的新快照，不能当跨请求冻结报告；有变化应重新核对，不把未读页当零值。结果受既有 24 KiB 工具预算限制，既有 Harness 超时/停止会传播到查询和聚合。
+- 授权面板披露工时与分布外发；不返回 Task 正文/名称、人员、客户或区间明细。H4-C 的结果 route 已携带日期、时区、可选项目及报告维度，点击后才在专注页读取对应当前事实，详见下方定位契约。没有新增 API、SQLite 迁移、独立统计副本或自动业务写入。
+- 确定性测试见 `ai_focus_report_test.go`：与人工报告逐维逐页比对、春秋 DST/跨午夜、当前项目/标签重分类、93 日边界、空值/分页上限、取消/恢复/Provider 变更门禁、只读心跳与脱敏存储失败，以及真实 Harness→隔离模拟模型→聚合结果回填→下一轮不继承授权。真实模型体验仍需单独验收。
+
+### 已实现：H4-C 专注报告定位与返回对话
+
+- `workspace_focus_report` 由代码生成 `/focus?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&report=summary|days|projects|tags|hours|heatmap&timezone=IANA`，项目过滤额外携带 `project_id`。沿用实际聚合窗口，不携带模型权限、工具分页 offset/limit 或业务正文；人工页展示该范围的完整报告，而非一页工具结果。
+- 主/侧对话共用安全富文本渲染，允许这组精确参数；拒绝重复、未知、缺失和非法参数、外部地址/片段及模型指定的返回会话。界面按产生回复的真实 Session 补 `return_session=UUID`；“返回原对话”在主聊天区选中该会话，不发送消息、不继承授权，也不被另一条后台生成抢走。会话已删除时沿用聊天页的不可用状态，不重新创建。
+- FocusPage 初次渲染、刷新、同页换链接及浏览器后退都按 URL 条件读取，不先请求默认窗口。读取完成定位并聚焦指定维度；空报告/失败回到报告区。日期输入不被自动滚动抢焦点。修改日期或快捷范围保留链接时区/项目；快捷范围以该时区的今日计算并写成明确日期，“清除链接筛选”恢复本机时区、全部项目和最近七天。
+- 日期限 1–93 个自然日，时区必须可解析为 IANA，项目为 canonical UUID；无效链接展示错误并禁用报告读取，不静默降级。项目删除显示不可用、可清除筛选；报告与活动计时读取独立，查询失败可重试且不展示失败后的旧数据。筛选只作用于报告，不改变活动 Session、Today、本地循环或最近历史分页。
+- 页面明确重新读取的是当前事实，不保证与对话时刻相同。链接是导航线索，不是经过核验的知识引用；真实模型遵循返回链接的质量仍须单独验收。验证：`focusReportLocation.test.ts`、`FocusPage.test.tsx`、主/侧聊天测试与 `ai_focus_report_test.go`；无 schema/API 版本变化。
+
+### 已实现：H3-A2 前置——Session 身份与异步循环协调
+
+- 本地循环增加 `sessionId`，区分同一 Task 上的不同工作块；运行时 `revision` 防止创建期间的本地重置被旧回调撤销，不持久化 revision。存储键仍为 `opc-workspace-focus-cycle-v1`，Zustand payload version 升至 2；v1 升级保留休息绝对截止时间、Task 和轮次，Session 身份先置空，旧 work 在读取同一任务的真实未结束 Session 时绑定，不补写服务端事实。SQLite/API 版本不变。
+- 创建、手动结束/取消与中断恢复的本地转换统一在共享 mutation hook 执行，不依赖 Today/FocusPage/恢复弹窗是否仍挂载。只有匹配 Session 的自动到时 stop 才计入下一休息/轮次；重复结果不重复计数，A 的旧结束/恢复结果不能重置 B，即使两者绑定同一 Task。
+- active 查询传递 AbortSignal；原生命令前及成功回包后取消旧活动查询。更新缓存时检查 Session ID、版本和更新期间的空快照，不允许旧 stop 清空另一个会话、旧 pause 降低版本或旧 create 覆盖新空快照；随后重新读取活动事实。网络/超时的模糊失败也触发回读。
+- 创建的幂等重试可能返回已结束会话的首次快照；即使它与当前空快照处于同一服务端秒，也不能视为仍在运行。重试成功后先读活动端点，再校验 ID 并同步；回读失败不重放旧创建快照，保留查询恢复路径。
+- 全局 ticker 同步 active/paused/recovery_pending，会接管从其他入口观察到的新 Session；新外部会话开始独立轮次，不凭相同 Task 自动接续旧休息。只有本地“开始下一块”/自动下一块的成功创建才保留已完成轮数。服务端明确为空时清理过期 work；自动 stop 回包仍在途时保留该次完成意图。查询加载、刷新、失败或已有未结束会话时，不从旧本地休息自动创建下一块。
+- 验证包括真实 QueryClient + mutation + ticker 集成、延迟停止/创建/恢复回包、同会话版本竞争、v1 本地状态升级、轮次幂等和未知活动状态门禁。前置本身不增加 AI 命令；后续接入见上方 H3-A2，不声明真实模型或桌面联调通过。
+
 ### 尚未实现：原生反馈与后续增强
 
 - 原生本地通知、托盘专注状态/控制、暂停应用通知和系统专注/勿扰引导；当前只有受 WebView 音频策略约束的短提示音。通用托盘仅显示/隐藏窗口和退出，不改变 Session。
@@ -99,6 +137,7 @@
    - `exclude_gap_resume`：只结算到 `last_heartbeat_at`，排除未知间隔，再从当前时间继续；
    - `interrupt`：只结算到最后心跳并终止为 interrupted，不累计 Task 工时。
 5. recover 使用 `If-Match`；前端不能在本地直接改写恢复结果。
+6. “在智能体中处理”不会执行 recover，只把 recovery_pending Session 的 ID、version 和页面显示的已确认/不确定时长放入待带入的智能体提示；进入 `/ai` 后仍需人工选择权限、发送消息和确认 `focus.recover` 建议。
 
 ### 番茄循环
 
@@ -227,7 +266,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 ## 与其他模块协作
 
 - [任务](tasks.md)：选择未取消 Task；stop 递增 `actual_minutes` 与 Task version。活动 Session 阻止 Task 硬删除，Focus 不改变 Task 状态。
-- [今日](today.md)：左侧 FocusMiniCard 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
+- [今日](today.md)：右侧 WorkbenchOverview 读取共享活动 Session；Today stats 按 completed interval 的用户当地日 overlap 聚合。
 - [项目](projects.md)：既有 Task `actual_minutes` 聚合和 trigger 会在 Focus 入账后更新项目工时与聚合版本；Project 详情另以可选 `project_id` 按 Task 当前归属读取报告和终态历史，Session 不复制 Project 状态或历史归属。
 - [设置](settings.md)：committed 参数用于新 Session 与自动下一轮；draft/preview 不改写活动 Session。
 - [命令与搜索](command-search.md)：当前命令可导航到 FocusPage，并可让“专注设置”直达 focus 模块；从命令结果直接绑定任务仍未交付。
@@ -249,7 +288,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 ### v0.1-C：前端接入与恢复（已完成）
 
 - 共享 Session Query、纯显示 ticker、任务选择、未绑定确认、恢复 Modal、错误重试和缓存失效已完成。
-- 左侧 FocusMiniCard 已接真实 Session；专注设置入口定向和草稿不破坏活动 Session 已修复。
+- 工作台右侧环形卡已接真实 Session；专注设置入口定向和草稿不破坏活动 Session 已修复。
 - 本地番茄循环继续提供休息、轮次、自动开始和提示音。
 
 ### v0.1-D1：历史与七日报告（已完成）
@@ -292,7 +331,8 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - IANA 时区、跨午夜、DST 23/25 小时边界、completed-only 和 distinct Session 统计。
 - Project 过滤覆盖 canonical UUID 400、不存在 404、归档/空 Project、当前 Task 项目重分类、Task 删除/无项目排除、终态历史分页，以及 completed-only 报告的跨午夜/DST/零事实序列。
 - Project 详情覆盖 7 天/30 天/本月、总时长/完成数/Streak、终态历史、分页收敛、两路独立加载/空/错误/重试和归档只读；缓存测试覆盖必要失效与改期/排序等无关写入不失效。
-- 前端快照规范化、稳定幂等重试、缓存失效、刷新恢复、设置草稿隔离、恢复对话框、左侧 FocusMiniCard 与番茄循环。
+- 前端快照规范化、稳定幂等重试、缓存失效、刷新恢复、设置草稿隔离、恢复对话框、右侧专注卡与番茄循环。
+- Session 身份绑定、v1→v2 本地循环迁移、A 的迟到结果不覆盖 B、重复完成不重复计轮、查询未确认空闲时不自动开始。
 
 ## 相关代码/PRD 链接
 
@@ -305,8 +345,9 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 - [今日统计 API](../../services/sidecar/internal/api/stats.go)
 - [前端 Focus 时钟与循环](../../apps/web/src/store/focus.ts)
 - [全局 ticker](../../apps/web/src/components/FocusTicker.tsx)
+- [Query / ticker / 循环集成测试](../../apps/web/src/components/FocusTicker.integration.test.tsx)
 - [专注页面](../../apps/web/src/pages/FocusPage.tsx)
 - [Task 详情专注记录](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [Project 详情专注分析](../../apps/web/src/components/ProjectFocusSection.tsx)
 - [恢复对话框](../../apps/web/src/components/FocusRecoveryModal.tsx)
-- [左侧专注小组件](../../apps/web/src/components/FocusMiniCard.tsx)
+- [工作台右侧专注卡](../../apps/web/src/components/WorkbenchOverview.tsx)

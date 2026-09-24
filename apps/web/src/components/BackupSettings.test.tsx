@@ -15,6 +15,7 @@ import type {
   ScheduledBackupRestoreResult,
   ScheduledBackupPolicy,
 } from "../types/models";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { BackupSettings } from "./BackupSettings";
 
 const backup: BackupSummary = {
@@ -74,6 +75,7 @@ const mocks = vi.hoisted(() => ({
   applyPackageImport: vi.fn(),
   applyPackageImportError: null as Error | null,
   restartApplication: vi.fn(),
+  navigate: vi.fn(),
   reset: vi.fn(),
   refetch: vi.fn(),
   updateScheduledPolicy: vi.fn(),
@@ -96,6 +98,17 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../api/desktop", () => ({
   requestApplicationRestart: mocks.restartApplication,
 }));
+
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
+  return {
+    ...actual,
+    useNavigate: () => mocks.navigate,
+  };
+});
 
 vi.mock("../api/hooks", () => ({
   useRestoreDiagnosticsQuery: () => ({
@@ -277,11 +290,43 @@ describe("BackupSettings", () => {
     mocks.previewPackageImport.mockClear();
     mocks.applyPackageImport.mockClear();
     mocks.restartApplication.mockReset();
+    mocks.navigate.mockReset();
     mocks.updateScheduledPolicy.mockReset();
     mocks.updateScheduledPolicyError = null;
     mocks.restartApplication.mockResolvedValue(true);
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
+  });
+
+  it("hands data and backup settings to the agent without running maintenance actions", () => {
+    render(<BackupSettings />);
+
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toMatchObject({
+      label: "数据与备份设置",
+      route: "/ai?settings=data",
+      routeLabel: "打开数据与备份设置",
+      scopes: [],
+    });
+    expect(useAiWorkbenchHandoff.getState().pendingIssue?.prompt).toContain(
+      "不要自动执行备份/恢复/删除/导入导出",
+    );
+    expect(mocks.navigate).toHaveBeenCalledWith("/ai");
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.verify).not.toHaveBeenCalled();
+    expect(mocks.drill).not.toHaveBeenCalled();
+    expect(mocks.restore).not.toHaveBeenCalled();
+    expect(mocks.deleteBackup).not.toHaveBeenCalled();
+    expect(mocks.downloadArchive).not.toHaveBeenCalled();
+    expect(mocks.exportData).not.toHaveBeenCalled();
+    expect(mocks.exportPackage).not.toHaveBeenCalled();
+    expect(mocks.previewImport).not.toHaveBeenCalled();
+    expect(mocks.applyImport).not.toHaveBeenCalled();
+    expect(mocks.previewPackageImport).not.toHaveBeenCalled();
+    expect(mocks.applyPackageImport).not.toHaveBeenCalled();
+    expect(mocks.updateScheduledPolicy).not.toHaveBeenCalled();
   });
 
   it("downloads a complete backup archive and revokes its object URL", async () => {

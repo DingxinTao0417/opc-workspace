@@ -33,6 +33,8 @@ import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { RoadmapMilestoneDetailModal } from "../components/RoadmapMilestoneDetailModal";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { focusReportReturnSession } from "../lib/focusReportLocation";
 import { useLocalCalendar } from "../lib/localCalendar";
 import { useSettledPage } from "../lib/useSettledPage";
 import type { RoadmapMilestone, RoadmapMilestoneStatus } from "../types/models";
@@ -811,6 +813,7 @@ export function RoadmapPage() {
   const [editing, setEditing] = useState<RoadmapMilestone | null>(null);
   const [deleting, setDeleting] = useState<RoadmapMilestone | null>(null);
   const detailId = searchParams.get("milestone")?.trim() || null;
+  const returnSession = focusReportReturnSession(searchParams);
   const [reordering, setReordering] = useState(false);
   const [quarterMoving, setQuarterMoving] = useState(false);
   const [dateMoving, setDateMoving] = useState(false);
@@ -1065,6 +1068,16 @@ export function RoadmapPage() {
       <PageHeader
         actions={
           <div className="roadmap-header-actions">
+            {!detailId ? (
+              <ReturnToAiChat
+                sessionId={returnSession}
+                disabled={
+                  reorder.isPending ||
+                  periodMove.isPending ||
+                  dateMove.isPending
+                }
+              />
+            ) : null}
             {!reordering && !quarterMoving && !dateMoving ? (
               viewMode === "quarter" ? (
                 <>
@@ -1633,6 +1646,7 @@ export function RoadmapPage() {
       ) : null}
       <RoadmapMilestoneDetailModal
         milestoneId={detailId}
+        returnSession={returnSession}
         onClose={closeDetail}
         onEdit={(milestone) => {
           closeDetail();

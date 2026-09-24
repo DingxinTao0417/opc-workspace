@@ -73,12 +73,12 @@ var automationPresets = []automationPresetDefinition{
 	},
 	{
 		ID: "00000000-0000-5000-8000-000000000105", PresetKey: automationPresetAgentRunFailed,
-		Name: "Agent 失败诊断", Description: "本地 Agent Run 失败后创建或更新诊断事项。",
-		TriggerType: "event", TriggerLabel: "Agent Run failed event",
+		Name: "Agent 失败诊断", Description: "启用后新发生的 Agent Run 失败创建本地诊断事项；不会重试执行或启动模型。",
+		TriggerType: "event", TriggerLabel: "Agent Run 工作流事件：agent_run_failed",
 		ActionType: "inbox_item", ActionLabel: "创建本地诊断 Inbox Item",
-		UnavailableReason: "本地 Agent Runtime 尚未交付，当前没有 Agent Run 事实。",
-		DefaultConfig:     automationConfig{Priority: "P1"},
-		Permissions:       []string{"读取本地 Agent Run 失败事件", "创建一条本地 Inbox Item", "记录本地 Automation Run"},
+		Available:     true,
+		DefaultConfig: automationConfig{Priority: "P1"},
+		Permissions:   []string{"读取本地 Agent Run 失败事件", "创建一条本地 Inbox Item", "记录本地 Automation Run"},
 	},
 }
 

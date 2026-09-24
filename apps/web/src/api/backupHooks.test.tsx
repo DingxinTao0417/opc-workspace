@@ -4,6 +4,7 @@ import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
 import {
+  aiAgentInboxQueryKey,
   backupQueryKey,
   inboxQueryKey,
   useCreateBackup,
@@ -101,8 +102,11 @@ describe("backup maintenance failures", () => {
       expect(result.current.drill.isError).toBe(true);
       expect(result.current.restore.isError).toBe(true);
     });
-    expect(invalidate).toHaveBeenCalledTimes(4);
+    expect(invalidate).toHaveBeenCalledTimes(8);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxQueryKey });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: aiAgentInboxQueryKey,
+    });
   });
 
   it("does not refresh Inbox for a capacity refusal that creates no incident", async () => {

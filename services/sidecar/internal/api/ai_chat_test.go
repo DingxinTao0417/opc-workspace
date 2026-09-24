@@ -334,6 +334,7 @@ func TestAIChatCancelStopsUpstreamAndKeepsPartial(t *testing.T) {
 	if cancelled.Code != http.StatusAccepted {
 		t.Fatalf("cancel = %d: %s", cancelled.Code, cancelled.Body.String())
 	}
+	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'ai_generation' AND aggregate_id = ? AND action = ?", 1, generationID, aiGenerationStopRequestedEvent)
 	select {
 	case result := <-resultCh:
 		if result.code != http.StatusOK || !strings.Contains(result.body, "event: cancelled") || !strings.Contains(result.body, "部分") {
@@ -359,6 +360,34 @@ func TestAIChatCancelStopsUpstreamAndKeepsPartial(t *testing.T) {
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_messages WHERE role = 'assistant' AND generation_id = ?", 1, generationID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE generation_id = ? AND kind = 'generation' AND status = 'cancelled'", 1, generationID)
 	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM ai_run_steps WHERE generation_id = ? AND kind = 'model_turn' AND status = 'cancelled'", 1, generationID)
+}
+
+func TestAIGenerationCancelPersistsIntentBeforeSignaling(t *testing.T) {
+	registry := newAIGenerationRegistry()
+	persisted, signaled := false, false
+	if !registry.register("generation", "provider", "session", func() {
+		if !persisted {
+			t.Error("generation cancellation signaled before stop intent persisted")
+		}
+		signaled = true
+	}) {
+		t.Fatal("register generation")
+	}
+	accepted, err := registry.cancelWithPersist("generation", func() (bool, error) {
+		persisted = true
+		return true, nil
+	})
+	if err != nil || !accepted || !signaled {
+		t.Fatalf("cancelWithPersist = (%t, %v), signaled=%t; want accepted after persistence", accepted, err, signaled)
+	}
+
+	persisted, signaled = false, false
+	accepted, err = registry.cancelWithPersist("generation", func() (bool, error) {
+		return false, nil
+	})
+	if err != nil || accepted || signaled {
+		t.Fatalf("cancelWithPersist without persisted active row = (%t, %v), signaled=%t; want no cancellation", accepted, err, signaled)
+	}
 }
 
 func TestAIStaleSessionDeleteDoesNotCancelActiveGeneration(t *testing.T) {
@@ -742,7 +771,7 @@ func TestAIChatRecoversStaleGenerationsOnStartup(t *testing.T) {
 	if err := store.DB.Create(&provider).Error; err != nil {
 		t.Fatalf("seed provider: %v", err)
 	}
-	for index, status := range []string{"queued", "streaming"} {
+	for index, status := range []string{"queued", "streaming", "streaming"} {
 		generation := models.AIGeneration{
 			ID: fmt.Sprintf("018f0000-0000-7000-8000-00000000610%d", index), SessionID: session.ID,
 			ProviderID: provider.ID, Status: status,
@@ -756,6 +785,11 @@ func TestAIChatRecoversStaleGenerationsOnStartup(t *testing.T) {
 			Kind: "generation", Status: "running", StartedAt: generation.CreatedAt, CreatedAt: generation.CreatedAt,
 		}).Error; err != nil {
 			t.Fatalf("seed generation root step: %v", err)
+		}
+		if index == 2 {
+			if persisted, err := persistAIGenerationStopIntent(store.DB, generation.ID, "stop-request", now); err != nil || !persisted {
+				t.Fatalf("seed generation stop intent = (%t, %v)", persisted, err)
+			}
 		}
 	}
 	if err := store.Close(); err != nil {
@@ -777,7 +811,9 @@ func TestAIChatRecoversStaleGenerationsOnStartup(t *testing.T) {
 	}
 	defer router.Close()
 	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_generations WHERE status = 'cancelled' AND error_code = 'AI_GENERATION_INTERRUPTED'", 2)
-	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_run_steps WHERE kind = 'generation' AND status = 'cancelled'", 2)
+	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_generations WHERE status = 'cancelled' AND error_code IS NULL", 1)
+	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM ai_run_steps WHERE kind = 'generation' AND status = 'cancelled'", 3)
+	assertDatabaseCount(t, reopened, "SELECT COUNT(*) FROM workflow_events WHERE aggregate_type = 'ai_generation' AND aggregate_id = ? AND action = ?", 1, "018f0000-0000-7000-8000-000000006102", aiGenerationStopRequestedEvent)
 }
 
 func TestAIChatRenamesDefaultTitleFromFirstUserMessage(t *testing.T) {
@@ -808,8 +844,44 @@ func TestAIChatRenamesDefaultTitleFromFirstUserMessage(t *testing.T) {
 	if createdEnvelope.Data.Title != defaultAISessionTitle {
 		t.Fatalf("default title = %q", createdEnvelope.Data.Title)
 	}
+	listedMessageCount := func() int64 {
+		t.Helper()
+		listed := performRequest(router, http.MethodGet, "/api/v1/ai/sessions", nil, nil)
+		var envelope struct {
+			Data []struct {
+				ID           string `json:"id"`
+				MessageCount *int64 `json:"message_count"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(listed.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode session list: %v", err)
+		}
+		for _, row := range envelope.Data {
+			if row.ID == createdEnvelope.Data.ID {
+				if row.MessageCount == nil {
+					t.Fatal("session list omitted message_count")
+				}
+				return *row.MessageCount
+			}
+		}
+		t.Fatal("created session missing from list")
+		return 0
+	}
+	if count := listedMessageCount(); count != 0 {
+		t.Fatalf("empty session message_count = %d", count)
+	}
 	if resp := chatRequest(t, router, provider.ID, createdEnvelope.Data.ID, "帮我梳理特斯拉落地页任务"); resp.Code != http.StatusOK {
 		t.Fatalf("chat = %d: %s", resp.Code, resp.Body.String())
+	}
+	var storedMessages int64
+	if err := store.DB.Raw("SELECT COUNT(*) FROM ai_messages WHERE session_id = ?", createdEnvelope.Data.ID).Scan(&storedMessages).Error; err != nil {
+		t.Fatalf("count stored messages: %v", err)
+	}
+	if storedMessages == 0 {
+		t.Fatal("chat did not persist messages")
+	}
+	if count := listedMessageCount(); count != storedMessages {
+		t.Fatalf("listed message_count = %d, stored = %d", count, storedMessages)
 	}
 	var renamed string
 	if err := store.DB.Raw("SELECT title FROM ai_sessions WHERE id = ?", createdEnvelope.Data.ID).Scan(&renamed).Error; err != nil {

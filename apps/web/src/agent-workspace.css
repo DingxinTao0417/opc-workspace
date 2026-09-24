@@ -1,0 +1,575 @@
+/* Agent-only presentation. The shell frame and navigation keep the workbench
+   tokens so switching modes only swaps the content; agent colours apply inside
+   the workspace frame. Semantic success/error colours stay meaningful. */
+.app-shell-agent {
+  --agent-surface: #fff;
+  --agent-soft: #f4f4f4;
+  --agent-hover: #e9e9e9;
+  --agent-text: #242424;
+  --agent-secondary: #606060;
+  --agent-muted: #858585;
+  --agent-line: #e9e9e9;
+  --agent-shadow: 0 4px 24px rgb(0 0 0 / 5%), 0 1px 3px rgb(0 0 0 / 3%);
+}
+
+.app-shell-agent .workspace-frame {
+  --panel: var(--agent-surface);
+  --panel-2: var(--agent-soft);
+  --panel-hover: var(--agent-hover);
+  --text: var(--agent-text);
+  --text-secondary: var(--agent-secondary);
+  --text-muted: var(--agent-muted);
+  --text-dim: var(--agent-muted);
+  --border: var(--agent-line);
+  --border-subtle: var(--agent-line);
+  --border-hover: color-mix(in srgb, var(--agent-text) 24%, transparent);
+  --surface-soft: var(--agent-soft);
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-card: 18px;
+  color: var(--agent-text);
+  font-size: 14px;
+}
+
+:root:not([data-theme="light"]) .app-shell-agent {
+  --agent-surface: #212121;
+  --agent-soft: #2b2b2b;
+  --agent-hover: #343434;
+  --agent-text: #ececec;
+  --agent-secondary: #b8b8b8;
+  --agent-muted: #969696;
+  --agent-line: #353535;
+  --agent-shadow: 0 4px 24px rgb(0 0 0 / 16%), 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+
+.app-shell-agent .main-column {
+  position: relative;
+  container: agent-conversation / inline-size;
+}
+
+/* The rail keeps a scrolling conversation/inbox column and a pinned settings
+   row. Visual language comes from the workbench nav classes. */
+.app-shell-agent .ai-session-rail {
+  overflow: hidden;
+}
+
+.app-shell-agent .ai-rail-actions,
+.app-shell-agent .ai-session-rail > .nav-item,
+.app-shell-agent .ai-session-rail > .nav-label,
+.app-shell-agent .ai-session-rail > .brand-block {
+  flex-shrink: 0;
+}
+
+.app-shell-agent .ai-rail-sessions,
+.app-shell-agent .ai-agent-inbox {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.app-shell-agent .ai-session-row:focus-within .ai-session-delete {
+  opacity: 1;
+}
+
+/* One reading axis, regardless of the rail, overview or browser state. */
+.app-shell-agent .ai-page {
+  --border: var(--agent-line);
+  --surface-soft: var(--agent-soft);
+  --radius-card: 18px;
+}
+
+.app-shell-agent .ai-chat-header {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  min-height: 64px;
+  height: 64px;
+  gap: 8px;
+  padding: 0 24px;
+  border-bottom-color: transparent;
+}
+
+.app-shell-agent .ai-chat-heading {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-shell-agent .ai-chat-header-title {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.app-shell-agent .ai-chat-header-sub {
+  margin-top: 0;
+  font-size: 12px;
+}
+
+.app-shell-agent .ai-left-sidebar-toggle {
+  order: -1;
+}
+
+.app-shell-agent .icon-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+}
+
+.app-shell-agent .ai-chat-messages,
+.app-shell-agent.app-shell-no-overview .ai-chat-messages {
+  padding: 28px 32px 24px;
+  scrollbar-gutter: stable both-edges;
+}
+
+.app-shell-agent .ai-chat-messages-inner,
+.app-shell-agent .ai-composer-inner,
+.app-shell-agent.app-shell-no-overview .ai-chat-messages-inner,
+.app-shell-agent.app-shell-no-overview .ai-composer-inner {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+.app-shell-agent .ai-chat-messages-inner {
+  gap: 32px;
+}
+
+.app-shell-agent .ai-msg-body {
+  gap: 14px;
+}
+
+.app-shell-agent .ai-bubble-user {
+  max-width: 85%;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--agent-soft);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.app-shell-agent .ai-msg-text {
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.app-shell-agent .ai-msg-text p + p {
+  margin-top: 16px;
+}
+
+.app-shell-agent .ai-msg-text :is(ol, ul) {
+  padding-left: 24px;
+  margin-block: 12px;
+}
+
+.app-shell-agent .ai-msg-text li + li {
+  margin-top: 6px;
+}
+
+.app-shell-agent .ai-msg-text code {
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: var(--agent-soft);
+  font-size: 0.88em;
+}
+
+.app-shell-agent .ai-thinking-toggle,
+.app-shell-agent .ai-run-timeline-toggle {
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.app-shell-agent .ai-thinking-toggle > svg {
+  color: inherit;
+}
+
+.app-shell-agent .ai-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: -6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.app-shell-agent .ai-message-actions .icon-button {
+  color: var(--text-muted);
+}
+
+.app-shell-agent
+  :is(
+    .ai-think-card,
+    .ai-run-timeline-panel,
+    .ai-created-task-card,
+    .ai-memory-card,
+    .ai-citation-evidence
+  ) {
+  border: 1px solid var(--agent-line);
+  border-radius: 14px;
+  background: var(--agent-surface);
+}
+
+.app-shell-agent .ai-think-card {
+  border-left: 2px solid var(--border-hover);
+  border-radius: 0;
+  background: transparent;
+  border-block: 0;
+  border-right: 0;
+}
+
+.app-shell-agent .ai-created-task-card {
+  max-width: 100%;
+  padding: 16px 18px;
+}
+
+.app-shell-agent .ai-created-task-card:hover {
+  background: var(--agent-soft);
+  border-color: var(--border-hover);
+}
+
+.app-shell-agent .ai-created-title {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.app-shell-agent .ai-created-tag {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.app-shell-agent
+  :is(
+    .ai-run-step-copy strong,
+    .ai-run-step-metrics,
+    .ai-run-timeline-summary,
+    .ai-citation-evidence article strong
+  ) {
+  font-size: 12px;
+}
+
+.app-shell-agent
+  :is(.ai-run-step-copy small, .ai-citation-evidence article small) {
+  font-size: 11px;
+}
+
+.app-shell-agent .ai-action-chip {
+  border: 1px solid var(--agent-line);
+  border-radius: 9px;
+  background: var(--agent-soft);
+  color: var(--text-secondary);
+  padding: 8px 12px;
+}
+
+/* The composer floats on the same white surface, not in a separate grey bar. */
+.app-shell-agent .ai-composer,
+.app-shell-agent.app-shell-no-overview .ai-composer {
+  padding: 12px 40px 12px;
+  border-top: 0;
+  background: var(--agent-surface);
+}
+
+.app-shell-agent .ai-composer-box {
+  border: 1px solid var(--agent-line);
+  border-radius: 22px;
+  box-shadow: var(--agent-shadow);
+  overflow: hidden;
+}
+
+.app-shell-agent .ai-composer-box:focus-within {
+  border-color: var(--border-hover);
+  box-shadow: var(--agent-shadow);
+}
+
+.app-shell-agent .ai-composer-textarea {
+  min-height: 88px;
+  padding: 16px 18px 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.app-shell-agent .ai-composer-tool-row {
+  padding: 4px 12px 12px;
+  gap: 10px;
+}
+
+.app-shell-agent .ai-composer-tools-left {
+  flex: 1;
+  gap: 10px;
+}
+
+.app-shell-agent .ai-context-toggle {
+  flex-shrink: 0;
+  min-height: 32px;
+  gap: 7px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-radius: 8px;
+}
+
+.app-shell-agent .ai-model-select {
+  flex: 0 1 260px;
+  margin-left: auto;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.app-shell-agent .ai-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--agent-text);
+  color: var(--agent-surface);
+}
+
+.app-shell-agent .ai-send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--agent-text) 78%, var(--agent-surface));
+}
+
+.app-shell-agent .ai-send-btn:disabled {
+  opacity: 0.3;
+}
+
+.app-shell-agent .ai-send-btn.is-stop {
+  border: 0;
+  background: var(--agent-text);
+  color: var(--agent-surface);
+}
+
+.app-shell-agent :is(.ai-context-panel, .ai-task-card) {
+  width: min(760px, calc(100% - 80px));
+  max-height: 45%;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 auto 8px;
+  padding: 16px;
+  border: 1px solid var(--agent-line);
+  border-radius: 16px;
+  background: var(--agent-soft);
+}
+
+.app-shell-agent :is(.ai-context-panel, .ai-task-card) .button-primary {
+  background: var(--agent-text);
+  border-color: var(--agent-text);
+  color: var(--agent-surface);
+}
+
+.app-shell-agent .ai-hero {
+  padding-top: clamp(32px, 12vh, 140px);
+}
+
+.app-shell-agent .ai-hero-avatar {
+  width: 48px;
+  height: 48px;
+  border: 0;
+  background: var(--agent-soft);
+  color: var(--text);
+}
+
+.app-shell-agent .ai-hero-title {
+  font-size: 28px;
+  font-weight: 550;
+  letter-spacing: -0.8px;
+}
+
+.app-shell-agent .ai-hero-sub {
+  font-size: 14px;
+}
+
+.app-shell-agent .ai-suggest-card {
+  border-radius: 14px;
+  color: var(--text-secondary);
+}
+
+.app-shell-agent .ai-suggest-card:hover {
+  background: var(--agent-soft);
+  border-color: var(--border-hover);
+}
+
+/* Floating facts never change the reading axis or overlap the conversation.
+   1320 = 760px text + two 280px gutters; the card needs 256px + 16px. */
+.app-shell-agent .right-floating-card {
+  display: none;
+  position: absolute;
+  top: 72px;
+  right: 16px;
+  width: 256px;
+  max-height: calc(100% - 96px);
+  z-index: 10;
+  padding: 16px 12px;
+  border-radius: 20px;
+  box-shadow: var(--agent-shadow);
+}
+
+@container agent-conversation (min-width: 1320px) {
+  .app-shell-agent .right-floating-card {
+    display: block;
+  }
+}
+
+.app-shell-agent .ov-group + .ov-group {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--agent-line);
+}
+
+.app-shell-agent .ov-group-title {
+  padding-bottom: 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.app-shell-agent .ov-row {
+  min-height: 36px;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.app-shell-agent .ov-value {
+  font-size: 11px;
+}
+
+.app-shell-agent .right-sidebar {
+  padding-top: 10px;
+}
+
+.app-shell-agent .ov-tabs {
+  gap: 3px;
+  min-height: 38px;
+  border-bottom: 0;
+}
+
+.app-shell-agent .ov-tab {
+  align-self: center;
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 4px;
+}
+
+.app-shell-agent .ov-tab-active {
+  background: var(--agent-soft);
+}
+
+.app-shell-agent :is(.ov-empty, .ov-detail-meta, .ov-back, .ov-detail-result) {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.app-shell-agent .ov-detail-title {
+  font-size: 14px;
+}
+
+.app-shell-agent .ov-scope-active {
+  border-color: var(--border-hover);
+  background: var(--agent-soft);
+  color: var(--text);
+}
+
+.app-shell-agent .ov-resizer::after {
+  width: 2px;
+  height: 32px;
+  background: transparent;
+}
+
+.app-shell-agent
+  .ov-resizer:is(:hover, :focus-visible, [data-dragging="true"])::after {
+  background: var(--text-muted);
+}
+
+.app-shell-agent .ai-usage-summary-toggle {
+  padding: 6px 8px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 11px;
+}
+
+.app-shell-agent .ai-usage-summary-panel {
+  z-index: 45;
+  border-radius: 16px;
+  box-shadow: var(--agent-shadow);
+}
+
+.app-shell-agent :is(.browser-address, .browser-tab) {
+  border-radius: 8px;
+}
+
+.app-shell-agent .browser-tabs-bar {
+  padding-bottom: 5px;
+  background: var(--agent-soft);
+}
+
+.app-shell-agent .browser-tab-active {
+  border-bottom: 1px solid var(--agent-line);
+}
+
+@container agent-conversation (max-width: 600px) {
+  .app-shell-agent .ai-chat-messages,
+  .app-shell-agent.app-shell-no-overview .ai-chat-messages {
+    padding: 20px 16px;
+  }
+
+  .app-shell-agent .ai-composer,
+  .app-shell-agent.app-shell-no-overview .ai-composer {
+    padding: 10px 24px;
+  }
+
+  .app-shell-agent .ai-model-select {
+    max-width: 170px;
+  }
+
+  .app-shell-agent :is(.ai-context-panel, .ai-task-card) {
+    width: calc(100% - 48px);
+  }
+
+  .app-shell-agent .ai-context-select-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 961px) and (max-width: 1180px) {
+  .app-shell-agent:not(.app-shell-no-overview) .workspace-frame {
+    grid-template-columns: minmax(0, 1fr) var(--right-overview-width);
+  }
+
+  .app-shell-agent .right-sidebar {
+    display: flex;
+  }
+
+  .app-shell-agent .ov-resizer {
+    display: block;
+  }
+}
+
+@media (max-width: 960px) {
+  .app-shell.app-shell-agent {
+    padding: 6px;
+  }
+
+  .app-shell-agent .ai-chat-header {
+    padding: 0 14px;
+  }
+
+  .app-shell-agent .ai-mobile-session-controls {
+    order: -2;
+  }
+
+  .app-shell-agent .ai-sidebar-toggle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell-agent *,
+  .app-shell-agent *::after {
+    transition: none;
+  }
+}

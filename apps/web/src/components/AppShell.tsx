@@ -10,16 +10,21 @@ import { Outlet, useLocation } from "react-router-dom";
 import { useHealthQuery } from "../api/hooks";
 import { useSettingsStore } from "../store/settings";
 import {
+  BROWSER_PANEL_DEFAULT_WIDTH,
+  BROWSER_PANEL_MAX_WIDTH,
+  BROWSER_PANEL_MIN_WIDTH,
   RIGHT_OVERVIEW_DEFAULT_WIDTH,
   RIGHT_OVERVIEW_MAX_WIDTH,
   RIGHT_OVERVIEW_MIN_WIDTH,
   useUiStore,
 } from "../store/ui";
 import { RightOverview } from "./RightOverview";
+import { WorkbenchOverview } from "./WorkbenchOverview";
 import { RightFloatingCard } from "./RightFloatingCard";
 import { AiSessionRail } from "./AiSessionRail";
 import { ModeSwitch, isAgentRoute } from "./ModeSwitch";
 import { Sidebar } from "./Sidebar";
+import { useWorkspacePanels } from "../store/workspacePanels";
 
 /**
  * Pointer capture is unavailable in jsdom and some embedded webviews; the
@@ -55,6 +60,11 @@ export function AppShell() {
     (state) => state.rightOverviewCollapsed,
   );
   const rightOverviewWidth = useUiStore((state) => state.rightOverviewWidth);
+  const workspaceMaximized = useWorkspacePanels((state) => state.maximized);
+  const browserPanelWidth = useUiStore((state) => state.browserPanelWidth);
+  const setBrowserPanelWidth = useUiStore(
+    (state) => state.setBrowserPanelWidth,
+  );
   const setRightOverviewWidth = useUiStore(
     (state) => state.setRightOverviewWidth,
   );
@@ -62,6 +72,8 @@ export function AppShell() {
     (state) => state.setLastWorkspacePath,
   );
   const [resizingRightOverview, setResizingRightOverview] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [frameWidth, setFrameWidth] = useState(0);
   const resize = useRef<{
     pointerId: number;
     startX: number;
@@ -72,17 +84,63 @@ export function AppShell() {
   const agentMode = isAgentRoute(location.pathname);
   const isAiPage = agentMode;
   const hideAgentRail = agentMode && agentRailCollapsed;
-  // The docked overview belongs to agent mode only: business pages keep the
-  // full width, while the conversation can dock the panel or fall back to the
-  // floating card when it is collapsed.
+  // Business cards and the agent tool workspace have separate widths. The
+  // agent's temporary collapse/maximize state must not hide business content.
   const showRightOverview =
-    configuredRightOverview && !rightOverviewCollapsed && agentMode;
+    configuredRightOverview && (!agentMode || !rightOverviewCollapsed);
   const showFloatingCard =
     configuredRightOverview && !showRightOverview && isAiPage;
+  const browserOpen = showRightOverview && agentMode;
+  const panelMin = browserOpen
+    ? BROWSER_PANEL_MIN_WIDTH
+    : RIGHT_OVERVIEW_MIN_WIDTH;
+  const panelMax = browserOpen
+    ? Math.min(
+        BROWSER_PANEL_MAX_WIDTH,
+        Math.max(BROWSER_PANEL_MIN_WIDTH, (frameWidth || 1040) - 360),
+      )
+    : RIGHT_OVERVIEW_MAX_WIDTH;
+  const panelWidth = browserOpen
+    ? Math.min(browserPanelWidth, panelMax)
+    : rightOverviewWidth;
+  const panelDefault = browserOpen
+    ? BROWSER_PANEL_DEFAULT_WIDTH
+    : RIGHT_OVERVIEW_DEFAULT_WIDTH;
+  const setPanelWidth = (width: number) => {
+    if (browserOpen)
+      setBrowserPanelWidth(Math.min(panelMax, Math.max(panelMin, width)));
+    else setRightOverviewWidth(width);
+  };
 
   useEffect(() => {
-    if (!agentMode) setLastWorkspacePath(location.pathname);
-  }, [agentMode, location.pathname, setLastWorkspacePath]);
+    const frame = frameRef.current;
+    if (!frame) return;
+    const measure = () => setFrameWidth(frame.clientWidth);
+    measure();
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(frame);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!agentMode)
+      setLastWorkspacePath(
+        `${location.pathname}${location.search}${location.hash}`,
+      );
+  }, [
+    agentMode,
+    location.pathname,
+    location.search,
+    location.hash,
+    setLastWorkspacePath,
+  ]);
 
   const handleOverviewResizeKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
@@ -90,17 +148,17 @@ export function AppShell() {
     const step = event.shiftKey ? 48 : 12;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
-      setRightOverviewWidth(rightOverviewWidth + step);
+      setPanelWidth(panelWidth + step);
       return;
     }
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      setRightOverviewWidth(rightOverviewWidth - step);
+      setPanelWidth(panelWidth - step);
       return;
     }
     if (event.key === "Home") {
       event.preventDefault();
-      setRightOverviewWidth(RIGHT_OVERVIEW_DEFAULT_WIDTH);
+      setPanelWidth(Math.min(panelDefault, panelMax));
     }
   };
 
@@ -113,7 +171,7 @@ export function AppShell() {
     resize.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
-      startWidth: rightOverviewWidth,
+      startWidth: panelWidth,
     };
     setResizingRightOverview(true);
   };
@@ -123,7 +181,7 @@ export function AppShell() {
   ) => {
     const active = resize.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    setRightOverviewWidth(active.startWidth - (event.clientX - active.startX));
+    setPanelWidth(active.startWidth - (event.clientX - active.startX));
   };
 
   const handleOverviewResizePointerEnd = (
@@ -144,12 +202,16 @@ export function AppShell() {
         hideAgentRail ? "app-shell-nav-hidden" : "",
         !agentMode && sidebarCollapsed ? "app-shell-sidebar-collapsed" : "",
         resizingRightOverview ? "app-shell-resizing" : "",
+        browserOpen ? "app-shell-browser-open" : "",
+        showRightOverview && agentMode && workspaceMaximized
+          ? "app-shell-workspace-maximized"
+          : "",
       ]
         .filter(Boolean)
         .join(" ")}
       style={
         {
-          "--right-overview-width": `${rightOverviewWidth}px`,
+          "--right-overview-width": `${panelWidth}px`,
         } as CSSProperties
       }
     >
@@ -163,19 +225,20 @@ export function AppShell() {
           {agentMode ? <AiSessionRail /> : <Sidebar />}
         </div>
       )}
-      <div className="workspace-frame">
+      <div className="workspace-frame" ref={frameRef}>
         <main className="main-column">
           <div className="page-scroll">
             <Outlet />
           </div>
+          {showFloatingCard ? <RightFloatingCard /> : null}
         </main>
         {showRightOverview ? (
           <div
             aria-label="调整右侧概览宽度"
             aria-orientation="vertical"
-            aria-valuemax={RIGHT_OVERVIEW_MAX_WIDTH}
-            aria-valuemin={RIGHT_OVERVIEW_MIN_WIDTH}
-            aria-valuenow={rightOverviewWidth}
+            aria-valuemax={panelMax}
+            aria-valuemin={panelMin}
+            aria-valuenow={panelWidth}
             className="ov-resizer"
             data-dragging={resizingRightOverview ? "true" : undefined}
             onKeyDown={handleOverviewResizeKeyDown}
@@ -187,9 +250,14 @@ export function AppShell() {
             tabIndex={0}
           />
         ) : null}
-        {showRightOverview ? <RightOverview /> : null}
+        {showRightOverview ? (
+          agentMode ? (
+            <RightOverview />
+          ) : (
+            <WorkbenchOverview />
+          )
+        ) : null}
       </div>
-      {showFloatingCard ? <RightFloatingCard /> : null}
     </div>
   );
 }

@@ -206,7 +206,7 @@ func (a *API) listClientFollowupsForClient(c *gin.Context, scopedClientID string
 		return query.Select(clientFollowupSelectColumns).
 			Joins("JOIN clients ON clients.id = client_followups.client_id").
 			Joins("JOIN actors assigned_actor ON assigned_actor.id = client_followups.assigned_actor_id").
-			Order("client_followups.scheduled_at ASC").Order("client_followups.id ASC").
+			Order(clientFollowupScheduledTimeKey + " ASC").Order("client_followups.id ASC").
 			Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error
 	}, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -279,18 +279,9 @@ func (a *API) createClientFollowup(c *gin.Context) {
 				return fmt.Errorf("read client followup idempotency key: %w", err)
 			}
 		}
-		if err := ensureClientFollowupReferences(tx, followup.ClientID, followup.AssignedActorID); err != nil {
-			return err
-		}
-		if err := tx.Create(&followup).Error; err != nil {
-			return fmt.Errorf("create client followup: %w", err)
-		}
-		row, err := loadClientFollowupRow(tx, followup.ID)
+		var err error
+		response, err = createClientFollowupInTransaction(tx, followup, requestIDFromContext(c))
 		if err != nil {
-			return err
-		}
-		response = clientFollowupResponseFromRow(row)
-		if err := recordClientFollowupWorkflowEvent(tx, followup.ID, "client_followup_created", nil, clientFollowupEventState(response), requestIDFromContext(c), followup.CreatedAt); err != nil {
 			return err
 		}
 		if key != "" {
@@ -359,54 +350,9 @@ func (a *API) updateClientFollowup(c *gin.Context) {
 	}
 	var response clientFollowupResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.ClientFollowup
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
-			}
-			return err
-		}
-		if current.Version != expected {
-			return clientFollowupVersionConflict()
-		}
-		if current.Status != "planned" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be edited")
-		}
-		if err := ensureClientFollowupClientIsPlannable(tx, current.ClientID); err != nil {
-			return err
-		}
-		if actor, exists := updates["assigned_actor_id"]; exists {
-			if err := ensureClientFollowupAssigneeIsAvailable(tx, actor.(string)); err != nil {
-				return err
-			}
-		}
-		previousRow, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		updates["updated_at"], updates["version"] = a.options.Now().UTC().Format(time.RFC3339Nano), gorm.Expr("version + 1")
-		result := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientFollowupVersionConflict()
-		}
-		row, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientFollowupResponseFromRow(row)
-		if err := resolveClientFollowupInboxSources(
-			tx,
-			id,
-			"客户回访计划已更新",
-			requestIDFromContext(c),
-			response.UpdatedAt,
-		); err != nil {
-			return err
-		}
-		return recordClientFollowupWorkflowEvent(tx, id, "client_followup_updated", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(response), requestIDFromContext(c), response.UpdatedAt)
+		var err error
+		response, err = changeClientFollowupInTransaction(tx, id, expected, updates, "client_followup_updated", requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -476,70 +422,9 @@ func (a *API) completeClientFollowup(c *gin.Context) {
 func (a *API) completeClientFollowupWithNext(c *gin.Context, id string, expected int64, result string, nextStep *string, completedAt string, nextPlan *models.ClientFollowup) (clientFollowupResponse, error) {
 	var response clientFollowupResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.ClientFollowup
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
-			}
-			return err
-		}
-		if current.Version != expected {
-			return clientFollowupVersionConflict()
-		}
-		if current.Status != "planned" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
-		}
-		if nextPlan != nil {
-			if err := ensureClientFollowupReferences(tx, current.ClientID, nextPlan.AssignedActorID); err != nil {
-				return err
-			}
-		}
-		previousRow, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates := map[string]any{"status": "completed", "completed_at": completedAt, "result": result, "next_step": nextStep, "updated_at": now, "version": gorm.Expr("version + 1")}
-		write := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(updates)
-		if write.Error != nil {
-			return write.Error
-		}
-		if write.RowsAffected == 0 {
-			return clientFollowupVersionConflict()
-		}
-		row, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientFollowupResponseFromRow(row)
-		var nextResponse *clientFollowupResponse
-		if nextPlan != nil {
-			nextPlan.ClientID, nextPlan.CreatedAt, nextPlan.UpdatedAt = current.ClientID, now, now
-			if err := tx.Create(nextPlan).Error; err != nil {
-				return fmt.Errorf("create next client followup: %w", err)
-			}
-			nextRow, err := loadClientFollowupRow(tx, nextPlan.ID)
-			if err != nil {
-				return err
-			}
-			created := clientFollowupResponseFromRow(nextRow)
-			nextResponse = &created
-			response.NextFollowup = nextResponse
-		}
-		if err := resolveClientFollowupInboxSources(tx, id, clientFollowupInboxResolutionReason("client_followup_completed"), requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		currentEvent := clientFollowupEventState(response)
-		if nextResponse != nil {
-			currentEvent["next_followup_id"] = nextResponse.ID
-		}
-		if err := recordClientFollowupWorkflowEvent(tx, id, "client_followup_completed", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), currentEvent, requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		if nextResponse == nil {
-			return nil
-		}
-		return recordClientFollowupWorkflowEvent(tx, nextResponse.ID, "client_followup_created_from_completion", nil, map[string]any{"client_id": nextResponse.ClientID, "completed_followup_id": id, "scheduled_at": nextResponse.ScheduledAt, "timezone": nextResponse.Timezone, "channel": nextResponse.Channel, "purpose": nextResponse.Purpose, "priority": nextResponse.Priority, "version": nextResponse.Version}, requestIDFromContext(c), now)
+		var err error
+		response, err = completeClientFollowupInTransaction(tx, id, expected, result, nextStep, completedAt, nextPlan, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	return response, err
 }
@@ -630,60 +515,9 @@ func (a *API) rescheduleClientFollowup(c *gin.Context) {
 	}
 	var oldResponse, nextResponse clientFollowupResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.ClientFollowup
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
-			}
-			return err
-		}
-		if current.Version != expected {
-			return clientFollowupVersionConflict()
-		}
-		if current.Status != "planned" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
-		}
-		if err := ensureClientFollowupReferences(tx, current.ClientID, next.AssignedActorID); err != nil {
-			return err
-		}
-		previousRow, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(map[string]any{"status": "cancelled", "cancelled_at": now, "cancel_reason": reason, "updated_at": now, "version": gorm.Expr("version + 1")})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientFollowupVersionConflict()
-		}
-		next.ClientID, next.RescheduledFromID, next.CreatedAt, next.UpdatedAt = current.ClientID, &id, now, now
-		if err := tx.Create(&next).Error; err != nil {
-			return fmt.Errorf("create rescheduled client followup: %w", err)
-		}
-		oldRow, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		nextRow, err := loadClientFollowupRow(tx, next.ID)
-		if err != nil {
-			return err
-		}
-		oldResponse, nextResponse = clientFollowupResponseFromRow(oldRow), clientFollowupResponseFromRow(nextRow)
-		if err := resolveClientFollowupInboxSources(
-			tx,
-			id,
-			"客户回访已重新安排",
-			requestIDFromContext(c),
-			now,
-		); err != nil {
-			return err
-		}
-		if err := recordClientFollowupWorkflowEvent(tx, id, "client_followup_rescheduled", clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(oldResponse), requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		return recordClientFollowupWorkflowEvent(tx, next.ID, "client_followup_reschedule_created", nil, clientFollowupEventState(nextResponse), requestIDFromContext(c), now)
+		var err error
+		oldResponse, nextResponse, err = rescheduleClientFollowupInTransaction(tx, id, expected, next, reason, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		a.writeClientFollowupTransitionError(c, err)
@@ -696,46 +530,9 @@ func (a *API) rescheduleClientFollowup(c *gin.Context) {
 func (a *API) transitionClientFollowup(c *gin.Context, id string, expected int64, action string, updates map[string]any) (clientFollowupResponse, error) {
 	var response clientFollowupResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var current models.ClientFollowup
-		if err := tx.First(&current, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_FOLLOWUP_NOT_FOUND", "Client followup not found")
-			}
-			return err
-		}
-		if current.Version != expected {
-			return clientFollowupVersionConflict()
-		}
-		if current.Status != "planned" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_FOLLOWUP_FINAL", "Terminal client followups cannot be changed")
-		}
-		previousRow, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		updates["updated_at"], updates["version"] = a.options.Now().UTC().Format(time.RFC3339Nano), gorm.Expr("version + 1")
-		result := tx.Model(&models.ClientFollowup{}).Where("id = ? AND version = ? AND status = 'planned'", id, expected).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientFollowupVersionConflict()
-		}
-		row, err := loadClientFollowupRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientFollowupResponseFromRow(row)
-		if err := resolveClientFollowupInboxSources(
-			tx,
-			id,
-			clientFollowupInboxResolutionReason(action),
-			requestIDFromContext(c),
-			response.UpdatedAt,
-		); err != nil {
-			return err
-		}
-		return recordClientFollowupWorkflowEvent(tx, id, action, clientFollowupEventState(clientFollowupResponseFromRow(previousRow)), clientFollowupEventState(response), requestIDFromContext(c), response.UpdatedAt)
+		var err error
+		response, err = changeClientFollowupInTransaction(tx, id, expected, updates, action, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	return response, err
 }

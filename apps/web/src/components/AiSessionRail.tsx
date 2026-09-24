@@ -2,7 +2,7 @@ import {
   PanelLeftClose,
   CalendarClock,
   FolderKanban,
-  Search,
+  ListTodo,
   Settings2,
   SquarePen,
   Trash2,
@@ -10,13 +10,23 @@ import {
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  useAiAgentInboxQuery,
   useAiSessionsQuery,
+  useAiWorkPlanInboxQuery,
+  useAgentRunsQuery,
   useCreateAiSession,
   useDeleteAiSession,
+  useRestoreDiagnosticsQuery,
 } from "../api/hooks";
 import { useAiChatStore } from "../store/aiChat";
+import {
+  outstandingFileOperationReminders,
+  useFileOperationReminders,
+} from "../store/fileOperationReminders";
+import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 import type { AiSession } from "../types/models";
+import { AiAgentInboxPanel } from "./AiAgentInboxPanel";
 import { ErrorState, LoadingState } from "./feedback";
 import { Modal } from "./Modal";
 
@@ -61,28 +71,38 @@ function sessionTimeLabel(updatedAt: string): string {
  */
 export function AiSessionRail() {
   const sessions = useAiSessionsQuery();
+  const planInbox = useAiWorkPlanInboxQuery();
+  const agentInbox = useAiAgentInboxQuery();
+  const runInbox = useAgentRunsQuery({
+    pageSize: 50,
+    attentionOnly: true,
+    unplannedOnly: true,
+  });
+  const restoreDiagnostics = useRestoreDiagnosticsQuery();
   const createSession = useCreateAiSession();
   const deleteSession = useDeleteAiSession();
   const activeSessionId = useAiChatStore((state) => state.activeSessionId);
   const setActiveSessionId = useAiChatStore(
     (state) => state.setActiveSessionId,
   );
-  const sessionFilter = useAiChatStore((state) => state.sessionFilter);
-  const setSessionFilter = useAiChatStore((state) => state.setSessionFilter);
   const isStreaming = useAiChatStore((state) => state.streaming !== null);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
+  const showPlanInbox = useUiStore((state) => state.aiInboxOpen);
+  const setShowPlanInbox = useUiStore((state) => state.setAiInboxOpen);
   const navigate = useNavigate();
   const setSettingsOpen = useUiStore((state) => state.setSettingsOpen);
   const toggleAgentRailCollapsed = useUiStore(
     (state) => state.toggleAgentRailCollapsed,
   );
+  const displayName = useSettingsStore(
+    (state) => state.preview?.profile.displayName ?? state.displayName,
+  );
+  const avatarDataUrl = useSettingsStore(
+    (state) => state.preview?.profile.avatarDataUrl ?? state.avatarDataUrl,
+  );
 
   const sessionList = useMemo(() => {
-    const all = sessions.data ?? [];
-    const keyword = sessionFilter.trim().toLowerCase();
-    const filtered = keyword
-      ? all.filter((session) => session.title.toLowerCase().includes(keyword))
-      : all;
+    const filtered = sessions.data ?? [];
     const buckets: Record<string, AiSession[]> = {
       today: [],
       yesterday: [],
@@ -102,28 +122,61 @@ export function AiSessionRail() {
       groups.push({ label: "更早", sessions: buckets.earlier });
     }
     return groups;
-  }, [sessions.data, sessionFilter]);
+  }, [sessions.data]);
+  const planInboxMeta = planInbox.data?.pages[0]?.meta;
+  const runInboxTotal = runInbox.data?.meta.total ?? 0;
+  const agentInboxMeta = agentInbox.data?.pages[0]?.meta;
+  const recoveryAttention = Boolean(
+    restoreDiagnostics.data &&
+    (restoreDiagnostics.data.restartRequired ||
+      restoreDiagnostics.data.cleanupRequired ||
+      restoreDiagnostics.data.attentionRequired),
+  );
+  const fileReminderTotal = useFileOperationReminders(
+    (state) => outstandingFileOperationReminders(state.reminders).length,
+  );
+  const attentionTotal =
+    (planInboxMeta?.attention_total ?? 0) +
+    runInboxTotal +
+    fileReminderTotal +
+    Math.max(
+      0,
+      (agentInboxMeta?.total ?? 0) - (agentInboxMeta?.agent_run_total ?? 0),
+    ) +
+    (recoveryAttention ? 1 : 0);
 
   return (
     <aside aria-label="会话列表" className="ai-session-rail" id="agent-sidebar">
-      <div className="ai-rail-head">
-        <span className="ai-rail-head-label">会话</span>
+      <div className="brand-block">
+        <div className="brand-mark">
+          {avatarDataUrl ? (
+            <img alt={`${displayName}的头像`} src={avatarDataUrl} />
+          ) : (
+            Array.from(displayName.trim())[0]?.toUpperCase() || "O"
+          )}
+        </div>
+        <div className="sidebar-copy min-w-0">
+          <div className="brand-name" title={displayName}>
+            {displayName}
+          </div>
+        </div>
         <button
           aria-controls="agent-sidebar"
           aria-expanded="true"
           aria-label="隐藏会话侧边栏"
-          className="icon-button ai-rail-collapse"
+          className="icon-button sidebar-collapse-button"
           onClick={toggleAgentRailCollapsed}
           title="隐藏会话侧边栏"
           type="button"
         >
-          <PanelLeftClose aria-hidden="true" size={16} />
+          <PanelLeftClose aria-hidden="true" size={17} />
         </button>
       </div>
       <button
-        className="ai-rail-primary"
+        className="nav-item"
         disabled={createSession.isPending || isStreaming}
         onClick={() => {
+          setShowPlanInbox(false);
           void createSession
             .mutateAsync()
             .then((session) => setActiveSessionId(session.id))
@@ -133,8 +186,8 @@ export function AiSessionRail() {
         }}
         type="button"
       >
-        <SquarePen aria-hidden="true" size={16} />
-        <span>新会话</span>
+        <SquarePen aria-hidden="true" className="nav-icon" size={17} />
+        <span className="nav-text">新会话</span>
       </button>
       {createSession.error ? (
         <div className="ai-session-create-error" role="alert">
@@ -143,84 +196,112 @@ export function AiSessionRail() {
       ) : null}
       <nav aria-label="智能体快捷入口" className="ai-rail-actions">
         <button
+          className="nav-item"
           onClick={() => setSettingsOpen(true, "automation")}
           type="button"
         >
-          <CalendarClock aria-hidden="true" size={16} />
-          <span>定时任务</span>
+          <CalendarClock aria-hidden="true" className="nav-icon" size={17} />
+          <span className="nav-text">定时任务</span>
         </button>
-        <button onClick={() => navigate("/projects")} type="button">
-          <FolderKanban aria-hidden="true" size={16} />
-          <span>项目</span>
+        <button
+          className="nav-item"
+          onClick={() => navigate("/projects")}
+          type="button"
+        >
+          <FolderKanban aria-hidden="true" className="nav-icon" size={17} />
+          <span className="nav-text">项目</span>
+        </button>
+        <button
+          aria-pressed={showPlanInbox}
+          className={`nav-item${showPlanInbox ? " nav-item-active" : ""}`}
+          onClick={() => setShowPlanInbox(!showPlanInbox)}
+          type="button"
+        >
+          <ListTodo aria-hidden="true" className="nav-icon" size={17} />
+          <span className="nav-text">续办队列</span>
+          {attentionTotal > 0 ? (
+            <span className="nav-badge">
+              {attentionTotal > 99 ? "99+" : attentionTotal}
+            </span>
+          ) : null}
         </button>
       </nav>
-      <div className="ai-rail-search">
-        <Search size={14} />
-        <input
-          aria-label="搜索会话"
-          onChange={(event) => setSessionFilter(event.target.value)}
-          placeholder="搜索会话"
-          value={sessionFilter}
+      {showPlanInbox ? (
+        <AiAgentInboxPanel
+          agentInbox={agentInbox}
+          isStreaming={isStreaming}
+          onClose={() => setShowPlanInbox(false)}
+          planInbox={planInbox}
+          restoreDiagnostics={restoreDiagnostics}
+          runInbox={runInbox}
         />
-      </div>
-      <div className="ai-rail-section">对话</div>
-      {sessions.isPending ? (
-        <LoadingState label="正在读取会话…" />
-      ) : sessions.isError ? (
-        <ErrorState
-          compact
-          message="无法读取会话列表"
-          onRetry={() => void sessions.refetch()}
-        />
-      ) : sessionList.length === 0 ? (
-        <p className="ai-session-empty">
-          {sessionFilter
-            ? "没有匹配的会话。"
-            : "还没有会话，发送第一条消息开始。"}
-        </p>
       ) : (
-        sessionList.map((group) => (
-          <div key={group.label}>
-            <div className="ai-rail-group-label">{group.label}</div>
-            {group.sessions.map((session) => (
-              <div
-                className="ai-session-row"
-                data-active={session.id === activeSessionId}
-                key={session.id}
-              >
-                <button
-                  disabled={isStreaming}
-                  onClick={() => setActiveSessionId(session.id)}
-                  title={session.title}
-                  type="button"
-                >
-                  <span className="ai-session-title">{session.title}</span>
-                  <span className="ai-session-time">
-                    {sessionTimeLabel(session.updated_at)}
-                  </span>
-                </button>
-                <button
-                  aria-label={`删除会话 ${session.title}`}
-                  className="ai-session-delete"
-                  disabled={isStreaming}
-                  onClick={() => setDeletingSession(session.id)}
-                  type="button"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
+        <>
+          <div className="nav-label">对话</div>
+          <div className="ai-rail-sessions">
+            {sessions.isPending ? (
+              <LoadingState label="正在读取会话…" />
+            ) : sessions.isError ? (
+              <ErrorState
+                compact
+                message="无法读取会话列表"
+                onRetry={() => void sessions.refetch()}
+              />
+            ) : sessionList.length === 0 ? (
+              <p className="ai-session-empty">
+                还没有会话，发送第一条消息开始。
+              </p>
+            ) : (
+              sessionList.map((group) => (
+                <div key={group.label}>
+                  <div className="nav-label">{group.label}</div>
+                  {group.sessions.map((session) => (
+                    <div
+                      className="ai-session-row"
+                      data-active={session.id === activeSessionId}
+                      key={session.id}
+                    >
+                      <button
+                        aria-current={
+                          session.id === activeSessionId ? "page" : undefined
+                        }
+                        disabled={isStreaming}
+                        onClick={() => setActiveSessionId(session.id)}
+                        title={session.title}
+                        type="button"
+                      >
+                        <span className="ai-session-title">
+                          {session.title}
+                        </span>
+                        <span className="ai-session-time">
+                          {sessionTimeLabel(session.updated_at)}
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`删除会话 ${session.title}`}
+                        className="ai-session-delete"
+                        disabled={isStreaming}
+                        onClick={() => setDeletingSession(session.id)}
+                        type="button"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
           </div>
-        ))
+        </>
       )}
 
       <button
-        className="ai-rail-settings"
+        className="nav-item sidebar-settings"
         onClick={() => setSettingsOpen(true, "ai")}
         type="button"
       >
-        <Settings2 aria-hidden="true" size={16} />
-        <span>AI 助手设置</span>
+        <Settings2 aria-hidden="true" className="nav-icon" size={17} />
+        <span className="nav-text">AI 助手设置</span>
       </button>
 
       <Modal

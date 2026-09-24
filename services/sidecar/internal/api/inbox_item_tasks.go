@@ -267,26 +267,12 @@ func (a *API) executeInboxTaskMutation(c *gin.Context, command string) {
 			statusCode = replayStatus
 			return nil
 		}
-		current, err := loadInboxItem(tx, inboxID)
+		var err error
+		response, err = mutateInboxTaskInTransaction(tx, inboxID, command, payload, requestIDFromContext(c), now)
 		if err != nil {
-			return inboxItemLoadError(err)
+			return err
 		}
-		if current.Version != expectedVersion {
-			return inboxVersionConflict()
-		}
-		if inboxItemTerminal(current.Status) {
-			return inboxTerminalConflict("Archived Inbox Items must be reopened before changing Task relations")
-		}
-		switch command {
-		case "link":
-			return a.createInboxTaskRelation(tx, c, current, taskIDValue, *payload.IsRequired, idempotencyKey, endpoint, requestHash, now, nowText, statusCode, &response)
-		case "requirement":
-			return a.changeInboxTaskRequirement(tx, c, current, taskIDValue, *payload.IsRequired, idempotencyKey, endpoint, requestHash, now, nowText, statusCode, &response)
-		case "unlink":
-			return a.softUnlinkInboxTask(tx, c, current, taskIDValue, payload.Reason, idempotencyKey, endpoint, requestHash, now, nowText, statusCode, &response)
-		default:
-			return errors.New("unsupported Inbox Task command")
-		}
+		return recordInboxSnapshot(tx, idempotencyKey, endpoint, response.Relation.ID, requestHash, statusCode, &response, nowText)
 	})
 	if err != nil {
 		if writeProjectRequestError(c, mapInboxTaskConstraintError(err)) {
@@ -302,18 +288,14 @@ func (a *API) executeInboxTaskMutation(c *gin.Context, command string) {
 	c.JSON(statusCode, gin.H{"data": response})
 }
 
-func (a *API) createInboxTaskRelation(
+func createInboxTaskRelation(
 	tx *gorm.DB,
-	c *gin.Context,
+	requestID string,
 	current models.InboxItem,
 	taskIDValue string,
 	isRequired bool,
-	idempotencyKey string,
-	endpoint string,
-	requestHash string,
 	now time.Time,
 	nowText string,
-	statusCode int,
 	response *inboxTaskMutationResponse,
 ) error {
 	var activeCount int64
@@ -381,11 +363,11 @@ func (a *API) createInboxTaskRelation(
 	if err := recordInboxTaskWorkflowEvent(
 		tx, current.ID, "task_linked", nil,
 		inboxTaskEventState(relationOutput, progress, "", updated.Status, updated.Version),
-		requestIDFromContext(c), nowText,
+		requestID, nowText,
 	); err != nil {
 		return err
 	}
-	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestID, nowText)
 	if err != nil {
 		return err
 	}
@@ -394,21 +376,17 @@ func (a *API) createInboxTaskRelation(
 	if err != nil {
 		return err
 	}
-	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
+	return nil
 }
 
-func (a *API) changeInboxTaskRequirement(
+func changeInboxTaskRequirement(
 	tx *gorm.DB,
-	c *gin.Context,
+	requestID string,
 	current models.InboxItem,
 	taskIDValue string,
 	isRequired bool,
-	idempotencyKey string,
-	endpoint string,
-	requestHash string,
 	now time.Time,
 	nowText string,
-	statusCode int,
 	response *inboxTaskMutationResponse,
 ) error {
 	relation, err := loadActiveInboxTaskRelation(tx, current.ID, taskIDValue)
@@ -431,7 +409,7 @@ func (a *API) changeInboxTaskRequirement(
 		response.InboxItem = inboxOutput
 		response.Relation = previousOutput
 		response.Progress = previousProgress
-		return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
+		return nil
 	}
 	result := tx.Model(&models.InboxItemTask{}).
 		Where("id = ? AND unlinked_at IS NULL", relation.ID).
@@ -465,11 +443,11 @@ func (a *API) changeInboxTaskRequirement(
 		tx, current.ID, "task_requirement_changed",
 		inboxTaskEventState(previousOutput, previousProgress, "", current.Status, current.Version),
 		inboxTaskEventState(currentOutput, progress, "", updated.Status, updated.Version),
-		requestIDFromContext(c), nowText,
+		requestID, nowText,
 	); err != nil {
 		return err
 	}
-	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestID, nowText)
 	if err != nil {
 		return err
 	}
@@ -478,21 +456,17 @@ func (a *API) changeInboxTaskRequirement(
 	if err != nil {
 		return err
 	}
-	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
+	return nil
 }
 
-func (a *API) softUnlinkInboxTask(
+func softUnlinkInboxTask(
 	tx *gorm.DB,
-	c *gin.Context,
+	requestID string,
 	current models.InboxItem,
 	taskIDValue string,
 	reason string,
-	idempotencyKey string,
-	endpoint string,
-	requestHash string,
 	now time.Time,
 	nowText string,
-	statusCode int,
 	response *inboxTaskMutationResponse,
 ) error {
 	relation, err := loadActiveInboxTaskRelation(tx, current.ID, taskIDValue)
@@ -554,11 +528,11 @@ func (a *API) softUnlinkInboxTask(
 		tx, current.ID, "task_unlinked",
 		inboxTaskEventState(previousOutput, previousProgress, "", current.Status, current.Version),
 		inboxTaskEventState(currentOutput, progress, reason, updated.Status, updated.Version),
-		requestIDFromContext(c), nowText,
+		requestID, nowText,
 	); err != nil {
 		return err
 	}
-	updated, progress, err = reconcileInboxItem(tx, current.ID, requestIDFromContext(c), nowText)
+	updated, progress, err = reconcileInboxItem(tx, current.ID, requestID, nowText)
 	if err != nil {
 		return err
 	}
@@ -567,7 +541,7 @@ func (a *API) softUnlinkInboxTask(
 	if err != nil {
 		return err
 	}
-	return recordInboxSnapshot(tx, idempotencyKey, endpoint, relation.ID, requestHash, statusCode, response, nowText)
+	return nil
 }
 
 func decodeInboxTaskMutation(c *gin.Context, command string, expectedVersion int64, taskIDValue string) (inboxTaskCommandHash, bool) {

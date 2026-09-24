@@ -12,10 +12,12 @@ import {
 import { useId } from "react";
 import { ApiError } from "../api/client";
 import { useTaskArtifactQuery } from "../api/hooks";
+import type { AiIssueHandoffContent } from "../lib/aiIssueHandoff";
 import type {
   TaskArtifactStorageKind,
   TaskArtifactSummary,
 } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 const storageLabels: Record<TaskArtifactStorageKind, string> = {
   text: "文本",
@@ -59,22 +61,26 @@ function formatBytes(value: number | null): string | null {
 }
 
 export interface TaskArtifactCardProps {
+  readOnly?: boolean;
   artifact: TaskArtifactSummary;
   disabled: boolean;
   downloadDisabled: boolean;
   expanded: boolean;
   downloading: boolean;
+  handoffContent?: AiIssueHandoffContent | null;
   onDelete: (artifact: TaskArtifactSummary) => void;
   onDownload: (artifact: TaskArtifactSummary) => void;
   onToggle: (artifactId: string) => void;
 }
 
 export function TaskArtifactCard({
+  readOnly = false,
   artifact,
   disabled,
   downloadDisabled,
   expanded,
   downloading,
+  handoffContent = null,
   onDelete,
   onDownload,
   onToggle,
@@ -83,7 +89,17 @@ export function TaskArtifactCard({
   const detailQuery = useTaskArtifactQuery(
     artifact.deletedAt ? null : artifact.id,
     expanded,
+    readOnly,
   );
+  const candidate =
+    detailQuery.isFetching || detailQuery.isError
+      ? undefined
+      : detailQuery.data;
+  const mismatch =
+    candidate &&
+    (candidate.taskId !== artifact.taskId ||
+      candidate.submissionId !== artifact.submissionId);
+  const detail = mismatch || candidate?.deletedAt ? undefined : candidate;
   const deleted = artifact.deletedAt !== null;
   const integrityLabel =
     artifact.integrityStatus === "missing"
@@ -98,7 +114,8 @@ export function TaskArtifactCard({
     !deleted &&
     artifact.integrityStatus !== "missing" &&
     artifact.integrityStatus !== "mismatch";
-  const canDelete = !deleted && artifact.submissionStatus !== "pending_review";
+  const canDelete =
+    !readOnly && !deleted && artifact.submissionStatus !== "pending_review";
 
   return (
     <article className={`task-artifact-card${deleted ? " is-deleted" : ""}`}>
@@ -116,6 +133,10 @@ export function TaskArtifactCard({
           {storageLabels[artifact.storageKind]}
         </span>
         <div className="task-artifact-actions">
+          <AiIssueHandoffButton
+            content={deleted ? null : handoffContent}
+            disabled={disabled}
+          />
           {downloadable ? (
             <button
               aria-label={`下载产出“${artifact.name}”`}
@@ -182,7 +203,7 @@ export function TaskArtifactCard({
 
       {expanded && !deleted ? (
         <div className="task-artifact-detail" id={detailId}>
-          {detailQuery.isPending ? (
+          {detailQuery.isPending || detailQuery.isFetching ? (
             <span
               aria-live="polite"
               className="task-output-state"
@@ -190,6 +211,11 @@ export function TaskArtifactCard({
             >
               <LoaderCircle className="spin" size={13} /> 正在读取产出详情…
             </span>
+          ) : null}
+          {mismatch ? (
+            <p role="alert">产出与提交批次不一致，未展示其内容。</p>
+          ) : candidate?.deletedAt ? (
+            <p role="alert">产出已删除，请刷新批次。</p>
           ) : null}
           {detailQuery.isError ? (
             <div className="task-output-error" role="alert">
@@ -204,34 +230,31 @@ export function TaskArtifactCard({
               </button>
             </div>
           ) : null}
-          {detailQuery.data?.storageKind === "text" ? (
-            <pre>{detailQuery.data.contentText}</pre>
+          {detail?.storageKind === "text" ? (
+            <pre>{detail.contentText}</pre>
           ) : null}
-          {detailQuery.data?.storageKind === "structured" ? (
-            <pre>
-              {JSON.stringify(detailQuery.data.structuredJson, null, 2)}
-            </pre>
+          {detail?.storageKind === "structured" ? (
+            <pre>{JSON.stringify(detail.structuredJson, null, 2)}</pre>
           ) : null}
-          {detailQuery.data?.storageKind === "link" &&
-          detailQuery.data.referenceUrl ? (
+          {detail?.storageKind === "link" && detail.referenceUrl ? (
             <a
-              href={detailQuery.data.referenceUrl}
+              href={detail.referenceUrl}
               rel="noreferrer noopener"
               target="_blank"
             >
-              {detailQuery.data.referenceUrl}
+              {detail.referenceUrl}
               <ExternalLink size={11} />
             </a>
           ) : null}
-          {detailQuery.data?.storageKind === "file" ? (
+          {detail?.storageKind === "file" ? (
             <dl>
               <div>
                 <dt>MIME</dt>
-                <dd>{detailQuery.data.mimeType ?? "未知"}</dd>
+                <dd>{detail.mimeType ?? "未知"}</dd>
               </div>
               <div>
                 <dt>SHA-256</dt>
-                <dd>{detailQuery.data.sha256 ?? "未提供"}</dd>
+                <dd>{detail.sha256 ?? "未提供"}</dd>
               </div>
             </dl>
           ) : null}

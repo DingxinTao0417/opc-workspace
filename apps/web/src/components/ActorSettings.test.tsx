@@ -6,8 +6,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetRuntimeConnection } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { ActorSettings } from "./ActorSettings";
 
 const owner = {
@@ -112,9 +114,11 @@ function renderActors() {
   return {
     queryClient,
     ...render(
-      <QueryClientProvider client={queryClient}>
-        <ActorSettings />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ActorSettings />
+        </QueryClientProvider>
+      </MemoryRouter>,
     ),
   };
 }
@@ -134,6 +138,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   resetRuntimeConnection();
+  useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
 });
 
 describe("ActorSettings", () => {
@@ -234,6 +239,52 @@ describe("ActorSettings", () => {
     expect(urls.some((url) => url.searchParams.get("type") === "agent")).toBe(
       false,
     );
+  });
+
+  it("hands a saved local person to the agent without mutating actor data", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) =>
+        actorListResponse(input, [person]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderActors();
+
+    expect(await screen.findByText("陈设计")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "本地人员",
+      route: "/ai?settings=actors",
+      routeLabel: "打开人员与责任设置",
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain(person.id);
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("person.update");
+    expect(pending?.prompt).toContain("不要读取或复述已有备注/metadata");
+    expect(
+      fetchMock.mock.calls.some(([, init]) =>
+        ["POST", "PATCH"].includes(String(init?.method ?? "")),
+      ),
+    ).toBe(false);
+  });
+
+  it("disables person handoff while an editor has unsaved local state", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      actorListResponse(input, [person]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderActors();
+
+    expect(await screen.findByText("陈设计")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "编辑陈设计" }));
+
+    expect(screen.getByRole("button", { name: "交给智能体" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
   });
 
   it("hides the previous page placeholder while preserving owner and system", async () => {

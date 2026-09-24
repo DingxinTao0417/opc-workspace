@@ -8,12 +8,18 @@ import {
   useUpdateProjectNote,
 } from "../api/hooks";
 import { useSettledPage } from "../lib/useSettledPage";
+import { projectNoteHandoff } from "../lib/aiIssueHandoff";
 import type { ProjectNote } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
+import { ProjectNoteLocation } from "./ProjectNoteLocation";
 
 interface ProjectNotesSectionProps {
   projectId: string;
   archived: boolean;
+  selectedId?: string;
+  returnSession?: string | null;
+  onClearSelection?: () => void;
 }
 
 interface NoteDraft {
@@ -72,9 +78,89 @@ function noteError(error: unknown): string | null {
   return "项目笔记操作失败，请重试。";
 }
 
+function ProjectNoteCard({
+  archived,
+  note,
+  onDelete,
+  onEdit,
+  pending,
+}: {
+  archived: boolean;
+  note: ProjectNote;
+  onDelete: (note: ProjectNote) => void;
+  onEdit: (note: ProjectNote) => void;
+  pending: boolean;
+}) {
+  const deleted = note.deletedAt !== null;
+  const handoff = projectNoteHandoff(note.projectId, note.id, note.title);
+  return (
+    <article
+      className={deleted ? "is-deleted" : undefined}
+      data-project-note-id={note.id}
+    >
+      <span className="client-activity-icon" aria-hidden="true">
+        <BookOpenText size={14} />
+      </span>
+      <div className="client-activity-copy">
+        <div>
+          <strong>{note.title}</strong>
+          <span>{deleted ? "已删除" : `v${note.version}`}</span>
+        </div>
+        {deleted ? (
+          <p>
+            已于 {formatNoteTime(note.deletedAt!)} 删除
+            {note.deleteReason ? `：${note.deleteReason}` : ""}
+          </p>
+        ) : (
+          <p>{note.body}</p>
+        )}
+        <small>
+          {formatNoteTime(note.occurredAt)} · 由 {note.createdBy.displayName}{" "}
+          记录
+        </small>
+      </div>
+      {!deleted && !archived ? (
+        <div className="client-activity-actions">
+          {handoff ? (
+            <AiIssueHandoffButton content={handoff} disabled={pending} />
+          ) : null}
+          <button
+            aria-label={`编辑笔记 ${note.title}`}
+            className="icon-button"
+            disabled={pending}
+            onClick={() => onEdit(note)}
+            type="button"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            aria-label={`删除笔记 ${note.title}`}
+            className="icon-button icon-button-danger"
+            disabled={pending}
+            onClick={() => onDelete(note)}
+            type="button"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ) : (
+        <div className="client-activity-actions">
+          {!deleted && handoff ? (
+            <AiIssueHandoffButton content={handoff} disabled={pending} />
+          ) : null}
+          <BookOpenText className="client-activity-readonly" size={13} />
+        </div>
+      )}
+    </article>
+  );
+}
+
 export function ProjectNotesSection({
   projectId,
   archived,
+  selectedId,
+  returnSession,
+  onClearSelection,
 }: ProjectNotesSectionProps) {
   const [page, setPage] = useState(1);
   const [includeDeleted, setIncludeDeleted] = useState(false);
@@ -94,6 +180,9 @@ export function ProjectNotesSection({
   const [deleteReason, setDeleteReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const items = query.data?.items ?? [];
+  const visibleItems = selectedId
+    ? items.filter((note) => note.id !== selectedId)
+    : items;
   const totalPages = Math.max(
     1,
     Math.ceil((query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 6)),
@@ -146,6 +235,13 @@ export function ProjectNotesSection({
     setEditing(note);
   };
 
+  const openDelete = (note: ProjectNote) => {
+    resetFeedback();
+    setEditing(null);
+    setDeleteCandidate(note);
+    setDeleteReason("");
+  };
+
   const submit = () => {
     const title = draft.title.trim();
     const body = draft.body.trim();
@@ -195,11 +291,6 @@ export function ProjectNotesSection({
         },
       },
       {
-        onError: (error) => {
-          if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-            void query.refetch();
-          }
-        },
         onSuccess: () => setEditing(null),
       },
     );
@@ -220,11 +311,6 @@ export function ProjectNotesSection({
         input: { reason, expectedVersion: deleteCandidate.version },
       },
       {
-        onError: (error) => {
-          if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-            void query.refetch();
-          }
-        },
         onSuccess: () => {
           setDeleteCandidate(null);
           setDeleteReason("");
@@ -270,6 +356,27 @@ export function ProjectNotesSection({
         />
         显示已删除记录
       </label>
+
+      {selectedId ? (
+        <ProjectNoteLocation
+          noteId={selectedId}
+          onClose={onClearSelection}
+          projectId={projectId}
+          returnSession={returnSession}
+        >
+          {(note) => (
+            <div className="client-activity-list">
+              <ProjectNoteCard
+                archived={archived}
+                note={note}
+                onDelete={openDelete}
+                onEdit={openEdit}
+                pending={pending}
+              />
+            </div>
+          )}
+        </ProjectNoteLocation>
+      ) : null}
 
       {editing ? (
         <div className="client-activity-editor">
@@ -354,7 +461,7 @@ export function ProjectNotesSection({
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      {query.isSuccess && items.length === 0 ? (
+      {query.isSuccess && items.length === 0 && !selectedId ? (
         <EmptyState
           action={
             !archived && !includeDeleted ? (
@@ -378,71 +485,18 @@ export function ProjectNotesSection({
         />
       ) : null}
 
-      {items.length > 0 ? (
+      {visibleItems.length > 0 ? (
         <div className="client-activity-list">
-          {items.map((note) => {
-            const deleted = note.deletedAt !== null;
-            return (
-              <article
-                className={deleted ? "is-deleted" : undefined}
-                key={note.id}
-              >
-                <span className="client-activity-icon" aria-hidden="true">
-                  <BookOpenText size={14} />
-                </span>
-                <div className="client-activity-copy">
-                  <div>
-                    <strong>{note.title}</strong>
-                    <span>{deleted ? "已删除" : `v${note.version}`}</span>
-                  </div>
-                  {deleted ? (
-                    <p>
-                      已于 {formatNoteTime(note.deletedAt!)} 删除
-                      {note.deleteReason ? `：${note.deleteReason}` : ""}
-                    </p>
-                  ) : (
-                    <p>{note.body}</p>
-                  )}
-                  <small>
-                    {formatNoteTime(note.occurredAt)} · 由{" "}
-                    {note.createdBy.displayName} 记录
-                  </small>
-                </div>
-                {!deleted && !archived ? (
-                  <div className="client-activity-actions">
-                    <button
-                      aria-label={`编辑笔记 ${note.title}`}
-                      className="icon-button"
-                      disabled={pending}
-                      onClick={() => openEdit(note)}
-                      type="button"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                    <button
-                      aria-label={`删除笔记 ${note.title}`}
-                      className="icon-button icon-button-danger"
-                      disabled={pending}
-                      onClick={() => {
-                        resetFeedback();
-                        setEditing(null);
-                        setDeleteCandidate(note);
-                        setDeleteReason("");
-                      }}
-                      type="button"
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ) : (
-                  <BookOpenText
-                    className="client-activity-readonly"
-                    size={13}
-                  />
-                )}
-              </article>
-            );
-          })}
+          {visibleItems.map((note) => (
+            <ProjectNoteCard
+              archived={archived}
+              key={note.id}
+              note={note}
+              onDelete={openDelete}
+              onEdit={openEdit}
+              pending={pending}
+            />
+          ))}
         </div>
       ) : null}
 

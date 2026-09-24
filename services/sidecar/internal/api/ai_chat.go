@@ -14,19 +14,53 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/harness"
-	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
 
 const aiSSEProtocolVersion = "opc-ai-sse-v1"
+const aiGenerationStopRequestedEvent = "ai_generation_stop_requested"
+
+// This code-owned handoff remains visible after a saved generation is reloaded;
+// a successful response boundary must not imply that the business task is done.
+const aiBudgetHandoffNotice = "本轮已达到处理轮数上限，已停止继续调用工具。以下是当前交接结果，不表示整个任务已完成；操作是否已执行请以实际回执为准，待确认建议仍需你逐项确认。后续处理请发送新消息，并按需要重新授权。"
+
+const aiContextWindowNotice = "本轮为继续处理工具结果，已从模型请求中移除部分较早对话；当前消息、最新工具证据和已授权上下文保留。较早细节可能不完整，重要旧约束请核对；本地聊天记录未删除，也未增加任何权限。"
+const aiToolResultCompactionNotice = "本轮为继续处理，已从后续模型请求中收起部分较早的只读查询正文；部分结果只保留代码生成的身份/版本/状态/分页证据胶囊，其余仅有省略标记。胶囊不完整且可能过时，不能仅凭旧查询声称当前事实有效，需要完整或最新信息时应重新查询。最新工具结果与操作回执保留，本地记录未删除，也未增加任何权限。"
+
+// Notices are code-owned and persisted with the successful reply. They share
+// the response limit and never replace/truncate the model's actual evidence.
+func aiCompletedRunText(result harness.Result) (string, error) {
+	var notices []string
+	if result.ContextTrimmedTurns > 0 {
+		notices = append(notices, aiContextWindowNotice)
+	}
+	if result.CompactedToolResults > 0 {
+		notices = append(notices, aiToolResultCompactionNotice)
+	}
+	if result.BudgetHandoff {
+		notices = append(notices, aiBudgetHandoffNotice)
+	}
+	if len(notices) == 0 {
+		return result.Text, nil
+	}
+	prefix := strings.Join(notices, "\n\n") + "\n\n"
+	if len(prefix)+len(result.Text)+len(result.Reasoning) > modelclient.MaxResponseBytes {
+		return "", modelclient.ErrResponseBudget
+	}
+	return prefix + result.Text, nil
+}
 
 type chatAIRequest struct {
-	ProviderID string `json:"provider_id"`
-	SessionID  string `json:"session_id"`
-	Message    string `json:"message"`
-	Context    *struct {
+	ProviderID                string                `json:"provider_id"`
+	SessionID                 string                `json:"session_id"`
+	Message                   string                `json:"message"`
+	ActionReceiptGenerationID string                `json:"action_receipt_generation_id,omitempty"`
+	ActionRecheckProposalID   string                `json:"action_recheck_proposal_id,omitempty"`
+	Workspace                 *aiWorkspaceGrant     `json:"workspace,omitempty"`
+	ProjectFiles              *aiProjectFileContext `json:"project_files,omitempty"`
+	Context                   *struct {
 		ProviderVersion int64                           `json:"provider_version"`
 		Sources         []aiBusinessContextSourceInput  `json:"sources"`
 		Knowledge       []aiKnowledgeContextSourceInput `json:"knowledge"`
@@ -37,15 +71,17 @@ type chatAIRequest struct {
 // an explicit cancel can stop the upstream request and so a provider or
 // session never runs two generations at once.
 type aiGenerationRegistry struct {
-	beginMu   sync.Mutex
-	mu        sync.Mutex
-	active    map[string]string
-	cancels   map[string]context.CancelFunc
-	snapshots map[string]aiGenerationResponse
+	beginMu                 sync.Mutex
+	mu                      sync.Mutex
+	active                  map[string]string
+	cancels                 map[string]context.CancelFunc
+	snapshots               map[string]aiGenerationResponse
+	citations               map[string]aiTransientCitations
+	dismissedAccessRequests map[string]bool
 }
 
 func newAIGenerationRegistry() *aiGenerationRegistry {
-	return &aiGenerationRegistry{active: make(map[string]string), cancels: make(map[string]context.CancelFunc), snapshots: make(map[string]aiGenerationResponse)}
+	return &aiGenerationRegistry{active: make(map[string]string), cancels: make(map[string]context.CancelFunc), snapshots: make(map[string]aiGenerationResponse), citations: make(map[string]aiTransientCitations), dismissedAccessRequests: make(map[string]bool)}
 }
 
 func (r *aiGenerationRegistry) register(generationID, providerID, sessionID string, cancel context.CancelFunc) bool {
@@ -69,6 +105,7 @@ func (r *aiGenerationRegistry) release(generationID string) {
 	defer r.mu.Unlock()
 	delete(r.cancels, generationID)
 	delete(r.snapshots, generationID)
+	delete(r.dismissedAccessRequests, generationID)
 	for key, active := range r.active {
 		if active == generationID {
 			delete(r.active, key)
@@ -85,6 +122,21 @@ func (r *aiGenerationRegistry) cancel(generationID string) bool {
 	}
 	cancel()
 	return true
+}
+
+func (r *aiGenerationRegistry) cancelWithPersist(generationID string, persist func() (bool, error)) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cancel, ok := r.cancels[generationID]
+	if !ok {
+		return false, nil
+	}
+	persisted, err := persist()
+	if err != nil || !persisted {
+		return false, err
+	}
+	cancel()
+	return true, nil
 }
 
 func (r *aiGenerationRegistry) cancelSession(sessionID string) {
@@ -110,12 +162,39 @@ func recoverAIGenerationsOnStartup(db *gorm.DB, now time.Time) error {
 		if len(generationIDs) == 0 {
 			return nil
 		}
-		if err := tx.Model(&models.AIGeneration{}).
-			Where("id IN ?", generationIDs).
-			Updates(map[string]any{
-				"status": "cancelled", "error_code": "AI_GENERATION_INTERRUPTED", "updated_at": completedAt,
-			}).Error; err != nil {
+		var stopRequestedIDs []string
+		if err := tx.Table("workflow_events").Distinct("aggregate_id").
+			Where("aggregate_type = 'ai_generation' AND action = ? AND aggregate_id IN ?", aiGenerationStopRequestedEvent, generationIDs).
+			Pluck("aggregate_id", &stopRequestedIDs).Error; err != nil {
 			return err
+		}
+		stopRequested := make(map[string]bool, len(stopRequestedIDs))
+		for _, id := range stopRequestedIDs {
+			stopRequested[id] = true
+		}
+		var interruptedIDs []string
+		for _, id := range generationIDs {
+			if !stopRequested[id] {
+				interruptedIDs = append(interruptedIDs, id)
+			}
+		}
+		if len(interruptedIDs) > 0 {
+			if err := tx.Model(&models.AIGeneration{}).
+				Where("id IN ?", interruptedIDs).
+				Updates(map[string]any{
+					"status": "cancelled", "error_code": "AI_GENERATION_INTERRUPTED", "updated_at": completedAt,
+				}).Error; err != nil {
+				return err
+			}
+		}
+		if len(stopRequestedIDs) > 0 {
+			if err := tx.Model(&models.AIGeneration{}).
+				Where("id IN ?", stopRequestedIDs).
+				Updates(map[string]any{
+					"status": "cancelled", "error_code": nil, "updated_at": completedAt,
+				}).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Model(&models.AIRunStep{}).
 			Where("generation_id IN ? AND kind = 'generation' AND status = 'running'", generationIDs).
@@ -131,334 +210,38 @@ func (a *API) chatAI(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_JSON", "The request body is not valid JSON")
 		return
 	}
-	message := strings.TrimSpace(input.Message)
-	if message == "" || len(message) > modelclient.MaxPromptBytes {
-		writeError(c, http.StatusUnprocessableEntity, "AI_MESSAGE_INVALID", "The chat message must be between 1 and 65536 characters")
-		return
-	}
-	requestKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
-	if len(requestKey) > 128 {
-		writeError(c, http.StatusUnprocessableEntity, "INVALID_IDEMPOTENCY_KEY", "Idempotency-Key must contain at most 128 bytes")
-		return
-	}
-	input.Message = message
-	requestBody, _ := json.Marshal(input)
-	requestHash := sha256Hex(requestBody)
-	// Serialize only acceptance, so concurrent retries observe one committed
-	// request identity even when the first response has not sent its meta yet.
-	a.aiGenerations.beginMu.Lock()
-	a.maintenance.RLock()
-	preparing := true
-	defer func() {
-		if preparing {
-			a.aiProviderMu.RUnlock()
-			a.maintenance.RUnlock()
-			a.aiGenerations.beginMu.Unlock()
+	streamStarted := false
+	sink := func(event, payload string) bool {
+		if !streamStarted {
+			c.Writer.Header().Set("Content-Type", "text/event-stream")
+			c.Writer.Header().Set("Cache-Control", "no-store")
+			c.Writer.Header().Set("X-Accel-Buffering", "no")
+			c.Writer.WriteHeader(http.StatusOK)
+			streamStarted = true
 		}
-	}()
-	a.aiProviderMu.RLock()
-	if a.restorePending.Load() {
-		writeError(c, http.StatusServiceUnavailable, "RESTORE_RESTART_REQUIRED", "A verified restore is pending; restart the application to apply it")
-		return
-	}
-	if requestKey != "" && a.replayAIChatRequest(c, requestKey, requestHash) {
-		return
-	}
-	provider, ok := a.loadChatProvider(c, input.ProviderID)
-	if !ok {
-		return
-	}
-	var businessContext aiBusinessContextEnvelope
-	var businessContextJSON *string
-	if input.Context != nil {
-		if input.Context.ProviderVersion < 1 || input.Context.ProviderVersion != provider.Version {
-			writeError(c, http.StatusConflict, "AI_CONTEXT_PROVIDER_CHANGED", "The selected AI provider changed; preview workspace context again")
-			return
-		}
-		var contextErr error
-		businessContext, _, contextErr = buildAIMessageContext(
-			c.Request.Context(), a.db, input.Context.Sources, input.Context.Knowledge, true,
-		)
-		if contextErr != nil {
-			if !writeAIBusinessContextError(c, contextErr) {
-				writeDatabaseError(c)
-			}
-			return
-		}
-		businessContext.Provider = &aiBusinessContextProviderSnapshot{
-			ID: provider.ID, Name: provider.Name, Kind: provider.Kind, Version: provider.Version,
-		}
-		businessContextJSON, contextErr = encodeAIBusinessContextSnapshot(businessContext)
-		if contextErr != nil {
-			writeDatabaseError(c)
-			return
-		}
-	}
-	// Local providers run keyless on the loopback interface (ADR-005); remote
-	// providers read their key from the OS credential store, use it for this
-	// request only, and never persist it.
-	apiKey := ""
-	if provider.Kind != aiProviderKindLocal {
-		var keyErr error
-		apiKey, keyErr = a.keyStore.Get(aiProviderKeyService, aiProviderKeyAccount(provider.ID))
-		if errors.Is(keyErr, keystore.ErrNotFound) {
-			writeError(c, http.StatusConflict, "AI_KEY_UNAVAILABLE", "This provider has no stored API key")
-			return
-		}
-		if keyErr != nil {
-			writeError(c, http.StatusServiceUnavailable, "AI_KEY_STORE_UNAVAILABLE", "The operating system credential store is not available")
-			return
-		}
-	}
-	session, newSession, ok := a.resolveChatSession(c, &input.SessionID, message)
-	if !ok {
-		return
-	}
-	memories := a.confirmedAIMemories()
-	_, snapshot, snapshotErr := a.activeAIContextSnapshot(session.ID)
-	if snapshotErr != nil {
-		writeDatabaseError(c)
-		return
-	}
-	promptContext := promptContextFromSnapshot(memories, snapshot)
-	promptContext = promptContextWithBusinessContext(promptContext, businessContext)
-	memoryTools, err := a.aiMemoryToolRegistry(session.ID, session.Persist)
-	if err != nil {
-		writeError(c, http.StatusInternalServerError, "AI_TOOL_CONFIGURATION_INVALID", "The AI memory tools could not be configured")
-		return
-	}
-	promptContext.Tools = memoryTools.Definitions()
-	history, historyErr := a.chatHistory(session.ID, message, provider.Protocol, provider.Model, promptContext)
-	if errors.Is(historyErr, modelclient.ErrPromptTooLarge) {
-		writeError(c, http.StatusUnprocessableEntity, "AI_PROMPT_TOO_LARGE", "The current message and system context exceed the prompt budget")
-		return
-	}
-	if historyErr != nil {
-		writeDatabaseError(c)
-		return
-	}
-
-	streamCtx := c.Request.Context()
-	generationCtx, cancelGeneration := context.WithCancel(streamCtx)
-	defer cancelGeneration()
-	generationID := uuid.NewString()
-	if !a.aiGenerations.register(generationID, provider.ID, session.ID, cancelGeneration) {
-		cancelGeneration()
-		writeError(c, http.StatusConflict, "AI_PROVIDER_BUSY", "This provider or session already has an active generation")
-		return
-	}
-	defer a.aiGenerations.release(generationID)
-
-	generation := models.AIGeneration{
-		ID: generationID, SessionID: session.ID, ProviderID: provider.ID,
-		Status: "streaming", CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
-	}
-	if requestKey != "" {
-		generation.RequestKey = &requestKey
-		generation.RequestHash = &requestHash
-	}
-	runSteps := &aiRunStepCollector{}
-	// Session creation, the durable user turn and generation start form one
-	// transaction. The assistant reply is committed separately after the
-	// upstream stream reaches a terminal outcome.
-	if err := a.db.Transaction(func(tx *gorm.DB) error {
-		if input.Context != nil {
-			verified, _, err := buildAIMessageContext(
-				c.Request.Context(), tx, input.Context.Sources, input.Context.Knowledge, true,
-			)
-			if err != nil {
-				return err
-			}
-			verified.Provider = &aiBusinessContextProviderSnapshot{
-				ID: provider.ID, Name: provider.Name, Kind: provider.Kind, Version: provider.Version,
-			}
-			verifiedJSON, err := encodeAIBusinessContextSnapshot(verified)
-			if err != nil {
-				return err
-			}
-			if verifiedJSON == nil || businessContextJSON == nil || *verifiedJSON != *businessContextJSON {
-				return &aiBusinessContextRequestError{status: http.StatusConflict, code: "AI_CONTEXT_CHANGED", message: "Selected workspace context changed; preview it again before sending"}
-			}
-		}
-		if newSession {
-			if err := tx.Create(session).Error; err != nil {
-				return err
-			}
-		}
-		if session.Persist {
-			if err := tx.Create(&models.AIMessage{
-				ID: uuid.NewString(), SessionID: session.ID, Role: "user", Status: "completed",
-				Content: message, ContextSnapshot: businessContextJSON,
-				CreatedAt: nowStamp(a), UpdatedAt: nowStamp(a),
-			}).Error; err != nil {
-				return err
-			}
-			updates := map[string]any{
-				"version": gorm.Expr("version + 1"), "updated_at": nowStamp(a),
-			}
-			if session.Title == "" || session.Title == defaultAISessionTitle {
-				updates["title"] = aiSessionTitleFromMessage(message)
-			}
-			if err := tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(updates).Error; err != nil {
-				return err
-			}
-		}
-		if err := tx.Create(&generation).Error; err != nil {
-			return err
-		}
-		return createAIRunRootStep(tx, generation)
-	}); err != nil {
-		if writeAIBusinessContextError(c, err) {
-			return
-		}
-		writeDatabaseError(c)
-		return
-	}
-	a.recordAIGenerationEvent("ai_generation_started", generation, requestIDFromContext(c))
-	a.aiGenerations.setSnapshot(aiGenerationResponse{ID: generationID, SessionID: session.ID, ProviderID: provider.ID, Status: "streaming", Persist: session.Persist, ClientRequestID: generation.RequestKey})
-	a.aiProviderMu.RUnlock()
-	a.maintenance.RUnlock()
-	a.aiGenerations.beginMu.Unlock()
-	preparing = false
-
-	c.Writer.Header().Set("Content-Type", "text/event-stream")
-	c.Writer.Header().Set("Cache-Control", "no-store")
-	c.Writer.Header().Set("X-Accel-Buffering", "no")
-	c.Writer.WriteHeader(http.StatusOK)
-	writeSSE := func(event, payload string) bool {
 		if _, err := fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, payload); err != nil {
 			return false
 		}
 		c.Writer.Flush()
 		return true
 	}
-	meta := aiChatStreamMeta{
-		Protocol: provider.Protocol, Generation: generationID, SessionID: session.ID,
-		Model: provider.Model, ProviderID: provider.ID, SSEProtocol: aiSSEProtocolVersion,
-	}
-	metaJSON, _ := json.Marshal(meta)
-	if !writeSSE("meta", string(metaJSON)) {
-		a.finalizeCancelledGeneration(generation, session, "", "", runSteps.snapshot())
+	result, err := a.runAIGeneration(c.Request.Context(), input, aiGenerationRunOptions{
+		RequestKey: c.GetHeader("Idempotency-Key"), RequestID: requestIDFromContext(c),
+	}, sink)
+	if streamStarted {
 		return
 	}
-
-	// ADR-007 limits the production registry to the three session-scoped memory
-	// tools above. ADR-010 may inject only user-previewed knowledge snapshots;
-	// it does not register a business, file, shell, network, or knowledge tool.
-	harnessClient := a.harnessClient
-	if harnessClient == nil {
-		harnessClient = harness.NewModelClient(nil)
+	if err != nil {
+		var runError *aiGenerationRunError
+		if errors.As(err, &runError) {
+			writeError(c, runError.Status, runError.Code, runError.Message)
+		} else if !writeAIBusinessContextError(c, err) {
+			writeDatabaseError(c)
+		}
+		return
 	}
-	runResult, streamErr := harness.Run(generationCtx, harnessClient,
-		harness.Request{
-			Protocol: provider.Protocol, BaseURL: provider.BaseURL, APIKey: apiKey, Model: provider.Model,
-			History: history, Memories: promptContext.Memories,
-			Summary: promptContext.Summary, Facts: promptContext.Facts,
-			BusinessContext:  promptContext.BusinessContext,
-			KnowledgeContext: promptContext.KnowledgeContext,
-		},
-		memoryTools, nil,
-		harness.Callbacks{
-			OnStep: runSteps.add,
-			OnDelta: func(delta string) {
-				a.aiGenerations.appendSnapshot(generationID, delta, "")
-				deltaJSON, _ := json.Marshal(struct {
-					GenerationID string `json:"generation_id"`
-					Text         string `json:"text"`
-				}{generationID, delta})
-				if !writeSSE("delta", string(deltaJSON)) {
-					cancelGeneration()
-				}
-			},
-			OnReasoning: func(reasoning string) {
-				a.aiGenerations.appendSnapshot(generationID, "", reasoning)
-				reasoningJSON, _ := json.Marshal(struct {
-					GenerationID string `json:"generation_id"`
-					Text         string `json:"text"`
-				}{generationID, reasoning})
-				if !writeSSE("reasoning", string(reasoningJSON)) {
-					cancelGeneration()
-				}
-			},
-		})
-
-	switch {
-	case streamCtx.Err() != nil || generationCtx.Err() != nil:
-		partial := stripAIControlBlocks(runResult.Text)
-		a.finalizeCancelledGeneration(generation, session, partial, runResult.Reasoning, runSteps.snapshot())
-		cancelledJSON, _ := json.Marshal(struct {
-			GenerationID string `json:"generation_id"`
-			PartialText  string `json:"partial_text"`
-		}{generationID, partial})
-		_ = writeSSE("cancelled", string(cancelledJSON))
-	case streamErr != nil:
-		code := aiStreamErrorCode(streamErr)
-		partial := stripAIControlBlocks(runResult.Text)
-		a.finalizeFailedGeneration(generation, code, runSteps.snapshot(), aiFailedPartial{session: session, text: partial, reasoning: runResult.Reasoning})
-		detail := streamErr.Error()
-		if len(detail) > 200 {
-			detail = detail[:200]
-		}
-		errorJSON, _ := json.Marshal(struct {
-			GenerationID string `json:"generation_id"`
-			Error        string `json:"error"`
-			Detail       string `json:"detail"`
-			PartialText  string `json:"partial_text"`
-		}{generationID, code, detail, partial})
-		_ = writeSSE("error", string(errorJSON))
-	default:
-		citationStartedAt := time.Now().UTC()
-		cleanedText, citationsJSON, _, citationErr := validateAIResponseCitations(runResult.Text, businessContext.Knowledge)
-		citationCompletedAt := time.Now().UTC()
-		citationStatus, citationErrorCode := "succeeded", ""
-		if citationErr != nil {
-			citationStatus, citationErrorCode = "failed", "AI_CITATION_PERSIST_FAILED"
-		}
-		citationOutputBytes := 0
-		if citationsJSON != nil {
-			citationOutputBytes = len(*citationsJSON)
-		}
-		runSteps.add(harness.RunStep{
-			Kind: "citation_validation", Status: citationStatus,
-			StartedAt: citationStartedAt, CompletedAt: citationCompletedAt,
-			DurationMS:  citationCompletedAt.Sub(citationStartedAt).Milliseconds(),
-			OutputBytes: citationOutputBytes, ErrorCode: citationErrorCode,
-		})
-		if citationErr != nil {
-			a.finalizeFailedGeneration(generation, "AI_CITATION_PERSIST_FAILED", runSteps.snapshot())
-			errorJSON, _ := json.Marshal(struct {
-				GenerationID string `json:"generation_id"`
-				Error        string `json:"error"`
-			}{generationID, "AI_CITATION_PERSIST_FAILED"})
-			_ = writeSSE("error", string(errorJSON))
-			return
-		}
-		completedAt := nowStamp(a)
-		runResult.Text = cleanedText
-		if err := a.finalizeCompletedGeneration(generation, session, runResult.Text, runResult.Reasoning, provider, citationsJSON, runSteps.snapshot(), completedAt); err != nil {
-			a.finalizeFailedGeneration(generation, "AI_MESSAGE_PERSIST_FAILED", runSteps.snapshot())
-			errorJSON, _ := json.Marshal(struct {
-				GenerationID string `json:"generation_id"`
-				Error        string `json:"error"`
-			}{generationID, "AI_MESSAGE_PERSIST_FAILED"})
-			_ = writeSSE("error", string(errorJSON))
-			return
-		}
-		a.scheduleAICompaction(session.ID, provider)
-		if runResult.Reflections > 0 {
-			replacementJSON, _ := json.Marshal(struct {
-				GenerationID string `json:"generation_id"`
-				Text         string `json:"text"`
-				Reasoning    string `json:"reasoning"`
-			}{generationID, runResult.Text, runResult.Reasoning})
-			if !writeSSE("replace", string(replacementJSON)) {
-				return
-			}
-		}
-		doneJSON, _ := json.Marshal(struct {
-			GenerationID string `json:"generation_id"`
-		}{generationID})
-		_ = writeSSE("done", string(doneJSON))
+	if result.Accepted {
+		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"code": "AI_CHAT_ALREADY_ACCEPTED", "message": "This chat request was already accepted; resume its existing generation", "request_id": requestIDFromContext(c), "generation_id": result.GenerationID, "session_id": result.SessionID})
 	}
 }
 
@@ -472,56 +255,17 @@ type aiChatStreamMeta struct {
 }
 
 func (a *API) loadChatProvider(c *gin.Context, providerID string) (models.AIProvider, bool) {
-	id := strings.TrimSpace(providerID)
-	if _, err := uuid.Parse(id); err != nil {
-		writeError(c, http.StatusUnprocessableEntity, "INVALID_AI_PROVIDER_ID", "AI provider id must be a UUID")
-		return models.AIProvider{}, false
+	row, err := a.loadGenerationProvider(c.Request.Context(), providerID)
+	if err == nil {
+		return row, true
 	}
-	row, err := loadAIProvider(a.db.WithContext(c.Request.Context()), id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		writeError(c, http.StatusNotFound, "AI_PROVIDER_NOT_FOUND", "AI provider not found")
-		return models.AIProvider{}, false
-	}
-	if err != nil {
+	var runError *aiGenerationRunError
+	if errors.As(err, &runError) {
+		writeError(c, runError.Status, runError.Code, runError.Message)
+	} else {
 		writeDatabaseError(c)
-		return models.AIProvider{}, false
 	}
-	if row.Status == "disabled" {
-		writeError(c, http.StatusConflict, "AI_PROVIDER_DISABLED", "This AI provider is disabled")
-		return models.AIProvider{}, false
-	}
-	if row.Status != "ready" {
-		writeError(c, http.StatusConflict, "AI_PROVIDER_NOT_READY", "Run a successful health check before chatting with this provider")
-		return models.AIProvider{}, false
-	}
-	return row, true
-}
-
-// resolveChatSession returns the referenced session or creates one; ok=false
-// means the response has already been written.
-func (a *API) resolveChatSession(c *gin.Context, sessionID *string, firstMessage string) (*models.AISession, bool, bool) {
-	if trimmed := strings.TrimSpace(*sessionID); trimmed != "" {
-		if _, err := uuid.Parse(trimmed); err != nil {
-			writeError(c, http.StatusUnprocessableEntity, "INVALID_AI_SESSION_ID", "AI session id must be a UUID")
-			return nil, false, false
-		}
-		var row models.AISession
-		if err := a.db.WithContext(c.Request.Context()).Where("id = ?", trimmed).First(&row).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				writeError(c, http.StatusNotFound, "AI_SESSION_NOT_FOUND", "AI session not found")
-				return nil, false, false
-			}
-			writeDatabaseError(c)
-			return nil, false, false
-		}
-		return &row, false, true
-	}
-	now := nowStamp(a)
-	row := models.AISession{
-		ID: uuid.NewString(), Title: aiSessionTitleFromMessage(firstMessage), Persist: true,
-		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	return &row, true, true
+	return models.AIProvider{}, false
 }
 
 func aiSessionTitleFromMessage(message string) string {
@@ -567,13 +311,29 @@ func (a *API) chatHistory(sessionID, currentMessage, protocol, model string, pro
 	return selected, err
 }
 
-func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, citationsSnapshot *string, steps []harness.RunStep, completedAt string) error {
+func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, session *models.AISession, assistantText, reasoning string, provider models.AIProvider, citationsSnapshot *string, steps []harness.RunStep, completedAt string, accessRequests ...[]string) error {
 	a.maintenance.RLock()
 	defer a.maintenance.RUnlock()
+	a.aiWorkspaceAccessRequestMu.Lock()
+	defer a.aiWorkspaceAccessRequestMu.Unlock()
 	if a.restorePending.Load() {
 		return errors.New("AI generation interrupted by pending restore")
 	}
-	err := a.db.Transaction(func(tx *gorm.DB) error {
+	citationStatus, citations, err := decodeAICitationSnapshot(citationsSnapshot)
+	if err != nil {
+		return err
+	}
+	claimed := false
+	err = a.db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"status": "completed", "error_code": nil, "updated_at": completedAt}
+		if session.Persist {
+			updates["content"] = assistantText
+		}
+		var claimErr error
+		claimed, claimErr = claimAIGenerationTerminal(tx, generation, updates)
+		if claimErr != nil || !claimed {
+			return claimErr
+		}
 		if session.Persist {
 			snapshot, err := json.Marshal(struct {
 				Model    string `json:"model"`
@@ -590,26 +350,39 @@ func (a *API) finalizeCompletedGeneration(generation models.AIGeneration, sessio
 			}).Error; err != nil {
 				return err
 			}
-		}
-		generationUpdates := map[string]any{"status": "completed", "updated_at": completedAt}
-		if session.Persist {
-			generationUpdates["content"] = assistantText
-		}
-		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(generationUpdates).Error; err != nil {
-			return err
+			if len(accessRequests) > 0 && len(accessRequests[0]) > 0 {
+				status := "open"
+				if a.aiGenerations != nil && a.aiGenerations.accessRequestDismissed(generation.ID) {
+					status = "dismissed"
+				}
+				if err := persistAIWorkspaceAccessRequest(tx, generation.ID, accessRequests[0], status, completedAt); err != nil {
+					return err
+				}
+			}
 		}
 		if err := tx.Model(&models.AISession{}).Where("id = ?", session.ID).Updates(map[string]any{
 			"version": gorm.Expr("version + 1"), "updated_at": completedAt,
 		}).Error; err != nil {
 			return err
 		}
-		return persistAIRunSteps(tx, generation, steps, "succeeded", "", completedAt)
+		if err := persistAIRunSteps(tx, generation, steps, "succeeded", "", completedAt); err != nil {
+			return err
+		}
+		if !session.Persist {
+			// Publish before commit: a reader cannot observe the completed row
+			// before its metadata exists. Rollback removes the unpublished result.
+			a.aiGenerations.rememberCitations(generation.ID, session.ID, aiGenerationCitations{CitationStatus: citationStatus, Citations: citations}, time.Now())
+		}
+		return nil
 	})
 	if err != nil {
+		a.aiGenerations.forgetCitations(generation.ID)
 		a.options.Logger.Print("AI generation completion persistence failed for " + generation.ID)
 		return err
 	}
-	a.recordAIGenerationEvent("ai_generation_completed", generation, "")
+	if claimed {
+		a.recordAIGenerationEvent("ai_generation_completed", generation, "")
+	}
 	return nil
 }
 
@@ -618,46 +391,66 @@ type aiFailedPartial struct {
 	text, reasoning string
 }
 
-func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code string, steps []harness.RunStep, partial ...aiFailedPartial) {
+func (a *API) finalizeFailedGeneration(generation models.AIGeneration, code string, steps []harness.RunStep, partial ...aiFailedPartial) error {
 	a.maintenance.RLock()
 	defer a.maintenance.RUnlock()
 	if a.restorePending.Load() {
-		return
+		return errors.New("AI generation interrupted by pending restore")
 	}
 	completedAt := nowStamp(a)
+	claimed := false
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{
 			"status": "failed", "error_code": code, "updated_at": completedAt,
 		}
-		if len(partial) > 0 && partial[0].session.Persist && partial[0].text != "" {
+		hasPartial := len(partial) > 0 && partial[0].session != nil && partial[0].session.Persist && partial[0].text != ""
+		if hasPartial {
+			updates["content"] = partial[0].text
+		}
+		var claimErr error
+		claimed, claimErr = claimAIGenerationTerminal(tx, generation, updates)
+		if claimErr != nil || !claimed {
+			return claimErr
+		}
+		if hasPartial {
 			value := partial[0]
 			updates["content"] = value.text
 			if err := tx.Create(&models.AIMessage{ID: uuid.NewString(), SessionID: generation.SessionID, Role: "assistant", Status: "failed", Content: value.text, Reasoning: aiNullableString(value.reasoning), GenerationID: &generation.ID, CreatedAt: completedAt, UpdatedAt: completedAt}).Error; err != nil {
 				return err
 			}
 		}
-		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(updates).Error; err != nil {
-			return err
-		}
 		return persistAIRunSteps(tx, generation, steps, "failed", code, completedAt)
 	})
 	if err != nil {
 		a.options.Logger.Print("AI generation failure persistence failed for " + generation.ID)
-		return
+		return err
 	}
-	a.recordAIGenerationEvent("ai_generation_failed", generation, "")
+	if claimed {
+		a.recordAIGenerationEvent("ai_generation_failed", generation, "")
+	}
+	return nil
 }
 
 // finalizeCancelledGeneration keeps the generated partial content. The user
 // turn was already persisted when the generation started.
-func (a *API) finalizeCancelledGeneration(generation models.AIGeneration, session *models.AISession, partial, reasoning string, steps []harness.RunStep) {
+func (a *API) finalizeCancelledGeneration(generation models.AIGeneration, session *models.AISession, partial, reasoning string, steps []harness.RunStep) error {
 	a.maintenance.RLock()
 	defer a.maintenance.RUnlock()
 	if a.restorePending.Load() {
-		return
+		return errors.New("AI generation interrupted by pending restore")
 	}
 	completedAt := nowStamp(a)
+	claimed := false
 	err := a.db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"status": "cancelled", "error_code": nil, "updated_at": completedAt}
+		if session.Persist && partial != "" {
+			updates["content"] = partial
+		}
+		var claimErr error
+		claimed, claimErr = claimAIGenerationTerminal(tx, generation, updates)
+		if claimErr != nil || !claimed {
+			return claimErr
+		}
 		if session.Persist {
 			if err := tx.Create(&models.AIMessage{
 				ID: uuid.NewString(), SessionID: session.ID, Role: "assistant", Status: "cancelled",
@@ -667,38 +460,81 @@ func (a *API) finalizeCancelledGeneration(generation models.AIGeneration, sessio
 				return err
 			}
 		}
-		updates := map[string]any{"status": "cancelled", "updated_at": completedAt}
-		if session.Persist && partial != "" {
-			updates["content"] = partial
-		}
-		if err := tx.Model(&models.AIGeneration{}).Where("id = ?", generation.ID).Updates(updates).Error; err != nil {
-			return err
-		}
 		return persistAIRunSteps(tx, generation, steps, "cancelled", "", completedAt)
 	})
 	if err != nil {
 		a.options.Logger.Print("AI generation cancel persistence failed for " + generation.ID)
-		return
+		return err
 	}
-	a.recordAIGenerationEvent("ai_generation_cancelled", generation, "")
+	if claimed {
+		a.recordAIGenerationEvent("ai_generation_cancelled", generation, "")
+	}
+	return nil
 }
 
 func (a *API) recordAIGenerationEvent(action string, generation models.AIGeneration, requestID string) {
+	if err := recordAIGenerationEventTx(a.db, action, generation, requestID, nowStamp(a)); err != nil {
+		a.options.Logger.Print("AI generation event persistence failed for " + generation.ID)
+	}
+}
+
+func recordAIGenerationEventTx(tx *gorm.DB, action string, generation models.AIGeneration, requestID, createdAt string) error {
 	payload, err := json.Marshal(struct {
 		GenerationID string `json:"generation_id"`
 		SessionID    string `json:"session_id"`
 	}{generation.ID, generation.SessionID})
 	if err != nil {
-		return
+		return err
 	}
-	err = a.db.Table("workflow_events").Create(map[string]any{
+	return tx.Table("workflow_events").Create(map[string]any{
 		"id": uuid.NewString(), "aggregate_type": "ai_generation", "aggregate_id": generation.ID,
 		"action": action, "actor_id": models.BuiltinOwnerActorID, "request_id": aiNullableString(requestID),
-		"current_json": string(payload), "created_at": nowStamp(a),
+		"current_json": string(payload), "created_at": createdAt,
 	}).Error
-	if err != nil {
-		a.options.Logger.Print("AI generation event persistence failed for " + generation.ID)
+}
+
+func recordAIGenerationStopIntentTx(tx *gorm.DB, generationID, requestID, createdAt string) (bool, error) {
+	var generation models.AIGeneration
+	if err := tx.Select("id", "session_id", "status").Where("id = ?", generationID).Take(&generation).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		return false, err
 	}
+	if generation.Status != "queued" && generation.Status != "streaming" {
+		return false, nil
+	}
+	return recordAIGenerationStopIntentEventTx(tx, generation, requestID, createdAt)
+}
+
+// recordAIGenerationStopIntentEventTx is the idempotent event writer shared by
+// the normal active-generation path and the continuation stop race. The latter
+// may arrive after its own cancellation finalizer has already marked the exact
+// generation cancelled, but never treats a naturally completed/failed row as
+// a user stop.
+func recordAIGenerationStopIntentEventTx(tx *gorm.DB, generation models.AIGeneration, requestID, createdAt string) (bool, error) {
+	var count int64
+	if err := tx.Table("workflow_events").Where(
+		"aggregate_type = 'ai_generation' AND aggregate_id = ? AND action = ?", generation.ID, aiGenerationStopRequestedEvent,
+	).Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count == 0 {
+		if err := recordAIGenerationEventTx(tx, aiGenerationStopRequestedEvent, generation, requestID, createdAt); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func persistAIGenerationStopIntent(db *gorm.DB, generationID, requestID string, now time.Time) (bool, error) {
+	persisted := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		persisted, err = recordAIGenerationStopIntentTx(tx, generationID, requestID, now.UTC().Format(time.RFC3339Nano))
+		return err
+	})
+	return persisted, err
 }
 
 // cancelAIGeneration stops one active generation on behalf of the user.
@@ -708,12 +544,38 @@ func (a *API) cancelAIGeneration(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_AI_GENERATION_ID", "AI generation id must be a UUID")
 		return
 	}
-	if a.aiGenerations.cancel(id) {
+	if err := a.stopAIContinuationForGeneration(id); err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	cancelled, cancelErr := a.aiGenerations.cancelWithPersist(id, func() (bool, error) {
+		return persistAIGenerationStopIntent(a.db, id, requestIDFromContext(c), a.options.Now())
+	})
+	if cancelErr != nil {
+		a.options.Logger.Print("AI generation stop intent persistence failed for " + id)
+		writeDatabaseError(c)
+		return
+	}
+	if !cancelled {
+		// A coordinator worker may have an in-memory generation before its
+		// database row commits (and restore cancellation deliberately bypasses
+		// the maintenance writer). A missing row is not a persistence failure;
+		// revoke that process-local worker directly and let its own finalizer
+		// converge the durable state if/when it becomes visible.
+		var status string
+		err := a.db.Model(&models.AIGeneration{}).Select("status").Where("id = ?", id).Limit(1).Scan(&status).Error
+		if err != nil {
+			writeDatabaseError(c)
+			return
+		}
+		if status == "" {
+			cancelled = a.aiGenerations.cancel(id)
+		}
+	}
+	if cancelled {
 		c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"id": id, "cancel_requested": true}})
 		return
 	}
-	a.maintenance.RLock()
-	defer a.maintenance.RUnlock()
 	var row models.AIGeneration
 	err := a.db.WithContext(c.Request.Context()).Where("id = ?", id).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

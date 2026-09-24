@@ -6,7 +6,7 @@
   "scripts": {
     "tauri": "tauri",
     "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
-    "tauri:build": "tauri build",
+    "tauri:build": "node ../../scripts/build-desktop.mjs",
     "check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },

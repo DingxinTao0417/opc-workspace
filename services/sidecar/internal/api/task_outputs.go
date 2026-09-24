@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -751,109 +752,17 @@ func (a *API) submitTaskOutput(c *gin.Context) {
 			return nil
 		}
 
-		var task models.Task
-		if err := tx.First(&task, "id = ?", taskIDValue).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-			}
-			return err
-		}
-		if task.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		if task.ReviewPolicy != "manual" {
-			return newProjectRequestError(http.StatusConflict, "TASK_MANUAL_REVIEW_REQUIRED", "Only manual-review tasks accept submitted output")
-		}
-		if task.Status != "todo" && task.Status != "in_progress" {
-			return newProjectRequestError(http.StatusConflict, "TASK_SUBMISSION_NOT_ALLOWED", "Output can only be submitted from todo or in-progress status")
-		}
-		assignee, err := requireTaskOutputActors(tx, taskIDValue)
-		if err != nil {
-			return err
-		}
-		var sequence int
-		if err := tx.Model(&models.TaskSubmission{}).Where("task_id = ?", taskIDValue).
-			Select("COALESCE(MAX(sequence), 0) + 1").Scan(&sequence).Error; err != nil {
-			return err
-		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		submission := models.TaskSubmission{
-			ID: uuid.NewString(), TaskID: taskIDValue, Sequence: sequence, Status: "pending_review",
-			Origin: taskSubmissionOriginManual, Summary: input.Summary,
-			SubmittedByActorID: models.BuiltinOwnerActorID, SubmittedAt: now,
-		}
-		if err := tx.Create(&submission).Error; err != nil {
-			return mapTaskOutputConstraintError(err)
-		}
-		for _, artifact := range artifacts {
-			if artifact.StagedFile != nil {
-				if err := a.artifactStore.commitStagedFile(*artifact.StagedFile); err != nil {
-					return newProjectRequestError(http.StatusInternalServerError, "ARTIFACT_STORAGE_ERROR", "The Artifact file could not be stored")
-				}
-				committedFiles = append(committedFiles, committedArtifactFile{
-					artifactID: artifact.ID, relativePath: artifact.StagedFile.relativePath,
-				})
+		var commandErr error
+		response, commandErr = submitTaskOutputInTransaction(tx, taskIDValue, expectedVersion, input, artifacts, func(artifact preparedArtifact) error {
+			if err := a.artifactStore.commitStagedFile(*artifact.StagedFile); err != nil {
+				return newProjectRequestError(http.StatusInternalServerError, "ARTIFACT_STORAGE_ERROR", "The Artifact file could not be stored")
 			}
-			record := models.TaskArtifact{
-				ID: artifact.ID, TaskID: taskIDValue, SubmissionID: submission.ID, Position: artifact.Position,
-				StorageKind: artifact.StorageKind, Name: artifact.Name, ContentText: artifact.ContentText,
-				ReferenceURL: artifact.ReferenceURL, StructuredJSON: artifact.StructuredJSON,
-				RelativePath: artifact.RelativePath, MimeType: artifact.MimeType, SizeBytes: artifact.SizeBytes,
-				SHA256: artifact.SHA256, RequiresFollowup: artifact.RequiresFollowup,
-				ProducedByActorID: assignee.ActorID, RecordedByActorID: models.BuiltinOwnerActorID,
-				IntegrityStatus: "unverified", CreatedAt: now,
-			}
-			if artifact.StorageKind == "file" {
-				record.IntegrityStatus = "verified"
-				record.IntegrityCheckedAt = &now
-			}
-			if err := tx.Create(&record).Error; err != nil {
-				return mapTaskOutputConstraintError(err)
-			}
-		}
-		updates := map[string]any{
-			"status": "waiting_review", "current_submission_id": submission.ID,
-			"submitted_at": now, "reviewed_at": nil, "completed_at": nil,
-			"updated_at": now, "version": gorm.Expr("version + 1"),
-		}
-		result := tx.Model(&models.Task{}).Where("id = ? AND version = ?", taskIDValue, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return mapTaskOutputConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		updated, err := loadTask(tx, taskIDValue)
-		if err != nil {
-			return err
-		}
-		submissionOutput, err := loadSubmissionOutput(tx, submission.ID)
-		if err != nil {
-			return err
-		}
-		artifactSnapshots := artifactEventSnapshots(submissionOutput.Artifacts)
-		sequenceValue := 1
-		event, err := recordTaskOutputEvent(tx, "task_output_submitted", taskIDValue, &submission.ID, nil,
-			taskLifecycleSnapshot(task, ""), map[string]any{
-				"status": updated.Status, "review_policy": updated.ReviewPolicy,
-				"current_submission_id": updated.CurrentSubmissionID, "submitted_at": updated.SubmittedAt,
-				"reviewed_at": updated.ReviewedAt, "version": updated.Version,
-				"submission_id": submission.ID, "submission_sequence": submission.Sequence,
-				"artifact_count": len(submissionOutput.Artifacts), "artifacts": artifactSnapshots,
-			}, requestIDFromContext(c), now, sequenceValue)
-		if err != nil {
-			return err
-		}
-		if err := projectTaskArtifactFollowups(
-			tx, updated, submission, requestIDFromContext(c), now,
-		); err != nil {
-			return err
-		}
-		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestIDFromContext(c), now); err != nil {
-			return err
-		}
-		response = submitOutputResponse{
-			Task: updated, Submission: submissionOutput, Artifacts: submissionOutput.Artifacts, Event: event,
+			committedFiles = append(committedFiles, committedArtifactFile{artifactID: artifact.ID, relativePath: artifact.StagedFile.relativePath})
+			return nil
+		}, requestIDFromContext(c), now)
+		if commandErr != nil {
+			return commandErr
 		}
 		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, taskIDValue, requestHash, statusCode, response, now)
 	})
@@ -957,111 +866,23 @@ func (a *API) reviewTaskOutput(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		var task models.Task
-		if err := tx.First(&task, "id = ?", taskIDValue).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-			}
-			return err
-		}
-		if task.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		if task.ReviewPolicy != "manual" || task.Status != "waiting_review" || task.CurrentSubmissionID == nil {
-			return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_NOT_ALLOWED", "The task does not have output awaiting manual review")
-		}
-		if _, err := requireActiveOwnerReviewer(tx, taskIDValue); err != nil {
-			return err
-		}
-		var submission models.TaskSubmission
-		if err := tx.First(&submission, "id = ? AND task_id = ?", *task.CurrentSubmissionID, taskIDValue).Error; err != nil {
-			return newProjectRequestError(http.StatusConflict, "TASK_SUBMISSION_INVALID", "The current Task submission is unavailable")
-		}
-		if submission.Status != "pending_review" {
-			return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_NOT_ALLOWED", "The current submission is no longer pending review")
-		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		requestID := requestIDFromContext(c)
-		commandSequence := 1
-		action := "task_changes_requested"
-		targetStatus := "in_progress"
-		updates := map[string]any{
-			"status": targetStatus, "reviewed_at": now, "completed_at": nil,
-			"updated_at": now, "version": gorm.Expr("version + 1"),
+		var commandErr error
+		response, commandErr = reviewTaskOutputInTransaction(tx, taskIDValue, expectedVersion, input, requestIDFromContext(c), now)
+		if commandErr != nil {
+			return commandErr
 		}
-		if input.Decision == "accept" {
-			action = "task_review_accepted"
-			targetStatus = "done"
-			updates["status"] = targetStatus
-			updates["completed_at"] = now
-			var err error
-			commandSequence, err = closeActiveAssignmentsForTerminalTask(
-				tx, taskIDValue, requestID, now, "Task review accepted", commandSequence,
-			)
-			if err != nil {
-				return err
-			}
-		}
-		submissionUpdates := map[string]any{
-			"status":               map[bool]string{true: "accepted", false: "changes_requested"}[input.Decision == "accept"],
-			"reviewed_by_actor_id": models.BuiltinOwnerActorID, "reviewed_at": now,
-		}
-		if reason != "" {
-			submissionUpdates["review_reason"] = reason
-		} else {
-			submissionUpdates["review_reason"] = nil
-		}
-		result := tx.Model(&models.TaskSubmission{}).
-			Where("id = ? AND task_id = ? AND status = 'pending_review'", submission.ID, taskIDValue).
-			Updates(submissionUpdates)
-		if result.Error != nil {
-			return mapTaskOutputConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return newProjectRequestError(http.StatusConflict, "TASK_REVIEW_NOT_ALLOWED", "The current submission is no longer pending review")
-		}
-		result = tx.Model(&models.Task{}).Where("id = ? AND version = ?", taskIDValue, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return mapTaskOutputConstraintError(result.Error)
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		updated, err := loadTask(tx, taskIDValue)
-		if err != nil {
-			return err
-		}
-		submissionOutput, err := loadSubmissionOutput(tx, submission.ID)
-		if err != nil {
-			return err
-		}
-		previousSnapshot := taskLifecycleSnapshot(task, "")
-		previousSnapshot["submission_id"] = submission.ID
-		previousSnapshot["submission_status"] = "pending_review"
-		currentSnapshot := taskLifecycleSnapshot(updated, reason)
-		currentSnapshot["submission_id"] = submission.ID
-		currentSnapshot["submission_status"] = submissionOutput.Status
-		event, err := recordTaskOutputEvent(
-			tx, action, taskIDValue, &submission.ID, nil, previousSnapshot, currentSnapshot,
-			requestID, now, commandSequence,
-		)
-		if err != nil {
-			return err
-		}
-		if err := reconcileInboxItemsForTask(tx, taskIDValue, requestID, now); err != nil {
-			return err
-		}
-		if input.Decision == "accept" {
-			if err := reconcileTaskParentChain(tx, updated.ParentTaskID, requestID, now); err != nil {
-				return taskParentProgressError("reconcile reviewed Task parent", err)
-			}
-		}
-		response = reviewTaskOutputResponse{Task: updated, Submission: submissionOutput, Event: event}
 		return recordTaskOutputIdempotency(tx, idempotencyKey, endpoint, taskIDValue, requestHash, statusCode, response, now)
 	})
 	if err != nil {
 		writeTaskOutputError(c, err)
 		return
+	}
+	if !replayed {
+		// The Task Submission is the authoritative review fact. Wake plan
+		// continuations only after its review transaction commits; replayed
+		// idempotent responses do not represent a new fact transition.
+		a.wakeAIContinuationsAfterFactCommit()
 	}
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
@@ -1123,6 +944,16 @@ func (a *API) deleteTaskArtifact(c *gin.Context) {
 		}
 		if row.DeletedAt != nil {
 			return newProjectRequestError(http.StatusConflict, "ARTIFACT_ALREADY_DELETED", "The Artifact is already deleted")
+		}
+		referenced, err := activeAgentRunReferencesControlledFile(
+			tx, agentexec.FileSourceTaskArtifact, row.ID,
+		)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return newProjectRequestError(http.StatusConflict, agentRunFileReferencedByActiveRunCode,
+				"Wait for or cancel the active Agent Run before deleting this input Artifact")
 		}
 		var task models.Task
 		if err := tx.First(&task, "id = ?", row.TaskID).Error; err != nil {
@@ -1274,17 +1105,10 @@ func (a *API) prepareSubmitOutputRequest(c *gin.Context) (submitOutputRequest, [
 			return submitOutputRequest{}, nil, err
 		}
 	}
-	input.Summary = strings.TrimSpace(input.Summary)
-	if utf8.RuneCountInString(input.Summary) > 10_000 {
-		return submitOutputRequest{}, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "summary cannot exceed 10000 characters")
+	input, prepared, err := prepareTaskOutputInput(input, mediaType == "multipart/form-data")
+	if err != nil {
+		return submitOutputRequest{}, nil, err
 	}
-	if len(input.Artifacts) > maxArtifactsPerSubmission {
-		return submitOutputRequest{}, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "a submission cannot contain more than 20 Artifacts")
-	}
-	if input.Summary == "" && len(input.Artifacts) == 0 {
-		return submitOutputRequest{}, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "summary or at least one Artifact is required")
-	}
-	prepared := make([]preparedArtifact, 0, len(input.Artifacts))
 	cleanup := true
 	defer func() {
 		if !cleanup || a.artifactStore == nil {
@@ -1296,23 +1120,6 @@ func (a *API) prepareSubmitOutputRequest(c *gin.Context) (submitOutputRequest, [
 			}
 		}
 	}()
-	usedFileFields := make(map[string]struct{})
-	usedClientRefs := make(map[string]struct{})
-	for index, artifact := range input.Artifacts {
-		artifact.ClientRef = strings.TrimSpace(artifact.ClientRef)
-		if utf8.RuneCountInString(artifact.ClientRef) < 1 || utf8.RuneCountInString(artifact.ClientRef) > 100 || hasUnsafeControlCharacters(artifact.ClientRef) {
-			return submitOutputRequest{}, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "client_ref must contain 1 to 100 safe characters")
-		}
-		if _, exists := usedClientRefs[artifact.ClientRef]; exists {
-			return submitOutputRequest{}, nil, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "client_ref values must be unique within a submission")
-		}
-		usedClientRefs[artifact.ClientRef] = struct{}{}
-		value, err := a.prepareArtifactInput(artifact, index+1, usedFileFields, mediaType == "multipart/form-data")
-		if err != nil {
-			return submitOutputRequest{}, nil, err
-		}
-		prepared = append(prepared, value)
-	}
 	if multipartReader != nil {
 		if err := a.stageSubmitOutputFiles(multipartReader, prepared); err != nil {
 			return submitOutputRequest{}, nil, err
@@ -1422,7 +1229,7 @@ func multipartRequestReadError(err error) error {
 	return newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "The multipart request is not valid")
 }
 
-func (a *API) prepareArtifactInput(
+func prepareArtifactInput(
 	input submitArtifactInput,
 	position int,
 	usedFileFields map[string]struct{},
@@ -1716,6 +1523,22 @@ func recordTaskOutputEventAs(
 	actorIDValue, requestID, createdAt string,
 	commandSequence int,
 ) (taskWorkflowEventOutput, error) {
+	return recordTaskOutputEventAttributed(
+		tx, action, taskIDValue, submissionID, artifactIDValue,
+		previous, current, actorIDValue, nil, requestID, createdAt, commandSequence,
+	)
+}
+
+func recordTaskOutputEventAttributed(
+	tx *gorm.DB,
+	action, taskIDValue string,
+	submissionID, artifactIDValue *string,
+	previous, current map[string]any,
+	actorIDValue string,
+	agentRunID *string,
+	requestID, createdAt string,
+	commandSequence int,
+) (taskWorkflowEventOutput, error) {
 	var previousJSON *string
 	if previous != nil {
 		encoded, err := json.Marshal(previous)
@@ -1730,10 +1553,14 @@ func recordTaskOutputEventAs(
 		return taskWorkflowEventOutput{}, err
 	}
 	currentJSON := string(encoded)
+	var requestIDValue *string
+	if requestID != "" {
+		requestIDValue = &requestID
+	}
 	event := models.WorkflowEvent{
 		ID: uuid.NewString(), AggregateType: "task", AggregateID: taskIDValue, Action: action,
 		ActorID: &actorIDValue, SubmissionID: submissionID, ArtifactID: artifactIDValue,
-		RequestID: &requestID, CommandSeq: &commandSequence, PreviousJSON: previousJSON,
+		AgentRunID: agentRunID, RequestID: requestIDValue, CommandSeq: &commandSequence, PreviousJSON: previousJSON,
 		CurrentJSON: &currentJSON, CreatedAt: createdAt,
 	}
 	if err := tx.Create(&event).Error; err != nil {

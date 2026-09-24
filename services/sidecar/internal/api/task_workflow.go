@@ -167,41 +167,12 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 			return nil
 		}
 
-		var current models.Task
-		if err := tx.First(&current, "id = ?", taskIDValue).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
-			}
-			return err
-		}
-		if current.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		normalizeTask(&current)
-		if err := validateTaskLifecycleTransition(tx, current, command); err != nil {
-			return err
-		}
-
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		requestID := requestIDFromContext(c)
-		updated, event, err := applyValidatedTaskLifecycleTransition(
-			tx, current, command, reason, requestID, now,
-		)
+		var err error
+		response, err = transitionTaskInTransaction(tx, taskIDValue, expectedVersion, command, reason, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		if command == taskLifecycleComplete || command == taskLifecycleCancel || command == taskLifecycleReopen {
-			if err := reconcileTaskParentChain(tx, updated.ParentTaskID, requestID, now); err != nil {
-				return taskParentProgressError("reconcile lifecycle Task parent", err)
-			}
-		}
-		if command == taskLifecycleStart || command == taskLifecycleUnblock {
-			updated, err = reconcileTaskParentProgress(tx, updated.ID, requestID, now)
-			if err != nil {
-				return taskParentProgressError("reconcile lifecycle parent Task", err)
-			}
-		}
-		response = taskLifecycleResponse{Task: updated, Event: event}
 		return recordTaskLifecycleIdempotency(
 			tx,
 			idempotencyKey,
@@ -227,6 +198,42 @@ func (a *API) executeTaskLifecycle(c *gin.Context, command string) {
 	response.Event.CreatedAt = normalizeTimestamp(response.Event.CreatedAt)
 	setProjectETag(c, response.Task.Version)
 	c.JSON(statusCode, gin.H{"data": response})
+}
+
+func transitionTaskInTransaction(tx *gorm.DB, taskIDValue string, expectedVersion int64, command, reason, requestID, now string) (taskLifecycleResponse, error) {
+	var current models.Task
+	if err := tx.First(&current, "id = ?", taskIDValue).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return taskLifecycleResponse{}, newProjectRequestError(http.StatusNotFound, "TASK_NOT_FOUND", "Task not found")
+		}
+		return taskLifecycleResponse{}, err
+	}
+	if current.Version != expectedVersion {
+		return taskLifecycleResponse{}, taskVersionConflict()
+	}
+	normalizeTask(&current)
+	if err := validateTaskLifecycleTransition(tx, current, command); err != nil {
+		return taskLifecycleResponse{}, err
+	}
+
+	updated, event, err := applyValidatedTaskLifecycleTransition(
+		tx, current, command, reason, requestID, now,
+	)
+	if err != nil {
+		return taskLifecycleResponse{}, err
+	}
+	if command == taskLifecycleComplete || command == taskLifecycleCancel || command == taskLifecycleReopen {
+		if err := reconcileTaskParentChain(tx, updated.ParentTaskID, requestID, now); err != nil {
+			return taskLifecycleResponse{}, taskParentProgressError("reconcile lifecycle Task parent", err)
+		}
+	}
+	if command == taskLifecycleStart || command == taskLifecycleUnblock {
+		updated, err = reconcileTaskParentProgress(tx, updated.ID, requestID, now)
+		if err != nil {
+			return taskLifecycleResponse{}, taskParentProgressError("reconcile lifecycle parent Task", err)
+		}
+	}
+	return taskLifecycleResponse{Task: updated, Event: event}, nil
 }
 
 func applyValidatedTaskLifecycleTransition(

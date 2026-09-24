@@ -13,8 +13,8 @@ func TestInvoiceInboxProjectionMigrationGuardsSourcesAndPaidEntries(t *testing.T
 		t.Fatalf("Open() error = %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 71 {
-		t.Fatalf("schema version = %d, want 69", store.SchemaVersion)
+	if store.SchemaVersion != 79 {
+		t.Fatalf("schema version = %d, want 79", store.SchemaVersion)
 	}
 	const (
 		clientID  = "018f0000-0000-7000-8000-000000004801"

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
@@ -46,19 +47,20 @@ func (a *API) projectDueContentItems(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	now := formatInboxTimestamp(a.options.Now().UTC())
+	clock := a.options.Now().UTC()
+	now := formatInboxTimestamp(clock)
 	var ids []string
 	if err := a.db.WithContext(ctx).Model(&models.ContentItem{}).
 		Where(`status IN ('in_review', 'scheduled')
 			AND scheduled_at IS NOT NULL
-			AND scheduled_at <= ?
 			AND NOT EXISTS (
 				SELECT 1 FROM inbox_items
 				WHERE source_event_key = 'content:' || content_items.id || ':' ||
 					CASE content_items.status WHEN 'in_review' THEN 'review_due' ELSE 'publish_due' END || ':' ||
 					content_items.version
-			)`, now).
-		Order("scheduled_at ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
+			)`).
+		Where(contentItemTimeKeyExpression+" <= ?", clock.Format(contentItemTimeKeyLayout)).
+		Order(contentItemTimeKeyExpression+" ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
 		return fmt.Errorf("list due Content Items: %w", err)
 	}
 	for _, id := range ids {
@@ -73,6 +75,13 @@ func (a *API) projectDueContentItems(ctx context.Context) error {
 }
 
 func (a *API) projectContentItemDue(ctx context.Context, id, now string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	clock, err := time.Parse(time.RFC3339Nano, now)
+	if err != nil {
+		return errors.New("invalid Content Item projection time")
+	}
 	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var item models.ContentItem
 		if err := tx.First(&item, "id = ?", id).Error; err != nil {
@@ -82,12 +91,24 @@ func (a *API) projectContentItemDue(ctx context.Context, id, now string) error {
 			return err
 		}
 		eventType, ok := contentItemInboxEventType(item.Status)
-		if !ok || item.ScheduledAt == nil || item.ScheduledTimezone == nil || *item.ScheduledAt > now {
+		if !ok || item.ScheduledAt == nil || item.ScheduledTimezone == nil {
+			return nil
+		}
+		// The SQL comparison key assumes stored UTC timestamps with 0–9 fractional
+		// digits. Re-read and validate that contract before any projection write;
+		// do not echo malformed values through parser errors or accept truncation.
+		raw := *item.ScheduledAt
+		scheduledAt, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil || len(raw) < 20 || len(raw) > 30 || raw[len(raw)-1] != 'Z' ||
+			raw[:19] != scheduledAt.UTC().Format("2006-01-02T15:04:05") || (len(raw) > 20 && raw[19] != '.') {
+			return errors.New("invalid Content Item scheduled time")
+		}
+		if scheduledAt.After(clock) {
 			return nil
 		}
 		key := contentItemInboxEventKey(item.ID, eventType, item.Version)
 		var existing models.InboxItem
-		err := tx.First(&existing, "source_event_key = ?", key).Error
+		err = tx.First(&existing, "source_event_key = ?", key).Error
 		if err == nil {
 			if existing.Kind != "event" || existing.SourceEntityType != contentItemInboxSourceType ||
 				existing.SourceEntityID == nil || *existing.SourceEntityID != item.ID {

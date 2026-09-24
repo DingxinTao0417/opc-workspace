@@ -11,11 +11,13 @@ function deleteErrorText(error: unknown): string | null {
     const message =
       error.code === "VERSION_CONFLICT"
         ? "任务已被更新。列表已刷新，请关闭后按最新内容重试。"
-        : error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS"
-          ? "该任务仍关联活动收件箱条目。请先在收件箱解除关联，再删除任务。"
-          : error.code === "TASK_HAS_ACTIVE_INBOX_SOURCES"
-            ? "该任务或其产出仍是活动收件箱事项的来源。请先解决或忽略这些来源项，再删除任务。"
-            : error.message;
+        : error.code === "TASK_HAS_ACTIVE_AGENT_RUN"
+          ? "该任务仍有执行中的 Agent 作业。请先等待或取消执行；若产出登记待恢复，请先打开执行过程并重试登记。"
+          : error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS"
+            ? "该任务仍关联活动收件箱条目。请先在收件箱解除关联，再删除任务。"
+            : error.code === "TASK_HAS_ACTIVE_INBOX_SOURCES"
+              ? "该任务或其产出仍是活动收件箱事项的来源。请先解决或忽略这些来源项，再删除任务。"
+              : error.message;
     return error.requestId ? `${message} · 请求 ${error.requestId}` : message;
   }
   return "删除任务失败，请重试。";
@@ -82,7 +84,8 @@ export function TaskDeleteConfirmModal({
         <div>
           <strong>确定删除“{task?.title}”吗？</strong>
           <p>
-            删除后无法恢复；存在活动收件箱关系或任务/产出来源项时，系统会拒绝操作。
+            删除后无法恢复；存在活动 Agent
+            作业、收件箱关系或任务/产出来源项时，系统会拒绝操作。
           </p>
         </div>
       </div>

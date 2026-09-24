@@ -835,7 +835,7 @@ func TestAutomationBusinessImportPreflightRejectsInvalidRunGraphsWithoutSideEffe
 			},
 		},
 		{
-			name: "unavailable Agent preset has a pseudo run",
+			name: "Agent failure preset cannot adopt another preset run",
 			mutate: func(packageData *businessExportPackage) {
 				setAutomationImportValue(t, packageData, "automation_runs", "id", fixture.projectRunID, "rule_id", fixture.agentRuleID)
 			},

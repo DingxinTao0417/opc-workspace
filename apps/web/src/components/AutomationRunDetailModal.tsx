@@ -9,13 +9,16 @@ import {
   RotateCcw,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import { useAutomationRunQuery, useRetryAutomationRun } from "../api/hooks";
+import { automationRunHandoff } from "../lib/aiIssueHandoff";
+import { agentRunFailureRuleId } from "../lib/agentRunFailureSource";
 import type {
   AutomationRun,
   AutomationRunAttemptSummary,
 } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { ErrorState, LoadingState } from "./feedback";
 import { Modal } from "./Modal";
 
@@ -151,16 +154,28 @@ export function AutomationRunDetailModal({
   onOpenReminder,
   onOpenTask,
   runId,
+  inline = false,
+  onSelectRun,
 }: {
   onClose: () => void;
   onOpenInboxItem: (inboxItemId: string) => void;
   onOpenReminder: (reminderId: string) => void;
   onOpenTask: (taskId: string) => void;
   runId: string | null;
+  inline?: boolean;
+  onSelectRun?: (id: string) => void;
 }) {
   const [activeRunId, setActiveRunId] = useState<string | null>(runId);
-  const detailQuery = useAutomationRunQuery(activeRunId);
+  const selectedRunId = inline ? runId : activeRunId;
+  const detailQuery = useAutomationRunQuery(selectedRunId, inline);
   const retryRun = useRetryAutomationRun();
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     setActiveRunId(runId);
@@ -170,60 +185,78 @@ export function AutomationRunDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 
-  const detail = detailQuery.data;
+  const detail =
+    inline && (detailQuery.isFetching || detailQuery.isError)
+      ? undefined
+      : detailQuery.data;
 
   function selectAttempt(nextRunId: string) {
-    if (retryRun.isPending || nextRunId === activeRunId) return;
+    if (retryRun.isPending || nextRunId === selectedRunId) return;
     retryRun.reset();
-    setActiveRunId(nextRunId);
+    if (onSelectRun) onSelectRun(nextRunId);
+    else setActiveRunId(nextRunId);
   }
 
   async function retry() {
     if (!detail) return;
     try {
       const next = await retryRun.mutateAsync(detail.id);
-      setActiveRunId(next.id);
+      // A manual retry may finish after the user returns to chat. Keep the
+      // actual mutation/cache outcome, but never navigate them back here.
+      if (!mounted.current) return;
+      if (onSelectRun) onSelectRun(next.id);
+      else setActiveRunId(next.id);
     } catch {
       // The safe mutation error remains visible in the modal.
     }
   }
 
-  return (
-    <Modal
-      dismissible={!retryRun.isPending}
-      footer={
-        <div className="automation-run-detail-footer">
-          {detail?.status === "failed" && detail.retryable ? (
-            <button
-              className="button button-primary"
-              disabled={retryRun.isPending}
-              onClick={() => void retry()}
-              type="button"
-            >
-              {retryRun.isPending ? (
-                <LoaderCircle className="animate-spin" size={14} />
-              ) : (
-                <RotateCcw size={14} />
-              )}
-              {retryRun.isPending ? "正在重试…" : "重试本次运行"}
-            </button>
-          ) : null}
-          <button
-            className="button button-secondary"
-            disabled={retryRun.isPending}
-            onClick={onClose}
-            type="button"
-          >
-            关闭
-          </button>
-        </div>
-      }
-      onClose={onClose}
-      open={Boolean(runId)}
-      title="自动化运行详情"
-      width="720px"
-    >
-      {detailQuery.isPending && !detail ? (
+  const footer = (
+    <div className="automation-run-detail-footer">
+      <AiIssueHandoffButton
+        content={
+          detail
+            ? automationRunHandoff(
+                detail.id,
+                detail.ruleName,
+                detail.attempt,
+                statusLabel(detail.status),
+                detail.errorCode,
+                detail.retryable,
+              )
+            : null
+        }
+        disabled={retryRun.isPending}
+      />
+      {detail?.status === "failed" && detail.retryable ? (
+        <button
+          className="button button-primary"
+          disabled={retryRun.isPending}
+          onClick={() => void retry()}
+          type="button"
+        >
+          {retryRun.isPending ? (
+            <LoaderCircle className="animate-spin" size={14} />
+          ) : (
+            <RotateCcw size={14} />
+          )}
+          {retryRun.isPending ? "正在重试…" : "重试本次运行"}
+        </button>
+      ) : null}
+      <button
+        className="button button-secondary"
+        disabled={retryRun.isPending}
+        onClick={onClose}
+        type="button"
+      >
+        关闭
+      </button>
+    </div>
+  );
+  const content = (
+    <>
+      {(detailQuery.isPending || (inline && detailQuery.isFetching)) &&
+      !detail ? (
         <LoadingState label="正在读取不可变运行记录…" />
       ) : !detail ? (
         <div role="alert">
@@ -326,6 +359,12 @@ export function AutomationRunDetailModal({
 
           <section className="automation-run-detail-section">
             <h4>错误与重试</h4>
+            {detail.ruleId === agentRunFailureRuleId ? (
+              <p>
+                这里只重试失败诊断通知，不重跑
+                Agent、不调用模型、不恢复产出登记。
+              </p>
+            ) : null}
             <dl className="automation-run-audit-list">
               <div>
                 <dt>错误码</dt>
@@ -380,6 +419,23 @@ export function AutomationRunDetailModal({
           </section>
         </div>
       )}
+    </>
+  );
+  return inline ? (
+    <section aria-label="自动化运行详情">
+      {content}
+      {footer}
+    </section>
+  ) : (
+    <Modal
+      dismissible={!retryRun.isPending}
+      footer={footer}
+      onClose={onClose}
+      open={Boolean(runId)}
+      title="自动化运行详情"
+      width="720px"
+    >
+      {content}
     </Modal>
   );
 }

@@ -7,6 +7,7 @@ import { ApiError } from "./client";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
   inboxQueryKey,
+  invalidateReminderActionFacts,
   reminderDetailQueryKey,
   reminderQueryKey,
   useCancelReminder,
@@ -89,6 +90,24 @@ afterEach(() => {
 });
 
 describe("Reminder hooks", () => {
+  it("refreshes reminders and Inbox projections after an AI approval decision", async () => {
+    const client = new QueryClient();
+    const keys = [
+      [...reminderQueryKey, "list"],
+      reminderDetailQueryKey("r1"),
+      [...inboxQueryKey, "stats"],
+      [...inboxQueryKey, "list"],
+      ["search", "reminder"],
+    ];
+    keys.forEach((key) => client.setQueryData(key, { old: true }));
+    client.setQueryData(["tasks"], { old: true });
+    await invalidateReminderActionFacts(client);
+    keys.forEach((key) =>
+      expect(client.getQueryState(key)?.isInvalidated).toBe(true),
+    );
+    expect(client.getQueryState(["tasks"])?.isInvalidated).toBe(false);
+    client.clear();
+  });
   it("polls the local scheduler result at the Inbox refresh interval", async () => {
     vi.useFakeTimers();
     calls.list.mockResolvedValue({

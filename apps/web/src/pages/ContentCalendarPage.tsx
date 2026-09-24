@@ -28,6 +28,13 @@ import {
 } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
+import { focusReportReturnSession } from "../lib/focusReportLocation";
+import {
+  contentCalendarHandoff,
+  contentItemHandoff,
+} from "../lib/aiIssueHandoff";
 import { PageHeader } from "../components/PageHeader";
 import { localDateFromKey, useLocalCalendar } from "../lib/localCalendar";
 import {
@@ -383,9 +390,11 @@ function CreateContentItemModal({
 function EditContentItemModal({
   item,
   onClose,
+  returnSession,
 }: {
   item: ContentItem | null;
   onClose: () => void;
+  returnSession?: string | null;
 }) {
   const update = useUpdateContentItem();
   const schedule = useScheduleContentItem();
@@ -416,6 +425,7 @@ function EditContentItemModal({
   const [taskRequired, setTaskRequired] = useState(true);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   if (!item) return null;
   const busy =
     update.isPending ||
@@ -426,6 +436,7 @@ function EditContentItemModal({
     unlinkTask.isPending;
   const saveDetails = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busy) return;
     update.mutate(
       {
         id: item.id,
@@ -442,6 +453,7 @@ function EditContentItemModal({
     );
   };
   const saveSchedule = () => {
+    if (busy) return;
     const timezone =
       item.scheduledTimezone ||
       Intl.DateTimeFormat().resolvedOptions().timeZone ||
@@ -524,14 +536,47 @@ function EditContentItemModal({
     linkTask.error ??
     unlinkTask.error;
   const linkedTaskIDs = new Set(item.tasks.map((task) => task.id));
+  const handoffDraftDirty =
+    title !== item.title ||
+    platform !== item.platform ||
+    projectId !== (item.projectId ?? "") ||
+    notes !== (item.notes ?? "") ||
+    status !== (item.status === "published" ? "draft" : item.status) ||
+    scheduledAt !== localDateTime(item.scheduledAt, item.scheduledTimezone) ||
+    externalLink !== (item.externalLink ?? "") ||
+    Boolean(taskId);
+  const requestClose = () => {
+    if (busy) return;
+    if (handoffDraftDirty) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+    onClose();
+  };
+  const keepEditing = () => {
+    if (!busy) setDiscardConfirmOpen(false);
+  };
+  const discardAndClose = () => {
+    if (!busy) onClose();
+  };
   return (
     <Modal
+      dismissible={!busy}
       footer={
         <>
+          <ReturnToAiChat
+            sessionId={returnSession}
+            disabled={busy || handoffDraftDirty}
+          />
+          <AiIssueHandoffButton
+            content={contentItemHandoff(item.id, item.title, item.status)}
+            disabled={busy || handoffDraftDirty}
+            onNavigate={onClose}
+          />
           <button
             className="button button-secondary"
             disabled={busy}
-            onClick={onClose}
+            onClick={requestClose}
             type="button"
           >
             关闭
@@ -570,17 +615,24 @@ function EditContentItemModal({
           </button>
         </>
       }
-      onClose={onClose}
+      onClose={requestClose}
       open
       title="内容详情与排期"
       width="640px"
     >
+      {busy || handoffDraftDirty ? (
+        <p className="form-hint" role="status">
+          {busy
+            ? "操作正在进行，请等待完成后再关闭或返回。"
+            : "请先保存或舍弃未保存更改，再返回原对话或交给智能体；关闭时会请你确认是否舍弃。"}
+        </p>
+      ) : null}
       <form id="content-item-edit-form" onSubmit={saveDetails}>
         <div className="content-calendar-edit-grid">
           <label className="form-field">
             <span>内容标题</span>
             <input
-              disabled={item.status === "published"}
+              disabled={busy || item.status === "published"}
               maxLength={200}
               onChange={(event) => setTitle(event.target.value)}
               value={title}
@@ -589,7 +641,7 @@ function EditContentItemModal({
           <label className="form-field">
             <span>平台</span>
             <input
-              disabled={item.status === "published"}
+              disabled={busy || item.status === "published"}
               maxLength={64}
               onChange={(event) => setPlatform(event.target.value)}
               value={platform}
@@ -598,7 +650,7 @@ function EditContentItemModal({
           <label className="form-field">
             <span>状态</span>
             <select
-              disabled={item.status === "published"}
+              disabled={busy || item.status === "published"}
               onChange={(event) =>
                 setStatus(
                   event.target.value as Exclude<ContentItemStatus, "published">,
@@ -616,7 +668,7 @@ function EditContentItemModal({
           <label className="form-field">
             <span>关联项目</span>
             <select
-              disabled={item.status === "published"}
+              disabled={busy || item.status === "published"}
               onChange={(event) => setProjectId(event.target.value)}
               value={projectId}
             >
@@ -631,7 +683,7 @@ function EditContentItemModal({
           <label className="form-field content-calendar-edit-wide">
             <span>备注</span>
             <textarea
-              disabled={item.status === "published"}
+              disabled={busy || item.status === "published"}
               maxLength={4000}
               onChange={(event) => setNotes(event.target.value)}
               rows={3}
@@ -644,7 +696,9 @@ function EditContentItemModal({
             <span>计划发布时间</span>
             <input
               disabled={
-                item.status === "published" || item.status === "archived"
+                busy ||
+                item.status === "published" ||
+                item.status === "archived"
               }
               onChange={(event) => setScheduledAt(event.target.value)}
               type="datetime-local"
@@ -669,6 +723,7 @@ function EditContentItemModal({
         <label className="form-field">
           <span>外部链接文本（可选，不会自动访问）</span>
           <input
+            disabled={busy}
             maxLength={2048}
             onChange={(event) => setExternalLink(event.target.value)}
             placeholder="https://…"
@@ -700,6 +755,7 @@ function EditContentItemModal({
           <div className="content-calendar-task-link">
             <select
               aria-label="选择准备任务"
+              disabled={busy}
               onChange={(event) => setTaskId(event.target.value)}
               value={taskId}
             >
@@ -715,6 +771,7 @@ function EditContentItemModal({
             <label>
               <input
                 checked={taskRequired}
+                disabled={busy}
                 onChange={(event) => setTaskRequired(event.target.checked)}
                 type="checkbox"
               />
@@ -734,6 +791,39 @@ function EditContentItemModal({
           <p className="form-field-error">{mutationMessage(error)}</p>
         ) : null}
       </form>
+      <Modal
+        dismissible={!busy}
+        footer={
+          <>
+            <button
+              autoFocus
+              className="button button-secondary"
+              disabled={busy}
+              onClick={keepEditing}
+              type="button"
+            >
+              继续编辑
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={discardAndClose}
+              type="button"
+            >
+              舍弃更改并关闭
+            </button>
+          </>
+        }
+        onClose={keepEditing}
+        open={discardConfirmOpen}
+        title="舍弃未保存更改？"
+        width="500px"
+      >
+        <p>
+          内容信息、排期、外部链接或待关联任务仍有未保存更改。
+          继续编辑会保留草稿；舍弃只关闭本地编辑，不保存、发布或修改任务。
+        </p>
+      </Modal>
       <Modal
         dismissible={!remove.isPending}
         footer={
@@ -784,9 +874,11 @@ function EditContentItemModal({
 function ContentItemDetailModal({
   contentItemId,
   onClose,
+  returnSession,
 }: {
   contentItemId: string | null;
   onClose: () => void;
+  returnSession?: string | null;
 }) {
   const query = useContentItemQuery(contentItemId);
   if (query.data) {
@@ -795,19 +887,23 @@ function ContentItemDetailModal({
         item={query.data}
         key={`${query.data.id}:${query.data.version}`}
         onClose={onClose}
+        returnSession={returnSession}
       />
     );
   }
   return (
     <Modal
       footer={
-        <button
-          className="button button-secondary"
-          onClick={onClose}
-          type="button"
-        >
-          关闭
-        </button>
+        <>
+          <ReturnToAiChat sessionId={returnSession} />
+          <button
+            className="button button-secondary"
+            onClick={onClose}
+            type="button"
+          >
+            关闭
+          </button>
+        </>
       }
       onClose={onClose}
       open={Boolean(contentItemId)}
@@ -839,6 +935,7 @@ export function ContentCalendarPage() {
     null,
   );
   const detailId = searchParams.get("item")?.trim() || null;
+  const returnSession = focusReportReturnSession(searchParams);
   const view = contentViewFromSearchParams(searchParams);
   const [status, setStatus] = useState<ContentItemStatus | "">("");
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -1080,21 +1177,49 @@ export function ContentCalendarPage() {
     <div className="page">
       <PageHeader
         actions={
-          view !== "archived" ? (
-            <button
-              className="button button-primary"
-              disabled={schedule.isPending}
-              onClick={() =>
-                setCreatingMode(
-                  view === "unscheduled" ? "unscheduled" : "scheduled",
-                )
+          <>
+            {!detailId ? (
+              <ReturnToAiChat
+                sessionId={returnSession}
+                disabled={schedule.isPending}
+              />
+            ) : null}
+            <AiIssueHandoffButton
+              content={contentCalendarHandoff(
+                view === "month"
+                  ? {
+                      view,
+                      scheduledFrom: calendar.from,
+                      scheduledTo: calendar.to,
+                      timeZone,
+                      status,
+                    }
+                  : { view },
+              )}
+              disabled={
+                creatingMode !== null ||
+                detailId !== null ||
+                schedule.isPending ||
+                Object.keys(schedulePreviews).length > 0
               }
-              type="button"
-            >
-              <Plus size={15} />
-              {view === "unscheduled" ? "新建无排期内容" : "新建内容"}
-            </button>
-          ) : undefined
+              label="梳理内容排期"
+            />
+            {view !== "archived" ? (
+              <button
+                className="button button-primary"
+                disabled={schedule.isPending}
+                onClick={() =>
+                  setCreatingMode(
+                    view === "unscheduled" ? "unscheduled" : "scheduled",
+                  )
+                }
+                type="button"
+              >
+                <Plus size={15} />
+                {view === "unscheduled" ? "新建无排期内容" : "新建内容"}
+              </button>
+            ) : null}
+          </>
         }
         meta={<span className="page-count">{countText}</span>}
         title="内容日历"
@@ -1390,7 +1515,11 @@ export function ContentCalendarPage() {
         }}
         open={creatingMode !== null}
       />
-      <ContentItemDetailModal contentItemId={detailId} onClose={closeDetail} />
+      <ContentItemDetailModal
+        contentItemId={detailId}
+        onClose={closeDetail}
+        returnSession={returnSession}
+      />
     </div>
   );
 }

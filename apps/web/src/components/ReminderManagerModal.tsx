@@ -28,6 +28,9 @@ import type {
 } from "../types/models";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
 import { Modal } from "./Modal";
+import { ReturnToAiChat } from "./ClientRecordLocation";
+import { reminderHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 const statusLabels: Record<ReminderStatus, string> = {
   scheduled: "待触发",
@@ -50,6 +53,13 @@ type ReminderDraft = {
   recurrenceInterval: number;
   recurrenceTimezone: string;
 };
+
+type ReminderNavigation =
+  | { type: "close" }
+  | { type: "status"; status: ReminderStatus }
+  | { type: "select"; reminderId: string }
+  | { type: "inbox"; inboxItemId: string }
+  | { type: "create" };
 
 const emptyDraft = (): ReminderDraft => ({
   title: "",
@@ -156,6 +166,7 @@ export function ReminderManagerModal({
   onStateChange,
   onClose,
   onOpenInboxItem,
+  returnSession,
 }: {
   open: boolean;
   status: ReminderStatus;
@@ -166,6 +177,7 @@ export function ReminderManagerModal({
   ) => void;
   onClose: () => void;
   onOpenInboxItem?: (id: string) => void;
+  returnSession?: string | null;
 }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -174,7 +186,10 @@ export function ReminderManagerModal({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [pendingNavigation, setPendingNavigation] =
+    useState<ReminderNavigation | null>(null);
   const initializedEditor = useRef<string | null>(null);
+  const initializedDraft = useRef<ReminderDraft | null>(null);
   const query = useRemindersQuery(
     {
       status,
@@ -203,12 +218,46 @@ export function ReminderManagerModal({
     createMutation.isPending ||
     updateMutation.isPending ||
     cancelMutation.isPending;
+  // Compare with the last loaded/saved draft, not a polled or missing detail.
+  const hasUnsavedDraft =
+    initializedDraft.current !== null &&
+    JSON.stringify(draft) !== JSON.stringify(initializedDraft.current);
+  const hasPendingEditor = creating || confirmingCancel || hasUnsavedDraft;
+  const navigationBlocked = busy || hasPendingEditor;
   const routeState = useRef({ open, status, reminderId });
   const creatingState = useRef(creating);
   const reconciledStatus = useRef<string | null>(null);
   const mountedState = useRef(false);
   routeState.current = { open, status, reminderId };
   creatingState.current = creating;
+  const reloadRequest = useRef(0);
+  const reloadSource = {
+    open,
+    status,
+    reminderId,
+    creating,
+    busy,
+    draft,
+    cancelReason,
+    confirmingCancel,
+    pendingNavigation,
+  };
+  const reloadSourceRef = useRef(reloadSource);
+  const previousReloadSource = reloadSourceRef.current;
+  // A new identity also invalidates ABA navigation or edits while a read waits.
+  if (
+    previousReloadSource.open !== open ||
+    previousReloadSource.status !== status ||
+    previousReloadSource.reminderId !== reminderId ||
+    previousReloadSource.creating !== creating ||
+    previousReloadSource.busy !== busy ||
+    previousReloadSource.draft !== draft ||
+    previousReloadSource.cancelReason !== cancelReason ||
+    previousReloadSource.confirmingCancel !== confirmingCancel ||
+    previousReloadSource.pendingNavigation !== pendingNavigation
+  ) {
+    reloadSourceRef.current = reloadSource;
+  }
 
   useEffect(() => {
     mountedState.current = true;
@@ -221,12 +270,16 @@ export function ReminderManagerModal({
     if (!open) {
       setCreating(false);
       initializedEditor.current = null;
+      initializedDraft.current = null;
+      setPendingNavigation(null);
       return;
     }
   }, [open]);
 
   useEffect(() => {
     initializedEditor.current = null;
+    initializedDraft.current = null;
+    setPendingNavigation(null);
     setValidationError(null);
     setCancelReason("");
     setConfirmingCancel(false);
@@ -239,6 +292,7 @@ export function ReminderManagerModal({
   useEffect(() => {
     setPage(1);
     setCreating(false);
+    setPendingNavigation(null);
   }, [status]);
 
   useEffect(() => {
@@ -251,7 +305,8 @@ export function ReminderManagerModal({
       return;
     }
     initializedEditor.current = selected.id;
-    setDraft(draftFromReminder(selected));
+    initializedDraft.current = draftFromReminder(selected);
+    setDraft(initializedDraft.current);
     setValidationError(null);
     setCancelReason("");
     setConfirmingCancel(false);
@@ -322,34 +377,50 @@ export function ReminderManagerModal({
     setValidationError(null);
   };
 
-  const switchStatus = (next: ReminderStatus) => {
-    if (busy || next === status) return;
-    setPage(1);
+  const applyNavigation = (next: ReminderNavigation) => {
+    if (busy) return;
+    reloadRequest.current += 1;
+    setPendingNavigation(null);
     setCreating(false);
     initializedEditor.current = null;
-    resetMutations();
-    onStateChange({ status: next, reminderId: null });
-  };
-
-  const startCreating = () => {
-    if (busy) return;
-    setCreating(true);
-    initializedEditor.current = null;
-    setDraft(emptyDraft());
+    initializedDraft.current = null;
     setCancelReason("");
     setConfirmingCancel(false);
     resetMutations();
-    if (reminderId) {
-      onStateChange({ status, reminderId: null });
+    if (next.type === "close") {
+      onClose();
+    } else if (next.type === "status") {
+      setPage(1);
+      onStateChange({ status: next.status, reminderId: null });
+    } else if (next.type === "select") {
+      onStateChange({ status, reminderId: next.reminderId });
+    } else if (next.type === "inbox") {
+      onOpenInboxItem?.(next.inboxItemId);
+    } else {
+      setCreating(true);
+      setDraft(emptyDraft());
+      if (reminderId) onStateChange({ status, reminderId: null });
     }
   };
 
-  const selectReminder = (reminder: Reminder) => {
+  const requestNavigation = (next: ReminderNavigation) => {
     if (busy) return;
-    setCreating(false);
-    initializedEditor.current = null;
-    resetMutations();
-    onStateChange({ status, reminderId: reminder.id });
+    if (hasPendingEditor) {
+      setPendingNavigation(next);
+      return;
+    }
+    applyNavigation(next);
+  };
+
+  const switchStatus = (next: ReminderStatus) => {
+    if (next !== status) requestNavigation({ type: "status", status: next });
+  };
+
+  const startCreating = () => requestNavigation({ type: "create" });
+
+  const selectReminder = (reminder: Reminder) => {
+    if (!creating && reminder.id === reminderId) return;
+    requestNavigation({ type: "select", reminderId: reminder.id });
   };
 
   const validateDraft = (): {
@@ -412,17 +483,17 @@ export function ReminderManagerModal({
               routeState.current.open &&
               routeState.current.reminderId === null &&
               creatingState.current;
+            if (!shouldSelectCreated) return;
             setCreating(false);
             creatingState.current = false;
             setPage(1);
             initializedEditor.current = reminder.id;
-            setDraft(draftFromReminder(reminder));
-            if (shouldSelectCreated) {
-              onStateChange({
-                status: "scheduled",
-                reminderId: reminder.id,
-              });
-            }
+            initializedDraft.current = draftFromReminder(reminder);
+            setDraft(initializedDraft.current);
+            onStateChange({
+              status: "scheduled",
+              reminderId: reminder.id,
+            });
           },
         },
       );
@@ -443,17 +514,34 @@ export function ReminderManagerModal({
           if (!mountedState.current) return;
           if (routeState.current.reminderId !== reminder.id) return;
           initializedEditor.current = reminder.id;
-          setDraft(draftFromReminder(reminder));
+          initializedDraft.current = draftFromReminder(reminder);
+          setDraft(initializedDraft.current);
         },
       },
     );
   };
 
   const reloadSelected = async () => {
+    if (busy || creating || !open || !reminderId) return;
+    const source = reloadSourceRef.current;
+    const request = ++reloadRequest.current;
+    const requestedReminderId = reminderId;
     const result = await detailQuery.refetch();
-    if (!result.data) return;
+    if (
+      !mountedState.current ||
+      request !== reloadRequest.current ||
+      source !== reloadSourceRef.current ||
+      !routeState.current.open ||
+      routeState.current.reminderId !== requestedReminderId ||
+      creatingState.current ||
+      result.isError ||
+      !result.data ||
+      result.data.id !== requestedReminderId
+    )
+      return;
     initializedEditor.current = result.data.id;
-    setDraft(draftFromReminder(result.data));
+    initializedDraft.current = draftFromReminder(result.data);
+    setDraft(initializedDraft.current);
     setValidationError(null);
     updateMutation.reset();
     cancelMutation.reset();
@@ -472,9 +560,13 @@ export function ReminderManagerModal({
       {
         onSuccess: (reminder) => {
           if (!mountedState.current) return;
+          if (routeState.current.reminderId !== reminder.id) return;
           setConfirmingCancel(false);
           setPage(1);
           initializedEditor.current = reminder.id;
+          initializedDraft.current = draftFromReminder(reminder);
+          setDraft(initializedDraft.current);
+          setCancelReason("");
           if (
             routeState.current.open &&
             routeState.current.reminderId === reminder.id
@@ -489,9 +581,7 @@ export function ReminderManagerModal({
     );
   };
 
-  const requestClose = () => {
-    if (!busy) onClose();
-  };
+  const requestClose = () => requestNavigation({ type: "close" });
 
   const detailFailureMessage =
     errorMessage(detailQuery.error) ?? "无法读取提醒详情，请重试。";
@@ -499,20 +589,45 @@ export function ReminderManagerModal({
   return (
     <Modal
       footer={
-        <button
-          className="button button-secondary"
-          disabled={busy}
-          onClick={requestClose}
-          type="button"
-        >
-          关闭
-        </button>
+        <>
+          <ReturnToAiChat
+            sessionId={returnSession}
+            disabled={navigationBlocked}
+          />
+          {selected && !creating ? (
+            <AiIssueHandoffButton
+              content={reminderHandoff(
+                selected.id,
+                selected.title,
+                selected.status,
+              )}
+              disabled={navigationBlocked}
+              onNavigate={onClose}
+            />
+          ) : null}
+          <button
+            className="button button-secondary"
+            disabled={busy}
+            onClick={requestClose}
+            type="button"
+          >
+            关闭
+          </button>
+        </>
       }
       onClose={requestClose}
       open={open}
+      dismissible={!busy}
       title="本地提醒"
       width="940px"
     >
+      {navigationBlocked ? (
+        <p className="form-note" role="status">
+          {busy
+            ? "提醒操作正在处理中，请等待完成后再返回原对话或离开当前编辑。"
+            : "请先保存或放弃当前提醒草稿，或退出取消确认，再返回原对话或交给智能体。"}
+        </p>
+      ) : null}
       <div className="reminder-manager">
         <aside aria-label="提醒分类" className="reminder-manager-nav">
           <div className="reminder-manager-nav-heading">
@@ -852,7 +967,7 @@ export function ReminderManagerModal({
                         cancelMutation.error instanceof ApiError) ? (
                         <button
                           className="button button-secondary"
-                          disabled={detailQuery.isFetching}
+                          disabled={busy || detailQuery.isFetching}
                           onClick={() => void reloadSelected()}
                           type="button"
                         >
@@ -993,7 +1108,13 @@ export function ReminderManagerModal({
                   {selected.inboxItemId ? (
                     <button
                       className="button button-primary"
-                      onClick={() => onOpenInboxItem?.(selected.inboxItemId!)}
+                      disabled={busy}
+                      onClick={() =>
+                        requestNavigation({
+                          type: "inbox",
+                          inboxItemId: selected.inboxItemId!,
+                        })
+                      }
                       type="button"
                     >
                       <Inbox size={15} />
@@ -1012,6 +1133,42 @@ export function ReminderManagerModal({
           </div>
         </section>
       </div>
+      <Modal
+        open={open && pendingNavigation !== null}
+        title="放弃提醒草稿？"
+        dismissible={!busy}
+        onClose={() => {
+          if (!busy) setPendingNavigation(null);
+        }}
+        footer={
+          <>
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() => setPendingNavigation(null)}
+              type="button"
+            >
+              保留草稿
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={() => {
+                if (pendingNavigation) applyNavigation(pendingNavigation);
+              }}
+              type="button"
+            >
+              {pendingNavigation?.type === "close"
+                ? "放弃草稿并关闭"
+                : "放弃草稿并继续"}
+            </button>
+          </>
+        }
+      >
+        <p>
+          当前新建、编辑或取消确认尚未完成。继续会放弃本地草稿，不会保存修改或取消提醒。
+        </p>
+      </Modal>
     </Modal>
   );
 }

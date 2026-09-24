@@ -32,6 +32,9 @@ import { InboxItemEventsSection } from "./InboxItemEventsSection";
 import { InboxSourceContext } from "./InboxSourceContext";
 import { InboxItemTasksSection } from "./InboxItemTasksSection";
 import { Modal } from "./Modal";
+import { ReturnToAiChat } from "./ClientRecordLocation";
+import { inboxItemHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 type ActionEditor = "snooze" | "resolve" | "dismiss" | null;
 
@@ -105,9 +108,11 @@ function actionAvailable(item: InboxItem, action: InboxItemAction): boolean {
 export function InboxItemDetailModal({
   itemId,
   onClose,
+  returnSession,
 }: {
   itemId: string | null;
   onClose: () => void;
+  returnSession?: string | null;
 }) {
   const query = useInboxItemQuery(itemId);
   const updateMutation = useUpdateInboxItem();
@@ -128,14 +133,18 @@ export function InboxItemDetailModal({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [relationBusy, setRelationBusy] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const item = query.data;
   const busy =
     updateMutation.isPending || commandMutation.isPending || relationBusy;
+  const draftOpen = editing || actionEditor !== null;
+  const navigationDisabled = busy || draftOpen;
 
   useEffect(() => {
     if (!itemId) {
       initializedFor.current = null;
       pendingConflictRefresh.current = null;
+      setDiscardConfirmOpen(false);
       return;
     }
     if (!item || initializedFor.current === item.id) return;
@@ -151,7 +160,7 @@ export function InboxItemDetailModal({
     setActionValue("");
     setValidationError(null);
     setConflictMessage(null);
-    setRelationBusy(false);
+    setDiscardConfirmOpen(false);
     updateMutation.reset();
     commandMutation.reset();
   }, [item, itemId]);
@@ -179,7 +188,12 @@ export function InboxItemDetailModal({
   );
 
   const close = () => {
-    if (!busy) onClose();
+    if (busy) return;
+    if (draftOpen) {
+      setDiscardConfirmOpen(true);
+      return;
+    }
+    onClose();
   };
 
   const refreshAfterConflict = (message: string) => {
@@ -207,7 +221,7 @@ export function InboxItemDetailModal({
 
   const saveEdit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!item) return;
+    if (!item || busy) return;
     const cleanTitle = title.trim();
     const cleanSummary = summary.trim();
     if (unicodeLength(cleanTitle) < 2 || unicodeLength(cleanTitle) > 200) {
@@ -265,7 +279,7 @@ export function InboxItemDetailModal({
       | { action: "snooze"; snoozedUntil: string }
       | { action: "resolve" | "dismiss"; reason: string },
   ) => {
-    if (!item) return;
+    if (!item || busy) return;
     setValidationError(null);
     setConflictMessage(null);
     commandMutation.mutate(
@@ -294,6 +308,7 @@ export function InboxItemDetailModal({
 
   const submitAction = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busy) return;
     if (actionEditor === "snooze") {
       const snoozedUntil = toIsoDate(actionValue);
       if (!snoozedUntil) {
@@ -330,8 +345,26 @@ export function InboxItemDetailModal({
     <Modal
       onClose={close}
       open={Boolean(itemId)}
+      dismissible={!busy}
       title="收件箱详情"
       width="760px"
+      footer={
+        <>
+          {item ? (
+            <AiIssueHandoffButton
+              content={inboxItemHandoff(item.id, item.title, item.status)}
+              disabled={navigationDisabled}
+              onNavigate={onClose}
+            />
+          ) : null}
+          {returnSession ? (
+            <ReturnToAiChat
+              sessionId={returnSession}
+              disabled={navigationDisabled}
+            />
+          ) : null}
+        </>
+      }
     >
       {query.isPending ? <SkeletonRows count={7} /> : null}
       {query.isError ? (
@@ -355,7 +388,8 @@ export function InboxItemDetailModal({
               ) : item.sourceEntityType === "content_item" ||
                 item.sourceEntityType === "roadmap_milestone" ? (
                 <CalendarClock size={17} />
-              ) : item.sourceEntityType === "task" ? (
+              ) : item.sourceEntityType === "task" ||
+                item.sourceEntityType === "agent_run_failed" ? (
                 <TriangleAlert size={17} />
               ) : item.sourceEntityType === "automation" ? (
                 <Zap size={17} />
@@ -393,13 +427,16 @@ export function InboxItemDetailModal({
                               : "内容待发布"
                             : item.sourceEntityType === "task"
                               ? "任务阻塞"
-                              : item.sourceEntityType === "automation"
-                                ? "本地自动化事项"
-                                : item.sourceEntityType === "system_maintenance"
-                                  ? "系统维护"
-                                  : item.kind === "event"
-                                    ? "任务产出跟进"
-                                    : "手工录入"}{" "}
+                              : item.sourceEntityType === "agent_run_failed"
+                                ? "Agent 执行失败诊断"
+                                : item.sourceEntityType === "automation"
+                                  ? "本地自动化事项"
+                                  : item.sourceEntityType ===
+                                      "system_maintenance"
+                                    ? "系统维护"
+                                    : item.kind === "event"
+                                      ? "任务产出跟进"
+                                      : "手工录入"}{" "}
                 · 仅保存在本机
               </p>
             </div>
@@ -411,6 +448,7 @@ export function InboxItemDetailModal({
                 <span>标题</span>
                 <input
                   autoFocus
+                  disabled={busy}
                   maxLength={200}
                   onChange={(event) => setTitle(event.target.value)}
                   value={title}
@@ -419,6 +457,7 @@ export function InboxItemDetailModal({
               <label className="form-field">
                 <span>说明</span>
                 <textarea
+                  disabled={busy}
                   maxLength={10_000}
                   onChange={(event) => setSummary(event.target.value)}
                   rows={5}
@@ -429,6 +468,7 @@ export function InboxItemDetailModal({
                 <label className="form-field">
                   <span>优先级</span>
                   <select
+                    disabled={busy}
                     onChange={(event) =>
                       setPriority(event.target.value as InboxItemPriority)
                     }
@@ -443,7 +483,9 @@ export function InboxItemDetailModal({
                 <label className="form-field">
                   <span>截止时间</span>
                   <input
-                    disabled={item.sourceEntityType === "system_maintenance"}
+                    disabled={
+                      busy || item.sourceEntityType === "system_maintenance"
+                    }
                     onChange={(event) => setDueAt(event.target.value)}
                     title={
                       item.sourceEntityType === "system_maintenance"
@@ -529,7 +571,13 @@ export function InboxItemDetailModal({
             </>
           )}
 
-          {!editing ? <InboxSourceContext item={item} /> : null}
+          {!editing ? (
+            <InboxSourceContext
+              item={item}
+              returnSession={returnSession}
+              navigationDisabled={navigationDisabled}
+            />
+          ) : null}
 
           {!editing ? (
             <section aria-label="条目操作" className="inbox-detail-actions">
@@ -646,6 +694,7 @@ export function InboxItemDetailModal({
                     <CalendarClock size={14} />
                     <input
                       autoFocus
+                      disabled={busy}
                       onChange={(event) => setActionValue(event.target.value)}
                       type="datetime-local"
                       value={actionValue}
@@ -659,6 +708,7 @@ export function InboxItemDetailModal({
                   </span>
                   <textarea
                     autoFocus
+                    disabled={busy}
                     maxLength={2_000}
                     onChange={(event) => setActionValue(event.target.value)}
                     placeholder="说明为什么可以结束处理…"
@@ -718,6 +768,42 @@ export function InboxItemDetailModal({
           <InboxItemEventsSection itemId={item.id} />
         </div>
       ) : null}
+      <Modal
+        open={Boolean(itemId) && discardConfirmOpen}
+        onClose={() => {
+          if (!busy) setDiscardConfirmOpen(false);
+        }}
+        dismissible={!busy}
+        title="舍弃未保存更改？"
+        footer={
+          <>
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() => setDiscardConfirmOpen(false)}
+              type="button"
+            >
+              继续编辑
+            </button>
+            <button
+              className="button button-danger"
+              disabled={busy}
+              onClick={() => {
+                if (busy) return;
+                setDiscardConfirmOpen(false);
+                onClose();
+              }}
+              type="button"
+            >
+              舍弃更改并关闭
+            </button>
+          </>
+        }
+      >
+        <p>
+          关闭后，当前条目编辑或处理操作中尚未提交的内容将被舍弃；已保存的事实不会改变。
+        </p>
+      </Modal>
     </Modal>
   );
 }

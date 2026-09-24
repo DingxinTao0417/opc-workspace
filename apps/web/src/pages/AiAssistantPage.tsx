@@ -1,5 +1,6 @@
 import {
   AlertCircle,
+  ArrowUp,
   BarChart3,
   Brain,
   CalendarDays,
@@ -10,20 +11,20 @@ import {
   Lightbulb,
   ListChecks,
   LoaderCircle,
-  PanelRightClose,
   PanelRightOpen,
   PanelLeftOpen,
   Plus,
   Search,
-  Send,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
+import { useAiProjectFiles } from "../store/aiProjectFiles";
+import { AiProjectFileContext } from "../components/AiProjectFileContext";
+import { AiProjectFileReview } from "../components/AiProjectFileReview";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   getAiRunSteps,
   getAiUsageSummary,
@@ -51,6 +52,44 @@ import { ErrorState, LoadingState } from "../components/feedback";
 import { ClientSelect } from "../components/ClientSelect";
 import { Modal } from "../components/Modal";
 import { ModeSwitch } from "../components/ModeSwitch";
+import { AiCopyButton } from "../components/AiCopyButton";
+import {
+  AiWorkspaceAccess,
+  AiWorkspaceGrantSummary,
+} from "../components/AiWorkspaceAccess";
+import {
+  AiAccessRequestPrompt,
+  accessRequestContinuationPrompt,
+} from "../components/AiAccessRequestCard";
+import { AiWorkspaceRecordNavigation } from "../components/AiWorkspaceRecordNavigation";
+import {
+  AiWorkspaceActions,
+  useAiWorkspaceActions,
+} from "../components/AiWorkspaceActions";
+import { renderAiRichText } from "../components/AiRichText";
+import { AiCitationEvidence } from "../components/AiCitationEvidence";
+import { AiRunProgress } from "../components/AiRunProgress";
+import { AiWorkPlan } from "../components/AiWorkPlan";
+import {
+  AiAutomaticOrigin,
+  AiAutomaticReply,
+  AiContinuationSendNotice,
+  usePlanContinuation,
+} from "../components/AiPlanContinuation";
+import { isContinuationActive } from "../api/aiPlanContinuation";
+import { AiApprovalContinuation } from "../components/AiApprovalContinuation";
+import { AiActionReceiptAttachment } from "../components/AiActionReceiptAttachment";
+import type { AiActionContinuation } from "../lib/aiActionContinuation";
+import { aiToolLabel } from "../lib/aiToolLabels";
+import {
+  parseAiContinuationLocation,
+  type AiContinuationLocation,
+} from "../lib/aiContinuationLocation";
+import {
+  AiIssueHandoffCard,
+  AiWorkbenchHandoffCard,
+} from "../components/AiWorkbenchHandoff";
+import { workbenchHandoffDetails } from "../store/aiWorkbenchHandoff";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { TaskSelect } from "../components/TaskSelect";
 import {
@@ -71,6 +110,8 @@ import type {
   AiCitationStatus,
   AiMessage,
   AiSession,
+  AiWorkspaceGrant,
+  AiWorkspaceScope,
   AiKnowledgeContextSource,
   KnowledgeSearchResult,
   TaskStatus,
@@ -86,90 +127,6 @@ interface DraftTaskForm {
   description: string;
   dueDate: string;
   projectId: string | null;
-}
-
-// 极简只读 markdown 渲染：段落、有序/无序列表、**加粗**、`code`。
-// 只生成 React 节点（无 dangerouslySetInnerHTML），模型输出天然被转义。
-function inlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  return text
-    .split(/(\*\*[^*]+\*\*|`[^`]+`)/g)
-    .filter((part) => part !== "")
-    .map((part, index) => {
-      const key = `${keyPrefix}-${index}`;
-      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-        return <strong key={key}>{part.slice(2, -2)}</strong>;
-      }
-      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-        return <code key={key}>{part.slice(1, -1)}</code>;
-      }
-      return <span key={key}>{part}</span>;
-    });
-}
-
-function renderAiRichText(content: string): ReactNode[] {
-  const lines = content.split(/\r?\n/);
-  const blocks: ReactNode[] = [];
-  let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
-  let blockKey = 0;
-
-  const flushParagraph = () => {
-    if (paragraph.length > 0) {
-      const key = `p-${blockKey++}`;
-      blocks.push(<p key={key}>{inlineMarkdown(paragraph.join(" "), key)}</p>);
-      paragraph = [];
-    }
-  };
-  const flushList = () => {
-    if (list) {
-      const key = `l-${blockKey++}`;
-      const items = list.items.map((item, index) => (
-        <li key={`${key}-${index}`}>
-          {inlineMarkdown(item, `${key}-${index}`)}
-        </li>
-      ));
-      blocks.push(
-        list.ordered ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>,
-      );
-      list = null;
-    }
-  };
-
-  for (const raw of lines) {
-    const line = raw.trimEnd();
-    const ordered = /^(\d+)[.、)]\s+/.exec(line);
-    const unordered = /^[-*•]\s+/.exec(line);
-    if (!line.trim()) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-    if (ordered) {
-      flushParagraph();
-      if (!list || !list.ordered) {
-        flushList();
-        list = { ordered: true, items: [] };
-      }
-      list.items.push(line.slice(ordered[0].length));
-      continue;
-    }
-    if (unordered) {
-      flushParagraph();
-      if (list && list.ordered) {
-        flushList();
-      }
-      if (!list) {
-        list = { ordered: false, items: [] };
-      }
-      list.items.push(line.slice(unordered[0].length));
-      continue;
-    }
-    flushList();
-    paragraph.push(line.trim());
-  }
-  flushParagraph();
-  flushList();
-  return blocks;
 }
 
 function draftFromSuggestion(suggestion: AiTaskSuggestion): DraftTaskForm {
@@ -230,8 +187,19 @@ const statusLabels: Record<TaskStatus, string> = {
   cancelled: "已取消",
 };
 
+function isCanonicalWorkspaceId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+    value,
+  );
+}
+
 export function AiAssistantPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [continuation, setContinuation] = useState<
+    (AiContinuationLocation & { request: number }) | null
+  >(null);
+  const continuationRequest = useRef(0);
   const providers = useAiProvidersQuery();
   const sessions = useAiSessionsQuery();
   const createSession = useCreateAiSession();
@@ -250,6 +218,18 @@ export function AiAssistantPage() {
   );
 
   const activeSessionId = useAiChatStore((state) => state.activeSessionId);
+  const liveAccessRequest = useAiChatStore(
+    (state) => state.accessRequests[activeSessionId],
+  );
+  const dismissAccessRequest = useAiChatStore(
+    (state) => state.dismissAccessRequest,
+  );
+  const automaticContinuation = usePlanContinuation(activeSessionId);
+  const [automaticSendBlocked, setAutomaticSendBlocked] = useState(false);
+  useEffect(
+    () => setAutomaticSendBlocked(false),
+    [activeSessionId, automaticContinuation.data?.status],
+  );
   const setActiveSessionId = useAiChatStore(
     (state) => state.setActiveSessionId,
   );
@@ -261,6 +241,22 @@ export function AiAssistantPage() {
   const [draft, setDraft] = useState<DraftTaskForm | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [workspaceApproval, setWorkspaceApproval] = useState<{
+    providerId: string;
+    sessionId: string;
+    grant: AiWorkspaceGrant;
+  } | null>(null);
+  const [workspaceAccessRequest, setWorkspaceAccessRequest] = useState(0);
+  const [actionReceiptGenerationId, setActionReceiptGenerationId] =
+    useState<string>();
+  const [actionRecheckProposalId, setActionRecheckProposalId] =
+    useState<string>();
+  const receiptPreparedAt = useRef(0);
+  const receiptAttachmentId = useRef<string>();
+  const acceptedCommand = useAiChatStore((state) => state.acceptedCommand);
+  const [recommendedWorkspaceScopes, setRecommendedWorkspaceScopes] = useState<
+    AiWorkspaceScope[]
+  >(["work", "actions"]);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [contextTaskId, setContextTaskId] = useState("");
   const [contextProjectId, setContextProjectId] = useState("");
@@ -286,6 +282,119 @@ export function AiAssistantPage() {
   const activeProvider =
     readyProviders.find((provider) => provider.id === selectedProviderId) ??
     null;
+  const [fileSendError, setFileSendError] = useState<string | null>(null);
+  const filePreparing = useRef(false);
+  const fileSendIdentity = useRef("");
+  fileSendIdentity.current = JSON.stringify([
+    activeSessionId,
+    activeProvider?.id,
+    activeProvider?.version,
+    automaticContinuation.data?.status,
+    workspaceApproval,
+    confirmedContext,
+    contextTaskId,
+    contextProjectId,
+    contextClientId,
+    selectedKnowledgeChunks,
+    actionReceiptGenerationId,
+    actionRecheckProposalId,
+  ]);
+
+  useEffect(() => {
+    const requestedSettings = searchParams.get("settings");
+    if (
+      requestedSettings !== "ai" &&
+      requestedSettings !== "data" &&
+      requestedSettings !== "actors" &&
+      requestedSettings !== "agent" &&
+      requestedSettings !== "diagnostics"
+    )
+      return;
+    setSettingsOpen(true, requestedSettings);
+    const next = new URLSearchParams(searchParams);
+    next.delete("settings");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, setSettingsOpen]);
+
+  useEffect(() => {
+    const requestedSession = searchParams.get("session");
+    if (!requestedSession) return;
+    if (isCanonicalWorkspaceId(requestedSession)) {
+      setActiveSessionId(requestedSession);
+      const target = parseAiContinuationLocation(searchParams);
+      setContinuation(
+        target ? { ...target, request: ++continuationRequest.current } : null,
+      );
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("session");
+    next.delete("generation");
+    next.delete("proposal");
+    next.delete("plan");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setActiveSessionId, setSearchParams]);
+
+  useEffect(() => {
+    if (
+      !searchParams.has("session") &&
+      continuation &&
+      continuation.sessionId !== activeSessionId
+    )
+      setContinuation(null);
+  }, [activeSessionId, continuation, searchParams]);
+
+  const workspaceGrant =
+    workspaceApproval &&
+    activeProvider &&
+    workspaceApproval.providerId === activeProvider.id &&
+    workspaceApproval.sessionId === activeSessionId &&
+    workspaceApproval.grant.provider_version === activeProvider.version
+      ? workspaceApproval.grant
+      : undefined;
+  useEffect(() => {
+    setWorkspaceApproval(null);
+    receiptAttachmentId.current = undefined;
+    setActionReceiptGenerationId(undefined);
+    setActionRecheckProposalId(undefined);
+  }, [activeSessionId, activeProvider?.id, activeProvider?.version]);
+  useEffect(() => {
+    if (
+      actionReceiptGenerationId &&
+      acceptedCommand &&
+      acceptedCommand.sequence > receiptPreparedAt.current &&
+      acceptedCommand.owner === "main" &&
+      acceptedCommand.sessionId === activeSessionId &&
+      !!receiptAttachmentId.current &&
+      acceptedCommand.actionReceiptAttachmentId ===
+        receiptAttachmentId.current &&
+      acceptedCommand.actionReceiptGenerationId === actionReceiptGenerationId &&
+      acceptedCommand.actionRecheckProposalId === actionRecheckProposalId
+    ) {
+      receiptAttachmentId.current = undefined;
+      setActionReceiptGenerationId(undefined);
+      setActionRecheckProposalId(undefined);
+      setWorkspaceApproval(null);
+    }
+  }, [
+    acceptedCommand,
+    actionReceiptGenerationId,
+    actionRecheckProposalId,
+    activeSessionId,
+  ]);
+
+  const continuationSource = JSON.stringify([
+    activeSessionId,
+    activeProvider?.id,
+    activeProvider?.version,
+    chat.isStreaming,
+  ]);
+  const continuationSourceRef = useRef({ key: continuationSource, epoch: 0 });
+  if (continuationSourceRef.current.key !== continuationSource)
+    continuationSourceRef.current = {
+      key: continuationSource,
+      epoch: continuationSourceRef.current.epoch + 1,
+    };
+  const continuationEpoch = continuationSourceRef.current.epoch;
 
   const selectedContextSources = useMemo(
     () =>
@@ -360,8 +469,12 @@ export function AiAssistantPage() {
   });
 
   useEffect(() => {
+    if (chat.streamOwner?.startsWith("side:")) return;
+    // Returning from a workspace result must keep the explicitly selected
+    // conversation, even if another session is still generating/recovering.
+    if (useAiChatStore.getState().activeSessionId) return;
     if (chat.streaming?.sessionId) setActiveSessionId(chat.streaming.sessionId);
-  }, [chat.streaming?.sessionId]);
+  }, [chat.streaming?.sessionId, chat.streamOwner]);
 
   useEffect(() => {
     if (activeSessionId)
@@ -371,10 +484,11 @@ export function AiAssistantPage() {
   // The session list lives in the shell rail, so this pane adopts the last
   // used session and clears per-session task drafts whenever it changes.
   useEffect(() => {
-    if (activeSessionId) return;
+    if (activeSessionId || searchParams.has("session")) return;
+    if (useAiChatStore.getState().streamOwner?.startsWith("side:")) return;
     const lastSessionId = useAiChatStore.getState().lastSessionId;
     if (lastSessionId) setActiveSessionId(lastSessionId);
-  }, [activeSessionId, setActiveSessionId]);
+  }, [activeSessionId, setActiveSessionId, searchParams]);
 
   useEffect(() => {
     setPendingCard(null);
@@ -382,6 +496,8 @@ export function AiAssistantPage() {
   }, [activeSessionId]);
 
   useEffect(() => {
+    if (useAiChatStore.getState().streamOwner?.startsWith("side:")) return;
+    if (useAiChatStore.getState().activeSessionId) return;
     if (!activeSessionId && sessions.data && sessions.data.length > 0) {
       setActiveSessionId(sessions.data[0].id);
     }
@@ -406,6 +522,16 @@ export function AiAssistantPage() {
     chat.streaming?.sessionId,
     chat.streaming?.text,
   ]);
+
+  useEffect(() => {
+    if (
+      continuation?.kind === "plan" &&
+      continuation.sessionId === activeSessionId
+    ) {
+      scrollRef.current?.scrollTo?.({ top: 0 });
+      autoScrolledSessionRef.current = activeSessionId;
+    }
+  }, [continuation, activeSessionId]);
 
   const streamedText = chat.streaming?.text ?? "";
   const activeSession = sessions.data?.find(
@@ -518,20 +644,145 @@ export function AiAssistantPage() {
     });
   }
 
+  function prepareContinuation(
+    prompt: string,
+    scopes: AiWorkspaceScope[],
+    generationId?: string,
+    recheckProposalId?: string,
+  ) {
+    if (!activeProvider || chat.isStreaming) return;
+    if (
+      generationId &&
+      (!activeSessionId || !isCanonicalWorkspaceId(generationId))
+    )
+      return;
+    setWorkspaceApproval(null);
+    clearSelectedContext();
+    setContextPanelOpen(false);
+    receiptAttachmentId.current = generationId
+      ? crypto.randomUUID()
+      : undefined;
+    setActionReceiptGenerationId(generationId);
+    setActionRecheckProposalId(recheckProposalId);
+    receiptPreparedAt.current =
+      useAiChatStore.getState().acceptedCommand?.sequence ?? 0;
+    setInput((current) =>
+      current.endsWith(prompt)
+        ? current
+        : current.trim()
+          ? `${current}\n\n${prompt}`
+          : prompt,
+    );
+    setRecommendedWorkspaceScopes(scopes);
+    setWorkspaceAccessRequest((request) => request + 1);
+    setContinuation(null);
+  }
+  const prepareContinuationRef = useRef(prepareContinuation);
+  prepareContinuationRef.current = prepareContinuation;
+  const continuePlan = useMemo(
+    () =>
+      !activeProvider || chat.isStreaming
+        ? undefined
+        : (prompt: string, scopes: AiWorkspaceScope[]) => {
+            if (continuationSourceRef.current.epoch !== continuationEpoch)
+              return;
+            prepareContinuationRef.current(prompt, scopes);
+          },
+    [continuationEpoch, !!activeProvider, chat.isStreaming],
+  );
+  const continueActions = useMemo(
+    () =>
+      !activeProvider || chat.isStreaming
+        ? undefined
+        : (request: AiActionContinuation) => {
+            if (
+              continuationSourceRef.current.epoch !== continuationEpoch ||
+              (request.sourceSessionId &&
+                request.sourceSessionId !== activeSessionId) ||
+              (request.recheckProposalId &&
+                !isCanonicalWorkspaceId(request.recheckProposalId))
+            )
+              return;
+            prepareContinuationRef.current(
+              request.prompt,
+              request.scopes,
+              request.generationId,
+              request.recheckProposalId,
+            );
+          },
+    [continuationEpoch, activeSessionId, !!activeProvider, chat.isStreaming],
+  );
+
   async function sendMessage() {
+    if (isContinuationActive(automaticContinuation.data)) {
+      setAutomaticSendBlocked(true);
+      return;
+    }
     const message = input.trim();
     const draftRevision = useAiChatStore.getState().inputRevision;
     if (
       !activeProvider ||
       !message ||
       chat.isStreaming ||
+      (actionRecheckProposalId && !workspaceGrant) ||
       (contextSelectionCount > 0 && !confirmedContextIsCurrent)
     )
       return;
+    const attachmentIdForRequest = receiptAttachmentId.current;
+    if (filePreparing.current) return;
+    const fileIdentity = fileSendIdentity.current;
+    const fileSelection = useAiProjectFiles.getState().selection;
+    const fileApproval = useAiProjectFiles.getState().approval;
+    let projectFiles: import("../api/ai").AiProjectFileContext | undefined;
+    filePreparing.current = true;
+    setFileSendError(null);
+    try {
+      if (
+        fileSelection ||
+        useAiProjectFiles.getState().loading ||
+        useAiProjectFiles.getState().error
+      ) {
+        projectFiles = await useAiProjectFiles
+          .getState()
+          .prepare(activeSessionId, activeProvider);
+      }
+      if (
+        fileIdentity !== fileSendIdentity.current ||
+        useAiChatStore.getState().inputRevision !== draftRevision
+      ) {
+        throw new Error("对话、模型或消息已变化，请重新核对后发送");
+      }
+      if (
+        projectFiles &&
+        (useAiProjectFiles.getState().selection !== fileSelection ||
+          useAiProjectFiles.getState().approval !== fileApproval)
+      ) {
+        throw new Error("文件选择或授权已变化，请重新确认后发送");
+      }
+      if (projectFiles && useAiChatStore.getState().streaming) {
+        throw new Error("已有生成正在运行，请等待结束后再发送文件");
+      }
+      // Consume on the attempt, including uncertain acceptance. Retain only
+      // the local baseline for this one ephemeral review, never a new grant.
+      if (projectFiles)
+        useAiProjectFiles.getState().consumeForReview(activeProvider);
+    } catch (error) {
+      setFileSendError(error instanceof Error ? error.message : String(error));
+      return;
+    } finally {
+      filePreparing.current = false;
+    }
     const outcome = await chat.send({
       providerId: activeProvider.id,
       sessionId: activeSessionId || undefined,
       message,
+      ...(projectFiles ? { projectFiles } : {}),
+      workspace: workspaceGrant,
+      ...(actionReceiptGenerationId ? { actionReceiptGenerationId } : {}),
+      ...(actionReceiptGenerationId && attachmentIdForRequest
+        ? { actionReceiptAttachmentId: attachmentIdForRequest }
+        : {}),
+      ...(actionRecheckProposalId ? { actionRecheckProposalId } : {}),
       context:
         confirmedContext && confirmedContextIsCurrent
           ? {
@@ -551,6 +802,20 @@ export function AiAssistantPage() {
             }
           : undefined,
     });
+    const sameAttachment =
+      receiptAttachmentId.current === attachmentIdForRequest;
+    if (
+      sameAttachment &&
+      (outcome.accepted ||
+        outcome.errorCode === "AI_WORKSPACE_PROVIDER_CHANGED")
+    ) {
+      setWorkspaceApproval(null);
+    }
+    if (outcome.accepted && sameAttachment) {
+      receiptAttachmentId.current = undefined;
+      setActionReceiptGenerationId(undefined);
+      setActionRecheckProposalId(undefined);
+    }
     // Preserve a rejected/uncertain draft. Accepted messages are in the server
     // history and must not be silently resent. Never overwrite newer typing.
     if (
@@ -558,7 +823,11 @@ export function AiAssistantPage() {
       useAiChatStore.getState().inputRevision === draftRevision
     )
       setInput((current) => (current.trim() === message ? "" : current));
-    if (outcome.sessionId && outcome.sessionId !== activeSessionId) {
+    if (
+      outcome.sessionId &&
+      outcome.sessionId !== activeSessionId &&
+      useAiChatStore.getState().activeSessionId === activeSessionId
+    ) {
       setActiveSessionId(outcome.sessionId);
     }
     if (
@@ -665,7 +934,7 @@ export function AiAssistantPage() {
               </button>
               <ModeSwitch />
             </div>
-            <div className="min-w-0">
+            <div className="ai-chat-heading">
               <div className="ai-chat-header-title">
                 {activeSession?.title ?? "新会话"}
               </div>
@@ -686,7 +955,7 @@ export function AiAssistantPage() {
                 aria-controls="agent-sidebar"
                 aria-expanded={false}
                 aria-label="显示会话侧边栏"
-                className="icon-button ai-sidebar-toggle"
+                className="icon-button ai-sidebar-toggle ai-left-sidebar-toggle"
                 onClick={toggleAgentRailCollapsed}
                 title="显示会话侧边栏"
                 type="button"
@@ -694,29 +963,55 @@ export function AiAssistantPage() {
                 <PanelLeftOpen aria-hidden="true" size={16} />
               </button>
             ) : null}
-            <button
-              aria-controls="right-overview"
-              aria-expanded={!rightOverviewCollapsed}
-              aria-label={
-                rightOverviewCollapsed ? "打开右侧工作栏" : "关闭右侧工作栏"
-              }
-              className="icon-button ai-sidebar-toggle"
-              onClick={toggleRightOverviewCollapsed}
-              title={
-                rightOverviewCollapsed ? "打开右侧工作栏" : "关闭右侧工作栏"
-              }
-              type="button"
-            >
-              {rightOverviewCollapsed ? (
+            {rightOverviewCollapsed ? (
+              <button
+                aria-controls="right-overview"
+                aria-expanded={false}
+                aria-label="打开右侧工作栏"
+                className="icon-button ai-sidebar-toggle"
+                onClick={toggleRightOverviewCollapsed}
+                title="打开右侧工作栏"
+                type="button"
+              >
                 <PanelRightOpen aria-hidden="true" size={16} />
-              ) : (
-                <PanelRightClose aria-hidden="true" size={16} />
-              )}
-            </button>
+              </button>
+            ) : null}
           </header>
 
           <div className="ai-chat-messages" ref={scrollRef}>
             <div className="ai-chat-messages-inner">
+              <AiWorkPlan
+                key={activeSessionId}
+                sessionId={activeSessionId ?? ""}
+                focusRequest={
+                  continuation?.kind === "plan" &&
+                  continuation.sessionId === activeSessionId
+                    ? continuation.request
+                    : 0
+                }
+                onContinue={continuePlan}
+                onContinueActions={continueActions}
+                live={
+                  chat.isStreaming &&
+                  chat.streaming?.sessionId === activeSessionId
+                }
+              />
+              <AiContinuationSendNotice lease={automaticContinuation.data} />
+              {automaticSendBlocked ? (
+                <p role="alert">
+                  该会话正在自动续办，请先停止自动续办后再发送。草稿和单次权限仍保留，不会自动发送。
+                </p>
+              ) : null}
+              <AiWorkspaceRecordNavigation sessionId={activeSessionId} />
+              {continuation?.kind === "approval" &&
+              continuation.sessionId === activeSessionId ? (
+                <AiApprovalContinuation
+                  key={continuation.request}
+                  target={continuation}
+                  onContinue={continueActions}
+                  onClose={() => setContinuation(null)}
+                />
+              ) : null}
               {activeSessionId && messages.isPending ? (
                 <LoadingState label="正在读取消息…" />
               ) : activeSessionId && messages.isError ? (
@@ -780,10 +1075,16 @@ export function AiAssistantPage() {
                       citations={message.citations ?? []}
                       generationId={message.generation_id ?? null}
                       createdAt={message.created_at}
+                      origin={message.origin}
                       key={message.id}
                       messageId={message.id}
                       sessionId={message.session_id}
                       onOpenTaskCard={() => openTaskCard(message)}
+                      onContinueActions={
+                        message.session_id === activeSessionId
+                          ? continueActions
+                          : undefined
+                      }
                       reasoning={message.reasoning}
                       role={message.role}
                       status={message.status}
@@ -791,6 +1092,12 @@ export function AiAssistantPage() {
                   ))}
                 </>
               )}
+              <AiAutomaticReply
+                sessionId={activeSessionId}
+                knownGenerationIds={loadedMessages
+                  .filter((m) => m.role === "assistant")
+                  .map((m) => m.generation_id ?? "")}
+              />
               {visibleRetainedTurns.length > 0 ? (
                 <p role="status">
                   以下回复仅在当前窗口内存中保留，刷新后可能丢失（最多 20
@@ -819,11 +1126,18 @@ export function AiAssistantPage() {
                     contextProvider={null}
                     contextSources={[]}
                     contextKnowledge={[]}
-                    citationStatus="not_requested"
-                    citations={[]}
+                    citationStatus={
+                      turn.citationEvidence?.status ??
+                      (turn.status === "completed" ||
+                      turn.status === "incomplete"
+                        ? null
+                        : "not_requested")
+                    }
+                    citations={turn.citationEvidence?.items ?? []}
                     generationId={null}
                     onOpenTaskCard={() => {}}
                   />
+                  <AiRunProgress steps={turn.progress} />
                 </div>
               ))}
               {chat.interrupted?.sessionId === activeSessionId &&
@@ -835,6 +1149,7 @@ export function AiAssistantPage() {
                   message.generation_id === chat.interrupted?.generationId,
               ) ? (
                 <div className="ai-msg-text" data-status="failed">
+                  <AiRunProgress steps={chat.interrupted.progress} />
                   {chat.interrupted.reasoning ? (
                     <AiThinkingProcess
                       reasoning={chat.interrupted.reasoning}
@@ -843,6 +1158,7 @@ export function AiAssistantPage() {
                   ) : null}
                   {renderAiRichText(
                     displayAiReply(chat.interrupted.text, true),
+                    chat.interrupted.sessionId,
                   )}
                   <p>（连接已中断，内容不完整；可重新读取会话历史）</p>
                 </div>
@@ -894,6 +1210,10 @@ export function AiAssistantPage() {
                   ) : null}
                   <div className="ai-msg">
                     <div className="ai-msg-body">
+                      <AiRunProgress
+                        steps={chat.streaming?.progress}
+                        live={!chat.streamError}
+                      />
                       {(chat.streaming?.reasoning ?? "").length > 0 ? (
                         <AiThinkingProcess
                           live={streamedText === ""}
@@ -907,8 +1227,10 @@ export function AiAssistantPage() {
                                 stripAiSelfCheckBlock(streamedText),
                                 true,
                               ),
+                              chat.streaming?.sessionId,
                             )
-                          : (chat.streaming?.reasoning ?? "").length > 0
+                          : (chat.streaming?.reasoning ?? "").length > 0 ||
+                              chat.streaming?.progress?.length
                             ? ""
                             : "正在思考…"}
                       </div>
@@ -1244,8 +1566,103 @@ export function AiAssistantPage() {
 
           <div className="ai-composer">
             <div className="ai-composer-inner">
+              <AiAccessRequestPrompt
+                sessionId={activeSessionId}
+                messages={loadedMessages}
+                liveRequest={liveAccessRequest}
+                continuation={automaticContinuation.data}
+                streamingGenerationId={
+                  chat.streaming?.sessionId === activeSessionId
+                    ? chat.streaming.generationId
+                    : undefined
+                }
+                disabled={!activeProvider || chat.isStreaming}
+                onPrepare={(scopes) => {
+                  if (!activeProvider || chat.isStreaming) return;
+                  prepareContinuation(accessRequestContinuationPrompt, scopes);
+                }}
+                onDismissLive={(generationId) =>
+                  dismissAccessRequest(activeSessionId, generationId)
+                }
+              />
+              <AiProjectFileReview
+                sessionId={activeSessionId}
+                provider={activeProvider}
+              />
+              <AiProjectFileContext
+                sessionId={activeSessionId}
+                provider={activeProvider}
+                disabled={chat.isStreaming}
+              />
+              {fileSendError && (
+                <p className="ws-error" role="alert">
+                  {fileSendError}
+                </p>
+              )}
+              <AiWorkbenchHandoffCard
+                disabled={!activeProvider || chat.isStreaming}
+                onPrepare={(handoff) => {
+                  const detail = workbenchHandoffDetails(
+                    handoff.type,
+                    handoff.id,
+                  );
+                  if (!detail || !activeProvider || chat.isStreaming) return;
+                  // A new workbench intent never carries earlier grants or
+                  // unrelated context into the next message.
+                  setWorkspaceApproval(null);
+                  setActionReceiptGenerationId(undefined);
+                  setActionRecheckProposalId(undefined);
+                  clearSelectedContext();
+                  setContextPanelOpen(false);
+                  setInput((current) =>
+                    current.endsWith(detail.prompt)
+                      ? current
+                      : current.trim()
+                        ? `${current}\n\n${detail.prompt}`
+                        : detail.prompt,
+                  );
+                  setRecommendedWorkspaceScopes(detail.scopes);
+                  setWorkspaceAccessRequest((request) => request + 1);
+                }}
+              />
+              <AiIssueHandoffCard
+                disabled={!activeProvider || chat.isStreaming}
+                onPrepare={(handoff) => {
+                  if (!activeProvider || chat.isStreaming) return;
+                  // A new queue intent never carries earlier grants or
+                  // unrelated context into the next message.
+                  setWorkspaceApproval(null);
+                  setActionReceiptGenerationId(undefined);
+                  setActionRecheckProposalId(undefined);
+                  clearSelectedContext();
+                  setContextPanelOpen(false);
+                  setInput((current) =>
+                    current.endsWith(handoff.prompt)
+                      ? current
+                      : current.trim()
+                        ? `${current}\n\n${handoff.prompt}`
+                        : handoff.prompt,
+                  );
+                  if (handoff.scopes.length > 0) {
+                    setRecommendedWorkspaceScopes(handoff.scopes);
+                    setWorkspaceAccessRequest((request) => request + 1);
+                  }
+                }}
+              />
+              {actionReceiptGenerationId ? (
+                <AiActionReceiptAttachment
+                  disabled={chat.isStreaming}
+                  recheckProposalId={actionRecheckProposalId}
+                  onRemove={() => {
+                    receiptAttachmentId.current = undefined;
+                    setActionReceiptGenerationId(undefined);
+                    setActionRecheckProposalId(undefined);
+                  }}
+                />
+              ) : null}
               <div className="ai-composer-box">
                 <textarea
+                  aria-label="消息输入框"
                   className="ai-composer-textarea"
                   disabled={!activeProvider || chat.isStreaming}
                   onChange={(event) => setInput(event.target.value)}
@@ -1261,15 +1678,36 @@ export function AiAssistantPage() {
                     }
                   }}
                   placeholder={
-                    activeProvider
-                      ? "向 AI 助手提问… Enter 发送，Shift+Enter 换行"
-                      : "配置 AI 供应商后可用"
+                    activeProvider ? "向 AI 助手提问…" : "配置 AI 供应商后可用"
                   }
                   rows={3}
+                  title="Enter 发送，Shift+Enter 换行"
                   value={input}
                 />
                 <div className="ai-composer-tool-row">
                   <div className="ai-composer-tools-left">
+                    {activeProvider ? (
+                      <AiWorkspaceAccess
+                        key={`${activeProvider.id}:${activeProvider.version}:${activeSessionId}`}
+                        provider={activeProvider}
+                        openRequest={workspaceAccessRequest}
+                        recommendedScopes={recommendedWorkspaceScopes}
+                        persist={activeSession?.persist ?? true}
+                        value={workspaceGrant}
+                        disabled={chat.isStreaming}
+                        onChange={(grant) =>
+                          setWorkspaceApproval(
+                            grant
+                              ? {
+                                  providerId: activeProvider.id,
+                                  sessionId: activeSessionId,
+                                  grant,
+                                }
+                              : null,
+                          )
+                        }
+                      />
+                    ) : null}
                     <button
                       aria-pressed={contextPanelOpen}
                       className="ai-context-toggle"
@@ -1281,7 +1719,7 @@ export function AiAssistantPage() {
                       {confirmedContextIsCurrent ? (
                         <CheckCircle2 size={13} />
                       ) : (
-                        <Database size={13} />
+                        <Plus size={16} />
                       )}
                       {confirmedContextIsCurrent ? "上下文已确认" : "上下文"}
                       {contextSelectionCount > 0 ? (
@@ -1324,24 +1762,18 @@ export function AiAssistantPage() {
                       disabled={
                         !activeProvider ||
                         !input.trim() ||
+                        (!!actionRecheckProposalId && !workspaceGrant) ||
                         (contextSelectionCount > 0 &&
                           !confirmedContextIsCurrent)
                       }
                       onClick={() => void sendMessage()}
                       type="button"
                     >
-                      <Send size={15} />
+                      <ArrowUp size={19} />
                     </button>
                   )}
                 </div>
-              </div>
-              <div className="ai-composer-hint">
-                AI 生成内容仅供参考 · 回答只读，创建任务需你确认 ·
-                {activeProvider?.kind === "local"
-                  ? "模型请求仅发送到本机回环端点"
-                  : activeProvider
-                    ? "当前对话上下文会发送给所选远程供应商"
-                    : "尚未选择供应商，不会发送对话"}
+                <AiWorkspaceGrantSummary value={workspaceGrant} />
               </div>
             </div>
           </div>
@@ -1401,6 +1833,8 @@ const aiBusinessContextFieldLabels: Record<string, string> = {
   status: "状态",
   priority: "优先级",
   completion_criteria: "完成条件",
+  review_policy: "验收方式",
+  review_policy_change_allowed: "当前允许切换验收方式",
   planned_date: "计划日期",
   due_date: "截止日期",
   start_date: "开始日期",
@@ -1413,8 +1847,12 @@ const aiBusinessContextFieldLabels: Record<string, string> = {
   task_waiting_review: "待验收任务",
 };
 
-function displayAIContextValue(value: unknown): string {
+function displayAIContextValue(value: unknown, field?: string): string {
   if (value === null || value === undefined || value === "") return "未设置";
+  if (field === "review_policy") {
+    if (value === "manual") return "人工验收";
+    if (value === "none") return "无需人工验收";
+  }
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
   }
@@ -1498,7 +1936,7 @@ function AiBusinessContextPreviewContent({
                       ? "（已截断）"
                       : ""}
                   </dt>
-                  <dd>{displayAIContextValue(value)}</dd>
+                  <dd>{displayAIContextValue(value, field)}</dd>
                 </div>
               ))}
             </dl>
@@ -1568,57 +2006,10 @@ function AiThinkingProcess({
   );
 }
 
-function AiCitationEvidence({
-  status,
-  citations,
-}: {
-  status: AiCitationStatus;
-  citations: AiCitation[];
-}) {
-  if (status === "not_requested") return null;
-  if (status !== "validated") {
-    const message =
-      status === "no_evidence"
-        ? "模型标记为没有足够的已选资料证据。"
-        : status === "missing"
-          ? "这条回答没有提供结构化引用，请谨慎核对。"
-          : "模型给出的引用不在已确认片段内，已被 Sidecar 拒绝。";
-    return (
-      <div className={`ai-citation-status is-${status}`} role="status">
-        <AlertCircle size={13} />
-        {message}
-      </div>
-    );
-  }
-  return (
-    <section className="ai-citation-evidence" aria-label="已验证知识来源">
-      <header>
-        <CheckCircle2 size={13} />
-        <strong>已验证来源</strong>
-        <span>{citations.length}</span>
-      </header>
-      <div>
-        {citations.map((citation) => (
-          <article key={citation.chunk_id}>
-            <FileText size={13} />
-            <span>
-              <strong>{citation.source_name}</strong>
-              <small>
-                第 {citation.start_line}–{citation.end_line} 行 · 文档 v
-                {citation.document_version} · chunk {citation.chunk_index + 1}
-              </small>
-            </span>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 const aiRunStepKindLabels: Record<string, string> = {
   generation: "本次生成",
   model_turn: "模型轮次",
-  tool_call: "记忆工具",
+  tool_call: "工具调用",
   self_check: "回答自检",
   citation_validation: "引用校验",
   persistence: "本地保存",
@@ -1896,7 +2287,9 @@ function AiRunTimeline({ generationId }: { generationId: string }) {
                       <strong>
                         {aiRunStepKindLabels[step.kind] ?? step.kind}
                         {step.turnIndex ? ` ${step.turnIndex}` : ""}
-                        {step.toolName ? ` · ${step.toolName}` : ""}
+                        {step.toolName
+                          ? ` · ${aiToolLabel(step.toolName) ?? step.toolName}`
+                          : ""}
                       </strong>
                       <small>
                         {step.status === "succeeded"
@@ -1929,6 +2322,7 @@ function AiRunTimeline({ generationId }: { generationId: string }) {
 }
 
 function AiMessageBlock({
+  origin,
   role,
   messageId,
   sessionId,
@@ -1945,8 +2339,10 @@ function AiMessageBlock({
   attachedTaskId,
   attachedTaskTitle,
   onOpenTaskCard,
+  onContinueActions,
   readOnly = false,
 }: {
+  origin?: AiMessage["origin"];
   role: AiMessage["role"];
   messageId: string;
   sessionId: string;
@@ -1954,7 +2350,7 @@ function AiMessageBlock({
   contextProvider: AiMessage["context_provider"];
   contextSources: AiBusinessContextSource[];
   contextKnowledge: AiKnowledgeContextSource[];
-  citationStatus: AiCitationStatus;
+  citationStatus: AiCitationStatus | null;
   citations: AiCitation[];
   generationId: string | null;
   reasoning: string | null;
@@ -1963,13 +2359,21 @@ function AiMessageBlock({
   attachedTaskId: string | null;
   attachedTaskTitle: string | null;
   onOpenTaskCard: () => void;
+  onContinueActions?: (request: AiActionContinuation) => void;
   readOnly?: boolean;
 }) {
   const navigate = useNavigate();
+  const actions = useAiWorkspaceActions(
+    role === "assistant" && !readOnly ? generationId : null,
+  );
+  const hasActions = !!actions.data?.length;
+  const allowLegacyTask =
+    !generationId || readOnly || (actions.isSuccess && !hasActions);
   if (role === "user") {
     return (
       <div className="ai-msg-user">
         <div className="ai-user-message-stack">
+          <AiAutomaticOrigin origin={origin} />
           <div className="ai-bubble-user">{content}</div>
           {contextSources.length > 0 || contextKnowledge.length > 0 ? (
             <AiBusinessContextChips
@@ -1985,20 +2389,23 @@ function AiMessageBlock({
   const suggestion = parseAiTaskSuggestion(content);
   const display = attachedTaskId
     ? `已创建任务「${attachedTaskTitle ?? suggestion?.title ?? "新任务"}」，可以从下方打开查看。`
-    : suggestion
-      ? status === "completed"
-        ? readOnly
-          ? `已整理任务建议「${suggestion.title}」，尚未创建。此回复仅供查看，请另行确认后创建。`
-          : `已整理任务建议「${suggestion.title}」，尚未创建。请确认下面的信息后创建。`
-        : "回复尚未完成，任务未创建。"
-      : parseAiMemorySuggestion(content)
-        ? readOnly
-          ? "我整理了一条记忆建议，尚未保存。此回复仅供查看，请另行确认后添加永久记忆。"
-          : "我整理了一条记忆建议，保存状态见下方。"
-        : displayAiReply(content);
+    : suggestion && hasActions
+      ? "工作台操作建议及实际执行状态见下方。"
+      : suggestion
+        ? status === "completed"
+          ? readOnly
+            ? `已整理任务建议「${suggestion.title}」，尚未创建。此回复仅供查看，请另行确认后创建。`
+            : `已整理任务建议「${suggestion.title}」，尚未创建。请确认下面的信息后创建。`
+          : "回复尚未完成，任务未创建。"
+        : parseAiMemorySuggestion(content)
+          ? readOnly
+            ? "我整理了一条记忆建议，尚未保存。此回复仅供查看，请另行确认后添加永久记忆。"
+            : "我整理了一条记忆建议，保存状态见下方。"
+          : displayAiReply(content);
   return (
     <div className="ai-msg">
       <div className="ai-msg-body">
+        <AiAutomaticOrigin origin={origin} />
         {reasoning ? (
           <AiThinkingProcess reasoning={reasoning} live={false} />
         ) : null}
@@ -2008,7 +2415,7 @@ function AiMessageBlock({
           ) : null}
           {status === "cancelled" && display === ""
             ? "（已停止生成）"
-            : renderAiRichText(display)}
+            : renderAiRichText(display, sessionId)}
           {status === "cancelled" && display !== ""
             ? "（已停止生成，内容不完整）"
             : null}
@@ -2017,15 +2424,30 @@ function AiMessageBlock({
             ? "（生成已结束，但完整回复未保存；这里只保留收到的片段）"
             : null}
         </div>
-        <AiCitationEvidence citations={citations} status={citationStatus} />
+        <AiCitationEvidence
+          citations={citations}
+          status={citationStatus}
+          sessionId={sessionId}
+          incomplete={status === "incomplete"}
+        />
         {generationId ? <AiRunTimeline generationId={generationId} /> : null}
+        {generationId && !readOnly ? (
+          <AiWorkspaceActions
+            generationId={generationId}
+            sessionId={sessionId}
+            onContinue={onContinueActions}
+          />
+        ) : null}
         {attachedTaskId ? (
           <AiTaskCreatedCard
             onOpen={() => navigate(`/tasks/${attachedTaskId}`)}
             taskId={attachedTaskId}
             fallbackTitle={content}
           />
-        ) : suggestion && status === "completed" && !readOnly ? (
+        ) : allowLegacyTask &&
+          suggestion &&
+          status === "completed" &&
+          !readOnly ? (
           <button
             className="ai-action-chip"
             onClick={onOpenTaskCard}
@@ -2041,6 +2463,9 @@ function AiMessageBlock({
             messageId={messageId}
             sessionId={sessionId}
           />
+        ) : null}
+        {status === "completed" && display ? (
+          <AiCopyButton text={display} />
         ) : null}
       </div>
     </div>

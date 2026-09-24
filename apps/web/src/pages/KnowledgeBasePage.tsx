@@ -15,12 +15,14 @@ import {
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type ReactNode,
 } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ApiError,
   cancelKnowledgeIndexJob,
@@ -34,7 +36,12 @@ import {
 } from "../api/client";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { Modal } from "../components/Modal";
+import { KnowledgeCitationLocation } from "../components/KnowledgeCitationLocation";
 import { PageHeader } from "../components/PageHeader";
+import {
+  knowledgeIndexLocationKeys,
+  parseKnowledgeIndexLocation,
+} from "../lib/knowledgeIndexLocation";
 import type {
   KnowledgeHighlight,
   KnowledgeSearchResult,
@@ -134,6 +141,7 @@ function SourceCard({
   source,
   selected,
   busy,
+  located,
   onToggle,
   onReindex,
   onCancel,
@@ -143,6 +151,7 @@ function SourceCard({
   source: KnowledgeSource;
   selected: boolean;
   busy: boolean;
+  located: boolean;
   onToggle: () => void;
   onReindex: () => void;
   onCancel: () => void;
@@ -161,7 +170,9 @@ function SourceCard({
       : null;
   return (
     <article
-      className={`knowledge-source-card${selected ? " is-selected" : ""}`}
+      className={`knowledge-source-card${selected ? " is-selected" : ""}${located ? " is-located" : ""}`}
+      id={`knowledge-source-${source.id}`}
+      tabIndex={-1}
     >
       <button
         aria-label={`${selected ? "取消筛选" : "筛选"}来源 ${source.name}`}
@@ -269,6 +280,7 @@ function SearchResultCard({ result }: { result: KnowledgeSearchResult }) {
 
 export function KnowledgeBasePage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [selectedSourceIDs, setSelectedSourceIDs] = useState<string[]>([]);
@@ -277,6 +289,18 @@ export function KnowledgeBasePage() {
   const [pendingDelete, setPendingDelete] = useState<KnowledgeSource | null>(
     null,
   );
+  const requestedIndexLocation = knowledgeIndexLocationKeys.some((key) =>
+    searchParams.has(key),
+  );
+  const indexLocation = parseKnowledgeIndexLocation(searchParams);
+
+  const invalidateAgentInbox = () =>
+    queryClient.invalidateQueries({ queryKey: ["ai", "agent-inbox"] });
+  const clearIndexLocation = () => {
+    const next = new URLSearchParams(searchParams);
+    for (const key of knowledgeIndexLocationKeys) next.delete(key);
+    setSearchParams(next, { replace: true });
+  };
 
   const sourcesQuery = useQuery({
     queryKey: ["knowledge", "sources"],
@@ -295,9 +319,10 @@ export function KnowledgeBasePage() {
       setNotice(
         `已将 ${result.source.name} 加入本地索引队列；完成前不会出现在检索结果中。`,
       );
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge", "sources"],
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["knowledge", "sources"] }),
+        invalidateAgentInbox(),
+      ]);
     },
     onError: (error) => {
       setNotice(null);
@@ -312,9 +337,10 @@ export function KnowledgeBasePage() {
       setNotice(
         `已开始重建 ${result.source.name}；旧文档在新索引原子发布前保持可解释。`,
       );
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge", "sources"],
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["knowledge", "sources"] }),
+        invalidateAgentInbox(),
+      ]);
     },
     onError: (error) => {
       setNotice(null);
@@ -331,9 +357,11 @@ export function KnowledgeBasePage() {
       );
       setNotice(`已删除 ${source.name} 的受控副本、派生文本和全部索引。`);
       setOperationError(null);
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge", "sources"],
-      });
+      if (indexLocation?.source === source.id) clearIndexLocation();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["knowledge", "sources"] }),
+        invalidateAgentInbox(),
+      ]);
     },
     onError: (error) => setOperationError(errorMessage(error)),
   });
@@ -369,9 +397,11 @@ export function KnowledgeBasePage() {
     onSuccess: async (result) => {
       setNotice(`已将 ${result.source.name} 的新 attempt 加入本地索引队列。`);
       setOperationError(null);
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge", "sources"],
-      });
+      clearIndexLocation();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["knowledge", "sources"] }),
+        invalidateAgentInbox(),
+      ]);
     },
     onError: async (error) => {
       setNotice(null);
@@ -410,6 +440,28 @@ export function KnowledgeBasePage() {
   });
 
   const sources = sourcesQuery.data?.items ?? [];
+  const locatedSource =
+    requestedIndexLocation && indexLocation
+      ? (sources.find(
+          (source) =>
+            source.id === indexLocation.source &&
+            source.latestJob?.id === indexLocation.job &&
+            source.latestJob.status === "failed",
+        ) ?? null)
+      : null;
+  useEffect(() => {
+    if (!locatedSource) return;
+    setSelectedSourceIDs((current) =>
+      current.length === 1 && current[0] === locatedSource.id
+        ? current
+        : [locatedSource.id],
+    );
+    const element = document.getElementById(
+      `knowledge-source-${locatedSource.id}`,
+    );
+    element?.scrollIntoView?.({ block: "center" });
+    element?.focus();
+  }, [locatedSource]);
   const readySources = sources.filter(
     (source) =>
       source.status === "ready" ||
@@ -518,7 +570,7 @@ export function KnowledgeBasePage() {
           <div>
             <h2>把常用资料变成可定位的本地答案</h2>
             <p>
-              仅处理你明确选择的 TXT 或 Markdown。原文、分段和 FTS
+              仅处理你明确选择的 TXT、Markdown 或 PDF。原文、分段和 FTS
               索引随工作区数据库一致备份，不会自动联网。
             </p>
           </div>
@@ -550,6 +602,39 @@ export function KnowledgeBasePage() {
       ) : null}
       {operationError ? (
         <ErrorState compact message={operationError} title="知识库操作未完成" />
+      ) : null}
+      {requestedIndexLocation && !indexLocation ? (
+        <ErrorState
+          compact
+          message="链接中的来源或索引任务身份无效，请从智能体续办队列重新打开。"
+          title="索引异常位置无效"
+        />
+      ) : null}
+      {requestedIndexLocation &&
+      indexLocation &&
+      !sourcesQuery.isPending &&
+      !locatedSource ? (
+        <ErrorState
+          compact
+          message="这次失败已被重试、来源已删除，或当前最新索引任务已经变化；不会用其他任务替代它。"
+          title="索引异常已不再是当前状态"
+        />
+      ) : null}
+      {locatedSource ? (
+        <div className="knowledge-notice knowledge-notice-location">
+          <ShieldCheck size={15} />
+          <span>
+            已定位 {locatedSource.name} 的第 {locatedSource.latestJob?.attempt}{" "}
+            次索引失败。
+          </span>
+          <button
+            className="button button-quiet"
+            onClick={clearIndexLocation}
+            type="button"
+          >
+            关闭定位
+          </button>
+        </div>
       ) : null}
 
       <div className="knowledge-workspace">
@@ -592,6 +677,7 @@ export function KnowledgeBasePage() {
               <SourceCard
                 busy={activeMutationID === source.id}
                 key={source.id}
+                located={locatedSource?.id === source.id}
                 onCancel={() => {
                   setNotice(null);
                   cancelIndexMutation.mutate(source);
@@ -686,6 +772,7 @@ export function KnowledgeBasePage() {
         </main>
       </div>
 
+      <KnowledgeCitationLocation />
       <Modal
         footer={
           <>

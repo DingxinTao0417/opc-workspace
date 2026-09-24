@@ -7,8 +7,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetRuntimeConnection } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { AgentAdapterSettings } from "./AgentAdapterSettings";
 
 function response(body: unknown, status = 200): Response {
@@ -126,9 +128,11 @@ function renderSettings() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={queryClient}>
-      <AgentAdapterSettings />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <AgentAdapterSettings />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -136,6 +140,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   resetRuntimeConnection();
+  useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
 });
 
 describe("AgentAdapterSettings", () => {
@@ -224,6 +229,26 @@ describe("AgentAdapterSettings", () => {
         .writes()
         .map(([, init]) => new Headers(init?.headers).get("If-Match")),
     ).toEqual(['"5"', '"6"']);
+  });
+
+  it("hands the saved adapter settings to the agent without mutating adapter state", async () => {
+    const api = mockAdapterAPI(adapterPayload({ version: 5 }));
+    renderSettings();
+
+    fireEvent.click(await screen.findByRole("button", { name: "交给智能体" }));
+
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "本地 Agent 设置",
+      route: "/ai?settings=agent",
+      routeLabel: "打开本地 Agent 设置",
+      scopes: [],
+    });
+    expect(pending?.prompt).toContain(
+      "adapter_id=018f0000-0000-5000-8000-000000003401",
+    );
+    expect(pending?.prompt).toContain("不要自动登记、检查、启停");
+    expect(api.writes()).toHaveLength(0);
   });
 
   it.each([

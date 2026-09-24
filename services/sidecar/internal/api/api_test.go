@@ -23,7 +23,7 @@ const testToken = "test-session-token"
 
 func newTestAPI(t *testing.T) *gin.Engine {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

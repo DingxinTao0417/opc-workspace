@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
 
@@ -26,24 +25,7 @@ type aiKnowledgeContextSourceInput struct {
 	ExpectedDocumentVersion int64  `json:"expected_document_version,omitempty"`
 }
 
-type aiKnowledgeContextSource struct {
-	SourceID        string `json:"source_id"`
-	SourceName      string `json:"source_name"`
-	SourceVersion   int64  `json:"source_version"`
-	SourceType      string `json:"source_type"`
-	DocumentID      string `json:"document_id"`
-	DocumentTitle   string `json:"document_title"`
-	DocumentVersion int64  `json:"document_version"`
-	ChunkID         string `json:"chunk_id"`
-	ChunkIndex      int    `json:"chunk_index"`
-	StartChar       int    `json:"start_char"`
-	EndChar         int    `json:"end_char"`
-	StartLine       int    `json:"start_line"`
-	EndLine         int    `json:"end_line"`
-	StartPage       int    `json:"start_page"`
-	EndPage         int    `json:"end_page"`
-	Content         string `json:"content"`
-}
+type aiKnowledgeContextSource = knowledgeChunk
 
 func buildAIMessageContext(
 	ctx context.Context,
@@ -125,22 +107,7 @@ func buildAIKnowledgeContext(ctx context.Context, db *gorm.DB, inputs []aiKnowle
 		}
 		seen[input.ChunkID] = struct{}{}
 
-		var row struct {
-			models.KnowledgeChunk
-			SourceName      string `gorm:"column:source_name"`
-			SourceVersion   int64  `gorm:"column:source_version"`
-			SourceType      string `gorm:"column:source_type"`
-			DocumentTitle   string `gorm:"column:document_title"`
-			DocumentVersion int64  `gorm:"column:document_version"`
-		}
-		err := db.WithContext(ctx).Table("knowledge_chunks AS chunk").Select(`
-			chunk.*, source.name AS source_name, source.version AS source_version,
-			source.source_type AS source_type, document.title AS document_title,
-			document.version AS document_version
-		`).Joins("JOIN knowledge_documents document ON document.id = chunk.document_id AND document.status = 'ready'").
-			Joins("JOIN knowledge_sources source ON source.id = chunk.source_id AND source.status IN ('ready', 'indexing') AND source.deleted_at IS NULL").
-			Where("chunk.id = ? AND chunk.document_id = ? AND chunk.source_id = ?", input.ChunkID, input.DocumentID, input.SourceID).
-			Take(&row).Error
+		row, err := readKnowledgeChunk(ctx, db, input.SourceID, input.DocumentID, input.ChunkID)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, &aiBusinessContextRequestError{
 				status: http.StatusNotFound, code: "AI_KNOWLEDGE_CONTEXT_NOT_FOUND",
@@ -156,14 +123,7 @@ func buildAIKnowledgeContext(ctx context.Context, db *gorm.DB, inputs []aiKnowle
 				message: "Selected knowledge context changed; preview it again before sending",
 			}
 		}
-		result = append(result, aiKnowledgeContextSource{
-			SourceID: row.SourceID, SourceName: row.SourceName, SourceVersion: row.SourceVersion,
-			SourceType: row.SourceType, DocumentID: row.DocumentID, DocumentTitle: row.DocumentTitle,
-			DocumentVersion: row.DocumentVersion, ChunkID: row.ID, ChunkIndex: row.ChunkIndex,
-			StartChar: row.StartChar, EndChar: row.EndChar, StartLine: row.StartLine, EndLine: row.EndLine,
-			StartPage: row.StartPage, EndPage: row.EndPage,
-			Content: row.Content,
-		})
+		result = append(result, row)
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {

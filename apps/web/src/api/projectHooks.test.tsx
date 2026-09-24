@@ -270,7 +270,7 @@ describe("useUpdateProject", () => {
 
 describe("project note conflicts", () => {
   it.each(["update", "delete"] as const)(
-    "leaves the active note list refresh to the %s editor",
+    "refreshes the active note list and exact detail after a %s conflict",
     async (operation) => {
       const conflict = new ApiError("Project note changed", {
         code: "VERSION_CONFLICT",
@@ -313,7 +313,7 @@ describe("project note conflicts", () => {
       });
       expect(invalidate).toHaveBeenCalledWith({
         queryKey: projectNoteQueryKey(completedProject.id),
-        refetchType: "none",
+        refetchType: "active",
       });
     },
   );

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -195,32 +196,45 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		writeError(c, http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must be provided together")
 		return
 	}
-	if !validDate(dateFrom) || !validDate(dateTo) {
-		writeError(c, http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
+	data, err := readFocusPeriodStats(c.Request.Context(), a.db, dateFrom, dateTo, location, projectID)
+	if err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			writeError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
+			return
+		}
+		writeDatabaseError(c)
 		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": data})
+}
+
+// Shared read model for the human statistics API and authorized AI reports.
+// All source facts are loaded in one read transaction. No heartbeat or business write.
+func readFocusPeriodStats(ctx context.Context, db *gorm.DB, dateFrom, dateTo string, location *time.Location, projectID *string) (focusPeriodStatsResponse, error) {
+	if !validDate(dateFrom) || !validDate(dateTo) {
+		return focusPeriodStatsResponse{}, newProjectRequestError(http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
 	}
 	localStart, err := time.ParseInLocation("2006-01-02", dateFrom, location)
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
-		return
+		return focusPeriodStatsResponse{}, newProjectRequestError(http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
 	}
 	localEnd, err := time.ParseInLocation("2006-01-02", dateTo, location)
 	if err != nil {
-		writeError(c, http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
-		return
+		return focusPeriodStatsResponse{}, newProjectRequestError(http.StatusBadRequest, "INVALID_DATE_RANGE", "date_from and date_to must use YYYY-MM-DD")
 	}
 	if localEnd.Before(localStart) {
-		writeError(c, http.StatusBadRequest, "INVALID_DATE_RANGE", "date_to must not be before date_from")
-		return
+		return focusPeriodStatsResponse{}, newProjectRequestError(http.StatusBadRequest, "INVALID_DATE_RANGE", "date_to must not be before date_from")
 	}
 	// Date arithmetic is calendar based so a DST transition still counts as one day.
 	dayCount := 0
-	for day := localStart; !day.After(localEnd); day = day.AddDate(0, 0, 1) {
+	for day := localStart; !day.After(localEnd) && dayCount <= maxFocusStatsDays; day = day.AddDate(0, 0, 1) {
 		dayCount++
 	}
 	if dayCount > maxFocusStatsDays {
-		writeError(c, http.StatusBadRequest, "DATE_RANGE_TOO_LARGE", "focus statistics range cannot exceed 93 days")
-		return
+		return focusPeriodStatsResponse{}, newProjectRequestError(http.StatusBadRequest, "DATE_RANGE_TOO_LARGE", "focus statistics range cannot exceed 93 days")
 	}
 
 	rangeStartUTC := localStart.UTC()
@@ -251,7 +265,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		Color  string `gorm:"column:color"`
 	}
 	var taskTags []taskTagRow
-	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := requireFocusProject(tx, projectID); err != nil {
 			return err
 		}
@@ -281,12 +295,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 			Scan(&taskTags).Error
 	}, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			writeError(c, http.StatusNotFound, "PROJECT_NOT_FOUND", "Project not found")
-			return
-		}
-		writeDatabaseError(c)
-		return
+		return focusPeriodStatsResponse{}, err
 	}
 
 	days := make([]focusPeriodDay, 0, dayCount)
@@ -294,6 +303,9 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	longestStreak := 0
 	runningStreak := 0
 	for day := localStart; !day.After(localEnd); day = day.AddDate(0, 0, 1) {
+		if err := ctx.Err(); err != nil {
+			return focusPeriodStatsResponse{}, err
+		}
 		dayStartUTC := day.UTC()
 		dayEndUTC := day.AddDate(0, 0, 1).UTC()
 		daySessions := make(map[string]struct{})
@@ -301,8 +313,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 		for _, interval := range intervals {
 			overlapSeconds, overlapErr := focusIntervalOverlapSeconds(interval, dayStartUTC, dayEndUTC)
 			if overlapErr != nil {
-				writeDatabaseError(c)
-				return
+				return focusPeriodStatsResponse{}, overlapErr
 			}
 			if overlapSeconds == 0 {
 				continue
@@ -338,8 +349,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	for _, interval := range intervals {
 		overlapSeconds, overlapErr := focusIntervalOverlapSeconds(interval, rangeStartUTC, rangeEndUTC)
 		if overlapErr != nil {
-			writeDatabaseError(c)
-			return
+			return focusPeriodStatsResponse{}, overlapErr
 		}
 		if overlapSeconds == 0 {
 			continue
@@ -406,8 +416,7 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	for _, interval := range intervals {
 		overlapSeconds, overlapErr := focusIntervalOverlapSeconds(interval, rangeStartUTC, rangeEndUTC)
 		if overlapErr != nil {
-			writeDatabaseError(c)
-			return
+			return focusPeriodStatsResponse{}, overlapErr
 		}
 		if overlapSeconds == 0 {
 			continue
@@ -479,13 +488,15 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 	for _, interval := range intervals {
 		overlapStart, overlapEnd, exists, overlapErr := focusIntervalOverlapRange(interval, rangeStartUTC, rangeEndUTC)
 		if overlapErr != nil {
-			writeDatabaseError(c)
-			return
+			return focusPeriodStatsResponse{}, overlapErr
 		}
 		if !exists {
 			continue
 		}
 		for cursor := overlapStart; cursor.Before(overlapEnd); {
+			if err := ctx.Err(); err != nil {
+				return focusPeriodStatsResponse{}, err
+			}
 			next := cursor.Truncate(time.Minute).Add(time.Minute)
 			if next.After(overlapEnd) {
 				next = overlapEnd
@@ -520,12 +531,12 @@ func (a *API) focusPeriodStats(c *gin.Context) {
 			})
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": focusPeriodStatsResponse{
+	return focusPeriodStatsResponse{
 		DateFrom: dateFrom, DateTo: dateTo, Timezone: location.String(),
 		Totals: focusStats{Sessions: len(totalSessions), Seconds: totalSeconds, Minutes: int(totalSeconds / 60)},
 		Days:   days, Projects: projects, Hours: hours, Heatmap: heatmap, Tags: tags,
 		CurrentStreakDays: runningStreak, LongestStreakDays: longestStreak,
-	}})
+	}, nil
 }
 
 func focusProjectFilter(c *gin.Context) (*string, bool) {

@@ -1,0 +1,65 @@
+.agent-project-file-select {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+.agent-project-file-select legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.agent-project-file-select p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.agent-project-file-select article {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.06));
+  overflow-wrap: anywhere;
+}
+.agent-project-file-source {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.agent-project-file-select code {
+  overflow-wrap: anywhere;
+}
+.agent-project-file-candidates {
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.agent-project-file-select .agent-project-file-candidate {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.agent-project-file-candidate input {
+  margin-top: 3px;
+}
+.agent-project-file-select nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.agent-project-file-select > button {
+  justify-self: start;
+}

@@ -17,11 +17,39 @@ vi.mock("../api/hooks", () => ({
   useAgentRunsQuery: () => ({
     data: {
       items: [
-        { id: "run-1", status: "running", taskTitle: "甲" },
-        { id: "run-2", status: "succeeded", taskTitle: "乙" },
-        { id: "run-3", status: "succeeded", taskTitle: "丙" },
+        {
+          id: "run-1",
+          status: "running",
+          outputDeliveryStatus: "not_ready",
+          taskTitle: "甲",
+        },
+        {
+          id: "run-pending",
+          status: "running",
+          outputDeliveryStatus: "pending",
+          taskTitle: "待登记",
+        },
+        {
+          id: "run-2",
+          status: "succeeded",
+          outputDeliveryStatus: "submitted",
+          taskTitle: "乙",
+        },
+        {
+          id: "run-3",
+          status: "succeeded",
+          outputDeliveryStatus: "retained",
+          taskTitle: "丙",
+        },
       ],
-      meta: { page: 1, pageSize: 50, total: 3 },
+      meta: {
+        page: 1,
+        pageSize: 50,
+        total: 4,
+        activeTotal: 87,
+        pendingDeliveryTotal: 3,
+        succeededTotal: 123,
+      },
     },
     isError: false,
     isPending: false,
@@ -71,6 +99,7 @@ beforeEach(() => {
   useUiStore.setState({
     rightOverviewCollapsed: true,
     rightPanelTab: "summary",
+    rightPanelRequestMode: "open",
   });
 });
 
@@ -79,6 +108,7 @@ afterEach(() => {
   useUiStore.setState({
     rightOverviewCollapsed: false,
     rightPanelTab: "summary",
+    rightPanelRequestMode: "open",
   });
 });
 
@@ -86,11 +116,13 @@ describe("RightFloatingCard", () => {
   it("groups environment, agents, background jobs and sources", async () => {
     renderCard();
 
-    for (const title of ["环境信息", "子智能体", "后台进程", "来源"]) {
+    for (const title of ["环境信息", "Agent 执行", "后台进程", "来源"]) {
       expect(screen.getByText(title)).toBeInTheDocument();
     }
     expect(screen.getByText("v0.1.1 · 71")).toBeInTheDocument();
-    expect(screen.getByText("1 运行 · 2 完成")).toBeInTheDocument();
+    expect(
+      screen.getByText("87 运行 · 3 待登记 · 123 完成"),
+    ).toBeInTheDocument();
     expect(await screen.findByText(/专注 · 索引 1/)).toBeInTheDocument();
     expect(await screen.findByText("9 来源")).toBeInTheDocument();
   });

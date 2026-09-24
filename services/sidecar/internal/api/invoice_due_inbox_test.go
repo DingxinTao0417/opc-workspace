@@ -21,7 +21,7 @@ import (
 
 func newInvoiceDueTestAPI(t *testing.T, now *time.Time) (*Router, *API, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "invoice-due.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "invoice-due.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

@@ -21,7 +21,7 @@ import {
   useState,
   type DragEvent,
 } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
@@ -43,6 +43,8 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
 import { TaskList } from "../components/TaskList";
 import { TaskPlanModal } from "../components/TaskPlanModal";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
+import { todayPlanningHandoff } from "../lib/aiIssueHandoff";
 import { useSettledPage } from "../lib/useSettledPage";
 import {
   localDateFromKey,
@@ -196,10 +198,21 @@ function previewTaskDropToGroup(
 export function TodayPage() {
   const setNewTaskOpen = useUiStore((state) => state.setNewTaskOpen);
   const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
-  const { dateKey: todayKey } = useLocalCalendar();
-  const [dateKey, setDateKey] = useState(todayKey);
+  const { dateKey: todayKey, timeZone } = useLocalCalendar();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedDate = searchParams.get("date");
+  const requestedRisk = searchParams.get("risk");
+  const [dateKey, setDateKey] = useState(() =>
+    requestedDate && isValidLocalDateKey(requestedDate)
+      ? requestedDate
+      : todayKey,
+  );
   const previousTodayKey = useRef(todayKey);
-  const [riskFilter, setRiskFilter] = useState<DueRiskFilter | null>(null);
+  const [riskFilter, setRiskFilter] = useState<DueRiskFilter | null>(() =>
+    requestedRisk === "overdue" || requestedRisk === "due_soon"
+      ? requestedRisk
+      : null,
+  );
   const [riskPage, setRiskPage] = useState(1);
   const [planningTask, setPlanningTask] = useState<Task | null>(null);
   const [deletingTask, setDeletingTask] = useState<Task | null>(null);
@@ -238,9 +251,7 @@ export function TodayPage() {
   );
   const [dragPreview, setDragPreview] = useState<TodayTaskGroups | null>(null);
   const focusMinutes = useSettingsStore((state) => state.focusMinutes);
-  const focusCycles = useSettingsStore((state) => state.cycles);
   const focusPhase = useFocusCycleStore((state) => state.phase);
-  const beginFocusWork = useFocusCycleStore((state) => state.beginWork);
 
   const riskTotal = riskTasksQuery.data?.meta.total ?? 0;
   const effectiveRiskPageSize = Math.max(
@@ -289,6 +300,7 @@ export function TodayPage() {
       crossPlanMutation.reset();
       resetOrderMutation.reset();
       setDateKey(nextDateKey);
+      setSearchParams(nextDateKey === todayKey ? {} : { date: nextDateKey });
       return true;
     },
     [
@@ -297,19 +309,42 @@ export function TodayPage() {
       dateNavigationLocked,
       moveMutation.reset,
       resetOrderMutation.reset,
+      setSearchParams,
+      todayKey,
     ],
   );
 
   useEffect(() => {
+    const routeDate =
+      requestedDate && isValidLocalDateKey(requestedDate)
+        ? requestedDate
+        : todayKey;
+    const routeRisk =
+      requestedRisk === "overdue" || requestedRisk === "due_soon"
+        ? requestedRisk
+        : null;
+    if (dateKey !== routeDate) {
+      setDateKey(routeDate);
+      setRiskPage(1);
+      setDragPreview(null);
+      setSharedDraggingTask(null);
+    }
+    if (riskFilter !== routeRisk) {
+      setRiskFilter(routeRisk);
+      setRiskPage(1);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     const previousToday = previousTodayKey.current;
     if (todayKey === previousToday) return;
-    if (dateKey !== previousToday) {
+    if (requestedDate || dateKey !== previousToday) {
       previousTodayKey.current = todayKey;
       return;
     }
     if (dateNavigationLocked) return;
     if (changeDate(todayKey)) previousTodayKey.current = todayKey;
-  }, [changeDate, dateKey, dateNavigationLocked, todayKey]);
+  }, [changeDate, dateKey, dateNavigationLocked, requestedDate, todayKey]);
 
   const reorderReady =
     live && !taskGroupsQuery.isFetching && !orderMutationPending;
@@ -497,15 +532,10 @@ export function TodayPage() {
     createFocusMutation.reset();
     crossPlanMutation.reset();
     if (focusActionDisabled) return;
-    createFocusMutation.mutate(
-      {
-        taskId: task.id,
-        plannedSeconds: focusMinutes * 60,
-      },
-      {
-        onSuccess: () => beginFocusWork(task.id, focusCycles, task.title),
-      },
-    );
+    createFocusMutation.mutate({
+      taskId: task.id,
+      plannedSeconds: focusMinutes * 60,
+    });
   };
   const taskQuickActionProps = {
     focusActionDisabled:
@@ -524,6 +554,11 @@ export function TodayPage() {
     setDragPreview(null);
     setSharedDraggingTask(null);
     setRiskFilter((current) => (current === next ? null : next));
+    const params = new URLSearchParams();
+    if (requestedDate && isValidLocalDateKey(requestedDate))
+      params.set("date", requestedDate);
+    if (riskFilter !== next) params.set("risk", next);
+    setSearchParams(params);
   };
 
   return (
@@ -582,6 +617,15 @@ export function TodayPage() {
           </div>
         </div>
         <div className="page-actions">
+          <AiIssueHandoffButton
+            content={todayPlanningHandoff(dateKey, timeZone, riskFilter)}
+            disabled={
+              dateNavigationLocked ||
+              lifecycleMutation.isPending ||
+              createFocusMutation.isPending
+            }
+            label="梳理今日安排"
+          />
           <button
             aria-label="列表视图"
             className="icon-button icon-button-active"
@@ -705,7 +749,7 @@ export function TodayPage() {
                   aria-label={`查看客户回访：${item.title}`}
                   className="today-followup-card"
                   key={item.id}
-                  to={`/clients/${clientId}`}
+                  to={`/clients/${clientId}?followup=${item.sourceEntityId}`}
                 >
                   <span className="today-followup-copy">
                     <strong>{item.title}</strong>

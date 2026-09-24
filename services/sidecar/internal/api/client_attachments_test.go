@@ -20,7 +20,7 @@ import (
 func newClientAttachmentTestAPI(t *testing.T) (*Router, *database.Store, string) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := database.Open(filepath.Join(root, "workspace.db"))
+	store, err := openAPITestDatabase(filepath.Join(root, "workspace.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

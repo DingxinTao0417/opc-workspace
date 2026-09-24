@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -95,35 +96,16 @@ func (a *API) generateInvoicePDF(c *gin.Context) {
 		return
 	}
 	generatedAt := a.options.Now().UTC()
-	staged, err := store.stage(id, func(destination io.Writer) error {
-		return renderInvoicePDF(destination, invoice, generatedAt)
-	})
+	change, err := stageInvoicePDF(store, invoice, generatedAt)
 	if err != nil {
-		writeInvoicePDFStorageError(c, a, "stage", err)
-		return
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			store.discardStaged(staged)
+		if !writeInvoiceRequestError(c, err) {
+			writeDatabaseError(c)
 		}
-	}()
-	if err := store.commit(staged); err != nil {
-		writeInvoicePDFStorageError(c, a, "commit", err)
 		return
 	}
-	committed = true
-
 	now := generatedAt.Format(time.RFC3339Nano)
-	asset := models.InvoicePDFAsset{
-		ID: staged.assetID, InvoiceID: id, FileName: invoicePDFFilename(invoice.InvoiceNumber, id),
-		RelativePath: staged.relative, MimeType: invoicePDFMimeType,
-		SizeBytes: staged.sizeBytes, SHA256: staged.sha256,
-		GeneratedFromVersion: expectedVersion, GeneratedAt: now,
-		IntegrityStatus: "verified", IntegrityCheckedAt: now,
-	}
+	asset := change.asset
 	response = invoicePDFResponseFromAsset(asset)
-	var movedOld *trashedInvoicePDF
 	replayedAfterRender := false
 	replayedAssetID := ""
 	statusCode := http.StatusCreated
@@ -138,46 +120,13 @@ func (a *API) generateInvoicePDF(c *gin.Context) {
 			statusCode = status
 			return nil
 		}
-		current, err := loadInvoiceRow(tx, id)
-		if err != nil {
-			return err
-		}
-		if current.Version != expectedVersion {
-			return invoiceVersionConflict()
-		}
-		old, exists, err := invoicePDFAssetExists(tx, id)
-		if err != nil {
-			return err
-		}
-		if exists {
-			movedOld, err = store.moveToTrash(old.RelativePath, old.ID)
-			if err != nil {
-				return newInvoiceRequestError(http.StatusInternalServerError, "INVOICE_PDF_STORAGE_ERROR", "The previous invoice PDF could not be replaced safely")
-			}
-			result := tx.Model(&models.InvoicePDFAsset{}).Where("invoice_id = ? AND id = ?", id, old.ID).Updates(map[string]any{
-				"id": asset.ID, "file_name": asset.FileName, "relative_path": asset.RelativePath,
-				"mime_type": asset.MimeType, "size_bytes": asset.SizeBytes, "sha256": asset.SHA256,
-				"generated_from_version": asset.GeneratedFromVersion, "generated_at": asset.GeneratedAt,
-				"integrity_status": asset.IntegrityStatus, "integrity_checked_at": asset.IntegrityCheckedAt,
-			})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return errors.New("invoice PDF asset changed during replacement")
-			}
-		} else if err := tx.Create(&asset).Error; err != nil {
+		if err := replaceInvoicePDFInTransaction(tx, store, change); err != nil {
 			return err
 		}
 		return recordInvoicePDFIdempotency(tx, idempotencyKey, endpoint, asset.ID, requestHash, http.StatusCreated, response, now)
 	})
 	if err != nil {
-		if removeErr := store.remove(staged.relative, staged.assetID); removeErr != nil && a.options.Logger != nil {
-			a.options.Logger.Printf("invoice PDF compensation remove failed invoice_id=%s error=%v", id, removeErr)
-		}
-		if restoreErr := store.restoreTrashed(movedOld); restoreErr != nil && a.options.Logger != nil {
-			a.options.Logger.Printf("invoice PDF compensation restore failed invoice_id=%s error=%v", id, restoreErr)
-		}
+		a.finishInvoicePDFChange(change, err)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			writeError(c, http.StatusNotFound, "INVOICE_NOT_FOUND", "Invoice not found")
 			return
@@ -189,7 +138,7 @@ func (a *API) generateInvoicePDF(c *gin.Context) {
 		return
 	}
 	if replayedAfterRender {
-		_ = store.remove(staged.relative, staged.assetID)
+		a.finishInvoicePDFChange(change, errors.New("discard unused PDF after idempotent replay"))
 		checkedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
 		response, err = validateInvoicePDFReplay(a.db.WithContext(c.Request.Context()), store, id, replayedAssetID, response, checkedAt)
 		if err != nil {
@@ -201,7 +150,7 @@ func (a *API) generateInvoicePDF(c *gin.Context) {
 		}
 		c.Header("Idempotency-Replayed", "true")
 	} else {
-		store.purgeTrashed(movedOld)
+		a.finishInvoicePDFChange(change, nil)
 	}
 	setProjectETag(c, response.GeneratedFromVersion)
 	c.JSON(statusCode, gin.H{"data": response})
@@ -267,12 +216,20 @@ func (a *API) getInvoicePDF(c *gin.Context) {
 }
 
 func (a *API) downloadInvoicePDF(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if a.invoicePDFStore == nil {
 		writeError(c, http.StatusServiceUnavailable, "INVOICE_PDF_STORAGE_UNAVAILABLE", "Invoice PDF storage is unavailable")
 		return
 	}
 	id, ok := invoiceID(c)
 	if !ok {
+		return
+	}
+	query, queryErr := url.ParseQuery(c.Request.URL.RawQuery)
+	guarded := c.Request.URL.RawQuery != ""
+	if queryErr != nil || (guarded && (len(query) != 2 || len(query["asset_id"]) != 1 || len(query["sha256"]) != 1 ||
+		!canonicalInvoicePDFUUID(query.Get("asset_id")) || !validInvoicePDFHash(query.Get("sha256")))) {
+		writeError(c, 422, "INVALID_INVOICE_PDF_LOCATION", "An exact PDF asset ID and checksum pair is required")
 		return
 	}
 	store := a.invoicePDFStore
@@ -285,6 +242,10 @@ func (a *API) downloadInvoicePDF(c *gin.Context) {
 	asset, err := loadInvoicePDFAsset(a.db.WithContext(c.Request.Context()), id)
 	if err != nil {
 		writeInvoicePDFAssetLoadError(c, err)
+		return
+	}
+	if guarded && (asset.ID != query.Get("asset_id") || asset.SHA256 != query.Get("sha256")) {
+		writeError(c, 409, "INVOICE_PDF_CHANGED", "This generated PDF has been replaced; the saved result cannot download a different file")
 		return
 	}
 	file, verifyErr := store.openVerified(asset.RelativePath, asset.ID, asset.SizeBytes, asset.SHA256)

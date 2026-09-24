@@ -29,6 +29,7 @@ import {
   useTaskAssignmentsQuery,
   useTaskSubmissionsQuery,
 } from "../api/hooks";
+import { taskArtifactHandoff } from "../lib/aiIssueHandoff";
 import type {
   NewTaskArtifactInput,
   Task,
@@ -324,7 +325,11 @@ function ConflictNotice({
   );
 }
 
-function SubmissionSummary({ submission }: { submission: TaskSubmission }) {
+export function TaskSubmissionSummary({
+  submission,
+}: {
+  submission: TaskSubmission;
+}) {
   const childRollup = submission.origin === "child_rollup";
   return (
     <div className="task-submission-summary">
@@ -735,44 +740,63 @@ export function TaskOutputsSection({
     }
   };
 
-  const renderArtifact = (artifact: TaskArtifactSummary) => (
-    <TaskArtifactCard
-      artifact={artifact}
-      disabled={writeDisabled}
-      downloadDisabled={downloadDisabled}
-      downloading={
-        downloadBusy && downloadMutation.variables?.id === artifact.id
-      }
-      expanded={expandedArtifactId === artifact.id}
-      key={artifact.id}
-      onDelete={(target) => {
-        setDeleteEditor((current) =>
-          current?.artifact.id === target.id
-            ? {
-                ...current,
-                expectedVersion: Math.max(
-                  current.expectedVersion,
-                  task.version,
-                ),
-              }
-            : {
-                artifact: target,
-                reason: "",
-                expectedVersion: task.version,
-              },
-        );
-        setDeleteEditorOpen(true);
-        setDeleteConflict(null);
-        setValidationError(null);
-      }}
-      onDownload={downloadArtifact}
-      onToggle={(artifactId) =>
-        setExpandedArtifactId((current) =>
-          current === artifactId ? null : artifactId,
-        )
-      }
-    />
-  );
+  const renderArtifact = (artifact: TaskArtifactSummary) => {
+    const sourceSubmission =
+      submissions.find(
+        (submission) => submission.id === artifact.submissionId,
+      ) ??
+      (currentSubmission?.id === artifact.submissionId
+        ? currentSubmission
+        : null);
+    return (
+      <TaskArtifactCard
+        artifact={artifact}
+        disabled={writeDisabled}
+        downloadDisabled={downloadDisabled}
+        downloading={
+          downloadBusy && downloadMutation.variables?.id === artifact.id
+        }
+        expanded={expandedArtifactId === artifact.id}
+        handoffContent={taskArtifactHandoff(
+          artifact.id,
+          artifact.taskId,
+          artifact.submissionId,
+          artifact.name,
+          task.title,
+          sourceSubmission?.sequence ?? null,
+          artifact.storageKind,
+          artifact.submissionStatus,
+        )}
+        key={artifact.id}
+        onDelete={(target) => {
+          setDeleteEditor((current) =>
+            current?.artifact.id === target.id
+              ? {
+                  ...current,
+                  expectedVersion: Math.max(
+                    current.expectedVersion,
+                    task.version,
+                  ),
+                }
+              : {
+                  artifact: target,
+                  reason: "",
+                  expectedVersion: task.version,
+                },
+          );
+          setDeleteEditorOpen(true);
+          setDeleteConflict(null);
+          setValidationError(null);
+        }}
+        onDownload={downloadArtifact}
+        onToggle={(artifactId) =>
+          setExpandedArtifactId((current) =>
+            current === artifactId ? null : artifactId,
+          )
+        }
+      />
+    );
+  };
 
   const mutationError =
     errorMessage(submitMutation.error, "提交产出失败，请重试。") ??
@@ -1185,7 +1209,7 @@ export function TaskOutputsSection({
               ) : null}
               {currentSubmission ? (
                 <>
-                  <SubmissionSummary submission={currentSubmission} />
+                  <TaskSubmissionSummary submission={currentSubmission} />
                   <div className="task-artifact-list">
                     {currentSubmission.artifacts.length > 0 ? (
                       currentSubmission.artifacts.map(renderArtifact)
@@ -1575,7 +1599,7 @@ export function TaskOutputsSection({
             ) : null}
             {submissions.map((submission) => (
               <article className="task-submission-card" key={submission.id}>
-                <SubmissionSummary submission={submission} />
+                <TaskSubmissionSummary submission={submission} />
                 <div className="task-artifact-list">
                   {submission.artifacts.map(renderArtifact)}
                 </div>

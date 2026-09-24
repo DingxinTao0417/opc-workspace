@@ -282,6 +282,15 @@ func containsFold(value, query string) bool {
 }
 
 func searchRoute(resourceType, resourceID string) string {
+	if resourceType == "automation_rule" || resourceType == "automation_run" {
+		return ""
+	} // Opens the existing settings modal, not a fabricated URL.
+	if resourceType == "focus_session" {
+		return "/focus"
+	}
+	if resourceType == "reminder" {
+		return "/inbox?reminder=" + url.QueryEscape(resourceID)
+	}
 	prefixes := map[string]string{
 		"task": "/tasks/", "project": "/projects/", "client": "/clients/", "inbox_item": "/inbox/", "invoice": "/invoices/",
 	}

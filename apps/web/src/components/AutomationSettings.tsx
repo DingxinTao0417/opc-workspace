@@ -21,6 +21,7 @@ import {
   useSetAutomationRuleEnabled,
   useUpdateAutomationRule,
 } from "../api/hooks";
+import { automationRuleHandoff } from "../lib/aiIssueHandoff";
 import { useSettledPage } from "../lib/useSettledPage";
 import type {
   AutomationConfig,
@@ -28,6 +29,7 @@ import type {
   AutomationRun,
   AutomationRunStatus,
 } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { AutomationRunDetailModal } from "./AutomationRunDetailModal";
 
 const RUN_PAGE_SIZE = 20;
@@ -73,15 +75,21 @@ function ruleStatusLabel(rule: AutomationRule): string {
 }
 
 export function AutomationSettings({
+  requestedRuleId,
+  onSelectRule,
+  onSelectRun,
   onOpenInboxItem,
   onOpenReminder,
   onOpenTask,
 }: {
+  requestedRuleId?: string;
+  onSelectRule?: (id: string) => void;
+  onSelectRun?: (id: string) => void;
   onOpenInboxItem: (inboxItemId: string) => void;
   onOpenReminder: (reminderId: string) => void;
   onOpenTask: (taskId: string) => void;
 }) {
-  const rulesQuery = useAutomationRulesQuery();
+  const rulesQuery = useAutomationRulesQuery(true, Boolean(requestedRuleId));
   const [runPage, setRunPage] = useState(1);
   const [runRuleId, setRunRuleId] = useState("");
   const [runStatus, setRunStatus] = useState<AutomationRunStatus | "">("");
@@ -96,7 +104,9 @@ export function AutomationSettings({
   const updateRule = useUpdateAutomationRule();
   const setEnabled = useSetAutomationRuleEnabled();
   const retryRun = useRetryAutomationRun();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    requestedRuleId ?? null,
+  );
   const [draft, setDraft] = useState<AutomationConfig>({});
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -112,6 +122,7 @@ export function AutomationSettings({
   );
 
   useEffect(() => {
+    if (requestedRuleId) return;
     if (!rulesQuery.data?.length) return;
     if (
       !selectedId ||
@@ -119,7 +130,7 @@ export function AutomationSettings({
     ) {
       setSelectedId(rulesQuery.data[0].id);
     }
-  }, [rulesQuery.data, selectedId]);
+  }, [rulesQuery.data, selectedId, requestedRuleId]);
 
   useEffect(() => {
     if (!selected) return;
@@ -128,7 +139,11 @@ export function AutomationSettings({
   }, [selected?.id, selected?.version]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (
+      !selected ||
+      (requestedRuleId && (rulesQuery.isFetching || rulesQuery.isError))
+    )
+      return;
     const timer = window.setTimeout(() => {
       preview.mutate({ id: selected.id, config: draft });
     }, 250);
@@ -136,7 +151,13 @@ export function AutomationSettings({
     // The mutation object is intentionally excluded; only the selected draft
     // should schedule a new server-authoritative preview.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, draft]);
+  }, [
+    selected?.id,
+    draft,
+    requestedRuleId,
+    rulesQuery.isFetching,
+    rulesQuery.isError,
+  ]);
 
   useSettledPage({
     page: runPage,
@@ -189,7 +210,7 @@ export function AutomationSettings({
     }
   }
 
-  if (rulesQuery.isPending) {
+  if (rulesQuery.isPending || (requestedRuleId && rulesQuery.isFetching)) {
     return (
       <div aria-live="polite" className="settings-state" role="status">
         <LoaderCircle className="animate-spin" size={16} />
@@ -222,8 +243,14 @@ export function AutomationSettings({
     return (
       <div className="automation-empty">
         <Zap size={18} />
-        <strong>暂无自动化预设</strong>
-        <span>本地服务尚未提供可配置规则。</span>
+        <strong>
+          {requestedRuleId ? "指定自动化规则不可用" : "暂无自动化预设"}
+        </strong>
+        <span>
+          {requestedRuleId
+            ? "没有找到链接中的规则，不会选择其他预设代替。"
+            : "本地服务尚未提供可配置规则。"}
+        </span>
       </div>
     );
   }
@@ -255,7 +282,9 @@ export function AutomationSettings({
             className="automation-rule-tab"
             data-active={rule.id === selected.id}
             key={rule.id}
-            onClick={() => setSelectedId(rule.id)}
+            onClick={() =>
+              onSelectRule ? onSelectRule(rule.id) : setSelectedId(rule.id)
+            }
             type="button"
           >
             <span>{rule.name}</span>
@@ -270,19 +299,29 @@ export function AutomationSettings({
             <h4>{selected.name}</h4>
             <p>{selected.description}</p>
           </div>
-          <button
-            aria-label={
-              selected.status === "enabled" ? "停用自动化" : "启用自动化"
-            }
-            aria-pressed={selected.status === "enabled"}
-            className="settings-toggle"
-            data-checked={selected.status === "enabled"}
-            disabled={pending || !selected.available}
-            onClick={() => void toggleRule()}
-            type="button"
-          >
-            <span />
-          </button>
+          <div className="automation-editor-heading-actions">
+            <AiIssueHandoffButton
+              content={automationRuleHandoff(
+                selected.id,
+                selected.name,
+                ruleStatusLabel(selected),
+              )}
+              disabled={pending}
+            />
+            <button
+              aria-label={
+                selected.status === "enabled" ? "停用自动化" : "启用自动化"
+              }
+              aria-pressed={selected.status === "enabled"}
+              className="settings-toggle"
+              data-checked={selected.status === "enabled"}
+              disabled={pending || !selected.available}
+              onClick={() => void toggleRule()}
+              type="button"
+            >
+              <span />
+            </button>
+          </div>
         </div>
 
         <div className="automation-flow">
@@ -609,7 +648,9 @@ export function AutomationSettings({
                   ) : null}
                   <button
                     className="button button-quiet"
-                    onClick={() => setDetailRunId(run.id)}
+                    onClick={() =>
+                      onSelectRun ? onSelectRun(run.id) : setDetailRunId(run.id)
+                    }
                     type="button"
                   >
                     查看详情

@@ -180,10 +180,11 @@ func aiContextTypeOrder(value string) int {
 func loadAITaskContext(ctx context.Context, db *gorm.DB, id string) (aiBusinessContextSource, error) {
 	var row struct {
 		models.Task
-		ProjectName *string `gorm:"column:project_name"`
+		ProjectName          *string `gorm:"column:project_name"`
+		HasSubmissionHistory bool    `gorm:"column:has_submission_history"`
 	}
 	err := db.WithContext(ctx).Table("tasks").
-		Select("tasks.*, projects.name AS project_name").
+		Select("tasks.*, projects.name AS project_name, EXISTS(SELECT 1 FROM task_submissions WHERE task_submissions.task_id = tasks.id) AS has_submission_history").
 		Joins("LEFT JOIN projects ON projects.id = tasks.project_id").
 		Where("tasks.id = ?", id).Take(&row).Error
 	if err != nil {
@@ -203,6 +204,7 @@ func loadAITaskContext(ctx context.Context, db *gorm.DB, id string) (aiBusinessC
 		Fields: map[string]any{
 			"title": row.Title, "description": description, "kind": row.Kind,
 			"status": row.Status, "priority": row.Priority, "completion_criteria": criteria,
+			"review_policy": row.ReviewPolicy, "review_policy_change_allowed": row.Status == "todo" && !row.HasSubmissionHistory,
 			"planned_date": row.PlannedDate, "due_date": row.DueDate,
 			"project_id": row.ProjectID, "project_name": row.ProjectName,
 		},
@@ -244,14 +246,114 @@ func loadAIProjectContext(ctx context.Context, db *gorm.DB, id string) (aiBusine
 			"start_date": row.StartDate, "due_date": row.DueDate,
 			"task_total": row.TaskTotal, "task_done": row.TaskDone,
 			"task_blocked": row.TaskBlocked, "task_waiting_review": row.TaskWaitingReview,
+			"incomplete_task_count": row.TaskTotal - row.TaskDone,
+			"available_actions":     availableProjectActions(row.Status),
+		},
+		TruncatedFields: truncatedFields,
+	}, nil
+}
+
+func loadAIRoadmapMilestoneContext(ctx context.Context, db *gorm.DB, id string) (aiBusinessContextSource, error) {
+	response, err := loadRoadmapMilestoneResponse(db.WithContext(ctx), id)
+	if err != nil {
+		return aiBusinessContextSource{}, err
+	}
+	description := ""
+	if response.Description != nil {
+		description = *response.Description
+	}
+	description, truncated := boundedAIBusinessContextText(description)
+	truncatedFields := []string{}
+	if truncated {
+		truncatedFields = append(truncatedFields, "description")
+	}
+	projectIDs := make([]string, len(response.Projects))
+	projectNames := make([]string, len(response.Projects))
+	for i, project := range response.Projects {
+		projectIDs[i], projectNames[i] = project.ID, project.Name
+	}
+	return aiBusinessContextSource{
+		Type: "roadmap_milestone", ID: response.ID, Version: response.Version, Label: response.Title,
+		Fields: map[string]any{
+			"title": response.Title, "description": description, "status": response.Status,
+			"year": response.Year, "quarter": response.Quarter, "target_date": response.TargetDate,
+			"project_ids": projectIDs, "project_names": projectNames,
+			"task_total": response.TaskSummary.Total, "task_completed": response.TaskSummary.Completed,
+			"task_in_progress": response.TaskSummary.InProgress, "progress_percent": response.TaskSummary.ProgressPercent,
+		},
+		TruncatedFields: truncatedFields,
+	}, nil
+}
+
+func loadAIContentItemContext(ctx context.Context, db *gorm.DB, id string) (aiBusinessContextSource, error) {
+	response, err := loadContentItemResponse(db.WithContext(ctx), id)
+	if err != nil {
+		return aiBusinessContextSource{}, err
+	}
+	notes := ""
+	if response.Notes != nil {
+		notes = *response.Notes
+	}
+	notes, notesTruncated := boundedAIBusinessContextText(notes)
+	externalLink := ""
+	if response.ExternalLink != nil {
+		externalLink = *response.ExternalLink
+	}
+	externalLink, linkTruncated := boundedAIBusinessContextText(externalLink)
+	truncatedFields := []string{}
+	if notesTruncated {
+		truncatedFields = append(truncatedFields, "notes")
+	}
+	if linkTruncated {
+		truncatedFields = append(truncatedFields, "external_link")
+	}
+	taskLimit := len(response.Tasks)
+	if taskLimit > 50 {
+		taskLimit = 50
+		truncatedFields = append(truncatedFields, "tasks")
+	}
+	tasks := make([]map[string]any, taskLimit)
+	for i := 0; i < taskLimit; i++ {
+		task := response.Tasks[i]
+		tasks[i] = map[string]any{"id": task.ID, "title": task.Title, "status": task.Status, "is_required": task.IsRequired}
+	}
+	return aiBusinessContextSource{
+		Type: "content_item", ID: response.ID, Version: response.Version, Label: response.Title,
+		Fields: map[string]any{
+			"title": response.Title, "platform": response.Platform, "status": response.Status,
+			"scheduled_at": response.ScheduledAt, "scheduled_timezone": response.ScheduledTimezone,
+			"published_at": response.PublishedAt, "project_id": response.ProjectID,
+			"notes": notes, "external_link": externalLink,
+			"archived_from_status": response.ArchivedFromStatus,
+			"required_task_total":  response.RequiredTaskTotal, "required_task_done": response.RequiredTaskDone,
+			"task_total": len(response.Tasks), "tasks": tasks,
+			"external_link_policy": "untrusted_text_not_fetched",
 		},
 		TruncatedFields: truncatedFields,
 	}, nil
 }
 
 func loadAIClientContext(ctx context.Context, db *gorm.DB, id string) (aiBusinessContextSource, error) {
-	var row models.Client
-	if err := db.WithContext(ctx).Where("id = ?", id).Take(&row).Error; err != nil {
+	var row struct {
+		models.Client
+		ContactLinkID       *string `gorm:"column:contact_link_id"`
+		ContactActorID      *string `gorm:"column:contact_actor_id"`
+		ContactDisplayName  *string `gorm:"column:contact_display_name"`
+		ContactActorType    *string `gorm:"column:contact_actor_type"`
+		ContactActorStatus  *string `gorm:"column:contact_actor_status"`
+		ContactActorVersion *int64  `gorm:"column:contact_actor_version"`
+	}
+	if err := db.WithContext(ctx).Table("clients").
+		Select(`clients.*,
+			contact_link.id AS contact_link_id,
+			contact_actor.id AS contact_actor_id,
+			contact_actor.display_name AS contact_display_name,
+			contact_actor.type AS contact_actor_type,
+			contact_actor.status AS contact_actor_status,
+			contact_actor.version AS contact_actor_version`).
+		Joins("LEFT JOIN client_actor_links contact_link ON contact_link.client_id = clients.id AND contact_link.role = 'contact' AND contact_link.unlinked_at IS NULL").
+		Joins("LEFT JOIN actors contact_actor ON contact_actor.id = contact_link.actor_id").
+		Where("clients.id = ?", id).Take(&row).Error; err != nil {
 		return aiBusinessContextSource{}, err
 	}
 	notes := ""
@@ -263,9 +365,15 @@ func loadAIClientContext(ctx context.Context, db *gorm.DB, id string) (aiBusines
 	if truncated {
 		truncatedFields = append(truncatedFields, "notes")
 	}
+	fields := map[string]any{
+		"name": row.Name, "status": row.Status, "notes": notes,
+		"contact_link_id": row.ContactLinkID, "contact_actor_id": row.ContactActorID,
+		"contact_actor_name": row.ContactDisplayName, "contact_actor_type": row.ContactActorType,
+		"contact_actor_status": row.ContactActorStatus, "contact_actor_version": row.ContactActorVersion,
+	}
 	return aiBusinessContextSource{
 		Type: "client", ID: row.ID, Version: row.Version, Label: row.Name,
-		Fields:          map[string]any{"name": row.Name, "status": row.Status, "notes": notes},
+		Fields:          fields,
 		TruncatedFields: truncatedFields,
 	}, nil
 }

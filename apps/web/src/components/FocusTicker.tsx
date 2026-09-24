@@ -44,22 +44,19 @@ function playPhaseCompleteSound() {
 export function FocusTicker() {
   const focusQuery = useActiveFocusSessionQuery();
   const createFocus = useCreateFocusSession();
-  const stopFocus = useStopFocusSession();
+  const stopFocus = useStopFocusSession(true);
   const clock = useFocusClock(focusQuery.data);
   const breakClock = useBreakClock();
   const focusMinutes = useSettingsStore((state) => state.focusMinutes);
-  const breakMinutes = useSettingsStore((state) => state.breakMinutes);
   const cycles = useSettingsStore((state) => state.cycles);
-  const autoStartBreak = useSettingsStore((state) => state.autoStartBreak);
   const autoStartFocus = useSettingsStore((state) => state.autoStartFocus);
   const soundEnabled = useSettingsStore((state) => state.soundEnabled);
   const cyclePhase = useFocusCycleStore((state) => state.phase);
   const cycleTaskId = useFocusCycleStore((state) => state.taskId);
-  const cycleTaskTitle = useFocusCycleStore((state) => state.taskTitle);
   const completedCycles = useFocusCycleStore((state) => state.completedCycles);
   const targetCycles = useFocusCycleStore((state) => state.targetCycles);
   const beginWork = useFocusCycleStore((state) => state.beginWork);
-  const completeWork = useFocusCycleStore((state) => state.completeWork);
+  const resetCycle = useFocusCycleStore((state) => state.resetCycle);
   const finishBreak = useFocusCycleStore((state) => state.finishBreak);
   const autoStopAttempt = useRef<string | null>(null);
   const breakCompletionAttempt = useRef<number | null>(null);
@@ -67,12 +64,30 @@ export function FocusTicker() {
 
   useEffect(() => {
     if (
-      session?.status === "active" &&
-      (cyclePhase === "idle" || cyclePhase === "ready")
+      session &&
+      ["active", "paused", "recovery_pending"].includes(session.status)
     ) {
-      beginWork(session.taskId, cycles, session.taskTitle);
+      // The command hook handles local next-round intent. An independently
+      // observed Session is a new sequence, even when it targets the same Task.
+      beginWork(session.taskId, cycles, session.taskTitle, session.id, false);
+    } else if (
+      focusQuery.isSuccess &&
+      !focusQuery.isFetching &&
+      !stopFocus.isPending &&
+      cyclePhase === "work"
+    ) {
+      resetCycle(useFocusCycleStore.getState().sessionId ?? undefined);
     }
-  }, [beginWork, cyclePhase, cycles, session]);
+  }, [
+    beginWork,
+    cyclePhase,
+    cycles,
+    focusQuery.isFetching,
+    focusQuery.isSuccess,
+    resetCycle,
+    session,
+    stopFocus.isPending,
+  ]);
 
   useEffect(() => {
     if (!session || session.status !== "active" || clock.remainingSeconds > 0) {
@@ -82,46 +97,35 @@ export function FocusTicker() {
 
     const attempt = `${session.id}:${session.version}`;
     if (autoStopAttempt.current === attempt) return;
+    const cycle = useFocusCycleStore.getState();
+    if (cycle.phase !== "work" || cycle.sessionId !== session.id) return;
     autoStopAttempt.current = attempt;
 
     void stopFocus
       .mutateAsync({ id: session.id, expectedVersion: session.version })
       .then(() => {
-        completeWork(
-          session.taskId,
-          {
-            focusMinutes,
-            breakMinutes,
-            cycles,
-            autoStartBreak,
-            autoStartFocus,
-            soundEnabled,
-          },
-          session.taskTitle,
-        );
-        if (soundEnabled) playPhaseCompleteSound();
+        const current = useFocusCycleStore.getState();
+        if (
+          soundEnabled &&
+          current.sessionId === session.id &&
+          (current.phase === "break" || current.phase === "complete")
+        )
+          playPhaseCompleteSound();
       })
       .catch(() => {
         if (autoStopAttempt.current === attempt) {
           autoStopAttempt.current = null;
         }
       });
-  }, [
-    clock.remainingSeconds,
-    autoStartBreak,
-    autoStartFocus,
-    breakMinutes,
-    completeWork,
-    cycles,
-    focusMinutes,
-    session,
-    soundEnabled,
-    stopFocus.mutateAsync,
-  ]);
+  }, [clock.remainingSeconds, session, soundEnabled, stopFocus.mutateAsync]);
 
   useEffect(() => {
     if (
       cyclePhase !== "break" ||
+      useFocusCycleStore.getState().phase !== "break" ||
+      !focusQuery.isSuccess ||
+      focusQuery.isFetching ||
+      session ||
       breakClock.remainingSeconds > 0 ||
       breakCompletionAttempt.current === completedCycles
     ) {
@@ -139,19 +143,19 @@ export function FocusTicker() {
         taskId: cycleTaskId,
         plannedSeconds: focusMinutes * 60,
       })
-      .then(() => beginWork(cycleTaskId, targetCycles, cycleTaskTitle))
       .catch(() => undefined);
   }, [
     autoStartFocus,
-    beginWork,
     breakClock.remainingSeconds,
     completedCycles,
     createFocus.mutateAsync,
     cyclePhase,
     cycleTaskId,
-    cycleTaskTitle,
     finishBreak,
     focusMinutes,
+    focusQuery.isSuccess,
+    focusQuery.isFetching,
+    session,
     soundEnabled,
     targetCycles,
   ]);

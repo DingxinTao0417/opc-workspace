@@ -100,12 +100,16 @@ pub fn handle_global_shortcut<R: Runtime>(
     let Some(action) = shortcut_action(shortcut) else {
         return;
     };
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
-    let _ = app.emit_to("main", GLOBAL_SHORTCUT_EVENT, action);
+    let _ = app.emit_to(
+        tauri::EventTarget::webview("main"),
+        GLOBAL_SHORTCUT_EVENT,
+        action,
+    );
 }
 
 fn shortcut_definitions() -> [(ShortcutAction, Shortcut); 2] {

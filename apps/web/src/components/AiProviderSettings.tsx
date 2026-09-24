@@ -33,6 +33,8 @@ import {
   useRejectAiMemoryProposal,
   useSetAiProviderKey,
 } from "../api/hooks";
+import { aiProviderSettingsHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import type {
   AiEvaluationQualityGroup,
   AiEvaluationReviewDecision,
@@ -399,6 +401,11 @@ function AiProviderCard({
     useState<AiEvaluationTopicSuiteKey>("grounded");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const busy =
+    setKey.isPending ||
+    checkHealth.isPending ||
+    deleteProvider.isPending ||
+    createEvaluation.isPending;
   const actionError =
     setKey.error ??
     checkHealth.error ??
@@ -536,6 +543,17 @@ function AiProviderCard({
         </div>
       )}
       <div className="ai-provider-actions">
+        <AiIssueHandoffButton
+          content={aiProviderSettingsHandoff(
+            provider.id,
+            provider.name,
+            provider.model,
+            provider.kind,
+            provider.status,
+            provider.health_status,
+          )}
+          disabled={busy || confirmingDelete}
+        />
         <button
           className="button button-secondary"
           disabled={checkHealth.isPending}

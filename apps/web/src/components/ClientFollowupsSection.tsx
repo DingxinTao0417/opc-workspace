@@ -10,7 +10,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { ApiError } from "../api/client";
+import { Link } from "react-router-dom";
+import { aiWorkspaceHref } from "../lib/aiWorkspaceLinks";
+import { clientRecordHref } from "../lib/clientRecordLocation";
+import { isWorkspaceIdentity } from "../lib/focusReportLocation";
+import { ApiError, getClientFollowup } from "../api/client";
 import {
   useCancelClientFollowup,
   useClientFollowupActorOptionsQuery,
@@ -34,6 +38,12 @@ import {
   localDateTimeToZonedISOString,
 } from "../lib/zonedDateTime";
 import { EmptyState, ErrorState, SkeletonRows } from "./feedback";
+import {
+  ClientRecordLocation,
+  type ClientRecordLocationProps,
+} from "./ClientRecordLocation";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
+import { clientFollowupHandoff } from "../lib/aiIssueHandoff";
 
 type FollowupAction = "complete" | "skip" | "cancel" | "reschedule";
 
@@ -328,10 +338,13 @@ function PlanFields({
 export function ClientFollowupsSection({
   clientId,
   clientStatus = "active",
+  selectedId,
+  returnSession,
+  onClearSelection,
 }: {
   clientId: string;
   clientStatus?: ClientStatus;
-}) {
+} & ClientRecordLocationProps) {
   const canPlan = clientStatus !== "inactive";
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<
@@ -385,6 +398,7 @@ export function ClientFollowupsSection({
     skipMutation.isPending ||
     cancelMutation.isPending ||
     rescheduleMutation.isPending;
+  const handoffBlocked = pending || editing !== null || action !== null;
   const mutationError =
     followupError(createMutation.error) ??
     followupError(updateMutation.error) ??
@@ -585,6 +599,104 @@ export function ClientFollowupsSection({
     reschedule: "重新安排回访",
   };
 
+  const renderRecord = (followup: ClientFollowup) => {
+    const overdue = isOverdue(followup, query.data?.meta.serverNow);
+    const Icon =
+      followup.status === "completed"
+        ? CircleCheck
+        : followup.status === "planned"
+          ? Clock3
+          : CircleOff;
+    const copy = detailCopy(followup);
+    return (
+      <article className={overdue ? "is-overdue" : undefined} key={followup.id}>
+        <span className="client-followup-icon" aria-hidden="true">
+          <Icon size={14} />
+        </span>
+        <div className="client-followup-copy">
+          <div>
+            <strong>{followup.purpose}</strong>
+            <span>{overdue ? "已逾期" : statusLabel[followup.status]}</span>
+            <span className={`client-followup-priority ${followup.priority}`}>
+              {priorityLabel[followup.priority]}
+            </span>
+          </div>
+          {copy ? <p>{copy}</p> : null}
+          <small>
+            <CalendarClock size={11} />{" "}
+            {formatTime(followup.scheduledAt, followup.timezone)} ·{" "}
+            {followup.timezone} · {followup.channel} · 负责人{" "}
+            {followup.assignedActorName}
+          </small>
+          {followup.nextStep ? (
+            <small className="client-followup-next-step">
+              下一步：{followup.nextStep}
+            </small>
+          ) : null}
+        </div>
+        <div className="client-followup-actions">
+          <AiIssueHandoffButton
+            content={clientFollowupHandoff(
+              clientId,
+              followup.id,
+              followup.purpose,
+            )}
+            disabled={handoffBlocked}
+          />
+          {followup.status === "planned" ? (
+            <>
+              {canPlan ? (
+                <button
+                  aria-label={`编辑回访 ${followup.purpose}`}
+                  className="icon-button"
+                  disabled={pending}
+                  onClick={() => openEdit(followup)}
+                  type="button"
+                >
+                  <Pencil size={13} />
+                </button>
+              ) : null}
+              <button
+                className="button button-secondary"
+                disabled={pending}
+                onClick={() => openAction("complete", followup)}
+                type="button"
+              >
+                完成
+              </button>
+              {canPlan ? (
+                <button
+                  className="button button-secondary"
+                  disabled={pending}
+                  onClick={() => openAction("reschedule", followup)}
+                  type="button"
+                >
+                  重排
+                </button>
+              ) : null}
+              <button
+                className="button button-quiet"
+                disabled={pending}
+                onClick={() => openAction("skip", followup)}
+                type="button"
+              >
+                跳过
+              </button>
+              <button
+                className="button button-quiet"
+                disabled={pending}
+                onClick={() => openAction("cancel", followup)}
+                type="button"
+              >
+                取消
+              </button>
+            </>
+          ) : null}
+        </div>
+      </article>
+    );
+  };
+
   return (
     <section className="project-detail-section client-followups-section">
       <div className="project-detail-heading">
@@ -612,6 +724,67 @@ export function ClientFollowupsSection({
           </button>
         ) : null}
       </div>
+      {handoffBlocked ? (
+        <p>
+          {pending
+            ? "回访操作正在处理中，请等待完成后再交给智能体。"
+            : "请先保存或取消当前回访编辑，再交给智能体，以免丢失未保存内容。"}
+          {selectedId ? "返回原对话和关闭定位也暂不可用。" : null}
+        </p>
+      ) : null}
+      {selectedId ? (
+        <ClientRecordLocation
+          key={`${clientId}:${selectedId}`}
+          clientId={clientId}
+          recordId={selectedId}
+          kind="followup"
+          load={getClientFollowup}
+          onClose={onClearSelection}
+          returnSession={returnSession}
+          navigationDisabled={handoffBlocked}
+        >
+          {(record) => (
+            <>
+              <div className="client-followup-list">{renderRecord(record)}</div>
+              {record.status !== "planned" && record.notes ? (
+                <p>计划备注：{record.notes}</p>
+              ) : null}
+              {record.completedAt || record.skippedAt || record.cancelledAt ? (
+                <p>
+                  处理时间：
+                  {formatTime(
+                    (record.completedAt ??
+                      record.skippedAt ??
+                      record.cancelledAt)!,
+                    record.timezone,
+                  )}{" "}
+                  · {record.timezone}
+                </p>
+              ) : null}
+              <small>
+                当前版本 {record.version} · 最近更新{" "}
+                {formatTime(record.updatedAt, record.timezone)}
+              </small>
+              {isWorkspaceIdentity(record.rescheduledFromId) ? (
+                <p>
+                  <Link
+                    to={aiWorkspaceHref(
+                      clientRecordHref(
+                        clientId,
+                        "followup",
+                        record.rescheduledFromId,
+                      ),
+                      returnSession ?? undefined,
+                    )}
+                  >
+                    查看重排前的回访计划
+                  </Link>
+                </p>
+              ) : null}
+            </>
+          )}
+        </ClientRecordLocation>
+      ) : null}
       {!canPlan ? (
         <p className="client-followup-inactive-note">
           客户已停用。既有计划仍可完成、跳过或取消；恢复客户状态后才能安排、编辑或重排。
@@ -863,100 +1036,7 @@ export function ClientFollowupsSection({
       ) : null}
       {items.length > 0 ? (
         <div className="client-followup-list">
-          {items.map((followup) => {
-            const overdue = isOverdue(followup, query.data?.meta.serverNow);
-            const Icon =
-              followup.status === "completed"
-                ? CircleCheck
-                : followup.status === "planned"
-                  ? Clock3
-                  : CircleOff;
-            const copy = detailCopy(followup);
-            return (
-              <article
-                className={overdue ? "is-overdue" : undefined}
-                key={followup.id}
-              >
-                <span className="client-followup-icon" aria-hidden="true">
-                  <Icon size={14} />
-                </span>
-                <div className="client-followup-copy">
-                  <div>
-                    <strong>{followup.purpose}</strong>
-                    <span>
-                      {overdue ? "已逾期" : statusLabel[followup.status]}
-                    </span>
-                    <span
-                      className={`client-followup-priority ${followup.priority}`}
-                    >
-                      {priorityLabel[followup.priority]}
-                    </span>
-                  </div>
-                  {copy ? <p>{copy}</p> : null}
-                  <small>
-                    <CalendarClock size={11} />{" "}
-                    {formatTime(followup.scheduledAt, followup.timezone)} ·{" "}
-                    {followup.timezone} · {followup.channel} · 负责人{" "}
-                    {followup.assignedActorName}
-                  </small>
-                  {followup.nextStep ? (
-                    <small className="client-followup-next-step">
-                      下一步：{followup.nextStep}
-                    </small>
-                  ) : null}
-                </div>
-                {followup.status === "planned" ? (
-                  <div className="client-followup-actions">
-                    {canPlan ? (
-                      <button
-                        aria-label={`编辑回访 ${followup.purpose}`}
-                        className="icon-button"
-                        disabled={pending}
-                        onClick={() => openEdit(followup)}
-                        type="button"
-                      >
-                        <Pencil size={13} />
-                      </button>
-                    ) : null}
-                    <button
-                      className="button button-secondary"
-                      disabled={pending}
-                      onClick={() => openAction("complete", followup)}
-                      type="button"
-                    >
-                      完成
-                    </button>
-                    {canPlan ? (
-                      <button
-                        className="button button-secondary"
-                        disabled={pending}
-                        onClick={() => openAction("reschedule", followup)}
-                        type="button"
-                      >
-                        重排
-                      </button>
-                    ) : null}
-                    <button
-                      className="button button-quiet"
-                      disabled={pending}
-                      onClick={() => openAction("skip", followup)}
-                      type="button"
-                    >
-                      跳过
-                    </button>
-                    <button
-                      className="button button-quiet"
-                      disabled={pending}
-                      onClick={() => openAction("cancel", followup)}
-                      type="button"
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : null}
-              </article>
-            );
-          })}
+          {items.filter((item) => item.id !== selectedId).map(renderRecord)}
         </div>
       ) : null}
       {totalPages > 1 ? (

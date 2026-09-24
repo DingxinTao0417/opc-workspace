@@ -15,13 +15,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 )
 
 func newAIRuntimeLockTest(t *testing.T) (*gin.Engine, *API) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "runtime.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "runtime.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

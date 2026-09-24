@@ -7,7 +7,9 @@ import {
   useTaskSavedViewsQuery,
   useUpdateTaskSavedView,
 } from "../api/hooks";
+import { taskSavedViewHandoff } from "../lib/aiIssueHandoff";
 import type { TaskSavedViewDefinition } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 interface TaskSavedViewsControlProps {
   definition: TaskSavedViewDefinition;
@@ -165,6 +167,12 @@ export function TaskSavedViewsControl({
           <Trash2 size={13} />
           删除
         </button>
+        <AiIssueHandoffButton
+          content={
+            selected ? taskSavedViewHandoff(selected.id, selected.name) : null
+          }
+          disabled={pending}
+        />
       </div>
 
       {query.isError ? (

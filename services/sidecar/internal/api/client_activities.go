@@ -285,21 +285,11 @@ func (a *API) createClientActivity(c *gin.Context) {
 				return fmt.Errorf("read client activity idempotency key: %w", err)
 			}
 		}
-		var clientCount int64
-		if err := tx.Model(&models.Client{}).Where("id = ?", clientID).Count(&clientCount).Error; err != nil {
-			return err
-		}
-		if clientCount == 0 {
-			return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
-		}
-		if err := tx.Create(&activity).Error; err != nil {
-			return fmt.Errorf("create client activity: %w", err)
-		}
-		row, err := loadClientActivityRow(tx, activity.ID)
+		var err error
+		response, err = createClientActivityInTransaction(tx, activity)
 		if err != nil {
 			return err
 		}
-		response = clientActivityResponseFromRow(row)
 		if idempotencyKey != "" {
 			encoded, err := json.Marshal(response)
 			if err != nil {
@@ -373,37 +363,10 @@ func (a *API) updateClientActivity(c *gin.Context) {
 
 	var response clientActivityResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var activity models.ClientActivity
-		if err := tx.First(&activity, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_ACTIVITY_NOT_FOUND", "Client activity not found")
-			}
-			return err
-		}
-		if activity.Version != expectedVersion {
-			return clientActivityVersionConflict()
-		}
-		if activity.DeletedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTIVITY_DELETED", "Deleted client activities cannot be changed")
-		}
-		if activity.Kind == "system_reference" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTIVITY_READ_ONLY", "System reference activities are read-only")
-		}
-		updates["updated_at"] = a.options.Now().UTC().Format(time.RFC3339Nano)
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.ClientActivity{}).Where("id = ? AND version = ? AND deleted_at IS NULL", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientActivityVersionConflict()
-		}
-		row, err := loadClientActivityRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientActivityResponseFromRow(row)
-		return nil
+		var err error
+		now := a.options.Now().UTC().Format(time.RFC3339Nano)
+		response, err = changeClientActivityInTransaction(tx, id, expectedVersion, updates, now)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -442,41 +405,11 @@ func (a *API) deleteClientActivity(c *gin.Context) {
 
 	var response clientActivityResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var activity models.ClientActivity
-		if err := tx.First(&activity, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_ACTIVITY_NOT_FOUND", "Client activity not found")
-			}
-			return err
-		}
-		if activity.Version != expectedVersion {
-			return clientActivityVersionConflict()
-		}
-		if activity.DeletedAt != nil {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTIVITY_DELETED", "Client activity is already deleted")
-		}
-		if activity.Kind == "system_reference" {
-			return newProjectRequestError(http.StatusConflict, "CLIENT_ACTIVITY_READ_ONLY", "System reference activities are read-only")
-		}
+		var err error
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
-		result := tx.Model(&models.ClientActivity{}).
-			Where("id = ? AND version = ? AND deleted_at IS NULL", id, expectedVersion).
-			Updates(map[string]any{
-				"deleted_at": now, "deleted_by_actor_id": models.BuiltinOwnerActorID,
-				"delete_reason": reason, "updated_at": now, "version": gorm.Expr("version + 1"),
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientActivityVersionConflict()
-		}
-		row, err := loadClientActivityRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientActivityResponseFromRow(row)
-		return nil
+		updates := map[string]any{"deleted_at": now, "deleted_by_actor_id": models.BuiltinOwnerActorID, "delete_reason": reason}
+		response, err = changeClientActivityInTransaction(tx, id, expectedVersion, updates, now)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -490,6 +423,10 @@ func (a *API) deleteClientActivity(c *gin.Context) {
 }
 
 func (a *API) clientActivityFromCreateRequest(clientID string, input createClientActivityRequest) (models.ClientActivity, error) {
+	return clientActivityFromCreateRequestAt(clientID, input, a.options.Now())
+}
+
+func clientActivityFromCreateRequestAt(clientID string, input createClientActivityRequest, clock time.Time) (models.ClientActivity, error) {
 	kind, err := cleanManualClientActivityKind(input.Kind)
 	if err != nil {
 		return models.ClientActivity{}, err
@@ -502,11 +439,11 @@ func (a *API) clientActivityFromCreateRequest(clientID string, input createClien
 	if err != nil {
 		return models.ClientActivity{}, err
 	}
-	occurredAt, err := cleanClientActivityOccurredAt(input.OccurredAt, a.options.Now())
+	occurredAt, err := cleanClientActivityOccurredAt(input.OccurredAt, clock)
 	if err != nil {
 		return models.ClientActivity{}, err
 	}
-	now := a.options.Now().UTC().Format(time.RFC3339Nano)
+	now := clock.UTC().Format(time.RFC3339Nano)
 	return models.ClientActivity{
 		ID: uuid.NewString(), ClientID: clientID, Kind: kind, Title: title, Body: &body,
 		OccurredAt: occurredAt, CreatedByActorID: models.BuiltinOwnerActorID,
@@ -515,6 +452,10 @@ func (a *API) clientActivityFromCreateRequest(clientID string, input createClien
 }
 
 func (a *API) clientActivityUpdates(input updateClientActivityRequest) (map[string]any, error) {
+	return clientActivityUpdatesAt(input, a.options.Now())
+}
+
+func clientActivityUpdatesAt(input updateClientActivityRequest, now time.Time) (map[string]any, error) {
 	updates := make(map[string]any)
 	if input.Kind.Set {
 		if input.Kind.Value == nil {
@@ -551,7 +492,7 @@ func (a *API) clientActivityUpdates(input updateClientActivityRequest) (map[stri
 		if input.OccurredAt.Value == nil {
 			return nil, errors.New("occurred_at cannot be null")
 		}
-		occurredAt, err := cleanClientActivityOccurredAt(*input.OccurredAt.Value, a.options.Now())
+		occurredAt, err := cleanClientActivityOccurredAt(*input.OccurredAt.Value, now)
 		if err != nil {
 			return nil, err
 		}

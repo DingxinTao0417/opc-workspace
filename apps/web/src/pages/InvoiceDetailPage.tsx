@@ -1,6 +1,13 @@
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { focusReportReturnSession } from "../lib/focusReportLocation";
 import { ApiError } from "../api/client";
 import { useInvoiceQuery } from "../api/hooks";
 import type { Invoice } from "../types/models";
@@ -8,12 +15,14 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { InvoiceActions } from "../components/InvoiceActions";
 import { InvoiceFormModal } from "../components/InvoiceFormModal";
 import { InvoicePdfSection } from "../components/InvoicePdfSection";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
 import {
   formatInvoiceAmount,
   invoiceStatusClass,
   invoiceStatusLabels,
 } from "../components/invoicePresentation";
 import { PageHeader } from "../components/PageHeader";
+import { invoiceHandoff } from "../lib/aiIssueHandoff";
 
 function formatTimestamp(value: string): string {
   const date = new Date(value);
@@ -38,10 +47,15 @@ function invoiceNotFound(error: unknown): boolean {
 export function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
-  const query = useInvoiceQuery(invoiceId ?? null);
+  const [params] = useSearchParams();
+  const returnSession = focusReportReturnSession(params);
+  const query = useInvoiceQuery(invoiceId ?? null, !!returnSession);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const invoice = query.data;
+  const invoice =
+    returnSession && (query.isFetching || query.isError)
+      ? undefined
+      : query.data;
   const notFound = query.isError && invoiceNotFound(query.error);
 
   useEffect(() => {
@@ -66,13 +80,16 @@ export function InvoiceDetailPage() {
   };
 
   const backLink = (
-    <Link className="project-back-link" to="/invoices">
-      <ArrowLeft size={13} />
-      全部发票
-    </Link>
+    <>
+      <Link className="project-back-link" to="/invoices">
+        <ArrowLeft size={13} />
+        全部发票
+      </Link>
+      <ReturnToAiChat sessionId={returnSession} />
+    </>
   );
 
-  if (query.isPending) {
+  if (query.isPending || (returnSession && query.isFetching)) {
     return (
       <div className="page invoice-detail-page">
         <PageHeader eyebrow={backLink} title="发票详情" />
@@ -115,14 +132,20 @@ export function InvoiceDetailPage() {
     <div className="page invoice-detail-page">
       <PageHeader
         actions={
-          <InvoiceActions
-            invoice={invoice}
-            onConflict={refreshAfterConflict}
-            onDeleted={() => navigate("/invoices", { replace: true })}
-            onEdit={() => setEditing(true)}
-            onTransitioned={transitioned}
-            variant="detail"
-          />
+          <>
+            <AiIssueHandoffButton
+              content={invoiceHandoff(invoice.id)}
+              disabled={editing}
+            />
+            <InvoiceActions
+              invoice={invoice}
+              onConflict={refreshAfterConflict}
+              onDeleted={() => navigate("/invoices", { replace: true })}
+              onEdit={() => setEditing(true)}
+              onTransitioned={transitioned}
+              variant="detail"
+            />
+          </>
         }
         eyebrow={backLink}
         meta={
@@ -238,7 +261,15 @@ export function InvoiceDetailPage() {
                 invoice.financialEntryId ? "invoice-detail-code" : undefined
               }
             >
-              {invoice.financialEntryId ?? "未关联收入记录"}
+              {invoice.financialEntryId ? (
+                <Link
+                  to={`/income/${invoice.financialEntryId}${returnSession ? `?return_session=${returnSession}` : ""}`}
+                >
+                  {invoice.financialEntryId}
+                </Link>
+              ) : (
+                "未关联收入记录"
+              )}
             </dd>
           </div>
           <div>

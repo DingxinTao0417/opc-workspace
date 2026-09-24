@@ -20,7 +20,7 @@ import (
 
 func newTaskFactsAPI(t *testing.T) (*gin.Engine, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "task-facts.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "task-facts.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}
@@ -592,6 +592,60 @@ func TestTaskReorderAndBatchUpdatesAreAtomic(t *testing.T) {
 	for _, task := range batchEnvelope.Data.Tasks {
 		if task.Version != 5 || task.PlannedDate == nil || *task.PlannedDate != "2026-08-28" || task.ManualOrder != nil {
 			t.Fatalf("batch date task = %#v", task)
+		}
+	}
+}
+
+func TestTaskBatchPriorityAndDueDateAreAtomic(t *testing.T) {
+	router := newTestAPI(t)
+	first := createTaskForTaskFacts(t, router, `{"title":"批量优先级一"}`)
+	second := createTaskForTaskFacts(t, router, `{"title":"批量优先级二"}`)
+	items := fmt.Sprintf(`[{"id":%q,"expected_version":1},{"id":%q,"expected_version":1}]`, first.ID, second.ID)
+	setPriority := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(`{"action":"set_priority","items":%s,"priority":"P0"}`, items)), nil)
+	if setPriority.Code != http.StatusOK {
+		t.Fatalf("set priority: %d %s", setPriority.Code, setPriority.Body.String())
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		task := getTaskForTaskFacts(t, router, id)
+		if task.Priority != "P0" || task.Version != 2 {
+			t.Fatalf("priority task=%#v", task)
+		}
+	}
+	stale := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(`{"action":"set_due_date","items":[{"id":%q,"expected_version":2},{"id":%q,"expected_version":1}],"due_date":"2026-09-25T16:30:00+08:00"}`, first.ID, second.ID)), nil)
+	if stale.Code != http.StatusConflict || responseErrorCode(t, stale.Body.Bytes()) != "VERSION_CONFLICT" {
+		t.Fatalf("stale due: %d %s", stale.Code, stale.Body.String())
+	}
+	if task := getTaskForTaskFacts(t, router, first.ID); task.DueDate != nil {
+		t.Fatalf("partial due update=%#v", task)
+	}
+	due := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(`{"action":"set_due_date","items":[{"id":%q,"expected_version":2},{"id":%q,"expected_version":2}],"due_date":"2026-09-25T16:30:00+08:00"}`, first.ID, second.ID)), nil)
+	if due.Code != http.StatusOK {
+		t.Fatalf("set due: %d %s", due.Code, due.Body.String())
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		task := getTaskForTaskFacts(t, router, id)
+		if task.Version != 3 || task.DueDate == nil || *task.DueDate != "2026-09-25T08:30:00Z" {
+			t.Fatalf("due task=%#v", task)
+		}
+	}
+	for _, body := range []string{
+		fmt.Sprintf(`{"action":"set_priority","items":%s,"priority":"P9"}`, items),
+		fmt.Sprintf(`{"action":"set_due_date","items":%s,"due_date":"2026-09-25T16:30:00"}`, items),
+		fmt.Sprintf(`{"action":"set_priority","items":%s,"priority":"P1","due_date":null}`, items),
+	} {
+		response := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(body), nil)
+		if response.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid batch accepted: %d %s", response.Code, response.Body.String())
+		}
+	}
+	clear := performRequest(router, http.MethodPatch, "/api/v1/tasks/batch", []byte(fmt.Sprintf(`{"action":"set_due_date","items":[{"id":%q,"expected_version":3},{"id":%q,"expected_version":3}],"due_date":null}`, first.ID, second.ID)), nil)
+	if clear.Code != http.StatusOK {
+		t.Fatalf("clear due: %d %s", clear.Code, clear.Body.String())
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		task := getTaskForTaskFacts(t, router, id)
+		if task.Version != 4 || task.DueDate != nil {
+			t.Fatalf("cleared task=%#v", task)
 		}
 	}
 }

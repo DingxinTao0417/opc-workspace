@@ -16,11 +16,14 @@ import type {
 } from "../types/models";
 import { ApiError } from "./client";
 import {
+  agentRunDetailQueryKey,
+  agentRunListQueryKey,
   contentItemQueryKey,
   inboxQueryKey,
   projectQueryKey,
   roadmapMilestoneQueryKey,
   searchQueryKey,
+  taskAgentRunsQueryKey,
   taskQueryKey,
   taskAssignmentQueryKey,
   taskAssignmentQueryRootKey,
@@ -1251,6 +1254,41 @@ describe("task planned-date mutation", () => {
 });
 
 describe("task deletion mutation", () => {
+  it("refreshes AI action receipts after a confirmed task is deleted", async () => {
+    deleteTaskMock.mockResolvedValue(undefined);
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        mutations: { retry: false },
+        queries: { retry: false },
+      },
+    });
+    const actionKey = ["ai", "actions", "generation-1"] as const;
+    const taskRunsKey = taskAgentRunsQueryKey(task.id);
+    const runDetailKey = agentRunDetailQueryKey("run-1", task.id);
+    const globalRunsKey = agentRunListQueryKey({ pageSize: 50 });
+    queryClient.setQueryData(actionKey, [{ id: "proposal-1" }]);
+    queryClient.setQueryData(taskRunsKey, [{ id: "run-1" }]);
+    queryClient.setQueryData(runDetailKey, { id: "run-1", taskId: task.id });
+    queryClient.setQueryData(globalRunsKey, { items: [{ id: "run-1" }] });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useDeleteTask(), {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    act(() =>
+      result.current.mutate({ id: task.id, expectedVersion: task.version }),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["ai", "actions"],
+    });
+    expect(queryClient.getQueryState(actionKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(taskRunsKey)).toBeUndefined();
+    expect(queryClient.getQueryState(runDetailKey)).toBeUndefined();
+    expect(queryClient.getQueryState(globalRunsKey)?.isInvalidated).toBe(true);
+  });
+
   it("uses the visible version and refreshes task facts after a conflict", async () => {
     deleteTaskMock.mockRejectedValue(
       new ApiError("任务版本冲突", {
@@ -1803,6 +1841,7 @@ describe("task output mutations", () => {
         queries: { retry: false },
       },
     });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
     const wrapper = wrapperFor(queryClient);
     const reviewHook = renderHook(() => useReviewTaskSubmission(), { wrapper });
     const deleteHook = renderHook(() => useDeleteTaskArtifact(), { wrapper });
@@ -1814,6 +1853,15 @@ describe("task output mutations", () => {
       }),
     );
     await waitFor(() => expect(reviewHook.result.current.isSuccess).toBe(true));
+    for (const queryKey of [
+      ["ai", "work-plan"],
+      ["ai", "work-plans", "attention"],
+      ["ai", "plan-continuation"],
+      ["ai", "active-plan-continuations"],
+      ["ai", "recent-plan-continuations"],
+    ]) {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey });
+    }
     act(() =>
       deleteHook.result.current.mutate({
         taskId: task.id,

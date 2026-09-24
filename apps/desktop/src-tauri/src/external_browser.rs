@@ -4,7 +4,7 @@
 //! but delegates arbitrary external pages to a dedicated native webview window
 //! so rendering is stable and never subject to third-party frame blocking.
 
-use tauri::{command, AppHandle, Manager, WebviewWindowBuilder, WebviewUrl};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder, command};
 
 const EXTERNAL_BROWSER_LABEL: &str = "external-browser";
 
@@ -15,7 +15,9 @@ fn parse_external_url(raw: &str) -> Result<tauri::Url, String> {
     if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
         return Err("external browser only accepts http or https URLs".to_string());
     }
-    trimmed.parse::<tauri::Url>().map_err(|error| error.to_string())
+    trimmed
+        .parse::<tauri::Url>()
+        .map_err(|error| error.to_string())
 }
 
 #[command]
@@ -27,15 +29,11 @@ pub fn open_external_browser(app: AppHandle, url: String) -> Result<(), String> 
         return Ok(());
     }
     let host = parsed.host_str().unwrap_or("external").to_string();
-    WebviewWindowBuilder::new(
-        &app,
-        EXTERNAL_BROWSER_LABEL,
-        WebviewUrl::External(parsed),
-    )
-    .title(format!("opc-workspace 浏览器 - {host}"))
-    .inner_size(1200.0, 800.0)
-    .build()
-    .map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(&app, EXTERNAL_BROWSER_LABEL, WebviewUrl::External(parsed))
+        .title(format!("opc-workspace 浏览器 - {host}"))
+        .inner_size(1200.0, 800.0)
+        .build()
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 

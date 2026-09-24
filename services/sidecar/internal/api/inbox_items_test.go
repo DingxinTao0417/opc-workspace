@@ -25,7 +25,7 @@ func (clock *inboxTestClock) Set(value time.Time) {
 
 func newInboxTestAPI(t *testing.T, clock *inboxTestClock) (*Router, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "inbox-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "inbox-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

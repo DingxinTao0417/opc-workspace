@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { resetRuntimeConnection } from "../api/client";
 import { AutomationSettings } from "./AutomationSettings";
 
@@ -103,11 +104,13 @@ function renderSettings(
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AutomationSettings
-        onOpenInboxItem={onOpenInboxItem}
-        onOpenReminder={onOpenReminder}
-        onOpenTask={onOpenTask}
-      />
+      <MemoryRouter>
+        <AutomationSettings
+          onOpenInboxItem={onOpenInboxItem}
+          onOpenReminder={onOpenReminder}
+          onOpenTask={onOpenTask}
+        />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -119,6 +122,64 @@ afterEach(() => {
 });
 
 describe("AutomationSettings", () => {
+  it("keeps the available Agent failure notification preset disabled until manual enable", async () => {
+    let rule = {
+      ...invoiceRulePayload(),
+      id: "00000000-0000-5000-8000-000000000105",
+      preset_key: "agent-run-failed-inbox",
+      name: "Agent 失败诊断通知",
+      description: "仅创建本地诊断事项，不重跑 Agent。",
+      action_type: "inbox_item",
+      action_label: "创建本地诊断事项",
+      trigger_label: "Agent 执行失败事件",
+      permissions: ["读取 Agent 失败元数据", "创建本地诊断事项"],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/automations/runs"))
+          return response({
+            data: [],
+            meta: { page: 1, page_size: 20, total: 0 },
+          });
+        if (url.endsWith("/preview"))
+          return response({
+            data: {
+              can_enable: true,
+              trigger_summary: rule.trigger_label,
+              action_summary: rule.action_label,
+              config: rule.config,
+              next_run_at: null,
+              permissions: rule.permissions,
+            },
+          });
+        if (url.endsWith("/enable")) {
+          rule = { ...rule, status: "enabled", version: 2 };
+          return response({ data: rule });
+        }
+        return response({ data: [rule] });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderSettings();
+    const enable = await screen.findByRole("button", { name: "启用自动化" });
+    await waitFor(() => expect(enable).toBeEnabled(), { timeout: 3000 });
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).endsWith("/enable")),
+    ).toBe(false);
+    fireEvent.click(enable);
+    expect(
+      await screen.findByRole("button", { name: "停用自动化" }),
+    ).toBeVisible();
+    const writes = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        init?.method &&
+        init.method !== "GET" &&
+        !String(url).endsWith("/preview"),
+    );
+    expect(writes).toHaveLength(1);
+    expect(String(writes[0][0])).toContain(`${rule.id}/enable`);
+  });
   it("previews schedule edits, saves them, and enables the rule", async () => {
     let rule = rulePayload();
     const fetchMock = vi.fn(
@@ -160,16 +221,36 @@ describe("AutomationSettings", () => {
     renderSettings();
 
     const timeInput = await screen.findByLabelText("当地时间");
+    // The editor appears before its selected-rule effect hydrates the draft.
+    // Wait for that draft's first preview, not just the input's fallback value,
+    // otherwise the pending hydration can overwrite this synthetic edit.
+    await waitFor(
+      () => {
+        expect(
+          fetchMock.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith("/preview") &&
+              JSON.parse(String(init?.body)).config.local_time === "09:00" &&
+              JSON.parse(String(init?.body)).config.timezone ===
+                "Asia/Shanghai",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
     fireEvent.change(timeInput, { target: { value: "08:30" } });
-    await waitFor(() => {
-      expect(
-        fetchMock.mock.calls.some(
-          ([url, init]) =>
-            String(url).endsWith("/preview") &&
-            JSON.parse(String(init?.body)).config.local_time === "08:30",
-        ),
-      ).toBe(true);
-    });
+    await waitFor(
+      () => {
+        expect(
+          fetchMock.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith("/preview") &&
+              JSON.parse(String(init?.body)).config.local_time === "08:30",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
     expect(await screen.findByText("配置已保存")).toBeTruthy();
@@ -247,18 +328,34 @@ describe("AutomationSettings", () => {
     expect(screen.queryByText("待依赖")).toBeNull();
     expect(screen.queryByText(/依赖.*不可用/)).toBeNull();
 
+    // The heading alone does not prove that the selected config has hydrated.
+    await waitFor(
+      () => {
+        expect(
+          fetchMock.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith("/preview") &&
+              JSON.parse(String(init?.body)).config.priority === "P1",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
     fireEvent.change(screen.getByLabelText("任务优先级"), {
       target: { value: "P0" },
     });
-    await waitFor(() => {
-      expect(
-        fetchMock.mock.calls.some(
-          ([url, init]) =>
-            String(url).endsWith("/preview") &&
-            JSON.parse(String(init?.body)).config.priority === "P0",
-        ),
-      ).toBe(true);
-    });
+    await waitFor(
+      () => {
+        expect(
+          fetchMock.mock.calls.some(
+            ([url, init]) =>
+              String(url).endsWith("/preview") &&
+              JSON.parse(String(init?.body)).config.priority === "P0",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 3_000 },
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "启用自动化" }));
     expect(await screen.findByText("自动化已启用")).toBeTruthy();

@@ -66,6 +66,110 @@ export async function requestApplicationRestart(
   return true;
 }
 
+export type StartupRestoreChoice = {
+  id: string;
+  createdAt: string | null;
+  verificationStatus: "verified" | "unverified" | "invalid";
+  kind: string;
+  schemaVersion: number;
+  note?: string | null;
+};
+
+export type ScheduledRestoreResult = {
+  backupId: string;
+  rollbackBackupId: string;
+  requestedAt: string;
+  restartRequired: boolean;
+};
+
+const canonicalId =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function parseStartupRestoreChoice(value: unknown): StartupRestoreChoice {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("INVALID_RESPONSE");
+  }
+  const record = value as Record<string, unknown>;
+  const id = String(record.id ?? "");
+  const status = String(record.verificationStatus ?? "");
+  const kind = String(record.kind ?? "");
+  const schemaVersion = Number(record.schemaVersion);
+  if (
+    !canonicalId.test(id) ||
+    !["verified", "unverified", "invalid"].includes(status) ||
+    !kind ||
+    kind.length > 40 ||
+    !Number.isInteger(schemaVersion) ||
+    schemaVersion < 0 ||
+    (record.createdAt != null &&
+      (typeof record.createdAt !== "string" ||
+        !Number.isFinite(Date.parse(record.createdAt)))) ||
+    (record.note != null &&
+      (typeof record.note !== "string" || record.note.length > 120))
+  ) {
+    throw new Error("INVALID_RESPONSE");
+  }
+  return {
+    id,
+    createdAt: (record.createdAt as string | null) ?? null,
+    verificationStatus: status as StartupRestoreChoice["verificationStatus"],
+    kind,
+    schemaVersion,
+    note: (record.note as string | null | undefined) ?? null,
+  };
+}
+
+export async function listStartupRestoreChoices(
+  invokeCommand?: InvokeCommand,
+): Promise<StartupRestoreChoice[]> {
+  if (!invokeCommand && !isDesktopRuntime()) return [];
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  const raw = await invoke("list_startup_restore_choices");
+  if (!Array.isArray(raw) || raw.length > 20) {
+    throw new Error("INVALID_RESPONSE");
+  }
+  return raw.map(parseStartupRestoreChoice);
+}
+
+export async function scheduleStartupRestore(
+  backupId: string,
+  invokeCommand?: InvokeCommand,
+): Promise<ScheduledRestoreResult> {
+  if (!canonicalId.test(backupId)) {
+    throw new Error("INVALID_RESPONSE");
+  }
+  if (!invokeCommand && !isDesktopRuntime()) {
+    throw new Error("UNAVAILABLE");
+  }
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  const raw = (await invoke("schedule_startup_restore", {
+    args: { backupId, confirm: true },
+  })) as Record<string, unknown> | null;
+  if (!raw || typeof raw !== "object") {
+    throw new Error("INVALID_RESPONSE");
+  }
+  const backup = String(raw.backupId ?? "");
+  const rollback = String(raw.rollbackBackupId ?? "");
+  const requestedAt = String(raw.requestedAt ?? "");
+  if (
+    !canonicalId.test(backup) ||
+    !canonicalId.test(rollback) ||
+    backup === rollback ||
+    raw.restartRequired !== true ||
+    !Number.isFinite(Date.parse(requestedAt))
+  ) {
+    throw new Error("INVALID_RESPONSE");
+  }
+  return {
+    backupId: backup,
+    rollbackBackupId: rollback,
+    requestedAt,
+    restartRequired: true,
+  };
+}
+
 export async function openDesktopLogDirectory(
   invokeCommand?: InvokeCommand,
 ): Promise<boolean> {

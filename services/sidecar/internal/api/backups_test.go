@@ -892,6 +892,19 @@ func TestScheduledRestoreCreatesRollbackAndAppliesBeforeNextDatabaseOpen(t *test
 	if blocked.Code != http.StatusServiceUnavailable || responseErrorCode(t, blocked.Body.Bytes()) != "RESTORE_RESTART_REQUIRED" {
 		t.Fatalf("request after scheduled restore = %d: %s", blocked.Code, blocked.Body.String())
 	}
+	diagnostics := performRequest(router, http.MethodGet, "/api/v1/backups/restore-diagnostics", nil, nil)
+	if diagnostics.Code != http.StatusOK {
+		t.Fatalf("restore diagnostics while restart is pending = %d: %s", diagnostics.Code, diagnostics.Body.String())
+	}
+	var diagnosticsEnvelope struct {
+		Data restoreDiagnostics `json:"data"`
+	}
+	if err := json.Unmarshal(diagnostics.Body.Bytes(), &diagnosticsEnvelope); err != nil {
+		t.Fatalf("decode pending restore diagnostics: %v", err)
+	}
+	if diagnosticsEnvelope.Data.Status != "restart_required" || !diagnosticsEnvelope.Data.RestartRequired {
+		t.Fatalf("pending restore diagnostics = %#v", diagnosticsEnvelope.Data)
+	}
 	if err := router.Close(); err != nil {
 		t.Fatalf("close router before restore: %v", err)
 	}

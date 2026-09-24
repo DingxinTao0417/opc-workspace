@@ -1,11 +1,29 @@
-import { apiRequest, ApiError, normalizeTask } from "./client";
-import type { NewTaskInput } from "../types/models";
+import {
+  apiRequest,
+  ApiError,
+  normalizeTask,
+  aiGenerationCitations,
+} from "./client";
+import type {
+  AiCitationResult,
+  AiRunProgress,
+  NewTaskInput,
+} from "../types/models";
+import { parseAiRunProgressList } from "./aiProgress";
+import { parseAiGenerationOrigin } from "../lib/aiGenerationOrigin";
+import {
+  parseAiAccessRequest,
+  type AiAccessRequestData,
+} from "../lib/aiAccessRequest";
+import type { AiGenerationOrigin } from "../types/models";
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
 export interface AiGeneration {
+  origin?: AiGenerationOrigin;
+  accessRequest?: AiAccessRequestData;
   id: string;
   session_id: string;
   provider_id: string;
@@ -15,6 +33,8 @@ export interface AiGeneration {
   error_code: string | null;
   persist: boolean;
   client_request_id: string;
+  citationEvidence?: AiCitationResult;
+  progress?: AiRunProgress[];
 }
 
 function generation(value: unknown): AiGeneration {
@@ -29,7 +49,34 @@ function generation(value: unknown): AiGeneration {
   ) {
     throw new ApiError("生成状态响应无效", { code: "INVALID_RESPONSE" });
   }
+  const citationEvidence = aiGenerationCitations(value);
+  let accessRequest: AiAccessRequestData | undefined;
+  try {
+    accessRequest = parseAiAccessRequest(value.access_request);
+  } catch {
+    throw new ApiError("工作台权限请求响应无效", { code: "INVALID_RESPONSE" });
+  }
+  if (
+    accessRequest &&
+    value.status !== "completed" &&
+    value.status !== "streaming"
+  )
+    throw new ApiError("工作台权限请求状态无效", { code: "INVALID_RESPONSE" });
+  const progress = parseAiRunProgressList(value.progress);
+  if (
+    !["queued", "streaming"].includes(String(value.status)) &&
+    progress?.some((step) => step.status === "running")
+  )
+    throw new ApiError("已结束生成仍包含运行中步骤", {
+      code: "INVALID_RESPONSE",
+    });
+  if (citationEvidence && value.status !== "completed")
+    throw new ApiError("未完成生成不应包含引用结果", {
+      code: "INVALID_RESPONSE",
+    });
   return {
+    origin: parseAiGenerationOrigin(value.origin),
+    accessRequest,
     id: value.id,
     session_id: value.session_id,
     provider_id: value.provider_id,
@@ -42,6 +89,8 @@ function generation(value: unknown): AiGeneration {
       typeof value.client_request_id === "string"
         ? value.client_request_id
         : "",
+    citationEvidence,
+    progress,
   };
 }
 
@@ -72,6 +121,17 @@ export async function cancelAiGeneration(id: string): Promise<void> {
   await apiRequest(`/api/v1/ai/generations/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
   });
+}
+
+export async function dismissAiAccessRequest(
+  generationId: string,
+): Promise<void> {
+  await apiRequest(
+    `/api/v1/ai/generations/${encodeURIComponent(generationId)}/access-request/dismiss`,
+    {
+      method: "POST",
+    },
+  );
 }
 
 export async function confirmAiMessageTask(

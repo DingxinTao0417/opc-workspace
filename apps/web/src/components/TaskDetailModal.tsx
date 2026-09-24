@@ -2,6 +2,10 @@ import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
+import {
+  parseAgentRunLocation,
+  parseTaskWorkspaceLocation,
+} from "../lib/aiWorkspaceLinks";
 import { useDeleteTask, useTaskQuery, useUpdateTask } from "../api/hooks";
 import { useUiStore } from "../store/ui";
 import type {
@@ -22,6 +26,9 @@ import { TaskLifecycleSection } from "./TaskLifecycleSection";
 import { TaskOutputsSection } from "./TaskOutputsSection";
 import { TaskSelect } from "./TaskSelect";
 import { TaskTagPicker } from "./TaskTagPicker";
+import { taskHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
+import { ReturnToAiChat } from "./ClientRecordLocation";
 
 const priorities: { value: TaskPriority; label: string }[] = [
   { value: "P0", label: "紧急" },
@@ -75,6 +82,9 @@ function mutationErrorMessage(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof ApiError) {
     if (error.code === "VERSION_CONFLICT") return null;
+    if (error.code === "TASK_HAS_ACTIVE_AGENT_RUN") {
+      return "该任务仍有执行中的 Agent 作业。请先等待或取消执行；若产出登记待恢复，请先在执行过程中重试登记。";
+    }
     if (error.code === "TASK_HAS_ACTIVE_INBOX_RELATIONS") {
       return "该任务仍被收件箱条目关联。请先到收件箱解除活动关联，再删除任务。";
     }
@@ -94,6 +104,11 @@ export function TaskDetailModal() {
   const taskId = useUiStore((state) => state.taskDetailId);
   const setTaskId = useUiStore((state) => state.setTaskDetailId);
   const location = useLocation();
+  const returnLocation =
+    parseAgentRunLocation(location.pathname, location.search) ??
+    parseTaskWorkspaceLocation(location.pathname, location.search);
+  const returnSession =
+    returnLocation?.taskId === taskId ? returnLocation.returnSession : null;
   const navigate = useNavigate();
   const routedTaskId = matchPath("/tasks/:taskId", location.pathname)?.params
     .taskId;
@@ -334,68 +349,82 @@ export function TaskDetailModal() {
   return (
     <Modal
       footer={
-        task ? (
-          confirmingDelete ? (
-            <>
-              <span className="task-delete-warning">
-                <AlertTriangle size={14} />
-                删除后无法恢复，确定继续？
-              </span>
-              <button
-                className="button button-secondary"
-                disabled={busy}
-                onClick={() => setConfirmingDelete(false)}
-                type="button"
-              >
-                返回
-              </button>
-              <button
-                className="button button-danger"
-                disabled={busy}
-                onClick={confirmDelete}
-                type="button"
-              >
-                {deleteMutation.isPending ? "正在删除…" : "确认删除"}
-              </button>
-            </>
+        <>
+          <ReturnToAiChat
+            sessionId={returnSession}
+            disabled={
+              busy || taskDraftDirty || versionConflict || confirmingDelete
+            }
+            onNavigate={() => setTaskId(null)}
+          />
+          {task ? (
+            confirmingDelete ? (
+              <>
+                <span className="task-delete-warning">
+                  <AlertTriangle size={14} />
+                  删除后无法恢复；活动 Agent 作业会阻止删除。确定继续？
+                </span>
+                <button
+                  className="button button-secondary"
+                  disabled={busy}
+                  onClick={() => setConfirmingDelete(false)}
+                  type="button"
+                >
+                  返回
+                </button>
+                <button
+                  className="button button-danger"
+                  disabled={busy}
+                  onClick={confirmDelete}
+                  type="button"
+                >
+                  {deleteMutation.isPending ? "正在删除…" : "确认删除"}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="button button-quiet task-detail-delete"
+                  disabled={busy || versionConflict}
+                  onClick={() => setConfirmingDelete(true)}
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                  删除任务
+                </button>
+                <AiIssueHandoffButton
+                  content={taskHandoff(task.id, task.title, task.status)}
+                  disabled={busy || taskDraftDirty || versionConflict}
+                  onNavigate={() => setTaskId(null)}
+                />
+                <button
+                  className="button button-secondary"
+                  disabled={busy}
+                  onClick={close}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="button button-primary"
+                  disabled={title.trim().length < 2 || busy || versionConflict}
+                  form="task-detail-form"
+                  type="submit"
+                >
+                  {updateMutation.isPending ? "正在保存…" : "保存修改"}
+                </button>
+              </>
+            )
           ) : (
-            <>
-              <button
-                className="button button-quiet task-detail-delete"
-                disabled={busy || versionConflict}
-                onClick={() => setConfirmingDelete(true)}
-                type="button"
-              >
-                <Trash2 size={14} />
-                删除任务
-              </button>
-              <button
-                className="button button-secondary"
-                disabled={busy}
-                onClick={close}
-                type="button"
-              >
-                取消
-              </button>
-              <button
-                className="button button-primary"
-                disabled={title.trim().length < 2 || busy || versionConflict}
-                form="task-detail-form"
-                type="submit"
-              >
-                {updateMutation.isPending ? "正在保存…" : "保存修改"}
-              </button>
-            </>
-          )
-        ) : (
-          <button
-            className="button button-secondary"
-            onClick={close}
-            type="button"
-          >
-            关闭
-          </button>
-        )
+            <button
+              className="button button-secondary"
+              onClick={close}
+              type="button"
+            >
+              关闭
+            </button>
+          )}
+        </>
       }
       onClose={close}
       open={Boolean(taskId)}
@@ -525,7 +554,11 @@ export function TaskDetailModal() {
             task={task}
           />
 
-          <TaskAgentRunsSection task={task} />
+          <TaskAgentRunsSection
+            task={task}
+            returnSession={returnSession}
+            disabled={busy || taskDraftDirty || versionConflict}
+          />
           <TaskOutputsSection
             disabled={
               taskWriteBusy ||

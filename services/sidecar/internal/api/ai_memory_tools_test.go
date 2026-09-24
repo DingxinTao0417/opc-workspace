@@ -184,8 +184,8 @@ func TestAIChatExecutesAllowlistedMemoryToolAndFeedsResultBack(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode chat request: %v", err)
 		}
-		if len(payload.Tools) != 3 {
-			t.Errorf("production memory tools=%d, want 3", len(payload.Tools))
+		if len(payload.Tools) != 4 {
+			t.Errorf("production memory and request tools=%d, want 4", len(payload.Tools))
 		}
 		if call == 1 {
 			w.Header().Set("Content-Type", "text/event-stream")

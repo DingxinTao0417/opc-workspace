@@ -197,7 +197,7 @@ func (a *API) listInboxItems(c *gin.Context) {
 		return
 	}
 	sourceEntityType := strings.TrimSpace(c.Query("source_entity_type"))
-	if sourceEntityType != "" && sourceEntityType != clientFollowupInboxSourceType && sourceEntityType != contentItemInboxSourceType && sourceEntityType != roadmapMilestoneInboxSourceType && sourceEntityType != invoiceDueInboxSourceType && sourceEntityType != automationInboxSourceType {
+	if sourceEntityType != "" && sourceEntityType != clientFollowupInboxSourceType && sourceEntityType != contentItemInboxSourceType && sourceEntityType != roadmapMilestoneInboxSourceType && sourceEntityType != invoiceDueInboxSourceType && sourceEntityType != automationInboxSourceType && sourceEntityType != agentRunFailedInboxSourceType {
 		writeError(c, http.StatusBadRequest, "INVALID_FILTER", "source_entity_type filter is invalid")
 		return
 	}
@@ -335,23 +335,11 @@ func (a *API) createInboxItem(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		item := models.InboxItem{
-			ID: uuid.NewString(), Kind: "manual", Title: normalized.Title, Summary: normalized.Summary,
-			SourceEntityType: "manual", Priority: normalized.Priority, Status: "open",
-			ResolutionPolicy: "manual", DueAt: normalized.DueAt, PayloadJSON: normalized.PayloadJSON,
-			Version: 1, CreatedAt: nowText, UpdatedAt: nowText,
-		}
-		if err := tx.Create(&item).Error; err != nil {
-			return fmt.Errorf("create Inbox Item: %w", err)
-		}
-		if err := recordInboxWorkflowEvent(tx, item.ID, "created", nil, inboxItemEventState(item, ""), requestIDFromContext(c), nowText); err != nil {
-			return err
-		}
-		response, err = inboxItemOutputFromModel(item, now)
+		response, err = createInboxItemInTransaction(tx, normalized, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
-		return recordInboxSnapshot(tx, idempotencyKey, createInboxItemEndpoint, item.ID, requestHash, statusCode, response, nowText)
+		return recordInboxSnapshot(tx, idempotencyKey, createInboxItemEndpoint, response.ID, requestHash, statusCode, response, nowText)
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -415,60 +403,9 @@ func (a *API) updateInboxItem(c *gin.Context) {
 	}
 
 	now := a.inboxNow()
-	nowText := formatInboxTimestamp(now)
 	var response inboxItemOutput
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		current, err := loadInboxItem(tx, id)
-		if err != nil {
-			return inboxItemLoadError(err)
-		}
-		if current.Version != expectedVersion {
-			return inboxVersionConflict()
-		}
-		if inboxItemTerminal(current.Status) {
-			return inboxTerminalConflict("Archived Inbox Items must be reopened before editing")
-		}
-		next := current
-		patch.apply(&next)
-		if (current.SourceEntityType == systemMaintenanceInboxSourceType ||
-			current.SourceEntityType == projectCompletionInboxSourceType) &&
-			!equalStringPointers(current.DueAt, next.DueAt) {
-			message := "system maintenance Inbox Items cannot have a due date"
-			if current.SourceEntityType == projectCompletionInboxSourceType {
-				message = "Project completion Inbox Items cannot have a due date"
-			}
-			return newProjectRequestError(
-				http.StatusUnprocessableEntity,
-				"VALIDATION_ERROR",
-				message,
-			)
-		}
-		if inboxItemEditableEqual(current, next) {
-			response, err = inboxItemOutputFromModel(current, now)
-			return err
-		}
-		if next.TriagedAt == nil {
-			next.TriagedAt = &nowText
-		}
-		next.Version = current.Version + 1
-		next.UpdatedAt = nowText
-		result := tx.Model(&models.InboxItem{}).
-			Where("id = ? AND version = ? AND status IN ('open', 'tracking')", id, expectedVersion).
-			Updates(map[string]any{
-				"title": next.Title, "summary": next.Summary, "priority": next.Priority,
-				"due_at": next.DueAt, "triaged_at": next.TriagedAt,
-				"version": next.Version, "updated_at": next.UpdatedAt,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return inboxVersionConflict()
-		}
-		if err := recordInboxWorkflowEvent(tx, id, "updated", inboxItemEventState(current, ""), inboxItemEventState(next, ""), requestIDFromContext(c), nowText); err != nil {
-			return err
-		}
-		response, err = inboxItemOutputFromModel(next, now)
+		response, err = updateInboxItemInTransaction(tx, id, expectedVersion, patch, requestIDFromContext(c), now)
 		return err
 	})
 	if err != nil {
@@ -545,65 +482,7 @@ func (a *API) executeInboxCommand(c *gin.Context, command string) {
 			statusCode = replayStatus
 			return nil
 		}
-		if command == "snooze" {
-			through, parseErr := time.Parse(time.RFC3339Nano, commandInput.SnoozedUntil)
-			if parseErr != nil || !through.After(now) {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "snoozed_until must be later than server_now")
-			}
-		}
-		current, loadErr := loadInboxItem(tx, id)
-		if loadErr != nil {
-			return inboxItemLoadError(loadErr)
-		}
-		if current.Version != expectedVersion {
-			return inboxVersionConflict()
-		}
-		if command == "resolve" && current.ResolutionPolicy == "all_required_tasks_done" {
-			progress, progressErr := loadInboxTaskProgress(tx, id)
-			if progressErr != nil {
-				return progressErr
-			}
-			if progress.RequiredTotal == 0 || !progress.AllRequiredDone {
-				return newProjectRequestError(
-					http.StatusConflict,
-					"INBOX_REQUIRED_TASKS_INCOMPLETE",
-					"All active required Tasks must be done before resolving this Inbox Item; use force-resolve for an exception",
-				)
-			}
-		}
-		reopenTracking := false
-		if command == "reopen" {
-			var activeRelations int64
-			if err := tx.Model(&models.InboxItemTask{}).
-				Where("inbox_item_id = ? AND unlinked_at IS NULL", id).
-				Count(&activeRelations).Error; err != nil {
-				return err
-			}
-			reopenTracking = activeRelations > 0
-		}
-		next, changed, transitionErr := applyInboxCommand(current, commandInput, nowText, reopenTracking)
-		if transitionErr != nil {
-			return transitionErr
-		}
-		if changed {
-			result := tx.Model(&models.InboxItem{}).
-				Where("id = ? AND version = ?", id, expectedVersion).
-				Updates(inboxCommandUpdates(next))
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected == 0 {
-				return inboxVersionConflict()
-			}
-			if err := recordInboxWorkflowEvent(
-				tx, id, inboxCommandEventAction(command),
-				inboxItemEventState(current, ""), inboxItemEventState(next, commandInput.Reason),
-				requestIDFromContext(c), nowText,
-			); err != nil {
-				return err
-			}
-		}
-		response, err = inboxItemOutputFromModel(next, now)
+		response, err = commandInboxItemInTransaction(tx, id, commandInput, requestIDFromContext(c), now)
 		if err != nil {
 			return err
 		}
@@ -659,40 +538,9 @@ func (a *API) readAllInboxItems(c *gin.Context) {
 			statusCode = replayStatus
 			return nil
 		}
-		cutoff, parseErr := time.Parse(time.RFC3339Nano, through)
-		if parseErr != nil || cutoff.After(now) {
-			return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "through_created_at cannot be later than server_now")
-		}
-		var items []models.InboxItem
-		if err := tx.Where(`
-			read_at IS NULL
-			AND status IN ('open', 'tracking')
-			AND (snoozed_until IS NULL OR snoozed_until <= ?)
-			AND created_at <= ?
-			AND updated_at <= ?
-		`, through, through, through).
-			Order("created_at ASC").Order("id ASC").Find(&items).Error; err != nil {
+		response, err = readAllInboxItemsInTransaction(tx, through, requestIDFromContext(c), now)
+		if err != nil {
 			return err
-		}
-		for index := range items {
-			current := items[index]
-			next := current
-			next.ReadAt = &nowText
-			next.Version = current.Version + 1
-			next.UpdatedAt = nowText
-			result := tx.Model(&models.InboxItem{}).
-				Where("id = ? AND version = ? AND read_at IS NULL", current.ID, current.Version).
-				Updates(map[string]any{"read_at": nowText, "version": next.Version, "updated_at": nowText})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return inboxVersionConflict()
-			}
-			if err := recordInboxWorkflowEvent(tx, current.ID, "read", inboxItemEventState(current, ""), inboxItemEventState(next, ""), requestIDFromContext(c), nowText); err != nil {
-				return err
-			}
-			response.MarkedCount++
 		}
 		return recordInboxSnapshot(tx, idempotencyKey, readAllInboxEndpoint, through, requestHash, statusCode, response, nowText)
 	})
@@ -707,6 +555,60 @@ func (a *API) readAllInboxItems(c *gin.Context) {
 		c.Header("Idempotency-Replayed", "true")
 	}
 	c.JSON(statusCode, gin.H{"data": response})
+}
+
+func inboxReadAllEligibleQuery(tx *gorm.DB, through string) *gorm.DB {
+	return tx.Model(&models.InboxItem{}).Where(`
+		read_at IS NULL
+		AND status IN ('open', 'tracking')
+		AND (snoozed_until IS NULL OR snoozed_until <= ?)
+		AND created_at <= ?
+		AND updated_at <= ?
+	`, through, through, through)
+}
+
+func countInboxItemsEligibleForReadAll(tx *gorm.DB, through string) (int64, error) {
+	var count int64
+	err := inboxReadAllEligibleQuery(tx, through).Count(&count).Error
+	return count, err
+}
+
+// readAllInboxItemsInTransaction is shared by the native Inbox command and
+// AI approval execution. The caller supplies an immutable list snapshot
+// cutoff; records created or changed after it are deliberately excluded.
+func readAllInboxItemsInTransaction(tx *gorm.DB, through, requestID string, now time.Time) (readAllInboxItemsOutput, error) {
+	response := readAllInboxItemsOutput{ThroughCreatedAt: through}
+	cutoff, err := time.Parse(time.RFC3339Nano, through)
+	if err != nil || cutoff.After(now) {
+		return response, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "through_created_at cannot be later than server_now")
+	}
+	var items []models.InboxItem
+	if err := inboxReadAllEligibleQuery(tx, through).
+		Order("created_at ASC").Order("id ASC").Find(&items).Error; err != nil {
+		return response, err
+	}
+	nowText := formatInboxTimestamp(now)
+	for index := range items {
+		current := items[index]
+		next := current
+		next.ReadAt = &nowText
+		next.Version = current.Version + 1
+		next.UpdatedAt = nowText
+		result := tx.Model(&models.InboxItem{}).
+			Where("id = ? AND version = ? AND read_at IS NULL", current.ID, current.Version).
+			Updates(map[string]any{"read_at": nowText, "version": next.Version, "updated_at": nowText})
+		if result.Error != nil {
+			return response, result.Error
+		}
+		if result.RowsAffected != 1 {
+			return response, inboxVersionConflict()
+		}
+		if err := recordInboxWorkflowEvent(tx, current.ID, "read", inboxItemEventState(current, ""), inboxItemEventState(next, ""), requestID, nowText); err != nil {
+			return response, err
+		}
+		response.MarkedCount++
+	}
+	return response, nil
 }
 
 func (a *API) listInboxItemEvents(c *gin.Context) {

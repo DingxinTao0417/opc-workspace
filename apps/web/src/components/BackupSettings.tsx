@@ -40,6 +40,8 @@ import type {
   BusinessPackageImportPreview,
   ScheduledBackupPolicy,
 } from "../types/models";
+import { dataBackupSettingsHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
@@ -497,6 +499,12 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       : null;
   const restoreReady = scheduledRestore ?? diagnosticRestore;
   const locked = pending || restoreReady !== null;
+  const handoffContent = dataBackupSettingsHandoff({
+    backupCount: backupsQuery.data?.length ?? 0,
+    policyEnabled: policyDraft?.enabled ?? null,
+    policyStatus: policyDraft?.lastStatus ?? "unknown",
+    restoreStatus: restoreDiagnostics?.status ?? "unknown",
+  });
   const mutationError =
     createMutation.error ??
     verifyMutation.error ??
@@ -870,6 +878,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       <header className="settings-content-header">
         <h3>数据与备份</h3>
         <p>创建 SQLite 与受控文件处于同一写入边界的本地备份。</p>
+        <AiIssueHandoffButton content={handoffContent} disabled={locked} />
       </header>
 
       {storageSettings}

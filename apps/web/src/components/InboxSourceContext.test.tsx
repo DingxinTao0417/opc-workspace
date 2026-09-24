@@ -61,13 +61,412 @@ const reminderItem: InboxItem = {
   },
 };
 
+const targetId = "018f0000-0000-7000-8000-000000000830";
+const clientId = "018f0000-0000-7000-8000-000000000831";
+const sessionId = "018f0000-0000-7000-8000-000000000899";
+const ruleId = "00000000-0000-5000-8000-000000000101";
+const at = "2026-08-28T10:00:00Z";
+function eventSource(
+  sourceEntityType: InboxItem["sourceEntityType"],
+  sourceEventKey: string,
+  payloadJson: InboxItem["payloadJson"],
+  dueAt: string | null = null,
+): InboxItem {
+  return {
+    ...sourceItem,
+    sourceEntityType,
+    sourceEntityId: targetId,
+    sourceEventKey,
+    payloadJson,
+    dueAt,
+  };
+}
+const navigationCases = [
+  {
+    item: eventSource(
+      "agent_run_failed" as InboxItem["sourceEntityType"],
+      `agent-run:${targetId}:failed`,
+      {
+        agent_run_id: targetId,
+        task_id: clientId,
+        attempt: 2,
+        error_code: "AGENT_MODEL_FAILED",
+        failed_at: "2026-09-21T12:00:00.000000000Z",
+        automation_rule_id: "00000000-0000-5000-8000-000000000105",
+        automation_run_id: sourceItem.id,
+        source_event_id: sourceItem.payloadJson.submission_id,
+      },
+    ),
+    label: "查看失败执行",
+    href: `/tasks/${clientId}?agent_run=${targetId}`,
+    routeFields: [
+      "agent_run_id",
+      "task_id",
+      "automation_run_id",
+      "source_event_id",
+    ],
+  },
+  {
+    item: sourceItem,
+    label: "查看来源提交",
+    href: `/tasks/${sourceItem.payloadJson.task_id}/submissions/${sourceItem.payloadJson.submission_id}`,
+    routeFields: ["artifact_id", "task_id", "submission_id"],
+  },
+  {
+    item: reminderItem,
+    label: "查看来源提醒",
+    href: `/inbox?reminders=fired&reminder=${reminderId}`,
+    routeFields: ["reminder_id"],
+  },
+  {
+    item: eventSource("task", `task:${targetId}:blocked:4`, {
+      task_id: targetId,
+      task_title: "任务",
+      blocked_reason: "阻塞原因",
+      blocked_at: at,
+      blocked_from_status: "in_progress",
+      block_version: 4,
+    }),
+    label: "查看来源任务",
+    href: `/tasks/${targetId}`,
+    routeFields: ["task_id"],
+  },
+  {
+    item: eventSource(
+      "task_due",
+      `task:${targetId}:due:${at}`,
+      {
+        task_id: targetId,
+        task_title: "任务",
+        due_at: at,
+        projected_at: at,
+        due_state: "overdue",
+        lead_minutes: 1440,
+      },
+      at,
+    ),
+    label: "查看来源任务",
+    href: `/tasks/${targetId}`,
+    routeFields: ["task_id"],
+  },
+  {
+    item: eventSource(
+      "invoice_due",
+      `invoice:${targetId}:overdue:2026-08-28`,
+      {
+        invoice_id: targetId,
+        invoice_number: "INV-1",
+        client_id: clientId,
+        client_name: "客户",
+        project_id: null,
+        project_name: null,
+        amount_minor: 100,
+        currency: "CNY",
+        due_date: "2026-08-27",
+        due_state: "overdue",
+        occurrence_date: "2026-08-28",
+        invoice_version: 4,
+        projected_at: at,
+        lead_days: 3,
+      },
+      at,
+    ),
+    label: "查看来源发票",
+    href: `/invoices/${targetId}`,
+    routeFields: ["invoice_id"],
+  },
+  {
+    item: eventSource(
+      "roadmap_milestone",
+      `roadmap:${targetId}:due:4`,
+      {
+        roadmap_milestone_id: targetId,
+        event_type: "due",
+        milestone_version: 4,
+        target_date: "2026-08-28",
+        year: 2026,
+        quarter: 3,
+      },
+      at,
+    ),
+    label: "查看路线图",
+    href: `/roadmap?milestone=${targetId}`,
+    routeFields: ["roadmap_milestone_id"],
+  },
+  {
+    item: eventSource(
+      "content_item",
+      `content:${targetId}:publish_due:4`,
+      {
+        content_item_id: targetId,
+        event_type: "publish_due",
+        content_version: 4,
+        scheduled_at: at,
+        scheduled_timezone: "Asia/Shanghai",
+      },
+      at,
+    ),
+    label: "查看内容日历",
+    href: `/content-calendar?item=${targetId}`,
+    routeFields: ["content_item_id"],
+  },
+  {
+    item: eventSource(
+      "client_followup",
+      `followup:${targetId}:due:4`,
+      {
+        client_followup_id: targetId,
+        client_id: clientId,
+        scheduled_at: at,
+        timezone: "Asia/Shanghai",
+        channel: "微信",
+      },
+      at,
+    ),
+    label: "查看客户回访",
+    href: `/clients/${clientId}?followup=${targetId}`,
+    routeFields: ["client_followup_id", "client_id"],
+  },
+  {
+    item: eventSource("project_completion", `project:${targetId}:completed:4`, {
+      project_id: targetId,
+      project_name: "项目",
+      completed_at: at,
+      completion_version: 4,
+      incomplete_task_count: 0,
+    }),
+    label: "查看来源项目",
+    href: `/projects/${targetId}`,
+    routeFields: ["project_id"],
+  },
+  {
+    item: eventSource("automation", `automation:event:${ruleId}:${clientId}`, {
+      automation_rule_id: ruleId,
+      automation_run_id: targetId,
+      preset_key: "project-completed-inbox",
+      project_id: clientId,
+      project_name: "历史项目",
+    }),
+    label: "查看自动化运行",
+    href: `/settings/automation?run=${targetId}`,
+    routeFields: ["automation_rule_id", "automation_run_id", "project_id"],
+  },
+];
+
+describe.each(navigationCases)(
+  "source roundtrip: $item.sourceEntityType",
+  ({ item, label, href, routeFields }) => {
+    it.each([
+      undefined,
+      sessionId,
+      "https://evil.invalid",
+      `${sessionId}&run=${targetId}`,
+    ])("uses only the supplied valid conversation (%s)", (returnSession) => {
+      render(
+        <MemoryRouter
+          initialEntries={[
+            `/inbox/${item.id}?return_session=${clientId}&extra=untrusted`,
+          ]}
+        >
+          <InboxSourceContext item={item} returnSession={returnSession} />
+        </MemoryRouter>,
+      );
+      const suffix =
+        returnSession === sessionId
+          ? `${href.includes("?") ? "&" : "?"}return_session=${sessionId}`
+          : "";
+      expect(screen.getByRole("link", { name: label })).toHaveAttribute(
+        "href",
+        `${href}${suffix}`,
+      );
+    });
+
+    it("has no live links after source deletion", () => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={{ ...item, sourceDeletedAt: at }}
+            returnSession={sessionId}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+    });
+
+    it.each([
+      { kind: "manual" as const },
+      { sourceEntityId: clientId },
+      { sourceEventKey: "wrong-source-key" },
+    ])("does not navigate a mismatched snapshot (%j)", (override) => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={{ ...item, ...override }}
+            returnSession={sessionId}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+    });
+
+    it.each(routeFields)("rejects noncanonical route identity %s", (field) => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={{
+              ...item,
+              payloadJson: {
+                ...item.payloadJson,
+                [field]: `${targetId}/../../ai?return_session=${clientId}`,
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+    });
+
+    it("does not offer an alternate href while navigation is blocked", () => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={item}
+            returnSession={sessionId}
+            navigationDisabled
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+      const button = screen.getByRole("button", { name: label });
+      expect(button).toBeDisabled();
+      expect(button).not.toHaveAttribute("href");
+    });
+  },
+);
+
 afterEach(() => {
   cleanup();
   useUiStore.setState({ settingsOpen: false, settingsModule: "general" });
 });
 
 describe("InboxSourceContext", () => {
-  it("shows the immutable Task Artifact snapshot and precise Task link", () => {
+  it.each([
+    ["AGENT_MODEL_TRUNCATED", "模型输出未完整结束，未登记产出。"],
+    ["AGENT_MODEL_FILTERED", "模型拒绝或过滤了输出，未登记产出。"],
+    [
+      "AGENT_MODEL_RESPONSE_INVALID",
+      "模型响应不符合完整文本交付协议，未登记产出。",
+    ],
+  ])(
+    "explains the historical failure %s without treating the snapshot as current Run proof",
+    (error_code, message) => {
+      const item = {
+        ...navigationCases[0].item,
+        payloadJson: { ...navigationCases[0].item.payloadJson, error_code },
+      };
+      render(
+        <MemoryRouter>
+          <InboxSourceContext item={item} />
+        </MemoryRouter>,
+      );
+      expect(screen.getByText(message)).toBeVisible();
+      expect(screen.getByText(error_code)).toBeVisible();
+      expect(
+        screen.getByText(/以下是失败时的安全元数据，不是当前执行状态证明/),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("link", { name: "查看失败执行" }),
+      ).toHaveAttribute("href", navigationCases[0].href);
+      expect(
+        screen.queryByRole("button", { name: /重试|恢复|执行/ }),
+      ).not.toBeInTheDocument();
+    },
+  );
+  it("rebuilds reminder filters without duplicate or stale navigation targets", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/inbox?risk=blocked&risk=tracking&view=not-a-view&reminders=scheduled&reminder=${clientId}&return_session=${clientId}&return_session=${targetId}&url=https://evil.invalid`,
+        ]}
+      >
+        <InboxSourceContext item={reminderItem} returnSession={sessionId} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "查看来源提醒" })).toHaveAttribute(
+      "href",
+      `/inbox?reminders=fired&reminder=${reminderId}&return_session=${sessionId}`,
+    );
+  });
+
+  it.each(["unknown", "File", "file/../../ai", ""])(
+    "rejects invalid Artifact storage kind %s",
+    (storageKind) => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={{
+              ...sourceItem,
+              payloadJson: {
+                ...sourceItem.payloadJson,
+                storage_kind: storageKind,
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+    },
+  );
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid historical submission sequence %s",
+    (sequence) => {
+      render(
+        <MemoryRouter>
+          <InboxSourceContext
+            item={{
+              ...sourceItem,
+              payloadJson: {
+                ...sourceItem.payloadJson,
+                submission_sequence: sequence,
+              },
+            }}
+          />
+        </MemoryRouter>,
+      );
+      expect(screen.queryAllByRole("link")).toHaveLength(0);
+    },
+  );
+
+  it("keeps data settings closed while source navigation is blocked", () => {
+    render(
+      <MemoryRouter>
+        <InboxSourceContext
+          navigationDisabled
+          item={{
+            ...sourceItem,
+            sourceEntityType: "system_maintenance",
+            sourceEntityId: "backup:create",
+            sourceEventKey: `system:backup:create:${targetId}`,
+            payloadJson: {
+              component: "backup",
+              operation: "create",
+              failure_code: "backup_create_failed",
+              occurred_at: at,
+              message:
+                "无法创建已验证的本地备份；现有数据没有被修改。请检查本地存储后重试。",
+            },
+          }}
+        />
+      </MemoryRouter>,
+    );
+    const open = screen.getByRole("button", { name: "打开数据与备份" });
+    expect(open).toBeDisabled();
+    fireEvent.click(open);
+    expect(useUiStore.getState().settingsOpen).toBe(false);
+  });
+
+  it("shows the immutable Task Artifact snapshot and its exact submission link", () => {
     render(
       <MemoryRouter>
         <InboxSourceContext item={sourceItem} />
@@ -78,9 +477,9 @@ describe("InboxSourceContext", () => {
     expect(screen.getByText("准备项目交付")).toBeTruthy();
     expect(screen.getByText("官网升级")).toBeTruthy();
     expect(screen.getByText("第 2 批提交")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /查看来源任务/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /查看来源提交/ })).toHaveAttribute(
       "href",
-      "/tasks/018f0000-0000-7000-8000-000000000803",
+      "/tasks/018f0000-0000-7000-8000-000000000803/submissions/018f0000-0000-7000-8000-000000000804",
     );
   });
 
@@ -181,7 +580,7 @@ describe("InboxSourceContext", () => {
     expect(screen.getByText("v4")).toBeTruthy();
     expect(screen.getByRole("link", { name: /查看路线图/ })).toHaveAttribute(
       "href",
-      "/roadmap",
+      "/roadmap?milestone=018f0000-0000-7000-8000-000000000824",
     );
 
     rerender(
@@ -206,7 +605,7 @@ describe("InboxSourceContext", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("来源产出已删除");
     expect(screen.getByText("准备项目交付")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /查看来源任务/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /查看来源提交/ })).toBeNull();
   });
 
   it("shows a Task blocked source and hides its dead link after deletion", () => {
@@ -367,7 +766,19 @@ describe("InboxSourceContext", () => {
     expect(screen.queryByRole("link", { name: /查看来源发票/ })).toBeNull();
   });
 
-  it("routes a due Client Follow-up to its client without inventing an external action", () => {
+  it.each([
+    { label: "without return context", returnSession: undefined, suffix: "" },
+    {
+      label: "with a verified conversation",
+      returnSession: "018f0000-0000-7000-8000-000000000899",
+      suffix: "&return_session=018f0000-0000-7000-8000-000000000899",
+    },
+    {
+      label: "with an invalid return target",
+      returnSession: "https://evil.invalid",
+      suffix: "",
+    },
+  ])("routes a due Client Follow-up $label", ({ returnSession, suffix }) => {
     const clientId = "018f0000-0000-7000-8000-000000000808";
     const followupId = "018f0000-0000-7000-8000-000000000809";
     const followupItem: InboxItem = {
@@ -388,7 +799,7 @@ describe("InboxSourceContext", () => {
     };
     render(
       <MemoryRouter>
-        <InboxSourceContext item={followupItem} />
+        <InboxSourceContext item={followupItem} returnSession={returnSession} />
       </MemoryRouter>,
     );
 
@@ -397,7 +808,7 @@ describe("InboxSourceContext", () => {
     expect(screen.getByText("微信")).toBeTruthy();
     expect(screen.getByRole("link", { name: "查看客户回访" })).toHaveAttribute(
       "href",
-      `/clients/${clientId}`,
+      `/clients/${clientId}?followup=${followupId}${suffix}`,
     );
   });
 

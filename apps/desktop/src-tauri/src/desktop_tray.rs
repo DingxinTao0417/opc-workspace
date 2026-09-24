@@ -111,7 +111,7 @@ fn log(app: &AppHandle, event: DesktopEvent) {
 }
 
 pub fn show_main_window(app: &AppHandle) -> bool {
-    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+    let Some(window) = app.get_window(MAIN_WINDOW_LABEL) else {
         return false;
     };
     if window.show().is_err() {
@@ -127,7 +127,7 @@ pub fn hide_main_window_to_tray(app: &AppHandle) -> bool {
     if !app.state::<DesktopTrayState>().should_hide_on_close() {
         return false;
     }
-    let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+    let Some(window) = app.get_window(MAIN_WINDOW_LABEL) else {
         return false;
     };
     if window.hide().is_err() {

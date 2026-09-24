@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"time"
@@ -18,7 +19,9 @@ import (
 	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
 )
 
-const defaultGracePeriod = 5 * time.Second
+const executorExitGracePeriod = 500 * time.Millisecond
+
+var errUnexpectedExecutorOutput = errors.New("executor stdout contains data after the manifest frame")
 
 // Stable agent run error codes surfaced by the runner.
 const (
@@ -37,17 +40,27 @@ type RunRequest struct {
 }
 
 type RunOutcome struct {
+	ResultType string
 	ResultText string
 	Duration   time.Duration
 }
 
-// Execute spawns the executor, sends the input frame, waits for the manifest,
-// and always reclaims the process tree before returning. The second return
-// value is a stable run error code ("" on success).
+type manifestReadResult struct {
+	manifest agentexec.ManifestFrame
+	err      error
+}
+
+// Execute spawns the executor, sends the input frame, requires exactly one
+// manifest plus a clean executor exit, and always reclaims the process tree
+// before returning. The second return value is a stable run error code
+// ("" on success).
 func Execute(ctx context.Context, request RunRequest) (RunOutcome, string, error) {
 	started := time.Now()
 	if request.Executor == nil {
 		return RunOutcome{}, CodeExecutorUnavailable, errors.New("executor command factory missing")
+	}
+	if err := agentexec.ValidateInputFrame(request.Input); err != nil {
+		return RunOutcome{}, CodeProtocolInvalid, err
 	}
 	command := request.Executor()
 	stdin, err := command.StdinPipe()
@@ -72,92 +85,184 @@ func Execute(ctx context.Context, request RunRequest) (RunOutcome, string, error
 	runContext, cancel := context.WithTimeout(ctx, request.Timeout)
 	defer cancel()
 
-	if err := agentexec.WriteFrame(stdin, request.Input); err != nil {
-		terminate(command)
-		_ = command.Wait()
-		return RunOutcome{}, CodeProtocolInvalid, err
-	}
-	// The executor reads exactly one frame; close stdin so it cannot block.
-	_ = stdin.Close()
-
-	resultCh := make(chan error, 1)
-	manifestCh := make(chan agentexec.ManifestFrame, 1)
+	manifestCh := make(chan manifestReadResult, 1)
+	streamCh := make(chan error, 1)
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
+		reader := bufio.NewReader(stdout)
 		var manifest agentexec.ManifestFrame
-		if err := agentexec.ReadFrame(bufio.NewReader(stdout), &manifest); err != nil {
-			resultCh <- err
+		if err := agentexec.ReadFrame(reader, &manifest); err != nil {
+			manifestCh <- manifestReadResult{err: err}
 			return
 		}
-		manifestCh <- manifest
-		resultCh <- nil
+		manifestCh <- manifestReadResult{manifest: manifest}
+		if _, err := reader.ReadByte(); err == nil {
+			streamCh <- errUnexpectedExecutorOutput
+		} else if errors.Is(err, io.EOF) {
+			streamCh <- nil
+		} else {
+			streamCh <- fmt.Errorf("read executor stdout after manifest: %w", err)
+		}
 	}()
 
-	monitorCh := make(chan error, 1)
-	go func() { monitorCh <- command.Wait() }()
-
-	var manifest agentexec.ManifestFrame
-	var frameErr error
-	timedOut := false
-	select {
-	case <-monitorCh:
-		if runContext.Err() != nil {
-			cause := cancelCause(runContext)
-			return RunOutcome{}, cause, errors.New(cause)
+	// A full H5-C input frame can exceed an anonymous pipe's buffer. Write it
+	// off the control goroutine so a child that never reads (or only partially
+	// reads) cannot prevent cancellation or the run deadline from reclaiming
+	// the process tree. Closing stdin from the control path unblocks a pending
+	// WriteFrame after terminate has revoked the child.
+	writeCh := make(chan error, 1)
+	go func() {
+		writeErr := agentexec.WriteFrame(stdin, request.Input)
+		if closeErr := stdin.Close(); writeErr == nil {
+			writeErr = closeErr
 		}
-		return RunOutcome{}, CodeExecutorFailed, fmt.Errorf("executor exited before responding")
-	case frameErr = <-resultCh:
-		if frameErr == nil {
-			manifest = <-manifestCh
+		writeCh <- writeErr
+	}()
+	select {
+	case writeErr := <-writeCh:
+		if writeErr != nil {
+			terminate(command)
+			_ = stdin.Close()
+			<-readerDone
+			_ = command.Wait()
+			if runContext.Err() != nil {
+				cause := cancelCause(runContext)
+				return RunOutcome{}, cause, errors.New(cause)
+			}
+			return RunOutcome{}, CodeProtocolInvalid, writeErr
 		}
 	case <-runContext.Done():
-		timedOut = true
+		terminate(command)
+		_ = stdin.Close()
+		<-writeCh
+		<-readerDone
+		_ = command.Wait()
+		cause := cancelCause(runContext)
+		return RunOutcome{}, cause, errors.New(cause)
 	}
 
-	if timedOut || frameErr != nil {
-		// Grace: the executor sees stdin EOF and may exit on its own; only a
-		// still-running tree gets terminated through the Job Object.
-		select {
-		case <-monitorCh:
-		case <-time.After(defaultGracePeriod):
-			terminate(command)
-			<-monitorCh
-		}
-		if timedOut {
-			cause := cancelCause(runContext)
-			return RunOutcome{}, cause, errors.New(cause)
-		}
-		if errors.Is(frameErr, agentexec.ErrFrameTooLarge) {
-			return RunOutcome{}, CodeResultTooLarge, frameErr
+	var frameResult manifestReadResult
+	select {
+	case frameResult = <-manifestCh:
+	case <-runContext.Done():
+		terminate(command)
+		<-readerDone
+		_ = command.Wait()
+		cause := cancelCause(runContext)
+		return RunOutcome{}, cause, errors.New(cause)
+	}
+	if frameResult.err != nil {
+		terminate(command)
+		<-readerDone
+		_ = command.Wait()
+		if errors.Is(frameResult.err, agentexec.ErrFrameTooLarge) {
+			return RunOutcome{}, CodeResultTooLarge, frameResult.err
 		}
 		if runContext.Err() != nil {
 			cause := cancelCause(runContext)
 			return RunOutcome{}, cause, errors.New(cause)
 		}
-		return RunOutcome{}, CodeProtocolInvalid, frameErr
-	}
-	// Manifest received; the executor should exit on its own. Reclaim it if
-	// it lingers so no run can leave a live process behind.
-	select {
-	case <-monitorCh:
-	case <-time.After(500 * time.Millisecond):
-		terminate(command)
-		<-monitorCh
+		return RunOutcome{}, CodeProtocolInvalid, frameResult.err
 	}
 
+	// A valid response is exactly one frame followed by EOF, and the executor
+	// must then exit successfully. Start one bounded grace window as soon as
+	// the frame arrives; a child cannot make a result authoritative by writing
+	// a valid prefix and then emitting more bytes, failing, or lingering.
+	exitTimer := time.NewTimer(executorExitGracePeriod)
+	defer exitTimer.Stop()
+	var streamErr error
+	select {
+	case streamErr = <-streamCh:
+	case <-exitTimer.C:
+		terminate(command)
+		<-readerDone
+		_ = command.Wait()
+		return RunOutcome{}, CodeExecutorFailed, errors.New("executor did not finish its output stream after the manifest")
+	case <-runContext.Done():
+		terminate(command)
+		<-readerDone
+		_ = command.Wait()
+		cause := cancelCause(runContext)
+		return RunOutcome{}, cause, errors.New(cause)
+	}
+	if streamErr != nil {
+		terminate(command)
+		<-readerDone
+		_ = command.Wait()
+		return RunOutcome{}, CodeProtocolInvalid, streamErr
+	}
+	<-readerDone
+
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- command.Wait() }()
+	var waitErr error
+	select {
+	case waitErr = <-waitCh:
+	case <-exitTimer.C:
+		select {
+		case waitErr = <-waitCh:
+		default:
+			terminate(command)
+			<-waitCh
+			return RunOutcome{}, CodeExecutorFailed, errors.New("executor did not exit after closing its output stream")
+		}
+	case <-runContext.Done():
+		select {
+		case waitErr = <-waitCh:
+		default:
+			terminate(command)
+			<-waitCh
+			cause := cancelCause(runContext)
+			return RunOutcome{}, cause, errors.New(cause)
+		}
+	}
+	if waitErr != nil {
+		return RunOutcome{}, CodeExecutorFailed, fmt.Errorf("executor exited unsuccessfully: %w", waitErr)
+	}
+
+	manifest := frameResult.manifest
 	if manifest.ProtocolVersion != agentexec.ProtocolVersion || manifest.RunID != request.Input.RunID ||
 		manifest.Nonce != request.Input.Nonce {
 		return RunOutcome{}, CodeProtocolInvalid, errors.New("manifest identity mismatch")
 	}
 	if manifest.Result.Type == "error" {
-		return RunOutcome{}, manifest.Result.Text, errors.New("executor reported a stable failure")
+		if code, ok := stableExecutorErrorCode(manifest.Result.Text); ok {
+			return RunOutcome{}, code, errors.New("executor reported a stable failure")
+		}
+		return RunOutcome{}, CodeProtocolInvalid, errors.New("executor reported an invalid failure code")
 	}
-	if manifest.Result.Type != "text" || manifest.Result.Text == "" {
-		return RunOutcome{}, CodeProtocolInvalid, errors.New("manifest result is not inline text")
+	resultPayload, payloadErr := agentexec.ResultPayload(
+		manifest.Result,
+		agentexec.EffectiveOutputContract(request.Input),
+		agentexec.EffectiveMaxResultBytes(request.Input),
+	)
+	if payloadErr != nil {
+		if errors.Is(payloadErr, agentexec.ErrResultTooLarge) {
+			return RunOutcome{}, CodeResultTooLarge, payloadErr
+		}
+		return RunOutcome{}, CodeProtocolInvalid, payloadErr
 	}
-	if len(manifest.Result.Text) > request.Input.MaxResultBytes {
-		return RunOutcome{}, CodeResultTooLarge, errors.New("executor result exceeds the byte budget")
+	return RunOutcome{ResultType: manifest.Result.Type, ResultText: resultPayload, Duration: time.Since(started)}, "", nil
+}
+
+func stableExecutorErrorCode(value string) (string, bool) {
+	switch value {
+	case agentexec.ErrorCodeInvalidInput,
+		agentexec.ErrorCodeModelEndpoint,
+		agentexec.ErrorCodeModelUnavailable,
+		agentexec.ErrorCodeModelFailed,
+		agentexec.ErrorCodeModelTruncated,
+		agentexec.ErrorCodeModelFiltered,
+		agentexec.ErrorCodeModelResponseInvalid,
+		agentexec.ErrorCodeEmptyResult,
+		agentexec.ErrorCodeInvalidResult,
+		agentexec.ErrorCodeResultTooLarge:
+		return value, true
+	default:
+		return "", false
 	}
-	return RunOutcome{ResultText: manifest.Result.Text, Duration: time.Since(started)}, "", nil
 }
 
 func cancelCause(runContext context.Context) string {
@@ -180,6 +285,12 @@ func bindProcessTree(command *exec.Cmd) error {
 }
 
 func reclaimProcessTree(command *exec.Cmd) {
+	// A successful Wait sets ProcessState before this deferred cleanup runs.
+	// The OS-specific release must still happen: on Windows it closes and
+	// forgets the kill-on-close Job handle. releaseProcessTree is idempotent,
+	// because error/cancellation paths may already have consumed that handle
+	// while terminating the job.
+	defer releaseProcessTree(command)
 	if command.Process == nil || command.ProcessState != nil {
 		return
 	}
@@ -188,7 +299,7 @@ func reclaimProcessTree(command *exec.Cmd) {
 }
 
 func terminate(command *exec.Cmd) {
-	if command.Process == nil || command.ProcessState != nil {
+	if command.Process == nil {
 		return
 	}
 	if runtime.GOOS == "windows" {

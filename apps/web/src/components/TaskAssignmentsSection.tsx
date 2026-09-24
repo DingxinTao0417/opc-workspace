@@ -24,6 +24,8 @@ import type {
   Task,
   TaskAssignment,
 } from "../types/models";
+import { taskAssignmentHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 type AssignmentAction = "assign" | "reassign" | "end";
 
@@ -267,6 +269,11 @@ export function TaskAssignmentsSection({
   const pages = assignmentsQuery.data?.pages ?? [];
   const firstPage = pages[0];
   const active = firstPage?.active;
+  const handoffContent = taskAssignmentHandoff(
+    task.id,
+    task.title,
+    task.status,
+  );
   const latestTaskVersion = Math.max(
     task.version,
     firstPage?.meta.taskVersion ?? task.version,
@@ -470,18 +477,29 @@ export function TaskAssignmentsSection({
           <h3 id="task-assignments-title">责任分派</h3>
           <p>本地责任记录与审核角色</p>
         </div>
-        {firstPage ? (
-          <button
-            aria-expanded={historyOpen}
-            className="button button-quiet task-assignment-history-toggle"
-            onClick={() => setHistoryOpen((open) => !open)}
-            type="button"
-          >
-            <History size={13} />
-            历史 {firstPage.meta.total}
-            {historyOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          </button>
-        ) : null}
+        <div className="task-assignments-actions">
+          <AiIssueHandoffButton
+            content={handoffContent}
+            disabled={disabled || commandBusy || editor !== null}
+            label="交给智能体处理分派"
+          />
+          {firstPage ? (
+            <button
+              aria-expanded={historyOpen}
+              className="button button-quiet task-assignment-history-toggle"
+              onClick={() => setHistoryOpen((open) => !open)}
+              type="button"
+            >
+              <History size={13} />
+              历史 {firstPage.meta.total}
+              {historyOpen ? (
+                <ChevronUp size={13} />
+              ) : (
+                <ChevronDown size={13} />
+              )}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {assignmentsQuery.isPending && !firstPage ? (

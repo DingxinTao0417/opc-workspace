@@ -4,12 +4,16 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
+import { useAiChatStore } from "../store/aiChat";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { useUiStore } from "../store/ui";
-import type { Project, Task } from "../types/models";
+import type { Project, ProjectNote, Task } from "../types/models";
 import { ProjectDetailPage } from "./ProjectDetailPage";
 
 const project: Project = {
@@ -46,9 +50,20 @@ const deleteProjectState = vi.hoisted(() => ({
   isPending: false,
 }));
 const projectRefetch = vi.hoisted(() => vi.fn());
+const projectQueryState = vi.hoisted(() => ({
+  isError: false,
+  isPending: false,
+}));
 const taskPageInput = vi.hoisted(() => vi.fn());
 const focusReportInput = vi.hoisted(() => vi.fn());
 const focusHistoryInput = vi.hoisted(() => vi.fn());
+const getProjectNote = vi.hoisted(() => vi.fn());
+
+vi.mock("../api/client", async () => {
+  const actual =
+    await vi.importActual<typeof import("../api/client")>("../api/client");
+  return { ...actual, getProjectNote };
+});
 
 const rootTask: Task = {
   id: "task-1",
@@ -95,6 +110,12 @@ let projectTasks: Task[] = [];
 let taskPagePlaceholder = false;
 
 vi.mock("../api/hooks", () => ({
+  projectNoteQueryKey: (projectId: string) => [
+    "projects",
+    "detail",
+    projectId,
+    "notes",
+  ],
   useClientOptionsQuery: () => ({
     data: [],
     isError: false,
@@ -115,9 +136,10 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
   }),
   useProjectQuery: () => ({
-    data: project,
-    isError: false,
-    isPending: false,
+    data:
+      projectQueryState.isError || projectQueryState.isPending ? null : project,
+    isError: projectQueryState.isError,
+    isPending: projectQueryState.isPending,
     refetch: projectRefetch,
   }),
   useProjectEventsQuery: () => ({
@@ -321,9 +343,13 @@ describe("ProjectDetailPage", () => {
     deleteProjectState.error = null;
     deleteProjectState.isPending = false;
     projectRefetch.mockReset();
+    projectQueryState.isError = false;
+    projectQueryState.isPending = false;
     taskPageInput.mockReset();
     focusReportInput.mockReset();
     focusHistoryInput.mockReset();
+    getProjectNote.mockReset();
+    project.id = "project-1";
     project.status = "in_progress";
     project.availableActions = ["pause", "complete", "archive"];
     project.taskSummary.remaining = 2;
@@ -337,17 +363,119 @@ describe("ProjectDetailPage", () => {
     cleanup();
     vi.useRealTimers();
     useUiStore.setState({ newTaskOpen: false, newTaskProjectId: null });
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
+    useAiChatStore.setState({ activeSessionId: "" });
   });
 
-  function renderPage() {
-    return render(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
-        <Routes>
-          <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
-        </Routes>
-      </MemoryRouter>,
+  function renderPage(initialEntry = "/projects/project-1") {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const page = (entry: string) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[entry]}>
+          <Routes>
+            <Route
+              element={<ProjectDetailPage />}
+              path="/projects/:projectId"
+            />
+            <Route element={<p>AI 对话</p>} path="/ai" />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
     );
+    const view = render(page(initialEntry));
+    return {
+      ...view,
+      rerenderPage: (entry = initialEntry) => view.rerender(page(entry)),
+    };
   }
+
+  it("opens an exact note, preserves its source session when closing, and returns", async () => {
+    const exactProjectId = "018f0000-0000-7000-8000-000000005861";
+    const exactNoteId = "018f0000-0000-7000-8000-000000005862";
+    const sessionId = "018f0000-0000-7000-8000-000000005863";
+    project.id = exactProjectId;
+    const exactNote: ProjectNote = {
+      id: exactNoteId,
+      projectId: exactProjectId,
+      title: "从智能体定位的项目笔记",
+      body: "这是直接读取的项目笔记正文",
+      occurredAt: "2026-09-18T08:00:00Z",
+      createdBy: { id: sessionId, type: "owner", displayName: "我" },
+      version: 3,
+      deletedAt: null,
+      deletedByActorId: null,
+      deleteReason: null,
+      createdAt: "2026-09-18T08:00:00Z",
+      updatedAt: "2026-09-18T08:10:00Z",
+      projectVersion: 7,
+    };
+    getProjectNote.mockResolvedValue(exactNote);
+    renderPage(
+      `/projects/${exactProjectId}?note=${exactNoteId}&return_session=${sessionId}`,
+    );
+
+    expect(await screen.findByText(exactNote.body!)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭定位" }));
+    await waitFor(() => expect(screen.queryByText(exactNote.body!)).toBeNull());
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    expect(screen.getByText("AI 对话")).toBeVisible();
+  });
+
+  it("hands off the precise project without running project actions", () => {
+    const exactProjectId = "018f0000-0000-7000-8000-000000005891";
+    project.id = exactProjectId;
+    renderPage(`/projects/${exactProjectId}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "项目",
+      route: `/projects/${exactProjectId}`,
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=project");
+    expect(pending?.prompt).toContain(`id=${exactProjectId}`);
+    expect(pending?.prompt).toContain("project.*");
+    expect(pending?.prompt).toContain("完成项目不会自动完成任务");
+    expect(transition).not.toHaveBeenCalled();
+    expect(deleteProject).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed note parameters without starting a detail read", () => {
+    const exactProjectId = "018f0000-0000-7000-8000-000000005871";
+    const exactNoteId = "018f0000-0000-7000-8000-000000005872";
+    project.id = exactProjectId;
+    renderPage(
+      `/projects/${exactProjectId}?note=${exactNoteId}&note=${exactNoteId}`,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "项目笔记链接无效或包含重复参数",
+    );
+    expect(getProjectNote).not.toHaveBeenCalled();
+  });
+
+  it("keeps return-to-chat available when the project itself cannot load", () => {
+    const exactProjectId = "018f0000-0000-7000-8000-000000005881";
+    const exactNoteId = "018f0000-0000-7000-8000-000000005882";
+    const sessionId = "018f0000-0000-7000-8000-000000005883";
+    projectQueryState.isError = true;
+    renderPage(
+      `/projects/${exactProjectId}?note=${exactNoteId}&return_session=${sessionId}`,
+    );
+
+    expect(screen.getByText("项目详情不可用")).toBeVisible();
+    fireEvent.click(screen.getByRole("link", { name: "返回原对话" }));
+    expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    expect(screen.getByText("AI 对话")).toBeVisible();
+    expect(getProjectNote).not.toHaveBeenCalled();
+  });
 
   it("requires confirmation before completing a project with open tasks", () => {
     renderPage();
@@ -580,13 +708,7 @@ describe("ProjectDetailPage", () => {
     taskPageInput.mockClear();
     projectTasks = [rootTask];
     taskPagePlaceholder = true;
-    view.rerender(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
-        <Routes>
-          <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    view.rerenderPage();
 
     const placeholderRootPages = taskPageInput.mock.calls
       .map(
@@ -606,13 +728,7 @@ describe("ProjectDetailPage", () => {
 
     taskPageInput.mockClear();
     taskPagePlaceholder = false;
-    view.rerender(
-      <MemoryRouter initialEntries={["/projects/project-1"]}>
-        <Routes>
-          <Route element={<ProjectDetailPage />} path="/projects/:projectId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    view.rerenderPage();
 
     expect(taskPageInput).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1, projectId: project.id }),

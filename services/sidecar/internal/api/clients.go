@@ -198,14 +198,10 @@ func (a *API) createClient(c *gin.Context) {
 			}
 		}
 
-		if err := tx.Create(&client).Error; err != nil {
-			return fmt.Errorf("create client: %w", err)
-		}
-		row, err := loadClientRow(tx, client.ID)
+		response, err = createClientInTransaction(tx, client, client.CreatedAt)
 		if err != nil {
-			return fmt.Errorf("load created client: %w", err)
+			return err
 		}
-		response = clientResponseFromRow(row)
 		if idempotencyKey != "" {
 			encoded, err := json.Marshal(response)
 			if err != nil {
@@ -274,37 +270,9 @@ func (a *API) updateClient(c *gin.Context) {
 
 	var response clientResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var client models.Client
-		if err := tx.First(&client, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
-			}
-			return err
-		}
-		if client.Version != expectedVersion {
-			return clientVersionConflict()
-		}
-		updates, err := clientUpdates(input)
-		if err != nil {
-			return err
-		}
-		updates["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.Client{}).
-			Where("id = ? AND version = ?", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientVersionConflict()
-		}
-		row, err := loadClientRow(tx, id)
-		if err != nil {
-			return err
-		}
-		response = clientResponseFromRow(row)
-		return nil
+		var err error
+		response, err = updateClientInTransaction(tx, id, expectedVersion, input, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -331,91 +299,20 @@ func (a *API) deleteClient(c *gin.Context) {
 		return
 	}
 
-	deleted := deletedClientResponse{DeletedID: id}
+	var deleted deletedClientResponse
 	var movedAttachmentFiles []trashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var client models.Client
-		if err := tx.First(&client, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
-			}
-			return err
-		}
-		if client.Version != expectedVersion {
-			return clientVersionConflict()
-		}
-		if client.Status != "inactive" {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"CLIENT_NOT_INACTIVE",
-				"Only inactive clients can be permanently deleted",
-			)
-		}
-
-		var invoiceCount int64
-		if err := tx.Table("invoices").Where("client_id = ?", id).Count(&invoiceCount).Error; err != nil {
-			return err
-		}
-		if invoiceCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"CLIENT_HAS_INVOICES",
-				fmt.Sprintf("Client is referenced by %d invoice(s) and cannot be deleted", invoiceCount),
-			)
-		}
-		var financialEntryCount int64
-		if err := tx.Table("financial_entries").Where("client_id = ?", id).Count(&financialEntryCount).Error; err != nil {
-			return err
-		}
-		if financialEntryCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"CLIENT_HAS_FINANCIAL_ENTRIES",
-				fmt.Sprintf("Client is referenced by %d financial entry record(s) and cannot be deleted", financialEntryCount),
-			)
-		}
-		var followupCount int64
-		if err := tx.Table("client_followups").Where("client_id = ?", id).Count(&followupCount).Error; err != nil {
-			return err
-		}
-		if followupCount > 0 {
-			return newProjectRequestError(
-				http.StatusConflict,
-				"CLIENT_HAS_FOLLOWUPS",
-				fmt.Sprintf("Client is referenced by %d follow-up(s) and cannot be deleted", followupCount),
-			)
-		}
-		if err := tx.Table("projects").Where("client_id = ?", id).Count(&deleted.DetachedProjects).Error; err != nil {
-			return err
-		}
 		var err error
-		movedAttachmentFiles, err = a.trashClientAttachmentFiles(tx, id, a.options.Now().UTC().Format(time.RFC3339Nano))
-		if err != nil {
-			return err
-		}
-		result := tx.Where("id = ? AND version = ?", id, expectedVersion).Delete(&models.Client{})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return clientVersionConflict()
-		}
-		return nil
+		_, _, deleted, movedAttachmentFiles, err = a.deleteClientInTransaction(tx, id, expectedVersion, a.options.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
+	a.finishClientDeletion(id, movedAttachmentFiles, err)
 	if err != nil {
-		if restoreErr := a.restoreClientAttachmentFiles(movedAttachmentFiles); restoreErr != nil && a.options.Logger != nil {
-			a.options.Logger.Printf("Client attachment delete compensation failed client_id=%s error=%v", id, restoreErr)
-		}
 		if writeProjectRequestError(c, err) {
 			return
 		}
 		writeDatabaseError(c)
 		return
-	}
-	if a.artifactStore != nil {
-		for _, moved := range movedAttachmentFiles {
-			a.artifactStore.purgeTrashedFile(moved)
-		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": deleted})
 }
@@ -632,6 +529,51 @@ func clientID(c *gin.Context) (string, bool) {
 
 func clientVersionConflict() error {
 	return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Client has changed; reload it before retrying")
+}
+
+func createClientInTransaction(tx *gorm.DB, client models.Client, now string) (clientResponse, error) {
+	client.CreatedAt, client.UpdatedAt = now, now
+	if err := tx.Create(&client).Error; err != nil {
+		return clientResponse{}, fmt.Errorf("create client: %w", err)
+	}
+	row, err := loadClientRow(tx, client.ID)
+	if err != nil {
+		return clientResponse{}, fmt.Errorf("load created client: %w", err)
+	}
+	return clientResponseFromRow(row), nil
+}
+
+func updateClientInTransaction(tx *gorm.DB, id string, expectedVersion int64, input updateClientRequest, now string) (clientResponse, error) {
+	var client models.Client
+	if err := tx.First(&client, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return clientResponse{}, newProjectRequestError(http.StatusNotFound, "CLIENT_NOT_FOUND", "Client not found")
+		}
+		return clientResponse{}, err
+	}
+	if client.Version != expectedVersion {
+		return clientResponse{}, clientVersionConflict()
+	}
+	updates, err := clientUpdates(input)
+	if err != nil {
+		return clientResponse{}, err
+	}
+	updates["updated_at"] = now
+	updates["version"] = gorm.Expr("version + 1")
+	result := tx.Model(&models.Client{}).
+		Where("id = ? AND version = ?", id, expectedVersion).
+		Updates(updates)
+	if result.Error != nil {
+		return clientResponse{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return clientResponse{}, clientVersionConflict()
+	}
+	row, err := loadClientRow(tx, id)
+	if err != nil {
+		return clientResponse{}, err
+	}
+	return clientResponseFromRow(row), nil
 }
 
 func applyClientSort(query *gorm.DB, raw string) (*gorm.DB, bool) {

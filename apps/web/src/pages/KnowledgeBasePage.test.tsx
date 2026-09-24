@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import {
   cleanup,
   fireEvent,
@@ -54,13 +55,15 @@ const source: KnowledgeSource = {
   latestJob: null,
 };
 
-function renderPage() {
+function renderPage(route = "/knowledge") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <KnowledgeBasePage />
+      <MemoryRouter initialEntries={[route]}>
+        <KnowledgeBasePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -363,6 +366,90 @@ describe("KnowledgeBasePage", () => {
         source.version,
       ),
     );
+  });
+
+  it("locates the exact current failed index job from Agent Inbox", async () => {
+    const sourceId = "018f0000-0000-7000-8000-000000000901";
+    const jobId = "018f0000-0000-7000-8000-000000000902";
+    vi.mocked(getKnowledgeSources).mockResolvedValue({
+      items: [
+        {
+          ...source,
+          id: sourceId,
+          status: "failed",
+          latestJob: {
+            id: jobId,
+            sourceId,
+            operation: "reindex",
+            status: "failed",
+            stage: "complete",
+            progress: 75,
+            attempt: 2,
+            retryOfJobId: null,
+            errorCode: "KNOWLEDGE_INDEX_INTERRUPTED",
+            cancelRequested: false,
+            startedAt: "2026-09-19T12:00:00Z",
+            completedAt: "2026-09-19T12:01:00Z",
+            createdAt: "2026-09-19T12:00:00Z",
+          },
+        },
+      ],
+      meta: { page: 1, pageSize: 100, total: 1 },
+    });
+
+    renderPage(`/knowledge?source=${sourceId}&job=${jobId}`);
+
+    expect(
+      await screen.findByText(/已定位 billing-guide\.md 的第 2 次索引失败/),
+    ).toBeVisible();
+    const card = document.getElementById(`knowledge-source-${sourceId}`);
+    expect(card).toHaveClass("is-located");
+    expect(
+      screen.getByRole("button", { name: "取消筛选来源 billing-guide.md" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭定位" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/已定位 billing-guide\.md/),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not substitute another knowledge job for a stale exact location", async () => {
+    const sourceId = "018f0000-0000-7000-8000-000000000911";
+    const requestedJob = "018f0000-0000-7000-8000-000000000912";
+    vi.mocked(getKnowledgeSources).mockResolvedValue({
+      items: [
+        {
+          ...source,
+          id: sourceId,
+          latestJob: {
+            id: "018f0000-0000-7000-8000-000000000913",
+            sourceId,
+            operation: "reindex",
+            status: "succeeded",
+            stage: "complete",
+            progress: 100,
+            attempt: 3,
+            retryOfJobId: requestedJob,
+            errorCode: null,
+            cancelRequested: false,
+            startedAt: "2026-09-19T12:02:00Z",
+            completedAt: "2026-09-19T12:03:00Z",
+            createdAt: "2026-09-19T12:02:00Z",
+          },
+        },
+      ],
+      meta: { page: 1, pageSize: 100, total: 1 },
+    });
+
+    renderPage(`/knowledge?source=${sourceId}&job=${requestedJob}`);
+
+    expect(await screen.findByText("索引异常已不再是当前状态")).toBeVisible();
+    expect(
+      screen.queryByText(/已定位 billing-guide\.md/),
+    ).not.toBeInTheDocument();
   });
 
   it("exports only the source and index-status manifest", async () => {

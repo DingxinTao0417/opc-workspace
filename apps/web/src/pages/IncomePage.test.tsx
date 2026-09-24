@@ -9,6 +9,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FinancialEntry, IncomeStatsParams } from "../types/models";
 import { IncomePage } from "./IncomePage";
+import { MemoryRouter } from "react-router-dom";
+import { IncomeRoutePage } from "./IncomeRoutePage";
 
 const entry: FinancialEntry = {
   id: "entry-1",
@@ -151,6 +153,8 @@ describe("IncomePage", () => {
         includeVoided: true,
         page: 1,
       }),
+      true,
+      false,
     );
     expect(hooks.stats).toHaveBeenLastCalledWith(
       expect.objectContaining({ currency: "USD" }),
@@ -184,6 +188,8 @@ describe("IncomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(hooks.entries).toHaveBeenLastCalledWith(
       expect.objectContaining({ page: 2 }),
+      true,
+      false,
     );
 
     hooks.entries.mockClear();
@@ -192,6 +198,8 @@ describe("IncomePage", () => {
 
     expect(hooks.entries).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1 }),
+      true,
+      false,
     );
   });
 
@@ -232,6 +240,8 @@ describe("IncomePage", () => {
     view.rerender(<IncomePage />);
     expect(hooks.entries).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1 }),
+      true,
+      false,
     );
   });
 
@@ -248,12 +258,14 @@ describe("IncomePage", () => {
         dateFrom: "2026-08-01",
         dateTo: "2026-08-31",
       }),
+      true,
+      false,
     );
-    expect(hooks.stats).toHaveBeenCalledWith({
-      currency: "CNY",
-      dateFrom: "2026-08-01",
-      dateTo: "2026-08-31",
-    });
+    expect(hooks.stats).toHaveBeenCalledWith(
+      { currency: "CNY", dateFrom: "2026-08-01", dateTo: "2026-08-31" },
+      true,
+      false,
+    );
     expect(
       hooks.stats.mock.calls.some((call: unknown[]) => {
         const input = call[0] as IncomeStatsParams;
@@ -272,6 +284,8 @@ describe("IncomePage", () => {
         dateFrom: "2026-12-01",
         dateTo: "2026-12-31",
       }),
+      true,
+      false,
     );
 
     act(() => vi.advanceTimersByTime(1_002));
@@ -282,6 +296,8 @@ describe("IncomePage", () => {
         dateFrom: "2027-01-01",
         dateTo: "2027-01-31",
       }),
+      true,
+      false,
     );
     expect(hooks.stats).toHaveBeenCalledWith({
       currency: "CNY",
@@ -305,6 +321,8 @@ describe("IncomePage", () => {
         dateFrom: "2026-11-01",
         dateTo: "2026-11-30",
       }),
+      true,
+      false,
     );
     expect(hooks.stats).toHaveBeenCalledWith({
       currency: "CNY",
@@ -400,6 +418,92 @@ describe("IncomePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "新建记录" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+
+  it("opens the exact AI report range from its first query and explicitly clears it", () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          "/income?currency=GBP&date_from=2025-12-20&date_to=2026-01-12&return_session=018f0000-0000-7000-8000-000000001711",
+        ]}
+      >
+        <IncomeRoutePage />
+      </MemoryRouter>,
+    );
+    expect(hooks.stats.mock.calls[0]).toEqual([
+      { currency: "GBP", dateFrom: "2025-12-20", dateTo: "2026-01-12" },
+      true,
+      true,
+    ]);
+    expect(hooks.entries.mock.calls[0][0]).toMatchObject({
+      currency: "GBP",
+      dateFrom: "2025-12-20",
+      dateTo: "2026-01-12",
+    });
+    expect(hooks.entries.mock.calls[0].slice(1)).toEqual([true, true]);
+    expect(screen.getByLabelText("币种筛选")).toBeDisabled();
+    expect(screen.queryByLabelText("月份")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回原对话" })).toHaveAttribute(
+      "href",
+      "/ai",
+    );
+    expect(hooks.exportMutation.mutate).not.toHaveBeenCalled();
+    expect(hooks.voidMutation.mutate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("link", { name: "清除报告条件" }));
+    expect(screen.getByLabelText("月份")).toHaveValue("2026-08");
+    expect(screen.getByLabelText("币种筛选")).toBeEnabled();
+    expect(screen.getByRole("link", { name: "返回原对话" })).toBeVisible();
+  });
+
+  it.each([
+    "currency=CNY&date_from=2026-02-30&date_to=2026-03-01",
+    "currency=CNY&date_from=2026-01-01&date_to=2026-01-02&currency=USD",
+    "redirect=/settings",
+  ])("does not query a default period for invalid report %s", (search) => {
+    render(
+      <MemoryRouter initialEntries={[`/income?${search}`]}>
+        <IncomeRoutePage />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("不会查询默认范围");
+    expect(hooks.stats).not.toHaveBeenCalled();
+    expect(hooks.entries).not.toHaveBeenCalled();
+  });
+
+  it.each(["fetching", "error"])(
+    "hides cached report totals while %s",
+    (state) => {
+      hooks.stats.mockImplementation((input: IncomeStatsParams) => ({
+        ...statsResult(input, 128000),
+        isFetching: state === "fetching",
+        isError: state === "error",
+      }));
+      hooks.entries.mockReturnValue({
+        data: { items: [entry], meta: { page: 1, pageSize: 20, total: 1 } },
+        isSuccess: state === "fetching",
+        isFetching: state === "fetching",
+        isError: state === "error",
+        refetch: vi.fn(),
+      });
+      render(
+        <IncomePage
+          report={{
+            currency: "CNY",
+            dateFrom: "2026-08-01",
+            dateTo: "2026-08-31",
+          }}
+        />,
+      );
+      const card = screen.getByText("指定期间已确认收入").closest("article")!;
+      expect(within(card).queryByText("¥1,280.00")).not.toBeInTheDocument();
+      expect(within(card).getByText("—")).toBeVisible();
+      expect(screen.queryByText("+¥1,280.00")).not.toBeInTheDocument();
+      expect(screen.queryByText("1 条")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "导出 CSV" })).toBeDisabled();
+      expect(
+        screen.queryByText("指定期间暂无财务记录"),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("keeps invoice-generated income read-only in the row actions", () => {
     hooks.entries.mockReturnValue({

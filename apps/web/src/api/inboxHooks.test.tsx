@@ -6,10 +6,13 @@ import type { InboxItem } from "../types/models";
 import { ApiError } from "./client";
 import {
   INBOX_LIST_REFRESH_INTERVAL_MS,
+  aiAgentInboxQueryKey,
   inboxDetailQueryKey,
   inboxEventQueryKey,
   inboxQueryKey,
   inboxTaskRelationQueryKey,
+  invalidateInboxActionFacts,
+  invalidateInboxReadAllFacts,
   searchQueryKey,
   useCreateInboxItem,
   useInboxItemCommand,
@@ -192,6 +195,7 @@ describe("inbox hooks", () => {
       .mockRejectedValueOnce(new Error("response lost"))
       .mockResolvedValueOnce(inboxItem(2));
     const queryClient = createQueryClient();
+    queryClient.setQueryData(aiAgentInboxQueryKey, { pages: [] });
     const { result } = renderHook(() => useInboxItemCommand(), {
       wrapper: wrapperFor(queryClient),
     });
@@ -210,6 +214,9 @@ describe("inbox hooks", () => {
     expect(
       queryClient.getQueryData(inboxDetailQueryKey(inboxItem().id)),
     ).toEqual(inboxItem(2));
+    expect(queryClient.getQueryState(aiAgentInboxQueryKey)?.isInvalidated).toBe(
+      true,
+    );
   });
 
   it("leaves one conflict refresh to the active Inbox detail editor", async () => {
@@ -444,6 +451,68 @@ describe("inbox hooks", () => {
     expect(queryClient.getQueryState(projectCacheKey)?.isInvalidated).toBe(
       true,
     );
+  });
+
+  it("refreshes AI Inbox decisions even without a cached source detail, cancelling stale Project responses", async () => {
+    let resolveStale!: (value: unknown) => void;
+    calls.projectArtifacts
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        items: [],
+        meta: { page: 1, pageSize: 20, total: 1, projectVersion: 2 },
+      });
+    const queryClient = createQueryClient();
+    const statsKey = [...inboxQueryKey, "stats"];
+    const searchKey = [...searchQueryKey, "items"];
+    queryClient.setQueryData(statsKey, { pending: 1 });
+    queryClient.setQueryData(searchKey, []);
+    const { result } = renderHook(
+      () => useProjectArtifactsQuery(sourceProjectId),
+      { wrapper: wrapperFor(queryClient) },
+    );
+    await waitFor(() =>
+      expect(calls.projectArtifacts).toHaveBeenCalledTimes(1),
+    );
+    const signal = calls.projectArtifacts.mock.calls[0][2] as AbortSignal;
+    await act(async () => {
+      await invalidateInboxActionFacts(queryClient);
+    });
+    await waitFor(() => expect(result.current.data?.meta.total).toBe(1));
+    expect(signal.aborted).toBe(true);
+    expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+    resolveStale({
+      items: [],
+      meta: { page: 1, pageSize: 20, total: 0, projectVersion: 1 },
+    });
+    await act(async () => Promise.resolve());
+    expect(result.current.data?.meta.total).toBe(1);
+  });
+
+  it("keeps snapshot read-all invalidation scoped to Inbox and unified search facts", async () => {
+    const queryClient = createQueryClient();
+    const statsKey = [...inboxQueryKey, "stats"] as const;
+    const searchKey = [...searchQueryKey, "items"] as const;
+    const projectKey = ["projects", "list", { page: 1 }] as const;
+    const taskKey = ["tasks", "list", { page: 1 }] as const;
+    queryClient.setQueryData(statsKey, { unread: 3 });
+    queryClient.setQueryData(searchKey, [{ type: "inbox_item" }]);
+    queryClient.setQueryData(projectKey, { items: [] });
+    queryClient.setQueryData(taskKey, { items: [] });
+
+    await act(async () => {
+      await invalidateInboxReadAllFacts(queryClient);
+    });
+
+    expect(queryClient.getQueryState(statsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(searchKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(projectKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(taskKey)?.isInvalidated).toBe(false);
   });
 
   it("cancels a stale pending Project Artifact read before refetching follow-up facts", async () => {

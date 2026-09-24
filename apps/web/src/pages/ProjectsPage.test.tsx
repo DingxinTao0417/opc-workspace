@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Project, ProjectListParams } from "../types/models";
 import { ProjectsPage } from "./ProjectsPage";
 
@@ -15,6 +16,7 @@ const hooks = vi.hoisted(() => ({
   responsePage: null as number | null,
   total: 1,
 }));
+const clientFilterId = "018f0000-0000-7000-8000-000000001910";
 
 vi.mock("../components/ClientSelect", () => ({
   ClientSelect: ({
@@ -34,7 +36,7 @@ vi.mock("../components/ClientSelect", () => ({
       value={value}
     >
       <option value="">{emptyLabel}</option>
-      <option value="client-inactive">旧客户（已停用）</option>
+      <option value={clientFilterId}>旧客户（已停用）</option>
     </select>
   ),
 }));
@@ -86,6 +88,7 @@ describe("ProjectsPage", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    useAiWorkbenchHandoff.setState({ pendingIssue: null, pending: null });
     hooks.responsePage = null;
     hooks.total = 1;
     hooks.projects.mockImplementation((input: ProjectListParams) => ({
@@ -133,10 +136,67 @@ describe("ProjectsPage", () => {
       screen.getByRole("option", { name: "旧客户（已停用）" }),
     ).toBeTruthy();
     fireEvent.change(screen.getByLabelText("关联客户"), {
-      target: { value: "client-inactive" },
+      target: { value: clientFilterId },
     });
     expect(hooks.projects).toHaveBeenLastCalledWith(
-      expect.objectContaining({ clientId: "client-inactive" }),
+      expect.objectContaining({ clientId: clientFilterId }),
+    );
+  });
+
+  it("restores a filtered page and hands only its filter identity to the agent", () => {
+    hooks.total = 25;
+    render(
+      <MemoryRouter
+        initialEntries={[
+          `/projects?q=needle&status=paused&client_id=${clientFilterId}&page=2`,
+        ]}
+      >
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+
+    expect(hooks.projects).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 2,
+        query: "needle",
+        status: "paused",
+        clientId: clientFilterId,
+        sort: "-updated_at",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "梳理项目组合" }));
+    const handoff = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(handoff?.route).toBe(
+      `/projects?q=needle&status=paused&client_id=${clientFilterId}&page=2`,
+    );
+    expect(handoff?.scopes).toEqual(["work", "clients", "actions"]);
+    expect(handoff?.prompt).toContain("workspace_projects");
+    expect(handoff?.prompt).not.toContain(project.description);
+    expect(handoff?.prompt).not.toContain(project.amountMinor);
+    expect(handoff?.prompt).not.toContain(project.name);
+  });
+
+  it("can prepare a fresh agent query even when the project list failed", () => {
+    hooks.projects.mockImplementation(() => ({
+      data: undefined,
+      isError: true,
+      isFetching: false,
+      isPending: false,
+      isPlaceholderData: false,
+      isSuccess: false,
+      refetch: vi.fn(),
+    }));
+    render(
+      <MemoryRouter initialEntries={["/projects?status=paused"]}>
+        <ProjectsPage />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.getByText("无法读取项目数据，请确认本地服务已连接。"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "梳理项目组合" }));
+    expect(useAiWorkbenchHandoff.getState().pendingIssue?.route).toBe(
+      "/projects?status=paused",
     );
   });
 

@@ -22,6 +22,12 @@ type aiRunStepCollector struct {
 	steps []harness.RunStep
 }
 
+func (c *aiRunStepCollector) nextSequence() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.steps) + 2
+}
+
 func (c *aiRunStepCollector) add(step harness.RunStep) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -244,16 +244,7 @@ func (a *API) createKnowledgeSource(c *gin.Context) {
 	if !ok {
 		return
 	}
-	source := models.KnowledgeSource{
-		ID: sourceID, Name: upload.Name, Title: upload.Title, SourceType: upload.SourceType, ImportMode: "managed_copy",
-		MimeType: upload.MimeType, SizeBytes: int64(len(upload.Bytes)), ContentSHA256: sourceHash,
-		OriginalContent: upload.Bytes, Status: "indexing",
-		Version: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	job := models.KnowledgeIndexJob{
-		ID: jobID, SourceID: sourceID, Operation: "import", Status: "queued", Stage: "queued",
-		Progress: 0, Attempt: 1, CreatedAt: now,
-	}
+	var job models.KnowledgeIndexJob
 	endpoint := "POST /api/v1/knowledge/sources"
 	response := knowledgeImportResponse{}
 	replayed := false
@@ -266,12 +257,11 @@ func (a *API) createKnowledgeSource(c *gin.Context) {
 			replayed = true
 			return nil
 		}
-		if err := tx.Create(&source).Error; err != nil {
-			return err
+		_, queued, createErr := createKnowledgeSourceInTransaction(tx, upload, sourceID, jobID, now)
+		if createErr != nil {
+			return createErr
 		}
-		if err := tx.Create(&job).Error; err != nil {
-			return err
-		}
+		job = queued
 		row, err := loadKnowledgeSourceRow(tx, sourceID, true)
 		if err != nil {
 			return err
@@ -389,46 +379,17 @@ func (a *API) deleteKnowledgeSource(c *gin.Context) {
 	if !ok {
 		return
 	}
-	reason := strings.TrimSpace(c.Query("reason"))
-	if reason == "" {
-		reason = "User requested deletion"
-	}
-	if utf8.RuneCountInString(reason) > 500 {
+	reason, err := normalizeKnowledgeDeleteReason(c.Query("reason"))
+	if err != nil {
 		writeError(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "reason must be at most 500 characters")
 		return
 	}
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
-	var deletedChunks int64
-	var nextVersion int64
-	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var source models.KnowledgeSource
-		if err := tx.First(&source, "id = ?", id).Error; err != nil {
-			return err
-		}
-		if source.DeletedAt != nil {
-			return newProjectRequestError(http.StatusNotFound, "KNOWLEDGE_SOURCE_NOT_FOUND", "Knowledge source not found")
-		}
-		if source.Version != expectedVersion {
-			return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Knowledge source has changed; reload it before retrying")
-		}
-		if err := tx.Model(&models.KnowledgeChunk{}).Where("source_id = ?", id).Count(&deletedChunks).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("source_id = ?", id).Delete(&models.KnowledgeDocument{}).Error; err != nil {
-			return err
-		}
-		nextVersion = source.Version + 1
-		result := tx.Model(&models.KnowledgeSource{}).Where("id = ? AND version = ?", id, source.Version).Updates(map[string]any{
-			"original_content": nil, "status": "deleted", "deleted_at": now, "delete_reason": reason,
-			"last_indexed_at": nil, "version": nextVersion, "updated_at": now,
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Knowledge source has changed; reload it before retrying")
-		}
-		return nil
+	var deletion knowledgeSourceDeletion
+	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		var deleteErr error
+		deletion, deleteErr = deleteKnowledgeSourceInTransaction(tx, id, expectedVersion, reason, now)
+		return deleteErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -441,8 +402,8 @@ func (a *API) deleteKnowledgeSource(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
-	setProjectETag(c, nextVersion)
-	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id, "status": "deleted", "version": nextVersion, "deleted_chunks": deletedChunks}})
+	setProjectETag(c, deletion.NextVersion)
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id, "status": "deleted", "version": deletion.NextVersion, "deleted_chunks": deletion.ChunkCount}})
 }
 
 func (a *API) reindexKnowledgeSource(c *gin.Context) {
@@ -459,45 +420,11 @@ func (a *API) reindexKnowledgeSource(c *gin.Context) {
 
 func (a *API) queueKnowledgeReindex(c *gin.Context, sourceID string, expectedVersion int64, retryOf *models.KnowledgeIndexJob) {
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
-	operation := "reindex"
-	if retryOf != nil {
-		operation = retryOf.Operation
-	}
-	job := models.KnowledgeIndexJob{
-		ID: uuid.NewString(), SourceID: sourceID, Operation: operation,
-		Status: "queued", Stage: "queued", Progress: 0, Attempt: 1, CreatedAt: now,
-	}
-	if retryOf != nil {
-		job.Attempt = retryOf.Attempt + 1
-		job.RetryOfJobID = &retryOf.ID
-	}
+	var job models.KnowledgeIndexJob
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var source models.KnowledgeSource
-		if err := tx.First(&source, "id = ? AND deleted_at IS NULL", sourceID).Error; err != nil {
-			return err
-		}
-		if source.Version != expectedVersion {
-			return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Knowledge source has changed; reload it before retrying")
-		}
-		if source.Status == "indexing" {
-			return newProjectRequestError(http.StatusConflict, "KNOWLEDGE_INDEX_IN_PROGRESS", "The knowledge source is already being indexed")
-		}
-		if len(source.OriginalContent) == 0 {
-			return newProjectRequestError(http.StatusConflict, "KNOWLEDGE_SOURCE_UNAVAILABLE", "The managed source copy is unavailable")
-		}
-		if err := tx.Create(&job).Error; err != nil {
-			return err
-		}
-		result := tx.Model(&models.KnowledgeSource{}).
-			Where("id = ? AND version = ? AND status <> 'indexing'", sourceID, expectedVersion).
-			Updates(map[string]any{"status": "indexing", "version": expectedVersion + 1, "updated_at": now})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return newProjectRequestError(http.StatusConflict, "VERSION_CONFLICT", "Knowledge source has changed; reload it before retrying")
-		}
-		return nil
+		var queueErr error
+		_, job, queueErr = queueKnowledgeReindexInTransaction(tx, sourceID, expectedVersion, retryOf, now)
+		return queueErr
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -670,7 +597,20 @@ func (a *API) searchKnowledge(c *gin.Context) {
 		return
 	}
 
-	dbQuery := a.db.WithContext(c.Request.Context()).Table("knowledge_chunks_fts").Select(`
+	results, err := searchKnowledgeChunks(c.Request.Context(), a.db, terms, sourceIDs, limit, 0)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"data": results, "meta": gin.H{
+		"query": query, "result_count": len(results), "source_ids": sourceIDs,
+	}})
+}
+
+// Callers validate query, scope and pagination before sharing the same FTS read model.
+func searchKnowledgeChunks(ctx context.Context, db *gorm.DB, terms, sourceIDs []string, limit, offset int) ([]knowledgeSearchResult, error) {
+	dbQuery := db.WithContext(ctx).Table("knowledge_chunks_fts").Select(`
 		knowledge_chunks_fts.chunk_id AS chunk_id,
 		knowledge_chunks_fts.document_id AS document_id,
 		knowledge_chunks_fts.source_id AS source_id,
@@ -681,16 +621,15 @@ func (a *API) searchKnowledge(c *gin.Context) {
 		c.start_page AS start_page, c.end_page AS end_page, c.content AS content,
 		bm25(knowledge_chunks_fts) AS rank
 	`).Joins("JOIN knowledge_chunks c ON c.id = knowledge_chunks_fts.chunk_id").
-		Joins("JOIN knowledge_documents d ON d.id = c.document_id AND d.status = 'ready'").
+		Joins("JOIN knowledge_documents d ON d.id = c.document_id AND d.source_id = c.source_id AND d.status = 'ready'").
 		Joins("JOIN knowledge_sources s ON s.id = c.source_id AND s.status IN ('ready', 'indexing') AND s.deleted_at IS NULL").
 		Where("knowledge_chunks_fts MATCH ?", knowledgeFTSQuery(terms))
 	if len(sourceIDs) > 0 {
 		dbQuery = dbQuery.Where("knowledge_chunks_fts.source_id IN ?", sourceIDs)
 	}
 	var rows []knowledgeSearchRow
-	if err := dbQuery.Order("rank ASC").Order("s.name ASC").Order("c.chunk_index ASC").Limit(limit).Scan(&rows).Error; err != nil {
-		writeDatabaseError(c)
-		return
+	if err := dbQuery.Order("rank ASC").Order("s.name ASC").Order("c.chunk_index ASC").Order("c.id ASC").Limit(limit).Offset(offset).Scan(&rows).Error; err != nil {
+		return nil, err
 	}
 	results := make([]knowledgeSearchResult, len(rows))
 	for index := range rows {
@@ -705,10 +644,7 @@ func (a *API) searchKnowledge(c *gin.Context) {
 			Excerpt: excerpt, Highlights: highlights, Rank: rows[index].Rank,
 		}
 	}
-	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"data": results, "meta": gin.H{
-		"query": query, "result_count": len(results), "source_ids": sourceIDs,
-	}})
+	return results, nil
 }
 
 func (a *API) getKnowledgeIndexJob(c *gin.Context) {
@@ -735,32 +671,11 @@ func (a *API) cancelKnowledgeIndexJob(c *gin.Context) {
 	now := a.options.Now().UTC().Format(time.RFC3339Nano)
 	var job models.KnowledgeIndexJob
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&job, "id = ?", id).Error; err != nil {
-			return err
+		cancelled, cancelErr := cancelKnowledgeIndexJobInTransaction(tx, id, now)
+		if cancelErr != nil {
+			return knowledgeJobNotFound(cancelErr)
 		}
-		if job.Status != "queued" && job.Status != "running" {
-			return newProjectRequestError(http.StatusConflict, "KNOWLEDGE_JOB_TERMINAL", "Completed index jobs cannot be cancelled")
-		}
-		if err := tx.Model(&models.KnowledgeIndexJob{}).Where("id = ?", id).Updates(map[string]any{
-			"status": "cancelled", "stage": "complete", "progress": job.Progress,
-			"cancel_requested": true, "completed_at": now,
-		}).Error; err != nil {
-			return err
-		}
-		var documentCount int64
-		if err := tx.Model(&models.KnowledgeDocument{}).Where("source_id = ?", job.SourceID).Count(&documentCount).Error; err != nil {
-			return err
-		}
-		sourceStatus := "failed"
-		if documentCount > 0 {
-			sourceStatus = "ready"
-		}
-		if err := tx.Model(&models.KnowledgeSource{}).
-			Where("id = ? AND status = 'indexing' AND deleted_at IS NULL", job.SourceID).
-			Updates(map[string]any{"status": sourceStatus, "version": gorm.Expr("version + 1"), "updated_at": now}).Error; err != nil {
-			return err
-		}
-		job.Status, job.Stage, job.CancelRequested, job.CompletedAt = "cancelled", "complete", true, &now
+		job = cancelled
 		return nil
 	})
 	if err != nil {
@@ -787,15 +702,19 @@ func (a *API) retryKnowledgeIndexJob(c *gin.Context) {
 		return
 	}
 	var job models.KnowledgeIndexJob
-	if err := a.db.WithContext(c.Request.Context()).First(&job, "id = ?", id).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-		writeError(c, http.StatusNotFound, "KNOWLEDGE_JOB_NOT_FOUND", "Knowledge index job not found")
-		return
-	} else if err != nil {
+	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+		retryable, loadErr := loadRetryableKnowledgeIndexJob(tx, id)
+		if loadErr != nil {
+			return knowledgeJobNotFound(loadErr)
+		}
+		job = retryable
+		return nil
+	})
+	if err := knowledgeJobNotFound(err); err != nil {
+		if writeProjectRequestError(c, err) {
+			return
+		}
 		writeDatabaseError(c)
-		return
-	}
-	if job.Status != "failed" && job.Status != "cancelled" {
-		writeError(c, http.StatusConflict, "KNOWLEDGE_JOB_NOT_RETRYABLE", "Only failed or cancelled index jobs can be retried")
 		return
 	}
 	a.queueKnowledgeReindex(c, job.SourceID, expectedVersion, &job)
@@ -881,32 +800,7 @@ func readKnowledgeUpload(c *gin.Context) (knowledgeUpload, error) {
 	if !fileSeen {
 		return knowledgeUpload{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Exactly one file part is required")
 	}
-	if result.Name == "" || result.Name == "." {
-		return knowledgeUpload{}, newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_INVALID_FILENAME", "The selected file name is not valid")
-	}
-	if len(result.Bytes) == 0 {
-		return knowledgeUpload{}, newProjectRequestError(http.StatusUnprocessableEntity, "KNOWLEDGE_EMPTY_SOURCE", "The selected file is empty")
-	}
-	result.SourceType, result.MimeType, err = knowledgeFileType(result.Name)
-	if err != nil {
-		return knowledgeUpload{}, err
-	}
-	if result.SourceType == "pdf" {
-		if err = validateKnowledgePDFUpload(result.Bytes); err != nil {
-			return knowledgeUpload{}, err
-		}
-	} else {
-		if _, err = extractKnowledgeText(result.Name, result.Bytes); err != nil {
-			return knowledgeUpload{}, err
-		}
-	}
-	if result.Title == "" {
-		result.Title = result.Name
-	}
-	if utf8.RuneCountInString(result.Title) > 255 {
-		return knowledgeUpload{}, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "title must be at most 255 characters")
-	}
-	return result, nil
+	return finalizeKnowledgeUpload(result)
 }
 
 func mapKnowledgeUploadReadError(err error) error {

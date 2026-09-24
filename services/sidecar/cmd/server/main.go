@@ -63,7 +63,88 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "agent-executor" {
 		os.Exit(agentexec.ExecutorMain())
 	}
+	// One-shot desktop recovery-page helpers: list/select backups before the
+	// live business API is ready. They never start the HTTP server.
+	if len(os.Args) > 1 && os.Args[1] == "list-restore-choices" {
+		os.Exit(runListRestoreChoices(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "prepare-restore" {
+		os.Exit(runPrepareRestore(os.Args[2:]))
+	}
 	os.Exit(run(os.Args[1:]))
+}
+
+func runListRestoreChoices(args []string) int {
+	cfg, backupIDFlag, err := parseRestoreCommandArgs(args)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "configuration error:", err)
+		return 2
+	}
+	_ = backupIDFlag
+	choices, err := api.ListStartupRestoreChoices(cfg.BackupDir)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "list restore choices failed:", err)
+		return 1
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"data": choices}); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "encode restore choices failed:", err)
+		return 1
+	}
+	return 0
+}
+
+func runPrepareRestore(args []string) int {
+	cfg, backupID, err := parseRestoreCommandArgs(args)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "configuration error:", err)
+		return 2
+	}
+	if backupID == "" {
+		_, _ = fmt.Fprintln(os.Stderr, "prepare-restore requires --backup-id=<uuid>")
+		return 2
+	}
+	result, err := api.PrepareStartupRestore(api.PrepareStartupRestoreConfig{
+		BackupID:      backupID,
+		Confirm:       true,
+		DatabasePath:  cfg.DatabasePath,
+		BackupDir:     cfg.BackupDir,
+		ArtifactDir:   cfg.ArtifactDir,
+		InvoicePDFDir: cfg.InvoicePDFDir,
+		AppVersion:    appVersion,
+		Commit:        commit,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "prepare restore failed:", err)
+		return 1
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{"data": result}); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "encode prepare restore result failed:", err)
+		return 1
+	}
+	return 0
+}
+
+func parseRestoreCommandArgs(args []string) (config.Config, string, error) {
+	backupID := ""
+	filtered := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if strings.HasPrefix(arg, "--backup-id=") {
+			backupID = strings.TrimSpace(strings.TrimPrefix(arg, "--backup-id="))
+			continue
+		}
+		if arg == "--backup-id" && index+1 < len(args) {
+			index++
+			backupID = strings.TrimSpace(args[index])
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	cfg, err := config.Parse(filtered, os.Getenv)
+	if err != nil {
+		return config.Config{}, "", err
+	}
+	return cfg, backupID, nil
 }
 
 func run(args []string) int {

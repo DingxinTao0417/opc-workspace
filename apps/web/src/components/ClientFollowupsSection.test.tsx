@@ -4,9 +4,13 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import type { Actor, ClientFollowup } from "../types/models";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
+import { useAiChatStore } from "../store/aiChat";
 import { ClientFollowupsSection } from "./ClientFollowupsSection";
 
 const actor: Actor = {
@@ -53,6 +57,7 @@ const followup: ClientFollowup = {
 
 const state = vi.hoisted(() => ({
   query: vi.fn(),
+  detail: vi.fn(),
   responsePage: null as number | null,
   total: 1,
   create: { error: null, isPending: false, mutate: vi.fn(), reset: vi.fn() },
@@ -68,7 +73,14 @@ const state = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/client")>()),
+  getClientFollowup: state.detail,
+}));
+
 vi.mock("../api/hooks", () => ({
+  clientActivityQueryKey: (id: string) => ["clients", id, "activities"],
+  clientFollowupQueryKey: (id: string) => ["clients", id, "followups"],
   useClientFollowupsQuery: state.query,
   useClientFollowupActorOptionsQuery: () => ({
     data: [actor],
@@ -84,8 +96,11 @@ vi.mock("../api/hooks", () => ({
   useRescheduleClientFollowup: () => state.reschedule,
 }));
 
+const queryClients: QueryClient[] = [];
+
 describe("ClientFollowupsSection", () => {
   beforeEach(() => {
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     state.responsePage = null;
     state.total = 1;
     state.query.mockImplementation(
@@ -115,12 +130,15 @@ describe("ClientFollowupsSection", () => {
       state.cancel,
       state.reschedule,
     ]) {
+      mutation.isPending = false;
       mutation.mutate.mockClear();
     }
   });
 
   afterEach(() => {
     cleanup();
+    queryClients.splice(0).forEach((client) => client.clear());
+    useAiChatStore.setState({ activeSessionId: "" });
     vi.clearAllMocks();
   });
 
@@ -326,4 +344,209 @@ describe("ClientFollowupsSection", () => {
     expect(screen.queryByText("安排本地回访")).toBeNull();
     expect(screen.getByText(/客户已停用/)).toBeTruthy();
   });
+
+  const clientId = "018f0000-0000-7000-8000-000000000901";
+  const followupId = "018f0000-0000-7000-8000-000000000902";
+  const sessionId = "018f0000-0000-7000-8000-000000000903";
+  function HandoffPath() {
+    return <output aria-label="当前地址">{useLocation().pathname}</output>;
+  }
+  function renderHandoff(selected = false) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClients.push(queryClient);
+    const close = vi.fn();
+    state.detail.mockResolvedValue({ ...followup, id: followupId, clientId });
+    state.query.mockReturnValue({
+      data: {
+        items: [{ ...followup, id: followupId, clientId }],
+        meta: { page: 1, pageSize: 6, total: 1, serverNow: followup.createdAt },
+      },
+      isError: false,
+      isFetching: false,
+      isPending: false,
+      isPlaceholderData: false,
+      isSuccess: true,
+      refetch: vi.fn(),
+    });
+    const element = () => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/clients/${clientId}`]}>
+          <HandoffPath />
+          <ClientFollowupsSection
+            clientId={clientId}
+            selectedId={selected ? followupId : undefined}
+            returnSession={selected ? sessionId : undefined}
+            onClearSelection={close}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    return { ...render(element()), element, close };
+  }
+
+  it.each([
+    ["安排回访", "目的", "取消"],
+    [`编辑回访 ${followup.purpose}`, "目的", "取消"],
+    ["完成", "回访结果", "返回"],
+    ["重排", "重排原因", "返回"],
+    ["跳过", "原因", "返回"],
+    ["取消", "原因", "返回"],
+  ])(
+    "preserves the %s draft before handing a followup to the agent",
+    (open, field, close) => {
+      renderHandoff();
+      fireEvent.click(screen.getByRole("button", { name: open }));
+      fireEvent.change(screen.getByLabelText(field), {
+        target: { value: "尚未保存的私人草稿" },
+      });
+      const handoff = screen.getByRole("button", { name: "交给智能体" });
+      expect(handoff).toBeDisabled();
+      expect(screen.getByText(/请先保存或取消当前回访编辑/)).toBeVisible();
+      fireEvent.click(handoff);
+      expect(screen.getByLabelText(field)).toHaveValue("尚未保存的私人草稿");
+      expect(screen.getByLabelText("当前地址")).toHaveTextContent(
+        `/clients/${clientId}`,
+      );
+      expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+      for (const mutation of [
+        state.create,
+        state.update,
+        state.complete,
+        state.skip,
+        state.cancel,
+        state.reschedule,
+      ]) {
+        expect(mutation.mutate).not.toHaveBeenCalled();
+      }
+      fireEvent.click(
+        within(
+          screen
+            .getByLabelText(field)
+            .closest(".client-followup-editor") as HTMLElement,
+        ).getByRole("button", { name: close }),
+      );
+      expect(handoff).toBeEnabled();
+      fireEvent.click(handoff);
+      expect(screen.getByLabelText("当前地址")).toHaveTextContent("/ai");
+      const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+      expect(pending).toMatchObject({
+        route: `/clients/${clientId}?followup=${followupId}`,
+        scopes: ["work", "clients", "actions"],
+      });
+      expect(pending?.prompt).not.toContain("尚未保存的私人草稿");
+    },
+  );
+
+  it.each([
+    "create",
+    "update",
+    "complete",
+    "skip",
+    "cancel",
+    "reschedule",
+  ] as const)(
+    "keeps handoff blocked while %s is pending and restores it after settling",
+    (kind) => {
+      state[kind].isPending = true;
+      const view = renderHandoff();
+      const handoff = screen.getByRole("button", { name: "交给智能体" });
+      expect(handoff).toBeDisabled();
+      expect(screen.getByText(/回访操作正在处理中/)).toBeVisible();
+      fireEvent.click(handoff);
+      expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+      expect(screen.getByLabelText("当前地址")).toHaveTextContent(
+        `/clients/${clientId}`,
+      );
+      state[kind].isPending = false;
+      view.rerender(view.element());
+      expect(handoff).toBeEnabled();
+    },
+  );
+
+  it.each([
+    [`编辑回访 ${followup.purpose}`, "目的", "取消"],
+    ["完成", "回访结果", "返回"],
+  ])(
+    "keeps selected followup navigation blocked while the %s draft exists",
+    async (open, field, dismiss) => {
+      const view = renderHandoff(true);
+      const panel = screen.getByLabelText("定位的客户回访");
+      await within(panel).findByText(followup.purpose);
+      expect(state.detail).toHaveBeenCalledWith(
+        followupId,
+        expect.any(AbortSignal),
+      );
+      useAiChatStore.setState({ activeSessionId: "different-session" });
+      fireEvent.click(within(panel).getByRole("button", { name: open }));
+      fireEvent.change(screen.getByLabelText(field), {
+        target: { value: "保留这个未保存草稿" },
+      });
+      const returnButton = within(panel).getByRole("button", {
+        name: "返回原对话",
+      });
+      const closeButton = within(panel).getByRole("button", {
+        name: "关闭定位",
+      });
+      expect(returnButton).toBeDisabled();
+      expect(closeButton).toBeDisabled();
+      fireEvent.click(returnButton);
+      fireEvent.click(closeButton);
+      expect(view.close).not.toHaveBeenCalled();
+      expect(screen.getByLabelText(field)).toHaveValue("保留这个未保存草稿");
+      expect(useAiChatStore.getState().activeSessionId).toBe(
+        "different-session",
+      );
+      expect(screen.getByLabelText("当前地址")).toHaveTextContent(
+        `/clients/${clientId}`,
+      );
+      fireEvent.click(
+        within(
+          screen
+            .getByLabelText(field)
+            .closest(".client-followup-editor") as HTMLElement,
+        ).getByRole("button", { name: dismiss }),
+      );
+      expect(closeButton).toBeEnabled();
+      fireEvent.click(closeButton);
+      expect(view.close).toHaveBeenCalledOnce();
+      fireEvent.click(within(panel).getByRole("link", { name: "返回原对话" }));
+      expect(screen.getByLabelText("当前地址")).toHaveTextContent("/ai");
+      expect(useAiChatStore.getState().activeSessionId).toBe(sessionId);
+    },
+  );
+
+  it.each([
+    "create",
+    "update",
+    "complete",
+    "skip",
+    "cancel",
+    "reschedule",
+  ] as const)(
+    "blocks selected followup return and close until %s settles",
+    async (kind) => {
+      state[kind].isPending = true;
+      const view = renderHandoff(true);
+      const panel = screen.getByLabelText("定位的客户回访");
+      await within(panel).findByText(followup.purpose);
+      expect(
+        within(panel).getByRole("button", { name: "返回原对话" }),
+      ).toBeDisabled();
+      const closeButton = within(panel).getByRole("button", {
+        name: "关闭定位",
+      });
+      expect(closeButton).toBeDisabled();
+      fireEvent.click(closeButton);
+      expect(view.close).not.toHaveBeenCalled();
+      state[kind].isPending = false;
+      view.rerender(view.element());
+      expect(closeButton).toBeEnabled();
+      expect(
+        within(panel).getByRole("link", { name: "返回原对话" }),
+      ).toHaveAttribute("href", "/ai");
+    },
+  );
 });
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

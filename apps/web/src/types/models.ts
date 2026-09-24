@@ -734,6 +734,16 @@ export interface TaskVersionItem {
 
 export type BatchUpdateTasksInput =
   | {
+      action: "set_priority";
+      items: TaskVersionItem[];
+      priority: TaskPriority;
+    }
+  | {
+      action: "set_due_date";
+      items: TaskVersionItem[];
+      dueDate: string | null;
+    }
+  | {
       action: "set_project";
       items: TaskVersionItem[];
       projectId: string | null;
@@ -1770,6 +1780,7 @@ export interface InboxItem {
     | "roadmap_milestone"
     | "project_completion"
     | "automation"
+    | "agent_run_failed"
     | "system_maintenance";
   sourceEntityId: string | null;
   sourceEventKey: string | null;
@@ -2986,6 +2997,51 @@ export interface AiBusinessContextPreview {
   knowledge: AiKnowledgeContextSource[];
 }
 
+export type AiWorkspaceScope =
+  | "work"
+  | "clients"
+  | "outputs"
+  | "output_files"
+  | "actions"
+  | "agent_execution"
+  | "agent_files"
+  | "agent_project_files"
+  | "workspace_ui"
+  | "workspace_browser"
+  | "knowledge"
+  | "knowledge_actions"
+  | "finance"
+  | "finance_actions"
+  | "invoice_actions"
+  | "finance_exports";
+
+export type AiWorkspaceRecordNavigationType =
+  | "task"
+  | "task_saved_view"
+  | "project"
+  | "client"
+  | "client_activity"
+  | "client_followup"
+  | "project_note"
+  | "financial_entry"
+  | "invoice"
+  | "inbox_item"
+  | "reminder"
+  | "roadmap_milestone"
+  | "content_item"
+  | "agent_run"
+  | "task_submission"
+  | "task_artifact";
+
+export interface AiWorkspaceGrant {
+  provider_version: number;
+  scopes: AiWorkspaceScope[];
+  knowledge_sources?: Array<{
+    source_id: string;
+    expected_source_version: number;
+  }>;
+}
+
 export interface AiBusinessContextSelection {
   provider_version: number;
   sources: Array<{
@@ -3007,6 +3063,8 @@ export interface AiSession {
   title: string;
   persist: boolean;
   compacted_message_count: number;
+  /** Absent when an older Sidecar does not report it; never guessed as 0. */
+  message_count?: number;
   version: number;
   created_at: string;
   updated_at: string;
@@ -3017,7 +3075,16 @@ export interface AiMessageTaskRef {
   task_title_snapshot: string;
 }
 
+export interface AiGenerationOrigin {
+  kind: "plan_continuation";
+  continuation_id: string;
+  turn_index: number;
+  max_turns: number;
+}
+
 export interface AiMessage {
+  origin?: AiGenerationOrigin;
+  access_request?: { scopes: AiWorkspaceScope[] };
   id: string;
   session_id: string;
   role: "user" | "assistant";
@@ -3044,6 +3111,12 @@ export interface AiMessageListResult {
   };
 }
 
+// Undefined evidence means unavailable, not a verified absence of sources.
+export interface AiCitationResult {
+  status: AiCitationStatus;
+  items: AiCitation[];
+}
+
 export interface AiChatStreamMeta {
   protocol: string;
   generation_id: string;
@@ -3053,8 +3126,118 @@ export interface AiChatStreamMeta {
   sse_protocol: string;
 }
 
+export interface AiRunProgress {
+  sequence: number;
+  kind:
+    | "model_turn"
+    | "tool_call"
+    | "self_check"
+    | "citation_validation"
+    | "persistence";
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  turn_index?: number;
+  tool_name?: string;
+  started_at: string;
+  completed_at?: string;
+  duration_ms: number;
+  retry_count?: number;
+  retry_reason?: string;
+  trimmed_history_turns?: number;
+  compacted_tool_results?: number;
+}
+
+export type AiWorkspacePanel =
+  | "overview"
+  | "agents"
+  | "files"
+  | "review"
+  | "terminal"
+  | "browser"
+  | "managed";
+
+export interface AiProjectFileProposal {
+  id: string;
+  path: string;
+  baseSHA256: string;
+  content: string;
+}
+
 export type AiChatStreamEvent =
   | { type: "meta"; meta: AiChatStreamMeta }
+  | {
+      type: "project_file_proposal";
+      generationId: string;
+      proposal: AiProjectFileProposal;
+    }
+  | { type: "progress"; generationId: string; step: AiRunProgress }
+  | {
+      type: "workspace_panel";
+      generationId: string;
+      panel: AiWorkspacePanel;
+    }
+  | {
+      type: "workspace_panels";
+      generationId: string;
+      panels: [AiWorkspacePanel, AiWorkspacePanel];
+      splitRatio?: number;
+    }
+  | {
+      type: "workspace_browser_navigation";
+      generationId: string;
+      url: string;
+    }
+  | {
+      type: "workspace_browser_action";
+      generationId: string;
+      action: "back" | "forward" | "reload" | "stop";
+    }
+  | {
+      type: "workspace_access_request";
+      generationId: string;
+      scopes: AiWorkspaceScope[];
+    }
+  | {
+      type: "workspace_plan_updated";
+      generationId: string;
+      version: number;
+      stepCount: number;
+    }
+  | {
+      type: "workspace_record_navigation";
+      generationId: string;
+      recordType: Exclude<
+        AiWorkspaceRecordNavigationType,
+        | "agent_run"
+        | "task_submission"
+        | "task_artifact"
+        | "project_note"
+        | "client_activity"
+        | "client_followup"
+      >;
+      recordId: string;
+    }
+  | {
+      type: "workspace_record_navigation";
+      generationId: string;
+      recordType: "agent_run" | "task_submission";
+      recordId: string;
+      taskId: string;
+    }
+  | {
+      type: "workspace_record_navigation";
+      generationId: string;
+      recordType: "task_artifact";
+      recordId: string;
+      taskId: string;
+      submissionId: string;
+    }
+  | {
+      type: "workspace_record_navigation";
+      generationId: string;
+      recordType: "project_note" | "client_activity" | "client_followup";
+      recordId: string;
+      parentId: string;
+    }
   | { type: "delta"; generationId: string; text: string }
   | { type: "reasoning"; generationId: string; text: string }
   | {
@@ -3063,7 +3246,7 @@ export type AiChatStreamEvent =
       text: string;
       reasoning: string;
     }
-  | { type: "done"; generationId: string }
+  | { type: "done"; generationId: string; citationEvidence?: AiCitationResult }
   | { type: "cancelled"; generationId: string; partialText: string }
   | {
       type: "error";
@@ -3076,6 +3259,35 @@ export type AiChatStreamEvent =
 export type AgentRunStatus =
   "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
+export type AgentRunOutputDeliveryStatus =
+  "not_ready" | "pending" | "submitted" | "retained";
+
+export type AgentRunProgressPhase =
+  "preparing" | "calling_model" | "registering_result";
+
+export interface AgentRunProgress {
+  phase: AgentRunProgressPhase;
+  elapsedMs: number;
+}
+
+export type AgentRunStartGateCloseReason =
+  | "predecessor_failed"
+  | "predecessor_cancelled"
+  | "predecessor_retained"
+  | "predecessor_not_accepted"
+  | "predecessor_unavailable"
+  | "expired"
+  | "run_not_queued";
+
+/** ADR-030 human-confirmed start precondition, projected by the Sidecar. */
+export interface AgentRunStartGate {
+  predecessorRunId: string;
+  require: "submitted" | "accepted";
+  expiresAt: string;
+  status: "waiting" | "released" | "closed";
+  closeReason?: AgentRunStartGateCloseReason;
+}
+
 export interface AgentRun {
   id: string;
   taskId: string;
@@ -3084,31 +3296,204 @@ export interface AgentRun {
   adapterId: string;
   createdByActorId: string;
   parentRunId: string | null;
+  restartOfRunId?: string | null;
+  startGate?: AgentRunStartGate;
   attempt: number;
   status: AgentRunStatus;
+  /** Ephemeral, content-free stage metadata for native UI polling only. */
+  progress?: AgentRunProgress;
   providerId: string;
   model: string;
+  /** Server-frozen output shape; it never contains model-controlled paths or bodies. */
+  outputContract?: AgentRunOutputContract;
+  executionContractVersion?: number;
+  reworkContext?: AgentRunReworkContext;
+  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
+  reworkInputFiles?: AgentRunReworkInputFile[];
+  modelProtocol?: "anthropic_messages" | "openai_chat";
+  maxOutputTokens?: 8192 | 0;
+  executionProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
+  executionInputFiles?: AgentRunReworkInputFile[];
   resultText: string | null;
   resultBytes: number | null;
   errorCode: string | null;
+  outputDeliveryStatus: AgentRunOutputDeliveryStatus;
+  outputDeliveryErrorCode: string | null;
+  submissionId: string | null;
+  artifactId: string | null;
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
 }
 
-export interface AgentRunSummary extends AgentRun {
+export type AgentRunSummary = Omit<
+  AgentRun,
+  | "resultText"
+  | "reworkContext"
+  | "reworkProviderConfirmation"
+  | "reworkInputFiles"
+  | "modelProtocol"
+  | "maxOutputTokens"
+  | "executionProviderConfirmation"
+  | "executionInputFiles"
+> & {
   taskTitle: string;
-}
+};
 
 export interface AgentRunListParams {
   page?: number;
   pageSize?: number;
   status?: AgentRunStatus;
+  outputDeliveryStatus?: AgentRunOutputDeliveryStatus;
+  attentionOnly?: boolean;
+  unplannedOnly?: boolean;
+}
+
+export interface AgentRunListMeta extends PageMeta {
+  activeTotal: number;
+  pendingDeliveryTotal: number;
+  succeededTotal: number;
 }
 
 export interface AgentRunListResult {
   items: AgentRunSummary[];
-  meta: PageMeta;
+  meta: AgentRunListMeta;
+}
+
+export type AgentRunFileSourceKind =
+  "task_artifact" | "project_attachment" | "project_task_artifact";
+
+export interface AgentProjectFileSource {
+  project_id: string;
+  task_id: string;
+  task_title: string;
+  task_version: number;
+  submission_id: string;
+  submission_sequence: number;
+}
+
+export interface AgentRunFileCandidate {
+  sourceTask?: AgentProjectFileSource;
+  sourceKind: AgentRunFileSourceKind;
+  id: string;
+  name: string;
+  mime: string;
+  sizeBytes: number;
+  sha256: string;
+  eligible: boolean;
+  errorCode: string | null;
+  createdAt: string;
+}
+
+export interface AgentRunFileLimits {
+  maxFiles: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
+  maxResultBytes: number;
+}
+
+export interface AgentRunFileCandidatesResult {
+  items: AgentRunFileCandidate[];
+  limits: AgentRunFileLimits;
+}
+
+export interface AgentRunFileReference {
+  sourceTask?: AgentProjectFileSource;
+  sha256?: string;
+  sourceKind: AgentRunFileSourceKind;
+  id: string;
+}
+
+export interface AgentRunFileAccessProviderConfirmation {
+  version: number;
+  configVersion: number;
+  kind: AiProviderKind;
+}
+
+export interface AgentRunOutputFileContract {
+  name: string;
+  mime: string;
+}
+
+export type AgentRunOutputContract =
+  | { type: "text" }
+  | { type: "file"; name: string; mime: string }
+  | { type: "files"; files: AgentRunOutputFileContract[] };
+
+export interface AgentRunAutoAssign {
+  actorId: string;
+  expectedTaskVersion: number;
+}
+
+export interface CreateAgentRunOptions {
+  confirmProjectTaskFiles?: boolean;
+  restart?: AgentRunRestartRequest;
+  confirmRestart?: boolean;
+  restartPreviewHash?: string;
+  autoAssign?: AgentRunAutoAssign;
+  inputFiles?: AgentRunFileReference[];
+  outputContract?: AgentRunOutputContract;
+  confirmFileAccess?: boolean;
+  fileAccessProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
+  rework?: AgentRunReworkRequest;
+  confirmReworkContext?: boolean;
+  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
+}
+
+export interface AgentRunRestartRequest {
+  runId: string;
+  expectedTaskVersion: number;
+}
+
+export interface AgentRunRestartSource {
+  run_id: string;
+  task_id: string;
+  status: "failed" | "cancelled" | "interrupted" | "succeeded";
+  output_delivery_status: "not_ready" | "retained";
+  attempt: number;
+  task_version: number;
+  actor_id: string;
+  provider_id: string;
+  model: string;
+  completed_at: string;
+}
+
+export interface AgentRunReworkRequest {
+  submissionId: string;
+  artifactIds: string[];
+  expectedTaskVersion: number;
+}
+
+export interface AgentRunReworkContext {
+  submission_id: string;
+  sequence: number;
+  review_reason: string;
+  reviewed_at: string;
+  artifacts: {
+    id: string;
+    storage_kind: "text" | "link" | "structured";
+    name: string;
+    content: string;
+    sha256: string;
+  }[];
+}
+
+export interface AgentRunReworkInputFile {
+  source_task?: AgentProjectFileSource;
+  source_kind: AgentRunFileSourceKind;
+  id: string;
+  name: string;
+  mime: string;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface RetryAgentRunReworkOptions {
+  confirmProjectTaskFiles?: boolean;
+  confirmReworkContext?: boolean;
+  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
+  confirmFileAccess?: boolean;
+  fileAccessProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
 }
 
 export type ControlledFileScope =

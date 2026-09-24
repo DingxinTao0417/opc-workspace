@@ -20,7 +20,7 @@ func newTaskDueFilterAPI(t *testing.T, now time.Time) (*gin.Engine, *database.St
 
 func newTaskDueFilterAPIWithClock(t *testing.T, now func() time.Time) (*gin.Engine, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "task-due-filters.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "task-due-filters.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

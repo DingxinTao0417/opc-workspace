@@ -3457,6 +3457,40 @@ describe("controlled task lifecycle", () => {
       reason: "等待客户确认",
     });
   });
+
+  it("maps batch priority and an explicit nullable UTC due date", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        return jsonResponse({
+          data: {
+            action: body.action,
+            changed: 1,
+            tasks: [taskPayload({ id: "task-1", version: 8 })],
+          },
+        });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await batchUpdateTasks({
+      action: "set_priority",
+      items: [{ id: "task-1", expectedVersion: 7 }],
+      priority: "P0",
+    });
+    await batchUpdateTasks({
+      action: "set_due_date",
+      items: [{ id: "task-1", expectedVersion: 8 }],
+      dueDate: null,
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      action: "set_priority",
+      priority: "P0",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
+      action: "set_due_date",
+      due_date: null,
+    });
+  });
 });
 
 describe("versioned task writes", () => {
@@ -3856,7 +3890,9 @@ describe("invoice requests", () => {
           meta: { page: 2, page_size: 20, total: 21 },
         }),
       )
-      .mockResolvedValueOnce(jsonResponse({ data: invoicePayload }))
+      .mockResolvedValueOnce(
+        jsonResponse({ data: { ...invoicePayload, id: "invoice/1" } }),
+      )
       .mockResolvedValueOnce(jsonResponse({ data: invoicePayload }))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -3976,6 +4012,47 @@ describe("invoice requests", () => {
     expect(
       new Headers(fetchMock.mock.calls[5][1]?.headers).get("If-Match"),
     ).toBe('"3"');
+  });
+
+  it("rejects a mismatched invoice identity", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ data: invoicePayload }));
+    vi.stubGlobal("fetch", request);
+    await expect(getInvoice("another-invoice")).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("cancels an in-flight invoice request when its caller aborts", async () => {
+    const controller = new AbortController();
+    const observed: { signal?: AbortSignal } = {};
+    let markStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            observed.signal = init?.signal ?? undefined;
+            observed.signal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+            markStarted?.();
+          }),
+      ),
+    );
+    const request = getInvoice("invoice-1", controller.signal);
+    const rejected = expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
+    await started;
+    expect(observed.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(observed.signal?.aborted).toBe(true);
+    await rejected;
   });
 
   it("rejects malformed hard-delete responses", async () => {

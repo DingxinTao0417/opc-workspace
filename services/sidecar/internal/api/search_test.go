@@ -21,7 +21,7 @@ type searchTestResponse struct {
 
 func newSearchTestAPI(t *testing.T) (*Router, *database.Store) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "search.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "search.db"))
 	if err != nil {
 		t.Fatalf("database.Open() error = %v", err)
 	}

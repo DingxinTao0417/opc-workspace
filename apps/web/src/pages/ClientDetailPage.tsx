@@ -9,7 +9,12 @@ import {
   UserRound,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useClientQuery,
@@ -22,6 +27,11 @@ import { ClientActivitiesSection } from "../components/ClientActivitiesSection";
 import { ClientAttachmentsSection } from "../components/ClientAttachmentsSection";
 import { ClientActorLinksSection } from "../components/ClientActorLinksSection";
 import { ClientFollowupsSection } from "../components/ClientFollowupsSection";
+import { ReturnToAiChat } from "../components/ClientRecordLocation";
+import { AiIssueHandoffButton } from "../components/AiWorkbenchHandoff";
+import { clientHandoff } from "../lib/aiIssueHandoff";
+import { parseClientRecordLocation } from "../lib/clientRecordLocation";
+import { focusReportReturnSession } from "../lib/focusReportLocation";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { useSettledPage } from "../lib/useSettledPage";
@@ -86,6 +96,17 @@ function operationErrorMessage(error: unknown): string | null {
 
 export function ClientDetailPage() {
   const clientId = useParams().clientId ?? "";
+  const [params, setParams] = useSearchParams();
+  const selection = parseClientRecordLocation(params);
+  const invalidSelection =
+    (params.has("activity") || params.has("followup")) && !selection;
+  const returnSession = focusReportReturnSession(params);
+  const clearSelection = () => {
+    const next = new URLSearchParams(params);
+    next.delete("activity");
+    next.delete("followup");
+    setParams(next, { replace: true });
+  };
   const navigate = useNavigate();
   const clientQuery = useClientQuery(clientId || null);
   const [projectPage, setProjectPage] = useState(1);
@@ -178,6 +199,7 @@ export function ClientDetailPage() {
   if (clientQuery.isPending) {
     return (
       <div className="page">
+        <ReturnToAiChat sessionId={returnSession} />
         <SkeletonRows count={8} />
       </div>
     );
@@ -195,6 +217,7 @@ export function ClientDetailPage() {
           onRetry={() => void clientQuery.refetch()}
           title="客户详情不可用"
         />
+        <ReturnToAiChat sessionId={returnSession} />
       </div>
     );
   }
@@ -203,15 +226,21 @@ export function ClientDetailPage() {
     <div className="page client-detail-page">
       <PageHeader
         actions={
-          <button
-            className="button button-secondary"
-            disabled={busy}
-            onClick={() => setEditing(true)}
-            type="button"
-          >
-            <Edit3 size={14} />
-            编辑资料
-          </button>
+          <>
+            <AiIssueHandoffButton
+              content={clientHandoff(client.id, client.name, client.status)}
+              disabled={busy}
+            />
+            <button
+              className="button button-secondary"
+              disabled={busy}
+              onClick={() => setEditing(true)}
+              type="button"
+            >
+              <Edit3 size={14} />
+              编辑资料
+            </button>
+          </>
         }
         eyebrow={
           <Link className="project-back-link" to="/clients">
@@ -229,6 +258,20 @@ export function ClientDetailPage() {
         }
         title={client.name}
       />
+
+      {!selection ? <ReturnToAiChat sessionId={returnSession} /> : null}
+      {invalidSelection ? (
+        <div className="form-error" role="alert">
+          客户记录链接无效，未读取指定记录。请重新打开正确链接。
+          <button
+            className="button button-quiet"
+            type="button"
+            onClick={clearSelection}
+          >
+            关闭定位
+          </button>
+        </div>
+      ) : null}
 
       <section className="client-detail-card">
         <div className="client-detail-identity">
@@ -343,11 +386,21 @@ export function ClientDetailPage() {
         ) : null}
       </section>
 
-      <ClientActivitiesSection clientId={client.id} />
+      <ClientActivitiesSection
+        key={`activity:${client.id}:${selection?.kind === "activity" ? selection.id : ""}`}
+        clientId={client.id}
+        selectedId={selection?.kind === "activity" ? selection.id : undefined}
+        returnSession={returnSession}
+        onClearSelection={clearSelection}
+      />
 
       <ClientFollowupsSection
+        key={`followup:${client.id}:${selection?.kind === "followup" ? selection.id : ""}`}
         clientId={client.id}
         clientStatus={client.status}
+        selectedId={selection?.kind === "followup" ? selection.id : undefined}
+        returnSession={returnSession}
+        onClearSelection={clearSelection}
       />
 
       <ClientAttachmentsSection

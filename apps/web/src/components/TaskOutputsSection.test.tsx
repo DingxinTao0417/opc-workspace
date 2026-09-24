@@ -8,7 +8,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type {
   ActorSummary,
   Task,
@@ -187,12 +189,14 @@ function renderSection(
     options.onRefreshTask ?? vi.fn(async () => ({ ...value, version: 5 }));
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <TaskOutputsSection
-        onBusyChange={options.onBusyChange}
-        onRefreshTask={onRefreshTask}
-        onTaskUpdated={onTaskUpdated}
-        task={value}
-      />
+      <MemoryRouter>
+        <TaskOutputsSection
+          onBusyChange={options.onBusyChange}
+          onRefreshTask={onRefreshTask}
+          onTaskUpdated={onTaskUpdated}
+          task={value}
+        />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return { ...view, onRefreshTask, onTaskUpdated, queryClient };
@@ -215,6 +219,11 @@ describe("TaskOutputsSection", () => {
       },
       history: [],
       meta: { page: 1, pageSize: 20, total: 0, taskVersion: task.version },
+    });
+    useAiWorkbenchHandoff.setState({
+      pending: null,
+      pendingIssue: null,
+      revision: 0,
     });
   });
 
@@ -728,6 +737,56 @@ describe("TaskOutputsSection", () => {
         name: "删除产出“交付说明”",
       }),
     ).toBeEnabled();
+  });
+
+  it("hands off a precise Task output from the source Task detail", async () => {
+    const taskId = "018f0000-0000-7000-8000-000000004101";
+    const submissionId = "018f0000-0000-7000-8000-000000004102";
+    const artifactId = "018f0000-0000-7000-8000-000000004103";
+    const canonicalTask: Task = {
+      ...task,
+      id: taskId,
+      title: "核对视觉稿",
+      status: "waiting_review",
+      currentSubmissionId: submissionId,
+      version: 9,
+    };
+    const canonicalArtifact: TaskArtifactSummary = {
+      ...textArtifact,
+      id: artifactId,
+      taskId,
+      submissionId,
+      submissionStatus: "pending_review",
+      name: "验收说明",
+    };
+    const canonicalSubmission: TaskSubmission = {
+      ...submission,
+      id: submissionId,
+      taskId,
+      sequence: 4,
+      artifacts: [canonicalArtifact],
+    };
+    apiMocks.getTaskSubmissions.mockResolvedValue({
+      items: [canonicalSubmission],
+      meta: { page: 1, pageSize: 10, total: 1, taskVersion: 9 },
+    });
+    renderSection(canonicalTask);
+
+    fireEvent.click(await screen.findByRole("button", { name: "交给智能体" }));
+
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "任务产出",
+      route: `/tasks/${taskId}/submissions/${submissionId}`,
+      scopes: ["work", "outputs"],
+    });
+    expect(pending?.prompt).toContain(`artifact_id=${artifactId}`);
+    expect(pending?.prompt).toContain("第 4 次提交");
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=artifact");
+    expect(pending?.prompt).toContain("workspace_task_submissions");
+    expect(pending?.prompt).toContain("不要验收、删除或修改产出");
   });
 
   it("serializes downloads and reports download work as busy", async () => {

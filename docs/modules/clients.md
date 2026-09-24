@@ -6,6 +6,12 @@
 
 ## 定位与边界
 
+H4-I/H4-L/H4-X：客户详情标题栏使用专用“交给智能体”，只暂存 `/clients/:id`、canonical Client ID、当前显示名称/状态和固定提示词，不复制联系字段、备注、项目列表、附件、活动/回访正文或财务/发票事实；提示模型先用 `workspace_get(type=client,id=...)` 读取最新受限客户事实，再起草待确认建议。活动与回访定位卡及列表行也可把精确 Activity/Followup ID 交给智能体，推荐 `work+clients+actions`，要求模型先用 `workspace_client_records(view=detail)` 读取当前事实并核对 client_id，再起草待确认建议。在对话里显式追加草稿并重新确认权限，不自动授权、不联系客户、不执行命令。详见 [AI 助手交接契约](ai-assistant.md#h4-i-从工作台事项进入智能体)。
+
+H5-E30（2026-09-21）也支持从智能体返回指定客户活动或回访：本条须 `workspace_ui+clients`，服务端核验真实活动/回访并推导 Client ID，已软删活动不能被该工具定位。模型不提供 Client 关系、URL 或正文；当前流仅给本地 UI 附带 `parent_id`，前端严格构造 `/clients/:clientId?activity=:id` 或 `?followup=:id`，等待用户确认后再打开。记录读取与后续修改仍各受既有授权和审批约束。见 [精确记录导航](ai-assistant.md#智能体精确记录导航扩展h5-e302026-09-21)。
+
+AI 独立轨道（更新至 2026-09-19，app v0.1.1 / API v1 / schema 76）已补 H2-I/J/K/Q 与 H3-B1–B3：本次显式 `clients` 授权可查询客户名称、状态、有界备注、当前联系人安全身份及未删除的本地活动与回访，不把联系字段、人员备注、附件或财务交给模型；手写正文仍可能含敏感内容，授权面板明确披露。`work+clients+actions` 可起草客户主档、联系人关系、回访、活动和受保护的 inactive Client 永久删除；`work+actions` 另可先单独创建/修改本地 person。所有动作由人工确认后通过共享领域事务执行并刷新关联事实。删除需完整影响预览和独立勾选，发票、收支或任何回访都会阻止；Project 与 person 保留。模型不能删除人员、联系客户或执行任意附件操作。完成回访须额外勾选核实实际结果与时间。精确定位与返回对话已由下述 H4-D 接通，详见 [客户回访](client-followups.md)。上方 v43 是原业务模块的历史交付基线，不是当前全仓 schema。
+
 Client 保存一人公司在本机维护的客户资料与业务关联，是 Project、Invoice 和后续回访的主数据，不是在线 CRM 或多人账号系统。
 
 - 客户联系人不会自动成为 Actor。只有 owner 在客户详情显式选择已有 active person，或确认“新建并关联”后，联系人才能作为本地责任记录；每个 Client 同时只允许一个 active `contact` 关联。
@@ -16,6 +22,8 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - v0.1 不自动发送邮件、短信、发票或其他外部消息。
 
 ## 当前实现状态
+
+- H4-H 让普通 `/clients/:id` 的 AI 消息/审批卡链接也携带 UI 生成的来源会话，客户详情及不可用状态复用“返回原对话”。来源由显示消息的界面决定，不接受模型指定会话，不触发客户操作或恢复权限。
 
 当前状态为**部分完成**，已经具备可运行的客户资料事实层、列表、基础详情、共享服务端搜索 ClientSelect、Project 客户关联、人工与项目状态本地活动时间线、受控附件和 person 显式关联。
 
@@ -57,13 +65,21 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 - 选择器区分加载、初始空、搜索无结果、错误重试和存在更多结果；提供 combobox/listbox 键盘语义。跨页、搜索或加载失败时当前选择仍保留；inactive Client 可见可选。编辑已有 Project 时不会因选项未加载或失败静默提交 `null`，只有用户显式点击“清除客户”才解除关系。
 - 项目列表和任务列表已支持按 Client 筛选；Client 创建、编辑、删除和 Project 关联变化会刷新相关 Client/Project/Task 查询缓存。Task 只提交 `client_id` 查询条件，服务端仍沿 Task→Project→Client 当前关系过滤，不复制客户事实。
 
+### 已实现：H4-D 活动与回访精确定位
+
+- 客户详情接受 `?activity=<canonical UUID>` 或 `?followup=<canonical UUID>`，一次只能定位一种记录。重复、未知或冲突参数拒绝定位，不猜测第一页；主/侧对话仅渲染白名单内部链接。AI 工具从实际记录生成 route，审批确认前的创建只链接客户；确认后优先用真实 result_id，重排/续排定位新计划，不将其称为已完成。
+- 定位区通过现有 `GET /client-activities/:id` 或 `GET /client-followups/:id` 独立读取最新事实，校验返回的记录与客户 ID。无须遍历列表，不受分页/筛选影响；返回到同一客户的其他记录或浏览器后退会重新定位。切换或关闭定位清理当前表单和定位读取，下方恢复普通列表。加载、失败、身份错配与重试可见，失败不展示旧正文、不以其他记录替代。
+- 定位卡复用活动和回访原行展示及原有手工命令/版本校验，点击链接不执行命令、不联系客户、不授予 AI 权限。软删除活动只展示删除事实且无正文/编辑；终态回访显示结果、计划备注、处理时刻、版本，重排后的计划可打开旧计划。只读系统活动保持只读，不复制业务事实或新增表。H4-L 起，活动/回访行内“交给智能体”只暂存 Client+Record 身份和固定提示词；进入 `/ai` 后仍需人工点击带入、重新授权并发送，模型必须重新读取 detail，才能提出 `client_activity.*` 或 `client_followup.*` 确认建议。
+- 主/侧消息及审批卡的返回会话由 UI 附加 `return_session`，不接受模型指定；“返回原对话”选择该会话，另一条生成流不能覆盖明确选择。客户或记录不可用时仍保留返回入口；关闭定位保留合法返回上下文。普通 Today/Inbox/右侧客户动态也复用精确链接，但不附加 AI 身份。
+- 代码证据：`clientRecordLocation.ts`、`ClientRecordLocation.tsx`、`ClientDetailPage.tsx`、两类 Section、`aiIssueHandoff.ts`、`ai_client_records.go` 与 `ai_workspace_actions.go`。确定性测试覆盖链接边界、跨页记录/编辑版本、前后导航、删除历史、身份错配、缓存失效、失败重试/取消、精确活动/回访交接，以及真实 Harness 配模拟模型的查询与确认路由。真实模型和原生桌面另验收；API v1/schema 76 不变。
+
 ### 已知缺口
 
 - Project complete/reopen 已成为第一类 `system_reference` 来源；邮件、日历、回访和其他外部业务来源仍无投影器。附件可选关联活动，但不会自动生成或伪造 Activity。
 - 没有客户标签、去重合并、批量操作或导入导出。
 - 当前仅支持一个 `contact` 角色，不支持多联系人、角色自定义、客户门户或远程协作。
 - 没有发票详情、累计收入或 Financial Entry 聚合；这些能力归入 v0.4。
-- `client_followups`、到期 Inbox 投影及客户详情管理已交付；完成回访可在同一事务安排下一次本地计划，Today 与 Inbox 均只提供回到客户详情的本地入口。更多提醒交互仍归入 v0.4。
+- `client_followups`、到期 Inbox 投影及客户详情管理已交付；完成回访可在同一事务安排下一次本地计划，Today 与 Inbox 均可直接定位客户详情中的指定回访，仍不自动执行命令。更多提醒交互仍归入 v0.4。
 - 仍需真实浏览器完成 ClientSelect 键盘/焦点、浮层与窄屏表格验收，并以至少 1,000 条、建议 10,000 条客户数据验证首开、搜索和翻页性能；现有组件/接口自动化不能替代该专项证据。
 
 ## 当前用户流程
@@ -89,6 +105,25 @@ Client 保存一人公司在本机维护的客户资料与业务关联，是 Pro
 2. 创建请求可带 `Idempotency-Key`；成功后活动与 Client 版本在同一事务更新，列表“最近动态”和详情时间线刷新。
 3. 编辑活动时提交活动自身 `version` 对应的 `If-Match`。并发冲突不会盲目覆盖，界面重新读取时间线并要求用户再次确认。
 4. 删除要求 `confirm=true`、最新 `If-Match` 和 1–1,000 字符原因。记录转为不可变删除历史，正文不再通过 API 返回；默认时间线隐藏删除历史，用户可显式打开审计视图。
+
+### 智能体起草人工活动（H3-B3，AI 独立轨道）
+
+- 仅已保存会话、本次显式 `work+clients+actions` 范围提供 `client_activity.create/update/delete`。模型只起草不可变确认卡；不发送消息、不创建回访计划、不伪造实际沟通或系统活动。创建/修改的数据应来自用户提供或核实的实际备注/会议，发生时间不明先询问。
+- create 必须给 changes.client_id、kind（note/meeting）、title（1–200 字符）、body（1–10,000 字符）和带偏移的 occurred_at（RFC3339，最多服务端当前时间后 5 分钟）。update 只接受 kind/title/body/occurred_at 中提供的字段；delete 只接受 1–1,000 字符 reason。非创建操作绑定 client_activity_id/expected_version，拒绝换客户、作者/来源字段、null、混合目标及模型同意标记。沿用原生规则：停用客户也可记录活动；system_reference 与已删除活动不能更改。
+- 预览含真实客户名称/状态及活动元数据；创建或替换正文完整展示正文，正文修改同时展示完整旧值。其他编辑与删除不复制无关长正文。模型修改正文前需分页读取完整原文，不应把截断读页当作完整替换。工具输入上限 64 KiB，完整审批预览上限 128 KiB；不截断审批内容。整体模型请求仍受既有 64 KiB 上限约束，超预算生成不可确认，不因此执行业务。
+- 人工删除决定需额外 `confirm_activity_delete=true`；未勾选返回 `422 CLIENT_ACTIVITY_DELETE_CONFIRMATION_REQUIRED`，拒绝/其他动作携带该标记返回 `422 AI_ACTION_DECISION_INVALID`。软删除保留历史、正文数据库事实与附件，正文不再从业务 API 返回；当前没有撤销删除接口。
+- 原生 HTTP 与 AI 确认共用 `client_activity_commands.go`；确认重验活动版本、客户资料及预览一致性，Client 聚合版本、活动写入、审批决定/事件同事务提交或回滚。确认人固定为本地 owner，模型不能选择作者。客户端成功及模糊失败都取消旧 Client/搜索查询并刷新详情、时间线、跨客户最近动态和导航角标；打开入口按真实活动 ID 精确读取；删除后显示无正文历史，见下述 H4-D。下一轮只注入动作/状态/目标/结果 ID 与版本，不附正文或继承权限。
+- schema 073 为通用审批 JSON 扩容，保留旧记录和不可变决定；见 [ADR-029](../adr/029-agent-workspace-capabilities.md)。验证入口：`ai_client_activity_actions_test.go`（含真实 Harness / 模拟上游闭环）、`client_activities_test.go`、`ai_action_capacity_migration_test.go`、`aiWorkspaceActions.test.ts`、`AiWorkspaceActions.test.tsx`、`clientActivityActionFacts.test.ts`；隔离测试不代替真实模型/页面验收。
+
+### 智能体起草客户主档、联系人关系、本地人员与永久删除（H2-I/J/K/Q，AI 独立轨道）
+
+- 仅保存会话、本条消息显式授予 `work+clients+actions` 时开放 `client.create/update`。创建必须提供名称，可选联系人、邮箱、电话、备注与 `active/lead/inactive` 状态；修改绑定真实 `client_id/expected_version`，只接受上述字段的非空补丁，nullable 联系字段可显式清空。
+- 输入先经过原生 Client 清洗与邮箱/长度/状态校验，再保存规范化 changes 和完整本地预览。确认前不写 Client；确认时重读版本并逐字比较预览，随后与原生 API 共用事务 helper，Client、审批决定和事件任一失败都整体回滚，已确认重放不重复写入。
+- `workspace_search(client)` 不返回联系字段或备注；`workspace_get(client)` 与显式选择的客户上下文返回名称、状态、最多 2000 Unicode 字符的备注，以及当前 active contact 的 link ID、person ID/名称/类型/状态/版本。`truncated_fields` 标明备注截断；不返回 contact_name/email/phone 或人员备注/metadata。联系字段只能来自用户本轮明确输入；备注也可来自本次已授权且未截断的完整客户快照。
+- `client_contact.link` 绑定真实 `client_id/expected_version`，changes 只接受从候选工具取得的现有 active person `actor_id`；owner、agent、inactive person、隐式新建 person 和已有 active contact 均拒绝。若需要新人员，先在独立 `person.create` 确认卡创建，确认后重新读取服务端分配的真实 actor ID，再提出关联；两步不会被静默合并。`client_contact.unlink` 另绑定当前 `client_actor_link_id`，changes 只接受原因。两者确认前零写入，确认时重验 Client version、人员身份/状态和完整预览，并与原生 HTTP API 共用关联/解除事务 helper。解除保留 Client、person、操作者和原因历史；不删除或停用人员，也不代表已联系客户。
+- `client.delete` 只接受真实 `client_id/expected_version` 与空 changes，并要求 Client 已 inactive。提议时与确认时都复用共享影响读取：发票、收支或任何回访存在即拒绝；确认卡冻结 Project 解绑、本地活动、联系人关系历史、附件记录和 active 受控文件数量。用户必须另勾选 `confirm_client_delete=true`；拒绝或其他动作不得夹带该同意。
+- 确认在同一外层事务重算完整预览并调用与原生 DELETE 共用的 `client_delete_command.go`。附件文件先移入受控 trash；数据库删除、审批决定与事件任一失败都恢复文件，提交后才清理。Project 外键置空，person 不删除；应用内无撤销，审批/审计历史保留，备份与外部副本不改变。成功回执保留历史 Client ID/最后版本并导航 `/clients`，不伪造已删除详情。
+- 主档修改刷新 Client/Project/Invoice/Financial/Search；联系人关系刷新 Client/Actor/Search；永久删除刷新同一组事实并先取消旧查询，避免已删除详情回写。API v1、schema 76 不变；确定性证据见 `ai_client_actions_test.go`、`ai_client_contact_actions_test.go`、`aiWorkspaceActions.test.ts`、`AiWorkspaceActions.test.tsx` 与 `clientActionFacts.test.ts`，真实 Provider/桌面体验另验收。
 
 ### 查看 Project 生命周期系统活动
 

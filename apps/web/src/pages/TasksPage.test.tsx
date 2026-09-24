@@ -7,7 +7,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BrowserRouter } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { useUiStore } from "../store/ui";
 import type {
   Task,
@@ -18,6 +20,8 @@ import type {
 import { TasksPage } from "./TasksPage";
 
 const mocks = vi.hoisted(() => ({
+  getTask: vi.fn(),
+  getTaskSavedViews: vi.fn(),
   batch: vi.fn(),
   move: vi.fn(),
   resetMove: vi.fn(),
@@ -38,6 +42,12 @@ const mocks = vi.hoisted(() => ({
   savedViews: [] as TaskSavedView[],
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
+}));
+
+vi.mock("../api/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/client")>()),
+  getTask: mocks.getTask,
+  getTaskSavedViews: mocks.getTaskSavedViews,
 }));
 
 const task: Task = {
@@ -238,6 +248,8 @@ function lastPageQueryEnabled(): boolean | undefined {
 
 describe("TasksPage", () => {
   beforeEach(() => {
+    mocks.getTask.mockReset();
+    mocks.getTaskSavedViews.mockReset();
     mocks.taskQueries.length = 0;
     mocks.taskQueryEnabled.length = 0;
     mocks.taskRefetch.mockClear();
@@ -258,10 +270,192 @@ describe("TasksPage", () => {
     mocks.taskResponsePage = null;
     mocks.taskTotal = 101;
     mocks.savedViews = [];
-    useUiStore.setState({ taskDetailId: null });
+    window.history.replaceState({}, "", "/tasks");
+    useAiWorkbenchHandoff.setState({
+      pending: null,
+      pendingIssue: null,
+      taskSelectionReturn: null,
+    });
+    useUiStore.setState({ taskDetailId: null, agentRunDrawer: null });
   });
 
   afterEach(cleanup);
+
+  it("opens the exact Agent run from a strict route and preserves the return conversation", async () => {
+    const taskId = "018f0000-0000-7000-8000-000000000111";
+    const runId = "018f0000-0000-7000-8000-000000000112";
+    const sessionId = "018f0000-0000-7000-8000-000000000113";
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks/${taskId}?agent_run=${runId}&return_session=${sessionId}`,
+    );
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    await waitFor(() =>
+      expect(useUiStore.getState().agentRunDrawer).toEqual({
+        taskId,
+        runId,
+        returnSession: sessionId,
+      }),
+    );
+    expect(screen.getByRole("link", { name: "返回原对话" })).toHaveAttribute(
+      "href",
+      "/ai",
+    );
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+  });
+
+  it("re-reads and applies a confirmed saved-view link before querying tasks", async () => {
+    const id = "018f0000-0000-7000-8000-000000000201";
+    const session = "018f0000-0000-7000-8000-000000000202";
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?task_view=${id}&return_session=${session}`,
+    );
+    mocks.getTaskSavedViews.mockResolvedValue([
+      {
+        id,
+        name: "待验收",
+        definition: {
+          q: "交付",
+          status: "waiting_review",
+          priority: "P1",
+          kind: "review",
+          projectId: "",
+          clientId: "",
+          tagIds: [],
+          plannedDate: "",
+          plannedFrom: "",
+          plannedTo: "",
+          dueFrom: "",
+          dueTo: "",
+          sort: "-updated_at",
+        },
+        schemaVersion: 1,
+        version: 1,
+        createdAt: "2026-09-21T00:00:00Z",
+        updatedAt: "2026-09-21T00:00:00Z",
+      },
+    ]);
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    expect(lastPageQueryEnabled()).toBe(false);
+    expect(
+      screen.queryByRole("button", { name: `查看任务：${task.title}` }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(lastPageQueryEnabled()).toBe(true));
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({
+        q: "交付",
+        status: "waiting_review",
+        priority: "P1",
+        rootOnly: false,
+      }),
+    );
+    expect(screen.getByText(/已从保存视图“待验收”载入/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "返回原对话" })).toHaveAttribute(
+      "href",
+      "/ai",
+    );
+  });
+
+  it("does not show an unfiltered task list when the linked view is gone", async () => {
+    const id = "018f0000-0000-7000-8000-000000000203";
+    window.history.replaceState({}, "", `/tasks?task_view=${id}`);
+    mocks.getTaskSavedViews.mockResolvedValue([]);
+    render(<TasksPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/该保存视图已不存在/)).toBeInTheDocument(),
+    );
+    expect(lastPageQueryEnabled()).toBe(false);
+    expect(
+      screen.queryByRole("button", { name: `查看任务：${task.title}` }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps task results hidden after a view read error and allows retry", async () => {
+    const id = "018f0000-0000-7000-8000-000000000204";
+    window.history.replaceState({}, "", `/tasks?task_view=${id}`);
+    mocks.getTaskSavedViews.mockRejectedValueOnce(new Error("offline"));
+    mocks.getTaskSavedViews.mockResolvedValueOnce([
+      {
+        id,
+        name: "待办",
+        definition: {
+          q: "",
+          status: "todo",
+          priority: "",
+          kind: "",
+          projectId: "",
+          clientId: "",
+          tagIds: [],
+          plannedDate: "",
+          plannedFrom: "",
+          plannedTo: "",
+          dueFrom: "",
+          dueTo: "",
+          sort: "",
+        },
+        schemaVersion: 1,
+        version: 1,
+        createdAt: "2026-09-21T00:00:00Z",
+        updatedAt: "2026-09-21T00:00:00Z",
+      },
+    ]);
+    render(<TasksPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/保存视图读取失败/)).toBeInTheDocument(),
+    );
+    expect(lastPageQueryEnabled()).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(lastPageQueryEnabled()).toBe(true));
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({ status: "todo" }),
+    );
+  });
+
+  it("fails closed for a malformed saved-view link", () => {
+    const id = "018f0000-0000-7000-8000-000000000203";
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks?task_view=${id}&task_view=${id}`,
+    );
+    render(<TasksPage />);
+    expect(screen.getByText(/保存视图链接无效/)).toBeInTheDocument();
+    expect(lastPageQueryEnabled()).toBe(false);
+    expect(mocks.getTaskSavedViews).not.toHaveBeenCalled();
+  });
+
+  it("does not open a task or run for duplicate or unknown location keys", () => {
+    const taskId = "018f0000-0000-7000-8000-000000000111";
+    const runId = "018f0000-0000-7000-8000-000000000112";
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks/${taskId}?agent_run=${runId}&agent_run=${runId}`,
+    );
+    const view = render(<TasksPage />);
+    expect(useUiStore.getState().agentRunDrawer).toBeNull();
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+
+    window.history.replaceState(
+      {},
+      "",
+      `/tasks/${taskId}?agent_run=${runId}&unknown=1`,
+    );
+    view.rerender(<TasksPage />);
+    expect(useUiStore.getState().agentRunDrawer).toBeNull();
+    expect(useUiStore.getState().taskDetailId).toBeNull();
+  });
 
   it("uses root pagination by default and switches to flat server filtering", () => {
     render(<TasksPage />);
@@ -350,6 +544,162 @@ describe("TasksPage", () => {
       screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
     );
     expect(screen.getByText("已选 1 项")).toBeVisible();
+  });
+
+  it("hands exact selected Task identities to the agent without copying row content or granting access", () => {
+    const selectedId = "018f0000-0000-7000-8000-000000001930";
+    mocks.taskItems = [
+      { ...task, id: selectedId, description: "PRIVATE BODY" },
+    ];
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "交给智能体（已选任务）" }),
+    );
+
+    expect(window.location.pathname).toBe("/ai");
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending?.label).toBe("已选 1 项任务");
+    expect(pending?.scopes).toEqual(["work", "actions"]);
+    expect(pending?.prompt).toContain(selectedId);
+    expect(pending?.prompt).not.toContain(task.title);
+    expect(pending?.prompt).not.toContain("PRIVATE BODY");
+    expect(mocks.batch).not.toHaveBeenCalled();
+    expect(useAiWorkbenchHandoff.getState().taskSelectionReturn?.ids).toEqual([
+      selectedId,
+    ]);
+  });
+
+  it("restores the prior view and re-reads the whole selection before batch writes", async () => {
+    const selectedId = "018f0000-0000-7000-8000-000000001930";
+    const definition = {
+      q: "",
+      status: "todo" as const,
+      priority: "" as const,
+      kind: "" as const,
+      projectId: "",
+      clientId: "",
+      tagIds: [],
+      plannedDate: "",
+      plannedFrom: "",
+      plannedTo: "",
+      dueFrom: "",
+      dueTo: "",
+      sort: "",
+    };
+    useAiWorkbenchHandoff.getState().rememberTaskSelectionReturn({
+      ids: [selectedId],
+      definition,
+      page: 2,
+      view: "board",
+    });
+    mocks.taskItems = [{ ...task, id: selectedId }];
+    mocks.getTask.mockResolvedValue({
+      ...task,
+      id: selectedId,
+      title: "最新标题",
+      version: 9,
+    });
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    expect(screen.getByText("正在重新读取先前选中的任务…")).toBeVisible();
+    await waitFor(() =>
+      expect(
+        screen.getByText("已重新读取并恢复 1 项选择；批量操作前请再次核对。"),
+      ).toBeVisible(),
+    );
+    expect(screen.getByLabelText("任务看板")).toBeVisible();
+    expect(lastPageQuery()).toEqual(
+      expect.objectContaining({ page: 2, status: "todo", rootOnly: false }),
+    );
+    expect(useAiWorkbenchHandoff.getState().taskSelectionReturn).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(mocks.batch).toHaveBeenCalledWith(
+      {
+        action: "set_project",
+        items: [{ id: selectedId, expectedVersion: 9 }],
+        projectId: null,
+      },
+      expect.any(Object),
+    );
+  });
+
+  it("rejects the entire returned selection when any Task cannot be re-read", async () => {
+    const ids = [
+      "018f0000-0000-7000-8000-000000001930",
+      "018f0000-0000-7000-8000-000000001931",
+    ];
+    useAiWorkbenchHandoff.getState().rememberTaskSelectionReturn({
+      ids,
+      definition: {
+        q: "",
+        status: "",
+        priority: "",
+        kind: "",
+        projectId: "",
+        clientId: "",
+        tagIds: [],
+        plannedDate: "",
+        plannedFrom: "",
+        plannedTo: "",
+        dueFrom: "",
+        dueTo: "",
+        sort: "",
+      },
+      page: 1,
+      view: "list",
+    });
+    mocks.getTask.mockImplementation((id: string) =>
+      id === ids[0]
+        ? Promise.resolve({ ...task, id, version: 12 })
+        : Promise.reject(new Error("Task deleted")),
+    );
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("alert", {
+          name: "",
+        }),
+      ).toHaveTextContent("原选择中的任务无法全部重新读取，未恢复勾选"),
+    );
+    expect(screen.queryByLabelText("批量操作")).not.toBeInTheDocument();
+    expect(useAiWorkbenchHandoff.getState().taskSelectionReturn).toBeNull();
+    expect(mocks.batch).not.toHaveBeenCalled();
+  });
+
+  it("does not hand off more than 20 selected Tasks", () => {
+    mocks.taskItems = Array.from({ length: 21 }, (_, index) => ({
+      ...task,
+      id: `018f0000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`,
+      title: `任务 ${index + 1}`,
+    }));
+    render(
+      <BrowserRouter>
+        <TasksPage />
+      </BrowserRouter>,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "选择任务：任务 1" }));
+    fireEvent.click(screen.getByLabelText("批量操作").querySelector("input")!);
+    expect(
+      screen.getByText("交给智能体每次最多 20 项，请减少选择。"),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "交给智能体（已选任务）" }),
+    ).not.toBeInTheDocument();
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
   });
 
   it("maps a cross-column drop to a confirmed versioned lifecycle command", () => {
@@ -457,6 +807,44 @@ describe("TasksPage", () => {
         onError: expect.any(Function),
         onSuccess: expect.any(Function),
       }),
+    );
+  });
+
+  it("sets batch priority and converts a local due time to an absolute instant", () => {
+    render(<TasksPage />);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
+    );
+    fireEvent.change(screen.getByLabelText("批量操作类型"), {
+      target: { value: "set_priority" },
+    });
+    fireEvent.change(screen.getByLabelText("批量目标优先级"), {
+      target: { value: "P0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(mocks.batch).toHaveBeenLastCalledWith(
+      {
+        action: "set_priority",
+        items: [{ id: task.id, expectedVersion: task.version }],
+        priority: "P0",
+      },
+      expect.any(Object),
+    );
+    fireEvent.change(screen.getByLabelText("批量操作类型"), {
+      target: { value: "set_due_date" },
+    });
+    fireEvent.change(
+      screen.getByLabelText("批量截止时间，按本机时区填写；留空表示清除"),
+      { target: { value: "2026-09-25T16:30" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(mocks.batch).toHaveBeenLastCalledWith(
+      {
+        action: "set_due_date",
+        items: [{ id: task.id, expectedVersion: task.version }],
+        dueDate: new Date("2026-09-25T16:30").toISOString(),
+      },
+      expect.any(Object),
     );
   });
 

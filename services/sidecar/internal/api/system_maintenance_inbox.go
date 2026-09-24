@@ -106,6 +106,31 @@ func systemMaintenanceSourceID(component, operation string) string {
 	return component + ":" + operation
 }
 
+func systemMaintenanceIncidentForSourceID(sourceID string) (systemMaintenanceIncident, bool) {
+	switch sourceID {
+	case systemMaintenanceSourceID(backupCreateMaintenanceIncident.component, backupCreateMaintenanceIncident.operation):
+		return backupCreateMaintenanceIncident, true
+	case systemMaintenanceSourceID(backupVerifyMaintenanceIncident.component, backupVerifyMaintenanceIncident.operation):
+		return backupVerifyMaintenanceIncident, true
+	case systemMaintenanceSourceID(backupDrillMaintenanceIncident.component, backupDrillMaintenanceIncident.operation):
+		return backupDrillMaintenanceIncident, true
+	case systemMaintenanceSourceID(backupRestoreMaintenanceIncident.component, backupRestoreMaintenanceIncident.operation):
+		return backupRestoreMaintenanceIncident, true
+	case systemMaintenanceSourceID(databaseStartupMaintenanceIncident.component, databaseStartupMaintenanceIncident.operation):
+		return databaseStartupMaintenanceIncident, true
+	case systemMaintenanceSourceID(databaseMigrationMaintenanceIncident.component, databaseMigrationMaintenanceIncident.operation):
+		return databaseMigrationMaintenanceIncident, true
+	case systemMaintenanceSourceID(sidecarStartupMaintenanceIncident.component, sidecarStartupMaintenanceIncident.operation):
+		return sidecarStartupMaintenanceIncident, true
+	case systemMaintenanceSourceID(runtimeDatabaseMaintenanceIncident.component, runtimeDatabaseMaintenanceIncident.operation):
+		return runtimeDatabaseMaintenanceIncident, true
+	case systemMaintenanceSourceID(storageLowSpaceMaintenanceIncident.component, storageLowSpaceMaintenanceIncident.operation):
+		return storageLowSpaceMaintenanceIncident, true
+	default:
+		return systemMaintenanceIncident{}, false
+	}
+}
+
 func systemMaintenanceEventKey(sourceID, incidentID string) string {
 	return fmt.Sprintf("system:%s:%s", sourceID, incidentID)
 }

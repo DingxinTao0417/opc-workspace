@@ -46,7 +46,17 @@ AI 会话已经能解释显式上下文与引用，但一个 generation 经历�
 - `GET /api/v1/ai/usage-summary` 可按 canonical `session_id`、`provider_id` 或两者过滤，在同一只读事务中只聚合每个 generation 的 sequence 1 根步骤。响应分开返回终态/活动生成数、Provider usage 覆盖数、unknown 数、原始 token 合计、字节、耗时及 Provider 分组；不存在的过滤对象返回 404，合法但无 generation 的范围返回全零和空分组。
 - AI 会话头部按需展开“本地用量”，只在展开时读取当前会话聚合；生成收尾会失效该会话缓存。客户端校验状态总数、终态 usage 覆盖和 Provider 分组合计，发现正文、reasoning、URL、key 或不一致计数时失败关闭。
 
-### 5. 数据生命周期
+### 5. H4-B：实时进度与恢复（2026-09-18）
+
+- Harness 的 `OnStepStart/OnStep` 同步报告模型轮、代码注册工具、自检修订的开始/结束；工具 worker 不持有回调，超时迟到结果不能改写状态。父取消也产生工具终态；单工具超时保留 `TOOL_TIMEOUT`，不能误记为用户取消。未知工具名固定为 `unknown_tool`，不复制模型自造名称。
+- `opc-ai-sse-v1` 新增兼容事件 `progress: {generation_id, step}`。step 仅含 `sequence/kind/status/started_at/duration_ms`，终态另含 `completed_at`；模型/自检含 `turn_index`，工具含代码白名单 `tool_name`；模型/自检还可含 `retry_count` 与稳定原因码 `retry_reason`（如 `upstream_503`），用于说明本次调用在未输出任何内容前自动重试过几次。不发送参数、结果、字节、错误原文、来源名称或凭据。Chat 同样推送引用核验开始/结束；保存成功后推送 persistence 提交标记，不伪造事务耗时或正在等待审批的状态。
+- 序号与最终时间线一致，根仍为 1，详情从 2 开始；最多 62 个详情加 1 个提交标记。活动进度仅存现有 generation registry，后一个步骤必须等待前一个终态，终态不回退。结束/删除/进程退出随活动快照释放，没有新增表或逐 token 写库。
+- generation GET、按请求 ID GET 和活动列表增加 `progress` 数组：活动读隔离副本，终态投影已有 `ai_run_steps`；旧历史只有 root 时返回空数组，不猜测内部步骤。非持久生成也可恢复既有无正文步骤，不借此保存正文；仍为 `Cache-Control: no-store`。
+- Web 严格校验字段白名单、代码工具名、类型、序号/轮次/耗时整数、时间和状态组合；SSE 更新只允许顺序追加或末项 running→terminal，generation 身份不符、回退、跳号或额外正文均失败关闭并走原恢复链。旧服务没有字段时保留原行为。
+- 主对话与侧边聊天展示当前阶段和可展开列表；切页不重置全局进度，replace 不清除步骤。断流的未结算步骤显示“结果未确认”，停止以回读终态为准，不假装已完成。步骤只存在 Web 内存，计入原 20 回合/8 MiB 预算，不写 storage；工具提议完成不代表人工批准或业务执行。原“运行详情”的字节/usage 查看继续保留。
+- 确定性证据：`harness/progress_test.go`、`api/ai_run_progress_test.go`、`api/aiProgress.test.ts`、`api/aiChatLifecycle.test.tsx`、`components/AiRunProgress.test.tsx` 及主/侧页面用例。真实模型及原生桌面体验需单独验收。
+
+### 6. 数据生命周期
 
 - `ai_run_steps` 属于 AI 操作态，显式排除便携业务导出，随一致性 SQLite 备份。
 - 删除会话级联 generations，再级联 run steps；message generation link 使用 `ON DELETE SET NULL`，避免跨子表删除顺序问题。

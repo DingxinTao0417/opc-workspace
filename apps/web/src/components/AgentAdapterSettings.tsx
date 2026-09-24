@@ -15,6 +15,8 @@ import {
   useRegisterAgentAdapter,
   useSetAgentAdapterEnabled,
 } from "../api/hooks";
+import { agentAdapterSettingsHandoff } from "../lib/aiIssueHandoff";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 const capabilityLabels: Record<string, string> = {
   read_task_snapshot: "读取任务快照",
@@ -264,6 +266,16 @@ export function AgentAdapterSettings() {
           )}
 
           <div className="agent-adapter-actions">
+            <AiIssueHandoffButton
+              content={agentAdapterSettingsHandoff(
+                adapter.id,
+                adapter.displayName,
+                adapter.status,
+                adapter.healthStatus,
+                adapter.executionReady,
+              )}
+              disabled={busy}
+            />
             <button
               className="button button-secondary"
               disabled={busy}

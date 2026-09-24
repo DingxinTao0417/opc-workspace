@@ -8,9 +8,23 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
 import { TodayPage } from "./TodayPage";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
+
+function TodayHistoryProbe() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output data-testid="today-location">{location.search}</output>
+      <button onClick={() => navigate(-1)} type="button">
+        返回上个视图
+      </button>
+    </>
+  );
+}
 
 const mocks = vi.hoisted(() => ({
   inbox: vi.fn(),
@@ -237,6 +251,7 @@ describe("TodayPage Inbox overview", () => {
 
   afterEach(() => {
     cleanup();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     vi.clearAllMocks();
     mocks.moveError = null;
     mocks.movePending = false;
@@ -318,6 +333,62 @@ describe("TodayPage Inbox overview", () => {
     );
   });
 
+  it("hands the exact Today date and risk view to AI without copying task data", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockReturnValue(
+      riskQueryResult([makeRiskTask("risk-task", "PRIVATE TASK TITLE")]),
+    );
+    render(
+      <MemoryRouter initialEntries={["/today?date=2026-03-08&risk=overdue"]}>
+        <TodayPage />
+      </MemoryRouter>,
+    );
+    expect(mocks.taskGroups).toHaveBeenCalledWith("2026-03-08");
+    expect(mocks.riskTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ dueState: "overdue" }),
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "梳理今日安排" }));
+    const handoff = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(handoff?.route).toBe("/today?date=2026-03-08&risk=overdue");
+    expect(handoff?.scopes).toEqual(["work", "actions"]);
+    expect(handoff?.prompt).toContain("filters.due_state=overdue");
+    expect(handoff?.prompt).not.toContain("PRIVATE TASK TITLE");
+    expect(mocks.lifecycleTask).not.toHaveBeenCalled();
+  });
+
+  it("restores selected date and risk through native browser history", () => {
+    mockTodayShell();
+    mocks.riskTasks.mockReturnValue(riskQueryResult([]));
+    render(
+      <MemoryRouter initialEntries={["/today?date=2026-09-18"]}>
+        <TodayPage />
+        <TodayHistoryProbe />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "后一天" }));
+    expect(screen.getByTestId("today-location")).toHaveTextContent(
+      "?date=2026-09-19",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /项临期/ }));
+    expect(screen.getByTestId("today-location")).toHaveTextContent(
+      "?date=2026-09-19&risk=due_soon",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "返回上个视图" }));
+    expect(screen.getByTestId("today-location")).toHaveTextContent(
+      "?date=2026-09-19",
+    );
+    expect(screen.getByRole("button", { name: /项临期/ })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "返回上个视图" }));
+    expect(screen.getByTestId("today-location")).toHaveTextContent(
+      "?date=2026-09-18",
+    );
+    expect(mocks.taskGroups).toHaveBeenLastCalledWith("2026-09-18");
+  });
+
   it("shows due Client Follow-ups from the filtered Inbox projection", () => {
     mockTodayShell(0, 0);
     mocks.followups.mockReturnValue({
@@ -328,6 +399,7 @@ describe("TodayPage Inbox overview", () => {
             title: "确认项目验收",
             summary: "客户：星河工作室 · 渠道：微信",
             sourceEntityType: "client_followup",
+            sourceEntityId: "018f0000-0000-7000-8000-000000000903",
             dueAt: "2026-08-30T10:00:00Z",
             payloadJson: {
               client_id: "018f0000-0000-7000-8000-000000000902",
@@ -351,7 +423,10 @@ describe("TodayPage Inbox overview", () => {
     expect(screen.getByText("确认项目验收")).toBeVisible();
     expect(
       screen.getByRole("link", { name: "查看客户回访：确认项目验收" }),
-    ).toHaveAttribute("href", "/clients/018f0000-0000-7000-8000-000000000902");
+    ).toHaveAttribute(
+      "href",
+      "/clients/018f0000-0000-7000-8000-000000000902?followup=018f0000-0000-7000-8000-000000000903",
+    );
     expect(screen.getByText("其余 5 项在收件箱")).toBeVisible();
     expect(mocks.followups).toHaveBeenLastCalledWith(
       {
@@ -783,15 +858,12 @@ describe("TodayPage Inbox overview", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "开始专注：准备交付" }));
-    expect(mocks.createFocus).toHaveBeenCalledWith(
-      { taskId: "todo", plannedSeconds: 1_500 },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
-    const focusCallbacks = mocks.createFocus.mock.calls.at(-1)?.[1] as {
-      onSuccess: () => void;
-    };
-    focusCallbacks.onSuccess();
-    expect(mocks.beginFocus).toHaveBeenCalledWith("todo", 4, "准备交付");
+    expect(mocks.createFocus).toHaveBeenCalledWith({
+      taskId: "todo",
+      plannedSeconds: 1_500,
+    });
+    // Session binding belongs to the shared mutation, not a late page callback.
+    expect(mocks.beginFocus).not.toHaveBeenCalled();
   });
 
   it("switches the queried date and can return to today", () => {

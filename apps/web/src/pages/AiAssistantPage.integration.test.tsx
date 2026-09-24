@@ -103,6 +103,103 @@ afterEach(() => {
 });
 
 describe("AI page through real query hooks and HTTP adapters", () => {
+  it.each(["task", "project"])(
+    "loads a %s proposal, confirms it through the HTTP adapter and restores the decision after remount",
+    async (kind) => {
+      const generationId = "018f0000-0000-7000-8000-000000005742";
+      const taskId = "018f0000-0000-7000-8000-000000005743";
+      let confirmed = false;
+      let decisions = 0;
+      const fetcher = vi.fn(async (url: unknown, init?: RequestInit) => {
+        if (String(url).endsWith(`/ai/actions/${proposalId}/decision`)) {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            fingerprint: "a".repeat(64),
+            decision: "confirm",
+            ...(kind === "project" ? { confirm_incomplete_tasks: true } : {}),
+          });
+          confirmed = true;
+          decisions++;
+          return json({ data: action() });
+        }
+        if (String(url).endsWith(`/ai/generations/${generationId}/actions`))
+          return json({ data: [action()] });
+        const common = baseResponse(String(url), {
+          ...message,
+          generation_id: generationId,
+          content:
+            '排期建议已准备好，请确认下方变更。[opc:task]{"title":"主页开发"}[/opc:task]',
+        });
+        return common ?? json({ data: [] });
+      });
+      function action() {
+        return {
+          id: proposalId,
+          generation_id: generationId,
+          fingerprint: "a".repeat(64),
+          action: {
+            action: kind === "project" ? "project.complete" : "task.update",
+            ...(kind === "project"
+              ? { project_id: taskId }
+              : { task_id: taskId }),
+            expected_version: 2,
+            changes: kind === "project" ? {} : { planned_date: "2026-09-21" },
+          },
+          preview: {
+            label: "主页开发",
+            before:
+              kind === "project"
+                ? { status: "in_progress" }
+                : { planned_date: "2026-09-20" },
+            after:
+              kind === "project"
+                ? { status: "completed", incomplete_task_count: 1 }
+                : { planned_date: "2026-09-21" },
+          },
+          status: confirmed ? "confirmed" : "pending",
+          can_confirm: !confirmed,
+          result_id: confirmed ? taskId : null,
+          result_version: confirmed ? 3 : null,
+          route: `/${kind}s/${taskId}`,
+          created_at: session.created_at,
+          decided_at: confirmed ? session.created_at : null,
+        };
+      }
+      vi.stubGlobal("fetch", fetcher);
+      useAiChatStore.setState({ lastSessionId: session.id });
+      const first = page();
+      if (kind === "project") {
+        const consent = await screen.findByRole("checkbox", {
+          name: /保留这 1 项未完成任务/,
+        });
+        expect(screen.getByRole("button", { name: "确认执行" })).toBeDisabled();
+        fireEvent.click(consent);
+      } else {
+        expect(await screen.findByText("2026-09-20")).toBeInTheDocument();
+        expect(screen.getByText("2026-09-21")).toBeInTheDocument();
+      }
+      expect(screen.queryByRole("button", { name: /建议任务/ })).toBeNull();
+      expect(decisions).toBe(0);
+      fireEvent.click(screen.getByRole("button", { name: "确认执行" }));
+      expect(await screen.findByText("已执行")).toBeInTheDocument();
+      first.unmount();
+      page();
+      expect(await screen.findByText("已执行")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "确认执行" })).toBeNull();
+      expect(
+        screen.getByRole("link", {
+          name: kind === "project" ? "查看项目" : "查看任务",
+        }),
+      ).toHaveAttribute("href", `/${kind}s/${taskId}`);
+      expect(decisions).toBe(1);
+      expect(screen.queryByRole("button", { name: /建议任务/ })).toBeNull();
+      expect(
+        fetcher.mock.calls.some(([url]) =>
+          String(url).includes("task-confirmation"),
+        ),
+      ).toBe(false);
+    },
+  );
+
   it("keeps a private SSE reply across page remounts without durable messages or confirmation requests", async () => {
     const reply = '[opc:task]{"title":"临时任务"}[/opc:task]';
     const fetcher = vi.fn(async (url: unknown) => {

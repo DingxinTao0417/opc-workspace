@@ -46,9 +46,9 @@ type aiCitationSnapshot struct {
 	Items   []aiCitationItem `json:"items"`
 }
 
-func validateAIResponseCitations(content string, allowed []aiKnowledgeContextSource) (string, *string, aiCitationSnapshot, error) {
+func validateAIResponseCitations(content string, allowed []aiKnowledgeContextSource, knowledgeRequested ...bool) (string, *string, aiCitationSnapshot, error) {
 	cleaned := stripAICitationBlocks(content)
-	if len(allowed) == 0 {
+	if len(allowed) == 0 && (len(knowledgeRequested) == 0 || !knowledgeRequested[0]) {
 		return cleaned, nil, aiCitationSnapshot{Version: 1, Status: "not_requested", Items: []aiCitationItem{}}, nil
 	}
 	snapshot := aiCitationSnapshot{Version: 1, Status: "missing", Items: []aiCitationItem{}}
@@ -159,7 +159,13 @@ func decodeAICitationSnapshot(value *string) (string, []aiCitationItem, error) {
 		return "", nil, errors.New("invalid persisted AI citation items")
 	}
 	seen := make(map[string]struct{}, len(snapshot.Items))
-	for _, item := range snapshot.Items {
+	for index := range snapshot.Items {
+		item := &snapshot.Items[index]
+		// Before schema 070 text snapshots did not carry page coordinates.
+		// PDF snapshots must always have real extracted page coordinates.
+		if item.SourceType != "pdf" && item.StartPage == 0 && item.EndPage == 0 {
+			item.StartPage, item.EndPage = 1, 1
+		}
 		for _, id := range []string{item.ChunkID, item.SourceID, item.DocumentID} {
 			parsed, err := uuid.Parse(id)
 			if err != nil || parsed.String() != id {
@@ -167,9 +173,10 @@ func decodeAICitationSnapshot(value *string) (string, []aiCitationItem, error) {
 			}
 		}
 		if _, duplicate := seen[item.ChunkID]; duplicate || strings.TrimSpace(item.SourceName) == "" ||
-			(item.SourceType != "text" && item.SourceType != "markdown") || item.SourceVersion < 1 ||
+			(item.SourceType != "text" && item.SourceType != "markdown" && item.SourceType != "pdf") || item.SourceVersion < 1 ||
 			strings.TrimSpace(item.DocumentTitle) == "" || item.DocumentVersion < 1 || item.ChunkIndex < 0 ||
-			item.StartChar < 0 || item.EndChar <= item.StartChar || item.StartLine < 1 || item.EndLine < item.StartLine {
+			item.StartChar < 0 || item.EndChar <= item.StartChar || item.StartLine < 1 || item.EndLine < item.StartLine ||
+			item.StartPage < 1 || item.EndPage < item.StartPage {
 			return "", nil, errors.New("invalid persisted AI citation item")
 		}
 		seen[item.ChunkID] = struct{}{}

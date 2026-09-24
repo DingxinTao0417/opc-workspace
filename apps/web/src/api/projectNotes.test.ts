@@ -147,7 +147,8 @@ describe("project note API contract", () => {
       },
       "project-note-key",
     );
-    await getProjectNote("note-1");
+    const controller = new AbortController();
+    await getProjectNote("note-1", controller.signal);
     await updateProjectNote("note-1", {
       body: "更新结论",
       expectedVersion: 2,
@@ -167,9 +168,33 @@ describe("project note API contract", () => {
     expect(new Headers(createInit?.headers).get("Idempotency-Key")).toBe(
       "project-note-key",
     );
+    expect(fetchMock.mock.calls[1][1]?.signal?.aborted).toBe(false);
     expect(new Headers(updateInit?.headers).get("If-Match")).toBe('"2"');
     expect(deleteUrl.searchParams.get("confirm")).toBe("true");
     expect(new Headers(deleteInit?.headers).get("If-Match")).toBe('"3"');
     expect(JSON.parse(String(deleteInit?.body))).toEqual({ reason: "重复" });
+  });
+
+  it("propagates detail-read cancellation to the actual fetch", async () => {
+    const observed: { signal: AbortSignal | null } = { signal: null };
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        await new Promise<Response>((_resolve, reject) => {
+          observed.signal = init?.signal ?? null;
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const request = getProjectNote("note-1", controller.signal);
+    await vi.waitFor(() => expect(observed.signal).not.toBeNull());
+    controller.abort();
+
+    expect(observed.signal?.aborted).toBe(true);
+    await expect(request).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 });

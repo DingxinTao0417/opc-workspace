@@ -69,7 +69,7 @@ func TestAIProviderConcurrentKeyWritesKeepDatabaseAndKeyStoreAligned(t *testing.
 
 func newAIProviderTestRouter(t *testing.T, now time.Time) (*gin.Engine, *database.Store, *keystore.MemoryStore) {
 	t.Helper()
-	store, err := database.Open(filepath.Join(t.TempDir(), "ai-provider-api.db"))
+	store, err := openAPITestDatabase(filepath.Join(t.TempDir(), "ai-provider-api.db"))
 	if err != nil {
 		t.Fatalf("database.Open: %v", err)
 	}
@@ -79,6 +79,7 @@ func newAIProviderTestRouter(t *testing.T, now time.Time) (*gin.Engine, *databas
 		AppVersion: "test", Commit: "test", SchemaVersion: store.SchemaVersion,
 		SessionToken: testToken, AllowedOrigins: []string{"tauri://localhost"},
 		Logger: log.New(io.Discard, "", 0), KeyStore: keyStore, Now: func() time.Time { return now },
+		ArtifactDir: filepath.Join(t.TempDir(), "artifacts"),
 	})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)

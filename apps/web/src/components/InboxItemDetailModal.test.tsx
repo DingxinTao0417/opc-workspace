@@ -1,15 +1,23 @@
 import {
+  act,
   cleanup,
   fireEvent,
-  render,
+  render as renderView,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import type { ReactElement } from "react";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { InboxItem } from "../types/models";
 import { InboxItemDetailModal } from "./InboxItemDetailModal";
+
+function render(ui: ReactElement) {
+  return renderView(ui, { wrapper: MemoryRouter });
+}
 
 const baseItem: InboxItem = {
   id: "018f0000-0000-7000-8000-000000000801",
@@ -41,6 +49,23 @@ const baseItem: InboxItem = {
   availableActions: ["edit", "read", "snooze", "resolve", "dismiss"],
 };
 
+const returnSession = "018f0000-0000-7000-8000-000000000899";
+const followupSourceItem: InboxItem = {
+  ...baseItem,
+  kind: "event",
+  sourceEntityType: "client_followup",
+  sourceEntityId: "018f0000-0000-7000-8000-000000000809",
+  sourceEventKey: "followup:018f0000-0000-7000-8000-000000000809:due:2",
+  dueAt: "2026-08-30T10:00:00Z",
+  payloadJson: {
+    client_followup_id: "018f0000-0000-7000-8000-000000000809",
+    client_id: "018f0000-0000-7000-8000-000000000808",
+    scheduled_at: "2026-08-30T10:00:00Z",
+    timezone: "Asia/Shanghai",
+    channel: "phone",
+  },
+};
+
 const hooks = vi.hoisted(() => ({
   detail: vi.fn(),
   update: {
@@ -50,6 +75,12 @@ const hooks = vi.hoisted(() => ({
     reset: vi.fn(),
   },
   command: {
+    error: null as unknown,
+    isPending: false,
+    mutate: vi.fn(),
+    reset: vi.fn(),
+  },
+  link: {
     error: null as unknown,
     isPending: false,
     mutate: vi.fn(),
@@ -122,12 +153,7 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     refetch: vi.fn(),
   }),
-  useLinkInboxItemTask: () => ({
-    error: null,
-    isPending: false,
-    mutate: vi.fn(),
-    reset: vi.fn(),
-  }),
+  useLinkInboxItemTask: () => hooks.link,
   useUpdateInboxItemTaskRequirement: () => ({
     error: null,
     isPending: false,
@@ -149,6 +175,60 @@ vi.mock("../api/hooks", () => ({
 }));
 
 describe("InboxItemDetailModal", () => {
+  it("labels an Agent failure and keeps exact source navigation behind the draft and pending gates", () => {
+    const runId = "018f0000-0000-7000-8000-000000000809";
+    const taskId = "018f0000-0000-7000-8000-000000000808";
+    hooks.detail.mockReturnValue({
+      data: {
+        ...baseItem,
+        kind: "event",
+        sourceEntityType: "agent_run_failed",
+        sourceEntityId: runId,
+        sourceEventKey: `agent-run:${runId}:failed`,
+        payloadJson: {
+          agent_run_id: runId,
+          task_id: taskId,
+          attempt: 2,
+          error_code: "AGENT_MODEL_FAILED",
+          failed_at: "2026-09-21T12:00:00.000000000Z",
+          automation_rule_id: "00000000-0000-5000-8000-000000000105",
+          automation_run_id: baseItem.id,
+          source_event_id: returnSession,
+        },
+      },
+      isError: false,
+      isPending: false,
+    });
+    const view = render(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={vi.fn()}
+        returnSession={returnSession}
+      />,
+    );
+    expect(screen.getByText(/Agent 执行失败诊断.*仅保存在本机/)).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看失败执行" })).toHaveAttribute(
+      "href",
+      `/tasks/${taskId}?agent_run=${runId}&return_session=${returnSession}`,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "标记解决" }));
+    expect(screen.getByRole("button", { name: "查看失败执行" })).toBeDisabled();
+    expect(
+      screen.queryByRole("link", { name: "查看失败执行" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    hooks.command.isPending = true;
+    view.rerender(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={vi.fn()}
+        returnSession={returnSession}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "查看失败执行" })).toBeDisabled();
+    expect(hooks.update.mutate).not.toHaveBeenCalled();
+    expect(hooks.command.mutate).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     hooks.detail.mockReturnValue({
       data: baseItem,
@@ -162,9 +242,412 @@ describe("InboxItemDetailModal", () => {
 
   afterEach(() => {
     cleanup();
+    useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
     vi.clearAllMocks();
     hooks.update.isPending = false;
     hooks.command.isPending = false;
+    hooks.link.isPending = false;
+  });
+
+  it("hands off the exact inbox item only after editing or command drafts are closed", () => {
+    const onClose = vi.fn();
+    render(<InboxItemDetailModal itemId={baseItem.id} onClose={onClose} />);
+    const handoff = screen.getByRole("button", { name: "交给智能体" });
+    expect(handoff).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "尚未保存的收件箱草稿" },
+    });
+    expect(handoff).toBeDisabled();
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(screen.getByRole("button", { name: "标记解决" }));
+    expect(handoff).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    fireEvent.click(handoff);
+    expect(useAiWorkbenchHandoff.getState().pending).toBeNull();
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "收件箱事项",
+      route: `/inbox/${baseItem.id}`,
+      scopes: ["work", "actions"],
+    });
+    expect(pending?.prompt).toContain("workspace_get");
+    expect(pending?.prompt).toContain("type=inbox_item");
+    expect(pending?.prompt).toContain(`id=${baseItem.id}`);
+    expect(pending?.prompt).toContain("inbox.*");
+    expect(pending?.prompt).toContain("拆分任务不会自动执行 Agent");
+    expect(pending?.prompt).toContain("不要直接改 Task 状态");
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(hooks.update.mutate).not.toHaveBeenCalled();
+    expect(hooks.command.mutate).not.toHaveBeenCalled();
+  });
+
+  it("preserves the originating conversation when opening the actual followup source", () => {
+    const clientId = "018f0000-0000-7000-8000-000000000808";
+    const followupId = "018f0000-0000-7000-8000-000000000809";
+    const sessionId = "018f0000-0000-7000-8000-000000000899";
+    hooks.detail.mockReturnValue({
+      data: {
+        ...baseItem,
+        kind: "event",
+        sourceEntityType: "client_followup",
+        sourceEntityId: followupId,
+        sourceEventKey: `followup:${followupId}:due:2`,
+        dueAt: "2026-08-30T10:00:00Z",
+        payloadJson: {
+          client_followup_id: followupId,
+          client_id: clientId,
+          scheduled_at: "2026-08-30T10:00:00Z",
+          timezone: "Asia/Shanghai",
+          channel: "phone",
+        },
+      },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    });
+    render(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={vi.fn()}
+        returnSession={sessionId}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "查看客户回访" })).toHaveAttribute(
+      "href",
+      `/clients/${clientId}?followup=${followupId}&return_session=${sessionId}`,
+    );
+    expect(hooks.update.mutate).not.toHaveBeenCalled();
+    expect(hooks.command.mutate).not.toHaveBeenCalled();
+    expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+  });
+
+  it.each(["header", "escape", "backdrop"])(
+    "protects an editing draft through the %s close path and return navigation",
+    (entry) => {
+      hooks.detail.mockReturnValue({ data: followupSourceItem });
+      const onClose = vi.fn();
+      render(
+        <InboxItemDetailModal
+          itemId={baseItem.id}
+          onClose={onClose}
+          returnSession={returnSession}
+        />,
+      );
+      const modal = screen.getByRole("dialog", { name: "收件箱详情" });
+      fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+      fireEvent.change(screen.getByLabelText("标题"), {
+        target: { value: "必须保留的未保存标题" },
+      });
+      const back = screen.getByRole("button", { name: "返回原对话" });
+      expect(back).toBeDisabled();
+      fireEvent.click(back);
+      expect(screen.queryByRole("link", { name: "查看客户回访" })).toBeNull();
+      const requestClose = () => {
+        if (entry === "escape") fireEvent.keyDown(document, { key: "Escape" });
+        else if (entry === "backdrop")
+          fireEvent.click(screen.getByRole("button", { name: "关闭弹窗" }));
+        else
+          fireEvent.click(within(modal).getByRole("button", { name: "关闭" }));
+      };
+      requestClose();
+      expect(onClose).not.toHaveBeenCalled();
+      const confirm = screen.getByRole("dialog", { name: "舍弃未保存更改？" });
+      fireEvent.click(
+        within(confirm).getByRole("button", { name: "继续编辑" }),
+      );
+      expect(screen.getByLabelText("标题")).toHaveValue("必须保留的未保存标题");
+      expect(
+        screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+      ).toBeNull();
+      requestClose();
+      fireEvent.click(screen.getByRole("button", { name: "舍弃更改并关闭" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(hooks.update.mutate).not.toHaveBeenCalled();
+      expect(hooks.command.mutate).not.toHaveBeenCalled();
+      expect(useAiWorkbenchHandoff.getState().pendingIssue).toBeNull();
+    },
+  );
+
+  it.each([
+    ["标记解决", "解决原因", "尚未提交的解决说明"],
+    ["忽略", "忽略原因", "尚未提交的忽略说明"],
+    ["稍后处理", "稍后至", "2026-09-25T13:30"],
+  ])(
+    "protects the %s action draft from all local exits",
+    (action, field, value) => {
+      hooks.detail.mockReturnValue({ data: followupSourceItem });
+      const onClose = vi.fn();
+      render(
+        <InboxItemDetailModal
+          itemId={baseItem.id}
+          onClose={onClose}
+          returnSession={returnSession}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      fireEvent.change(screen.getByLabelText(field), { target: { value } });
+      expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+      expect(screen.queryByRole("link", { name: "查看客户回访" })).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "查看客户回访" }),
+      ).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "查看客户回访" }));
+      expect(screen.getByLabelText(field)).toHaveValue(value);
+      fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+      expect(screen.getByLabelText(field)).toHaveValue(value);
+      fireEvent.click(screen.getByRole("button", { name: "取消" }));
+      expect(screen.getByRole("link", { name: "返回原对话" })).toHaveAttribute(
+        "href",
+        "/ai",
+      );
+      expect(screen.getByRole("link", { name: "查看客户回访" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(hooks.command.mutate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["update", "command", "link"] as const)(
+    "blocks source navigation, return and dismissal during pending %s operations",
+    (operation) => {
+      hooks.detail.mockReturnValue({ data: followupSourceItem });
+      const onClose = vi.fn();
+      const ui = () => (
+        <InboxItemDetailModal
+          itemId={baseItem.id}
+          onClose={onClose}
+          returnSession={returnSession}
+        />
+      );
+      const view = render(ui());
+      hooks[operation].isPending = true;
+      view.rerender(ui());
+      expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "查看客户回访" }),
+      ).toBeDisabled();
+      expect(screen.queryByRole("link", { name: "查看客户回访" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+      ).toBeNull();
+      hooks[operation].isPending = false;
+      view.rerender(ui());
+      expect(screen.getByRole("link", { name: "返回原对话" })).toBeVisible();
+      expect(screen.getByRole("link", { name: "查看客户回访" })).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(hooks.update.mutate).not.toHaveBeenCalled();
+      expect(hooks.command.mutate).not.toHaveBeenCalled();
+      expect(hooks.link.mutate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["update", "command", "link"] as const)(
+    "freezes all edit fields and ignores repeated form submits while %s is pending",
+    (operation) => {
+      const ui = () => (
+        <InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />
+      );
+      const view = render(ui());
+      fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+      fireEvent.change(screen.getByLabelText("标题"), {
+        target: { value: "已提交的标题" },
+      });
+      fireEvent.change(screen.getByLabelText("说明"), {
+        target: { value: "已提交的说明" },
+      });
+      fireEvent.change(screen.getByLabelText("优先级"), {
+        target: { value: "P0" },
+      });
+      fireEvent.change(screen.getByLabelText("截止时间"), {
+        target: { value: "2026-09-25T12:00" },
+      });
+      const form = screen.getByLabelText("标题").closest("form")!;
+      fireEvent.submit(form);
+      expect(hooks.update.mutate).toHaveBeenCalledOnce();
+      hooks[operation].isPending = true;
+      view.rerender(ui());
+      for (const label of ["标题", "说明", "优先级", "截止时间"]) {
+        expect(screen.getByLabelText(label)).toBeDisabled();
+      }
+      fireEvent.submit(form);
+      expect(hooks.update.mutate).toHaveBeenCalledOnce();
+      expect(hooks.command.mutate).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
+      hooks[operation].isPending = false;
+      view.rerender(ui());
+      for (const label of ["标题", "说明", "优先级", "截止时间"]) {
+        expect(screen.getByLabelText(label)).toBeEnabled();
+      }
+      expect(screen.getByLabelText("标题")).toHaveValue("已提交的标题");
+      expect(screen.getByLabelText("说明")).toHaveValue("已提交的说明");
+      expect(screen.getByLabelText("优先级")).toHaveValue("P0");
+      expect(screen.getByLabelText("截止时间")).toHaveValue("2026-09-25T12:00");
+    },
+  );
+
+  it.each([
+    ["标记解决", "解决原因", "确认前的解决原因"],
+    ["忽略", "忽略原因", "确认前的忽略原因"],
+    ["稍后处理", "稍后至", "2026-09-25T12:00"],
+  ])(
+    "freezes the %s input until its command completes",
+    (action, field, value) => {
+      const ui = () => (
+        <InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />
+      );
+      const view = render(ui());
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      fireEvent.change(screen.getByLabelText(field), { target: { value } });
+      const form = screen.getByLabelText(field).closest("form")!;
+      fireEvent.submit(form);
+      expect(hooks.command.mutate).toHaveBeenCalledOnce();
+      hooks.command.isPending = true;
+      view.rerender(ui());
+      expect(screen.getByLabelText(field)).toBeDisabled();
+      expect(screen.getByLabelText(field)).toHaveValue(value);
+      fireEvent.submit(form);
+      expect(hooks.command.mutate).toHaveBeenCalledOnce();
+      expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
+      hooks.command.isPending = false;
+      view.rerender(ui());
+      expect(screen.getByLabelText(field)).toBeEnabled();
+      expect(screen.getByLabelText(field)).toHaveValue(value);
+    },
+  );
+
+  it("restores navigation after a successful save without asking to discard the saved draft", () => {
+    hooks.detail.mockReturnValue({ data: followupSourceItem });
+    const onClose = vi.fn();
+    render(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={onClose}
+        returnSession={returnSession}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "已经保存的标题" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    expect(hooks.update.mutate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+    act(() =>
+      hooks.update.mutate.mock.lastCall![1].onSuccess({
+        ...followupSourceItem,
+        title: "已经保存的标题",
+        version: 3,
+      }),
+    );
+    expect(screen.getByRole("link", { name: "返回原对话" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "查看客户回访" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("dialog", { name: "舍弃未保存更改？" }),
+    ).toBeNull();
+  });
+
+  it("keeps a relation request that was already pending on mount protected", () => {
+    hooks.detail.mockReturnValue({ data: followupSourceItem });
+    hooks.link.isPending = true;
+    const onClose = vi.fn();
+    render(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={onClose}
+        returnSession={returnSession}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "查看客户回访" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("preserves a conflicted draft and its leave protection after refreshing the item", async () => {
+    const refetch = vi.fn().mockResolvedValue({
+      data: { ...followupSourceItem, version: 3 },
+    });
+    hooks.detail.mockReturnValue({ data: followupSourceItem, refetch });
+    const onClose = vi.fn();
+    render(
+      <InboxItemDetailModal
+        itemId={baseItem.id}
+        onClose={onClose}
+        returnSession={returnSession}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("标题"), {
+      target: { value: "冲突后仍需保留的本地标题" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await act(async () => {
+      hooks.update.mutate.mock.lastCall![1].onError(
+        new ApiError("版本冲突", { code: "VERSION_CONFLICT", status: 409 }),
+      );
+    });
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("标题")).toHaveValue(
+      "冲突后仍需保留的本地标题",
+    );
+    expect(screen.getByRole("button", { name: "返回原对话" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(screen.getByLabelText("标题")).toHaveValue(
+      "冲突后仍需保留的本地标题",
+    );
+    expect(hooks.update.mutate).toHaveBeenCalledOnce();
+    expect(hooks.command.mutate).not.toHaveBeenCalled();
+  });
+
+  it("cannot confirm discard if an operation starts while the confirmation is open", () => {
+    hooks.detail.mockReturnValue({ data: followupSourceItem });
+    const onClose = vi.fn();
+    const ui = () => (
+      <InboxItemDetailModal itemId={baseItem.id} onClose={onClose} />
+    );
+    const view = render(ui());
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.change(screen.getByLabelText("说明"), {
+      target: { value: "等待操作结束后再决定是否舍弃" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    hooks.command.isPending = true;
+    view.rerender(ui());
+    const confirm = screen.getByRole("dialog", { name: "舍弃未保存更改？" });
+    expect(
+      within(confirm).getByRole("button", { name: "舍弃更改并关闭" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "舍弃更改并关闭" }),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(confirm).toBeVisible();
+    expect(onClose).not.toHaveBeenCalled();
+    hooks.command.isPending = false;
+    view.rerender(ui());
+    fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(screen.getByLabelText("说明")).toHaveValue(
+      "等待操作结束后再决定是否舍弃",
+    );
   });
 
   it("labels an invoice due source as a local invoice reminder", () => {
@@ -214,11 +697,7 @@ describe("InboxItemDetailModal", () => {
       refetch: vi.fn(),
     });
 
-    render(
-      <MemoryRouter>
-        <InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />
-      </MemoryRouter>,
-    );
+    render(<InboxItemDetailModal itemId={baseItem.id} onClose={vi.fn()} />);
 
     expect(screen.getByText("本地自动化事项 · 仅保存在本机")).toBeTruthy();
     expect(screen.getByText("项目完成自动化")).toBeTruthy();
@@ -460,7 +939,8 @@ describe("InboxItemDetailModal", () => {
 
     expect(screen.getByRole("button", { name: "标为已读" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "标记解决" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "关闭" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭弹窗" })).toBeNull();
   });
 
   it("labels a backup-create maintenance item as system maintenance", () => {

@@ -25,6 +25,7 @@ type aiSessionResponse struct {
 	Title                 string `json:"title"`
 	Persist               bool   `json:"persist"`
 	CompactedMessageCount int64  `json:"compacted_message_count"`
+	MessageCount          int64  `json:"message_count"`
 	Version               int64  `json:"version"`
 	CreatedAt             string `json:"created_at"`
 	UpdatedAt             string `json:"updated_at"`
@@ -40,6 +41,8 @@ type aiMessageResponse struct {
 	TaskID            *string                            `json:"task_id"`
 	TaskTitleSnapshot *string                            `json:"task_title_snapshot"`
 	GenerationID      *string                            `json:"generation_id"`
+	Origin            *aiGenerationOrigin                `json:"origin,omitempty"`
+	AccessRequest     *aiWorkspaceAccessRequestResponse  `json:"access_request,omitempty"`
 	ContextProvider   *aiBusinessContextProviderSnapshot `json:"context_provider"`
 	ContextSources    []aiBusinessContextSource          `json:"context_sources"`
 	ContextKnowledge  []aiKnowledgeContextSource         `json:"context_knowledge"`
@@ -98,6 +101,32 @@ func (a *API) aiSessionCompactedMessageCounts(ctx context.Context, sessions []mo
 	return counts, nil
 }
 
+func (a *API) aiSessionMessageCounts(ctx context.Context, sessions []models.AISession) (map[string]int64, error) {
+	counts := make(map[string]int64, len(sessions))
+	if len(sessions) == 0 {
+		return counts, nil
+	}
+	ids := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, session.ID)
+	}
+	var rows []struct {
+		SessionID string `gorm:"column:session_id"`
+		Count     int64  `gorm:"column:message_count"`
+	}
+	if err := a.db.WithContext(ctx).Model(&models.AIMessage{}).
+		Select("session_id, COUNT(*) AS message_count").
+		Where("session_id IN ?", ids).
+		Group("session_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.SessionID] = row.Count
+	}
+	return counts, nil
+}
+
 func (a *API) listAISessions(c *gin.Context) {
 	var rows []models.AISession
 	if err := a.db.WithContext(c.Request.Context()).Order("updated_at DESC, id ASC").Limit(200).Find(&rows).Error; err != nil {
@@ -110,9 +139,15 @@ func (a *API) listAISessions(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
+	messageCounts, err := a.aiSessionMessageCounts(c.Request.Context(), rows)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
 	for _, row := range rows {
 		response := aiSessionResponseFromModel(row)
 		response.CompactedMessageCount = counts[row.ID]
+		response.MessageCount = messageCounts[row.ID]
 		responses = append(responses, response)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": responses})
@@ -158,8 +193,14 @@ func (a *API) getAISession(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
+	messageCounts, err := a.aiSessionMessageCounts(c.Request.Context(), []models.AISession{row})
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
 	response := aiSessionResponseFromModel(row)
 	response.CompactedMessageCount = counts[row.ID]
+	response.MessageCount = messageCounts[row.ID]
 	setProjectETag(c, row.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
@@ -213,6 +254,7 @@ func (a *API) deleteAISession(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
+	a.aiGenerations.forgetSessionCitations(id)
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"id": id, "deleted": true}})
 }
 
@@ -256,6 +298,31 @@ func (a *API) listAIMessages(c *gin.Context) {
 	if err != nil {
 		writeDatabaseError(c)
 		return
+	}
+	generationIDs := make([]string, 0, len(responses))
+	for _, response := range responses {
+		if response.Role == "assistant" && response.Status == "completed" && response.GenerationID != nil {
+			generationIDs = append(generationIDs, *response.GenerationID)
+		}
+	}
+	accessRequests, err := openAIWorkspaceAccessRequestsByGeneration(a.db.WithContext(c.Request.Context()), generationIDs)
+	if err != nil {
+		writeDatabaseError(c)
+		return
+	}
+	for i := range responses {
+		if responses[i].GenerationID == nil {
+			continue
+		}
+		if responses[i].Role == "assistant" && responses[i].Status == "completed" {
+			responses[i].AccessRequest = accessRequests[*responses[i].GenerationID]
+		}
+		origin, err := aiGenerationOriginFor(a.db.WithContext(c.Request.Context()), *responses[i].GenerationID)
+		if err != nil {
+			writeDatabaseError(c)
+			return
+		}
+		responses[i].Origin = origin
 	}
 	c.JSON(http.StatusOK, gin.H{"data": responses, "meta": meta})
 }

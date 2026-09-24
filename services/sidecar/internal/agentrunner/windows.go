@@ -17,9 +17,9 @@ var (
 )
 
 // bindWindowsJob assigns the child to a kill-on-close Job Object. The handle
-// is intentionally leaked until reclaimProcessTree terminates the job: closing
-// it early would defeat the kill-on-close guarantee if the sidecar dies
-// before cancellation runs.
+// stays owned by the runner until the child exits or the runner terminates the
+// job. Closing it earlier would defeat the kill-on-close guarantee if the
+// sidecar dies while the child is still running.
 func bindWindowsJob(command *exec.Cmd) error {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
@@ -54,11 +54,26 @@ func bindWindowsJob(command *exec.Cmd) error {
 	return nil
 }
 
-func terminateWindowsJob(command *exec.Cmd) {
+func takeWindowsJob(command *exec.Cmd) (windows.Handle, bool) {
 	jobHandlesMu.Lock()
+	defer jobHandlesMu.Unlock()
 	job, tracked := jobHandles[command]
 	delete(jobHandles, command)
-	jobHandlesMu.Unlock()
+	return job, tracked
+}
+
+// releaseProcessTree closes the Job handle after a normal child exit. It is
+// deliberately idempotent: terminateWindowsJob may already have taken and
+// closed the same handle on an error, timeout, or cancellation path.
+func releaseProcessTree(command *exec.Cmd) {
+	job, tracked := takeWindowsJob(command)
+	if tracked {
+		_ = windows.CloseHandle(job)
+	}
+}
+
+func terminateWindowsJob(command *exec.Cmd) {
+	job, tracked := takeWindowsJob(command)
 	if !tracked {
 		_ = command.Process.Kill()
 		return

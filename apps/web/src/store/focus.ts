@@ -15,6 +15,9 @@ export type FocusCyclePhase = "idle" | "work" | "break" | "ready" | "complete";
 
 interface FocusCycleState {
   phase: FocusCyclePhase;
+  sessionId: string | null;
+  // Runtime-only generation: an old create callback must not undo a local reset.
+  revision: number;
   taskId: string | null;
   taskTitle: string | null;
   completedCycles: number;
@@ -26,17 +29,20 @@ interface FocusCycleState {
     taskId: string | null,
     targetCycles: number,
     taskTitle?: string | null,
+    sessionId?: string | null,
+    continueSequence?: boolean,
   ) => void;
   completeWork: (
     taskId: string | null,
     settings: FocusSettings,
     taskTitle?: string | null,
     nowMs?: number,
-  ) => void;
+    expectedSessionId?: string,
+  ) => boolean;
   pauseBreak: (nowMs?: number) => void;
   resumeBreak: (nowMs?: number) => void;
   finishBreak: () => void;
-  resetCycle: () => void;
+  resetCycle: (expectedSessionId?: string) => void;
 }
 
 const cycleMemoryStorage = new Map<string, string>();
@@ -61,6 +67,7 @@ function focusCycleStorage(): Storage {
 
 const initialCycleState = {
   phase: "idle" as FocusCyclePhase,
+  sessionId: null,
   taskId: null,
   taskTitle: null,
   completedCycles: 0,
@@ -86,16 +93,32 @@ export const useFocusCycleStore = create<FocusCycleState>()(
   persist(
     (set) => ({
       ...initialCycleState,
-      beginWork: (taskId, targetCycles, taskTitle) =>
+      revision: 0,
+      beginWork: (
+        taskId,
+        targetCycles,
+        taskTitle,
+        sessionId = null,
+        continueSequence = true,
+      ) =>
         set((state) => {
-          const continueSequence =
-            state.phase === "ready" && state.taskId === taskId;
+          // Polling the same Session must not restart work after auto-stop, or
+          // reset its round count when paused/recovered. Bind legacy v1 work once.
+          if (sessionId && state.sessionId === sessionId) return state;
+          const keepSequence =
+            state.taskId === taskId &&
+            ((continueSequence && state.phase === "ready") ||
+              (sessionId &&
+                state.sessionId === null &&
+                state.phase === "work"));
           return {
             phase: "work",
+            sessionId,
+            revision: state.revision + 1,
             taskId,
-            taskTitle: taskTitle ?? (continueSequence ? state.taskTitle : null),
-            completedCycles: continueSequence ? state.completedCycles : 0,
-            targetCycles: continueSequence
+            taskTitle: taskTitle ?? (keepSequence ? state.taskTitle : null),
+            completedCycles: keepSequence ? state.completedCycles : 0,
+            targetCycles: keepSequence
               ? state.targetCycles
               : Math.max(1, Math.round(targetCycles)),
             breakDurationSeconds: 0,
@@ -103,8 +126,21 @@ export const useFocusCycleStore = create<FocusCycleState>()(
             breakEndsAtMs: null,
           };
         }),
-      completeWork: (taskId, settings, taskTitle, nowMs = Date.now()) =>
+      completeWork: (
+        taskId,
+        settings,
+        taskTitle,
+        nowMs = Date.now(),
+        expectedSessionId,
+      ) => {
+        let accepted = false;
         set((state) => {
+          if (
+            expectedSessionId &&
+            (state.sessionId !== expectedSessionId || state.phase !== "work")
+          )
+            return state;
+          accepted = true;
           const continuing = state.phase === "work" && state.taskId === taskId;
           const targetCycles = continuing
             ? state.targetCycles
@@ -116,6 +152,7 @@ export const useFocusCycleStore = create<FocusCycleState>()(
           if (completedCycles >= targetCycles) {
             return {
               phase: "complete",
+              revision: state.revision + 1,
               taskId,
               taskTitle: taskTitle ?? state.taskTitle,
               completedCycles,
@@ -131,6 +168,7 @@ export const useFocusCycleStore = create<FocusCycleState>()(
           );
           return {
             phase: "break",
+            revision: state.revision + 1,
             taskId,
             taskTitle: taskTitle ?? state.taskTitle,
             completedCycles,
@@ -141,7 +179,9 @@ export const useFocusCycleStore = create<FocusCycleState>()(
               ? nowMs + breakDurationSeconds * 1_000
               : null,
           };
-        }),
+        });
+        return accepted;
+      },
       pauseBreak: (nowMs = Date.now()) =>
         set((state) => ({
           breakRemainingSeconds: breakSecondsAt(state, nowMs),
@@ -155,23 +195,34 @@ export const useFocusCycleStore = create<FocusCycleState>()(
               : null,
         })),
       finishBreak: () =>
-        set((state) => ({
-          phase: "ready",
-          taskId: state.taskId,
-          taskTitle: state.taskTitle,
-          completedCycles: state.completedCycles,
-          targetCycles: state.targetCycles,
-          breakDurationSeconds: 0,
-          breakRemainingSeconds: 0,
-          breakEndsAtMs: null,
-        })),
-      resetCycle: () => set(initialCycleState),
+        set((state) =>
+          state.phase !== "break"
+            ? state
+            : {
+                phase: "ready",
+                revision: state.revision + 1,
+                taskId: state.taskId,
+                taskTitle: state.taskTitle,
+                completedCycles: state.completedCycles,
+                targetCycles: state.targetCycles,
+                breakDurationSeconds: 0,
+                breakRemainingSeconds: 0,
+                breakEndsAtMs: null,
+              },
+        ),
+      resetCycle: (expectedSessionId) =>
+        set((state) =>
+          expectedSessionId && state.sessionId !== expectedSessionId
+            ? state
+            : { ...initialCycleState, revision: state.revision + 1 },
+        ),
     }),
     {
       name: "opc-workspace-focus-cycle-v1",
       storage: createJSONStorage(focusCycleStorage),
       partialize: (state) => ({
         phase: state.phase,
+        sessionId: state.sessionId,
         taskId: state.taskId,
         taskTitle: state.taskTitle,
         completedCycles: state.completedCycles,
@@ -180,7 +231,14 @@ export const useFocusCycleStore = create<FocusCycleState>()(
         breakRemainingSeconds: state.breakRemainingSeconds,
         breakEndsAtMs: state.breakEndsAtMs,
       }),
-      version: 1,
+      version: 2,
+      // Keep v1 rests/rounds; the next authoritative open Session binds legacy
+      // work. The storage key stays stable so upgrading does not lose a break.
+      migrate: (persisted) =>
+        ({
+          ...(persisted as Partial<FocusCycleState>),
+          sessionId: null,
+        }) as FocusCycleState,
     },
   ),
 );

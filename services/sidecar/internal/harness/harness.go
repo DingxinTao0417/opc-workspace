@@ -1,7 +1,7 @@
 // Package harness is the AI assistant's model runtime: a bounded run loop
 // around a streaming LLM client with a narrow, explicitly registered tool
-// allowlist. Production currently registers only ADR-007's three memory tools;
-// any business or knowledge capability still requires separate authorization.
+// allowlist. Production has memory tools plus explicitly consented, run-scoped
+// business/knowledge reads (ADR-029); model/tool text cannot grant capabilities.
 package harness
 
 import (
@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/opc-workspace/opc-sidecar/internal/modelclient"
@@ -20,7 +21,7 @@ const (
 	DefaultMaxTurns = 8
 	// DefaultToolTimeout bounds a single tool execution.
 	DefaultToolTimeout = 30 * time.Second
-	// DefaultMaxResultBytes caps one tool result (truncated) and, equally,
+	// DefaultMaxResultBytes caps one complete tool result and, equally,
 	// the accumulated tool output fed back into one run's prompt.
 	DefaultMaxResultBytes = 64 << 10
 	// DefaultMaxToolCorrections bounds how many tool failures may be fed
@@ -44,6 +45,10 @@ const (
 // SelfCheckRevisionPrompt is code-owned. The model's own insufficiency note
 // is injected as data into the user-role revision instruction.
 const SelfCheckRevisionPrompt = `你刚才自评认为你的回答尚未满足用户请求。请针对该不足输出完整的修订后回答全文，不要输出解释或评论；若修订后已满足要求，照常在末尾输出自评块。`
+
+// BudgetHandoffPrompt is appended only to the last model request after a tool
+// loop. It does not grant capabilities or imply that the user's task is done.
+const BudgetHandoffPrompt = `这是本次运行的最后一轮，必须按轮数预算收尾。所有工具已禁用，不再调用工具，也没有额外修订轮。只根据已经获得的真实工具结果，用自然语言交接已核实的进度、待人工确认的建议、剩余工作和未知事项。不得把操作提议、计划或本轮收尾当作业务执行成功或整体任务完成；后续仍需用户另行发送消息并重新授权。保持原有自检格式，如实报告，不编造成功。`
 
 // selfCheckVerdict is the parsed model self-assessment.
 type selfCheckVerdict struct {
@@ -110,10 +115,11 @@ func selfCheckNoteMessage(note string) string {
 
 // Sentinel errors surfaced by Run; callers map them to stable AI_* error codes.
 var (
-	ErrMaxTurns        = errors.New("harness: run exceeded its turn budget")
-	ErrToolUnavailable = errors.New("harness: model requested a tool that is not registered")
-	ErrToolBudget      = errors.New("harness: tool results exceeded their byte budget")
-	ErrToolCorrections = errors.New("harness: tool failures exceeded the correction budget")
+	ErrMaxTurns           = errors.New("harness: run exceeded its turn budget")
+	ErrToolUnavailable    = errors.New("harness: model requested a tool that is not registered")
+	ErrToolBudget         = errors.New("harness: tool results exceeded their byte budget")
+	ErrToolResultTooLarge = errors.New("harness: tool result exceeds byte limit; tool may have changed state, inspect current state before retrying")
+	ErrToolCorrections    = errors.New("harness: tool failures exceeded the correction budget")
 )
 
 // LLMClient abstracts the streaming model adapter so the run loop is testable
@@ -125,6 +131,9 @@ type LLMClient interface {
 
 // Request is one provider-scoped generation request.
 type Request struct {
+	// DisableTransientRetries is code-owned for durable background work: an
+	// upstream request with an uncertain outcome must never be sent twice.
+	DisableTransientRetries bool
 	// ResponseByteLimit is assigned by the run budget, never by the user API.
 	ResponseByteLimit int
 	Protocol          string
@@ -142,20 +151,33 @@ type Request struct {
 	Facts            []string
 	BusinessContext  []string
 	KnowledgeContext []string
+	ProjectFiles     []string
+	ActionReceipts   string
 	Tools            []modelclient.ToolDefinition
 }
 
 // Turn is one completed LLM round, including any fully aggregated provider
 // tool calls.
 type Turn struct {
-	Text           string
-	Reasoning      string
-	ToolCalls      []ToolCall
-	InputBytes     int
-	OutputBytes    int
-	InputTokens    int
-	OutputTokens   int
-	UsageAvailable bool
+	// TrimmedHistoryTurns is assigned by the run's prompt window, not a model.
+	TrimmedHistoryTurns int
+	// CompactedToolResults counts earlier requeryable results replaced by a
+	// bounded evidence capsule or omission marker for this request. It never
+	// counts the latest tool group or action receipts.
+	CompactedToolResults int
+	Text                 string
+	Reasoning            string
+	ToolCalls            []ToolCall
+	InputBytes           int
+	OutputBytes          int
+	InputTokens          int
+	OutputTokens         int
+	UsageAvailable       bool
+	// RetryCount counts automatic retries of transient upstream failures that
+	// happened before any output reached the caller. RetryReason is the last
+	// stable reason code (for example upstream_503), never provider text.
+	RetryCount  int
+	RetryReason string
 }
 
 // ToolCall is one model-initiated tool invocation.
@@ -178,6 +200,10 @@ type toolSchemaProvider interface {
 type Registry struct {
 	tools []Tool
 	names map[string]struct{}
+	// Presentation is separate from authorization. The selected map is
+	// immutable once published; nil exposes all tools, empty exposes none.
+	modelMu    sync.RWMutex
+	modelTools map[string]struct{}
 }
 
 // NewRegistry builds a registry, rejecting duplicate tool names.
@@ -219,15 +245,59 @@ func (r *Registry) Names() []string {
 	return names
 }
 
-// Definitions exposes only the registered allowlist to the model. Tools may
+// Definitions exposes the complete registered allowlist. Tools may
 // provide a strict input schema; legacy/internal tools receive an empty object
 // schema and remain responsible for validating arguments in Execute.
 func (r *Registry) Definitions() []modelclient.ToolDefinition {
+	return r.definitions(nil)
+}
+
+// SelectModelTools atomically replaces the model-visible catalog with a
+// subset of tools already authorized for this run. It neither adds nor revokes
+// execution authority: Get, Names and Definitions always retain the allowlist.
+// Nil resets to the full catalog; an explicitly empty slice hides all tools.
+func (r *Registry) SelectModelTools(names []string) error {
+	var selected map[string]struct{}
+	if names != nil {
+		selected = make(map[string]struct{}, len(names))
+		for _, name := range names {
+			if _, authorized := r.names[name]; !authorized {
+				return fmt.Errorf("harness: model tool %q is not registered", name)
+			}
+			if _, duplicate := selected[name]; duplicate {
+				return fmt.Errorf("harness: duplicate model tool %q", name)
+			}
+			selected[name] = struct{}{}
+		}
+	}
+	r.modelMu.Lock()
+	r.modelTools = selected
+	r.modelMu.Unlock()
+	return nil
+}
+
+// ModelDefinitions is an ordered snapshot of the current catalog. Selection
+// changes cannot mutate a prior request or expose a half-replaced catalog.
+func (r *Registry) ModelDefinitions() []modelclient.ToolDefinition {
+	r.modelMu.RLock()
+	selected := r.modelTools
+	r.modelMu.RUnlock()
+	return r.definitions(selected)
+}
+
+func (r *Registry) definitions(selected map[string]struct{}) []modelclient.ToolDefinition {
 	definitions := make([]modelclient.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
+		if selected != nil {
+			if _, visible := selected[tool.Name()]; !visible {
+				continue
+			}
+		}
 		parameters := json.RawMessage(`{"type":"object","additionalProperties":true}`)
-		if provider, ok := tool.(toolSchemaProvider); ok && len(provider.InputSchema()) > 0 {
-			parameters = provider.InputSchema()
+		if provider, ok := tool.(toolSchemaProvider); ok {
+			if schema := provider.InputSchema(); len(schema) > 0 {
+				parameters = append(json.RawMessage(nil), schema...)
+			}
 		}
 		definitions = append(definitions, modelclient.ToolDefinition{
 			Name: tool.Name(), Description: tool.Summary(), Parameters: parameters,
@@ -254,8 +324,8 @@ func (e *Executor) withDefaults() Executor {
 }
 
 // Execute runs one tool under the executor's timeout, recovering panics as
-// errors and truncating oversized results. A parent ctx cancellation wins over
-// the per-tool timeout.
+// errors and rejecting oversized results without exposing partial evidence.
+// A parent ctx cancellation wins over the per-tool timeout.
 func (e *Executor) Execute(ctx context.Context, tool Tool, arguments json.RawMessage) (string, error) {
 	fixed := e.withDefaults()
 	runCtx, cancel := context.WithTimeout(ctx, fixed.Timeout)
@@ -281,13 +351,21 @@ func (e *Executor) Execute(ctx context.Context, tool Tool, arguments json.RawMes
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("harness: tool %q timed out after %s", tool.Name(), fixed.Timeout)
+		return "", fmt.Errorf("harness: tool %q timed out after %s: %w", tool.Name(), fixed.Timeout, context.DeadlineExceeded)
+	}
+	// Both completion and cancellation may be ready when select runs. A late
+	// successful return must not reach AcceptResult and change runtime state.
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if runCtx.Err() != nil {
+		return "", fmt.Errorf("harness: tool %q timed out after %s: %w", tool.Name(), fixed.Timeout, context.DeadlineExceeded)
 	}
 	if completed.err != nil {
 		return "", completed.err
 	}
 	if len(completed.result) > fixed.MaxResultBytes {
-		return completed.result[:fixed.MaxResultBytes], nil
+		return "", ErrToolResultTooLarge
 	}
 	return completed.result, nil
 }
@@ -298,36 +376,62 @@ type Callbacks struct {
 	OnDelta     func(string)
 	OnReasoning func(string)
 	OnStep      func(RunStep)
+	// OnStepStart reports code-owned work before it blocks. It is synchronous
+	// with OnStep and never called by a late tool goroutine.
+	OnStepStart func(RunStep)
 }
 
 // RunStep never carries prompts, responses, reasoning, tool arguments or
 // results, URLs, or credentials.
 type RunStep struct {
-	Kind           string
-	Status         string
-	TurnIndex      int
-	ToolName       string
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	DurationMS     int64
-	InputBytes     int
-	OutputBytes    int
-	InputTokens    int
-	OutputTokens   int
-	UsageAvailable bool
-	ErrorCode      string
+	// TrimmedHistoryTurns counts complete old turns removed for this request.
+	TrimmedHistoryTurns int
+	// CompactedToolResults counts prior read-only results newly compacted.
+	CompactedToolResults int
+	Kind                 string
+	Status               string
+	TurnIndex            int
+	ToolName             string
+	StartedAt            time.Time
+	CompletedAt          time.Time
+	DurationMS           int64
+	InputBytes           int
+	OutputBytes          int
+	InputTokens          int
+	OutputTokens         int
+	UsageAvailable       bool
+	RetryCount           int
+	RetryReason          string
+	ErrorCode            string
 }
 
 // Result summarizes a finished (or failed, cancelled) run with everything
 // accumulated so far. Reflections counts the autonomous revision turns the
 // agent triggered on its own insufficient-verdict (ADR-006).
 type Result struct {
-	Text        string
-	Reasoning   string
-	Turns       int
-	ToolCalls   int
-	Corrections int
-	Reflections int
+	// ContextTrimmedTurns is cumulative even when the run fails or is cancelled.
+	ContextTrimmedTurns int
+	// CompactedToolResults is cumulative across model and self-check requests.
+	CompactedToolResults int
+	Text                 string
+	Reasoning            string
+	Turns                int
+	ToolCalls            int
+	Corrections          int
+	Reflections          int
+	// BudgetHandoff marks a successful text-only last-round handoff, not a
+	// business outcome, approval or permission to start another generation.
+	BudgetHandoff bool
+}
+
+func requestForBudgetHandoff(request Request) Request {
+	base := strings.TrimSpace(request.SystemPrompt)
+	if base == "" {
+		base = modelclient.SystemPrompt
+	}
+	request.SystemPrompt = base + "\n\n" + BudgetHandoffPrompt
+	request.Tools = nil
+	return request
 }
 
 // Run executes the call/execute loop until the model produces a final reply
@@ -342,36 +446,54 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 	ctx, cancelRun := context.WithTimeout(ctx, modelclient.TotalTimeout)
 	defer cancelRun()
 	budget := &budgetedClient{inner: client, remaining: modelclient.MaxResponseBytes}
-	client = budget
+	client = newPromptWindowClient(budget, request.History, tools)
 
 	var result Result
 	history := make([]modelclient.ChatMessage, len(request.History))
 	copy(history, request.History)
 	totalToolResults := 0
-	toolDefinitions := request.Tools
-	if tools != nil {
-		toolDefinitions = tools.Definitions()
-	}
-	request.Tools = toolDefinitions
 
 	for result.Turns < maxTurns {
 		if ctx.Err() != nil {
 			return result, runContextError(ctx.Err())
 		}
 		turnIndex := result.Turns + 1
+		budgetHandoff := turnIndex == maxTurns && result.ToolCalls > 0
 		startedAt := time.Now().UTC()
-		turn, err := client.Stream(ctx, Request{
-			Protocol: request.Protocol, BaseURL: request.BaseURL,
+		emitRunStepStart(callbacks, RunStep{Kind: "model_turn", TurnIndex: turnIndex, StartedAt: startedAt})
+		if tools != nil {
+			request.Tools = tools.ModelDefinitions()
+		}
+		turnRequest := Request{
+			DisableTransientRetries: request.DisableTransientRetries,
+			Protocol:                request.Protocol, BaseURL: request.BaseURL,
 			APIKey: request.APIKey, Model: request.Model, SystemPrompt: request.SystemPrompt,
 			History: history, Memories: request.Memories, Summary: request.Summary, Facts: request.Facts,
 			BusinessContext:  request.BusinessContext,
 			KnowledgeContext: request.KnowledgeContext,
-			Tools:            toolDefinitions,
-		}, callbacks.OnDelta, callbacks.OnReasoning)
+			ProjectFiles:     request.ProjectFiles,
+			ActionReceipts:   request.ActionReceipts,
+			Tools:            request.Tools,
+		}
+		if budgetHandoff {
+			turnRequest = requestForBudgetHandoff(turnRequest)
+		}
+		turn, err := client.Stream(ctx, turnRequest, callbacks.OnDelta, callbacks.OnReasoning)
+		result.ContextTrimmedTurns += turn.TrimmedHistoryTurns
+		result.CompactedToolResults += turn.CompactedToolResults
+		if err == nil && budgetHandoff && len(turn.ToolCalls) != 0 {
+			// Hiding definitions is not enforcement. Even a registered tool must
+			// never execute after the final text-only request; record this as a
+			// failed model turn before returning the same hard budget error.
+			err = ErrMaxTurns
+		}
 		completedAt := time.Now().UTC()
 		stepStatus, stepErrorCode := "succeeded", ""
 		if err != nil {
 			stepStatus, stepErrorCode = "failed", "MODEL_TURN_FAILED"
+			if errors.Is(err, ErrMaxTurns) {
+				stepErrorCode = "TURN_BUDGET_EXHAUSTED"
+			}
 			if errors.Is(err, context.Canceled) {
 				stepStatus, stepErrorCode = "cancelled", ""
 			}
@@ -389,7 +511,10 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			DurationMS: completedAt.Sub(startedAt).Milliseconds(),
 			InputBytes: turn.InputBytes, OutputBytes: outputBytes,
 			InputTokens: turn.InputTokens, OutputTokens: turn.OutputTokens, UsageAvailable: turn.UsageAvailable,
-			ErrorCode: stepErrorCode,
+			RetryCount: turn.RetryCount, RetryReason: turn.RetryReason,
+			TrimmedHistoryTurns:  turn.TrimmedHistoryTurns,
+			CompactedToolResults: turn.CompactedToolResults,
+			ErrorCode:            stepErrorCode,
 		})
 		result.Turns++
 		result.Text += turn.Text
@@ -398,7 +523,14 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			return result, err
 		}
 		if len(turn.ToolCalls) == 0 {
-			return runSelfCheck(ctx, client, request, history, result, callbacks)
+			checked, checkErr := runSelfCheck(ctx, client, request, history, result, callbacks, budgetHandoff, tools)
+			if budgetHandoff && checkErr == nil {
+				if ctx.Err() != nil {
+					return checked, runContextError(ctx.Err())
+				}
+				checked.BudgetHandoff = true
+			}
+			return checked, checkErr
 		}
 		if tools == nil || len(tools.Names()) == 0 {
 			return result, ErrToolUnavailable
@@ -415,7 +547,7 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 			if !ok {
 				now := time.Now().UTC()
 				emitRunStep(callbacks, RunStep{
-					Kind: "tool_call", Status: "failed", ToolName: call.Name,
+					Kind: "tool_call", Status: "failed", ToolName: "unknown_tool",
 					StartedAt: now, CompletedAt: now, InputBytes: len(call.Arguments),
 					ErrorCode: "TOOL_UNAVAILABLE",
 				})
@@ -426,15 +558,35 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 				exec = *executor
 			}
 			toolStartedAt := time.Now().UTC()
+			emitRunStepStart(callbacks, RunStep{Kind: "tool_call", ToolName: tool.Name(), StartedAt: toolStartedAt})
 			output, err := exec.Execute(ctx, tool, call.Arguments)
+			if err == nil && ctx.Err() != nil {
+				err, output = ctx.Err(), ""
+			}
+			// Private acceptance hook: only successful, executor-bounded results may
+			// contribute run evidence. Timed-out goroutines cannot publish evidence.
+			// This is not telemetry; OnStep continues to carry no result content.
+			if err == nil {
+				if acceptor, ok := tool.(interface {
+					AcceptResult(context.Context, string) error
+				}); ok {
+					err = acceptor.AcceptResult(ctx, output)
+					if err != nil {
+						output = ""
+					}
+				}
+			}
 			toolCompletedAt := time.Now().UTC()
 			toolStatus, toolErrorCode := "succeeded", ""
 			if err != nil {
-				if ctx.Err() != nil {
-					return result, runContextError(ctx.Err())
-				}
 				toolStatus, toolErrorCode = "failed", "TOOL_EXECUTION_FAILED"
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				if errors.Is(err, ErrToolResultTooLarge) {
+					toolErrorCode = "TOOL_RESULT_TOO_LARGE"
+				}
+				if errors.Is(err, context.DeadlineExceeded) {
+					toolErrorCode = "TOOL_TIMEOUT"
+				}
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 					toolStatus, toolErrorCode = "cancelled", ""
 				}
 			}
@@ -445,6 +597,9 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 				InputBytes: len(call.Arguments), OutputBytes: len(output), ErrorCode: toolErrorCode,
 			})
 			if err != nil {
+				if ctx.Err() != nil {
+					return result, runContextError(ctx.Err())
+				}
 				// Self-correction: feed the failure back so the model can
 				// adjust and retry, bounded by the correction budget.
 				result.Corrections++
@@ -485,7 +640,7 @@ func Run(ctx context.Context, client LLMClient, request Request, tools *Registry
 // one internal revision turn fed back with the model's own note, bounded to a
 // single pass and the global turn budget. Failure retains the draft and is
 // propagated so the generation never presents an incomplete revision as success.
-func runSelfCheck(ctx context.Context, client LLMClient, request Request, history []modelclient.ChatMessage, result Result, callbacks Callbacks) (Result, error) {
+func runSelfCheck(ctx context.Context, client LLMClient, request Request, history []modelclient.ChatMessage, result Result, callbacks Callbacks, budgetHandoff bool, tools *Registry) (Result, error) {
 	checkStartedAt := time.Now().UTC()
 	if ctx.Err() != nil {
 		emitRunStep(callbacks, RunStep{
@@ -515,9 +670,10 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 		})
 		return result, nil
 	}
-	if strings.TrimSpace(stripped) == "" {
+	if strings.TrimSpace(stripped) == "" || budgetHandoff {
 		// There is no draft to revise, but the explicit insufficiency verdict
-		// must not be reported as a successful quality check.
+		// must not be reported as a successful quality check. A last-round
+		// handoff also keeps the negative verdict without requesting round nine.
 		completedAt := time.Now().UTC()
 		emitRunStep(callbacks, RunStep{
 			Kind: "self_check", Status: "failed", TurnIndex: maxInt(result.Turns, 1),
@@ -542,18 +698,38 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 		modelclient.ChatMessage{Role: "user", Content: selfCheckNoteMessage(verdict.note)},
 	)
 	revisionStartedAt := time.Now().UTC()
-	revised, err := client.Stream(ctx, Request{
-		Protocol: request.Protocol, BaseURL: request.BaseURL,
+	emitRunStepStart(callbacks, RunStep{Kind: "self_check", TurnIndex: result.Turns + 1, StartedAt: revisionStartedAt})
+	revisionHandoff := result.Turns+1 == DefaultMaxTurns && result.ToolCalls > 0
+	revisionRequest := Request{
+		DisableTransientRetries: request.DisableTransientRetries,
+		Protocol:                request.Protocol, BaseURL: request.BaseURL,
 		APIKey: request.APIKey, Model: request.Model, SystemPrompt: request.SystemPrompt,
 		History: verifyHistory, Memories: request.Memories, Summary: request.Summary, Facts: request.Facts,
 		BusinessContext:  request.BusinessContext,
 		KnowledgeContext: request.KnowledgeContext,
+		ProjectFiles:     request.ProjectFiles,
+		ActionReceipts:   request.ActionReceipts,
 		Tools:            request.Tools,
-	}, nil, nil)
+	}
+	if tools != nil {
+		revisionRequest.Tools = tools.ModelDefinitions()
+	}
+	if revisionHandoff {
+		revisionRequest = requestForBudgetHandoff(revisionRequest)
+	}
+	revised, err := client.Stream(ctx, revisionRequest, nil, nil)
+	result.ContextTrimmedTurns += revised.TrimmedHistoryTurns
+	result.CompactedToolResults += revised.CompactedToolResults
+	if err == nil && revisionHandoff && len(revised.ToolCalls) != 0 {
+		err = ErrMaxTurns
+	}
 	revisionCompletedAt := time.Now().UTC()
 	revisionStatus, revisionErrorCode := "succeeded", ""
 	if err != nil {
 		revisionStatus, revisionErrorCode = "failed", "SELF_CHECK_REVISION_FAILED"
+		if errors.Is(err, ErrMaxTurns) {
+			revisionErrorCode = "TURN_BUDGET_EXHAUSTED"
+		}
 		if errors.Is(err, context.Canceled) {
 			revisionStatus, revisionErrorCode = "cancelled", ""
 		}
@@ -575,11 +751,19 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 		DurationMS: revisionCompletedAt.Sub(revisionStartedAt).Milliseconds(),
 		InputBytes: revised.InputBytes, OutputBytes: revisionOutputBytes,
 		InputTokens: revised.InputTokens, OutputTokens: revised.OutputTokens, UsageAvailable: revised.UsageAvailable,
-		ErrorCode: revisionErrorCode,
+		TrimmedHistoryTurns:  revised.TrimmedHistoryTurns,
+		CompactedToolResults: revised.CompactedToolResults,
+		ErrorCode:            revisionErrorCode,
 	})
 	result.Turns++
 	if err != nil {
 		return result, err
+	}
+	if revisionHandoff {
+		if ctx.Err() != nil {
+			return result, runContextError(ctx.Err())
+		}
+		result.BudgetHandoff = true
 	}
 	if revisedStripped == "" || revisedStripped == stripped {
 		return result, nil
@@ -593,6 +777,13 @@ func runSelfCheck(ctx context.Context, client LLMClient, request Request, histor
 func emitRunStep(callbacks Callbacks, step RunStep) {
 	if callbacks.OnStep != nil {
 		callbacks.OnStep(step)
+	}
+}
+
+func emitRunStepStart(callbacks Callbacks, step RunStep) {
+	step.Status = "running"
+	if callbacks.OnStepStart != nil {
+		callbacks.OnStepStart(step)
 	}
 }
 

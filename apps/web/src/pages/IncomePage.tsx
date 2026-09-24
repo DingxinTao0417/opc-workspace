@@ -7,7 +7,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import {
   useExportFinancialEntries,
@@ -97,12 +97,15 @@ function apiErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export function IncomePage() {
+export function IncomePage({
+  report,
+  navigation,
+}: { report?: IncomeStatsParams; navigation?: ReactNode } = {}) {
   const { dateKey: todayKey } = useLocalCalendar();
   const currentMonth = todayKey.slice(0, 7);
   const previousCurrentMonth = useRef(currentMonth);
   const [monthInput, setMonthInput] = useState(currentMonth);
-  const [currency, setCurrency] = useState("CNY");
+  const [currency, setCurrency] = useState(report?.currency ?? "CNY");
   const [type, setType] = useState<FinancialEntryType | "">("");
   const [status, setStatus] = useState<FinancialEntryStatus | "">("");
   const [page, setPage] = useState(1);
@@ -114,7 +117,13 @@ export function IncomePage() {
   const [voidReason, setVoidReason] = useState("");
   const [actionMenu, setActionMenu] = useState<string | null>(null);
   const month = validMonthValue(monthInput) ? monthInput : currentMonth;
-  const bounds = useMemo(() => monthBounds(month), [month]);
+  const bounds = useMemo(
+    () =>
+      report
+        ? { dateFrom: report.dateFrom, dateTo: report.dateTo }
+        : monthBounds(month),
+    [month, report],
+  );
   const yearBounds = useMemo(() => currentYearBounds(todayKey), [todayKey]);
   const listInput = {
     page,
@@ -127,15 +136,20 @@ export function IncomePage() {
     includeVoided: status === "voided",
     sort: "-occurred_on,-created_at",
   } as const;
-  const entriesQuery = useFinancialEntriesQuery(listInput);
+  const entriesQuery = useFinancialEntriesQuery(listInput, true, !!report);
   const monthlyStatsRequest = { currency, ...bounds };
   const yearlyStatsRequest = { currency, ...yearBounds };
-  const statsQuery = useIncomeStatsQuery(monthlyStatsRequest);
+  const statsQuery = useIncomeStatsQuery(monthlyStatsRequest, true, !!report);
   const yearlyStatsQuery = useIncomeStatsQuery(yearlyStatsRequest);
   const exportMutation = useExportFinancialEntries();
   const voidMutation = useVoidFinancialEntry();
-  const entries = entriesQuery.data?.items ?? [];
-  const total = entriesQuery.data?.meta.total ?? 0;
+  const entriesUnavailable =
+    !!report &&
+    (entriesQuery.isFetching ||
+      entriesQuery.isError ||
+      entriesQuery.isPlaceholderData);
+  const entries = entriesUnavailable ? [] : (entriesQuery.data?.items ?? []);
+  const total = entriesUnavailable ? 0 : (entriesQuery.data?.meta.total ?? 0);
   const totalPages = Math.max(
     1,
     Math.ceil(total / (entriesQuery.data?.meta.pageSize ?? 20)),
@@ -144,6 +158,7 @@ export function IncomePage() {
   const statsTransitioning = Boolean(statsQuery.isPlaceholderData);
   const yearlyStatsTransitioning = Boolean(yearlyStatsQuery.isPlaceholderData);
   const stats =
+    !(report && (statsQuery.isFetching || statsQuery.isError)) &&
     !statsTransitioning &&
     statsMatchRequest(statsQuery.data, monthlyStatsRequest)
       ? statsQuery.data
@@ -230,6 +245,7 @@ export function IncomePage() {
       <PageHeader
         actions={
           <>
+            {navigation}
             <button
               className="button button-secondary"
               disabled={exportMutation.isPending || total === 0}
@@ -251,40 +267,55 @@ export function IncomePage() {
         }
         meta={
           <span className="page-count">
-            {entriesQuery.isPending ? "读取中" : `${total} 条`}
+            {entriesQuery.isPending || (report && entriesQuery.isFetching)
+              ? "读取中"
+              : entriesUnavailable
+                ? "读取失败"
+                : `${total} 条`}
           </span>
         }
         title="收入与支出"
       />
 
+      {report && (
+        <p role="status">
+          报告范围：{report.dateFrom} 至 {report.dateTo} · {currency}
+          ；按已存业务日期统计，不做时区换算。当前事实可能已更新，查看不会记账或确认付款。
+        </p>
+      )}
       <div className="toolbar finance-toolbar">
-        <label className="toolbar-select finance-month-filter">
-          <span className="sr-only">月份</span>
-          <input
-            aria-label="月份"
-            onChange={(event) => {
-              setMonthInput(event.target.value);
-              setPage(1);
-            }}
-            type="month"
-            value={month}
-          />
-        </label>
+        {!report && (
+          <label className="toolbar-select finance-month-filter">
+            <span className="sr-only">月份</span>
+            <input
+              aria-label="月份"
+              onChange={(event) => {
+                setMonthInput(event.target.value);
+                setPage(1);
+              }}
+              type="month"
+              value={month}
+            />
+          </label>
+        )}
         <label className="toolbar-select">
           <span className="sr-only">币种</span>
           <select
             aria-label="币种筛选"
+            disabled={!!report}
             onChange={(event) => {
               setCurrency(event.target.value);
               setPage(1);
             }}
             value={currency}
           >
-            {Object.keys(currencySymbols).map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
+            {[...new Set([...Object.keys(currencySymbols), currency])].map(
+              (item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ),
+            )}
           </select>
         </label>
         <label className="toolbar-select">
@@ -338,7 +369,7 @@ export function IncomePage() {
 
       <section aria-label="财务统计概览" className="finance-kpi-grid">
         <article className="kpi-card finance-kpi-card">
-          <span>本月已确认收入</span>
+          <span>{report ? "指定期间已确认收入" : "本月已确认收入"}</span>
           <strong className="finance-positive">
             {stats
               ? formatAmount(stats.confirmedIncomeMinor, stats.currency)
@@ -348,7 +379,7 @@ export function IncomePage() {
             {stats
               ? `${stats.confirmedIncomeCount} 笔 · 均值 ${formatAmount(stats.averageIncomeMinor, stats.currency)}`
               : statsTransitioning || statsQuery.isPending
-                ? "正在更新本月统计"
+                ? "正在更新当前范围统计"
                 : "当前范围暂无可用统计"}
           </small>
         </article>
@@ -377,7 +408,9 @@ export function IncomePage() {
               ? formatAmount(stats.confirmedExpenseMinor, stats.currency)
               : "—"}
           </strong>
-          <small>仅统计当前月份与币种</small>
+          <small>
+            {report ? "仅统计指定日期与币种" : "仅统计当前月份与币种"}
+          </small>
         </article>
         <article className="kpi-card finance-kpi-card">
           <span>净现金流</span>
@@ -416,9 +449,11 @@ export function IncomePage() {
           onRetry={() => void entriesQuery.refetch()}
         />
       ) : null}
-      {entriesQuery.isPending ? <SkeletonRows count={7} /> : null}
+      {entriesQuery.isPending || (report && entriesQuery.isFetching) ? (
+        <SkeletonRows count={7} />
+      ) : null}
 
-      {entriesQuery.isSuccess && entries.length === 0 ? (
+      {!entriesUnavailable && entriesQuery.isSuccess && entries.length === 0 ? (
         <EmptyState
           action={
             hasFilters ? (
@@ -449,7 +484,13 @@ export function IncomePage() {
               ? "调整类型或状态筛选后再试。"
               : "收入和支出数据只保存在本机，可随业务数据一起备份。"
           }
-          title={hasFilters ? "没有匹配的记录" : "本月暂无财务记录"}
+          title={
+            hasFilters
+              ? "没有匹配的记录"
+              : report
+                ? "指定期间暂无财务记录"
+                : "本月暂无财务记录"
+          }
         />
       ) : null}
 

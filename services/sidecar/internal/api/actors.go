@@ -201,22 +201,8 @@ func (a *API) createActor(c *gin.Context) {
 			}
 		}
 
-		if err := tx.Create(&actor).Error; err != nil {
-			return fmt.Errorf("create actor: %w", err)
-		}
-		response, err = actorResponseFromModel(actor)
+		response, err = createActorInTransaction(tx, actor, requestIDFromContext(c))
 		if err != nil {
-			return err
-		}
-		if err := recordActorWorkflowEvent(
-			tx,
-			"actor_created",
-			actor.ID,
-			nil,
-			response,
-			requestIDFromContext(c),
-			actor.CreatedAt,
-		); err != nil {
 			return err
 		}
 		if idempotencyKey != "" {
@@ -291,63 +277,11 @@ func (a *API) updateActor(c *gin.Context) {
 
 	var response actorResponse
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		actor, err := loadActor(tx, id)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "ACTOR_NOT_FOUND", "Actor not found")
-			}
-			return err
-		}
-		if actor.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		previous, err := actorResponseFromModel(actor)
-		if err != nil {
-			return err
-		}
-		updates, err := actorUpdates(tx, actor, input)
-		if err != nil {
-			return err
-		}
-		updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
-		updates["updated_at"] = updatedAt
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.Actor{}).
-			Where("id = ? AND version = ?", id, expectedVersion).
-			Updates(updates)
-		if result.Error != nil {
-			if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_ASSIGNMENTS") {
-				return actorHasActiveAssignmentsError()
-			}
-			if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_CLIENT_LINKS") {
-				return actorHasActiveClientLinksError()
-			}
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		updated, err := loadActor(tx, id)
-		if err != nil {
-			return err
-		}
-		response, err = actorResponseFromModel(updated)
-		if err != nil {
-			return err
-		}
-		action := "actor_updated"
-		if previous.Status == "active" && response.Status == "inactive" {
-			action = "actor_deactivated"
-		}
-		return recordActorWorkflowEvent(
-			tx,
-			action,
-			actor.ID,
-			&previous,
-			response,
-			requestIDFromContext(c),
-			updatedAt,
+		var err error
+		response, err = updateActorInTransaction(
+			tx, id, expectedVersion, input, requestIDFromContext(c), time.Now().UTC().Format(time.RFC3339Nano),
 		)
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -358,6 +292,72 @@ func (a *API) updateActor(c *gin.Context) {
 	}
 	setProjectETag(c, response.Version)
 	c.JSON(http.StatusOK, gin.H{"data": response})
+}
+
+func createActorInTransaction(tx *gorm.DB, actor models.Actor, requestID string) (actorResponse, error) {
+	if err := tx.Create(&actor).Error; err != nil {
+		return actorResponse{}, fmt.Errorf("create actor: %w", err)
+	}
+	response, err := actorResponseFromModel(actor)
+	if err != nil {
+		return actorResponse{}, err
+	}
+	if err := recordActorWorkflowEvent(tx, "actor_created", actor.ID, nil, response, requestID, actor.CreatedAt); err != nil {
+		return actorResponse{}, err
+	}
+	return response, nil
+}
+
+func updateActorInTransaction(tx *gorm.DB, id string, expectedVersion int64, input updateActorRequest, requestID, updatedAt string) (actorResponse, error) {
+	actor, err := loadActor(tx, id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return actorResponse{}, newProjectRequestError(http.StatusNotFound, "ACTOR_NOT_FOUND", "Actor not found")
+		}
+		return actorResponse{}, err
+	}
+	if actor.Version != expectedVersion {
+		return actorResponse{}, taskVersionConflict()
+	}
+	previous, err := actorResponseFromModel(actor)
+	if err != nil {
+		return actorResponse{}, err
+	}
+	updates, err := actorUpdates(tx, actor, input)
+	if err != nil {
+		return actorResponse{}, err
+	}
+	updates["updated_at"] = updatedAt
+	updates["version"] = gorm.Expr("version + 1")
+	result := tx.Model(&models.Actor{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
+	if result.Error != nil {
+		if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_ASSIGNMENTS") {
+			return actorResponse{}, actorHasActiveAssignmentsError()
+		}
+		if strings.Contains(result.Error.Error(), "ACTOR_HAS_ACTIVE_CLIENT_LINKS") {
+			return actorResponse{}, actorHasActiveClientLinksError()
+		}
+		return actorResponse{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return actorResponse{}, taskVersionConflict()
+	}
+	updated, err := loadActor(tx, id)
+	if err != nil {
+		return actorResponse{}, err
+	}
+	response, err := actorResponseFromModel(updated)
+	if err != nil {
+		return actorResponse{}, err
+	}
+	action := "actor_updated"
+	if previous.Status == "active" && response.Status == "inactive" {
+		action = "actor_deactivated"
+	}
+	if err := recordActorWorkflowEvent(tx, action, actor.ID, &previous, response, requestID, updatedAt); err != nil {
+		return actorResponse{}, err
+	}
+	return response, nil
 }
 
 func actorFromCreateRequest(input createActorRequest) (models.Actor, error) {

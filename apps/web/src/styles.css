@@ -194,7 +194,7 @@ button:disabled {
 /* Agent mode swaps the business navigation for the conversation list, so the
    rail never inherits the workspace collapse behaviour. */
 .app-shell-agent {
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
 }
 
 /* Hiding the agent rail keeps the conversation in a single full-width column;
@@ -415,6 +415,20 @@ button:disabled {
   background: var(--panel-2);
 }
 
+.sidebar-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.sidebar-search input::placeholder {
+  color: var(--text-muted);
+}
+
 kbd {
   display: inline-flex;
   min-width: 20px;
@@ -463,6 +477,23 @@ kbd {
     background 120ms ease;
 }
 
+button.nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+button.nav-item.nav-item-active {
+  background: var(--accent-bg);
+}
+
+button.nav-item.nav-item-active:hover {
+  background: var(--nav-active-hover);
+}
+
 .nav-item:hover {
   background: var(--panel-hover);
   color: var(--text);
@@ -508,60 +539,6 @@ kbd {
   color: var(--text);
 }
 
-.focus-mini-card {
-  margin-top: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 8px 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--panel);
-  color: var(--text-muted);
-}
-
-.focus-mini-dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--track);
-}
-
-.focus-mini-dot[data-state="active"] {
-  background: var(--green-light);
-}
-
-.focus-mini-dot[data-state="paused"] {
-  background: var(--text-secondary);
-}
-
-.focus-mini-dot[data-state="alert"] {
-  background: var(--danger-text);
-}
-
-.focus-mini-time {
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-
-.focus-mini-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
-}
-
-.focus-mini-action {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  margin-left: auto;
-}
-
 .progress-track,
 .goal-track,
 .project-progress {
@@ -587,7 +564,7 @@ kbd {
 .sidebar-settings {
   flex: 0 0 34px;
   width: 100%;
-  margin-top: 8px;
+  margin-top: auto;
   border: 0;
   background: transparent;
   cursor: pointer;
@@ -613,13 +590,14 @@ kbd {
   max-width: 1180px;
   min-height: 100%;
   margin: 0 auto;
-  padding: 22px 24px 48px;
+  padding: 0 24px 48px;
 }
 
 .page-header,
 .today-header {
   display: flex;
-  min-height: 38px;
+  box-sizing: border-box;
+  min-height: 64px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -784,6 +762,17 @@ kbd {
   background: transparent;
 }
 
+/* Business cards remain independent of the agent's tabbed tool workspace. */
+.right-sidebar.workbench-overview {
+  gap: 14px;
+  padding: 16px;
+  background: var(--bg-deep);
+}
+
+.workbench-overview > .overview-card {
+  flex-shrink: 0;
+}
+
 /* Drag handle for the docked overview. It is absolutely positioned inside the
    shell so it never adds a grid track or widens the gutter; its offset is
    derived from the same width variable that drives the grid. The shell padding
@@ -925,6 +914,120 @@ button.ov-row:hover {
   white-space: nowrap;
 }
 
+.ov-agent-run-row {
+  align-items: flex-start;
+}
+
+.ov-agent-family-entry {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-agent-family-entry > .ov-row {
+  width: 100%;
+}
+
+.ov-agent-family-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0 8px 6px 36px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ov-agent-family-controls [role="alert"] {
+  flex-basis: 100%;
+}
+
+.ov-agent-family-batch {
+  margin: 4px 8px 8px 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ov-agent-family-batch section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.ov-agent-family-batch section > span:first-child,
+.ov-agent-family-batch ul,
+.ov-agent-family-batch small {
+  flex-basis: 100%;
+}
+
+.ov-agent-family-batch section > span:first-child {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.ov-agent-family-batch ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ov-agent-family-batch small {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.ov-agent-family-batch small[role="alert"] {
+  color: var(--orange);
+}
+
+.ov-agent-family-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 4px 36px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ov-agent-family-selection input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.ov-agent-run-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-agent-run-copy small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-agent-delegation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
 .right-floating-card {
   position: fixed;
   top: 64px;
@@ -1062,32 +1165,6 @@ button.ov-row:hover {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
-}
-
-.ov-browser-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ov-browser-input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--text);
-  font-size: 11px;
-}
-
-.ov-browser-frame {
-  width: 100%;
-  height: 320px;
-  margin-top: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--panel);
 }
 
 @media (max-width: 1180px) {
@@ -2395,6 +2472,22 @@ button.ov-row:hover {
   margin-bottom: 12px;
 }
 
+.task-selection-return-notice {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.task-selection-return-notice-error {
+  border-color: color-mix(in srgb, var(--red) 36%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--danger-text);
+}
+
 .task-filter-active {
   border-color: var(--accent-border);
   background: var(--accent-bg);
@@ -2705,7 +2798,7 @@ button.ov-row:hover {
 
 .tag-manager-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) 34px 34px auto;
+  grid-template-columns: minmax(120px, 1fr) 34px 34px auto auto;
   gap: 7px;
   align-items: center;
   padding: 8px;
@@ -3207,6 +3300,14 @@ button.ov-row:hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.projects-page .page-actions .ai-issue-handoff-button {
+  margin: 0;
+}
+
+.projects-page .page-actions {
+  flex-wrap: wrap;
 }
 
 .roadmap-grid {
@@ -6826,6 +6927,63 @@ button.ov-row:hover {
   margin-top: 14px;
 }
 
+.focus-report-location {
+  padding: 12px;
+  margin-bottom: 14px;
+  background: var(--surface-subtle, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.focus-report-location p {
+  margin: 0 0 8px;
+}
+
+.focus-report-panel [data-report-view] {
+  scroll-margin-top: 20px;
+}
+
+.client-record-location,
+.project-note-location {
+  padding: 16px;
+  margin-block: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  scroll-margin-block: 20px;
+}
+
+.client-record-location:focus,
+.project-note-location:focus {
+  outline: 2px solid var(--border);
+  outline-offset: 4px;
+}
+
+.client-record-location-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.client-record-location-heading > div {
+  flex: 1 1 240px;
+}
+.client-record-location-heading p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.focus-report-panel:focus,
+.focus-report-panel [data-report-view]:focus {
+  outline: 2px solid var(--border);
+  outline-offset: 4px;
+}
+
 .focus-report-range-button {
   min-height: 26px;
   padding: 4px 8px;
@@ -8677,6 +8835,13 @@ button.ov-row:hover {
   flex: 0 0 auto;
 }
 
+.actor-settings-card-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .actor-settings-editor,
 .actor-settings-create {
   padding: 14px;
@@ -9168,6 +9333,13 @@ button.ov-row:hover {
   color: var(--text-muted);
   font-size: 10px;
   line-height: 1.5;
+}
+
+.automation-editor-heading-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .automation-flow {
@@ -9770,6 +9942,11 @@ button.ov-row:hover {
     padding-left: 7px;
   }
 
+  .actor-settings-card-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .automation-rule-tabs,
   .automation-flow,
   .automation-schedule-fields {
@@ -9781,6 +9958,10 @@ button.ov-row:hover {
   .automation-history-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .automation-editor-heading-actions {
+    justify-content: space-between;
   }
 
   .automation-run {
@@ -10902,6 +11083,12 @@ button.ov-row:hover {
 
 .task-assignments-heading {
   margin: 0 2px 9px;
+}
+
+.task-assignments-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .task-assignments-heading h3,
@@ -13066,6 +13253,22 @@ button.ov-row:hover {
   }
 }
 
+/* Native browsing remains available at the desktop window's 1080px minimum.
+   Summary panels retain their existing compact-layout behavior. */
+@media (min-width: 961px) and (max-width: 1180px) {
+  .app-shell-browser-open .right-sidebar {
+    display: flex;
+  }
+
+  .app-shell-browser-open .workspace-frame {
+    grid-template-columns: minmax(0, 1fr) var(--right-overview-width);
+  }
+
+  .app-shell-browser-open .ov-resizer {
+    display: block;
+  }
+}
+
 @media (max-width: 860px) {
   .focus-insights,
   .project-focus-grid {
@@ -13151,6 +13354,11 @@ button.ov-row:hover {
 }
 
 @media (max-width: 680px) {
+  .projects-page .page-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
   .today-inbox-grid {
     grid-template-columns: 1fr;
   }
@@ -13412,7 +13620,7 @@ button.ov-row:hover {
     grid-template-columns: minmax(0, 1fr) 34px 34px;
   }
 
-  .tag-manager-row > .button:last-of-type,
+  .tag-manager-row > .ai-issue-handoff-button,
   .tag-manager-confirm {
     grid-column: 1 / -1;
   }
@@ -13929,6 +14137,7 @@ button.ov-row:hover {
 }
 
 @import "./ai-page.css";
+@import "./agent-workspace.css";
 
 /* Agent 执行区块（ADR-027 内置执行器） */
 .task-agent-runs {
@@ -13977,6 +14186,155 @@ button.ov-row:hover {
   background: var(--panel);
   color: var(--text);
   font-size: 12px;
+}
+
+.task-agent-files {
+  margin: 0 0 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+}
+
+.task-agent-files > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.task-agent-files-summary {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.task-agent-files-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 11px 11px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.task-agent-files-help {
+  margin: 9px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.task-agent-output-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.task-agent-output-field select {
+  min-width: 190px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.task-agent-file-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.task-agent-file-group {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.task-agent-file-group h4,
+.task-agent-file-group p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.task-agent-file-group ul {
+  display: grid;
+  gap: 7px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-agent-file-group li {
+  min-width: 0;
+}
+
+.task-agent-file-group label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.task-agent-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-agent-file-meta,
+.task-agent-file-unavailable {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.task-agent-file-unavailable {
+  display: block;
+  margin: 2px 0 0 20px;
+  color: var(--danger, #b42318);
+}
+
+.task-agent-file-consent {
+  display: grid;
+  gap: 6px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.06));
+  color: var(--text);
+  font-size: 11px;
+}
+
+.task-agent-file-consent p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.task-agent-file-consent p[data-tone="warning"] {
+  color: var(--danger, #b42318);
+}
+
+.task-agent-file-consent label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+@media (max-width: 720px) {
+  .task-agent-file-groups {
+    grid-template-columns: 1fr;
+  }
 }
 
 .task-agent-runs-alert {
@@ -14043,6 +14401,21 @@ button.ov-row:hover {
   color: #b42318;
 }
 
+/* Lifecycle phase wins over the raw Run status: a finished model call whose
+   result was never registered is not shown in success colours. */
+.task-agent-run-status[data-phase="recovery_required"],
+.task-agent-run-status[data-phase="succeeded"],
+.task-agent-run-status[data-phase="unknown"] {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+.task-agent-run-status[data-phase="submitted"],
+.task-agent-run-status[data-phase="confirmed"] {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+}
+
 .task-agent-run-meta {
   min-width: 0;
   flex: 1;
@@ -14051,6 +14424,20 @@ button.ov-row:hover {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-agent-run-progress,
+.agent-run-drawer-progress {
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.task-agent-run-progress > span:first-child,
+.agent-run-drawer-progress > span:first-child {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .task-agent-run-actions {
@@ -14081,6 +14468,53 @@ button.ov-row:hover {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.task-agent-run-result-files {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.task-agent-run-result-file {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-subtle, rgba(127, 127, 127, 0.06));
+}
+
+.task-agent-run-result-file > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.task-agent-run-result-file > header span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-agent-run-result-file > header span:nth-child(2) {
+  margin-right: auto;
+}
+
+.task-agent-run-result-file > header button {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+.task-agent-run-result-file .task-agent-run-result {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 /* 右侧 Agent Run 详情：仅投影服务端记录的执行事实。 */
@@ -14209,6 +14643,13 @@ button.ov-row:hover {
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.agent-run-drawer-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .agent-run-drawer-result > .button {

@@ -19,7 +19,9 @@ import {
   useCreatePersonActor,
   useUpdateActor,
 } from "../api/hooks";
+import { personHandoff } from "../lib/aiIssueHandoff";
 import type { Actor, ActorStatus } from "../types/models";
+import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 interface ActorDraft {
   displayName: string;
@@ -319,6 +321,8 @@ export function ActorSettings() {
     Boolean(peopleQuery.data);
   const pageOutOfRange =
     !formOpen && peopleDataVisible && personPage > peopleTotalPages;
+  const handoffDisabled =
+    formOpen || createActor.isPending || updateActor.isPending;
 
   useEffect(() => {
     if (
@@ -891,16 +895,26 @@ export function ActorSettings() {
                         </div>
                         <p>{actor.notes || "暂无备注"}</p>
                       </div>
-                      <button
-                        aria-label={`编辑${actor.displayName}`}
-                        className="button button-quiet actor-settings-edit"
-                        disabled={updateActor.isPending}
-                        onClick={() => startEditing(actor)}
-                        type="button"
-                      >
-                        <Pencil size={14} />
-                        编辑
-                      </button>
+                      <div className="actor-settings-card-actions">
+                        <AiIssueHandoffButton
+                          content={personHandoff(
+                            actor.id,
+                            actor.displayName,
+                            actor.status,
+                          )}
+                          disabled={handoffDisabled}
+                        />
+                        <button
+                          aria-label={`编辑${actor.displayName}`}
+                          className="button button-quiet actor-settings-edit"
+                          disabled={updateActor.isPending}
+                          onClick={() => startEditing(actor)}
+                          type="button"
+                        >
+                          <Pencil size={14} />
+                          编辑
+                        </button>
+                      </div>
                     </div>
                     {editingActor?.id === actor.id ? (
                       <ActorEditor

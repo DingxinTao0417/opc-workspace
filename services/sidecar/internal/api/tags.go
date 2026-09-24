@@ -113,11 +113,8 @@ func (a *API) createTag(c *gin.Context) {
 				return fmt.Errorf("read tag idempotency key: %w", err)
 			}
 		}
-		if err := requireUniqueTagName(tx, tag.Name, ""); err != nil {
+		if err := createTagInTransaction(tx, &tag); err != nil {
 			return err
-		}
-		if err := tx.Create(&tag).Error; err != nil {
-			return fmt.Errorf("create tag: %w", err)
 		}
 		response = tag
 		normalizeTag(&response)
@@ -170,50 +167,9 @@ func (a *API) updateTag(c *gin.Context) {
 
 	var response models.Tag
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var tag models.Tag
-		if err := tx.First(&tag, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TAG_NOT_FOUND", "Tag not found")
-			}
-			return err
-		}
-		if tag.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-
-		updates := make(map[string]any)
-		if input.Name != nil {
-			name, err := validateTagName(*input.Name)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-			if err := requireUniqueTagName(tx, name, id); err != nil {
-				return err
-			}
-			updates["name"] = name
-		}
-		if input.Color != nil {
-			color, err := validateTagColor(*input.Color)
-			if err != nil {
-				return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
-			}
-			updates["color"] = color
-		}
-		if len(updates) == 0 {
-			return newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "at least one editable tag field is required")
-		}
-		updates["version"] = gorm.Expr("version + 1")
-		result := tx.Model(&models.Tag{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		if err := bumpTasksForTag(tx, id); err != nil {
-			return err
-		}
-		return tx.First(&response, "id = ?", id).Error
+		var err error
+		response, err = updateTagInTransaction(tx, id, expectedVersion, input, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -243,34 +199,9 @@ func (a *API) deleteTag(c *gin.Context) {
 
 	response := deletedTagResponse{DeletedID: id}
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		var tag models.Tag
-		if err := tx.First(&tag, "id = ?", id).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return newProjectRequestError(http.StatusNotFound, "TAG_NOT_FOUND", "Tag not found")
-			}
-			return err
-		}
-		if tag.Version != expectedVersion {
-			return taskVersionConflict()
-		}
-		var taskIDs []string
-		if err := tx.Table("task_tags").Where("tag_id = ?", id).Pluck("task_id", &taskIDs).Error; err != nil {
-			return err
-		}
-		response.DetachedTasks = int64(len(taskIDs))
-		result := tx.Delete(&models.Tag{}, "id = ? AND version = ?", id, expectedVersion)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return taskVersionConflict()
-		}
-		if len(taskIDs) > 0 {
-			if err := bumpTaskVersions(tx, taskIDs); err != nil {
-				return err
-			}
-		}
-		return nil
+		var err error
+		response, err = deleteTagInTransaction(tx, id, expectedVersion, time.Now().UTC().Format(time.RFC3339Nano))
+		return err
 	})
 	if err != nil {
 		if writeProjectRequestError(c, err) {
@@ -328,6 +259,95 @@ func requireUniqueTagName(db *gorm.DB, name, exceptID string) error {
 	return nil
 }
 
+func createTagInTransaction(tx *gorm.DB, tag *models.Tag) error {
+	if err := requireUniqueTagName(tx, tag.Name, ""); err != nil {
+		return err
+	}
+	if err := tx.Create(tag).Error; err != nil {
+		return fmt.Errorf("create tag: %w", err)
+	}
+	return nil
+}
+
+func updateTagInTransaction(tx *gorm.DB, id string, expectedVersion int64, input updateTagRequest, now string) (models.Tag, error) {
+	var tag models.Tag
+	if err := tx.First(&tag, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tag, newProjectRequestError(http.StatusNotFound, "TAG_NOT_FOUND", "Tag not found")
+		}
+		return tag, err
+	}
+	if tag.Version != expectedVersion {
+		return tag, taskVersionConflict()
+	}
+	updates := make(map[string]any)
+	if input.Name != nil {
+		name, err := validateTagName(*input.Name)
+		if err != nil {
+			return tag, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		}
+		if err := requireUniqueTagName(tx, name, id); err != nil {
+			return tag, err
+		}
+		updates["name"] = name
+	}
+	if input.Color != nil {
+		color, err := validateTagColor(*input.Color)
+		if err != nil {
+			return tag, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
+		}
+		updates["color"] = color
+	}
+	if len(updates) == 0 {
+		return tag, newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", "at least one editable tag field is required")
+	}
+	updates["version"] = gorm.Expr("version + 1")
+	result := tx.Model(&models.Tag{}).Where("id = ? AND version = ?", id, expectedVersion).Updates(updates)
+	if result.Error != nil {
+		return tag, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return tag, taskVersionConflict()
+	}
+	if err := bumpTasksForTagAt(tx, id, now); err != nil {
+		return tag, err
+	}
+	if err := tx.First(&tag, "id = ?", id).Error; err != nil {
+		return tag, err
+	}
+	return tag, nil
+}
+
+func deleteTagInTransaction(tx *gorm.DB, id string, expectedVersion int64, now string) (deletedTagResponse, error) {
+	response := deletedTagResponse{DeletedID: id}
+	var tag models.Tag
+	if err := tx.First(&tag, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return response, newProjectRequestError(http.StatusNotFound, "TAG_NOT_FOUND", "Tag not found")
+		}
+		return response, err
+	}
+	if tag.Version != expectedVersion {
+		return response, taskVersionConflict()
+	}
+	var taskIDs []string
+	if err := tx.Table("task_tags").Where("tag_id = ?", id).Pluck("task_id", &taskIDs).Error; err != nil {
+		return response, err
+	}
+	response.DetachedTasks = int64(len(taskIDs))
+	result := tx.Delete(&models.Tag{}, "id = ? AND version = ?", id, expectedVersion)
+	if result.Error != nil {
+		return response, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return response, taskVersionConflict()
+	}
+	if err := bumpTaskVersionsAt(tx, taskIDs, now); err != nil {
+		return response, err
+	}
+	return response, nil
+}
+
 func tagCreateRequestHash(tag models.Tag) string {
 	encoded, _ := json.Marshal(struct {
 		Name  string `json:"name"`
@@ -368,14 +388,22 @@ func applyTagSort(query *gorm.DB, raw string) (*gorm.DB, bool) {
 }
 
 func bumpTasksForTag(db *gorm.DB, tagID string) error {
+	return bumpTasksForTagAt(db, tagID, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+func bumpTasksForTagAt(db *gorm.DB, tagID, now string) error {
 	return db.Exec(`
 		UPDATE tasks
 		SET version = version + 1, updated_at = ?
 		WHERE id IN (SELECT task_id FROM task_tags WHERE tag_id = ?)
-	`, time.Now().UTC().Format(time.RFC3339Nano), tagID).Error
+	`, now, tagID).Error
 }
 
 func bumpTaskVersions(db *gorm.DB, taskIDs []string) error {
+	return bumpTaskVersionsAt(db, taskIDs, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+func bumpTaskVersionsAt(db *gorm.DB, taskIDs []string, now string) error {
 	if len(taskIDs) == 0 {
 		return nil
 	}
@@ -383,7 +411,7 @@ func bumpTaskVersions(db *gorm.DB, taskIDs []string) error {
 		Where("id IN ?", taskIDs).
 		Updates(map[string]any{
 			"version":    gorm.Expr("version + 1"),
-			"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
+			"updated_at": now,
 		}).Error
 }
 

@@ -167,6 +167,34 @@ func TestRunEmitsContentFreeModelToolAndSelfCheckSteps(t *testing.T) {
 	}
 }
 
+func TestRunReportsAutomaticModelTurnRetries(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{streams: []Turn{{
+		Text:       `ok[opc:selfcheck]{"sufficient":true}[/opc:selfcheck]`,
+		RetryCount: 2, RetryReason: "upstream_503",
+	}}}
+	var steps []RunStep
+	if _, err := Run(context.Background(), client, Request{Model: "m"}, registry, &Executor{}, Callbacks{
+		OnStep: func(step RunStep) { steps = append(steps, step) },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 2 || steps[0].Kind != "model_turn" {
+		t.Fatalf("steps=%#v", steps)
+	}
+	if steps[0].RetryCount != 2 || steps[0].RetryReason != "upstream_503" {
+		t.Fatalf("retry facts missing from model turn step: %#v", steps[0])
+	}
+	for _, step := range steps {
+		if step.Kind != "model_turn" && step.RetryCount != 0 {
+			t.Fatalf("retries must only attach to the model turn: %#v", step)
+		}
+	}
+}
+
 func TestRunOversizedToolResultTriggersBudget(t *testing.T) {
 	// A single oversized result is truncated to the per-result cap; the
 	// run-level budget trips when accumulated results exceed it.
@@ -323,15 +351,45 @@ func TestExecutorRecoversPanic(t *testing.T) {
 	}
 }
 
-func TestExecutorTruncatesOversizedResult(t *testing.T) {
+func TestExecutorRejectsOversizedResultWithoutLeakingPartialContent(t *testing.T) {
 	executor := &Executor{MaxResultBytes: 8}
 	tool := &fakeTool{name: "big", result: "0123456789abcdef"}
 	result, err := executor.Execute(context.Background(), tool, nil)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
+	if !errors.Is(err, ErrToolResultTooLarge) || result != "" {
+		t.Fatalf("expected an empty oversized-result failure, got %q, %v", result, err)
 	}
-	if result != "01234567" {
-		t.Fatalf("expected truncation to 8 bytes, got %q", result)
+	tool.result = "01234567"
+	result, err = executor.Execute(context.Background(), tool, nil)
+	if err != nil || result != tool.result {
+		t.Fatalf("exact byte limit must succeed: %q, %v", result, err)
+	}
+}
+
+func TestRunOversizedToolResultIsNotAcceptedAsEvidence(t *testing.T) {
+	tool := &fakeTool{name: "lookup", result: `{"private":"sensitive record"}`}
+	registry, err := NewRegistry(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeClient{streams: []Turn{
+		{ToolCalls: []ToolCall{{ID: "c1", Name: "lookup", Arguments: json.RawMessage(`{}`)}}},
+		{Text: "需要缩小查询范围"},
+	}}
+	var steps []RunStep
+	result, err := Run(context.Background(), client, Request{Model: "m"}, registry, &Executor{MaxResultBytes: 8}, Callbacks{
+		OnStep: func(step RunStep) { steps = append(steps, step) },
+	})
+	if err != nil || result.Corrections != 1 || result.ToolCalls != 1 {
+		t.Fatalf("run=%#v err=%v", result, err)
+	}
+	if len(steps) < 2 || steps[1].Kind != "tool_call" || steps[1].Status != "failed" ||
+		steps[1].ErrorCode != "TOOL_RESULT_TOO_LARGE" || steps[1].OutputBytes != 0 {
+		t.Fatalf("oversized result step=%#v", steps)
+	}
+	history := client.lastReq.History
+	if len(history) != 2 || history[1].Role != "tool" || !strings.Contains(history[1].Content, "exceeds") ||
+		!strings.Contains(history[1].Content, "may have changed state") || strings.Contains(history[1].Content, "sensitive") {
+		t.Fatalf("unsafe tool error receipt=%#v", history)
 	}
 }
 
@@ -426,6 +484,7 @@ func TestRunSelfCheckInsufficientTriggersAutonomousRevision(t *testing.T) {
 		Request{
 			Model: "m", History: []modelclient.ChatMessage{{Role: "user", Content: "问题"}},
 			KnowledgeContext: []string{`{"source_name":"guide.md","content":"evidence"}`},
+			ActionReceipts:   `{"items":[{"proposal_id":"p1","status":"confirmed"}]}`,
 		},
 		nil, nil, Callbacks{OnDelta: func(string) { deltas++ }})
 	if err != nil {
@@ -445,6 +504,9 @@ func TestRunSelfCheckInsufficientTriggersAutonomousRevision(t *testing.T) {
 	}
 	if len(client.lastReq.KnowledgeContext) != 1 || !strings.Contains(client.lastReq.KnowledgeContext[0], "guide.md") {
 		t.Fatalf("revision lost knowledge context: %+v", client.lastReq.KnowledgeContext)
+	}
+	if !strings.Contains(client.lastReq.ActionReceipts, "confirmed") {
+		t.Fatal("revision lost authoritative approval receipts")
 	}
 }
 

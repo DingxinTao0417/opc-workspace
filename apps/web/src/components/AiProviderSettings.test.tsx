@@ -5,10 +5,12 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AiProviderSettings } from "./AiProviderSettings";
 import { ApiError } from "../api/client";
+import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 
 afterEach(() => {
   cleanup();
@@ -21,6 +23,7 @@ afterEach(() => {
   mockState.createEvaluationReview.mutateAsync.mockClear();
   mockState.cancelEvaluation.mutateAsync.mockClear();
   mockState.deleteEvaluation.mutateAsync.mockClear();
+  useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
 });
 
 beforeEach(() => {
@@ -351,6 +354,41 @@ describe("AiProviderSettings", () => {
     expect(screen.getByText("完整质量评测")).toBeTruthy();
     expect(screen.getByLabelText("本地质量专题套件")).toHaveValue("grounded");
     expect(screen.getByText("运行专题检查")).toBeTruthy();
+  });
+
+  it("hands a saved provider to the agent without mutating provider settings", () => {
+    mockState.providers = [
+      readyProvider({
+        id: "018f0000-0000-7000-8000-00000000a101",
+        kind: "local",
+        has_key: false,
+        name: "Ollama",
+        model: "qwen3",
+      }),
+    ];
+    render(
+      <MemoryRouter>
+        <AiProviderSettings />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "交给智能体" }));
+
+    const pending = useAiWorkbenchHandoff.getState().pendingIssue;
+    expect(pending).toMatchObject({
+      label: "AI 供应商设置",
+      route: "/ai?settings=ai",
+      routeLabel: "打开 AI 助手设置",
+      scopes: [],
+    });
+    expect(pending?.prompt).toContain(
+      "provider_id=018f0000-0000-7000-8000-00000000a101",
+    );
+    expect(pending?.prompt).toContain("不要要求查看、粘贴或复述 API 密钥");
+    expect(mockState.setKey.mutateAsync).not.toHaveBeenCalled();
+    expect(mockState.checkHealth.mutateAsync).not.toHaveBeenCalled();
+    expect(mockState.deleteProvider.mutateAsync).not.toHaveBeenCalled();
+    expect(mockState.createEvaluation.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("starts an explicit evaluation only for the ready local provider", async () => {

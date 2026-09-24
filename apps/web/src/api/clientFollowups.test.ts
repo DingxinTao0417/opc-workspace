@@ -5,6 +5,7 @@ import {
   completeClientFollowup,
   createClientFollowup,
   getClientFollowups,
+  getClientFollowup,
   normalizeClientFollowup,
   resetRuntimeConnection,
   rescheduleClientFollowup,
@@ -56,6 +57,25 @@ afterEach(() => {
 });
 
 describe("client followup API contract", () => {
+  it("reads one exact followup without scanning the client list", async () => {
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        jsonResponse({ data: followupPayload() }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await getClientFollowup(
+      "followup-1",
+      new AbortController().signal,
+    );
+    expect(result.id).toBe("followup-1");
+    expect(result.clientId).toBe("client-1");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      "/api/v1/client-followups/followup-1",
+    );
+    expect(fetchMock.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
   it("strictly normalizes scheduled followup facts", () => {
     expect(normalizeClientFollowup(followupPayload())).toEqual({
       id: "followup-1",

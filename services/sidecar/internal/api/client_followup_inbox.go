@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
@@ -21,19 +22,20 @@ func (a *API) projectDueClientFollowups(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	nowText := formatInboxTimestamp(a.options.Now().UTC())
+	now := a.options.Now().UTC()
+	nowText := formatInboxTimestamp(now)
 	var ids []string
 	if err := a.db.WithContext(ctx).Table("client_followups").
 		Where(`status = 'planned'
-			AND scheduled_at <= ?
 			AND NOT EXISTS (
 				SELECT 1 FROM inbox_items
 				WHERE source_event_key = 'followup:' || client_followups.id || ':due:' || client_followups.version
 				  AND kind = 'event'
 				  AND source_entity_type = 'client_followup'
 				  AND source_entity_id = client_followups.id
-			)`, nowText).
-		Order("scheduled_at ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
+			)`).
+		Where(clientFollowupScheduledTimeKey+" <= ?", now.Format(clientFollowupTimeKeyLayout)).
+		Order(clientFollowupScheduledTimeKey+" ASC").Order("id ASC").Limit(100).Pluck("id", &ids).Error; err != nil {
 		return fmt.Errorf("list due client followups: %w", err)
 	}
 	for _, id := range ids {
@@ -48,6 +50,13 @@ func (a *API) projectDueClientFollowups(ctx context.Context) error {
 }
 
 func (a *API) projectClientFollowup(ctx context.Context, id, nowText string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	now, err := time.Parse(time.RFC3339Nano, nowText)
+	if err != nil {
+		return errors.New("invalid Client Followup projection time")
+	}
 	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var followup models.ClientFollowup
 		if err := tx.First(&followup, "id = ?", id).Error; err != nil {
@@ -56,12 +65,24 @@ func (a *API) projectClientFollowup(ctx context.Context, id, nowText string) err
 			}
 			return err
 		}
-		if followup.Status != "planned" || followup.ScheduledAt > nowText {
+		if followup.Status != "planned" {
+			return nil
+		}
+		// Native writes store UTC RFC3339Nano; historical fixed-nine values are
+		// also valid. Enforce the SQL key's format before writing, and compare
+		// against the captured scan instant, not a fresh clock or lexical order.
+		raw := followup.ScheduledAt
+		scheduledAt, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil || len(raw) < 20 || len(raw) > 30 || raw[len(raw)-1] != 'Z' ||
+			raw[:19] != scheduledAt.UTC().Format("2006-01-02T15:04:05") || (len(raw) > 20 && raw[19] != '.') {
+			return errors.New("invalid Client Followup scheduled time")
+		}
+		if scheduledAt.After(now) {
 			return nil
 		}
 		key := fmt.Sprintf("followup:%s:due:%d", followup.ID, followup.Version)
 		var existing models.InboxItem
-		err := tx.First(&existing, "source_event_key = ?", key).Error
+		err = tx.First(&existing, "source_event_key = ?", key).Error
 		if err == nil {
 			if existing.Kind != "event" || existing.SourceEntityType != clientFollowupInboxSourceType || existing.SourceEntityID == nil || *existing.SourceEntityID != followup.ID {
 				return errors.New("Client Followup source_event_key belongs to an incompatible Inbox Item")

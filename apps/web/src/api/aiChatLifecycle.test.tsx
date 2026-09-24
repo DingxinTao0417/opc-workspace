@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAiChatStream, useConfirmAiMessageTask } from "./hooks";
 import { resetRuntimeConnection } from "./client";
 import { useAiChatStore } from "../store/aiChat";
+import { useUiStore } from "../store/ui";
 
 function wrapper() {
   const client = new QueryClient({
@@ -29,6 +30,23 @@ const generation = {
   persist: true,
   client_request_id: "request-1",
   error_code: null,
+};
+const citation = {
+  chunk_id: "018f0000-0000-7000-8000-000000000001",
+  source_id: "018f0000-0000-7000-8000-000000000002",
+  document_id: "018f0000-0000-7000-8000-000000000003",
+  source_type: "pdf",
+  source_name: "私密资料.pdf",
+  document_title: "原始文档",
+  source_version: 2,
+  document_version: 3,
+  chunk_index: 1,
+  start_char: 10,
+  end_char: 30,
+  start_line: 2,
+  end_line: 4,
+  start_page: 3,
+  end_page: 3,
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -62,6 +80,7 @@ function sse(signal?: AbortSignal | null) {
 afterEach(async () => {
   cleanup();
   useAiChatStore.setState({
+    acceptedCommand: null,
     streaming: null,
     interrupted: null,
     retainedTurns: [],
@@ -70,6 +89,19 @@ afterEach(async () => {
     input: "",
     lastSessionId: "",
     activeGenerations: [],
+    workPlanVersions: {},
+    accessRequests: {},
+  });
+  useUiStore.setState({
+    rightOverviewCollapsed: false,
+    rightPanelTab: "summary",
+    rightPanelRequestMode: "open",
+    rightPanelRequest: 0,
+    workspacePanelsRequest: null,
+    workspacePanelsRequestId: 0,
+    browserNavigationRequest: null,
+    browserActionRequest: null,
+    workspaceRecordNavigationRequest: null,
   });
   sessionStorage.clear();
   vi.unstubAllGlobals();
@@ -77,6 +109,567 @@ afterEach(async () => {
 });
 
 describe("real AI stream hook and HTTP lifecycle", () => {
+  it("keeps a missing-scope request local without granting or resending", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_access_request", {
+        generation_id: generation.id,
+        scopes: ["work", "actions"],
+      });
+    });
+    expect(
+      useAiChatStore.getState().accessRequests[generation.session_id],
+    ).toEqual({
+      generationId: generation.id,
+      scopes: ["work", "actions"],
+    });
+    expect(useAiChatStore.getState().acceptedCommand?.sessionId).toBe(
+      generation.session_id,
+    );
+    expect(useUiStore.getState().rightPanelTab).toBe("summary");
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+    expect(
+      useAiChatStore.getState().accessRequests[generation.session_id],
+    ).toBeDefined();
+    act(() =>
+      useAiChatStore
+        .getState()
+        .dismissAccessRequest(generation.session_id, generation.id),
+    );
+    expect(
+      useAiChatStore.getState().accessRequests[generation.session_id],
+    ).toBeUndefined();
+  });
+
+  it("opens only the server-authorized fixed workspace panel for the active generation", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    useUiStore.setState({ rightOverviewCollapsed: true });
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_panel", {
+        generation_id: generation.id,
+        panel: "agents",
+      });
+    });
+    expect(useUiStore.getState()).toMatchObject({
+      rightOverviewCollapsed: false,
+      rightPanelTab: "agents",
+      rightPanelRequestMode: "activate",
+      rightPanelRequest: 1,
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("requests a server-authorized two-panel split without exposing panel content", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    useUiStore.setState({ rightOverviewCollapsed: true });
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_panels", {
+        generation_id: generation.id,
+        panels: ["files", "review"],
+        split_ratio: 0.62,
+      });
+    });
+    expect(useUiStore.getState()).toMatchObject({
+      rightOverviewCollapsed: false,
+      workspacePanelsRequest: {
+        id: 1,
+        panels: ["files", "review"],
+        splitRatio: 0.62,
+      },
+      workspacePanelsRequestId: 1,
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("keeps a streamed browser action as a local confirmation request", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_browser_action", {
+        generation_id: generation.id,
+        action: "reload",
+      });
+    });
+    expect(useUiStore.getState()).toMatchObject({
+      rightOverviewCollapsed: false,
+      rightPanelTab: "browser",
+      rightPanelRequestMode: "activate",
+      browserActionRequest: { action: "reload" },
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("queues a server-authorized browser URL for local confirmation only", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_browser_navigation", {
+        generation_id: generation.id,
+        url: "https://example.com/docs",
+      });
+    });
+    expect(useUiStore.getState()).toMatchObject({
+      rightOverviewCollapsed: false,
+      rightPanelTab: "browser",
+      rightPanelRequestMode: "activate",
+      browserNavigationRequest: { url: "https://example.com/docs" },
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("refreshes only metadata for the current plan after a committed plan update", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_plan_updated", {
+        generation_id: generation.id,
+        version: 2,
+        step_count: 3,
+      });
+    });
+    expect(useAiChatStore.getState().workPlanVersions).toEqual({
+      [generation.session_id]: 2,
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("queues a server-authorized record identity for local confirmation only", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_record_navigation", {
+        generation_id: generation.id,
+        record_type: "task",
+        record_id: "018f0000-0000-7000-8000-000000000001",
+      });
+    });
+    expect(
+      useUiStore.getState().workspaceRecordNavigationRequest,
+    ).toMatchObject({
+      recordType: "task",
+      recordId: "018f0000-0000-7000-8000-000000000001",
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("queues an Agent Run only with the Sidecar-derived Task identity", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_record_navigation", {
+        generation_id: generation.id,
+        record_type: "agent_run",
+        record_id: "018f0000-0000-7000-8000-000000000011",
+        task_id: "018f0000-0000-7000-8000-000000000012",
+      });
+    });
+    expect(
+      useUiStore.getState().workspaceRecordNavigationRequest,
+    ).toMatchObject({
+      recordType: "agent_run",
+      recordId: "018f0000-0000-7000-8000-000000000011",
+      taskId: "018f0000-0000-7000-8000-000000000012",
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("queues a Task Submission only with the Sidecar-derived Task identity", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_record_navigation", {
+        generation_id: generation.id,
+        record_type: "task_submission",
+        record_id: "018f0000-0000-7000-8000-000000000021",
+        task_id: "018f0000-0000-7000-8000-000000000022",
+      });
+    });
+    expect(
+      useUiStore.getState().workspaceRecordNavigationRequest,
+    ).toMatchObject({
+      recordType: "task_submission",
+      recordId: "018f0000-0000-7000-8000-000000000021",
+      taskId: "018f0000-0000-7000-8000-000000000022",
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("queues a Task Artifact only with Sidecar-derived Task and Submission identities", async () => {
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("workspace_record_navigation", {
+        generation_id: generation.id,
+        record_type: "task_artifact",
+        record_id: "018f0000-0000-7000-8000-000000000031",
+        task_id: "018f0000-0000-7000-8000-000000000032",
+        submission_id: "018f0000-0000-7000-8000-000000000033",
+      });
+    });
+    expect(
+      useUiStore.getState().workspaceRecordNavigationRequest,
+    ).toMatchObject({
+      recordType: "task_artifact",
+      recordId: "018f0000-0000-7000-8000-000000000031",
+      taskId: "018f0000-0000-7000-8000-000000000032",
+      submissionId: "018f0000-0000-7000-8000-000000000033",
+    });
+    await act(async () => {
+      channel!.push("done", { generation_id: generation.id });
+      channel!.end();
+      await sending;
+    });
+  });
+
+  it("keeps tool progress across replacement, route remount and terminal recovery without storing it", async () => {
+    const running = {
+      sequence: 2,
+      kind: "model_turn",
+      status: "running",
+      turn_index: 1,
+      started_at: "2026-09-18T10:00:00Z",
+      duration_ms: 0,
+    };
+    const completed = {
+      ...running,
+      status: "succeeded",
+      completed_at: "2026-09-18T10:00:01Z",
+      duration_ms: 1000,
+    };
+    let channel: ReturnType<typeof sse> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        channel = sse(init?.signal);
+        return channel.response;
+      }),
+    );
+    const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+    let sending!: ReturnType<typeof view.result.current.send>;
+    act(() => {
+      sending = view.result.current.send(input);
+    });
+    await waitFor(() => expect(channel).toBeDefined());
+    await act(async () => {
+      channel!.push("meta", {
+        generation_id: generation.id,
+        session_id: generation.session_id,
+      });
+      channel!.push("progress", {
+        generation_id: generation.id,
+        step: running,
+      });
+    });
+    expect(useAiChatStore.getState().streaming?.progress).toEqual([running]);
+    expect(JSON.stringify(sessionStorage)).not.toContain("model_turn");
+    view.unmount();
+    const remount = renderHook(useAiChatStream, { wrapper: wrapper() });
+    expect(remount.result.current.streaming?.progress).toEqual([running]);
+    await act(async () => {
+      channel!.push("progress", {
+        generation_id: generation.id,
+        step: completed,
+      });
+      channel!.push("replace", {
+        generation_id: generation.id,
+        text: "最终回答",
+        reasoning: "",
+      });
+      channel!.push("done", { generation_id: generation.id });
+      await sending;
+    });
+    expect(useAiChatStore.getState().retainedTurns[0]).toMatchObject({
+      text: "最终回答",
+      progress: [completed],
+    });
+    sessionStorage.setItem(
+      "opc-ai-pending-request-v1",
+      JSON.stringify({
+        requestId: "recover-progress",
+        sessionId: generation.session_id,
+      }),
+    );
+    useAiChatStore.setState({ retainedTurns: [] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) =>
+        String(url).endsWith("/active-generations")
+          ? json({ data: [] })
+          : json({
+              data: {
+                ...generation,
+                status: "completed",
+                progress: [completed],
+              },
+            }),
+      ),
+    );
+    await act(async () => {
+      await useAiChatStore.getState().recover();
+    });
+    expect(useAiChatStore.getState().retainedTurns[0].progress).toEqual([
+      completed,
+    ]);
+  });
+
+  it.each(["eof", "premature-done"])(
+    "retains progress-only %s without marking its running tool completed",
+    async (ending) => {
+      const progress = {
+        sequence: 2,
+        kind: "model_turn",
+        status: "running",
+        turn_index: 1,
+        started_at: "2026-09-18T10:00:00Z",
+        duration_ms: 0,
+      };
+      let channel: ReturnType<typeof sse> | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url, init?: RequestInit) => {
+          if (!String(url).endsWith("/chat")) throw new Error("offline");
+          channel = sse(init?.signal);
+          return channel.response;
+        }),
+      );
+      let sending!: Promise<import("../store/aiChat").AiChatStreamOutcome>;
+      act(() => {
+        sending = useAiChatStore.getState().send(input);
+      });
+      await waitFor(() => expect(channel).toBeDefined());
+      await act(async () => {
+        channel!.push("meta", {
+          generation_id: generation.id,
+          session_id: generation.session_id,
+        });
+        channel!.push("progress", {
+          generation_id: generation.id,
+          step: progress,
+        });
+        if (ending === "premature-done")
+          channel!.push("done", { generation_id: generation.id });
+        channel!.end();
+        await sending;
+      });
+      expect(useAiChatStore.getState().interrupted?.progress).toEqual([
+        progress,
+      ]);
+      expect(useAiChatStore.getState().retainedTurns).toEqual([]);
+      const recovered = { ...generation, content: "", progress: [progress] };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url) =>
+          String(url).endsWith("/active-generations")
+            ? json({ data: [recovered] })
+            : json({ data: recovered }),
+        ),
+      );
+      await act(async () => {
+        await useAiChatStore.getState().recover();
+      });
+      expect(useAiChatStore.getState().streaming?.progress).toEqual([progress]);
+      expect(useAiChatStore.getState().streamError).toBeNull();
+    },
+  );
   it.each(["completed", "missing"])(
     "does not let an older %s recovery overwrite a new send or its command identity",
     async (oldStatus) => {
@@ -159,7 +752,11 @@ describe("real AI stream hook and HTTP lifecycle", () => {
           generation_id: generation.id,
           text: "临时会话的完整回复",
         });
-        channel.push("done", { generation_id: generation.id });
+        channel.push("done", {
+          generation_id: generation.id,
+          citation_status: "validated",
+          citations: [citation],
+        });
         channel.end();
         return channel.response;
       }),
@@ -178,10 +775,11 @@ describe("real AI stream hook and HTTP lifecycle", () => {
         text: "临时会话的完整回复",
         reasoning: "私密思考",
         status: "completed",
+        citationEvidence: { status: "validated", items: [citation] },
       }),
     ]);
     expect(JSON.stringify(sessionStorage)).not.toMatch(
-      /临时会话|私密思考|写作业/,
+      /临时会话|私密思考|写作业|私密资料|原始文档|chunk_id/,
     );
   });
 
@@ -281,6 +879,8 @@ describe("real AI stream hook and HTTP lifecycle", () => {
             persist: false,
             status: "completed",
             content: "",
+            citation_status: "missing",
+            citations: [],
           },
         });
       }),
@@ -295,10 +895,73 @@ describe("real AI stream hook and HTTP lifecycle", () => {
       await view.result.current.recover();
     });
     expect(view.result.current.retainedTurns).toEqual([
-      expect.objectContaining({ text: "已有片段", status: "incomplete" }),
+      expect.objectContaining({
+        text: "已有片段",
+        status: "incomplete",
+        citationEvidence: { status: "missing", items: [] },
+      }),
     ]);
     expect(view.result.current.streamError).toContain("非持久");
   });
+
+  it.each(["wrong-generation", "invalid-evidence"])(
+    "does not mark %s terminal metadata as a completed reply",
+    async (fault) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: unknown) => {
+          if (String(url).endsWith("/active-generations"))
+            return json({ data: [] });
+          if (!String(url).endsWith("/ai/chat"))
+            return json({
+              data: {
+                ...generation,
+                status: "completed",
+                persist: false,
+                content: "",
+              },
+            });
+          const channel = sse();
+          channel.push("meta", {
+            generation_id: generation.id,
+            session_id: input.sessionId,
+          });
+          channel.push("delta", {
+            generation_id: generation.id,
+            text: "仅收片段",
+          });
+          channel.push(
+            "done",
+            fault === "wrong-generation"
+              ? { generation_id: "foreign" }
+              : {
+                  generation_id: generation.id,
+                  citation_status: "validated",
+                  citations: [],
+                },
+          );
+          channel.end();
+          return channel.response;
+        }),
+      );
+      const view = renderHook(useAiChatStream, { wrapper: wrapper() });
+      await act(async () => {
+        expect(await view.result.current.send(input)).toMatchObject({
+          errorCode:
+            fault === "wrong-generation"
+              ? "AI_STREAM_IDENTITY_MISMATCH"
+              : "INVALID_RESPONSE",
+        });
+      });
+      expect(view.result.current.retainedTurns).toEqual([
+        expect.objectContaining({
+          text: "仅收片段",
+          status: "incomplete",
+          citationEvidence: undefined,
+        }),
+      ]);
+    },
+  );
 
   it("recognizes a server cancellation terminal even when the browser signal was not aborted", async () => {
     vi.stubGlobal(
@@ -626,6 +1289,318 @@ describe("real AI stream hook and HTTP lifecycle", () => {
     expect(view.result.current.isStreaming).toBe(false);
     expect(view.result.current.streamError).toContain("重启");
     expect(view.result.current.interrupted?.text).toBe("partial");
+  });
+});
+
+describe("accepted command identity and owner isolation", () => {
+  it.each([
+    { initialSessionId: undefined, sameAttachment: true },
+    { initialSessionId: undefined, sameAttachment: false },
+    { initialSessionId: "session-1", sameAttachment: true },
+    { initialSessionId: "session-1", sameAttachment: false },
+  ])(
+    "isolates unknown receipt retries by attachment instance (session=$initialSessionId, same=$sameAttachment)",
+    async ({ initialSessionId, sameAttachment }) => {
+      const firstAttachment = "runtime-attachment-before-reselection";
+      const nextAttachment = sameAttachment
+        ? firstAttachment
+        : "runtime-attachment-after-reselection";
+      const keys: string[] = [];
+      const bodies: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, init?: RequestInit) => {
+          keys.push(new Headers(init?.headers).get("Idempotency-Key")!);
+          bodies.push(String(init?.body));
+          if (keys.length === 1) throw new TypeError("lost receipt response");
+          const channel = sse(init?.signal);
+          channel.push("meta", {
+            generation_id: generation.id,
+            session_id: input.sessionId,
+          });
+          channel.push("done", { generation_id: generation.id });
+          channel.end();
+          return channel.response;
+        }),
+      );
+      const selected = {
+        ...input,
+        actionReceiptGenerationId: "same-source-generation",
+        actionRecheckProposalId: "same-source-proposal",
+      };
+      await act(async () => {
+        expect(
+          await useAiChatStore.getState().send({
+            ...selected,
+            sessionId: initialSessionId,
+            actionReceiptAttachmentId: firstAttachment,
+          }),
+        ).toMatchObject({ accepted: false, errorCode: "NETWORK_ERROR" });
+        expect(JSON.stringify(sessionStorage)).not.toContain(firstAttachment);
+        await useAiChatStore.getState().send({
+          ...selected,
+          actionReceiptAttachmentId: nextAttachment,
+        });
+      });
+      expect(keys).toHaveLength(2);
+      expect(keys[0] === keys[1]).toBe(sameAttachment);
+      expect(JSON.parse(bodies[1]).session_id).toBe(
+        sameAttachment ? (initialSessionId ?? "") : input.sessionId,
+      );
+      expect(useAiChatStore.getState().acceptedCommand).toMatchObject({
+        requestId: keys[1],
+        actionReceiptGenerationId: selected.actionReceiptGenerationId,
+        actionRecheckProposalId: selected.actionRecheckProposalId,
+        actionReceiptAttachmentId: nextAttachment,
+      });
+      expect(bodies.join("\n")).not.toMatch(
+        /actionReceiptAttachmentId|action_receipt_attachment_id|runtime-attachment-/,
+      );
+      expect(JSON.stringify(sessionStorage)).not.toMatch(
+        /actionReceiptAttachmentId|runtime-attachment-/,
+      );
+    },
+  );
+
+  it("publishes metadata-only acceptance once per request without persisting it", async () => {
+    const keys: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init?: RequestInit) => {
+        keys.push(new Headers(init?.headers).get("Idempotency-Key")!);
+        const channel = sse(init?.signal);
+        const meta = {
+          generation_id: `generation-${keys.length}`,
+          session_id: input.sessionId,
+        };
+        channel.push("meta", meta);
+        channel.push("meta", meta);
+        channel.push("done", { generation_id: meta.generation_id });
+        channel.end();
+        return channel.response;
+      }),
+    );
+    await act(async () => {
+      await useAiChatStore.getState().send({
+        ...input,
+        actionReceiptGenerationId: "receipt-source-1",
+        actionRecheckProposalId: "recheck-source-1",
+        actionReceiptAttachmentId: "attachment-source-1",
+      });
+    });
+    expect(useAiChatStore.getState().acceptedCommand).toEqual({
+      sequence: 1,
+      requestId: keys[0],
+      owner: "main",
+      sessionId: input.sessionId,
+      actionReceiptGenerationId: "receipt-source-1",
+      actionRecheckProposalId: "recheck-source-1",
+      actionReceiptAttachmentId: "attachment-source-1",
+    });
+    await act(async () => {
+      await useAiChatStore.getState().send({ ...input, message: "第二个请求" });
+    });
+    expect(useAiChatStore.getState().acceptedCommand).toEqual({
+      sequence: 2,
+      requestId: keys[1],
+      owner: "main",
+      sessionId: input.sessionId,
+    });
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(JSON.stringify(sessionStorage)).not.toMatch(
+      /acceptedCommand|receipt-source-1|recheck-source-1|attachment-source-1|写作业|第二个请求/,
+    );
+  });
+
+  it("publishes AlreadyAccepted identity and does not increment it on matching recovery", async () => {
+    let requestId = "";
+    let completed = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown, init?: RequestInit) => {
+        if (String(url).endsWith("/ai/chat")) {
+          requestId = new Headers(init?.headers).get("Idempotency-Key")!;
+          return json(
+            {
+              code: "AI_CHAT_ALREADY_ACCEPTED",
+              generation_id: generation.id,
+              session_id: input.sessionId,
+            },
+            409,
+          );
+        }
+        const current = {
+          ...generation,
+          client_request_id: requestId,
+          status: completed ? "completed" : "streaming",
+        };
+        return String(url).endsWith("/active-generations")
+          ? json({ data: completed ? [] : [current] })
+          : json({ data: current });
+      }),
+    );
+    await act(async () => {
+      expect(
+        await useAiChatStore.getState().send({
+          ...input,
+          owner: "side:accepted",
+          actionReceiptGenerationId: "receipt-already-accepted",
+          actionRecheckProposalId: "recheck-already-accepted",
+          actionReceiptAttachmentId: "attachment-already-accepted",
+        }),
+      ).toMatchObject({ accepted: true });
+    });
+    const accepted = useAiChatStore.getState().acceptedCommand;
+    expect(accepted).toEqual({
+      sequence: 1,
+      requestId,
+      owner: "side:accepted",
+      sessionId: input.sessionId,
+      actionReceiptGenerationId: "receipt-already-accepted",
+      actionRecheckProposalId: "recheck-already-accepted",
+      actionReceiptAttachmentId: "attachment-already-accepted",
+    });
+    expect(
+      JSON.parse(sessionStorage.getItem("opc-ai-pending-request-v1")!),
+    ).toEqual({ requestId, sessionId: input.sessionId });
+    await act(async () => {
+      completed = true;
+      await useAiChatStore.getState().recover();
+    });
+    expect(useAiChatStore.getState().acceptedCommand).toBe(accepted);
+  });
+
+  it.each([
+    { owner: undefined, changedDraft: false, clearsDraft: true },
+    { owner: "main", changedDraft: false, clearsDraft: true },
+    { owner: "side:receipt", changedDraft: false, clearsDraft: false },
+    { owner: "main", changedDraft: true, clearsDraft: false },
+  ])(
+    "recovers uncertain acceptance for $owner without clearing another or newer draft ($changedDraft)",
+    async ({ owner, changedDraft, clearsDraft }) => {
+      let requestId = "";
+      let completed = false;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: unknown, init?: RequestInit) => {
+          if (String(url).endsWith("/ai/chat")) {
+            requestId = new Headers(init?.headers).get("Idempotency-Key")!;
+            throw new TypeError("accepted but response lost before meta");
+          }
+          const current = {
+            ...generation,
+            client_request_id: requestId,
+            status: completed ? "completed" : "streaming",
+          };
+          return String(url).endsWith("/active-generations")
+            ? json({ data: completed ? [] : [current] })
+            : json({ data: current });
+        }),
+      );
+      useAiChatStore.getState().setInput(input.message);
+      await act(async () => {
+        expect(
+          await useAiChatStore.getState().send({
+            ...input,
+            owner,
+            actionReceiptGenerationId: "receipt-response-lost",
+            actionReceiptAttachmentId: "attachment-response-lost",
+          }),
+        ).toMatchObject({ accepted: false });
+      });
+      expect(useAiChatStore.getState().acceptedCommand).toBeNull();
+      if (changedDraft) {
+        // Even equal text is a newer edit: draft revision must protect it.
+        useAiChatStore.getState().setInput(input.message);
+      }
+      await act(async () => {
+        await useAiChatStore.getState().recover();
+      });
+      const accepted = useAiChatStore.getState().acceptedCommand;
+      expect(accepted).toEqual({
+        sequence: 1,
+        requestId,
+        owner: owner ?? "main",
+        sessionId: input.sessionId,
+        actionReceiptGenerationId: "receipt-response-lost",
+        actionReceiptAttachmentId: "attachment-response-lost",
+      });
+      expect(useAiChatStore.getState().input).toBe(
+        clearsDraft ? "" : input.message,
+      );
+      expect(
+        JSON.parse(sessionStorage.getItem("opc-ai-pending-request-v1")!),
+      ).toEqual({ requestId, sessionId: input.sessionId });
+      await act(async () => {
+        completed = true;
+        await useAiChatStore.getState().recover();
+      });
+      expect(useAiChatStore.getState().acceptedCommand).toBe(accepted);
+    },
+  );
+
+  it.each([
+    { firstOwner: undefined, nextOwner: "main", reuses: true },
+    { firstOwner: "main", nextOwner: "side:new", reuses: false },
+    { firstOwner: "side:old", nextOwner: "main", reuses: false },
+    { firstOwner: "side:old", nextOwner: "side:new", reuses: false },
+  ])(
+    "isolates unknown first-session retries from $firstOwner to $nextOwner",
+    async ({ firstOwner, nextOwner, reuses }) => {
+      const keys: string[] = [];
+      const bodies: { session_id: string }[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, init?: RequestInit) => {
+          keys.push(new Headers(init?.headers).get("Idempotency-Key")!);
+          bodies.push(JSON.parse(String(init?.body)));
+          if (keys.length === 1) throw new TypeError("lost first response");
+          const channel = sse(init?.signal);
+          channel.push("meta", {
+            generation_id: generation.id,
+            session_id: input.sessionId,
+          });
+          channel.push("done", { generation_id: generation.id });
+          channel.end();
+          return channel.response;
+        }),
+      );
+      await act(async () => {
+        await useAiChatStore.getState().send({
+          ...input,
+          owner: firstOwner,
+          sessionId: undefined,
+        });
+        await useAiChatStore.getState().send({ ...input, owner: nextOwner });
+      });
+      expect(keys[0] === keys[1]).toBe(reuses);
+      expect(bodies[1].session_id).toBe(reuses ? "" : input.sessionId);
+      expect(useAiChatStore.getState().acceptedCommand?.owner).toBe(nextOwner);
+    },
+  );
+
+  it("does not publish receipt acceptance for an unrelated recovered generation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (String(url).endsWith("/ai/chat"))
+          throw new TypeError("unknown acceptance");
+        if (String(url).endsWith("/active-generations"))
+          return json({ data: [generation] });
+        return json({ code: "AI_GENERATION_NOT_FOUND" }, 404);
+      }),
+    );
+    useAiChatStore.getState().setInput(input.message);
+    await act(async () => {
+      await useAiChatStore.getState().send({
+        ...input,
+        actionReceiptGenerationId: "receipt-unmatched",
+      });
+      await useAiChatStore.getState().recover();
+    });
+    expect(useAiChatStore.getState().acceptedCommand).toBeNull();
+    expect(useAiChatStore.getState().input).toBe(input.message);
+    useAiChatStore.getState().forgetSession(input.sessionId);
   });
 });
 

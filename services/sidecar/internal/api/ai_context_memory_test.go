@@ -276,7 +276,7 @@ func TestAIChatInjectsLatestActiveSummaryAndFacts(t *testing.T) {
 		t.Fatalf("model requests=%d, want 1", len(client.requests))
 	}
 	request := client.requests[0]
-	if request.Summary != snapshot.Summary || len(request.Facts) != 1 || len(request.Memories) != 1 || len(request.Tools) != 3 {
+	if request.Summary != snapshot.Summary || len(request.Facts) != 1 || len(request.Memories) != 1 || len(request.Tools) != 4 {
 		t.Fatalf("injected request = %#v", request)
 	}
 }

@@ -108,34 +108,10 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 			taskContext[task.ID] = projectArtifactTaskOutput{ID: task.ID, Title: task.Title, Status: task.Status}
 		}
 
-		var inboxItems []models.InboxItem
-		if err := tx.Select("id", "source_entity_id", "source_event_key", "source_deleted_at", "status", "resolution_policy", "version").
-			Where("source_entity_type = ? AND source_entity_id IN ?", taskArtifactInboxSourceType, artifactIDs).
-			Order("id ASC").Find(&inboxItems).Error; err != nil {
-			return err
-		}
-		inboxIDs := make([]string, 0, len(inboxItems))
-		for _, item := range inboxItems {
-			if item.SourceEntityID == nil || item.SourceEventKey == nil ||
-				*item.SourceEventKey != taskArtifactFollowupEventKey(*item.SourceEntityID) {
-				return errors.New("Project Artifact follow-up source is inconsistent")
-			}
-			if _, exists := followupContext[*item.SourceEntityID]; exists {
-				return errors.New("Project Artifact has duplicate follow-up sources")
-			}
-			inboxIDs = append(inboxIDs, item.ID)
-			followupContext[*item.SourceEntityID] = &projectArtifactFollowupOutput{
-				InboxItemID: item.ID, InboxItemVersion: item.Version,
-				Status: item.Status, ResolutionPolicy: item.ResolutionPolicy,
-				SourceDeletedAt: normalizeOptionalTimestamp(item.SourceDeletedAt),
-			}
-		}
-		progressByInboxID, err := loadInboxTaskProgressByInboxIDs(tx, inboxIDs)
+		var err error
+		followupContext, err = loadProjectArtifactFollowups(tx, artifactIDs)
 		if err != nil {
 			return err
-		}
-		for _, followup := range followupContext {
-			followup.Progress = progressByInboxID[followup.InboxItemID]
 		}
 		return nil
 	}, &sql.TxOptions{ReadOnly: true})
@@ -170,4 +146,44 @@ func (a *API) listProjectArtifacts(c *gin.Context) {
 	}}
 	setProjectETag(c, project.Version)
 	c.JSON(http.StatusOK, response)
+}
+
+// Shared by the native project list and the AI metadata projection. Callers
+// own the read transaction; identity and progress must come from one snapshot.
+// Do not load source payloads, Artifact content or historical actor identities.
+func loadProjectArtifactFollowups(tx *gorm.DB, artifactIDs []string) (map[string]*projectArtifactFollowupOutput, error) {
+	result := make(map[string]*projectArtifactFollowupOutput)
+	if len(artifactIDs) == 0 {
+		return result, nil
+	}
+	var inboxItems []models.InboxItem
+	if err := tx.Select("id", "source_entity_id", "source_event_key", "source_deleted_at", "status", "resolution_policy", "version").
+		Where("source_entity_type = ? AND source_entity_id IN ?", taskArtifactInboxSourceType, artifactIDs).
+		Order("id ASC").Find(&inboxItems).Error; err != nil {
+		return nil, err
+	}
+	inboxIDs := make([]string, 0, len(inboxItems))
+	for _, item := range inboxItems {
+		if item.SourceEntityID == nil || item.SourceEventKey == nil ||
+			*item.SourceEventKey != taskArtifactFollowupEventKey(*item.SourceEntityID) {
+			return nil, errors.New("Project Artifact follow-up source is inconsistent")
+		}
+		if _, exists := result[*item.SourceEntityID]; exists {
+			return nil, errors.New("Project Artifact has duplicate follow-up sources")
+		}
+		inboxIDs = append(inboxIDs, item.ID)
+		result[*item.SourceEntityID] = &projectArtifactFollowupOutput{
+			InboxItemID: item.ID, InboxItemVersion: item.Version,
+			Status: item.Status, ResolutionPolicy: item.ResolutionPolicy,
+			SourceDeletedAt: normalizeOptionalTimestamp(item.SourceDeletedAt),
+		}
+	}
+	progressByInboxID, err := loadInboxTaskProgressByInboxIDs(tx, inboxIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, followup := range result {
+		followup.Progress = progressByInboxID[followup.InboxItemID]
+	}
+	return result, nil
 }
