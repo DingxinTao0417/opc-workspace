@@ -325,7 +325,7 @@ H5-E35 为智能体请求的当前 Chromium 标签动作补充本地回执：只
 
 > 桌面基座最初以 app v0.1.0 / API v1 / SQLite schema v43（2026-08-29）交付；当前仓库为 app v0.1.1 / API v1 / schema 78。数据库父目录运行锁、启动阶段恢复进度、generation-aware 内置 Sidecar 有界自动恢复、父管道 EOF 退出、前端世代清理、安全应用重启、托盘显示/隐藏/显式退出、持久化关闭到托盘偏好，以及运行诊断能力快照已实现；Windows x64 曾完成原生链接、38 项 Rust 测试和未签名 NSIS/MSI 本地打包，但这不证明当前构建已完成同等专项。T-02 仍部分完成，安装后托盘交互、真实父崩溃/进程树、签名、干净系统与其他平台验收仍待完成。当前阶段只规划签名离线更新，不启用在线 Updater。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v10.47](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD](../opc-workspace-PRD.md) · [数据管理](data-management.md) · [任务](tasks.md) · [本地提醒](reminders.md)
 
 ## 定位与边界
 
@@ -370,7 +370,7 @@ H5-E35 为智能体请求的当前 Chromium 标签动作补充本地回执：只
 
 尚未实现或仍待真实验收：
 
-- 真实 Tauri/Sidecar 父进程崩溃、进程树和安装包生命周期验收；Windows x64 本地包已生成，但尚未在干净系统完成安装、启动、卸载与数据保留验证，macOS/Linux 也尚未构建。当前没有 Windows Job Object、Unix 进程组或孙进程治理。hard-hung orphan 只会继续持有数据库运行锁并阻止新 Sidecar 接触同库，不会被自动识别或回收。
+- 真实 Tauri/Sidecar 父进程崩溃、进程树和安装包生命周期验收；Windows x64 本地包已生成，但尚未在干净系统完成安装、启动、卸载与数据保留验证，macOS/Linux 也尚未构建。Windows 上每一代 Sidecar 由桌面持有的 kill-on-close Job Object 托管（[ADR-031](../adr/031-desktop-sidecar-process-governance.md)）：桌面进程以任何方式结束时，Sidecar 及其启动的 Agent 执行器由操作系统终止，卡死的孤儿不再残留；该行为已有确定性测试，真实父进程崩溃与打包版验收仍待。macOS/Linux 没有进程树治理，仍只依赖父控制管道关闭后的优雅退出和数据库运行锁。
 - 数据库打开前的备份选择与安全回滚交互（H-HH02，2026-09-23）：全局恢复页 error 态提供“从备份恢复 / 跳过并重启”。列表由 Tauri 只读扫描 backup root 的 `manifest.json`，最多 20 项 metadata-only（id/时间/kind/校验状态/schema/有界 note）；用户选定后二次勾选确认，经 Sidecar 一次性 `prepare-restore --backup-id` 安排 pending restore（创建回滚包并发布 plan），成功后提示重启在打开业务数据前应用。失败关闭、不同 pending 拒绝、不展示路径/原始错误，不启动 HTTP API。跳过保持当前数据。真实安装/UAC/断电仍待专项验收。
 - `OPC_LOG_DIR` 已用于启动前安全故障 journal、下一次健康启动补偿和 Go Sidecar/Tauri 壳脱敏轮转日志；设置“运行诊断”可白名单化展示桌面生命周期/版本、托盘运行时可用性，复制基础脱敏摘要、下载诊断包 v1 并打开自身日志目录。`desktop_capabilities` 对未接入集成只返回 `not_implemented`，读取失败不阻断生命周期诊断；诊断包包含版本/平台、SQLite 健康/迁移和维护错误码汇总，原始日志不进入该包。
 - 托盘专注状态/快捷业务动作、原生通知、其他 OS 全局快捷键、开机启动和业务文件对话框；关闭到托盘设置开关已接，基础托盘已在当前主机完成原生编译，实际关闭/恢复/退出交互与 Sidecar 无残留仍待验收。
@@ -407,7 +407,8 @@ H5-E35 为智能体请求的当前 Chromium 标签动作补充本地回执：只
 - 区分关闭窗口、最小化到托盘和真正退出。
 - 真正退出先停止接受新业务操作，等待短事务，并让可取消的长任务进入 cancelled/interrupted 后再优雅关闭 Sidecar。若数据恢复已进入不可取消的 applying/restarting 阶段，桌面必须阻止普通退出，等待恢复协调器完成或回滚。
 - 维护精确子进程句柄和 generation，不使用宽泛进程名终止其他实例；并发 shutdown 共享一次 stop。
-- 父进程异常退出时，Go 受管模式可由父控制管道 EOF 优雅结束；若进程 hard-hung，下一次启动只会由数据库运行锁拒绝接触同库，当前不会识别、终止或回收孤儿/孙进程。
+- 父进程异常退出时：Windows 上桌面持有的 Job Object 随桌面进程关闭，Sidecar 与它的全部后代（含 Agent 执行器）被立即终止，包括已经卡死的进程；此时 Sidecar 不再有机会做优雅收尾，依赖事务、journal 和启动对账恢复。挂载 Job 失败时桌面拒绝让该代 Sidecar 继续运行，并按既有预算重试。其他平台仍由父控制管道 EOF 触发优雅退出，卡死的进程只会被数据库运行锁挡住。
+- 强制终止（优雅关闭超时、ready 握手超时、进程错误）在 Windows 上终止整个 Job，失败时回退为只终止 Sidecar 进程；仍然只有真实的进程退出事件才算退出。
 - Agent 子进程由本地 Agent 模块管理，但最终退出清理纳入桌面生命周期。
 
 ### 系统托盘
@@ -601,7 +602,7 @@ Shell 插件通过 `apps/desktop/src-tauri/src/host_shell.rs` 保留原生进程
 
 - 已扩展前端全局服务状态：桌面 `starting/restarting/ready/error + generation`、非 ready 连接/Query 清理、generation 补偿和浏览器降级。
 - 已实现启动失败恢复页 v1、内置 Sidecar 两次有界自动重启、500 ms/2 s 退避、连续 Ready 30 秒预算重置，以及每代新 token/动态端口申请。
-- 已实现数据库父目录运行锁、父管道 EOF 优雅退出、安全应用重启门禁和并发 shutdown 共享 stop；孤儿/进程树治理仍待实现。
+- 已实现数据库父目录运行锁、父管道 EOF 优雅退出、安全应用重启门禁、并发 shutdown 共享 stop，以及 Windows 上以 Job Object 回收 Sidecar 进程树（ADR-031）；macOS/Linux 的进程树治理不在当前范围。
 - 补真实 Tauri 与 Sidecar 父崩溃、进程树、三平台和安装包集成测试。
 
 ### v0.1-B：日志与维护
@@ -646,7 +647,9 @@ Shell 插件通过 `apps/desktop/src-tauri/src/host_shell.rs` 保留原生进程
 
 ### 仍待验收
 
-- [ ] 真实 Tauri/Sidecar 父进程崩溃、进程树、hard-hung orphan 与孙进程治理；当前运行锁只阻止第二个进程接触同库，不自动回收。
+逐项的前置条件、操作步骤、预期结果和证据形式见 [PRD 10.5.4 真机验收清单](../opc-workspace-PRD.md#1054-真机验收清单acc-01全部待验收)。
+
+- [ ] 真实 Tauri/Sidecar 父进程崩溃与进程树验收：Windows 的 Job Object 回收（含卡死的 Sidecar 与 Agent 执行器）已由确定性测试覆盖，打包版下的实机验证仍待；macOS/Linux 没有治理。
 - [x] 启动前白名单 incident journal、稳定 ID 重放、损坏隔离及健康启动补偿。
 - [x] 脱敏诊断包 v1（不含原始日志）。
 - [x] Go Sidecar 脱敏日志落盘/轮转与 stderr 降级。
@@ -658,7 +661,7 @@ Shell 插件通过 `apps/desktop/src-tauri/src/host_shell.rs` 保留原生进程
 - [ ] 托盘源码和关闭到托盘设置已完成最小闭环；当前 Windows x64 已完成 MSVC 链接、Rust 测试与安装包生成，仍需验证偏好启停、关闭/恢复/退出与 Sidecar 无残留，再补 macOS/Linux、运行状态和业务动作。原生通知、其他 OS 全局快捷键、开机启动和原生业务文件对话框仍待。
 - [ ] 签名离线更新、迁移前验证备份与失败回退。
 - [ ] Windows、macOS、Linux 对应签名/公证、干净机、备份恢复、更新和性能证据；当前仅有 Windows x64 未签名本地 NSIS/MSI 包。
-- [x] 当前主机已补齐 MSVC `link.exe` 与 Windows SDK，`cargo check` / 38 项 `cargo test`、Tauri 链接以及 Windows x64 NSIS/MSI 安装包生成通过。
+- [x] 当前 Windows x64 主机具备 MSVC `link.exe` 与 Windows SDK：`cargo check`、`cargo test`（桌面 crate 213 项通过、4 项忽略；file-security-helper 135 项通过、3 项忽略，另 4 项 CLI 集成测试）、Tauri 链接以及未签名 NSIS/MSI 安装包生成在 2026-10-04 复验通过。它只证明当前源码可编译和打包，安装、升级与卸载验收仍待。
 
 ## 相关代码/PRD链接
 
@@ -671,6 +674,6 @@ Shell 插件通过 `apps/desktop/src-tauri/src/host_shell.rs` 保留原生进程
 - [当前 Tauri 配置](../../apps/desktop/src-tauri/tauri.conf.json)
 - [当前最小 capability](../../apps/desktop/src-tauri/capabilities/default.json)
 - [当前 Sidecar 进程入口](../../services/sidecar/cmd/server/main.go)
-- [当前 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
-- [当前 API 安全中间件](../../services/sidecar/internal/api/middleware.go)
+- [当前 Artifact store](../../services/sidecar/internal/api/filestore/artifact_store.go)
+- [当前 API 安全中间件](../../services/sidecar/internal/api/apikit/middleware.go)
 - [当前前端连接发现](../../apps/web/src/api/client.ts)

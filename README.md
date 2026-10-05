@@ -1,5 +1,216 @@
 <!-- Current source schema: 079. Historical stage notes below retain their original versions. -->
 
+<div align="center">
+  <img src="./apps/desktop/src-tauri/icon.svg" width="112" height="112" alt="opc-workspace 图标" />
+
+  <h1>opc-workspace</h1>
+
+  <p><strong>一人公司的本地优先工作台</strong></p>
+  <p>在一个离线可用的桌面应用里，管理任务、项目、客户、收件箱、专注时间与本地业务数据。</p>
+
+  <p>
+    <a href="./README.md">简体中文</a>
+    ·
+    <a href="./README.en.md">English</a>
+    ·
+    <a href="./docs/README.md">产品文档</a>
+    ·
+    <a href="./docs/opc-workspace-PRD.md">PRD</a>
+  </p>
+
+  <p>
+    <img alt="版本 0.1.1" src="https://img.shields.io/badge/version-0.1.1-6C73E8" />
+    <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
+    <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
+    <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
+    <img alt="SQLite schema v79" src="https://img.shields.io/badge/database-SQLite%20v79-003B57" />
+    <img alt="积极开发中" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
+  </p>
+</div>
+
+> [!IMPORTANT]
+> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v79；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手与本地知识库作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
+
+## 为什么做 opc-workspace
+
+独立开发者、自由职业者、内容创作者和咨询顾问，往往需要在任务工具、项目表格、客户资料、计时器和内容日历之间来回切换。opc-workspace 希望把这些高频工作流收进一个轻量桌面应用，同时让业务数据默认留在自己的电脑上。
+
+- **本地优先**：核心能力离线可用，业务事实保存在本机 SQLite 与受控文件目录中。
+- **一个工作台**：任务、项目、客户、收件箱、专注与提醒围绕同一套业务事实协作。
+- **可追溯工作流**：分派、状态变化、产出、验收和返工保留明确记录。
+- **安装后无开发运行时依赖**：正式安装包内置 React 前端与 Go Sidecar；最终用户不需要 Docker、Node.js、Go 或 Rust。
+- **键盘友好**：提供命令面板、快速新建和桌面全局快捷键。
+
+`OPC` 取自 **one-person company**。项目关注的是一人经营场景，而不是把多人协作软件缩小一号。
+
+## 核心能力
+
+| 模块         | 当前能力                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 今日工作台   | 聚合逾期、当天、本周稍后和未排期任务，支持排期、排序与快捷执行                                                                               |
+| 任务与验收   | 六状态任务生命周期、父子任务、责任分派、产出提交、人工验收与返工                                                                             |
+| 项目与客户   | 项目进度、产出、附件、客户资料、活动、回访计划与关联视图                                                                                     |
+| 收件箱与提醒 | 本地事项受理、稍后处理、任务拆分、完成进度与重复提醒                                                                                         |
+| 专注与工时   | 可恢复的专注会话、任务绑定、历史记录、趋势、项目与标签统计                                                                                   |
+| 搜索与命令   | 跨任务、项目、客户和活动收件箱的本地搜索与直达                                                                                               |
+| 数据安全     | 版本化迁移、受控文件、完整备份/恢复、业务 JSON/ZIP 导入导出与诊断                                                                            |
+| 本地自动化   | 仅开放代码内置的受限预设；不提供任意 Shell、SQL、HTTP 或外发能力                                                                             |
+| AI 助手      | 远程/本地 Provider、流式会话、记忆工具、显式上下文、可验证引用、本地质量评测/趋势/category/失败原因、无正文运行步骤/用量聚合与建任务确认卡片 |
+
+### 当前边界
+
+- v0.1 的核心人工闭环正在持续完善，页面与接口的完成度以[模块状态总览](./docs/modules/README.md)为准。
+- 收入、支出与发票仍归属 v0.4，但当前源码已有本地账本、统计、发票状态/付款原子入账、PDF 与到期 Inbox 基础闭环，不再是页面骨架；完整验收和增强仍待。AI H3-E1 增加独立财务只读授权、同币种报告及精确详情往返，H3-E2 另接独立权限和逐项人工确认的收支创建/修改/作废，H3-E3 增加独立发票权限和草稿创建/编辑、发送/查看/回款/逾期事实的人工审批；付款唯一入账与到期事项联动，逾期沿用已启用的本地规则。H3-E4A 支持额外人工确认后永久删除无账本关联的草稿及受控 PDF，复用原生事务与文件补偿，保留审批/审计。H3-E4B 已接 PDF 生成/替换的双重人工确认及本次文件下载；历史卡核验资产身份，替换/缺失/损坏拒绝下载，不自动外发或执行付款。H3-E5 已接独立授权的 CSV 范围提议、人工批准与精确下载；数据变化拒绝旧卡，不持久存正文或自动发送给模型。完整验收仍待。详见 [财务模块](./docs/modules/finance-invoices.md)。
+- AI 助手独立轨道已交付远程/本地 Provider、双协议流式回复与推理、受控 Harness、scope 裁剪的按需领域指南、记忆三工具、分段摘要/事实压缩、显式业务/知识上下文、回答级来源、无正文运行步骤/用量与 UTC 趋势，以及 dataset v4 的 8-case 快速、四类 6-case 专题和 24-case 完整本地评测。核心安全规则常驻，详细领域手册和大体积操作提议定义由只读 `workspace_guide` 按需加载；最大组合固定首轮测试保留至少 32 KiB 余量。质量按 Provider 配置身份、数据集和套件隔离；有限事实规则、Wilson 区间与人工决定用于审阅，不代表通用语义正确或发布许可，缺失用量保持 unknown，不计算费用。
+- [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 修复生成总预算/流终态、跨页面停止与刷新恢复、任务原子确认、记忆决定回读和大回合压缩。模型等待不占全局维护锁；任务只在用户确认后按领域规则创建；`persist=false` 的正文和工具记忆仅在运行内保存。自动化使用隔离夹具，真实模型质量、WebView 输入法和真实崩溃仍需实机验收。本地知识库文本基线与 PDF 页码定位提取（ADR-026）已交付，授权引用与来源变化检测仍待。
+- 本地 Agent 已有 Windows 内置受控执行器、任务详情 Run 界面与可恢复 manual-review text/单 file/有界多 file 提交（ADR-027）。设置显式启停，任务启动前核对真实 Adapter/Actor/Assignment；缺少条件时引导设置，不静默替换负责人。可选择目标 Task 文件、其 Project Attachment，以及 H5-F6 新增的同项目其他任务当前已验收文件；共享最多 4 个、单个 64 KiB、合计 128 KiB，prepare/prelaunch 重验。新来源使用 v6 冻结任务版本/批次/hash，AI 另需本条 agent_project_files 与人工跨任务同意。旧 v1–v4 保留 OpenAI，v5 支持远程 Anthropic/8192 token；实际含新来源时两协议均走 v6。仅单次完整响应可登记，执行、文件、返工和跨任务范围分别确认，成功不等于任务验收。H5-F7 允许用户把已提交的 file/files 产出逐份带到右侧文件工作区，另选现有目标、查看完整差异，并在绑定发行构建中走按次原生审查/UAC/helper 链；它不会自动写入或代替任务验收。H5-F8 再把计划中的真实 Run/Submission 回执、右侧精确 Run 详情和人工验收页连成可返回原对话的路线，仍不自动验收或续跑。ADR-030/ADR-033 允许人工确认“前置执行的产出被验收后再启动”的执行，并可声明以前置任务验收通过的文件产出作为输入；这些文件在验收后须由人在执行过程里逐份核对并再次确认，才会启动和发送（执行契约 v7，见[前置产出输入](./docs/modules/local-agents.md#以前置-run-已验收的文件产出为输入2026-10-04adr-033)）。详见 [执行与来源契约](./docs/modules/local-agents.md#同项目已验收文件交接h5-f62026-09-21)、[H5-F7 文件桥接](./docs/modules/local-agents.md#已提交文件产出到项目文件的人工桥接h5-f72026-09-22)和 [H5-F8 验收往返](./docs/modules/local-agents.md#计划执行与人工验收的精确往返h5-f82026-09-22)。其他平台、external、任意工具、不经逐项确认的自治多步编排及真实模型/桌面验收仍待。
+- 当前没有云同步、多人账号、线上工作流或远程消息发送。
+
+## 快速开始
+
+### 开发环境
+
+| 依赖           | 版本                                                      |
+| -------------- | --------------------------------------------------------- |
+| Node.js        | 20.19–26                                                  |
+| pnpm           | 10+（仓库锁定 `pnpm@11.21.0`）                            |
+| Go             | 1.24+                                                     |
+| Rust           | 1.85+，通过 rustup/cargo 安装                             |
+| Tauri 系统依赖 | 对应 Windows、macOS 或 Linux 平台的 Tauri 2 prerequisites |
+
+Windows 桌面构建还需要 WebView2 Runtime、Visual Studio C++ Build Tools 与 Windows SDK；内嵌浏览器要求 WebView2 Runtime 122.0.2365.46 或更新版本。
+
+两条容易踩到的环境前提：
+
+- **换行符**：仓库通过 `.gitattributes` 统一为 LF，Prettier、gofmt 与 rustfmt 都按 LF 校验。Windows 上以 CRLF 检出的旧工作区会让 `pnpm format:check` 整体失败，重新检出即可。
+- **临时目录**：Go 与 Rust 的安全目录测试拒绝经过目录联接（junction）或符号链接的路径。如果 `TEMP` / `TMP` 被重定向到这类路径，运行 `pnpm check:go`、`pnpm check:rust` 前先把它们指向真实目录；这两个门禁开头的 `pnpm check:temp` 会在 Windows 上直接指出这种情况。
+
+### 安装依赖
+
+```powershell
+pnpm install
+go -C services/sidecar mod download
+```
+
+### 启动桌面开发环境
+
+```powershell
+pnpm dev
+```
+
+统一开发脚本会启动 Go Sidecar、Vite 和 Tauri。开发数据保存在已忽略的 `.local/dev-data/`，不会写入正式应用数据目录，也不会自动生成演示业务数据。需要换一个数据目录时设置环境变量 `OPC_DEV_DATA_DIR`。
+
+容量验收用的数据由 `node scripts/seed-volume.mjs --profile 1k`（或 `10k`）生成：脚本在 `.local/perf-data/` 下的独立目录里启动一个 Sidecar，通过公开 API 写入固定数量的客户、项目、任务和收件箱事项，打印列表接口的耗时基线，并保留该目录供 `OPC_DEV_DATA_DIR` 打开。它不属于任何门禁，打印的数字也不能代替真机验收。
+
+智能体模式右侧「浏览器」在 **Windows 桌面版** 使用 Chromium 内核的 WebView2，支持内嵌 HTTP(S) 页面、多标签和原生导航；用户也可主动捕获当前页面有界正文与可见链接，在交接卡中检查完整目标，再另行带入并手动发送。网页不会自动交给 AI，也不会自动访问链接。使用 `pnpm dev` 打开桌面版才能体验。开发浏览器 profile 单独保存在 `.local/browser-profile/`，正式版位于应用本地数据目录的 `browser-profile/`，与工作区 WebView 和业务备份隔离。`pnpm dev:web` 仅提供外部打开入口，不模拟内嵌浏览器。
+
+智能体模式右侧现为统一多标签工作区：`+` 打开文件预览、Git 只读审查、Windows 手动 PowerShell 终端、浏览器或侧边聊天，可分栏、放大与收起。文件与审查先通过原生对话框选择目录；Git 需已安装并位于 PATH。终端需单独点击启动，以当前用户权限运行，关闭标签会结束该进程树；工作区内容不会自动发给 AI。新增依赖为 Rust `rfd` / `portable-pty`、前端 `@xterm/xterm` / `@xterm/addon-fit`，由包管理器安装，启动命令不变。网页开发模式不提供本地文件、Git、PTY；限制与验证方式见 [桌面模块](docs/modules/desktop-platform.md) 和 [ADR-028](docs/adr/028-human-operated-agent-workspace.md)。
+
+工作台模式单独显示业务右侧栏：专注环形计时、临近项目节点、本月已确认收入和客户动态；默认 280px，可拖拽调整至 240–480px。通用设置可关闭，窗口宽度不超过 1180px 时自动隐藏；智能体面板的收起与放大不会影响它。各卡片复用已有业务 API，不新增迁移或启动依赖。
+
+只启动 Sidecar 与浏览器版前端：
+
+```powershell
+pnpm dev:web
+```
+
+## 构建与检查
+
+```powershell
+# 构建当前平台的 Sidecar、Web 前端和桌面安装包
+pnpm build
+
+# 不依赖 Rust 链接器的源码门禁
+pnpm check:source
+
+# 包含 Cargo check 与 Rust 测试的完整门禁
+pnpm check
+
+# 按当前分支未推送的改动，列出该跑哪些检查（不执行）
+pnpm check:impact
+```
+
+也可以按层运行 `pnpm check:web`、`pnpm check:go`、`pnpm check:rust`、`pnpm check:docs` 或 `pnpm check:scripts`。各层内容：
+
+| 命令                 | 内容                                                                             |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `pnpm format:check`  | Prettier、gofmt、rustfmt 格式检查                                                |
+| `pnpm check:docs`    | Markdown 本地链接与标题锚点                                                      |
+| `pnpm check:scripts` | `check:impact` 选层规则与临时目录预检的单元测试                                  |
+| `pnpm check:web`     | TypeScript 类型检查、ESLint（`pnpm lint:web`）、Vitest、生产构建                 |
+| `pnpm check:go`      | 临时目录预检、gofmt、`go test`、`go vet`、Sidecar 构建                           |
+| `pnpm check:rust`    | 临时目录预检、桌面构建脚本测试、`cargo check`、桌面与文件辅助程序的 `cargo test` |
+
+`pnpm check:source` 依次执行前五项，`pnpm check` 再加上 `check:rust`。这些门禁都是确定性的：不调用真实模型、不需要密钥，也不依赖公网。
+
+前端 ESLint 规则在 `apps/web/eslint.config.js`。关闭某条规则必须在同一行写明原因（`// eslint-disable-next-line 规则 -- 原因`），否则门禁失败；契约测试需要无类型夹具时使用 `apps/web/src/test/untyped.ts` 的 `Untyped`，生产代码不能引用它。
+
+**持续集成**：`.github/workflows/check.yml` 在 GitHub 的 Windows runner 上对 `main` 的推送和所有 Pull Request 运行同一条 `pnpm check`，也可以手动触发。真实 Provider、安装包签名与安装、跨平台等验收不在其中，仍需单独进行。
+
+`pnpm check:impact` 只做**选层建议**：它按改动路径选出受影响的门禁，遇到 `package.json`、`scripts/`、`.github/` 下的 CI 配置、`.gitattributes` 等影响所有 surface 的文件会保守地全选，并附上「这次改动可能影响哪些前端测试」的反向依赖清单，供本地窄范围迭代使用。
+
+当前 Windows x64 构建会生成：
+
+```text
+apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/opc-workspace_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/opc-workspace_0.1.1_x64_zh-CN.msi
+```
+
+NSIS 当前仅内置简体中文，MSI 使用 `zh-CN`；两者都是未签名的本地测试包。跨平台发布仍应在对应平台或 CI runner 上构建，并完成干净系统中的安装、启动、升级、卸载和数据保留验收。
+
+## 技术架构
+
+```mermaid
+flowchart TB
+    Desktop["Tauri 2 / Rust<br/>窗口 · 托盘 · 快捷键 · Sidecar 生命周期"]
+    Web["React 18 / TypeScript / WebView<br/>页面 · 表单 · 查询缓存 · UI 状态"]
+    API["Go Sidecar / API v1<br/>领域校验 · 事务 · 调度 · 备份"]
+    Data["本地事实层<br/>SQLite v75 · 受控文件 · FTS5 · 备份 · 日志"]
+
+    Desktop --> Web
+    Web -->|"Bearer HTTP · 127.0.0.1 动态端口"| API
+    API --> Data
+```
+
+生产环境中，Tauri 负责启动并监管内置 Go Sidecar。Sidecar 只监听回环地址，每个进程世代使用新的随机会话令牌；React 界面通过版本化 `/api/v1` 访问本地业务能力。数据库、附件、备份和日志保存在操作系统分配的应用数据目录中，与安装目录分离。
+
+更完整的模块关系和安全边界见[整体功能架构](./docs/functional-architecture.md)、[本地 Agent Runtime ADR](./docs/adr/003-local-agent-runtime-security.md)与 [AI 助手模块文档](./docs/modules/ai-assistant.md)。
+
+## 仓库结构
+
+```text
+apps/
+  web/                    React 18 + TypeScript + Vite + Tailwind CSS v4
+  desktop/                Tauri 2 桌面壳与 Rust 生命周期管理
+services/
+  sidecar/                Go HTTP API、SQLite、迁移、受控文件与测试
+scripts/                  开发编排、构建、格式化和文档检查
+docs/                     PRD、整体架构、ADR 与模块级功能文档
+.local/dev-data/          本地开发数据（Git 已忽略）
+```
+
+## AI 独立轨道近期交付
+
+以下是 AI 助手与本地 Agent 独立轨道近期交付的能力说明，按原有顺序保留（新的在前）。它们此前堆在标题之上；逐切片的交付记录见[变更记录](./docs/changelog.md)，当前事实以代码、测试和[模块文档](./docs/modules/README.md)为准。
+
+智能体主/侧对话已支持模型、工具、自检与引用核验的实时执行进度，切页和状态回读可恢复同序号步骤；连接中断不误报完成，只显示步骤与耗时，不记录工具参数或结果。业务操作建议仍须人工确认，见 [运行进度契约](./docs/adr/012-ai-run-steps-and-local-metrics.md)。
+
+AI 独立轨道新增客户联动：单次授权查询本地活动与回访记录，起草回访创建、编辑、取消、跳过、原子改期，以及记录实际完成结果并续排，由用户逐项确认；完成额外核实结果与时间。复用工作台领域事务与 Inbox 投影，不联系客户、不伪造沟通。已支持客户备注/会议的创建、修改与带原因软删除审批，删除还需独立勾选确认；历史和附件保留。已可定位具体活动/回访并返回原对话，详见[回访模块](./docs/modules/client-followups.md)。
+
+智能体另已接通内置自动化规则和运行元数据查询，以及需人工确认的启停、有限配置修改；启用或更新已启用规则须额外勾选持续本地效果，不外发消息。停用不撤销已捕获事件的投递，失败 Run 另经人工核对原快照、单独勾选重试，确认卡和后续对话明确区分成功/再次失败；模型不接收业务快照。已支持定位具体规则/Run、浏览尝试链并返回原对话，查看不执行操作。详见 [自动化模块](./docs/modules/automation.md)。
+
+知识引用已支持打开同版本原片段、核验后返回原会话，保留 PDF 页码。用户还可在“工作台权限 → 知识检索与引用”按消息选择 1–20 个版本化来源，让模型主动搜索和读取；只成功读到的完整片段可引用，搜索摘要不算证据。结果按当前 Provider 外发边界处理，动态正文不另存历史快照；临时会话已支持来源卡与短时纯内存引用恢复，不保存正文/引用，缺失回复不会冒充完成；真实模型验收仍待，详见 [知识库模块](./docs/modules/knowledge-base.md)。
+
+智能体输入区增加“工作台权限”：明确授权下一条消息后可查询工作事项、客户字段白名单与任务执行产出，返回详情链接；还可起草任务与项目创建、编辑、排期和状态命令，由用户逐项确认执行。审批记录保存在 schema 073（072 创建，073 扩容），支持版本保护、重复确认回读与工作台缓存同步；临时会话不能起草持久审批。不授权时不开放业务工具；远程模型会收到授权范围内的查询结果，文件/终端权限不共享。项目完成含未完成任务时还需人工勾选，客户关联另需 clients 范围，合同金额不开放。收件箱已支持手工事项创建/编辑、已读、稍后/恢复、解决/忽略/重开，审批保留原有版本、时间和必需任务规则，不改变关联任务或来源。另支持已有 Task 关联、必需标记和带原因解除，绑定 Inbox/Task 双版本及预览进度，自动结清结果须在卡片中确认；当前与历史关系可按授权分页查询。还可整批拆分 1–20 个任务并初始分派，确认卡展示层级、负责人、项目、标签和全部草稿字段；资料变化会阻止旧提议，任一失败整批回滚。person 仅本地责任记录，Agent 分派不启动执行。本地提醒也已支持授权查询和受确认的创建、改期、重复规则调整、取消，保留时区/版本/终态与共享领域事务；取消停止后续系列、不删历史，不增加外部通知。其他模块操作和完整编排仍在实施，见 [ADR-029](docs/adr/029-agent-workspace-capabilities.md)。
+
+专注已接入授权查询与逐项确认的开始、暂停、继续、结束、取消和异常恢复，复用工作台领域事务。开始新循环、计入中断间隔需额外人工勾选；结束按确认时刻结算工时但不完成任务，取消/中断不入账。活动快照与本地轮次按 Session 身份同步，旧确认卡不重放。另可授权读取周期报告：明确 1–93 日本地日期和 IANA 时区，与专注页共用已完成工时/逐日/项目/标签/时段聚合，按维度分页并披露当前归属和标签非互斥。本地休息直接控制、报告筛选深链及真实模型验收仍待，不代表专注全部打通。
+
+智能体已支持全局执行状态查询及人工确认的单次执行停止：取消请求持久化、任务状态不变，界面区分请求已接受与执行已停止；这不代表已开放自动重试或自主多步执行。
+
+失败、取消、中断的 Agent 执行现可从对话起草重试建议，重新核对原执行快照并人工确认后创建新尝试；文件须重新授权/确认，不替换原模型或输入，不重跑待登记结果。详见 [AI 助手模块](docs/modules/ai-assistant.md)。
+
+待登记产出也可从主/侧对话提出恢复建议，独立确认后在本地复用已有结果完成登记或安全保留；不重新调用模型，不自动验收。审批与产出同事务，重复确认不重复创建。
+
 后台计划续办现在以 metadata-only `continuation` 项进入统一 Agent Inbox；左侧“后台续办”可精确回到原会话计划并通过只读 handoff 重新核对，不继承权限或自动执行。详见 [H5-G54](docs/modules/ai-assistant.md#后台计划续办纳入统一-agent-inboxh5-g542026-09-23)。
 
 Task Agent Run 的活动、未被精确 retry 替代的失败/中断，以及 `pending`/`retained` 交付现以 metadata-only `agent_run` 项汇入统一 Agent Inbox；计划内 Run 还能通过重新授权 handoff 回到 AI；不返回正文、输入快照、文件/路径或 Provider 私密字段。
@@ -33,34 +244,6 @@ Windows 单文件辅助程序是独立、无 Tauri/WebView/模型依赖的 `apps
 项目文件 AI 读写仍是受限能力：Windows 文件预览已接主聊天的精确文件分析，需人工选择、核对完整内容与所选模型、单独授权下一条消息并手动发送。模型只能提出一份绑定本条原文件的完整替换建议；用户核对完整差异后，绑定发行构建可进入独立原生确认和本次 UAC，不能自主遍历目录或跳过确认。旧版原地 writer 因硬链接竞态永久关闭，现行路径只用 helper 的无覆盖对象替换。真实安装/UAC/SACL/断电验收尚未完成，普通开发构建仍只读。原附件/审查卡不保存到历史，但模型回复可能引用。见 [当前门禁与范围](docs/modules/ai-assistant.md#文件写入安全门禁与只读恢复检查2026-09-22部分实现)。
 
 开发源码数据库现为 schema079：权限建议支持下一条消息完整范围，升级需通过原备份门禁；已有请求和决定状态保留。前后端应配套更新，旧版本回退使用升级前完整备份。详见 [AI 模块升级说明](docs/modules/ai-assistant.md)。
-
-<div align="center">
-  <img src="./apps/desktop/src-tauri/icon.svg" width="112" height="112" alt="opc-workspace 图标" />
-
-  <h1>opc-workspace</h1>
-
-  <p><strong>一人公司的本地优先工作台</strong></p>
-  <p>在一个离线可用的桌面应用里，管理任务、项目、客户、收件箱、专注时间与本地业务数据。</p>
-
-  <p>
-    <a href="./README.md">简体中文</a>
-    ·
-    <a href="./README.en.md">English</a>
-    ·
-    <a href="./docs/README.md">产品文档</a>
-    ·
-    <a href="./docs/opc-workspace-PRD.md">PRD</a>
-  </p>
-
-  <p>
-    <img alt="版本 0.1.1" src="https://img.shields.io/badge/version-0.1.1-6C73E8" />
-    <img alt="Tauri 2" src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB" />
-    <img alt="React 18" src="https://img.shields.io/badge/frontend-React%2018-61DAFB" />
-    <img alt="Go" src="https://img.shields.io/badge/backend-Go-00ADD8" />
-    <img alt="SQLite schema v79" src="https://img.shields.io/badge/database-SQLite%20v79-003B57" />
-    <img alt="积极开发中" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
-  </p>
-</div>
 
 智能体现在可以建议打开真实任务保存视图：只有用户确认后，任务页才重新读取并应用当前筛选；失效视图不会显示未筛选任务。此操作不修改任务或继承授权。见 [AI 保存视图定位](docs/modules/ai-assistant.md#受确认的任务保存视图定位h5-e362026-09-21)。
 
@@ -126,9 +309,6 @@ H2-S 继续把已归档路线图里程碑永久删除接入受控审批链：模
 
 H2-T 已把内容条目的准备 Task 关系接入同一审批链：模型先读取真实 Content Item/Task 双 ID 与双版本，再分别提议新增关联、调整 required 或解除关联。确认卡显示任务名称、状态、版本和关系变化；确认时重验完整预览并与人工接口共用关系事务。该能力只改关系及内容条目版本，不创建、分派、完成、取消或删除 Task。
 
-> [!IMPORTANT]
-> opc-workspace 仍处于积极开发阶段。当前基线为 app v0.1.1、API v1、SQLite schema v78；Windows x64 已能生成未签名的本地测试安装包，但尚未达到正式发布、签名和多平台完整验收标准。AI 助手与本地知识库作为独立轨道持续交付，不并入 v0.1–v0.4 的产品范围。
-
 H5-G1 新增单独人工启用的计划后台续办：默认3轮/30分钟，待审批/运行/产出登记时等待，自动生成独立标记，不占用手动草稿。可随时停止，无进展、漂移、失败或预算耗尽停止；默认重启后需重新授权，不自动批准业务或取消已批准Agent Run。H5-G12 允许用户另行勾选普通重启后继续安全等待态：尚未受理的下一轮会重新核验，运行中请求与物理备份恢复一律中断，不补跑未知请求。API v1/schema078及启动命令不变，详见 [续办契约](docs/modules/ai-assistant.md#等待中自动续办的显式跨重启恢复h5-g122026-09-21)。
 
 H5-G8–G10 让有界后台续办在缺少必需工作台范围时只留下待人工核对请求，并在请求开放期间等待，不自动发新消息消费它或花费额外轮次。请求可从原会话和 Agent Inbox 恢复；忽略后仅按原授权与无进展门禁判断。若需授予新范围，主/侧请求卡可由用户明确点击“停止自动续办并核对权限”，停止成功后才准备草稿和单消息权限面板；用户仍须自行核对并发送，后台不能自行扩权或批准业务。API v1/schema078 不变，见 [权限交接](docs/modules/ai-assistant.md#权限请求与自动续办的一步式人工交接h5-g102026-09-21)。
@@ -157,165 +337,13 @@ H4-H 补齐 AI 对话与项目、客户、Inbox、Reminder、内容、里程碑�
 
 H4-I/H4-R–X/H4-AF–AQ 持续补齐工作台详情的“交给智能体”：只带入准确记录身份或安全的页面级状态和固定提示词，用户在对话中追加草稿、重新选权限后再发送；保留原草稿并清除旧授权与所选上下文，未保存编辑和在途操作受到保护。本地人员交接只带 person ID，不复制备注/metadata；本地 Agent、AI 供应商、数据/备份设置和运行诊断交接只带 ID/页面级状态，不复制配置、密钥、备份内容、路径、日志或诊断包，也不授予检查、启停、连接测试、启动 Run、备份恢复、导入导出或重启能力。H4-AM/H4-AN/H4-AO/H4-AQ 仅允许用户把已显示的 Git、文本预览、近期终端输出尾部或当前活动浏览器的已脱敏地址经交接卡再次带入并发送；浏览器快照不含 query/hash/credentials、页面正文、Cookie、登录态、历史或下载，终端快照不含 PTY/root ID、路径或输入，且不授予 Shell 或浏览器控制。H4-AP 还在右侧“子智能体”账本只读显示当前主对话的计划汇总与未替代步骤，并提供原计划、精确建议及经验证的记录入口，不授予任何发送、确认或 Run 控制权。导航本身不改业务或调用模型，见 [交接契约](docs/modules/ai-assistant.md#h4-i-从工作台事项进入智能体)。
 
-## 为什么做 opc-workspace
-
-独立开发者、自由职业者、内容创作者和咨询顾问，往往需要在任务工具、项目表格、客户资料、计时器和内容日历之间来回切换。opc-workspace 希望把这些高频工作流收进一个轻量桌面应用，同时让业务数据默认留在自己的电脑上。
-
-- **本地优先**：核心能力离线可用，业务事实保存在本机 SQLite 与受控文件目录中。
-- **一个工作台**：任务、项目、客户、收件箱、专注与提醒围绕同一套业务事实协作。
-- **可追溯工作流**：分派、状态变化、产出、验收和返工保留明确记录。
-- **安装后无开发运行时依赖**：正式安装包内置 React 前端与 Go Sidecar；最终用户不需要 Docker、Node.js、Go 或 Rust。
-- **键盘友好**：提供命令面板、快速新建和桌面全局快捷键。
-
-`OPC` 取自 **one-person company**。项目关注的是一人经营场景，而不是把多人协作软件缩小一号。
-
-## 核心能力
-
-智能体主/侧对话已支持模型、工具、自检与引用核验的实时执行进度，切页和状态回读可恢复同序号步骤；连接中断不误报完成，只显示步骤与耗时，不记录工具参数或结果。业务操作建议仍须人工确认，见 [运行进度契约](./docs/adr/012-ai-run-steps-and-local-metrics.md)。
-
-AI 独立轨道新增客户联动：单次授权查询本地活动与回访记录，起草回访创建、编辑、取消、跳过、原子改期，以及记录实际完成结果并续排，由用户逐项确认；完成额外核实结果与时间。复用工作台领域事务与 Inbox 投影，不联系客户、不伪造沟通。已支持客户备注/会议的创建、修改与带原因软删除审批，删除还需独立勾选确认；历史和附件保留。已可定位具体活动/回访并返回原对话，详见[回访模块](./docs/modules/client-followups.md)。
-
-| 模块         | 当前能力                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 今日工作台   | 聚合逾期、当天、本周稍后和未排期任务，支持排期、排序与快捷执行                                                                               |
-| 任务与验收   | 六状态任务生命周期、父子任务、责任分派、产出提交、人工验收与返工                                                                             |
-| 项目与客户   | 项目进度、产出、附件、客户资料、活动、回访计划与关联视图                                                                                     |
-| 收件箱与提醒 | 本地事项受理、稍后处理、任务拆分、完成进度与重复提醒                                                                                         |
-| 专注与工时   | 可恢复的专注会话、任务绑定、历史记录、趋势、项目与标签统计                                                                                   |
-| 搜索与命令   | 跨任务、项目、客户和活动收件箱的本地搜索与直达                                                                                               |
-| 数据安全     | 版本化迁移、受控文件、完整备份/恢复、业务 JSON/ZIP 导入导出与诊断                                                                            |
-| 本地自动化   | 仅开放代码内置的受限预设；不提供任意 Shell、SQL、HTTP 或外发能力                                                                             |
-| AI 助手      | 远程/本地 Provider、流式会话、记忆工具、显式上下文、可验证引用、本地质量评测/趋势/category/失败原因、无正文运行步骤/用量聚合与建任务确认卡片 |
-
-### 当前边界
-
-- v0.1 的核心人工闭环正在持续完善，页面与接口的完成度以[模块状态总览](./docs/modules/README.md)为准。
-- 收入、支出与发票仍归属 v0.4，但当前源码已有本地账本、统计、发票状态/付款原子入账、PDF 与到期 Inbox 基础闭环，不再是页面骨架；完整验收和增强仍待。AI H3-E1 增加独立财务只读授权、同币种报告及精确详情往返，H3-E2 另接独立权限和逐项人工确认的收支创建/修改/作废，H3-E3 增加独立发票权限和草稿创建/编辑、发送/查看/回款/逾期事实的人工审批；付款唯一入账与到期事项联动，逾期沿用已启用的本地规则。H3-E4A 支持额外人工确认后永久删除无账本关联的草稿及受控 PDF，复用原生事务与文件补偿，保留审批/审计。H3-E4B 已接 PDF 生成/替换的双重人工确认及本次文件下载；历史卡核验资产身份，替换/缺失/损坏拒绝下载，不自动外发或执行付款。H3-E5 已接独立授权的 CSV 范围提议、人工批准与精确下载；数据变化拒绝旧卡，不持久存正文或自动发送给模型。完整验收仍待。详见 [财务模块](./docs/modules/finance-invoices.md)。
-- AI 助手独立轨道已交付远程/本地 Provider、双协议流式回复与推理、受控 Harness、scope 裁剪的按需领域指南、记忆三工具、分段摘要/事实压缩、显式业务/知识上下文、回答级来源、无正文运行步骤/用量与 UTC 趋势，以及 dataset v4 的 8-case 快速、四类 6-case 专题和 24-case 完整本地评测。核心安全规则常驻，详细领域手册和大体积操作提议定义由只读 `workspace_guide` 按需加载；最大组合固定首轮测试保留至少 32 KiB 余量。质量按 Provider 配置身份、数据集和套件隔离；有限事实规则、Wilson 区间与人工决定用于审阅，不代表通用语义正确或发布许可，缺失用量保持 unknown，不计算费用。
-- [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) 修复生成总预算/流终态、跨页面停止与刷新恢复、任务原子确认、记忆决定回读和大回合压缩。模型等待不占全局维护锁；任务只在用户确认后按领域规则创建；`persist=false` 的正文和工具记忆仅在运行内保存。自动化使用隔离夹具，真实模型质量、WebView 输入法和真实崩溃仍需实机验收。本地知识库文本基线与 PDF 页码定位提取（ADR-026）已交付，授权引用与来源变化检测仍待。
-- 本地 Agent 已有 Windows 内置受控执行器、任务详情 Run 界面与可恢复 manual-review text/单 file/有界多 file 提交（ADR-027）。设置显式启停，任务启动前核对真实 Adapter/Actor/Assignment；缺少条件时引导设置，不静默替换负责人。可选择目标 Task 文件、其 Project Attachment，以及 H5-F6 新增的同项目其他任务当前已验收文件；共享最多 4 个、单个 64 KiB、合计 128 KiB，prepare/prelaunch 重验。新来源使用 v6 冻结任务版本/批次/hash，AI 另需本条 agent_project_files 与人工跨任务同意。旧 v1–v4 保留 OpenAI，v5 支持远程 Anthropic/8192 token；实际含新来源时两协议均走 v6。仅单次完整响应可登记，执行、文件、返工和跨任务范围分别确认，成功不等于任务验收。H5-F7 允许用户把已提交的 file/files 产出逐份带到右侧文件工作区，另选现有目标、查看完整差异，并在绑定发行构建中走按次原生审查/UAC/helper 链；它不会自动写入或代替任务验收。H5-F8 再把计划中的真实 Run/Submission 回执、右侧精确 Run 详情和人工验收页连成可返回原对话的路线，仍不自动验收或续跑。详见 [执行与来源契约](./docs/modules/local-agents.md#同项目已验收文件交接h5-f62026-09-21)、[H5-F7 文件桥接](./docs/modules/local-agents.md#已提交文件产出到项目文件的人工桥接h5-f72026-09-22)和 [H5-F8 验收往返](./docs/modules/local-agents.md#计划执行与人工验收的精确往返h5-f82026-09-22)。其他平台、external、任意工具、自治多步编排及真实模型/桌面验收仍待。
-- 当前没有云同步、多人账号、线上工作流或远程消息发送。
-
-智能体另已接通内置自动化规则和运行元数据查询，以及需人工确认的启停、有限配置修改；启用或更新已启用规则须额外勾选持续本地效果，不外发消息。停用不撤销已捕获事件的投递，失败 Run 另经人工核对原快照、单独勾选重试，确认卡和后续对话明确区分成功/再次失败；模型不接收业务快照。已支持定位具体规则/Run、浏览尝试链并返回原对话，查看不执行操作。详见 [自动化模块](./docs/modules/automation.md)。
-
-知识引用已支持打开同版本原片段、核验后返回原会话，保留 PDF 页码。用户还可在“工作台权限 → 知识检索与引用”按消息选择 1–20 个版本化来源，让模型主动搜索和读取；只成功读到的完整片段可引用，搜索摘要不算证据。结果按当前 Provider 外发边界处理，动态正文不另存历史快照；临时会话已支持来源卡与短时纯内存引用恢复，不保存正文/引用，缺失回复不会冒充完成；真实模型验收仍待，详见 [知识库模块](./docs/modules/knowledge-base.md)。
-
-## 快速开始
-
-### 开发环境
-
-| 依赖           | 版本                                                      |
-| -------------- | --------------------------------------------------------- |
-| Node.js        | 20.19–26                                                  |
-| pnpm           | 10+（仓库锁定 `pnpm@11.21.0`）                            |
-| Go             | 1.22+                                                     |
-| Rust           | 1.85+，通过 rustup/cargo 安装                             |
-| Tauri 系统依赖 | 对应 Windows、macOS 或 Linux 平台的 Tauri 2 prerequisites |
-
-Windows 桌面构建还需要 WebView2 Runtime、Visual Studio C++ Build Tools 与 Windows SDK；内嵌浏览器要求 WebView2 Runtime 122.0.2365.46 或更新版本。
-
-### 安装依赖
-
-```powershell
-pnpm install
-go -C services/sidecar mod download
-```
-
-### 启动桌面开发环境
-
-```powershell
-pnpm dev
-```
-
-统一开发脚本会启动 Go Sidecar、Vite 和 Tauri。开发数据保存在已忽略的 `.local/dev-data/`，不会写入正式应用数据目录，也不会自动生成演示业务数据。
-
-智能体模式右侧「浏览器」在 **Windows 桌面版** 使用 Chromium 内核的 WebView2，支持内嵌 HTTP(S) 页面、多标签和原生导航；用户也可主动捕获当前页面有界正文与可见链接，在交接卡中检查完整目标，再另行带入并手动发送。网页不会自动交给 AI，也不会自动访问链接。使用 `pnpm dev` 打开桌面版才能体验。开发浏览器 profile 单独保存在 `.local/browser-profile/`，正式版位于应用本地数据目录的 `browser-profile/`，与工作区 WebView 和业务备份隔离。`pnpm dev:web` 仅提供外部打开入口，不模拟内嵌浏览器。
-
-智能体模式右侧现为统一多标签工作区：`+` 打开文件预览、Git 只读审查、Windows 手动 PowerShell 终端、浏览器或侧边聊天，可分栏、放大与收起。文件与审查先通过原生对话框选择目录；Git 需已安装并位于 PATH。终端需单独点击启动，以当前用户权限运行，关闭标签会结束该进程树；工作区内容不会自动发给 AI。新增依赖为 Rust `rfd` / `portable-pty`、前端 `@xterm/xterm` / `@xterm/addon-fit`，由包管理器安装，启动命令不变。网页开发模式不提供本地文件、Git、PTY；限制与验证方式见 [桌面模块](docs/modules/desktop-platform.md) 和 [ADR-028](docs/adr/028-human-operated-agent-workspace.md)。
-
-工作台模式单独显示业务右侧栏：专注环形计时、临近项目节点、本月已确认收入和客户动态；默认 280px，可拖拽调整至 240–480px。通用设置可关闭，窗口宽度不超过 1180px 时自动隐藏；智能体面板的收起与放大不会影响它。各卡片复用已有业务 API，不新增迁移或启动依赖。
-
-只启动 Sidecar 与浏览器版前端：
-
-```powershell
-pnpm dev:web
-```
-
-## 构建与检查
-
-```powershell
-# 构建当前平台的 Sidecar、Web 前端和桌面安装包
-pnpm build
-
-# 不依赖 Rust 链接器的源码门禁
-pnpm check:source
-
-# 包含 Cargo check 与 Rust 测试的完整门禁
-pnpm check
-
-# 按当前分支未推送的改动，列出该跑哪些检查（不执行）
-pnpm check:impact
-```
-
-也可以按层运行 `pnpm check:web`、`pnpm check:go`、`pnpm check:rust` 或 `pnpm check:docs`。
-`pnpm check:impact` 只做**选层建议**：它按改动路径选出受影响的门禁，遇到 `package.json`、`scripts/`、CI 配置等影响所有 surface 的文件会保守地全选，并附上「这次改动可能影响哪些前端测试」的反向依赖清单，供本地窄范围迭代使用。
-
-当前 Windows x64 构建会生成：
-
-```text
-apps/desktop/src-tauri/target/release/bundle/nsis/opc-workspace_0.1.1_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/msi/opc-workspace_0.1.1_x64_zh-CN.msi
-```
-
-NSIS 当前仅内置简体中文，MSI 使用 `zh-CN`；两者都是未签名的本地测试包。跨平台发布仍应在对应平台或 CI runner 上构建，并完成干净系统中的安装、启动、升级、卸载和数据保留验收。
-
-## 技术架构
-
-```mermaid
-flowchart TB
-    Desktop["Tauri 2 / Rust<br/>窗口 · 托盘 · 快捷键 · Sidecar 生命周期"]
-    Web["React 18 / TypeScript / WebView<br/>页面 · 表单 · 查询缓存 · UI 状态"]
-    API["Go Sidecar / API v1<br/>领域校验 · 事务 · 调度 · 备份"]
-    Data["本地事实层<br/>SQLite v75 · 受控文件 · FTS5 · 备份 · 日志"]
-
-    Desktop --> Web
-    Web -->|"Bearer HTTP · 127.0.0.1 动态端口"| API
-    API --> Data
-```
-
-生产环境中，Tauri 负责启动并监管内置 Go Sidecar。Sidecar 只监听回环地址，每个进程世代使用新的随机会话令牌；React 界面通过版本化 `/api/v1` 访问本地业务能力。数据库、附件、备份和日志保存在操作系统分配的应用数据目录中，与安装目录分离。
-
-智能体输入区增加“工作台权限”：明确授权下一条消息后可查询工作事项、客户字段白名单与任务执行产出，返回详情链接；还可起草任务与项目创建、编辑、排期和状态命令，由用户逐项确认执行。审批记录保存在 schema 073（072 创建，073 扩容），支持版本保护、重复确认回读与工作台缓存同步；临时会话不能起草持久审批。不授权时不开放业务工具；远程模型会收到授权范围内的查询结果，文件/终端权限不共享。项目完成含未完成任务时还需人工勾选，客户关联另需 clients 范围，合同金额不开放。收件箱已支持手工事项创建/编辑、已读、稍后/恢复、解决/忽略/重开，审批保留原有版本、时间和必需任务规则，不改变关联任务或来源。另支持已有 Task 关联、必需标记和带原因解除，绑定 Inbox/Task 双版本及预览进度，自动结清结果须在卡片中确认；当前与历史关系可按授权分页查询。还可整批拆分 1–20 个任务并初始分派，确认卡展示层级、负责人、项目、标签和全部草稿字段；资料变化会阻止旧提议，任一失败整批回滚。person 仅本地责任记录，Agent 分派不启动执行。本地提醒也已支持授权查询和受确认的创建、改期、重复规则调整、取消，保留时区/版本/终态与共享领域事务；取消停止后续系列、不删历史，不增加外部通知。其他模块操作和完整编排仍在实施，见 [ADR-029](docs/adr/029-agent-workspace-capabilities.md)。
-
-专注已接入授权查询与逐项确认的开始、暂停、继续、结束、取消和异常恢复，复用工作台领域事务。开始新循环、计入中断间隔需额外人工勾选；结束按确认时刻结算工时但不完成任务，取消/中断不入账。活动快照与本地轮次按 Session 身份同步，旧确认卡不重放。另可授权读取周期报告：明确 1–93 日本地日期和 IANA 时区，与专注页共用已完成工时/逐日/项目/标签/时段聚合，按维度分页并披露当前归属和标签非互斥。本地休息直接控制、报告筛选深链及真实模型验收仍待，不代表专注全部打通。
-
-更完整的模块关系和安全边界见[整体功能架构](./docs/functional-architecture.md)、[本地 Agent Runtime ADR](./docs/adr/003-local-agent-runtime-security.md)与 [AI 助手模块文档](./docs/modules/ai-assistant.md)。
-
-智能体已支持全局执行状态查询及人工确认的单次执行停止：取消请求持久化、任务状态不变，界面区分请求已接受与执行已停止；这不代表已开放自动重试或自主多步执行。
-
-失败、取消、中断的 Agent 执行现可从对话起草重试建议，重新核对原执行快照并人工确认后创建新尝试；文件须重新授权/确认，不替换原模型或输入，不重跑待登记结果。详见 [AI 助手模块](docs/modules/ai-assistant.md)。
-
-待登记产出也可从主/侧对话提出恢复建议，独立确认后在本地复用已有结果完成登记或安全保留；不重新调用模型，不自动验收。审批与产出同事务，重复确认不重复创建。
-
-## 仓库结构
-
-```text
-apps/
-  web/                    React 18 + TypeScript + Vite + Tailwind CSS v4
-  desktop/                Tauri 2 桌面壳与 Rust 生命周期管理
-services/
-  sidecar/                Go HTTP API、SQLite、迁移、受控文件与测试
-scripts/                  开发编排、构建、格式化和文档检查
-docs/                     PRD、整体架构、ADR 与模块级功能文档
-.local/dev-data/          本地开发数据（Git 已忽略）
-```
-
 ## 文档
 
 - [文档中心](./docs/README.md)：阅读顺序、事实优先级与模块状态总览。
-- [产品需求文档（PRD v10.12）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
+- [产品需求文档（PRD）](./docs/opc-workspace-PRD.md)：产品范围、版本边界和实现追踪。
 - [整体功能架构](./docs/functional-architecture.md)：模块关系、事件流和事实归属。
 - [模块文档](./docs/modules/README.md)：每个模块的流程、API、状态、依赖与验收标准。
+- [变更记录](./docs/changelog.md)：各版本与实现切片当时交付了什么（历史口径）。
 - [Sidecar 开发文档](./services/sidecar/README.md)：本地 API、数据与服务端验证说明。
 - [English README](./README.en.md)：英文项目介绍与开发入口。
 

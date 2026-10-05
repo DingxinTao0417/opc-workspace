@@ -1,0 +1,192 @@
+.ai-session-create-error {
+  margin: 6px 10px 0;
+  color: #ff8a8a;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.ai-session-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-md);
+}
+
+.ai-session-row > button:first-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ai-session-row > button:first-child:hover {
+  background: var(--panel-hover);
+}
+
+.ai-session-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-session-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ai-session-row[data-active="true"] {
+  background: var(--accent-bg);
+}
+
+.ai-session-row[data-active="true"] > button:first-child:hover {
+  background: transparent;
+}
+
+.ai-session-row[data-active="true"] .ai-session-title {
+  color: var(--nav-active-text);
+  font-weight: 500;
+}
+
+.ai-session-delete:hover {
+  color: var(--danger-text);
+  background: var(--panel-hover);
+  opacity: 1;
+}
+
+.ai-session-row:hover .ai-session-delete {
+  opacity: 0.7;
+}
+
+.ai-session-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 8px;
+  line-height: 1.5;
+}
+
+.ai-agent-inbox {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 8px;
+}
+
+.ai-agent-inbox-group {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.ai-agent-inbox-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-agent-inbox-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.ai-agent-inbox-empty {
+  margin-top: 6px;
+}
+
+.ai-plan-inbox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-plan-inbox-row,
+.ai-plan-inbox-more {
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-plan-inbox-row {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+}
+
+.ai-plan-inbox-row:hover,
+.ai-plan-inbox-more:hover {
+  background: var(--panel-hover);
+}
+
+.ai-plan-inbox-row:disabled,
+.ai-plan-inbox-more:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-plan-inbox-entry {
+  display: grid;
+  gap: 2px;
+}
+
+.ai-plan-inbox-title,
+.ai-plan-inbox-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-plan-inbox-title {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ai-plan-inbox-meta,
+.ai-plan-inbox-row small {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.ai-plan-inbox-more {
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.app-shell-agent .ai-rail-sessions,
+.app-shell-agent .ai-agent-inbox {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.app-shell-agent .ai-session-row:focus-within .ai-session-delete {
+  opacity: 1;
+}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
@@ -519,7 +520,7 @@ func TestInvoicePDFStoreRequiresExplicitEmptyOrClaimedRootAndExclusiveLease(t *t
 	if contents, err := os.ReadFile(privatePath); err != nil || string(contents) != "private user file" {
 		t.Fatalf("unclaimed invoice PDF root content changed: %q err=%v", contents, err)
 	}
-	for _, unexpected := range []string{".opc-workspace-invoice-pdf-store", ".staging", ".trash", artifactStoreLockName} {
+	for _, unexpected := range []string{".opc-workspace-invoice-pdf-store", ".staging", ".trash", filestore.ArtifactStoreLockName} {
 		if _, err := os.Lstat(filepath.Join(unclaimed, unexpected)); !os.IsNotExist(err) {
 			t.Fatalf("unclaimed invoice PDF root gained %s, err=%v", unexpected, err)
 		}
@@ -678,7 +679,7 @@ func TestEnsureInvoicePDFOwnerDirectorySyncsParentAfterCreation(t *testing.T) {
 	syncCalls := 0
 	syncDirectory := func(path string) error {
 		syncCalls++
-		if !sameFilesystemPath(path, root) {
+		if !filestore.SameFilesystemPath(path, root) {
 			return fmt.Errorf("synced path %q, want %q", path, root)
 		}
 		if info, err := os.Stat(owner); err != nil || !info.IsDir() {
@@ -706,7 +707,7 @@ func TestEnsureInvoicePDFOwnerDirectoryCompensatesParentSyncFailure(t *testing.T
 	syncCalls := 0
 	forced := fmt.Errorf("forced invoice PDF parent sync failure")
 	syncDirectory := func(path string) error {
-		if !sameFilesystemPath(path, root) {
+		if !filestore.SameFilesystemPath(path, root) {
 			return fmt.Errorf("synced path %q, want %q", path, root)
 		}
 		syncCalls++

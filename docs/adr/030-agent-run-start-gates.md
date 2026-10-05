@@ -3,6 +3,7 @@
 - 状态：Accepted（2026-09-23，AH-07 首片）
 - 决策范围：本地 Agent 的自治跨 Run 调度第一步；修订 [ADR-027](027-builtin-agent-executor-and-run-lifecycle.md) 的“只在人工确认时立即排队”语义
 - 相关文档：[本地 Agent 模块](../modules/local-agents.md)、[AI 助手模块](../modules/ai-assistant.md)、[ADR-029](029-agent-workspace-capabilities.md)
+- 2026-10-04 修订：[ADR-033](033-agent-run-predecessor-file-inputs.md) 允许门控 Run 声明以前置 Run 已验收的文件产出为输入。它限定了本 ADR 的三处表述：带输入声明的门控不由对账器放行，而由人工确认放行；放行事件在这种情况下携带被确认的文件引用；关闭原因闭集增加 `predecessor_output_unavailable`。不带输入声明的门控行为不变，“Sidecar 不能改变快照”仍然成立。
 
 ## 背景
 
@@ -61,7 +62,7 @@
 - 同时开启的门控最多 4 个（全局）；超过时拒绝提案或确认，原 Proposal 保持待确认。
 - 有效期 1–24 小时；前置 Run 与后续 Run 必须属于不同任务（同一任务同时只能有一个活动 Run）。
 - 提出或确认时前置条件已满足、已不可能满足，或前置 Run 为非法状态时拒绝，并说明应改用普通启动。
-- 首片只表达**顺序依赖**，不传递前置产出作为后续输入：后续 Run 的输入在确认时冻结。
+- 首片只表达**顺序依赖**，不传递前置产出作为后续输入：后续 Run 的输入在确认时冻结。（传递文件产出由 [ADR-033](033-agent-run-predecessor-file-inputs.md) 另行规定，须两段人工确认。）
 
 ### 6. 明确不做
 

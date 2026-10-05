@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
@@ -354,8 +355,8 @@ func TestTaskOutputMultipartDownloadDeleteAndCompensation(t *testing.T) {
 	}
 	// A COMMIT error is not proof that SQLite rolled back. Rechecking an active
 	// row must preserve its object instead of applying destructive compensation.
-	(&API{db: store.DB, artifactStore: &artifactStore{
-		root: artifactDir, objectsDir: filepath.Join(artifactDir, "objects"),
+	(&API{db: store.DB, artifactStore: &filestore.ArtifactStore{
+		Root: artifactDir, ObjectsDir: filepath.Join(artifactDir, "objects"),
 	}}).compensateSubmittedArtifactFiles(task.ID, []committedArtifactFile{{
 		artifactID: artifact.ID, relativePath: relativePath,
 	}})
@@ -633,33 +634,33 @@ func TestSubmitOutputMultipartCleansStagingAfterChunkedTruncation(t *testing.T) 
 
 func TestArtifactStoreRejectsTraversalLinksAndOverwrite(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "artifacts")
-	store, err := newArtifactStore(root, testArtifactDatabaseID, "")
+	store, err := filestore.NewArtifactStore(root, testArtifactDatabaseID, "")
 	if err != nil {
 		t.Fatalf("newArtifactStore() error = %v", err)
 	}
-	t.Cleanup(func() { _ = store.close() })
+	t.Cleanup(func() { _ = store.Close() })
 	for _, unsafe := range []string{"../outside", "objects/../outside", filepath.Join("objects", "not-a-uuid")} {
-		if _, err := store.resolveObject(unsafe); err == nil {
+		if _, err := store.ResolveObject(unsafe); err == nil {
 			t.Fatalf("resolveObject(%q) accepted unsafe path", unsafe)
 		}
 	}
 	artifactID := "a4eef45f-edc2-4ef2-8620-84c0af34cf72"
-	staged, err := store.stageMultipartFile(io.NopCloser(strings.NewReader("new data")), artifactID)
+	staged, err := store.StageMultipartFile(io.NopCloser(strings.NewReader("new data")), artifactID)
 	if err != nil {
 		t.Fatalf("stage file: %v", err)
 	}
-	destination, _ := store.resolveObject(staged.relativePath)
+	destination, _ := store.ResolveObject(staged.RelativePath)
 	if err := os.WriteFile(destination, []byte("existing data"), 0o600); err != nil {
 		t.Fatalf("seed occupied destination: %v", err)
 	}
-	if err := store.commitStagedFile(staged); err == nil {
+	if err := store.CommitStagedFile(staged); err == nil {
 		t.Fatal("commit overwrote an occupied destination")
 	}
 	content, _ := os.ReadFile(destination)
 	if string(content) != "existing data" {
 		t.Fatalf("occupied destination changed to %q", content)
 	}
-	store.discardStagedFile(staged)
+	store.DiscardStagedFile(staged)
 
 	target := filepath.Join(t.TempDir(), "target")
 	if err := os.MkdirAll(target, 0o700); err != nil {
@@ -667,7 +668,7 @@ func TestArtifactStoreRejectsTraversalLinksAndOverwrite(t *testing.T) {
 	}
 	link := filepath.Join(t.TempDir(), "artifact-link")
 	if err := os.Symlink(target, link); err == nil {
-		if _, err := newArtifactStore(link, testArtifactDatabaseID, ""); err == nil {
+		if _, err := filestore.NewArtifactStore(link, testArtifactDatabaseID, ""); err == nil {
 			t.Fatal("newArtifactStore accepted a symlink root")
 		}
 	}
@@ -675,20 +676,20 @@ func TestArtifactStoreRejectsTraversalLinksAndOverwrite(t *testing.T) {
 
 func TestArtifactStoreEnforcesFileBoundsAndSafeStagingCleanup(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "artifacts")
-	store, err := newArtifactStore(root, testArtifactDatabaseID, "")
+	store, err := filestore.NewArtifactStore(root, testArtifactDatabaseID, "")
 	if err != nil {
 		t.Fatalf("newArtifactStore() error = %v", err)
 	}
-	t.Cleanup(func() { _ = store.close() })
+	t.Cleanup(func() { _ = store.Close() })
 	tooLargeID := "f0120f43-8400-4ca4-a959-36068d0924d0"
-	if _, err := store.stageMultipartFileWithLimit(strings.NewReader("four"), tooLargeID, 3); !errors.Is(err, errArtifactFileTooLarge) {
+	if _, err := store.StageMultipartFileWithLimit(strings.NewReader("four"), tooLargeID, 3); !errors.Is(err, filestore.ErrArtifactFileTooLarge) {
 		t.Fatalf("oversized stage error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(store.stagingDir, tooLargeID+".part")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(store.StagingDir, tooLargeID+".part")); !os.IsNotExist(err) {
 		t.Fatalf("oversized stage retained partial file: %v", err)
 	}
 	emptyID := "fb842839-fe0e-4541-a1c4-069af969c331"
-	if _, err := store.stageMultipartFileWithLimit(strings.NewReader(""), emptyID, 3); !errors.Is(err, errArtifactFileEmpty) {
+	if _, err := store.StageMultipartFileWithLimit(strings.NewReader(""), emptyID, 3); !errors.Is(err, filestore.ErrArtifactFileEmpty) {
 		t.Fatalf("empty stage error = %v", err)
 	}
 
@@ -696,7 +697,7 @@ func TestArtifactStoreEnforcesFileBoundsAndSafeStagingCleanup(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store.discardStagedFile(stagedArtifactFile{stagingPath: outside})
+	store.DiscardStagedFile(filestore.StagedArtifactFile{StagingPath: outside})
 	if content, err := os.ReadFile(outside); err != nil || string(content) != "keep" {
 		t.Fatalf("unsafe staging cleanup touched outside path content=%q err=%v", content, err)
 	}
@@ -708,7 +709,7 @@ func TestArtifactStoreRequiresOwnedNonRootDirectory(t *testing.T) {
 	if filepath.VolumeName(temp) == "" {
 		volumeRoot = string(filepath.Separator)
 	}
-	if _, err := newArtifactStore(volumeRoot, testArtifactDatabaseID, ""); err == nil || !strings.Contains(err.Error(), "volume root") {
+	if _, err := filestore.NewArtifactStore(volumeRoot, testArtifactDatabaseID, ""); err == nil || !strings.Contains(err.Error(), "volume root") {
 		t.Fatalf("filesystem root was accepted: %v", err)
 	}
 
@@ -721,7 +722,7 @@ func TestArtifactStoreRequiresOwnedNonRootDirectory(t *testing.T) {
 	if err := os.WriteFile(valuable, []byte("not owned by OPC"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newArtifactStore(shared, testArtifactDatabaseID, ""); err == nil || !strings.Contains(err.Error(), "ownership marker") {
+	if _, err := filestore.NewArtifactStore(shared, testArtifactDatabaseID, ""); err == nil || !strings.Contains(err.Error(), "ownership marker") {
 		t.Fatalf("unowned non-empty directory was accepted: %v", err)
 	}
 	if content, err := os.ReadFile(valuable); err != nil || string(content) != "not owned by OPC" {
@@ -729,35 +730,35 @@ func TestArtifactStoreRequiresOwnedNonRootDirectory(t *testing.T) {
 	}
 
 	owned := filepath.Join(temp, "owned")
-	first, err := newArtifactStore(owned, testArtifactDatabaseID, "")
+	first, err := filestore.NewArtifactStore(owned, testArtifactDatabaseID, "")
 	if err != nil {
 		t.Fatalf("claim empty root: %v", err)
 	}
-	t.Cleanup(func() { _ = first.close() })
-	marker, err := os.ReadFile(filepath.Join(owned, artifactStoreMarkerName))
-	expectedMarker, markerErr := artifactStoreMarkerBytes(testArtifactDatabaseID, first.storeID)
+	t.Cleanup(func() { _ = first.Close() })
+	marker, err := os.ReadFile(filepath.Join(owned, filestore.ArtifactStoreMarkerName))
+	expectedMarker, markerErr := filestore.ArtifactStoreMarkerBytes(testArtifactDatabaseID, first.StoreID)
 	if err != nil || markerErr != nil || string(marker) != string(expectedMarker) {
 		t.Fatalf("ownership marker content=%q err=%v", marker, err)
 	}
-	if _, err := newArtifactStore(owned, testArtifactDatabaseID, first.storeID); err == nil || !strings.Contains(err.Error(), "already in use") {
+	if _, err := filestore.NewArtifactStore(owned, testArtifactDatabaseID, first.StoreID); err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatalf("concurrent Artifact root open was accepted: %v", err)
 	}
-	if err := first.close(); err != nil {
+	if err := first.Close(); err != nil {
 		t.Fatalf("release Artifact root: %v", err)
 	}
 	otherDatabaseID := "018f0000-0000-7000-8000-000000000998"
-	if _, err := newArtifactStore(owned, otherDatabaseID, first.storeID); err == nil || !strings.Contains(err.Error(), "different workspace database") {
+	if _, err := filestore.NewArtifactStore(owned, otherDatabaseID, first.StoreID); err == nil || !strings.Contains(err.Error(), "different workspace database") {
 		t.Fatalf("mismatched database reused Artifact root: %v", err)
 	}
 	secondRoot := filepath.Join(temp, "second-owned")
-	if _, err := newArtifactStore(secondRoot, testArtifactDatabaseID, first.storeID); err == nil || !strings.Contains(err.Error(), "already bound") {
+	if _, err := filestore.NewArtifactStore(secondRoot, testArtifactDatabaseID, first.StoreID); err == nil || !strings.Contains(err.Error(), "already bound") {
 		t.Fatalf("bound database claimed a second empty root: %v", err)
 	}
-	second, err := newArtifactStore(owned, testArtifactDatabaseID, first.storeID)
-	if err != nil || !sameFilesystemPath(first.root, second.root) {
+	second, err := filestore.NewArtifactStore(owned, testArtifactDatabaseID, first.StoreID)
+	if err != nil || !filestore.SameFilesystemPath(first.Root, second.Root) {
 		t.Fatalf("reopen released root store=%#v err=%v", second, err)
 	}
-	t.Cleanup(func() { _ = second.close() })
+	t.Cleanup(func() { _ = second.Close() })
 }
 
 func TestSubmitOutputRejectsDeclaredOversizedMultipartRequest(t *testing.T) {
@@ -1040,24 +1041,24 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	artifactIDValue := response.Artifacts[0].ID
 	var relative string
 	_ = db.SQL.QueryRow("SELECT relative_path FROM task_artifacts WHERE id = ?", artifactIDValue).Scan(&relative)
-	store := &artifactStore{
-		root:          artifactDir,
-		objectsDir:    filepath.Join(artifactDir, "objects"),
-		stagingDir:    filepath.Join(artifactDir, ".staging"),
-		trashDir:      filepath.Join(artifactDir, ".trash"),
-		quarantineDir: filepath.Join(artifactDir, ".quarantine"),
+	store := &filestore.ArtifactStore{
+		Root:          artifactDir,
+		ObjectsDir:    filepath.Join(artifactDir, "objects"),
+		StagingDir:    filepath.Join(artifactDir, ".staging"),
+		TrashDir:      filepath.Join(artifactDir, ".trash"),
+		QuarantineDir: filepath.Join(artifactDir, ".quarantine"),
 	}
-	moved, err := store.moveObjectToTrash(relative, artifactIDValue)
+	moved, err := store.MoveObjectToTrash(relative, artifactIDValue)
 	if err != nil {
 		t.Fatalf("simulate crash before DB commit: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile active DB Artifact: %v", err)
 	}
-	if _, err := os.Stat(moved.livePath); err != nil {
+	if _, err := os.Stat(moved.LivePath); err != nil {
 		t.Fatalf("reconcile did not restore active file: %v", err)
 	}
-	if _, err := os.Stat(moved.trashPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(moved.TrashPath); !os.IsNotExist(err) {
 		t.Fatalf("reconcile retained restored trash: %v", err)
 	}
 
@@ -1066,7 +1067,7 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	if err := os.WriteFile(orphan, []byte("orphan after DB rollback"), 0o600); err != nil {
 		t.Fatalf("seed orphan object: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile orphan object: %v", err)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
@@ -1077,7 +1078,7 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 		t.Fatalf("reconcile quarantine entries=%v err=%v", quarantined, err)
 	}
 
-	if err := store.quarantineFile(moved.livePath, artifactIDValue); err != nil {
+	if err := store.QuarantineFile(moved.LivePath, artifactIDValue); err != nil {
 		t.Fatalf("simulate same-identity snapshot quarantine: %v", err)
 	}
 	if err := db.DB.Model(&models.TaskArtifact{}).Where("id = ?", artifactIDValue).Updates(map[string]any{
@@ -1085,13 +1086,13 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("mark snapshot Artifact missing: %v", err)
 	}
-	if _, err := os.Stat(moved.livePath); !os.IsNotExist(err) {
+	if _, err := os.Stat(moved.LivePath); !os.IsNotExist(err) {
 		t.Fatalf("snapshot simulation retained live object: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile current database after snapshot: %v", err)
 	}
-	if content, err := os.ReadFile(moved.livePath); err != nil || string(content) != "recover me" {
+	if content, err := os.ReadFile(moved.LivePath); err != nil || string(content) != "recover me" {
 		t.Fatalf("reconcile did not restore matching quarantined object content=%q err=%v", content, err)
 	}
 	var recoveredStatus string
@@ -1107,10 +1108,10 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	if err := os.WriteFile(corruptTrash, bytes.Repeat([]byte("x"), len("recover me")), 0o600); err != nil {
 		t.Fatalf("seed mismatched active trash: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile mismatched active trash: %v", err)
 	}
-	if content, err := os.ReadFile(moved.livePath); err != nil || string(content) != "recover me" {
+	if content, err := os.ReadFile(moved.LivePath); err != nil || string(content) != "recover me" {
 		t.Fatalf("mismatched trash displaced valid live object content=%q err=%v", content, err)
 	}
 	if _, err := os.Stat(corruptTrash); !os.IsNotExist(err) {
@@ -1121,13 +1122,13 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	if err := os.WriteFile(verifiedTrash, []byte("recover me"), 0o600); err != nil {
 		t.Fatalf("seed verified recovery trash: %v", err)
 	}
-	if err := os.WriteFile(moved.livePath, bytes.Repeat([]byte("y"), len("recover me")), 0o600); err != nil {
+	if err := os.WriteFile(moved.LivePath, bytes.Repeat([]byte("y"), len("recover me")), 0o600); err != nil {
 		t.Fatalf("corrupt live object: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile verified trash over corrupted live object: %v", err)
 	}
-	if content, err := os.ReadFile(moved.livePath); err != nil || string(content) != "recover me" {
+	if content, err := os.ReadFile(moved.LivePath); err != nil || string(content) != "recover me" {
 		t.Fatalf("verified trash did not restore correct live content=%q err=%v", content, err)
 	}
 	quarantineBeforeCommittedDelete, err := os.ReadDir(filepath.Join(artifactDir, ".quarantine"))
@@ -1135,7 +1136,7 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 		t.Fatalf("read quarantine before committed delete: %v", err)
 	}
 
-	moved, err = store.moveObjectToTrash(relative, artifactIDValue)
+	moved, err = store.MoveObjectToTrash(relative, artifactIDValue)
 	if err != nil {
 		t.Fatalf("simulate crash after DB commit: %v", err)
 	}
@@ -1154,10 +1155,10 @@ func TestArtifactStoreStartupReconcilesCrashWindows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("commit Artifact deletion fact: %v", err)
 	}
-	if err := store.reconcile(db.DB); err != nil {
+	if err := store.Reconcile(db.DB); err != nil {
 		t.Fatalf("reconcile committed delete: %v", err)
 	}
-	if _, err := os.Stat(moved.trashPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(moved.TrashPath); !os.IsNotExist(err) {
 		t.Fatalf("reconcile retained committed trash: %v", err)
 	}
 	quarantined, err = os.ReadDir(filepath.Join(artifactDir, ".quarantine"))

@@ -78,6 +78,7 @@ function validCandidate(candidate: AgentRunFileApplyCandidate) {
     candidate.index >= 0 &&
     candidate.name.trim().length > 0 &&
     contentBytes(candidate.name) <= 255 &&
+    // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
     !/[\u0000-\u001f]/.test(candidate.name) &&
     candidate.mime.trim().length > 0 &&
     candidate.mime.length <= 100 &&

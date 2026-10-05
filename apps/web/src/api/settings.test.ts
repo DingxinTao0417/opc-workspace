@@ -10,8 +10,9 @@ import {
   normalizeAppSettingsResponse,
   updateAppSettings,
 } from "./client";
+import type { Untyped } from "../test/untyped";
 
-const validPayload = (): any => ({
+const validPayload = (): Untyped => ({
   data: {
     schema_version: 2,
     items: [

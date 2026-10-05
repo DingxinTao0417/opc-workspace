@@ -16,6 +16,7 @@ const statuses = new Set<ProjectStatus>([
 ]);
 const canonicalId =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// eslint-disable-next-line no-control-regex -- matches control characters on purpose
 const controls = /[\u0000-\u001f\u007f]/;
 
 export function validProjectPortfolioView(view: ProjectPortfolioView): boolean {

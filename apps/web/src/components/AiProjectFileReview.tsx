@@ -48,6 +48,7 @@ export function AiProjectFileReview({
       Math.max(0, selection.expiresAt - Date.now()),
     );
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the reviewed selection and its status
   }, [review?.selection, review?.status, clear]);
   useEffect(() => () => useAiProjectFileReview.getState().clear(), []);
   if (error)

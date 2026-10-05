@@ -1,0 +1,49 @@
+.ov-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-left: 2px;
+  color: var(--text-dim);
+}
+
+.right-floating-card {
+  position: fixed;
+  top: 64px;
+  right: 20px;
+  z-index: 40;
+  width: 300px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--workspace-frame-shadow);
+}
+
+@media (max-width: 1180px) {
+  .right-floating-card {
+    display: none;
+  }
+}
+
+/* Floating facts never change the reading axis or overlap the conversation.
+   1320 = 760px text + two 280px gutters; the card needs 256px + 16px. */
+
+.app-shell-agent .right-floating-card {
+  display: none;
+  position: absolute;
+  top: 72px;
+  right: 16px;
+  width: 256px;
+  max-height: calc(100% - 96px);
+  z-index: 10;
+  padding: 16px 12px;
+  border-radius: 20px;
+  box-shadow: var(--agent-shadow);
+}
+
+@container agent-conversation (min-width: 1320px) {
+  .app-shell-agent .right-floating-card {
+    display: block;
+  }
+}

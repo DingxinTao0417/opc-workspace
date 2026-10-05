@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -143,7 +144,7 @@ func (a *API) deleteTaskInTransaction(
 	expectedVersion int64,
 	requestID string,
 	deletedAt string,
-) (models.Task, taskDeletionImpact, []trashedArtifactFile, error) {
+) (models.Task, taskDeletionImpact, []filestore.TrashedArtifactFile, error) {
 	task, impact, err := loadTaskDeletionImpact(tx, id, expectedVersion)
 	if err != nil {
 		return models.Task{}, taskDeletionImpact{}, nil, err
@@ -192,7 +193,7 @@ func (a *API) deleteTaskInTransaction(
 	return task, impact, moved, nil
 }
 
-func (a *API) finishTaskDeletion(moved []trashedArtifactFile, err error) {
+func (a *API) finishTaskDeletion(moved []filestore.TrashedArtifactFile, err error) {
 	if err != nil {
 		if restoreErr := a.restoreTaskArtifactFiles(moved); restoreErr != nil && a.options.Logger != nil {
 			a.options.Logger.Printf("Task delete Artifact compensation failed error=%v", restoreErr)
@@ -200,6 +201,6 @@ func (a *API) finishTaskDeletion(moved []trashedArtifactFile, err error) {
 		return
 	}
 	for _, file := range moved {
-		a.artifactStore.purgeTrashedFile(file)
+		a.artifactStore.PurgeTrashedFile(file)
 	}
 }

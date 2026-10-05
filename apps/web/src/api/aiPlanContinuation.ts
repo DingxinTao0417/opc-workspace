@@ -105,7 +105,7 @@ export const continuationScopeOptions: {
     id: "agent_project_files",
     label: "同项目已验收文件",
     description:
-      "显式选择其他已完成任务的已验收受控文件；还须独立跨任务交接确认。",
+      "显式选择其他已完成任务的已验收受控文件，或声明以前置任务验收后的文件产出作为输入；均须独立人工确认。",
   },
   {
     id: "output_files",

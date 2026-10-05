@@ -214,10 +214,11 @@ describe("AppShell", () => {
     );
   });
 
-  it("shows the floating status card only on the AI page when collapsed", () => {
+  it("shows the floating status card only on the AI page when collapsed", async () => {
     state.rightOverviewCollapsed = true;
     const view = renderShellAt("/ai");
-    expect(screen.getByText("悬浮卡")).toBeInTheDocument();
+    // The status card is loaded on demand.
+    expect(await screen.findByText("悬浮卡")).toBeInTheDocument();
     expect(screen.getByRole("main")).toContainElement(
       screen.getByText("悬浮卡"),
     );
@@ -239,12 +240,13 @@ describe("AppShell", () => {
     ).toBeNull();
   });
 
-  it("swaps the navigation rail for the conversation list in agent mode", () => {
+  it("swaps the navigation rail for the conversation list in agent mode", async () => {
     renderShellAt("/ai");
 
     const shell = screen.getByText("AI 页").closest(".app-shell");
     expect(shell).toHaveClass("app-shell-agent");
-    expect(screen.getByText("会话轨")).toBeInTheDocument();
+    // The agent rail is loaded on demand.
+    expect(await screen.findByText("会话轨")).toBeInTheDocument();
     expect(screen.queryByText("导航")).toBeNull();
   });
 
@@ -266,11 +268,12 @@ describe("AppShell", () => {
     expect(screen.queryByText("会话轨")).toBeNull();
   });
 
-  it("docks a resizable work panel beside the agent conversation", () => {
+  it("docks a resizable work panel beside the agent conversation", async () => {
     state.rightOverviewCollapsed = false;
     renderShellAt("/ai");
 
-    expect(screen.getByText("概览")).toBeInTheDocument();
+    // The agent workspace is loaded on demand.
+    expect(await screen.findByText("概览")).toBeInTheDocument();
     expect(screen.queryByText("工作台概览")).toBeNull();
     const handle = screen.getByRole("separator", {
       name: "调整右侧概览宽度",
@@ -323,12 +326,12 @@ describe("AppShell", () => {
     }
   });
 
-  it("falls back to the floating card when the work panel is collapsed", () => {
+  it("falls back to the floating card when the work panel is collapsed", async () => {
     state.rightOverviewCollapsed = true;
     renderShellAt("/ai");
 
     expect(screen.queryByText("概览")).toBeNull();
-    expect(screen.getByText("悬浮卡")).toBeInTheDocument();
+    expect(await screen.findByText("悬浮卡")).toBeInTheDocument();
     expect(
       screen.queryByRole("separator", { name: "调整右侧概览宽度" }),
     ).toBeNull();
@@ -363,7 +366,7 @@ describe("AppShell", () => {
     expect(screen.queryByText("概览")).toBeNull();
   });
 
-  it("collapses the agent workspace when switching in from the workbench", () => {
+  it("collapses the agent workspace when switching in from the workbench", async () => {
     state.rightOverviewCollapsed = false;
     renderShellAt("/today");
 
@@ -372,6 +375,6 @@ describe("AppShell", () => {
     expect(state.collapseAgentWorkspace).toHaveBeenCalledOnce();
     expect(screen.getByText("AI 页")).toBeInTheDocument();
     expect(screen.queryByText("概览")).toBeNull();
-    expect(screen.getByText("悬浮卡")).toBeInTheDocument();
+    expect(await screen.findByText("悬浮卡")).toBeInTheDocument();
   });
 });

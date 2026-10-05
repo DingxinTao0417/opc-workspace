@@ -275,6 +275,167 @@ describe("Agent execution start gates", () => {
     expect(await screen.findByText("已确认 · 等待前置执行")).toBeVisible();
     expect(screen.queryByText(/已启动 · 排队中/)).toBeNull();
   });
+
+  const expectedFiles = [
+    { name: "research.md", mime: "text/markdown" },
+    { name: "notes.md", mime: "text/markdown" },
+  ];
+  const inputProposal = (leavesDevice = true) => {
+    const p = structuredClone(gatedProposal);
+    Object.assign(p.action.changes, {
+      start_after_input: "predecessor_files",
+    });
+    const preview = p.preview.agent_run_start!;
+    Object.assign(preview, {
+      execution_contract_version: 7,
+      output_contract: { type: "text" },
+      input_files_leave_device: leavesDevice,
+    });
+    preview.task.project_id = "018f0000-0000-7000-8000-0000000003a3";
+    preview.provider.kind = leavesDevice ? "remote" : "local";
+    preview.provider.leaves_device = leavesDevice;
+    Object.assign(preview.start_gate!, {
+      input_slot: {
+        source: "predecessor_files",
+        expected_files: expectedFiles,
+        max_files: 4,
+        max_file_bytes: 65_536,
+        max_total_bytes: 131_072,
+      },
+    });
+    return p;
+  };
+  const deferredBox = /同意在条件满足后由系统启动这一次执行/;
+  const inputBox = /以前置任务验收通过的文件产出作为输入/;
+
+  it("discloses a deferred input and asks for it separately", async () => {
+    const p = inputProposal();
+    state.load.mockReset().mockResolvedValue([p]);
+    state.decide.mockReset();
+    mount();
+    const slot = await screen.findByRole("region", { name: "延后绑定的输入" });
+    expect(slot).toHaveTextContent("文件现在还不存在");
+    expect(slot).toHaveTextContent(
+      "最多 4 个，单个不超过 64.0 KiB，合计不超过 128.0 KiB",
+    );
+    const promised = screen.getByRole("list", { name: "约定的前置产出文件" });
+    expect(promised).toHaveTextContent("research.md · text/markdown");
+    expect(promised).toHaveTextContent("notes.md · text/markdown");
+    expect(slot).toHaveTextContent("未确认不启动、不读取、不发送");
+    expect(slot).toHaveTextContent(
+      "所选 Provider 是远程服务：届时文件正文将离开本机，发送后无法撤回",
+    );
+    expect(slot).toHaveTextContent("不能原样重试");
+    expect(screen.queryByText(/前置产出不会自动成为本次输入/)).toBeNull();
+
+    const submit = screen.getByRole("button", { name: "确认启动 Agent" });
+    fireEvent.click(screen.getByRole("checkbox", { name: deferredBox }));
+    expect(submit).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: inputBox }));
+    expect(submit).toBeEnabled();
+    state.decide.mockRejectedValue(new Error("refused"));
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(state.decide).toHaveBeenCalledWith(
+        p,
+        "confirm",
+        true,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      ),
+    );
+    // A refusal leaves nothing ticked: both consents are given again.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: inputBox }),
+      ).not.toBeChecked(),
+    );
+    expect(
+      screen.getByRole("checkbox", { name: deferredBox }),
+    ).not.toBeChecked();
+    expect(submit).toBeDisabled();
+  });
+
+  it("says the files stay on this device for a local Provider", async () => {
+    state.load.mockReset().mockResolvedValue([inputProposal(false)]);
+    mount();
+    expect(
+      await screen.findByRole("region", { name: "延后绑定的输入" }),
+    ).toHaveTextContent("所选 Provider 在本机：届时文件正文留在本机");
+  });
+
+  it("keeps the plain gate wording when no input is taken", async () => {
+    state.load.mockReset().mockResolvedValue([gatedProposal]);
+    mount();
+    expect(
+      await screen.findByText(/前置产出不会自动成为本次输入/),
+    ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "延后绑定的输入" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: inputBox })).toBeNull();
+  });
+
+  it.each([
+    ["awaiting_predecessor", "已确认 · 等待前置产出"],
+    ["awaiting_confirmation", "已确认 · 待确认输入文件"],
+  ] as const)(
+    "shows a confirmed Run whose slot is %s as not started",
+    async (slotStatus, label) => {
+      const p = inputProposal();
+      state.load.mockReset().mockResolvedValue([
+        {
+          ...p,
+          status: "confirmed",
+          can_confirm: false,
+          result_id: runId,
+          result_version: 1,
+          route: `/tasks/${taskId}?agent_run=${runId}`,
+          decided_at: "2026-09-18T10:01:00Z",
+          agent_run_result: {
+            id: runId,
+            task_id: taskId,
+            status: "queued",
+            attempt: 1,
+            provider_id: providerId,
+            model: "test-model",
+            output_delivery_status: "not_ready",
+            output_delivery_error_code: null,
+            submission_id: null,
+            artifact_id: null,
+            start_gate: {
+              ...waitingGate,
+              input_slot: {
+                source: "predecessor_files",
+                status: slotStatus,
+                expected_files: expectedFiles,
+              },
+            },
+          },
+        },
+      ]);
+      state.getRun.mockReset().mockResolvedValue(
+        run({
+          executionContractVersion: 7,
+          startGate: {
+            predecessorRunId: predecessor,
+            require: "accepted",
+            expiresAt: waitingGate.expires_at,
+            status: "waiting",
+            inputSlot: {
+              source: "predecessor_files",
+              status: slotStatus,
+              expectedFiles: expectedFiles as never,
+            },
+          },
+        }),
+      );
+      mount();
+      expect(await screen.findByText(label)).toBeVisible();
+      expect(screen.queryByText(/已启动 · 排队中/)).toBeNull();
+    },
+  );
 });
 
 describe("Agent execution confirmation card", () => {

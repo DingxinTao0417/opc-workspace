@@ -11,6 +11,7 @@ import {
   resetRuntimeConnection,
 } from "./client";
 import type { CreateAgentRunOptions } from "../types/models";
+import type { Untyped } from "../test/untyped";
 
 const id = {
   task: "018f0000-0000-7000-8000-00000000c001",
@@ -45,11 +46,11 @@ const wireSource = () => ({
 
 function previewData(
   options: AgentRunRestartOptions = { restart },
-): Record<string, any> {
+): Record<string, Untyped> {
   const output = options.outputContract ?? { type: "text" };
   const extended =
     !!options.rework || !!options.inputFiles?.length || output.type !== "text";
-  const current: Record<string, any> = {
+  const current: Record<string, Untyped> = {
     task: {
       id: id.task,
       title: "当前任务",
@@ -163,7 +164,7 @@ function previewData(
   };
 }
 
-function runData(): Record<string, any> {
+function runData(): Record<string, Untyped> {
   return {
     id: id.run,
     task_id: id.task,
@@ -406,90 +407,90 @@ describe("native current-facts restart contract", () => {
   it.each([
     [
       "Task",
-      (v: any) => {
+      (v: Untyped) => {
         v.task_id = id.source;
       },
     ],
     [
       "version",
-      (v: any) => {
+      (v: Untyped) => {
         v.task_version++;
       },
     ],
     [
       "fingerprint",
-      (v: any) => {
+      (v: Untyped) => {
         v.fingerprint = "A".repeat(64);
       },
     ],
     [
       "unknown envelope",
-      (v: any) => {
+      (v: Untyped) => {
         v.secret = "hidden";
       },
     ],
     [
       "active source",
-      (v: any) => {
+      (v: Untyped) => {
         v.source_run.status = "running";
       },
     ],
     [
       "pending source",
-      (v: any) => {
+      (v: Untyped) => {
         v.source_run.output_delivery_status = "pending";
       },
     ],
     [
       "submitted source",
-      (v: any) => {
+      (v: Untyped) => {
         v.source_run.status = "succeeded";
         v.source_run.output_delivery_status = "submitted";
       },
     ],
     [
       "source body",
-      (v: any) => {
+      (v: Untyped) => {
         v.source_run.result_text = "must not be accepted";
       },
     ],
     [
       "unfrozen historical source",
-      (v: any) => {
+      (v: Untyped) => {
         v.source_run.task_version = 0;
       },
     ],
     [
       "source/current mismatch",
-      (v: any) => {
+      (v: Untyped) => {
         v.current_start.restart.model = "different source model";
       },
     ],
     [
       "current Provider",
-      (v: any) => {
+      (v: Untyped) => {
         v.current_start.provider.id = id.oldProvider;
       },
     ],
     [
       "current Task",
-      (v: any) => {
+      (v: Untyped) => {
         v.current_start.task.id = id.source;
       },
     ],
     [
       "unknown input",
-      (v: any) => {
+      (v: Untyped) => {
         v.current_start.input_snapshot_json = "private";
       },
     ],
     [
       "endpoint disclosure",
-      (v: any) => {
+      (v: Untyped) => {
         v.current_start.provider.base_url = "private";
       },
     ],
-  ] as [string, (value: any) => void][])(
+  ] as [string, (value: Untyped) => void][])(
     "rejects mismatched/private response %s",
     async (_name, mutate) => {
       const value = previewData();

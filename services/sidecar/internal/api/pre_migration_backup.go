@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 // CreatePreMigrationBackup creates the same fully verified SQLite and
@@ -26,23 +28,23 @@ func CreatePreMigrationBackup(db *gorm.DB, options Options, targetSchema int) (s
 	if options.Now == nil {
 		options.Now = time.Now
 	}
-	artifacts, err := openWorkspaceArtifactStore(db, options.ArtifactDir, false)
+	artifacts, err := filestore.OpenWorkspaceArtifactStore(db, options.ArtifactDir, false)
 	if err != nil {
 		return "", fmt.Errorf("open controlled files for pre-migration backup: %w", err)
 	}
 	backups, err := newBackupStore(options.BackupDir, options.DatabasePath, artifacts)
 	if err != nil {
-		return "", errors.Join(err, artifacts.close())
+		return "", errors.Join(err, artifacts.Close())
 	}
 	note := fmt.Sprintf("自动迁移前备份：schema v%d → v%d", options.SchemaVersion, targetSchema)
 	if err := backups.requireCreateCapacity(db, options, 0); err != nil {
-		return "", errors.Join(fmt.Errorf("verify pre-migration backup capacity: %w", err), artifacts.close())
+		return "", errors.Join(fmt.Errorf("verify pre-migration backup capacity: %w", err), artifacts.Close())
 	}
 	summary, err := backups.create(db, options, note, "", sha256Hex([]byte(note)))
 	if err != nil {
-		return "", errors.Join(fmt.Errorf("create verified pre-migration backup: %w", err), artifacts.close())
+		return "", errors.Join(fmt.Errorf("create verified pre-migration backup: %w", err), artifacts.Close())
 	}
-	if err := artifacts.close(); err != nil {
+	if err := artifacts.Close(); err != nil {
 		return "", fmt.Errorf("release controlled files after pre-migration backup: %w", err)
 	}
 	return summary.ID, nil

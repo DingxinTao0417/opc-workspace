@@ -13,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 const maxScheduledBackupRetention = 365
@@ -352,12 +354,12 @@ func removeBackupPackageSafely(root, id string) error {
 		if err := os.Rename(packagePath, deletingPath); err != nil {
 			return err
 		}
-		if err := syncArtifactDirectory(root); err != nil {
+		if err := filestore.SyncArtifactDirectory(root); err != nil {
 			return err
 		}
 	}
 	if err := os.RemoveAll(deletingPath); err != nil {
 		return err
 	}
-	return syncArtifactDirectory(root)
+	return filestore.SyncArtifactDirectory(root)
 }

@@ -58,7 +58,7 @@ func TestAgentRunOutputRecoveryJoinsOuterDecisionTransaction(t *testing.T) {
 				if err = f.Service.persistPendingAgentRunOutput(run.ID, body, completedAt); err != nil {
 					t.Fatal(err)
 				}
-				before, err := os.ReadDir(f.Artifacts.objectsDir)
+				before, err := os.ReadDir(f.Artifacts.ObjectsDir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,7 +104,7 @@ func TestAgentRunOutputRecoveryJoinsOuterDecisionTransaction(t *testing.T) {
 				assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM workflow_events WHERE action='agent_run_output_submitted' AND agent_run_id=?", 0, run.ID)
 				assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM recovery_decision_guard", 0)
 				assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM tasks WHERE id=? AND version=? AND status=?", 1, f.Task.ID, f.Task.Version, f.Task.Status)
-				after, err := os.ReadDir(f.Artifacts.objectsDir)
+				after, err := os.ReadDir(f.Artifacts.ObjectsDir)
 				if err != nil || len(after) != len(before) {
 					t.Fatalf("orphan file: before=%d after=%d err=%v", len(before), len(after), err)
 				}

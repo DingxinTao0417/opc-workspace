@@ -121,14 +121,15 @@ export function InboxTaskOrchestrationModal({
     [actorsQuery.data],
   );
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
     if (!open) return;
     setPolicy("all_required_tasks_done");
     setTasks([newDraft(1, "", defaultProjectId)]);
     setNextId(2);
     setValidationError(null);
-    mutation.reset();
-  }, [defaultProjectId, item.id, open]);
+    resetMutation();
+  }, [defaultProjectId, item.id, open, resetMutation]);
 
   useEffect(() => {
     const owner = actors.find((actor) => actor.type === "owner");

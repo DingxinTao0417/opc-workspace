@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 )
 
@@ -125,11 +126,11 @@ func PrepareStartupRestore(cfg PrepareStartupRestoreConfig) (ScheduledRestoreRes
 	}
 	defer func() { _ = store.Close() }()
 
-	artifacts, err := openWorkspaceArtifactStore(store.DB, cfg.ArtifactDir, true)
+	artifacts, err := filestore.OpenWorkspaceArtifactStore(store.DB, cfg.ArtifactDir, true)
 	if err != nil {
 		return ScheduledRestoreResult{}, fmt.Errorf("open Artifact store: %w", err)
 	}
-	defer func() { _ = artifacts.close() }()
+	defer func() { _ = artifacts.Close() }()
 
 	backups, err := newBackupStore(cfg.BackupDir, cfg.DatabasePath, artifacts)
 	if err != nil {
@@ -234,7 +235,7 @@ func (a *API) scheduleRestorePackage(id string) (scheduledRestoreResult, error) 
 	).Row().Scan(&currentDatabaseID, &currentStoreID); err != nil {
 		return scheduledRestoreResult{}, errors.New("the current workspace identity could not be read")
 	}
-	if manifest.DatabaseID != currentDatabaseID || manifest.ArtifactStoreID != currentStoreID || currentStoreID != a.artifactStore.storeID {
+	if manifest.DatabaseID != currentDatabaseID || manifest.ArtifactStoreID != currentStoreID || currentStoreID != a.artifactStore.StoreID {
 		return scheduledRestoreResult{}, errors.New("the backup belongs to a different workspace or Artifact store")
 	}
 	if _, err := runBackupRestoreDrill(a.backupStore, packagePath, manifest, a.options.SchemaVersion); err != nil {

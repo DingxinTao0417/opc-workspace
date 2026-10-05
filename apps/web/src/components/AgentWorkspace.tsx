@@ -264,7 +264,6 @@ export function AgentWorkspace() {
       void open(compatibilityTab, compatibilityRequestMode);
     }
     // Compatibility requests from the floating status card/command entry points.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compatibilityTab, compatibilityRequestMode, compatibilityRequest]);
   useEffect(() => {
     const request = workspacePanelsRequest;
@@ -288,7 +287,7 @@ export function AgentWorkspace() {
     })();
     // Requests are immutable and individually consumed; re-mounts compare the
     // persistent handledLayoutRequest marker to avoid replaying old UI actions.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the request id; see above
   }, [workspacePanelsRequest?.id]);
   useEffect(() => {
     if (!isDesktopRuntime()) return;

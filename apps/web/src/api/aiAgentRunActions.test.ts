@@ -455,6 +455,235 @@ describe("Agent execution action contract", () => {
     ).toThrow();
   });
 
+  describe("a start that takes the predecessor's accepted files", () => {
+    const predecessor = "018f0000-0000-7000-8000-0000000002b1";
+    const project = "018f0000-0000-7000-8000-0000000002b2";
+    const expectedFiles = [
+      { name: "research.md", mime: "text/markdown" },
+      { name: "notes.md", mime: "text/markdown" },
+    ];
+    const slot = {
+      source: "predecessor_files",
+      expected_files: expectedFiles,
+      max_files: 4,
+      max_file_bytes: 65_536,
+      max_total_bytes: 131_072,
+    };
+    const gate = {
+      predecessor_run_id: predecessor,
+      predecessor_task_id: "018f0000-0000-7000-8000-0000000002b3",
+      predecessor_task_title: "完成调研",
+      predecessor_attempt: 1,
+      require: "accepted",
+      within_hours: 4,
+      input_slot: slot,
+    };
+    const waiting = () => ({
+      ...pending,
+      action: {
+        ...pending.action,
+        changes: {
+          ...pending.action.changes,
+          start_after_run_id: predecessor,
+          start_after: "accepted",
+          start_within_hours: 4,
+          start_after_input: "predecessor_files",
+        } as Record<string, unknown>,
+      },
+      preview: {
+        ...pending.preview,
+        agent_run_start: {
+          ...pending.preview.agent_run_start,
+          task: {
+            ...pending.preview.agent_run_start.task,
+            project_id: project,
+          },
+          execution_contract_version: 7,
+          output_contract: { type: "text" },
+          input_files_leave_device: true,
+          file_limits: {
+            max_files: 4,
+            max_file_bytes: 65_536,
+            max_total_bytes: 131_072,
+            max_result_bytes: 65_536,
+          },
+          start_gate: structuredClone(gate) as Record<string, unknown>,
+        } as Record<string, unknown>,
+      },
+    });
+
+    it("parses the declaration and keeps it bound to the proposal", () => {
+      expect(
+        parseAiActionProposal(waiting()).preview.agent_run_start?.start_gate
+          ?.input_slot,
+      ).toEqual(slot);
+    });
+
+    it.each([
+      ["another contract version", { execution_contract_version: 6 }, {}, {}],
+      [
+        "a submitted condition",
+        { start_gate: { ...gate, require: "submitted" } },
+        { start_after: "submitted" },
+        {},
+      ],
+      ["an unknown source", {}, { start_after_input: "predecessor_text" }, {}],
+      [
+        "a slot source that is not files",
+        {
+          start_gate: { ...gate, input_slot: { ...slot, source: "text" } },
+        },
+        {},
+        {},
+      ],
+      [
+        "no announced file",
+        {
+          start_gate: { ...gate, input_slot: { ...slot, expected_files: [] } },
+        },
+        {},
+        {},
+      ],
+      [
+        "a repeated file name",
+        {
+          start_gate: {
+            ...gate,
+            input_slot: {
+              ...slot,
+              expected_files: [expectedFiles[0], expectedFiles[0]],
+            },
+          },
+        },
+        {},
+        {},
+      ],
+      [
+        "a larger limit",
+        { start_gate: { ...gate, input_slot: { ...slot, max_files: 5 } } },
+        {},
+        {},
+      ],
+      ["selected files as well", {}, { input_file_candidate_ids: [] }, {}],
+      [
+        "a remote Provider without the off-device disclosure",
+        { input_files_leave_device: false },
+        {},
+        {},
+      ],
+      ["a Task outside any Project", {}, {}, { project_id: null }],
+    ])("rejects %s", (_name, start, changes, task) => {
+      const value = waiting();
+      Object.assign(value.action.changes, changes);
+      Object.assign(value.preview.agent_run_start, start);
+      value.preview.agent_run_start.task = {
+        ...(value.preview.agent_run_start.task as Record<string, unknown>),
+        ...task,
+      };
+      expect(() => parseAiActionProposal(value)).toThrow();
+    });
+
+    it("rejects the declaration on a start that does not ask for it", () => {
+      const value = waiting();
+      delete value.action.changes.start_after_input;
+      expect(() => parseAiActionProposal(value)).toThrow();
+      // And a v7 contract with no declaration at all.
+      const bare = waiting();
+      delete bare.action.changes.start_after_input;
+      delete (
+        bare.preview.agent_run_start.start_gate as Record<string, unknown>
+      ).input_slot;
+      expect(() => parseAiActionProposal(bare)).toThrow();
+    });
+
+    it("requires the confirmed receipt to carry the same slot", () => {
+      const receipt = {
+        id: id.run,
+        task_id: id.task,
+        status: "queued",
+        attempt: 2,
+        provider_id: id.provider,
+        model: "test-model",
+        output_delivery_status: "not_ready",
+        output_delivery_error_code: null,
+        submission_id: null,
+        artifact_id: null,
+        start_gate: {
+          predecessor_run_id: predecessor,
+          require: "accepted",
+          expires_at: "2026-09-18T14:01:00Z",
+          status: "waiting",
+          input_slot: {
+            source: "predecessor_files",
+            status: "awaiting_predecessor",
+            expected_files: expectedFiles,
+          },
+        },
+      };
+      const confirmed = {
+        ...waiting(),
+        status: "confirmed",
+        can_confirm: false,
+        result_id: id.run,
+        result_version: 1,
+        route: `/tasks/${id.task}?agent_run=${id.run}`,
+        decided_at: "2026-09-18T10:01:00Z",
+        agent_run_result: receipt,
+      };
+      expect(
+        parseAiActionProposal(confirmed).agent_run_result?.start_gate
+          ?.input_slot?.status,
+      ).toBe("awaiting_predecessor");
+      const { input_slot: _slot, ...gateWithoutSlot } = receipt.start_gate;
+      expect(() =>
+        parseAiActionProposal({
+          ...confirmed,
+          agent_run_result: { ...receipt, start_gate: gateWithoutSlot },
+        }),
+      ).toThrow();
+      // A waiting gate cannot already be bound.
+      expect(() =>
+        parseAiActionProposal({
+          ...confirmed,
+          agent_run_result: {
+            ...receipt,
+            start_gate: {
+              ...receipt.start_gate,
+              input_slot: { ...receipt.start_gate.input_slot, status: "bound" },
+            },
+          },
+        }),
+      ).toThrow();
+    });
+
+    it("sends its own consent, separate from starting the Run", async () => {
+      const proposal = parseAiActionProposal(waiting());
+      mocks.request.mockResolvedValue({ data: waiting() });
+      await decideAiAgentRun(
+        proposal,
+        "confirm",
+        true,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+      );
+      expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({
+        fingerprint: proposal.fingerprint,
+        decision: "confirm",
+        confirm_agent_execution: true,
+        confirm_agent_predecessor_input: true,
+      });
+      mocks.request.mockClear();
+      await decideAiAgentRun(proposal, "reject", false);
+      expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({
+        fingerprint: proposal.fingerprint,
+        decision: "reject",
+      });
+    });
+  });
+
   it("accepts only safe v1 no-op file fields on already-persisted cards", () => {
     for (const noOp of [
       { input_file_candidate_ids: [] },

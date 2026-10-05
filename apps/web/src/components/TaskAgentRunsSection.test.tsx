@@ -1253,6 +1253,25 @@ describe("TaskAgentRunsSection", () => {
     expect(retryAgentRun).not.toHaveBeenCalled();
   });
 
+  it("offers a failed v7 Run a new execution and never a retry", async () => {
+    vi.mocked(getTaskAgentRuns).mockResolvedValue([
+      {
+        ...run,
+        executionContractVersion: 7,
+        status: "failed",
+        resultText: null,
+        resultBytes: null,
+        outputDeliveryStatus: "not_ready",
+      },
+    ]);
+    renderSection();
+    expect(
+      await screen.findByRole("button", { name: "按当前事实重新执行" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(retryAgentRun).not.toHaveBeenCalled();
+  });
+
   it("refreshes a failed actor lookup and then enables execution", async () => {
     vi.mocked(getAllActors).mockRejectedValue(new Error("offline"));
     renderSection();

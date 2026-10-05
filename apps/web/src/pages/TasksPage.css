@@ -1,0 +1,42 @@
+.tag-manager-create {
+  margin-bottom: 12px;
+}
+
+.tag-manager-list {
+  display: flex;
+  max-height: 360px;
+  flex-direction: column;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.tag-manager-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 34px 34px auto auto;
+  gap: 7px;
+  align-items: center;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tag-manager-row:last-child {
+  border-bottom: 0;
+}
+
+.tag-manager-icon {
+  width: 34px;
+  padding: 0;
+}
+
+.tag-manager-error {
+  grid-column: 1 / -1;
+  color: var(--danger-text);
+  font-size: 9px;
+}
+
+@media (max-width: 680px) {
+  .tag-manager-row {
+    grid-template-columns: minmax(0, 1fr) 34px 34px;
+  }
+}

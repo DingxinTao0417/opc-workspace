@@ -1,3 +1,4 @@
+import "./AiAssistantPage.css";
 import {
   AlertCircle,
   ArrowUp,
@@ -109,7 +110,6 @@ import type {
   AiCitation,
   AiCitationStatus,
   AiMessage,
-  AiSession,
   AiWorkspaceGrant,
   AiWorkspaceScope,
   AiKnowledgeContextSource,
@@ -273,12 +273,15 @@ export function AiAssistantPage() {
     mutationFn: (query: string) => searchKnowledge(query, [], 8),
   });
 
-  const readyProviders =
-    providers.data?.filter(
-      (provider) =>
-        provider.status === "ready" &&
-        (provider.kind === "local" || provider.has_key),
-    ) ?? [];
+  const readyProviders = useMemo(
+    () =>
+      providers.data?.filter(
+        (provider) =>
+          provider.status === "ready" &&
+          (provider.kind === "local" || provider.has_key),
+      ) ?? [],
+    [providers.data],
+  );
   const activeProvider =
     readyProviders.find((provider) => provider.id === selectedProviderId) ??
     null;
@@ -474,7 +477,7 @@ export function AiAssistantPage() {
     // conversation, even if another session is still generating/recovering.
     if (useAiChatStore.getState().activeSessionId) return;
     if (chat.streaming?.sessionId) setActiveSessionId(chat.streaming.sessionId);
-  }, [chat.streaming?.sessionId, chat.streamOwner]);
+  }, [chat.streaming?.sessionId, chat.streamOwner, setActiveSessionId]);
 
   useEffect(() => {
     if (activeSessionId)
@@ -501,7 +504,7 @@ export function AiAssistantPage() {
     if (!activeSessionId && sessions.data && sessions.data.length > 0) {
       setActiveSessionId(sessions.data[0].id);
     }
-  }, [activeSessionId, sessions.data]);
+  }, [activeSessionId, sessions.data, setActiveSessionId]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -679,20 +682,21 @@ export function AiAssistantPage() {
   }
   const prepareContinuationRef = useRef(prepareContinuation);
   prepareContinuationRef.current = prepareContinuation;
+  const providerReady = !!activeProvider;
   const continuePlan = useMemo(
     () =>
-      !activeProvider || chat.isStreaming
+      !providerReady || chat.isStreaming
         ? undefined
         : (prompt: string, scopes: AiWorkspaceScope[]) => {
             if (continuationSourceRef.current.epoch !== continuationEpoch)
               return;
             prepareContinuationRef.current(prompt, scopes);
           },
-    [continuationEpoch, !!activeProvider, chat.isStreaming],
+    [continuationEpoch, providerReady, chat.isStreaming],
   );
   const continueActions = useMemo(
     () =>
-      !activeProvider || chat.isStreaming
+      !providerReady || chat.isStreaming
         ? undefined
         : (request: AiActionContinuation) => {
             if (
@@ -710,7 +714,7 @@ export function AiAssistantPage() {
               request.recheckProposalId,
             );
           },
-    [continuationEpoch, activeSessionId, !!activeProvider, chat.isStreaming],
+    [continuationEpoch, activeSessionId, providerReady, chat.isStreaming],
   );
 
   async function sendMessage() {
@@ -1074,7 +1078,6 @@ export function AiAssistantPage() {
                       }
                       citations={message.citations ?? []}
                       generationId={message.generation_id ?? null}
-                      createdAt={message.created_at}
                       origin={message.origin}
                       key={message.id}
                       messageId={message.id}
@@ -1119,7 +1122,6 @@ export function AiAssistantPage() {
                     sessionId={turn.sessionId}
                     content={turn.text}
                     reasoning={turn.reasoning}
-                    createdAt={turn.createdAt}
                     status={turn.status}
                     attachedTaskId={null}
                     attachedTaskTitle={null}
@@ -2334,7 +2336,6 @@ function AiMessageBlock({
   citations,
   generationId,
   reasoning,
-  createdAt,
   status,
   attachedTaskId,
   attachedTaskTitle,
@@ -2354,7 +2355,6 @@ function AiMessageBlock({
   citations: AiCitation[];
   generationId: string | null;
   reasoning: string | null;
-  createdAt: string;
   status: AiMessage["status"] | "incomplete";
   attachedTaskId: string | null;
   attachedTaskTitle: string | null;

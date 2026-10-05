@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 type restoreDiagnostics struct {
@@ -71,7 +73,7 @@ func inspectRestoreDiagnostics(root string, startup StartupRestoreResult) (resto
 		path := filepath.Join(root, name)
 		info, infoErr := os.Lstat(path)
 		parsed, parseErr := uuid.Parse(operationID)
-		if infoErr != nil || parseErr != nil || parsed.String() != operationID || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || requireSafeDirectory(path) != nil {
+		if infoErr != nil || parseErr != nil || parsed.String() != operationID || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || filestore.RequireSafeDirectory(path) != nil {
 			result.InvalidEntryCount++
 			continue
 		}

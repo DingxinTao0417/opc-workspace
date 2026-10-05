@@ -38,11 +38,12 @@ export function TaskPlanModal({
   const mutation = useSetTaskPlannedDate();
   const [plannedDate, setPlannedDate] = useState("");
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
     if (!open || !task) return;
     setPlannedDate(task.plannedDate ?? "");
-    mutation.reset();
-  }, [open, task]);
+    resetMutation();
+  }, [open, task, resetMutation]);
 
   const close = () => {
     if (!mutation.isPending) onClose();

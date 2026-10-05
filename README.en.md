@@ -1,29 +1,3 @@
-AI child-generation spawn and follow-up now share a bounded scheduler within each Sidecar: at most 8 active Provider attempts and 32 accepted queued jobs. Single and batch confirmations reserve capacity before their database transaction commits; a full queue leaves the proposal pending. The UI explains the rejection and preserves batch selection for a manual retry. Provider-busy backoff releases its slot, and unaccepted work is never replayed after restart. This does not limit ordinary chats or Task Agent Runs and is not a cross-instance quota; no schema, scope, API or Runner-wire change. See [H5-G41](docs/modules/ai-assistant.md#子智能体全局并发准入与有界排队h5-g412026-09-23部分实现).
-
-Current source uses schema079 for complete next-message permission recommendations. Actionable Task Agent Run metadata is also projected into the unified Agent Inbox without output bodies, snapshots, files/paths, or Provider-private fields. Existing databases pass the backup gate before migration; request history is preserved. Update frontend and Sidecar together; use the pre-upgrade backup for rollback. See [AI module](docs/modules/ai-assistant.md).
-
-A completed child generation with pending approvals does not satisfy the parent plan or resume it automatically. The parent receipt and sidebar expose only the count; the human must review the child proposals.
-
-The parent agent and Agent workspace now show the count of still-actionable child approval proposals. A completed generation can still need human review in the child conversation. Only the count crosses the parent boundary; approval contents and authority do not. Any actionable child proposal blocks follow-up dispatch. See the [H5-G30 boundary](docs/modules/ai-assistant.md#子任务待审批阻塞可见性h5-g302026-09-22).
-
-The parent agent can now use `workspace_agent_children(view=wait)` to wait up to 15 seconds for a confirmed child to reach a terminal state. It returns status metadata only; a committed child terminal fact also wakes the existing plan coordinator to re-read durable evidence. Waiting does not read the reply, renew permissions or start another model turn. See the [H5-G28 boundary](docs/modules/ai-assistant.md#子任务终态等待与计划唤醒h5-g282026-09-22).
-
-The parent agent can now list its confirmed child conversations with a freshly authorized `workspace_agent_children` tool. Results default to the latest confirmed parent-authorized follow-up reply, or the initial delegation reply when no follow-up exists; `generation_id` can select an exact parent-authorized generation. The current turn must cover that reply's scopes, Provider/configuration version, and knowledge-source versions. Nonzero-offset pages require both `generation_id` and the full-reply digest. Child-initiated generations and file-bound permissions do not cross the parent boundary. Replies are untrusted model text, not execution or acceptance receipts, and are never merged automatically. API v1/schema079 and Runner wire are unchanged. See the [H5-G27 boundary](docs/modules/ai-assistant.md#父智能体读取子任务进展与首轮回复h5-g272026-09-22) and [H5-G29 pagination boundary](docs/modules/ai-assistant.md#子任务回复分页的一致性绑定h5-g292026-09-22).
-
-The Agent workspace now shows a metadata-only list of child conversations for the current saved chat, with live generation status and manual parent/child navigation. Unavailable sessions are not linked. This is separate from the Task Agent Run ledger; navigation itself does not send messages, interrupt children, merge results or inherit permissions. Bounded waiting is described in G28 above. API v1 adds a read-only route; schema079 and Runner wire are unchanged. See the [H5-G26 boundary](docs/modules/ai-assistant.md#父子会话的只读导航与状态h5-g262026-09-22).
-
-The AI assistant now supports one level of human-approved child conversation delegation and a narrowly scoped, separately confirmed follow-up to an existing child. A saved parent freezes the complete instruction, an explicit subset of this turn's permissions, and the Provider; separate human confirmation is required before each generation. Each parent is limited to four pending or confirmed delegations. There is no recursive delegation, inherited permission, automatic merge, or replay of an uncertain startup after restart. General child messaging/interrupts and real Provider/desktop acceptance remain pending. API v1/schema079 are unchanged. See the [H5-G25 contract](docs/modules/ai-assistant.md#受确认的有界子智能体委派h5-g252026-09-22).
-
-Bound Windows desktop builds can now initiate a per-use, single-file operation from the trusted main WebView. AI replacement consumes an exact in-memory snapshot; v2 recovery consumes a one-shot review ticket. An independent Win32 window reviews the complete direction before `runas` requests UAC for that operation. The desktop launches only the same-directory helper bound to that build and accepts only a canonical receipt for the same operation ID over a one-shot pipe. Ordinary development builds have no embedded helper digest and stay read-only; CLI, model, Sidecar, and browser child WebViews cannot invoke the operation directly. Only one file operation may be active, cancellation is bound to its root and operation ID, explicit cancellation consumes the review, and every other launch/transport/receipt failure is treated as unknown and non-retryable. Internally the `prepared/materialized/recovery_intent/started/outcome` chain and v2 recovery intent still protect no-overwrite replacement and recovery. Stage data is unencrypted and its checksum is not tamper authentication. This deterministic slice did not invoke real UAC; cross-privilege SACL, installer, power-loss, and manual-recovery acceptance remain pending. See [product entry and boundaries](docs/modules/desktop-platform.md#绑定发行构建的按次单文件操作入口2026-09-22部分实现).
-
-The single-file helper reserves attempts in `appLocalDataDir/workspace-file-attempts-v1` after native review. Up to 64 metadata-only records bind operation/review IDs, a request digest and registration time. They prevent cooperative cross-process retries and are never automatically deleted. They are not backups, execution receipts, or tamper-proof history; the bound product entry cannot bypass them. See [attempt journal boundaries](docs/modules/desktop-platform.md#辅助端持久尝试占用内部实现非执行回执).
-
-The isolated Windows helper at `apps/file-security-helper` has no Tauri/WebView/model dependencies. Ordinary `--status` and `--verify-build` calls do not expose file operations; the only operation form is the six-field `--review-v1` bootstrap produced by the bound desktop, with no path or content in argv. `pnpm build:file-helper` produces an unbound standalone helper. On Windows, `pnpm build:desktop` generates a fresh in-memory signing key, embeds only its public key in the helper, embeds the helper digest in the desktop, then signs and verifies the final artifact pair. The private key is never exported, saved, or passed to child processes. `opc-desktop-build-binding.json` contains only a version, digests, and signature. Ordinary development remains unbound. This build-local signature is not Windows publisher signing or user approval. Installer/UAC and cross-privilege acceptance remain pending. See [build pair verification](docs/modules/desktop-platform.md#构建本地签名配对与只读自检部分实现).
-
-Local recovery inspection reads experimental v1 and v2 records from separate `appLocalDataDir/workspace-file-recovery-v1` and `workspace-file-recovery-v2` directories (64 entries each). Missing directories are not created; records are not migrated or automatically deleted. They contain unencrypted content and paths outside business database backups. The v1 in-place recovery path remains permanently disabled. A bound desktop may consume an exact v2 review ticket only through independent native review and per-use UAC; ordinary development builds stay read-only. See the [v2 contract](docs/modules/desktop-platform.md#版本-2-替换记录只读集成).
-
-Project-file AI editing remains constrained. Windows file previews connect to main-chat analysis through an exact snapshot, full disclosure review, provider/session-bound approval, and manual send. The model can propose one complete replacement bound to that baseline. After the user reviews the full diff, a bound desktop can enter independent native review and per-use UAC; it cannot autonomously traverse directories or bypass confirmation. The unsafe v1 in-place writer remains permanently disabled, while the product path uses the helper's no-overwrite object replacement. Real installer/UAC/SACL/power-loss acceptance remains pending, and ordinary development builds are read-only. Raw attachments and review cards are not saved to chat history; replies may quote them. See [current implementation boundary](docs/modules/ai-assistant.md#文件写入安全门禁与只读恢复检查2026-09-22部分实现).
-
 <div align="center">
   <img src="./apps/desktop/src-tauri/icon.svg" width="112" height="112" alt="opc-workspace icon" />
 
@@ -51,6 +25,208 @@ Project-file AI editing remains constrained. Windows file previews connect to ma
     <img alt="Active development" src="https://img.shields.io/badge/status-active%20development-F59E0B" />
   </p>
 </div>
+
+> [!IMPORTANT]
+> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v79. Migration 079 expands complete next-message permission recommendations behind the existing backup gate and preserves historical requests and decisions. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant and local knowledge base are developed on independent tracks outside the v0.1–v0.4 product scope.
+
+## Why opc-workspace
+
+Independent developers, freelancers, creators, and consultants often jump between task apps, project spreadsheets, client records, timers, and content calendars. opc-workspace brings those frequent workflows into a lightweight desktop app while keeping business data on the user's own computer by default.
+
+- **Local-first:** core workflows work offline, with business facts stored in local SQLite and controlled file storage.
+- **One workspace:** tasks, projects, clients, inbox items, focus sessions, and reminders share the same business facts.
+- **Auditable workflows:** assignments, state changes, deliverables, reviews, and rework remain traceable.
+- **No development runtime for end users:** production installers bundle the React frontend and Go Sidecar; users do not need Docker, Node.js, Go, or Rust.
+- **Keyboard-friendly:** the app includes a command palette, quick task creation, and desktop global shortcuts.
+
+`OPC` stands for **one-person company**. The product is designed around the realities of running a business alone, rather than being a smaller copy of team collaboration software.
+
+## Core capabilities
+
+| Area                 | Current capabilities                                                                                                                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Today workspace      | Brings together overdue, scheduled, later-this-week, and unscheduled tasks with planning and quick actions                                                                                     |
+| Tasks and review     | Six-state lifecycle, parent-child tasks, assignments, deliverable submission, manual review, and rework                                                                                        |
+| Projects and clients | Project progress and artifacts, attachments, client records, activities, follow-ups, and related views                                                                                         |
+| Inbox and reminders  | Local triage, snoozing, task splitting, completion progress, and recurring reminders                                                                                                           |
+| Focus and time       | Recoverable focus sessions, task binding, history, trends, project breakdowns, and tag breakdowns                                                                                              |
+| Search and commands  | Local search across tasks, projects, clients, and active inbox items, with direct navigation                                                                                                   |
+| Data safety          | Versioned migrations, controlled files, full backup and restore, business JSON/ZIP transfer, and diagnostics                                                                                   |
+| Local automation     | Only code-owned, constrained presets; no arbitrary Shell, SQL, HTTP, or external-send actions                                                                                                  |
+| AI assistant         | Remote/local providers, streaming chat, memory, explicit context, local-only quality evaluation with trends/categories/failure reasons, content-free run steps/usage, and confirmed task cards |
+
+### Current boundaries
+
+- The v0.1 manual workflow is still being refined. See the [module status overview](./docs/modules/README.md) for the current implementation baseline.
+- Income, expenses, and invoices remain assigned to v0.4, but local ledger/statistics, invoice transitions with atomic payment recording, PDF and due-Inbox foundations are implemented in source. Full acceptance and enhancements remain pending. AI H3-E1 adds independent read-only finance consent and exact report/detail navigation; H3-E2 adds separately authorized, human-approved ledger create/update/void with full local previews and shared transactions. H3-E3 adds independent invoice consent, draft create/update and sent/viewed/paid/overdue proposals with human approval, atomic payment bookkeeping and due-Inbox resolution. Overdue events retain existing enabled automation rules; approval is not evidence of automation success. H3-E4A adds separately confirmed permanent deletion of unlinked drafts and their controlled PDF, with shared transactions, file compensation and retained approval/audit history. H3-E4B adds separately approved local PDF generation/replacement, shared file compensation, immutable artifact receipts and human-only exact downloads. Replaced/missing/corrupt files cannot silently substitute a later PDF. H3-E5 adds independently authorized CSV proposals with explicit filters, human approval, and exact-content downloads. Changed data requires a fresh proposal; CSV bodies are neither retained nor sent to the model. Full acceptance remains pending; no stage performs external payments or automatic sending. See the [finance contract](./docs/modules/finance-invoices.md).
+- The independent AI assistant track includes remote/local providers, streamed replies and reasoning, a constrained harness with scope-filtered on-demand domain guidance, three memory tools, segmented summary/fact compaction, explicit business/knowledge context, answer-level citations, and content-free run steps, usage summaries and UTC trends. Core safety rules stay resident while the read-only `workspace_guide` supplies detailed domain rules and the large proposal schema as needed; the fixed maximum-scope initial request test keeps at least 32 KiB of headroom. Dataset v4 provides an 8-case smoke suite, four 6-case topic suites and a 24-case full suite. Quality evidence is grouped by provider configuration, dataset and suite; bounded fact rules, Wilson intervals and human decisions are review aids, not general semantic proofs or release approval. Missing usage stays unknown and no costs are estimated.
+- On Windows desktop, the embedded Chromium workspace can explicitly stage a bounded snapshot of visible page text and up to 20 visible HTTP(S) links for review. Query/fragment components are removed and credential-bearing links are rejected. Nothing is sent until the user stages the reviewed handoff and manually sends it; the page does not grant browser control or cause automatic navigation.
+- [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) adds run-wide budgets and explicit stream outcomes, application-wide stop/recovery controls, atomic task confirmation, durable memory decisions and progress through oversized history turns. Model network waits do not hold the global maintenance lock. Tasks require explicit user confirmation and domain validation; non-persistent chat text and tool memory remain in runtime memory. Automated checks use isolated fixtures; real model quality, native WebView input methods and real crash scenarios still require platform testing. The local knowledge base text baseline and PDF page-level extraction (ADR-026) are delivered; authorized references and source change detection remain pending.
+- The local Agent area ships a Windows builtin executor, task/run UI, bounded text/file/files submission, manual review and recoverable output registration. H5-F6 allows explicitly selected accepted predecessor Task files within the same project, with independent consent, one-message AI `agent_project_files`, frozen v6 provenance and deletion protection. Both OpenAI and Anthropic support v6; old v1–v4 keep their OpenAI meaning and v5 keeps the remote Anthropic/8192-token contract. Existing file budgets are shared, not increased. Single-request execution requires a complete response; exact retry/restart revalidate identity and input, and success is not task acceptance. H5-F7 lets a user take one submitted file output into the right-side Files workspace, choose an existing target, review the full replacement diff, and—only in a bound release build—continue through the per-use native review/UAC/helper chain. It never writes automatically or accepts the Task submission. H5-F8 connects exact Run/Submission receipts in the plan and right-side Run detail to the existing manual review page with return-to-chat context; it still never auto-accepts or continues execution. ADR-030/ADR-033 let a person confirm a Run that starts once a predecessor Run's output is accepted, and optionally declare that the predecessor's accepted file outputs become its inputs; those files must then be reviewed and confirmed again in the Run drawer before the Run starts or anything is sent (execution contract v7, see [predecessor file inputs](./docs/modules/local-agents.md#以前置-run-已验收的文件产出为输入2026-10-04adr-033)). See the [execution contract](./docs/modules/local-agents.md#同项目已验收文件交接h5-f62026-09-21), [H5-F7 file bridge](./docs/modules/local-agents.md#已提交文件产出到项目文件的人工桥接h5-f72026-09-22), and [H5-F8 review roundtrip](./docs/modules/local-agents.md#计划执行与人工验收的精确往返h5-f82026-09-22). Real-provider/native acceptance, macOS/Linux, external runners, autonomous scheduling without per-Run confirmation and arbitrary tools remain pending.
+- There is no cloud sync, multi-user account system, online workflow, or remote message sending.
+
+## Quick start
+
+### Development requirements
+
+| Dependency                | Version                                            |
+| ------------------------- | -------------------------------------------------- |
+| Node.js                   | 20.19–26                                           |
+| pnpm                      | 10+ (the repository pins `pnpm@11.21.0`)           |
+| Go                        | 1.24+                                              |
+| Rust                      | 1.85+, installed through rustup/cargo              |
+| Tauri system dependencies | Tauri 2 prerequisites for Windows, macOS, or Linux |
+
+Windows desktop builds also require the WebView2 Runtime, Visual Studio C++ Build Tools, and the Windows SDK.
+
+Two environment prerequisites that are easy to miss:
+
+- **Line endings**: `.gitattributes` pins the repository to LF, and Prettier, gofmt, and rustfmt all check against LF. An older Windows working tree checked out with CRLF makes `pnpm format:check` fail across the board; check it out again.
+- **Temporary directory**: the Go and Rust safe-directory tests reject paths that pass through a directory junction or a symbolic link. If `TEMP` / `TMP` is redirected to such a path, point them at a real directory before running `pnpm check:go` or `pnpm check:rust`; `pnpm check:temp`, which both gates run first, reports this case on Windows.
+
+### Install dependencies
+
+```powershell
+pnpm install
+go -C services/sidecar mod download
+```
+
+### Start the desktop development environment
+
+```powershell
+pnpm dev
+```
+
+The unified development script starts the Go Sidecar, Vite, and Tauri. Development data is kept under the ignored `.local/dev-data/` directory, separate from production application data, and no demo business records are created automatically. Set the `OPC_DEV_DATA_DIR` environment variable to use another data directory.
+
+Volume data for the large-data acceptance items comes from `node scripts/seed-volume.mjs --profile 1k` (or `10k`): the script starts a Sidecar on its own directory under `.local/perf-data/`, writes a fixed number of clients, projects, tasks, and inbox items through the public API, prints a latency baseline for the list endpoints, and keeps the directory so that `OPC_DEV_DATA_DIR` can open it. It is not part of any gate, and its numbers do not replace real-device acceptance.
+
+To run only the Sidecar and browser frontend:
+
+```powershell
+pnpm dev:web
+```
+
+## Build and verify
+
+```powershell
+# Build the Sidecar, web frontend, and desktop installers for this platform
+pnpm build
+
+# Source gate that does not require a Rust linker
+pnpm check:source
+
+# Full gate, including Cargo check and Rust tests
+pnpm check
+
+# List which checks the unpushed changes on this branch call for (runs nothing)
+pnpm check:impact
+```
+
+Layer-specific commands are `pnpm check:web`, `pnpm check:go`, `pnpm check:rust`, `pnpm check:docs`, and `pnpm check:scripts`:
+
+| Command              | What it runs                                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `pnpm format:check`  | Prettier, gofmt, and rustfmt formatting checks                                                                |
+| `pnpm check:docs`    | Local Markdown links and heading anchors                                                                      |
+| `pnpm check:scripts` | Unit tests for the `check:impact` lane selection and the temporary-directory preflight                        |
+| `pnpm check:web`     | TypeScript type check, ESLint (`pnpm lint:web`), Vitest, production build                                     |
+| `pnpm check:go`      | Temporary-directory preflight, gofmt, `go test`, `go vet`, Sidecar build                                      |
+| `pnpm check:rust`    | Temporary-directory preflight, desktop build script tests, `cargo check`, `cargo test` for desktop and helper |
+
+`pnpm check:source` runs the first five in order and `pnpm check` adds `check:rust`. Every gate is deterministic: no real model, no secrets, no public network.
+
+The frontend ESLint rules live in `apps/web/eslint.config.js`. Disabling a rule must state the reason on the same line (`// eslint-disable-next-line rule -- reason`) or the gate fails. Contract tests that need an untyped fixture use `Untyped` from `apps/web/src/test/untyped.ts`; production code may not import it.
+
+**Continuous integration**: `.github/workflows/check.yml` runs the same `pnpm check` on a GitHub Windows runner for pushes to `main` and for every pull request, and can be started manually. Real-provider, installer signing and installation, and cross-platform acceptance are not part of it and still have to be done separately.
+
+The current Windows x64 build produces:
+
+```text
+apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/opc-workspace_0.1.1_x64-setup.exe
+apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/opc-workspace_0.1.1_x64_zh-CN.msi
+```
+
+The NSIS installer currently includes Simplified Chinese only, and the MSI uses `zh-CN`. Both are unsigned local test packages. Cross-platform releases must still be built on the relevant platform or CI runner and pass clean-system install, launch, upgrade, uninstall, and data-retention acceptance checks.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    Desktop["Tauri 2 / Rust<br/>Window · tray · shortcuts · Sidecar lifecycle"]
+    Web["React 18 / TypeScript / WebView<br/>Pages · forms · query cache · UI state"]
+    API["Go Sidecar / API v1<br/>Domain validation · transactions · scheduling · backups"]
+    Data["Local fact layer<br/>SQLite v75 · controlled files · FTS5 · backups · logs"]
+
+    Desktop --> Web
+    Web -->|"Bearer HTTP · dynamic 127.0.0.1 port"| API
+    API --> Data
+```
+
+In production, Tauri starts and supervises the bundled Go Sidecar. The Sidecar listens only on loopback and uses a fresh random session token for each process generation. The React UI accesses local business capabilities through the versioned `/api/v1`. Databases, attachments, backups, and logs live in the operating system's application data directories, separate from the installation directory.
+
+For the complete module and security model, see the [functional architecture](./docs/functional-architecture.md), the [local Agent Runtime ADR](./docs/adr/003-local-agent-runtime-security.md), and the [AI assistant module documentation](./docs/modules/ai-assistant.md). These documents are currently maintained in Chinese.
+
+## Repository layout
+
+```text
+apps/
+  web/                    React 18 + TypeScript + Vite + Tailwind CSS v4
+  desktop/                Tauri 2 shell and Rust lifecycle management
+services/
+  sidecar/                Go HTTP API, SQLite, migrations, controlled files, and tests
+scripts/                  Development orchestration, builds, formatting, and doc checks
+docs/                     PRD, architecture, ADRs, and module documentation (Chinese)
+.local/dev-data/          Local development data (Git-ignored)
+```
+
+## Recent deliveries on the independent AI track
+
+The notes below describe capabilities recently delivered on the independent AI assistant and local Agent track, kept in their original order (newest first). They used to sit above the title; the per-slice record lives in the [changelog](./docs/changelog.md) (Chinese), and the code, tests, and [module documents](./docs/modules/README.md) remain the source of truth for current behaviour.
+
+Main and side chats now show live model/tool/self-check/citation progress with matching recovery sequences. Interrupted steps remain unconfirmed until recovery; progress contains no tool arguments or results and never approves business actions. See the [run progress contract](./docs/adr/012-ai-run-steps-and-local-metrics.md).
+
+The assistant can also read built-in automation rules and bounded Run metadata, and propose enable/disable or limited configuration changes for human approval. Enabling or updating an enabled rule requires separate consent to continuing local effects. Disabling does not revoke captured event deliveries; failed Runs can be retried after separate human consent to the complete original snapshot. Approval and actual attempt success/failure are distinguished; business snapshots are never sent to the model. Exact rule/Run links now open the shared local inspector, preserve attempt navigation, and return to the source chat without executing an action. See the [automation contract](./docs/modules/automation.md).
+
+Verified AI citations open exact versioned chunks locally and retain PDF page coordinates. Per-message knowledge consent now allows the model to search/read 1–20 explicitly selected versioned sources. Only successfully delivered full chunks become citation evidence; search excerpts do not. Results follow the selected provider's transfer boundary, and dynamic tool bodies are not separately saved as context snapshots. Ephemeral citation cards and short-lived in-memory metadata recovery are now supported without persisting text or citations; partial replies are never promoted to complete. Real-model acceptance remains pending; see the [knowledge contract](./docs/modules/knowledge-base.md).
+
+The agent can query explicitly authorized workspace records and propose task or project creation, edits, scheduling, and lifecycle commands. Each change requires a separate human confirmation, bound to an immutable proposal and the target version. Completing a project with unfinished tasks requires an additional human checkbox and never completes those tasks. Customer association requires the clients scope; contract amounts are not exposed. Schema 072 stores approvals for durable replay; ephemeral chats cannot propose these actions. Inbox creation, edits, read/snooze/unsnooze/resolve/dismiss/reopen also use this approval flow, preserving version, time and required-task guards without changing related tasks or source records. File and terminal permissions are not inherited. Inbox task linking, required-flag edits and soft unlinking are now supported, binding both Inbox/Task versions and the displayed progress/automatic-resolution effect. Active and historical relations are available through an explicitly authorized paginated read tool. Atomic Inbox splitting now supports 1–20 drafts with hierarchy, tags, scheduling and initial assignments, reviewed as one batch. Authorized actor/tag lookup exposes only IDs, labels, types and versions; confirmation rejects changed references and rolls back the whole batch on failure. Person assignments are local records, and agent assignments do not start execution. Local Reminder lookup and human-approved creation, rescheduling, recurrence edits and cancellation now reuse the native transactional commands, including timezone, version and terminal-state checks. Cancellation stops future occurrences without deleting history; it does not add external notifications. Other business operations and multi-step orchestration remain in progress.
+
+Authorized Focus queries read real sessions and terminal history. Human-approved start, pause/resume, stop/cancel and crash recovery share native domain transactions. Starting a new local cycle and including an uncertain gap require separate consent. Stop credits confirm-time work without completing the task; cancel/interrupt do not credit it. Live Session identity coordinates local cycles; historical approvals never replay them. Authorized period-report tools now share the Focus page's completed-only aggregates for explicit local dates (1–93 days) and IANA timezone, with bounded dimension pages and current project/tag attribution. Direct local-break control, report-filter deep links and real-model acceptance remain pending.
+
+The assistant can query global execution status and propose stopping one execution for separate human confirmation. Cancellation intent is durable, does not cancel the Task, and is displayed separately from a stopped executor. Automatic retries and autonomous multi-step execution are not implied.
+
+Failed, cancelled or interrupted Agent Runs can now be proposed for a human-approved retry using the original execution identity and input/output contract. File-enabled retries require fresh message-level authorization and input-file consent. Approval creates a new linked attempt, never replaces the original record, and does not rerun results awaiting delivery. See the [AI assistant contract](docs/modules/ai-assistant.md).
+
+Main and side conversations can also propose recovery of pending output delivery. Separate human consent processes the stored result locally without another model call; approval and delivery share one transaction. The actual outcome is submitted or retained, never automatic acceptance or Task completion, and replay does not duplicate output.
+
+The independent AI track supports explicitly authorized, paginated Client activity/followup reads and human-confirmed followup creation, edits, cancellation, skipping, completion with an optional next plan, and atomic rescheduling. Completion additionally requires the human to attest to the actual result and timestamp. Commands share native transactions and refresh Client/Inbox facts; they never contact customers or invent communication. Manual note/meeting creation, edits and reasoned soft deletion are now human-approved; deletion requires separate consent and preserves history and attachments. Exact record navigation remains pending. See the [followup contract](./docs/modules/client-followups.md).
+
+AI child-generation spawn and follow-up now share a bounded scheduler within each Sidecar: at most 8 active Provider attempts and 32 accepted queued jobs. Single and batch confirmations reserve capacity before their database transaction commits; a full queue leaves the proposal pending. The UI explains the rejection and preserves batch selection for a manual retry. Provider-busy backoff releases its slot, and unaccepted work is never replayed after restart. This does not limit ordinary chats or Task Agent Runs and is not a cross-instance quota; no schema, scope, API or Runner-wire change. See [H5-G41](docs/modules/ai-assistant.md#子智能体全局并发准入与有界排队h5-g412026-09-23部分实现).
+
+Current source uses schema079 for complete next-message permission recommendations. Actionable Task Agent Run metadata is also projected into the unified Agent Inbox without output bodies, snapshots, files/paths, or Provider-private fields. Existing databases pass the backup gate before migration; request history is preserved. Update frontend and Sidecar together; use the pre-upgrade backup for rollback. See [AI module](docs/modules/ai-assistant.md).
+
+A completed child generation with pending approvals does not satisfy the parent plan or resume it automatically. The parent receipt and sidebar expose only the count; the human must review the child proposals.
+
+The parent agent and Agent workspace now show the count of still-actionable child approval proposals. A completed generation can still need human review in the child conversation. Only the count crosses the parent boundary; approval contents and authority do not. Any actionable child proposal blocks follow-up dispatch. See the [H5-G30 boundary](docs/modules/ai-assistant.md#子任务待审批阻塞可见性h5-g302026-09-22).
+
+The parent agent can now use `workspace_agent_children(view=wait)` to wait up to 15 seconds for a confirmed child to reach a terminal state. It returns status metadata only; a committed child terminal fact also wakes the existing plan coordinator to re-read durable evidence. Waiting does not read the reply, renew permissions or start another model turn. See the [H5-G28 boundary](docs/modules/ai-assistant.md#子任务终态等待与计划唤醒h5-g282026-09-22).
+
+The parent agent can now list its confirmed child conversations with a freshly authorized `workspace_agent_children` tool. Results default to the latest confirmed parent-authorized follow-up reply, or the initial delegation reply when no follow-up exists; `generation_id` can select an exact parent-authorized generation. The current turn must cover that reply's scopes, Provider/configuration version, and knowledge-source versions. Nonzero-offset pages require both `generation_id` and the full-reply digest. Child-initiated generations and file-bound permissions do not cross the parent boundary. Replies are untrusted model text, not execution or acceptance receipts, and are never merged automatically. API v1/schema079 and Runner wire are unchanged. See the [H5-G27 boundary](docs/modules/ai-assistant.md#父智能体读取子任务进展与首轮回复h5-g272026-09-22) and [H5-G29 pagination boundary](docs/modules/ai-assistant.md#子任务回复分页的一致性绑定h5-g292026-09-22).
+
+The Agent workspace now shows a metadata-only list of child conversations for the current saved chat, with live generation status and manual parent/child navigation. Unavailable sessions are not linked. This is separate from the Task Agent Run ledger; navigation itself does not send messages, interrupt children, merge results or inherit permissions. Bounded waiting is described in G28 above. API v1 adds a read-only route; schema079 and Runner wire are unchanged. See the [H5-G26 boundary](docs/modules/ai-assistant.md#父子会话的只读导航与状态h5-g262026-09-22).
+
+The AI assistant now supports one level of human-approved child conversation delegation and a narrowly scoped, separately confirmed follow-up to an existing child. A saved parent freezes the complete instruction, an explicit subset of this turn's permissions, and the Provider; separate human confirmation is required before each generation. Each parent is limited to four pending or confirmed delegations. There is no recursive delegation, inherited permission, automatic merge, or replay of an uncertain startup after restart. General child messaging/interrupts and real Provider/desktop acceptance remain pending. API v1/schema079 are unchanged. See the [H5-G25 contract](docs/modules/ai-assistant.md#受确认的有界子智能体委派h5-g252026-09-22).
+
+Bound Windows desktop builds can now initiate a per-use, single-file operation from the trusted main WebView. AI replacement consumes an exact in-memory snapshot; v2 recovery consumes a one-shot review ticket. An independent Win32 window reviews the complete direction before `runas` requests UAC for that operation. The desktop launches only the same-directory helper bound to that build and accepts only a canonical receipt for the same operation ID over a one-shot pipe. Ordinary development builds have no embedded helper digest and stay read-only; CLI, model, Sidecar, and browser child WebViews cannot invoke the operation directly. Only one file operation may be active, cancellation is bound to its root and operation ID, explicit cancellation consumes the review, and every other launch/transport/receipt failure is treated as unknown and non-retryable. Internally the `prepared/materialized/recovery_intent/started/outcome` chain and v2 recovery intent still protect no-overwrite replacement and recovery. Stage data is unencrypted and its checksum is not tamper authentication. This deterministic slice did not invoke real UAC; cross-privilege SACL, installer, power-loss, and manual-recovery acceptance remain pending. See [product entry and boundaries](docs/modules/desktop-platform.md#绑定发行构建的按次单文件操作入口2026-09-22部分实现).
+
+The single-file helper reserves attempts in `appLocalDataDir/workspace-file-attempts-v1` after native review. Up to 64 metadata-only records bind operation/review IDs, a request digest and registration time. They prevent cooperative cross-process retries and are never automatically deleted. They are not backups, execution receipts, or tamper-proof history; the bound product entry cannot bypass them. See [attempt journal boundaries](docs/modules/desktop-platform.md#辅助端持久尝试占用内部实现非执行回执).
+
+The isolated Windows helper at `apps/file-security-helper` has no Tauri/WebView/model dependencies. Ordinary `--status` and `--verify-build` calls do not expose file operations; the only operation form is the six-field `--review-v1` bootstrap produced by the bound desktop, with no path or content in argv. `pnpm build:file-helper` produces an unbound standalone helper. On Windows, `pnpm build:desktop` generates a fresh in-memory signing key, embeds only its public key in the helper, embeds the helper digest in the desktop, then signs and verifies the final artifact pair. The private key is never exported, saved, or passed to child processes. `opc-desktop-build-binding.json` contains only a version, digests, and signature. Ordinary development remains unbound. This build-local signature is not Windows publisher signing or user approval. Installer/UAC and cross-privilege acceptance remain pending. See [build pair verification](docs/modules/desktop-platform.md#构建本地签名配对与只读自检部分实现).
+
+Local recovery inspection reads experimental v1 and v2 records from separate `appLocalDataDir/workspace-file-recovery-v1` and `workspace-file-recovery-v2` directories (64 entries each). Missing directories are not created; records are not migrated or automatically deleted. They contain unencrypted content and paths outside business database backups. The v1 in-place recovery path remains permanently disabled. A bound desktop may consume an exact v2 review ticket only through independent native review and per-use UAC; ordinary development builds stay read-only. See the [v2 contract](docs/modules/desktop-platform.md#版本-2-替换记录只读集成).
+
+Project-file AI editing remains constrained. Windows file previews connect to main-chat analysis through an exact snapshot, full disclosure review, provider/session-bound approval, and manual send. The model can propose one complete replacement bound to that baseline. After the user reviews the full diff, a bound desktop can enter independent native review and per-use UAC; it cannot autonomously traverse directories or bypass confirmation. The unsafe v1 in-place writer remains permanently disabled, while the product path uses the helper's no-overwrite object replacement. Real installer/UAC/SACL/power-loss acceptance remains pending, and ordinary development builds are read-only. Raw attachments and review cards are not saved to chat history; replies may quote them. See [current implementation boundary](docs/modules/ai-assistant.md#文件写入安全门禁与只读恢复检查2026-09-22部分实现).
 
 Agent-requested Chromium tab actions now show a local receipt only after the user confirms and the native command returns without error. That is not proof that a page finished loading. A user may separately bring a fixed, content-free result back into chat; failures keep the original request available. See [browser action receipts](docs/modules/ai-assistant.md#浏览器动作的本地执行回执与显式交接h5-e352026-09-21).
 
@@ -112,9 +288,6 @@ H2-S adds permanent deletion of archived roadmap milestones to the guarded appro
 
 H2-T adds Content Item preparation-Task relationships to the same approval path. The model must first read exact Content Item and Task IDs and versions, then separately propose linking, changing the required flag, or unlinking. The local card shows the Task name, status, version, and relationship transition; confirmation revalidates the complete preview and reuses the native relationship transaction. This capability changes only the relationship and Content Item version—it never creates, assigns, completes, cancels, or deletes the Task.
 
-> [!IMPORTANT]
-> opc-workspace is under active development. The current baseline is app v0.1.1, API v1, and SQLite schema v79. Migration 079 expands complete next-message permission recommendations behind the existing backup gate and preserves historical requests and decisions. Windows x64 can produce unsigned local test installers, but the project has not yet passed the release, signing, and cross-platform acceptance gates required for a production release. The AI assistant and local knowledge base are developed on independent tracks outside the v0.1–v0.4 product scope.
-
 H5-G1 adds separately authorized, bounded background plan continuation: three generations/30 minutes by default, waiting for approvals, execution and output registration. Automatic turns have explicit provenance and do not take over manual drafts. Stop, no progress, drift, failure and budget limits end the lease; restarting requires fresh consent by default. H5-G12 adds a separate opt-in to resume only an idle waiting lease after an ordinary service restart, subject to the original time/turn limits and fresh fact checks. An in-flight request or backup restore always interrupts the lease; unknown requests are never replayed. Business actions remain individually approved, and stopping continuation does not cancel approved Agent Runs. API v1/schema078 and startup commands are unchanged. See the [continuation contract](docs/modules/ai-assistant.md#等待中自动续办的显式跨重启恢复h5-g122026-09-21).
 
 H5-G8–G10 lets a bounded background turn leave a recoverable request for a missing workspace scope, then pauses while that request awaits human review. It does not consume the request or spend another model turn while waiting. In main or side chat, the person can explicitly click “Stop automatic continuation and review access”; only a confirmed stop prepares the draft and one-message permission panel. They must still review the grant and send the message themselves; the background turn cannot grant itself access or approve business actions. API v1/schema078 is unchanged. See the [permission handoff](docs/modules/ai-assistant.md#权限请求与自动续办的一步式人工交接h5-g102026-09-21).
@@ -145,156 +318,13 @@ H4-I/H4-R–X/H4-AF–AQ continue to expand human-triggered native-detail handof
 
 H5-C update (2026-09-20): this supersedes the earlier H5-C single-file wording above; bounded multi-file output is now delivered. No-input text remains execution contract v1; controlled input or one file remains v2; v3 freezes 2–4 safe UTF-8 output names/MIME values and order. The model returns only an ordered JSON array of bodies, never paths or file metadata. Delivery creates one human-review Submission with multiple Artifacts; the legacy Run artifact ID points to the first Artifact and the event records all IDs. Pending recovery revalidates the original v3 payload, and the task UI previews/downloads files by their frozen names. This does not add filesystem, Shell, browser, Git, terminal, autonomous scheduling, or multi-step execution authority.
 
-## Why opc-workspace
-
-Independent developers, freelancers, creators, and consultants often jump between task apps, project spreadsheets, client records, timers, and content calendars. opc-workspace brings those frequent workflows into a lightweight desktop app while keeping business data on the user's own computer by default.
-
-- **Local-first:** core workflows work offline, with business facts stored in local SQLite and controlled file storage.
-- **One workspace:** tasks, projects, clients, inbox items, focus sessions, and reminders share the same business facts.
-- **Auditable workflows:** assignments, state changes, deliverables, reviews, and rework remain traceable.
-- **No development runtime for end users:** production installers bundle the React frontend and Go Sidecar; users do not need Docker, Node.js, Go, or Rust.
-- **Keyboard-friendly:** the app includes a command palette, quick task creation, and desktop global shortcuts.
-
-`OPC` stands for **one-person company**. The product is designed around the realities of running a business alone, rather than being a smaller copy of team collaboration software.
-
-## Core capabilities
-
-| Area                 | Current capabilities                                                                                                                                                                           |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Today workspace      | Brings together overdue, scheduled, later-this-week, and unscheduled tasks with planning and quick actions                                                                                     |
-| Tasks and review     | Six-state lifecycle, parent-child tasks, assignments, deliverable submission, manual review, and rework                                                                                        |
-| Projects and clients | Project progress and artifacts, attachments, client records, activities, follow-ups, and related views                                                                                         |
-| Inbox and reminders  | Local triage, snoozing, task splitting, completion progress, and recurring reminders                                                                                                           |
-| Focus and time       | Recoverable focus sessions, task binding, history, trends, project breakdowns, and tag breakdowns                                                                                              |
-| Search and commands  | Local search across tasks, projects, clients, and active inbox items, with direct navigation                                                                                                   |
-| Data safety          | Versioned migrations, controlled files, full backup and restore, business JSON/ZIP transfer, and diagnostics                                                                                   |
-| Local automation     | Only code-owned, constrained presets; no arbitrary Shell, SQL, HTTP, or external-send actions                                                                                                  |
-| AI assistant         | Remote/local providers, streaming chat, memory, explicit context, local-only quality evaluation with trends/categories/failure reasons, content-free run steps/usage, and confirmed task cards |
-
-### Current boundaries
-
-Main and side chats now show live model/tool/self-check/citation progress with matching recovery sequences. Interrupted steps remain unconfirmed until recovery; progress contains no tool arguments or results and never approves business actions. See the [run progress contract](./docs/adr/012-ai-run-steps-and-local-metrics.md).
-
-- The v0.1 manual workflow is still being refined. See the [module status overview](./docs/modules/README.md) for the current implementation baseline.
-- Income, expenses, and invoices remain assigned to v0.4, but local ledger/statistics, invoice transitions with atomic payment recording, PDF and due-Inbox foundations are implemented in source. Full acceptance and enhancements remain pending. AI H3-E1 adds independent read-only finance consent and exact report/detail navigation; H3-E2 adds separately authorized, human-approved ledger create/update/void with full local previews and shared transactions. H3-E3 adds independent invoice consent, draft create/update and sent/viewed/paid/overdue proposals with human approval, atomic payment bookkeeping and due-Inbox resolution. Overdue events retain existing enabled automation rules; approval is not evidence of automation success. H3-E4A adds separately confirmed permanent deletion of unlinked drafts and their controlled PDF, with shared transactions, file compensation and retained approval/audit history. H3-E4B adds separately approved local PDF generation/replacement, shared file compensation, immutable artifact receipts and human-only exact downloads. Replaced/missing/corrupt files cannot silently substitute a later PDF. H3-E5 adds independently authorized CSV proposals with explicit filters, human approval, and exact-content downloads. Changed data requires a fresh proposal; CSV bodies are neither retained nor sent to the model. Full acceptance remains pending; no stage performs external payments or automatic sending. See the [finance contract](./docs/modules/finance-invoices.md).
-- The independent AI assistant track includes remote/local providers, streamed replies and reasoning, a constrained harness with scope-filtered on-demand domain guidance, three memory tools, segmented summary/fact compaction, explicit business/knowledge context, answer-level citations, and content-free run steps, usage summaries and UTC trends. Core safety rules stay resident while the read-only `workspace_guide` supplies detailed domain rules and the large proposal schema as needed; the fixed maximum-scope initial request test keeps at least 32 KiB of headroom. Dataset v4 provides an 8-case smoke suite, four 6-case topic suites and a 24-case full suite. Quality evidence is grouped by provider configuration, dataset and suite; bounded fact rules, Wilson intervals and human decisions are review aids, not general semantic proofs or release approval. Missing usage stays unknown and no costs are estimated.
-- On Windows desktop, the embedded Chromium workspace can explicitly stage a bounded snapshot of visible page text and up to 20 visible HTTP(S) links for review. Query/fragment components are removed and credential-bearing links are rejected. Nothing is sent until the user stages the reviewed handoff and manually sends it; the page does not grant browser control or cause automatic navigation.
-- [ADR-025](./docs/adr/025-ai-reliability-confirmations-and-evaluation-identity.md) adds run-wide budgets and explicit stream outcomes, application-wide stop/recovery controls, atomic task confirmation, durable memory decisions and progress through oversized history turns. Model network waits do not hold the global maintenance lock. Tasks require explicit user confirmation and domain validation; non-persistent chat text and tool memory remain in runtime memory. Automated checks use isolated fixtures; real model quality, native WebView input methods and real crash scenarios still require platform testing. The local knowledge base text baseline and PDF page-level extraction (ADR-026) are delivered; authorized references and source change detection remain pending.
-- The local Agent area ships a Windows builtin executor, task/run UI, bounded text/file/files submission, manual review and recoverable output registration. H5-F6 allows explicitly selected accepted predecessor Task files within the same project, with independent consent, one-message AI `agent_project_files`, frozen v6 provenance and deletion protection. Both OpenAI and Anthropic support v6; old v1–v4 keep their OpenAI meaning and v5 keeps the remote Anthropic/8192-token contract. Existing file budgets are shared, not increased. Single-request execution requires a complete response; exact retry/restart revalidate identity and input, and success is not task acceptance. H5-F7 lets a user take one submitted file output into the right-side Files workspace, choose an existing target, review the full replacement diff, and—only in a bound release build—continue through the per-use native review/UAC/helper chain. It never writes automatically or accepts the Task submission. H5-F8 connects exact Run/Submission receipts in the plan and right-side Run detail to the existing manual review page with return-to-chat context; it still never auto-accepts or continues execution. See the [execution contract](./docs/modules/local-agents.md#同项目已验收文件交接h5-f62026-09-21), [H5-F7 file bridge](./docs/modules/local-agents.md#已提交文件产出到项目文件的人工桥接h5-f72026-09-22), and [H5-F8 review roundtrip](./docs/modules/local-agents.md#计划执行与人工验收的精确往返h5-f82026-09-22). Real-provider/native acceptance, macOS/Linux, external runners, autonomous scheduling and arbitrary tools remain pending.
-- There is no cloud sync, multi-user account system, online workflow, or remote message sending.
-
-The assistant can also read built-in automation rules and bounded Run metadata, and propose enable/disable or limited configuration changes for human approval. Enabling or updating an enabled rule requires separate consent to continuing local effects. Disabling does not revoke captured event deliveries; failed Runs can be retried after separate human consent to the complete original snapshot. Approval and actual attempt success/failure are distinguished; business snapshots are never sent to the model. Exact rule/Run links now open the shared local inspector, preserve attempt navigation, and return to the source chat without executing an action. See the [automation contract](./docs/modules/automation.md).
-
-Verified AI citations open exact versioned chunks locally and retain PDF page coordinates. Per-message knowledge consent now allows the model to search/read 1–20 explicitly selected versioned sources. Only successfully delivered full chunks become citation evidence; search excerpts do not. Results follow the selected provider's transfer boundary, and dynamic tool bodies are not separately saved as context snapshots. Ephemeral citation cards and short-lived in-memory metadata recovery are now supported without persisting text or citations; partial replies are never promoted to complete. Real-model acceptance remains pending; see the [knowledge contract](./docs/modules/knowledge-base.md).
-
-## Quick start
-
-### Development requirements
-
-| Dependency                | Version                                            |
-| ------------------------- | -------------------------------------------------- |
-| Node.js                   | 20.19–26                                           |
-| pnpm                      | 10+ (the repository pins `pnpm@11.21.0`)           |
-| Go                        | 1.22+                                              |
-| Rust                      | 1.85+, installed through rustup/cargo              |
-| Tauri system dependencies | Tauri 2 prerequisites for Windows, macOS, or Linux |
-
-Windows desktop builds also require the WebView2 Runtime, Visual Studio C++ Build Tools, and the Windows SDK.
-
-### Install dependencies
-
-```powershell
-pnpm install
-go -C services/sidecar mod download
-```
-
-### Start the desktop development environment
-
-```powershell
-pnpm dev
-```
-
-The unified development script starts the Go Sidecar, Vite, and Tauri. Development data is kept under the ignored `.local/dev-data/` directory, separate from production application data, and no demo business records are created automatically.
-
-To run only the Sidecar and browser frontend:
-
-```powershell
-pnpm dev:web
-```
-
-## Build and verify
-
-```powershell
-# Build the Sidecar, web frontend, and desktop installers for this platform
-pnpm build
-
-# Source gate that does not require a Rust linker
-pnpm check:source
-
-# Full gate, including Cargo check and Rust tests
-pnpm check
-```
-
-Layer-specific commands include `pnpm check:web`, `pnpm check:go`, `pnpm check:rust`, and `pnpm check:docs`.
-
-The current Windows x64 build produces:
-
-```text
-apps/desktop/src-tauri/target/release/bundle/nsis/opc-workspace_0.1.1_x64-setup.exe
-apps/desktop/src-tauri/target/release/bundle/msi/opc-workspace_0.1.1_x64_zh-CN.msi
-```
-
-The NSIS installer currently includes Simplified Chinese only, and the MSI uses `zh-CN`. Both are unsigned local test packages. Cross-platform releases must still be built on the relevant platform or CI runner and pass clean-system install, launch, upgrade, uninstall, and data-retention acceptance checks.
-
-## Architecture
-
-```mermaid
-flowchart TB
-    Desktop["Tauri 2 / Rust<br/>Window · tray · shortcuts · Sidecar lifecycle"]
-    Web["React 18 / TypeScript / WebView<br/>Pages · forms · query cache · UI state"]
-    API["Go Sidecar / API v1<br/>Domain validation · transactions · scheduling · backups"]
-    Data["Local fact layer<br/>SQLite v75 · controlled files · FTS5 · backups · logs"]
-
-    Desktop --> Web
-    Web -->|"Bearer HTTP · dynamic 127.0.0.1 port"| API
-    API --> Data
-```
-
-In production, Tauri starts and supervises the bundled Go Sidecar. The Sidecar listens only on loopback and uses a fresh random session token for each process generation. The React UI accesses local business capabilities through the versioned `/api/v1`. Databases, attachments, backups, and logs live in the operating system's application data directories, separate from the installation directory.
-
-The agent can query explicitly authorized workspace records and propose task or project creation, edits, scheduling, and lifecycle commands. Each change requires a separate human confirmation, bound to an immutable proposal and the target version. Completing a project with unfinished tasks requires an additional human checkbox and never completes those tasks. Customer association requires the clients scope; contract amounts are not exposed. Schema 072 stores approvals for durable replay; ephemeral chats cannot propose these actions. Inbox creation, edits, read/snooze/unsnooze/resolve/dismiss/reopen also use this approval flow, preserving version, time and required-task guards without changing related tasks or source records. File and terminal permissions are not inherited. Inbox task linking, required-flag edits and soft unlinking are now supported, binding both Inbox/Task versions and the displayed progress/automatic-resolution effect. Active and historical relations are available through an explicitly authorized paginated read tool. Atomic Inbox splitting now supports 1–20 drafts with hierarchy, tags, scheduling and initial assignments, reviewed as one batch. Authorized actor/tag lookup exposes only IDs, labels, types and versions; confirmation rejects changed references and rolls back the whole batch on failure. Person assignments are local records, and agent assignments do not start execution. Local Reminder lookup and human-approved creation, rescheduling, recurrence edits and cancellation now reuse the native transactional commands, including timezone, version and terminal-state checks. Cancellation stops future occurrences without deleting history; it does not add external notifications. Other business operations and multi-step orchestration remain in progress.
-
-Authorized Focus queries read real sessions and terminal history. Human-approved start, pause/resume, stop/cancel and crash recovery share native domain transactions. Starting a new local cycle and including an uncertain gap require separate consent. Stop credits confirm-time work without completing the task; cancel/interrupt do not credit it. Live Session identity coordinates local cycles; historical approvals never replay them. Authorized period-report tools now share the Focus page's completed-only aggregates for explicit local dates (1–93 days) and IANA timezone, with bounded dimension pages and current project/tag attribution. Direct local-break control, report-filter deep links and real-model acceptance remain pending.
-
-For the complete module and security model, see the [functional architecture](./docs/functional-architecture.md), the [local Agent Runtime ADR](./docs/adr/003-local-agent-runtime-security.md), and the [AI assistant module documentation](./docs/modules/ai-assistant.md). These documents are currently maintained in Chinese.
-
-The assistant can query global execution status and propose stopping one execution for separate human confirmation. Cancellation intent is durable, does not cancel the Task, and is displayed separately from a stopped executor. Automatic retries and autonomous multi-step execution are not implied.
-
-Failed, cancelled or interrupted Agent Runs can now be proposed for a human-approved retry using the original execution identity and input/output contract. File-enabled retries require fresh message-level authorization and input-file consent. Approval creates a new linked attempt, never replaces the original record, and does not rerun results awaiting delivery. See the [AI assistant contract](docs/modules/ai-assistant.md).
-
-Main and side conversations can also propose recovery of pending output delivery. Separate human consent processes the stored result locally without another model call; approval and delivery share one transaction. The actual outcome is submitted or retained, never automatic acceptance or Task completion, and replay does not duplicate output.
-
-## Repository layout
-
-The independent AI track supports explicitly authorized, paginated Client activity/followup reads and human-confirmed followup creation, edits, cancellation, skipping, completion with an optional next plan, and atomic rescheduling. Completion additionally requires the human to attest to the actual result and timestamp. Commands share native transactions and refresh Client/Inbox facts; they never contact customers or invent communication. Manual note/meeting creation, edits and reasoned soft deletion are now human-approved; deletion requires separate consent and preserves history and attachments. Exact record navigation remains pending. See the [followup contract](./docs/modules/client-followups.md).
-
-```text
-apps/
-  web/                    React 18 + TypeScript + Vite + Tailwind CSS v4
-  desktop/                Tauri 2 shell and Rust lifecycle management
-services/
-  sidecar/                Go HTTP API, SQLite, migrations, controlled files, and tests
-scripts/                  Development orchestration, builds, formatting, and doc checks
-docs/                     PRD, architecture, ADRs, and module documentation (Chinese)
-.local/dev-data/          Local development data (Git-ignored)
-```
-
 ## Documentation
 
 - [Documentation center](./docs/README.md): reading order, source-of-truth rules, and module status overview (Chinese).
-- [Product requirements, PRD v10.12](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
+- [Product requirements (PRD)](./docs/opc-workspace-PRD.md): product scope, version boundaries, and implementation tracking (Chinese).
 - [Functional architecture](./docs/functional-architecture.md): module relationships, event flows, and fact ownership (Chinese).
 - [Module documentation](./docs/modules/README.md): workflows, APIs, states, dependencies, and acceptance criteria (Chinese).
+- [Changelog](./docs/changelog.md): what each version and implementation slice delivered at the time (Chinese).
 - [Sidecar developer documentation](./services/sidecar/README.md): local API, data, and backend verification notes.
 - [中文 README](./README.md): the Simplified Chinese project overview.
 

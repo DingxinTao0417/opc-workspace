@@ -1,3 +1,4 @@
+import "./ContentCalendarPage.css";
 import {
   AlertTriangle,
   Archive,
@@ -5,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Edit3,
   Plus,
   Send,
   Trash2,
@@ -929,6 +929,7 @@ export function ContentCalendarPage() {
   const [monthKey, setMonthKey] = useState(currentMonthKey);
   const month = useMemo(
     () => localDateFromKey(`${monthKey}-01`),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the local month boundary moves with the time zone
     [monthKey, timeZone],
   );
   const [creatingMode, setCreatingMode] = useState<ContentCreationMode | null>(
@@ -1019,6 +1020,7 @@ export function ContentCalendarPage() {
       previousCurrentMonthKey.current = currentMonthKey;
     }
   }, [currentMonthKey, monthKey]);
+  const fetchNextPage = query.fetchNextPage;
   useEffect(() => {
     if (
       view === "month" &&
@@ -1027,10 +1029,10 @@ export function ContentCalendarPage() {
       !query.isFetchingNextPage &&
       !query.isFetchNextPageError
     ) {
-      void query.fetchNextPage();
+      void fetchNextPage();
     }
   }, [
-    query.fetchNextPage,
+    fetchNextPage,
     query.hasNextPage,
     query.isFetchNextPageError,
     query.isFetchingNextPage,
@@ -1046,7 +1048,10 @@ export function ContentCalendarPage() {
     }
     return [...unique.values()];
   }, [query.data?.pages]);
-  const items = usingPlaceholderData ? [] : loadedItems;
+  const items = useMemo(
+    () => (usingPlaceholderData ? [] : loadedItems),
+    [loadedItems, usingPlaceholderData],
+  );
   useEffect(() => {
     setSchedulePreviews((current) => {
       let changed = false;

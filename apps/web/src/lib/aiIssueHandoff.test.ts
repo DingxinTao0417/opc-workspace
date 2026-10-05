@@ -393,7 +393,7 @@ describe("AI issue handoff helpers", () => {
   });
 
   it("caps page text, preserves valid JSON, marks truncation and rejects empty or unsafe captures", () => {
-    const text = `😀\\\"<tag>\n${"x".repeat(12 * 1024)}`;
+    const text = `😀\\"<tag>\n${"x".repeat(12 * 1024)}`;
     const handoff = browserPageTextHandoff({
       tabId: "tab",
       url: "https://example.com/",

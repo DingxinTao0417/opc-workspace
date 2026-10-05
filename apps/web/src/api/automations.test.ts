@@ -399,7 +399,7 @@ describe("Automation API contract", () => {
 
   it("serializes preview, update, commands and retry with optimistic locking", async () => {
     const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith("/preview")) {
           return jsonResponse({

@@ -9,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 const deletingBackupPrefix = ".deleting-"
@@ -60,7 +62,7 @@ func safeBackupDeletionPath(path string) (bool, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return false, errors.New("backup deletion target is not a regular directory")
 	}
-	if err := requireSafeDirectory(path); err != nil {
+	if err := filestore.RequireSafeDirectory(path); err != nil {
 		return false, err
 	}
 	err = filepath.WalkDir(path, func(current string, entry os.DirEntry, walkErr error) error {
@@ -71,7 +73,7 @@ func safeBackupDeletionPath(path string) (bool, error) {
 			return errors.New("backup deletion target traverses a symbolic link or reparse point")
 		}
 		if entry.IsDir() {
-			return requireSafeDirectory(current)
+			return filestore.RequireSafeDirectory(current)
 		}
 		info, err := entry.Info()
 		if err != nil {

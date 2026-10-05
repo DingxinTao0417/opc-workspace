@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 func TestBusinessPackageExportIncludesVerifiedControlledFiles(t *testing.T) {
@@ -72,7 +74,7 @@ func TestBusinessPackageExportIncludesVerifiedControlledFiles(t *testing.T) {
 		t.Fatalf("packaged Artifact scope = %#v", exported.ArtifactFiles)
 	}
 	metadata := string(entries["manifest.json"]) + string(entries["business-data.json"])
-	if strings.Contains(metadata, testToken) || strings.Contains(metadata, artifactDir) || strings.Contains(metadata, `:\\`) || strings.Contains(metadata, "/tmp/") || strings.Contains(metadata, artifactStoreMarkerName) {
+	if strings.Contains(metadata, testToken) || strings.Contains(metadata, artifactDir) || strings.Contains(metadata, `:\\`) || strings.Contains(metadata, "/tmp/") || strings.Contains(metadata, filestore.ArtifactStoreMarkerName) {
 		t.Fatal("package metadata leaked runtime secrets or local absolute paths")
 	}
 }

@@ -1,5 +1,28 @@
 # 本地 Agent 执行模块
 
+## 以前置 Run 已验收的文件产出为输入（2026-10-04，ADR-033）
+
+延后启动的 Run 现在可以把前置 Run 的文件产出当作输入，而不必等前置验收后再重新提议一次。完整设计见 [ADR-033](../adr/033-agent-run-predecessor-file-inputs.md)。
+
+**当前已实现**
+
+- **提议**：`agent_run.start` 在门控三字段之外可带 `start_after_input: "predecessor_files"`。只接受 `start_after: "accepted"`、两个任务同属一个非空项目、前置 Run 冻结的输出契约为单文件或多文件；不能与 `input_file_candidate_ids`、返工字段或 `restart_of_run_id` 同用；前置 Run 自己若是仍在等待输入的这类 Run 则拒绝（只传一步）。本条消息须同时具备 `agent_files` 与 `agent_project_files`。
+- **第一次确认**：确认卡在启动条件下增加「延后绑定的输入」，列出前置 Run 按契约将写出的文件名与 MIME、上限（4 个，单个 64 KiB，合计 128 KiB）、所选 Provider 是否离机，并写明文件现在还不存在、之后须再次确认、失败后不能原样重试。除延后启动同意外须另勾“以前置任务验收通过的文件产出作为输入”（`confirm_agent_predecessor_input`），缺失返回 422 `AGENT_PREDECESSOR_INPUT_CONFIRMATION_REQUIRED`。
+- **冻结**：Run 以执行契约 v7 创建为 `queued`。v7 快照是 v6 的字段加 `deferred_inputs{source, predecessor_run_id, expected_files}`，`files` 为空数组；`expected_files` 取自前置 Run 自己的输出契约。Run 行此后不再改变。
+- **等待**：门控的 `agent_run_start_gated` 事件携带 `input_slot`。对账器对这类门控从不放行：前置产出被验收后只核对元数据，产出仍可用则继续等人，不可用则以新原因 `predecessor_output_unavailable` 关闭并取消该 Run。等待人确认不延长截止时间。
+- **第二次确认**：执行抽屉在「以前置产出作为输入」面板里读取 `GET /api/v1/agent-runs/:id/start-gate/inputs`。前置未验收时说明没有可确认的文件；验收后列出每个文件的名称、MIME、大小、SHA-256 与来源任务/批次，以及接收的 Provider 与是否离机。勾选“已逐份核对”和“同意发送给该 Provider”两项后，`POST …/start-gate/inputs/confirm` 带回读取时的 `fingerprint` 与 Provider `version/config_version/kind`。服务端在事务内重新读取、比对指纹、检查 Adapter 仍可执行、按认领时的同一规则复核冻结身份并重读文件字节，然后写入携带 `input_files`、`provider`、`confirmed_by` 的 `agent_run_start_gate_released` 事件，Run 回到普通 FIFO。事件不含正文与路径。
+- **执行**：认领与启动前，Worker 以放行事件中的文件为输入，再次核对声明、Provider 版本与每个文件的 SHA-256；不一致按 `AGENT_RUN_IDENTITY_CHANGED` 失败，不改用其他文件。文件字节与 v6 一样进入内置 Runner 的管道，wire 不变。
+- **之后**：已绑定的文件受删除互锁保护直到 Run 终态；尚未确认的 Run 不占用任何文件。v7 Run 不能原样重试（原生端点返回 409 `AGENT_RUN_NOT_RETRYABLE`，AI 重试提案经同一命令被拒绝），任务详情与右栏不显示「重试」，只提供「按当前事实重新执行」。
+- **展示**：生命周期新增「等待前置产出」和需关注的「待确认输入文件」；关闭原因 `predecessor_output_unavailable` 说明没有发送任何文件。确认卡在确认后显示「已确认 · 等待前置产出」或「已确认 · 待确认输入文件」。
+
+**面板状态**：读取中；前置未验收（只列约定的文件，不提供确认）；读取失败（可「重新读取」，不提供确认）；已关闭；待确认（两项勾选齐全才可确认）；确认被拒（清空勾选并重新读取，说明没有发送任何文件）；已确认（列出被确认的文件与 Provider）。
+
+**同时修正**：`GET /api/v1/tasks/:id/agent-runs` 与 `GET /api/v1/agent-runs/:id` 的响应此前没有写出已计算的 `start_gate`，执行抽屉的「启动条件」因此没有数据；现在两者都携带。这一栏首次真正显示后发现会被单行截断，已改为整行显示完整的条件、截止时间与前置执行 ID。另外，取消等待中的执行后，在对账器关闭门控之前的瞬间，读取会返回“已取消，门控仍在等待”，前端此前会把它当作无效响应；现在按对账规则读作已以 `run_not_queued` 关闭，界面显示“已取消”。指向某次执行的链接（`/tasks/:id?agent_run=:run`）会同时打开执行抽屉和任务详情；任务详情加载较晚，此前会压在抽屉上面，要先关掉它才能操作抽屉。现在同一任务的详情在抽屉已打开时排在抽屉下方，浮层按栈顺序绘制；关闭抽屉后详情接管。从任务详情里点「查看过程」的行为不变。
+
+**已知限制**：统一 Agent Inbox 没有“待确认输入文件”的专门条目，等待中的这类 Run 在那里仍是排队中的执行；确认只能在执行抽屉里进行。不传递文本产出，不跨项目，不链式传递；前置 Run 被重试或重新执行后需要重新提议。真实 Provider 实际收到的内容、长时间等待与重启后的行为属于真机验收（PRD 10.5.4 的 A9），尚未执行。
+
+确定性证据：Go `TestAgentRunDeferredInputs*`、`TestAgentRunDeferredInputProposalBoundaries`、`TestAgentRunSnapshotContractsKeepTheirBytes`；前端 `agentRunDeferredInputs.test.ts`、`aiAgentRunActions.test.ts`、`AgentRunInputConfirmation.test.tsx`、`AgentRunDrawer.test.tsx`、`AiAgentRunActionCard.test.tsx`。代码证据：[声明与绑定](../../services/sidecar/internal/api/agent_run_deferred_inputs.go)、[读取与确认端点](../../services/sidecar/internal/api/agent_run_start_gate_inputs.go)、[门控与对账](../../services/sidecar/internal/api/agent_run_start_gate.go)、[确认面板](../../apps/web/src/components/AgentRunInputConfirmation.tsx)。
+
 ## 跨 Run 条件式延后启动（AH-07，2026-09-23，ADR-030 首片）
 
 用户现在可以一次确认“任务 A 的产出满足条件后，再启动任务 B 的这一次执行”，而不必在 A 结束的那一刻在场。设计与边界见 [ADR-030](../adr/030-agent-run-start-gates.md)，要点如下：
@@ -7,8 +30,8 @@
 - **仍是逐项人工确认**：`agent_run.start` 新增可选 `start_after_run_id`（前置 Run，必须属于不同任务且仍在排队/执行/待登记）、`start_after`（`submitted` 产出登记为任务提交，或 `accepted` 该提交被人工验收接受）与 `start_within_hours`（1–24，从确认时刻起算），三者必须同时出现，且不能与 `restart_of_run_id` 同用。确认卡照常展示 B 的完整冻结快照，另加“满足条件后由系统启动 · 不是现在启动”说明，执行勾选文案改为“同意在条件满足后由系统启动这一次执行”。
 - **事实**：确认事务照常创建 `queued` Run，并在同一事务追加不可变事件 `agent_run_start_gated`（前置 Run、条件、截止时间）；放行写 `agent_run_start_gate_released`，终止写 `agent_run_start_gate_closed`（原因闭集：`predecessor_failed/cancelled/retained/not_accepted/unavailable`、`expired`、`run_not_queued`），终止时经既有取消命令把仍在排队的 B 转为 `cancelled`。无新表、迁移或 scope。
 - **派发**：FIFO 查询排除门控未结束的 Run，Worker 认领事务再检查一次（放弃认领，不失败不重试）；放行后仍走 8+32 准入与认领前/启动前的冻结身份复核，等待期间任务/Agent/Provider 变化则按既有规则失败关闭。对账在 Run 终态、交付恢复、人工验收与审批决定提交后被唤醒，另每 30 秒扫描一次（`AgentRunGateScanInterval`），进程内串行；Sidecar 启动时先对账。维护写锁或待恢复时跳过。
-- **规则**：前置 `interrupted` 视为失败、从不放行；前置被重试或按当前事实重启不转移门控；同时等待的门控最多 4 个；预览只冻结前置 Run/任务身份、第几次、条件与时限，前置的实时状态在预览与确认时重新校验，已满足（应改用普通启动）或已不可能满足时拒绝。前置产出不会成为 B 的输入。
-- **读取与展示**：Run 列表、详情与 `workspace_agent_runs` 工具新增只读 `start_gate`（`predecessor_run_id/require/expires_at/status/close_reason`）；`agent_run_result` 回执同样携带。统一生命周期新增“等待前置执行”（queued + waiting）以及“未启动 · 前置条件未满足/等待超时”（cancelled + 关闭原因）；执行抽屉增加“启动条件”一栏；确认卡显示“已确认 · 等待前置执行”。
+- **规则**：前置 `interrupted` 视为失败、从不放行；前置被重试或按当前事实重启不转移门控；同时等待的门控最多 4 个；预览只冻结前置 Run/任务身份、第几次、条件与时限，前置的实时状态在预览与确认时重新校验，已满足（应改用普通启动）或已不可能满足时拒绝。前置产出默认不会成为 B 的输入；需要时须按上一节（ADR-033）另行声明并经两次确认。
+- **读取与展示**：全局 Run 列表与 `workspace_agent_runs` 工具新增只读 `start_gate`（任务的 Run 列表与 Run 详情自 2026-10-04 起才真正写出该字段，见上一节）（`predecessor_run_id/require/expires_at/status/close_reason`）；`agent_run_result` 回执同样携带。统一生命周期新增“等待前置执行”（queued + waiting）以及“未启动 · 前置条件未满足/等待超时”（cancelled + 关闭原因）；执行抽屉增加“启动条件”一栏；确认卡显示“已确认 · 等待前置执行”。
 
 确定性证据：Go `TestAgentRunStartGate*` 覆盖决策表每一行、等待中不被 FIFO 与直接认领启动、提交后放行且不重复结算、前置失败与过期的取消路径、提案边界（缺字段/非法值/同任务/未知或不可满足前置/与 restart 同用）与 4 个门控上限；前端覆盖 `start_gate` 与 Run 状态一致性解析、提案/回执严格绑定、生命周期文案、确认卡与抽屉展示。真实 Provider 下的长链执行、Windows 桌面上长时间等待与重启后的实际体验仍属专项验收。代码证据：[门控与对账](../../services/sidecar/internal/api/agent_run_start_gate.go)、[提案与回执](../../services/sidecar/internal/api/ai_agent_run_actions.go)、[前端生命周期](../../apps/web/src/lib/agentRunLifecycle.ts)。
 
@@ -380,23 +403,25 @@ AI 产出恢复现通过 `agent_run.recover_output` 提议与独立人工确认�
 
 Actor 读模型继续提供可空 `agent_adapter_id`，API v1 不变；当前数据库提升至 schema 76。非 agent 返回 null；兼容旧响应缺失字段时前端规范化为 null，因缺少关联无法证实可执行，必须关闭启动而非猜测。schema 074–076 只扩展操作态 Run/计划与索引，不把执行事实加入便携业务导出；业务导入兼容图显式允许既有 v49/v63–v75 递归迁入 v76。
 
-| 方法与路径                                        | 用途                                                                                        |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| GET / POST /api/v1/agent-adapters                 | 查询、幂等登记代码内置 Adapter                                                              |
-| GET /api/v1/agent-adapters/:id                    | 详情、ETag 与实际健康/就绪状态                                                              |
-| POST /api/v1/agent-adapters/:id/check             | If-Match 诊断；不自动启用                                                                   |
-| POST /api/v1/agent-adapters/:id/enable            | 版本化、健康和 Actor 一致性门控的显式启用                                                   |
-| POST /api/v1/agent-adapters/:id/disable           | 版本化显式停用，保留历史                                                                    |
-| GET /api/v1/actors                                | 查询真实 Actor 及可空 agent_adapter_id                                                      |
-| POST /api/v1/tasks/:id/assignments                | 复用 Task If-Match 创建分派；不是直接数据库补行                                             |
-| GET /api/v1/tasks/:id/agent-run-files             | 列出当前 Task/Project 范围的 metadata-only 候选与文件/结果上限                              |
-| GET / POST /api/v1/tasks/:id/agent-runs           | 查询历史或创建 Run；创建支持幂等重放，并可用 `auto_assign` 将空 assignee 与 Run 原子提交    |
-| GET /api/v1/agent-runs                            | 全局 metadata-only 分页摘要；严格 lifecycle/delivery 筛选，meta 含筛选 total 与三项全局计数 |
-| GET /api/v1/agent-runs/:id                        | 精确 Run 状态、有界结果、稳定错误码和可用动作依据                                           |
-| POST /api/v1/agent-runs/:id/cancel                | 请求取消；不是任务取消命令                                                                  |
-| POST /api/v1/agent-runs/:id/retry                 | 基于终态新建 attempt；不覆盖历史                                                            |
-| POST /api/v1/agent-runs/:id/output-delivery/retry | 只恢复 pending 产出登记；交付终态幂等回读                                                   |
-| POST /api/v1/tasks/:id/review                     | owner 接受或要求返工                                                                        |
+| 方法与路径                                            | 用途                                                                                        |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| GET / POST /api/v1/agent-adapters                     | 查询、幂等登记代码内置 Adapter                                                              |
+| GET /api/v1/agent-adapters/:id                        | 详情、ETag 与实际健康/就绪状态                                                              |
+| POST /api/v1/agent-adapters/:id/check                 | If-Match 诊断；不自动启用                                                                   |
+| POST /api/v1/agent-adapters/:id/enable                | 版本化、健康和 Actor 一致性门控的显式启用                                                   |
+| POST /api/v1/agent-adapters/:id/disable               | 版本化显式停用，保留历史                                                                    |
+| GET /api/v1/actors                                    | 查询真实 Actor 及可空 agent_adapter_id                                                      |
+| POST /api/v1/tasks/:id/assignments                    | 复用 Task If-Match 创建分派；不是直接数据库补行                                             |
+| GET /api/v1/tasks/:id/agent-run-files                 | 列出当前 Task/Project 范围的 metadata-only 候选与文件/结果上限                              |
+| GET / POST /api/v1/tasks/:id/agent-runs               | 查询历史或创建 Run；创建支持幂等重放，并可用 `auto_assign` 将空 assignee 与 Run 原子提交    |
+| GET /api/v1/agent-runs                                | 全局 metadata-only 分页摘要；严格 lifecycle/delivery 筛选，meta 含筛选 total 与三项全局计数 |
+| GET /api/v1/agent-runs/:id                            | 精确 Run 状态、有界结果、稳定错误码和可用动作依据                                           |
+| POST /api/v1/agent-runs/:id/cancel                    | 请求取消；不是任务取消命令                                                                  |
+| POST /api/v1/agent-runs/:id/retry                     | 基于终态新建 attempt；不覆盖历史                                                            |
+| POST /api/v1/agent-runs/:id/output-delivery/retry     | 只恢复 pending 产出登记；交付终态幂等回读                                                   |
+| GET /api/v1/agent-runs/:id/start-gate/inputs          | 读取 v7 Run 待确认的前置产出：状态、约定文件、Provider、文件元数据与指纹（ADR-033）         |
+| POST /api/v1/agent-runs/:id/start-gate/inputs/confirm | 人工确认这些文件并放行该 Run；仅原生入口，同一指纹幂等                                      |
+| POST /api/v1/tasks/:id/review                         | owner 接受或要求返工                                                                        |
 
 Adapter 与 Assignment 的写入使用各自版本契约；原生创建保持 HTTP 幂等，AI 创建以不可变 Proposal 决定幂等。原生创建 Run 的 `Idempotency-Key` 按规范化 Task UUID 隔离：同一 Task 的同摘要请求重放原响应、不同摘要返回 409，不同 Task 可以安全复用同一个 key；升级前以路由模板保存的记录只在其不可变 Run 仍能证明属于当前 Task 时兼容重放。Run schema 定义 queued/running/succeeded/failed/cancelled/interrupted；运行中人工取消稳定落为 cancelled，超时与真实执行失败仍为 failed。前端已观察的 Run 从活动/待登记转为终态时，以及任务页/右侧工作区原生创建、重试或取消命令成功返回时，都会立即失效 Task 输出、全局执行、Agent Inbox 和计划投影缓存；取消命令只请求并重读，不能假称已经终态。这只加快本地事实重读，不会启动、取消、重试、恢复或验收任何 Run。
 
@@ -429,7 +454,7 @@ Adapter 与 Assignment 的写入使用各自版本契约；原生创建保持 HT
 
 ## 相关文档与代码
 
-- [PRD T-19](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)、[功能架构](../functional-architecture.md#67-本地-agent-执行v02)
+- [PRD T-19](../opc-workspace-PRD.md#10419-t-19-本地-agent-执行)、[功能架构](../functional-architecture.md#67-本地-agent-执行v02h5-c-受控文件纵切已交付)
 - [Actor 与分派](actors.md)、[任务](tasks.md)、[设置](settings.md)、[数据管理](data-management.md)
 - [ADR-003](../adr/003-local-agent-runtime-security.md)、[ADR-027](../adr/027-builtin-agent-executor-and-run-lifecycle.md)、[ADR-029 H5](../adr/029-agent-workspace-capabilities.md#h5-a受人工确认的-agent-run-启动schema-074)
 - [Adapter API](../../services/sidecar/internal/api/agent_adapters.go)、[Actor API](../../services/sidecar/internal/api/actors.go)、[Run API](../../services/sidecar/internal/api/agent_runs.go)、[受控文件契约](../../services/sidecar/internal/api/agent_run_files.go)

@@ -20,11 +20,21 @@ type fakeClient struct {
 	fail    error
 	// failOn fails the Nth Stream call (1-based); takes precedence over fail.
 	failOn map[int]error
+	// started, when set, is closed as the first stream begins; that stream then
+	// stays open until the caller cancels it.
+	started chan struct{}
 }
 
 func (f *fakeClient) Stream(ctx context.Context, request Request, onDelta func(string), onReasoning func(string)) (Turn, error) {
 	f.calls++
 	f.lastReq = request
+	if f.started != nil {
+		if f.calls == 1 {
+			close(f.started)
+		}
+		<-ctx.Done()
+		return Turn{}, ctx.Err()
+	}
 	if err, ok := f.failOn[f.calls]; ok {
 		return Turn{}, err
 	}
@@ -52,12 +62,17 @@ type fakeTool struct {
 	delay   time.Duration
 	panic   bool
 	execCtx context.Context
+	// started, when set, is closed as Execute begins.
+	started chan struct{}
 }
 
 func (t *fakeTool) Name() string    { return t.name }
 func (t *fakeTool) Summary() string { return "fake tool " + t.name }
 func (t *fakeTool) Execute(ctx context.Context, arguments json.RawMessage) (string, error) {
 	t.execCtx = ctx
+	if t.started != nil {
+		close(t.started)
+	}
 	if t.delay > 0 {
 		select {
 		case <-time.After(t.delay):
@@ -278,9 +293,12 @@ func TestRunTurnBudgetExhausted(t *testing.T) {
 
 func TestRunPropagatesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	client := &fakeClient{fail: context.Canceled}
+	defer cancel()
+	// Cancel once the model turn is in flight, not after a guessed delay: a
+	// cancellation that lands before the first turn would not count it.
+	client := &fakeClient{started: make(chan struct{})}
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		<-client.started
 		cancel()
 	}()
 	result, err := Run(ctx, client, Request{Model: "m"}, nil, nil, Callbacks{})
@@ -396,9 +414,10 @@ func TestRunOversizedToolResultIsNotAcceptedAsEvidence(t *testing.T) {
 func TestExecutorParentCancelWinsOverTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	executor := &Executor{Timeout: 5 * time.Second}
-	tool := &fakeTool{name: "blocked", delay: 10 * time.Second}
+	defer cancel()
+	tool := &fakeTool{name: "blocked", delay: 10 * time.Second, started: make(chan struct{})}
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-tool.started
 		cancel()
 	}()
 	_, err := executor.Execute(ctx, tool, nil)

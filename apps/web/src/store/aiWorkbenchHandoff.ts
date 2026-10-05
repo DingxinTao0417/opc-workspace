@@ -57,7 +57,9 @@ export interface TaskSelectionReturn {
 }
 
 const localRouteBase = "http://opc-workspace.local";
+// eslint-disable-next-line no-control-regex -- matches control characters on purpose
 const asciiControl = /[\u0000-\u001f\u007f]/;
+// eslint-disable-next-line no-control-regex -- matches control characters on purpose
 const invalidHandoffPreviewControl = /[\u0000-\u0009\u000b-\u001f\u007f]/;
 const encodedAsciiControlOrBackslash = /%(?:0[0-9a-f]|1[0-9a-f]|7f|5c)/i;
 const maxIssueHandoffPromptBytes = 24 * 1024;

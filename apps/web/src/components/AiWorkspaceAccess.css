@@ -1,0 +1,85 @@
+.ai-workspace-consent {
+  display: grid;
+  gap: 14px;
+  line-height: 1.6;
+}
+
+.ai-workspace-consent .ai-workspace-manual-note {
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--accent-bg);
+}
+
+.ai-workspace-presets {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.ai-workspace-preset-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-workspace-presets .button {
+  min-height: 34px;
+}
+
+.ai-workspace-grant-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: var(--accent-bg);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-workspace-grant-summary svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ai-workspace-consent fieldset {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.ai-workspace-consent .ai-workspace-section-note {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ai-workspace-consent .ai-workspace-manual-recommendation {
+  border-radius: 8px;
+  padding-inline: 10px;
+  background: var(--surface-soft);
+}
+
+.ai-workspace-scope-details {
+  margin: 0 0 12px 23px;
+  font-size: 12px;
+}
+
+.ai-workspace-scope-details[open] summary {
+  margin-bottom: 8px;
+}
+
+.ai-workspace-consent input {
+  margin-top: 5px;
+}
+
+.ai-workspace-consent small {
+  display: block;
+  color: var(--text-muted);
+}

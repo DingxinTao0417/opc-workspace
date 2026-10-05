@@ -1,0 +1,11 @@
+# Keep LF in the working tree on every platform. Prettier, gofmt and
+# .editorconfig all expect LF; without this, Git for Windows' default
+# `core.autocrlf=true` checks text files out as CRLF and `pnpm format:check`
+# fails on a fresh clone.
+* text=auto eol=lf
+
+# Binary assets are never normalised.
+*.png binary
+*.ico binary
+*.icns binary
+*.ttf binary

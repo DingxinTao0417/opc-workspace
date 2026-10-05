@@ -1,3 +1,4 @@
+import "./RightFloatingCard.css";
 import { useQuery } from "@tanstack/react-query";
 import {
   BellRing,

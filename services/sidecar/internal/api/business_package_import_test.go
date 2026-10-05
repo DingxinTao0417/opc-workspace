@@ -255,7 +255,10 @@ func TestBusinessPackageImportBlocksExistingControlledFileBeforeBackup(t *testin
 	}
 }
 
-func TestBusinessPackageImportCompensatesCommittedFilesWhenDatabaseApplyFails(t *testing.T) {
+// tamperedBusinessPackageFixture returns a package whose Task points at a
+// Project that does not exist, with a manifest that matches the tampered data.
+func tamperedBusinessPackageFixture(t *testing.T) ([]byte, string) {
+	t.Helper()
 	payload, artifactPath := businessPackageFixture(t)
 	entries := readBusinessPackageEntries(t, payload)
 	var business businessExportPackage
@@ -291,18 +294,68 @@ func TestBusinessPackageImportCompensatesCommittedFilesWhenDatabaseApplyFails(t 
 		t.Fatal(err)
 	}
 	entries["manifest.json"] = append(manifestRaw, '\n')
-	tampered := writeBusinessPackageTestZIP(t, entries)
+	return writeBusinessPackageTestZIP(t, entries), artifactPath
+}
 
+// Rows the database would reject are found by the rehearsal: no rollback
+// backup is created and no file of the package is published.
+func TestBusinessPackageImportRefusesInvalidRowsBeforeBackupAndFiles(t *testing.T) {
+	tampered, artifactPath := tamperedBusinessPackageFixture(t)
 	targetRouter, targetStore, artifactDir, backupDir := newBackupTestAPI(t)
+	preview := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-package/preview", tampered, nil)
+	var envelope struct {
+		Data businessPackageImportPreview `json:"data"`
+	}
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || preview.Code != http.StatusOK || envelope.Data.CanApply ||
+		envelope.Data.Blocker != importBlockerApplyRehearsal || envelope.Data.ApplyMode != "" ||
+		envelope.Data.RehearsalFailure == nil || envelope.Data.RehearsalFailure.Code != "FOREIGN_KEY_CONSTRAINT" {
+		t.Fatalf("invalid package preview = %d %#v err=%v", preview.Code, envelope.Data, err)
+	}
 	response := performRequest(
 		targetRouter, http.MethodPost, "/api/v1/imports/business-package", tampered,
 		map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
 	)
-	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_PACKAGE_APPLY_FAILED" {
+	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_REHEARSAL_FAILED" {
 		t.Fatalf("invalid database package = %d: %s", response.Code, response.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(artifactPath)))); !os.IsNotExist(err) {
+		t.Fatalf("a refused import published a file: %v", err)
+	}
+	var tasks int64
+	if err := targetStore.DB.Table("tasks").Count(&tasks).Error; err != nil || tasks != 0 {
+		t.Fatalf("refused package changed tasks=%d err=%v", tasks, err)
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("a refused import created rollback backups: %v", backups)
+	}
+}
+
+// The rehearsal cannot see the files, which are published only for the real
+// import. When the import then fails its own verification (here: a stray file
+// in the controlled store), the files it published are removed again.
+func TestBusinessPackageImportCompensatesCommittedFilesWhenDatabaseApplyFails(t *testing.T) {
+	payload, artifactPath := businessPackageFixture(t)
+	targetRouter, targetStore, artifactDir, backupDir := newBackupTestAPI(t)
+	published := filepath.Join(artifactDir, filepath.FromSlash(stringsTrimFileRoot(artifactPath)))
+	stray := filepath.Join(filepath.Dir(published), "stray-object")
+	if err := os.MkdirAll(filepath.Dir(stray), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stray, []byte("not a controlled file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	response := performRequest(
+		targetRouter, http.MethodPost, "/api/v1/imports/business-package", payload,
+		map[string]string{"X-Import-Confirmation": packageImportReplaceConfirmation},
+	)
+	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_PACKAGE_APPLY_FAILED" {
+		t.Fatalf("package into a store with a stray file = %d: %s", response.Code, response.Body.String())
+	}
+	if _, err := os.Stat(published); !os.IsNotExist(err) {
 		t.Fatalf("failed import retained committed file: %v", err)
+	}
+	if body, err := os.ReadFile(stray); err != nil || string(body) != "not a controlled file" {
+		t.Fatalf("the stray file changed body=%q err=%v", body, err)
 	}
 	var tasks int64
 	if err := targetStore.DB.Table("tasks").Count(&tasks).Error; err != nil || tasks != 0 {

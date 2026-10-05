@@ -19,6 +19,7 @@ import type {
   CreateAgentRunOptions,
   RetryAgentRunReworkOptions,
 } from "../types/models";
+import type { Untyped } from "../test/untyped";
 
 const id = {
   task: "018f0000-0000-7000-8000-000000006201",
@@ -211,7 +212,7 @@ describe("project Task files native discovery and preview", () => {
   it.each(["source_task", "sha256", "name", "mime", "id", "created_at"])(
     "requires candidate %s",
     async (field) => {
-      const payload: Record<string, any> = page();
+      const payload: Record<string, Untyped> = page();
       delete payload.data[0][field];
       stub(payload);
       await expect(getAgentProjectFiles(id.task)).rejects.toMatchObject({

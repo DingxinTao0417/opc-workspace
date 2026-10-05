@@ -179,7 +179,7 @@ func TestAgentRunAnthropicFileContractsRegisterExactBytes(t *testing.T) {
 					artifact.SHA256 == nil || *artifact.SHA256 != sha256Hex([]byte(want)) || artifact.ProducedByActorID != f.Actor.ID || artifact.RecordedByActorID != models.BuiltinSystemActorID {
 					t.Fatalf("file identity/producer/size/hash mismatch: %#v", artifact)
 				}
-				file, _, err := f.Artifacts.openObject(*artifact.RelativePath)
+				file, _, err := f.Artifacts.OpenObject(*artifact.RelativePath)
 				if err != nil {
 					t.Fatal(err)
 				}

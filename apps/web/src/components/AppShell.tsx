@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useRef,
   useState,
   type CSSProperties,
@@ -18,13 +20,30 @@ import {
   RIGHT_OVERVIEW_MIN_WIDTH,
   useUiStore,
 } from "../store/ui";
-import { RightOverview } from "./RightOverview";
 import { WorkbenchOverview } from "./WorkbenchOverview";
-import { RightFloatingCard } from "./RightFloatingCard";
-import { AiSessionRail } from "./AiSessionRail";
 import { ModeSwitch, isAgentRoute } from "./ModeSwitch";
 import { Sidebar } from "./Sidebar";
 import { useWorkspacePanels } from "../store/workspacePanels";
+
+// The conversation rail, the tool workspace and its collapsed status card only
+// exist in agent mode.
+// Loading them on demand keeps the AI action contracts out of the workbench's
+// first paint; the placeholders hold the same grid cells while they load.
+const AiSessionRail = lazy(() =>
+  import("./AiSessionRail").then((module) => ({
+    default: module.AiSessionRail,
+  })),
+);
+const RightFloatingCard = lazy(() =>
+  import("./RightFloatingCard").then((module) => ({
+    default: module.RightFloatingCard,
+  })),
+);
+const RightOverview = lazy(() =>
+  import("./RightOverview").then((module) => ({
+    default: module.RightOverview,
+  })),
+);
 
 /**
  * Pointer capture is unavailable in jsdom and some embedded webviews; the
@@ -222,7 +241,21 @@ export function AppShell() {
           }`}
         >
           <ModeSwitch />
-          {agentMode ? <AiSessionRail /> : <Sidebar />}
+          {agentMode ? (
+            <Suspense
+              fallback={
+                <aside
+                  aria-busy="true"
+                  aria-label="会话列表"
+                  className="ai-session-rail"
+                />
+              }
+            >
+              <AiSessionRail />
+            </Suspense>
+          ) : (
+            <Sidebar />
+          )}
         </div>
       )}
       <div className="workspace-frame" ref={frameRef}>
@@ -230,7 +263,11 @@ export function AppShell() {
           <div className="page-scroll">
             <Outlet />
           </div>
-          {showFloatingCard ? <RightFloatingCard /> : null}
+          {showFloatingCard ? (
+            <Suspense fallback={null}>
+              <RightFloatingCard />
+            </Suspense>
+          ) : null}
         </main>
         {showRightOverview ? (
           <div
@@ -252,7 +289,17 @@ export function AppShell() {
         ) : null}
         {showRightOverview ? (
           agentMode ? (
-            <RightOverview />
+            <Suspense
+              fallback={
+                <aside
+                  aria-busy="true"
+                  aria-label="智能体工作区"
+                  className="right-sidebar agent-tool-workspace"
+                />
+              }
+            >
+              <RightOverview />
+            </Suspense>
           ) : (
             <WorkbenchOverview />
           )

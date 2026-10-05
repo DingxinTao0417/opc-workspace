@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -27,7 +28,7 @@ type invoicePDFStore struct {
 	root       string
 	stagingDir string
 	trashDir   string
-	lease      artifactStoreLease
+	lease      filestore.ArtifactStoreLease
 	mu         sync.Mutex
 }
 
@@ -54,13 +55,13 @@ func openInvoicePDFStore(db *gorm.DB, root string) (*invoicePDFStore, error) {
 		return nil, fmt.Errorf("resolve invoice PDF root: %w", err)
 	}
 	absolute = filepath.Clean(absolute)
-	if isFilesystemRoot(absolute) {
+	if filestore.IsFilesystemRoot(absolute) {
 		return nil, errors.New("invoice PDF root cannot be a filesystem volume root")
 	}
-	if err := ensureArtifactRootDirectory(absolute); err != nil {
+	if err := filestore.EnsureArtifactRootDirectory(absolute); err != nil {
 		return nil, fmt.Errorf("create invoice PDF root: %w", err)
 	}
-	if err := requireSafeDirectory(absolute); err != nil {
+	if err := filestore.RequireSafeDirectory(absolute); err != nil {
 		return nil, fmt.Errorf("validate invoice PDF root: %w", err)
 	}
 	store := &invoicePDFStore{
@@ -71,7 +72,7 @@ func openInvoicePDFStore(db *gorm.DB, root string) (*invoicePDFStore, error) {
 	if err := store.claimRoot(db); err != nil {
 		return nil, err
 	}
-	lease, err := acquireArtifactStoreLease(absolute)
+	lease, err := filestore.AcquireArtifactStoreLease(absolute)
 	if err != nil {
 		return nil, fmt.Errorf("lock invoice PDF root: %w", err)
 	}
@@ -86,11 +87,11 @@ func openInvoicePDFStore(db *gorm.DB, root string) (*invoicePDFStore, error) {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create invoice PDF storage directory: %w", err)
 		}
-		if err := requireSafeDirectory(directory); err != nil {
+		if err := filestore.RequireSafeDirectory(directory); err != nil {
 			return nil, fmt.Errorf("validate invoice PDF storage directory: %w", err)
 		}
 	}
-	if err := syncArtifactDirectory(store.root); err != nil {
+	if err := filestore.SyncArtifactDirectory(store.root); err != nil {
 		return nil, fmt.Errorf("sync invoice PDF storage layout: %w", err)
 	}
 	if err := store.reconcile(db); err != nil {
@@ -141,7 +142,7 @@ func (s *invoicePDFStore) claimRoot(db *gorm.DB) error {
 			_ = os.Remove(marker)
 			return fmt.Errorf("write invoice PDF store identity: %w", err)
 		}
-		return syncArtifactDirectory(s.root)
+		return filestore.SyncArtifactDirectory(s.root)
 	}
 	if !errors.Is(err, os.ErrExist) {
 		return fmt.Errorf("claim invoice PDF root: %w", err)
@@ -168,7 +169,7 @@ func validateClaimedInvoicePDFRootEntries(root string) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		switch name {
-		case ".opc-workspace-invoice-pdf-store", artifactStoreLockName, ".staging", ".trash":
+		case ".opc-workspace-invoice-pdf-store", filestore.ArtifactStoreLockName, ".staging", ".trash":
 			continue
 		}
 		if entry.IsDir() && canonicalInvoicePDFUUID(name) {
@@ -192,10 +193,10 @@ func (s *invoicePDFStore) stage(invoiceID string, render func(io.Writer) error) 
 	if !canonicalInvoicePDFUUID(invoiceID) {
 		return stagedInvoicePDF{}, errors.New("invalid invoice PDF owner id")
 	}
-	if err := requireSafeDirectory(s.root); err != nil {
+	if err := filestore.RequireSafeDirectory(s.root); err != nil {
 		return stagedInvoicePDF{}, err
 	}
-	if err := requireSafeDirectory(s.stagingDir); err != nil {
+	if err := filestore.RequireSafeDirectory(s.stagingDir); err != nil {
 		return stagedInvoicePDF{}, err
 	}
 	assetID := uuid.NewString()
@@ -231,7 +232,7 @@ func (s *invoicePDFStore) stage(invoiceID string, render func(io.Writer) error) 
 	if err := validateInvoicePDFFile(stagingPath, limited.written, hex.EncodeToString(hasher.Sum(nil))); err != nil {
 		return stagedInvoicePDF{}, err
 	}
-	if err := syncArtifactDirectory(s.stagingDir); err != nil {
+	if err := filestore.SyncArtifactDirectory(s.stagingDir); err != nil {
 		return stagedInvoicePDF{}, fmt.Errorf("sync invoice PDF staging directory: %w", err)
 	}
 	finished = true
@@ -264,7 +265,7 @@ func (s *invoicePDFStore) commit(staged stagedInvoicePDF) error {
 		return err
 	}
 	destinationDir := filepath.Dir(destination)
-	if err := ensureInvoicePDFOwnerDirectory(s.root, destinationDir, syncArtifactDirectory); err != nil {
+	if err := ensureInvoicePDFOwnerDirectory(s.root, destinationDir, filestore.SyncArtifactDirectory); err != nil {
 		return fmt.Errorf("prepare invoice PDF destination directory: %w", err)
 	}
 	stagedInfo, err := os.Lstat(staged.stagingPath)
@@ -282,18 +283,18 @@ func (s *invoicePDFStore) commit(staged stagedInvoicePDF) error {
 	if err := os.Rename(staged.stagingPath, destination); err != nil {
 		return fmt.Errorf("atomically commit invoice PDF: %w", err)
 	}
-	if err := syncArtifactDirectory(destinationDir); err != nil {
+	if err := filestore.SyncArtifactDirectory(destinationDir); err != nil {
 		_ = os.Rename(destination, staged.stagingPath)
-		_ = syncArtifactDirectory(s.stagingDir)
+		_ = filestore.SyncArtifactDirectory(s.stagingDir)
 		return fmt.Errorf("sync committed invoice PDF directory: %w", err)
 	}
-	_ = syncArtifactDirectory(s.stagingDir)
+	_ = filestore.SyncArtifactDirectory(s.stagingDir)
 	return nil
 }
 
 func (s *invoicePDFStore) discardStaged(staged stagedInvoicePDF) {
 	if filepath.Dir(staged.stagingPath) == s.stagingDir {
-		_ = removeArtifactFileDurably(staged.stagingPath)
+		_ = filestore.RemoveArtifactFileDurably(staged.stagingPath)
 	}
 }
 
@@ -309,7 +310,7 @@ func (s *invoicePDFStore) remove(relative, assetID string) error {
 	if !parentExists {
 		return nil
 	}
-	return removeArtifactFileDurably(path)
+	return filestore.RemoveArtifactFileDurably(path)
 }
 
 func (s *invoicePDFStore) moveToTrash(relative, assetID string) (*trashedInvoicePDF, error) {
@@ -324,7 +325,7 @@ func (s *invoicePDFStore) moveToTrash(relative, assetID string) (*trashedInvoice
 	if !parentExists {
 		return nil, nil
 	}
-	if err := requireSafeDirectory(s.trashDir); err != nil {
+	if err := filestore.RequireSafeDirectory(s.trashDir); err != nil {
 		return nil, err
 	}
 	info, err := os.Lstat(live)
@@ -339,10 +340,10 @@ func (s *invoicePDFStore) moveToTrash(relative, assetID string) (*trashedInvoice
 	}
 	trash := filepath.Join(s.trashDir, filepath.FromSlash(relative))
 	trashDir := filepath.Dir(trash)
-	if err := ensureInvoicePDFOwnerDirectory(s.trashDir, trashDir, syncArtifactDirectory); err != nil {
+	if err := ensureInvoicePDFOwnerDirectory(s.trashDir, trashDir, filestore.SyncArtifactDirectory); err != nil {
 		return nil, err
 	}
-	if err := moveFileNoReplace(live, trash); err != nil {
+	if err := filestore.MoveFileNoReplace(live, trash); err != nil {
 		return nil, err
 	}
 	return &trashedInvoicePDF{livePath: live, trashPath: trash}, nil
@@ -361,17 +362,17 @@ func (s *invoicePDFStore) restoreTrashed(moved *trashedInvoicePDF) error {
 	if err := requireSafeInvoicePDFParent(s.trashDir, moved.trashPath); err != nil {
 		return err
 	}
-	return moveFileNoReplace(moved.trashPath, moved.livePath)
+	return filestore.MoveFileNoReplace(moved.trashPath, moved.livePath)
 }
 
 func (s *invoicePDFStore) purgeTrashed(moved *trashedInvoicePDF) {
 	if moved != nil && pathWithin(s.trashDir, moved.trashPath) && requireSafeInvoicePDFParent(s.trashDir, moved.trashPath) == nil {
-		_ = removeArtifactFileDurably(moved.trashPath)
+		_ = filestore.RemoveArtifactFileDurably(moved.trashPath)
 	}
 }
 
 func (s *invoicePDFStore) resolve(relative, assetID string) (string, error) {
-	if err := requireSafeDirectory(s.root); err != nil {
+	if err := filestore.RequireSafeDirectory(s.root); err != nil {
 		return "", err
 	}
 	parsedAsset, err := uuid.Parse(assetID)
@@ -483,7 +484,7 @@ func (s *invoicePDFStore) reconcile(db *gorm.DB) error {
 		if _, err := os.Lstat(live); errors.Is(err, os.ErrNotExist) {
 			trash := filepath.Join(s.trashDir, filepath.FromSlash(asset.RelativePath))
 			if _, trashErr := os.Lstat(trash); trashErr == nil {
-				if err := ensureInvoicePDFOwnerDirectory(s.root, filepath.Dir(live), syncArtifactDirectory); err != nil {
+				if err := ensureInvoicePDFOwnerDirectory(s.root, filepath.Dir(live), filestore.SyncArtifactDirectory); err != nil {
 					return err
 				}
 				if err := requireSafeInvoicePDFParent(s.root, live); err != nil {
@@ -492,7 +493,7 @@ func (s *invoicePDFStore) reconcile(db *gorm.DB) error {
 				if err := requireSafeInvoicePDFParent(s.trashDir, trash); err != nil {
 					return err
 				}
-				if err := moveFileNoReplace(trash, live); err != nil {
+				if err := filestore.MoveFileNoReplace(trash, live); err != nil {
 					return err
 				}
 			}
@@ -524,24 +525,24 @@ func (s *invoicePDFStore) reconcile(db *gorm.DB) error {
 func ensureInvoicePDFOwnerDirectory(root, directory string, syncDirectory func(string) error) error {
 	root = filepath.Clean(root)
 	directory = filepath.Clean(directory)
-	if !sameFilesystemPath(filepath.Dir(directory), root) {
+	if !filestore.SameFilesystemPath(filepath.Dir(directory), root) {
 		return errors.New("invoice PDF owner directory leaves its controlled root")
 	}
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(directory); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return errors.New("invoice PDF owner path is not a safe directory")
 		}
-		return requireSafeDirectory(directory)
+		return filestore.RequireSafeDirectory(directory)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		return err
 	}
-	if err := requireSafeDirectory(directory); err != nil {
+	if err := filestore.RequireSafeDirectory(directory); err != nil {
 		_ = os.Remove(directory)
 		return err
 	}
@@ -555,7 +556,7 @@ func ensureInvoicePDFOwnerDirectory(root, directory string, syncDirectory func(s
 }
 
 func removeInvoicePDFTreeFiles(root string, keep map[string]models.InvoicePDFAsset) error {
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -575,23 +576,23 @@ func removeInvoicePDFTreeFiles(root string, keep map[string]models.InvoicePDFAss
 		if _, preserved := keep[path]; preserved {
 			return nil
 		}
-		return removeArtifactFileDurably(path)
+		return filestore.RemoveArtifactFileDurably(path)
 	})
 }
 
 func requireSafeInvoicePDFParent(root, path string) error {
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	parent := filepath.Dir(path)
 	if !pathWithin(root, parent) {
 		return errors.New("invoice PDF parent leaves controlled storage")
 	}
-	return requireSafeDirectory(parent)
+	return filestore.RequireSafeDirectory(parent)
 }
 
 func safeInvoicePDFParentExists(root, path string) (bool, error) {
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return false, err
 	}
 	parent := filepath.Dir(path)
@@ -608,7 +609,7 @@ func safeInvoicePDFParentExists(root, path string) (bool, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return false, errors.New("invoice PDF parent is not a safe directory")
 	}
-	if err := requireSafeDirectory(parent); err != nil {
+	if err := filestore.RequireSafeDirectory(parent); err != nil {
 		return false, err
 	}
 	return true, nil

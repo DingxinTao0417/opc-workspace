@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -101,7 +102,7 @@ func loadProjectDeletionImpact(tx *gorm.DB, id string, expectedVersion int64) (m
 	return project, impact, nil
 }
 
-func (a *API) deleteProjectInTransaction(tx *gorm.DB, id string, expectedVersion int64, requestID, deletedAt string) (models.Project, projectDeletionImpact, deletedProjectResponse, []trashedArtifactFile, error) {
+func (a *API) deleteProjectInTransaction(tx *gorm.DB, id string, expectedVersion int64, requestID, deletedAt string) (models.Project, projectDeletionImpact, deletedProjectResponse, []filestore.TrashedArtifactFile, error) {
 	project, impact, err := loadProjectDeletionImpact(tx, id, expectedVersion)
 	if err != nil {
 		return project, impact, deletedProjectResponse{}, nil, err
@@ -136,7 +137,7 @@ func (a *API) deleteProjectInTransaction(tx *gorm.DB, id string, expectedVersion
 	return project, impact, deleted, moved, nil
 }
 
-func (a *API) finishProjectDeletion(projectID string, moved []trashedArtifactFile, err error) {
+func (a *API) finishProjectDeletion(projectID string, moved []filestore.TrashedArtifactFile, err error) {
 	if err != nil {
 		if restoreErr := a.restoreProjectAttachmentFiles(moved); restoreErr != nil && a.options.Logger != nil {
 			a.options.Logger.Printf("restore project attachment files after delete rollback failed project_id=%s error=%v", projectID, restoreErr)
@@ -145,7 +146,7 @@ func (a *API) finishProjectDeletion(projectID string, moved []trashedArtifactFil
 	}
 	if a.artifactStore != nil {
 		for _, file := range moved {
-			a.artifactStore.purgeTrashedFile(file)
+			a.artifactStore.PurgeTrashedFile(file)
 		}
 	}
 }

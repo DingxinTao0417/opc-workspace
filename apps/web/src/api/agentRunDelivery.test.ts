@@ -460,7 +460,7 @@ describe("Agent Runs created before frozen execution identity", () => {
     });
   });
 
-  it.each([-1, 7, 1.5])(
+  it.each([-1, 8, 1.5])(
     "still rejects an out-of-range contract version %s",
     async (version) => {
       vi.stubGlobal(

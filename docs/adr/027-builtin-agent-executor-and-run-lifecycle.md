@@ -1,5 +1,9 @@
 # ADR-027：内置 Agent 执行器与 Run 生命周期（v0.2-B 首片）
 
+2026-10-04 执行契约 v7 补充：[ADR-033](033-agent-run-predecessor-file-inputs.md) 新增 v7 规范快照，即 v6 的字段加 `deferred_inputs` 声明且 `files` 为空。v7 Run 的输入文件不在快照里，而是人工确认后记录在门控放行事件中的文件引用；认领与启动前按本 ADR 的同一规则复核冻结身份，并重读这些文件核对 SHA-256，不一致按 `AGENT_RUN_IDENTITY_CHANGED` 失败关闭。文件同意仍绑定具体文件的哈希与 Provider 的 `version/config_version/kind`，只是给出同意的时间从创建 Run 时移到了文件存在之后。v7 Run 不可原样重试。v1–v6 快照字节、管道协议与产出登记不变。
+
+2026-10-04 进程树治理补充：桌面现在把整个 Sidecar 放进自己持有的 kill-on-close Job Object（[ADR-031](031-desktop-sidecar-process-governance.md)），执行器的 Job 因此嵌套在桌面的 Job 内。执行器 Job 的 1 GiB 内存上限、只回收该执行器子树的语义和句柄所有权不变；`TestExecuteWorksInsideAnOuterKillOnCloseJob` 在外层 Job 内复验了成功交付与超时回收。本 ADR 记录的 Windows 生命周期矩阵是在非嵌套配置下实测的，嵌套配置下的打包版实机验证仍待。
+
 2026-09-23 AH-07 补充：[ADR-030](030-agent-run-start-gates.md) 允许人工确认的 Run 在 `queued` 状态等待一个前置 Run 满足条件后才进入 FIFO；门控是不可变工作流事件，放行后仍走本 ADR 的准入、认领与冻结身份复核，终止时经既有取消命令转为 `cancelled`。不改变执行器、管道协议或产出登记。
 
 2026-09-23 H5-G44 并发/排队补充：单 Sidecar 限制 Task Agent Run 到最多 8 个 Worker 和 32 个额外 queued Run；共享创建事务以 `queued/running + output_delivery_status=not_ready` 做 40 个准入上限，满载拒绝并回滚。持久队列按创建时间/ID FIFO，在启动恢复及 Worker 退出时派发。模型执行结束而待登记的 `running + pending` 不占执行槽，只恢复原产出，不再次调用模型。历史队列不删除，先排空；不增加数据库结构或授权，也不承诺跨 Sidecar 配额、终态重跑或自动编排。详细验收边界见 [本地 Agent H5-G44](../modules/local-agents.md#task-agent-run-的有界-fifo-调度h5-g442026-09-23)。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -29,6 +30,7 @@ type aiAgentRunStartChanges struct {
 	StartAfterRunID               string    `json:"start_after_run_id,omitempty"`
 	StartAfter                    string    `json:"start_after,omitempty"`
 	StartWithinHours              int       `json:"start_within_hours,omitempty"`
+	StartAfterInput               string    `json:"start_after_input,omitempty"`
 }
 
 // Only stable identity is frozen: the predecessor's live state naturally
@@ -40,6 +42,47 @@ type aiAgentRunStartGatePreview struct {
 	PredecessorAttempt   int    `json:"predecessor_attempt"`
 	Require              string `json:"require"`
 	WithinHours          int    `json:"within_hours"`
+	// InputSlot is shown when the Run will take the predecessor's accepted
+	// files as inputs. The files do not exist yet; only their contract does.
+	InputSlot *aiAgentRunInputSlotPreview `json:"input_slot,omitempty"`
+}
+
+type aiAgentRunInputSlotPreview struct {
+	Source        string                         `json:"source"`
+	ExpectedFiles []agentexec.OutputFileContract `json:"expected_files"`
+	MaxFiles      int                            `json:"max_files"`
+	MaxFileBytes  int                            `json:"max_file_bytes"`
+	MaxTotalBytes int                            `json:"max_total_bytes"`
+}
+
+// aiAgentRunDeferredInputs returns the declaration a start_after_input start
+// asks for, derived from the predecessor Run as it is now.
+func aiAgentRunDeferredInputs(tx *gorm.DB, task models.Task, changes aiAgentRunStartChanges) (*agentRunDeferredInputs, error) {
+	if changes.StartAfterInput == "" {
+		return nil, nil
+	}
+	slot, err := agentRunDeferredInputsFor(tx, task, changes.StartAfterRunID, changes.StartAfter)
+	if err != nil {
+		return nil, err
+	}
+	return &slot, nil
+}
+
+// storedAIAgentRunDeferredInputs rebuilds the declaration a person saw on the
+// confirmation card. It has to agree with the proposal's own fields.
+func storedAIAgentRunDeferredInputs(stored *aiAgentRunStartPreview, changes aiAgentRunStartChanges) (*agentRunDeferredInputs, error) {
+	shown := stored != nil && stored.StartGate != nil && stored.StartGate.InputSlot != nil
+	if shown != (changes.StartAfterInput != "") ||
+		shown != (stored != nil && stored.ExecutionContractVersion == agentRunExecutionContractVersionV7) {
+		return nil, newProjectRequestError(409, "AI_ACTION_PREVIEW_CHANGED", "The frozen Agent input declaration is inconsistent")
+	}
+	if !shown {
+		return nil, nil
+	}
+	return &agentRunDeferredInputs{
+		Source: stored.StartGate.InputSlot.Source, PredecessorRunID: stored.StartGate.PredecessorRunID,
+		ExpectedFiles: stored.StartGate.InputSlot.ExpectedFiles,
+	}, nil
 }
 
 type aiAgentExecutionCandidateBinding struct {
@@ -321,7 +364,7 @@ func addAIAgentRunSchema(properties map[string]any) {
 	fields["rework_submission_id"] = map[string]any{"type": "string", "format": "uuid", "description": "Optional new start from the current changes_requested batch read via workspace_task_submissions. Pair with rework_artifact_ids, including [] for feedback only; not a retry or automatic acceptance."}
 	fields["rework_artifact_ids"] = map[string]any{"type": "array", "maxItems": agentexec.MaxReworkArtifacts, "uniqueItems": true, "items": map[string]any{"type": "string", "format": "uuid"}, "description": "Explicit 0–4 active text/link/structured artifacts from that exact batch. Server freezes complete feedback/content for separate human confirmation; files still require agent_files. Never supply content or consent."}
 	fields["restart_of_run_id"] = map[string]any{"type": "string", "format": "uuid", "description": "Optional same-Task terminal Run to explicitly supersede using CURRENT execution facts. Only failed/cancelled/interrupted without output or succeeded+retained; never active, pending or submitted. Separate human restart confirmation; no old input/output copied, no exact-retry parent link. Re-read current Task and execution eligibility; may change Agent/Provider. Use a bound start proposal with this source to replace its failed/retained plan step."}
-	fields["start_after_run_id"] = map[string]any{"type": "string", "format": "uuid", "description": "Optional start gate: active Run of another Task from workspace_agent_runs. Human confirms this Run now; Sidecar starts it once start_after holds, else cancels. Needs start_after and start_within_hours; not with restart_of_run_id; no predecessor output is passed."}
+	fields["start_after_run_id"] = map[string]any{"type": "string", "format": "uuid", "description": "Optional start gate: active Run of another Task from workspace_agent_runs. Human confirms this Run now; Sidecar starts it once start_after holds, else cancels. Needs start_after and start_within_hours; not with restart_of_run_id; predecessor output is passed only with start_after_input."}
 	fields["start_after"] = map[string]any{"type": "string", "enum": []string{agentRunStartAfterSubmitted, agentRunStartAfterAccepted}, "description": "submitted: predecessor output registered; accepted: human accepted it"}
 	fields["start_within_hours"] = map[string]any{"type": "integer", "minimum": 1, "maximum": agentRunStartGateMaxHours, "description": "Expiry cancels the waiting Run"}
 	addAIAgentRunCancelManySchema(properties)
@@ -339,6 +382,10 @@ func addAIAgentRunFileSchema(properties map[string]any) {
 	fields["output_kind"] = map[string]any{
 		"type": "string", "enum": []string{agentexec.ResultTypeText, agentexec.ResultTypeFile, agentexec.ResultTypeFiles},
 		"description": "Requested result kind; the server chooses frozen file names, MIME values, and any multi-file order",
+	}
+	fields["start_after_input"] = map[string]any{
+		"type": "string", "enum": []string{agentRunDeferredInputPredecessorFiles},
+		"description": "Optional with a start gate, start_after accepted and agent_project_files: the predecessor's accepted file outputs become this Run's inputs once a human confirms them in the app. Not with input_file_candidate_ids or rework",
 	}
 }
 
@@ -362,7 +409,7 @@ func parseAIAgentRunAction(input aiWorkspaceAction, fields, raw map[string]json.
 		if key != "provider_id" && key != "expected_provider_version" && key != "expected_provider_config_version" &&
 			key != "input_file_candidate_ids" && key != "output_kind" &&
 			key != "rework_submission_id" && key != "rework_artifact_ids" && key != "restart_of_run_id" &&
-			key != "start_after_run_id" && key != "start_after" && key != "start_within_hours" {
+			key != "start_after_run_id" && key != "start_after" && key != "start_within_hours" && key != "start_after_input" {
 			return input, errors.New("Agent run changes only accept Provider versions and controlled input selections")
 		}
 	}
@@ -388,6 +435,14 @@ func parseAIAgentRunAction(input aiWorkspaceAction, fields, raw map[string]json.
 		return input, errors.New("start gate needs an exact predecessor Run ID from workspace_agent_runs, start_after submitted or accepted, and start_within_hours 1-24")
 	}
 	_, hasReworkSubmission := fields["rework_submission_id"]
+	if _, present := fields["start_after_input"]; present {
+		_, hasCandidates := fields["input_file_candidate_ids"]
+		_, hasReworkIDs := fields["rework_artifact_ids"]
+		if !gateRun || changes.StartAfterInput != agentRunDeferredInputPredecessorFiles ||
+			changes.StartAfter != agentRunStartAfterAccepted || hasCandidates || hasReworkSubmission || hasReworkIDs {
+			return input, errors.New("start_after_input must be predecessor_files on a start gate with start_after accepted, without selected files or rework")
+		}
+	}
 	if _, present := fields["restart_of_run_id"]; present {
 		id, err := uuid.Parse(changes.RestartOfRunID)
 		if err != nil || id.String() != changes.RestartOfRunID {
@@ -461,7 +516,22 @@ func agentRunFileFieldsInArguments(arguments json.RawMessage) bool {
 	}
 	_, hasInputs := raw.Changes["input_file_candidate_ids"]
 	_, hasOutput := raw.Changes["output_kind"]
-	return hasInputs || hasOutput
+	return hasInputs || hasOutput || agentRunDeferredInputInArguments(arguments)
+}
+
+// agentRunDeferredInputInArguments reports a start that asks for the
+// predecessor's files. It needs the same separate permission as selecting
+// accepted files of another Task directly.
+func agentRunDeferredInputInArguments(arguments json.RawMessage) bool {
+	var raw struct {
+		Action  string                     `json:"action"`
+		Changes map[string]json.RawMessage `json:"changes"`
+	}
+	if json.Unmarshal(arguments, &raw) != nil || raw.Action != "agent_run.start" {
+		return false
+	}
+	_, present := raw.Changes["start_after_input"]
+	return present
 }
 
 func aiAgentRunPreviewFromPrepared(prepared preparedAgentRun) aiAgentRunStartPreview {
@@ -537,7 +607,9 @@ func aiAgentRunPreviewFromPrepared(prepared preparedAgentRun) aiAgentRunStartPre
 			contract := snapshot.OutputContract
 			preview.OutputContract = &contract
 			if prepared.ExecutionContractVersion != agentRunExecutionContractVersionV5 || len(snapshot.Files) > 0 || contract.Type != agentexec.ResultTypeText {
-				leavesDevice := len(snapshot.Files) > 0 && providerLeavesDevice
+				// A v7 Run has no files yet, but the ones confirmed later go
+				// to this Provider, so the disclosure is made now.
+				leavesDevice := (len(snapshot.Files) > 0 || prepared.ExecutionContractVersion == agentRunExecutionContractVersionV7) && providerLeavesDevice
 				preview.InputFilesLeaveDevice = &leavesDevice
 				preview.FileLimits = &aiAgentRunFileLimitsPreview{
 					MaxFiles: agentexec.MaxFileInputs, MaxFileBytes: agentexec.MaxFileInputBytes,
@@ -555,11 +627,11 @@ func previewAIAgentRunAction(tx *gorm.DB, input aiWorkspaceAction) (aiActionPrev
 
 // previewAIAgentRunStartGate re-checks, on every preview and confirmation,
 // that the predecessor can still meet the condition and the budget allows it.
-func previewAIAgentRunStartGate(tx *gorm.DB, input aiWorkspaceAction, changes aiAgentRunStartChanges) (*aiAgentRunStartGatePreview, error) {
+func previewAIAgentRunStartGate(tx *gorm.DB, input aiWorkspaceAction, changes aiAgentRunStartChanges, slot *agentRunDeferredInputs) (*aiAgentRunStartGatePreview, error) {
 	if changes.StartAfterRunID == "" {
 		return nil, nil
 	}
-	predecessor, err := validateAgentRunStartGateRequest(tx, changes.StartAfterRunID, changes.StartAfter, changes.StartWithinHours, input.TaskID)
+	predecessor, err := validateAgentRunStartGateRequest(tx, changes.StartAfterRunID, changes.StartAfter, changes.StartWithinHours, input.TaskID, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -573,11 +645,19 @@ func previewAIAgentRunStartGate(tx *gorm.DB, input aiWorkspaceAction, changes ai
 		Where("run.id = ?", predecessor.ID).Take(&identity).Error; err != nil {
 		return nil, err
 	}
-	return &aiAgentRunStartGatePreview{
+	gate := &aiAgentRunStartGatePreview{
 		PredecessorRunID: predecessor.ID, PredecessorTaskID: identity.TaskID,
 		PredecessorTaskTitle: identity.TaskTitle, PredecessorAttempt: identity.Attempt,
 		Require: changes.StartAfter, WithinHours: changes.StartWithinHours,
-	}, nil
+	}
+	if slot != nil {
+		gate.InputSlot = &aiAgentRunInputSlotPreview{
+			Source: slot.Source, ExpectedFiles: slot.ExpectedFiles,
+			MaxFiles: agentexec.MaxFileInputs, MaxFileBytes: agentexec.MaxFileInputBytes,
+			MaxTotalBytes: agentexec.MaxFileInputsTotalBytes,
+		}
+	}
+	return gate, nil
 }
 
 func aiAgentRunOutputRequest(kind string, attempt int) *agentRunOutputContractRequest {
@@ -616,7 +696,7 @@ func previewAIAgentRunActionWithCandidates(
 	tx *gorm.DB,
 	input aiWorkspaceAction,
 	run *aiAgentExecutionRun,
-	store *artifactStore,
+	store *filestore.ArtifactStore,
 ) (aiActionPreview, error) {
 	preview := aiActionPreview{Label: "", Before: map[string]any{}, After: map[string]any{}}
 	var changes aiAgentRunStartChanges
@@ -638,12 +718,17 @@ func previewAIAgentRunActionWithCandidates(
 	for index, binding := range bindings {
 		requests[index] = agentRunInputRequestFromReference(frozenAgentRunFileReference{SourceKind: binding.File.SourceKind, ID: binding.File.ID, SourceTask: binding.File.SourceTask, SHA256: binding.File.SHA256})
 	}
+	slot, err := aiAgentRunDeferredInputs(tx, base.Task, changes)
+	if err != nil {
+		return preview, err
+	}
 	prepared := base
-	if len(requests) > 0 || changes.OutputKind != "" || changes.ReworkSubmissionID != "" {
+	if len(requests) > 0 || changes.OutputKind != "" || changes.ReworkSubmissionID != "" || slot != nil {
 		prepared, err = prepareAgentRun(tx, prepareAgentRunInput{
 			TaskID: input.TaskID, ProviderID: changes.ProviderID,
 			InputFiles: requests, OutputContract: aiAgentRunOutputRequest(changes.OutputKind, base.Attempt),
 			ArtifactStore: store, Rework: aiAgentRunReworkRequest(input, changes), Restart: aiAgentRunRestartRequest(input, changes),
+			DeferredInputs: slot,
 		})
 		if err != nil {
 			return preview, err
@@ -666,7 +751,7 @@ func previewAIAgentRunActionWithCandidates(
 			return preview, newProjectRequestError(409, "AGENT_RUN_FILE_CHANGED", "A selected controlled file changed; read Agent execution eligibility again")
 		}
 	}
-	if typed.StartGate, err = previewAIAgentRunStartGate(tx, input, changes); err != nil {
+	if typed.StartGate, err = previewAIAgentRunStartGate(tx, input, changes, slot); err != nil {
 		return preview, err
 	}
 	preview.Label = typed.Task.Title
@@ -678,7 +763,7 @@ func previewAIAgentRunActionFromStored(
 	tx *gorm.DB,
 	input aiWorkspaceAction,
 	stored *aiAgentRunStartPreview,
-	store *artifactStore,
+	store *filestore.ArtifactStore,
 ) (aiActionPreview, error) {
 	if input.Action == "agent_run.retry" {
 		return previewAIAgentRunRetry(tx, input, store)
@@ -726,15 +811,20 @@ func previewAIAgentRunActionFromStored(
 		Type: stored.OutputContract.Type, Name: stored.OutputContract.Name, MIME: stored.OutputContract.MIME,
 		Files: stored.OutputContract.Files,
 	}
+	slot, err := storedAIAgentRunDeferredInputs(stored, changes)
+	if err != nil {
+		return preview, err
+	}
 	prepared, err := prepareAgentRun(tx, prepareAgentRunInput{
 		TaskID: input.TaskID, ProviderID: changes.ProviderID, Expected: agentRunExpectedIdentity(stored),
 		InputFiles: requests, OutputContract: output, ArtifactStore: store, Rework: aiAgentRunReworkRequest(input, changes), Restart: aiAgentRunRestartRequest(input, changes),
+		DeferredInputs: slot,
 	})
 	if err != nil {
 		return preview, err
 	}
 	typed := aiAgentRunPreviewFromPrepared(prepared)
-	if typed.StartGate, err = previewAIAgentRunStartGate(tx, input, changes); err != nil {
+	if typed.StartGate, err = previewAIAgentRunStartGate(tx, input, changes, slot); err != nil {
 		return preview, err
 	}
 	preview.Label = typed.Task.Title
@@ -804,7 +894,7 @@ func agentRunExpectedIdentity(preview *aiAgentRunStartPreview) *agentRunIdentity
 	}
 }
 
-func executeAIAgentRunAction(tx *gorm.DB, input aiWorkspaceAction, preview *aiAgentRunStartPreview, store *artifactStore, requestID string, now string) (models.AgentRun, error) {
+func executeAIAgentRunAction(tx *gorm.DB, input aiWorkspaceAction, preview *aiAgentRunStartPreview, store *filestore.ArtifactStore, requestID string, now string) (models.AgentRun, error) {
 	if input.Action == "agent_run.retry" {
 		prepared, _, err := prepareAIAgentRunRetry(tx, input, store)
 		if err != nil {
@@ -833,9 +923,14 @@ func executeAIAgentRunAction(tx *gorm.DB, input aiWorkspaceAction, preview *aiAg
 			}
 		}
 	}
+	slot, err := storedAIAgentRunDeferredInputs(preview, changes)
+	if err != nil {
+		return models.AgentRun{}, err
+	}
 	prepared, err := prepareAgentRun(tx, prepareAgentRunInput{
 		TaskID: input.TaskID, ProviderID: changes.ProviderID, Expected: agentRunExpectedIdentity(preview),
 		InputFiles: requests, OutputContract: output, ArtifactStore: store, Rework: aiAgentRunReworkRequest(input, changes), Restart: aiAgentRunRestartRequest(input, changes),
+		DeferredInputs: slot,
 	})
 	if err != nil {
 		return models.AgentRun{}, err
@@ -848,7 +943,7 @@ func executeAIAgentRunAction(tx *gorm.DB, input aiWorkspaceAction, preview *aiAg
 	if err != nil {
 		return models.AgentRun{}, err
 	}
-	if err := openAgentRunStartGate(tx, run, changes.StartAfterRunID, changes.StartAfter, changes.StartWithinHours, confirmedAt); err != nil {
+	if err := openAgentRunStartGate(tx, run, changes.StartAfterRunID, changes.StartAfter, changes.StartWithinHours, confirmedAt, slot); err != nil {
 		return models.AgentRun{}, err
 	}
 	return run, projectAgentRunStartGate(tx, &run)
@@ -919,6 +1014,10 @@ func readAIAgentRunResult(tx *gorm.DB, out aiActionResponse) (*aiAgentRunResult,
 		(gated && (run.StartGate.PredecessorRunID != changes.StartAfterRunID || run.StartGate.Require != changes.StartAfter ||
 			preview.StartGate.PredecessorRunID != changes.StartAfterRunID)) {
 		return nil, errors.New("inconsistent Agent run start gate receipt")
+	}
+	takesInput := changes.StartAfterInput != ""
+	if takesInput && !gated || gated && (takesInput != (run.StartGate.InputSlot != nil) || takesInput != (preview.StartGate.InputSlot != nil)) {
+		return nil, errors.New("inconsistent Agent run input slot receipt")
 	}
 	return &aiAgentRunResult{
 		RestartOfRunID: restartID,
@@ -1087,7 +1186,8 @@ func aiAgentExecutionPrompt(scopes []string) string {
 	}
 	if strings.Contains(","+strings.Join(scopes, ",")+",", ",agent_project_files,") {
 		prompt += `
-- agent_project_files 另需本条 agent_files；仅列同项目已验收文件元数据/本生成 ID（≤4、64KiB/份、128KiB总）；冻结来源版本/批次/hash并确认发送。拒绝跨项目/未验收/撤销/漂移；计划不授权文件/启动/验收。`
+- agent_project_files 另需本条 agent_files；仅列同项目已验收文件元数据/本生成 ID（≤4、64KiB/份、128KiB总）；冻结来源版本/批次/hash并确认发送。拒绝跨项目/未验收/撤销/漂移；计划不授权文件/启动/验收。
+- 前置产出作输入：门控加 start_after_input=predecessor_files（仅 accepted、同项目、前置为文件产出）；验收后须人工在执行过程里逐份确认才启动，不可代确认。`
 	}
 	return prompt
 }

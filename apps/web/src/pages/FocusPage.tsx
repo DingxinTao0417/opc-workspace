@@ -1,3 +1,4 @@
+import "./FocusPage.css";
 import {
   Ban,
   BarChart3,
@@ -212,12 +213,15 @@ export function FocusPage() {
     recentDateRange(localDateFromKey(todayKey)),
   );
   const reportRangeKind = linkedReportRequested ? "custom" : localRangeKind;
-  const customReportRange = linkedReportRequested
-    ? {
-        dateFrom: reportParams.get("date_from") ?? "",
-        dateTo: reportParams.get("date_to") ?? "",
-      }
-    : localCustomRange;
+  const linkedDateFrom = reportParams.get("date_from") ?? "";
+  const linkedDateTo = reportParams.get("date_to") ?? "";
+  const customReportRange = useMemo(
+    () =>
+      linkedReportRequested
+        ? { dateFrom: linkedDateFrom, dateTo: linkedDateTo }
+        : localCustomRange,
+    [linkedDateFrom, linkedDateTo, linkedReportRequested, localCustomRange],
+  );
   const setCustomReportRange = (
     update: (current: typeof customReportRange) => typeof customReportRange,
   ) => {

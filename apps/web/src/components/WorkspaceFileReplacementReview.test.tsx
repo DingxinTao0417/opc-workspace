@@ -223,7 +223,7 @@ it("cancels the exact in-flight v2 operation and requires a fresh review", async
     backupPath: string;
   }) => void;
   vi.mocked(workspaceApi.applyFileReplacement).mockImplementationOnce(
-    async (_root, _review, operation) =>
+    async () =>
       new Promise((resolve) => {
         finish = resolve;
       }),

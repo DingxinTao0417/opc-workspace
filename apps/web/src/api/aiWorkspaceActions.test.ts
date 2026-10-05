@@ -15,6 +15,7 @@ import {
   confirmAiAgentDelegationBatch,
   decideAiAgentFollowup,
 } from "./aiWorkspaceActions";
+import type { Untyped } from "../test/untyped";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("./client", async () => ({
   ...(await vi.importActual("./client")),
@@ -738,22 +739,22 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(batch).route).toBe("/tasks");
     for (const mutate of [
-      (v: any) => {
+      (v: Untyped) => {
         delete v.preview.task_batch.items[0].after_actor;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.task_batch.items[0].after_actor.actor_id = task;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.task_batch.items[0].after_actor.actor_type = "external";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.task_batch.items[0].after_actor.actor_status = "inactive";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.changes.reason = "其他原因";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.task_batch.items[0].assignment_id = actor;
       },
     ]) {
@@ -1173,34 +1174,34 @@ describe("action API contract", () => {
     ).toBe("/tasks");
 
     for (const mutate of [
-      (value: any) => (value.preview.task_view.definition.priority = "P1"),
-      (value: any) =>
+      (value: Untyped) => (value.preview.task_view.definition.priority = "P1"),
+      (value: Untyped) =>
         (value.action.changes.definition.tag_ids = [tagId, tagId]),
-      (value: any) =>
+      (value: Untyped) =>
         (value.action.changes.definition.planned_from = "2026-09-27"),
-      (value: any) => (value.action.changes.definition.unknown = "x"),
-      (value: any) => (value.action.expected_version = 1),
-      (value: any) => (value.action.changes.definition.q = "a".repeat(201)),
-      (value: any) => (value.preview.task_view.next_version = 5),
+      (value: Untyped) => (value.action.changes.definition.unknown = "x"),
+      (value: Untyped) => (value.action.expected_version = 1),
+      (value: Untyped) => (value.action.changes.definition.q = "a".repeat(201)),
+      (value: Untyped) => (value.preview.task_view.next_version = 5),
     ]) {
       const changed = structuredClone(create);
       mutate(changed);
       expect(() => parseAiActionProposal(changed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => (value.action.changes = {}),
-      (value: any) => (value.preview.task_view.version = 1),
-      (value: any) => (value.action.task_saved_view_id = "not-a-uuid"),
-      (value: any) => (value.preview.after.name = "别的名字"),
+      (value: Untyped) => (value.action.changes = {}),
+      (value: Untyped) => (value.preview.task_view.version = 1),
+      (value: Untyped) => (value.action.task_saved_view_id = "not-a-uuid"),
+      (value: Untyped) => (value.preview.after.name = "别的名字"),
     ]) {
       const changed = structuredClone(update);
       mutate(changed);
       expect(() => parseAiActionProposal(changed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => (value.action.changes = { name: "x" }),
-      (value: any) => (value.preview.task_view.deleted = false),
-      (value: any) => (value.preview.after.name = "x"),
+      (value: Untyped) => (value.action.changes = { name: "x" }),
+      (value: Untyped) => (value.preview.task_view.deleted = false),
+      (value: Untyped) => (value.preview.after.name = "x"),
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
@@ -1258,15 +1259,16 @@ describe("action API contract", () => {
       }).route,
     ).toBe("/knowledge");
     for (const mutate of [
-      (value: any) => (value.preview.knowledge.proposed_excerpt = "tampered"),
-      (value: any) => (value.preview.knowledge.proposed_content_bytes = 11),
-      (value: any) => (value.preview.after.status = "ready"),
-      (value: any) => (value.preview.before = { status: "pending" }),
-      (value: any) => (value.action.expected_version = 1),
-      (value: any) => (value.action.changes.name = "notes.exe"),
-      (value: any) => (value.action.changes.content = ""),
-      (value: any) => (value.action.changes.extra = "x"),
-      (value: any) =>
+      (value: Untyped) =>
+        (value.preview.knowledge.proposed_excerpt = "tampered"),
+      (value: Untyped) => (value.preview.knowledge.proposed_content_bytes = 11),
+      (value: Untyped) => (value.preview.after.status = "ready"),
+      (value: Untyped) => (value.preview.before = { status: "pending" }),
+      (value: Untyped) => (value.action.expected_version = 1),
+      (value: Untyped) => (value.action.changes.name = "notes.exe"),
+      (value: Untyped) => (value.action.changes.content = ""),
+      (value: Untyped) => (value.action.changes.extra = "x"),
+      (value: Untyped) =>
         (value.preview.knowledge.proposed_content_sha256 = "short"),
     ]) {
       const changed = structuredClone(create);
@@ -1433,37 +1435,38 @@ describe("action API contract", () => {
     expect(parseAiActionProposal(cancel).route).toBe("/knowledge");
 
     for (const mutate of [
-      (value: any) => (value.preview.knowledge.content_included = true),
-      (value: any) => (value.preview.knowledge.version = 9),
-      (value: any) => (value.preview.knowledge.source_id = jobId),
-      (value: any) => (value.action.changes = { reason: "不该出现在重建索引" }),
-      (value: any) => delete value.preview.knowledge,
+      (value: Untyped) => (value.preview.knowledge.content_included = true),
+      (value: Untyped) => (value.preview.knowledge.version = 9),
+      (value: Untyped) => (value.preview.knowledge.source_id = jobId),
+      (value: Untyped) =>
+        (value.action.changes = { reason: "不该出现在重建索引" }),
+      (value: Untyped) => delete value.preview.knowledge,
     ]) {
       const changed = structuredClone(reindex);
       mutate(changed);
       expect(() => parseAiActionProposal(changed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => (value.preview.knowledge.next_status = "ready"),
-      (value: any) => (value.preview.after.chunks = 2),
-      (value: any) => (value.action.knowledge_source_id = jobId),
+      (value: Untyped) => (value.preview.knowledge.next_status = "ready"),
+      (value: Untyped) => (value.preview.after.chunks = 2),
+      (value: Untyped) => (value.action.knowledge_source_id = jobId),
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
       expect(() => parseAiActionProposal(changed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => (value.preview.knowledge.job.status = "succeeded"),
-      (value: any) => (value.preview.after.job_status = "running"),
-      (value: any) => (value.preview.before.job_attempt = 4),
+      (value: Untyped) => (value.preview.knowledge.job.status = "succeeded"),
+      (value: Untyped) => (value.preview.after.job_status = "running"),
+      (value: Untyped) => (value.preview.before.job_attempt = 4),
     ]) {
       const changed = structuredClone(retry);
       mutate(changed);
       expect(() => parseAiActionProposal(changed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => (value.preview.knowledge.job.status = "succeeded"),
-      (value: any) => (value.preview.knowledge.next_status = "indexing"),
+      (value: Untyped) => (value.preview.knowledge.job.status = "succeeded"),
+      (value: Untyped) => (value.preview.knowledge.next_status = "indexing"),
     ]) {
       const changed = structuredClone(cancel);
       mutate(changed);
@@ -1500,12 +1503,12 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(deletion).route).toBe(`/tasks/${taskId}`);
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.status = "todo"),
-      (value: any) => (value.preview.after.task_deleted = false),
-      (value: any) => delete value.preview.after.agent_runs_deleted,
-      (value: any) => (value.preview.after.artifacts_deleted = -1),
-      (value: any) => (value.preview.after.extra = 0),
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.status = "todo"),
+      (value: Untyped) => (value.preview.after.task_deleted = false),
+      (value: Untyped) => delete value.preview.after.agent_runs_deleted,
+      (value: Untyped) => (value.preview.after.artifacts_deleted = -1),
+      (value: Untyped) => (value.preview.after.extra = 0),
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
@@ -1568,11 +1571,11 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(deletion).route).toBe("/tasks");
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.tag_version = 2),
-      (value: any) => (value.preview.before.color = "#aa11cc"),
-      (value: any) => (value.preview.after.detached_tasks = -1),
-      (value: any) => (value.preview.after.extra = 0),
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.tag_version = 2),
+      (value: Untyped) => (value.preview.before.color = "#aa11cc"),
+      (value: Untyped) => (value.preview.after.detached_tasks = -1),
+      (value: Untyped) => (value.preview.after.extra = 0),
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
@@ -1631,12 +1634,13 @@ describe("action API contract", () => {
       `/projects/${projectId}`,
     );
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.status = "paused"),
-      (value: any) => (value.preview.before.project_version = 7),
-      (value: any) => (value.preview.after.project_deleted = false),
-      (value: any) => (value.preview.after.project_notes_deleted = -1),
-      (value: any) => delete value.preview.after.project_attachments_deleted,
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.status = "paused"),
+      (value: Untyped) => (value.preview.before.project_version = 7),
+      (value: Untyped) => (value.preview.after.project_deleted = false),
+      (value: Untyped) => (value.preview.after.project_notes_deleted = -1),
+      (value: Untyped) =>
+        delete value.preview.after.project_attachments_deleted,
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
@@ -1691,12 +1695,12 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(deletion).route).toBe(`/clients/${clientId}`);
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.status = "active"),
-      (value: any) => (value.preview.before.client_version = 5),
-      (value: any) => (value.preview.after.client_deleted = false),
-      (value: any) => (value.preview.after.client_activities_deleted = -1),
-      (value: any) => delete value.preview.after.client_attachments_deleted,
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.status = "active"),
+      (value: Untyped) => (value.preview.before.client_version = 5),
+      (value: Untyped) => (value.preview.after.client_deleted = false),
+      (value: Untyped) => (value.preview.after.client_activities_deleted = -1),
+      (value: Untyped) => delete value.preview.after.client_attachments_deleted,
     ]) {
       const changed = structuredClone(deletion);
       mutate(changed);
@@ -1750,13 +1754,13 @@ describe("action API contract", () => {
       `/content-calendar?item=${contentItemId}`,
     );
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.status = "draft"),
-      (value: any) => (value.preview.before.content_item_version = 3),
-      (value: any) => (value.preview.after.content_item_deleted = false),
-      (value: any) =>
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.status = "draft"),
+      (value: Untyped) => (value.preview.before.content_item_version = 3),
+      (value: Untyped) => (value.preview.after.content_item_deleted = false),
+      (value: Untyped) =>
         (value.preview.after.content_item_task_links_deleted = -1),
-      (value: any) =>
+      (value: Untyped) =>
         delete value.preview.after.content_item_inbox_sources_marked,
     ]) {
       const changed = structuredClone(deletion);
@@ -1815,19 +1819,19 @@ describe("action API contract", () => {
       `/content-calendar?item=${contentId}`,
     );
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.status = "published";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.external_link = "https://different.test";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.published_at = "2026-09-18T12:00:00Z";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.before.status = "archived";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.project_id = contentId;
       },
     ]) {
@@ -1882,13 +1886,14 @@ describe("action API contract", () => {
       `/roadmap?milestone=${milestoneId}`,
     );
     for (const mutate of [
-      (value: any) => (value.action.changes.reason = "delete"),
-      (value: any) => (value.preview.before.status = "active"),
-      (value: any) => (value.preview.before.roadmap_milestone_version = 1),
-      (value: any) => (value.preview.after.roadmap_milestone_deleted = false),
-      (value: any) =>
+      (value: Untyped) => (value.action.changes.reason = "delete"),
+      (value: Untyped) => (value.preview.before.status = "active"),
+      (value: Untyped) => (value.preview.before.roadmap_milestone_version = 1),
+      (value: Untyped) =>
+        (value.preview.after.roadmap_milestone_deleted = false),
+      (value: Untyped) =>
         (value.preview.after.roadmap_milestone_project_links_deleted = -1),
-      (value: any) =>
+      (value: Untyped) =>
         delete value.preview.after.roadmap_milestone_inbox_sources_marked,
     ]) {
       const changed = structuredClone(deletion);
@@ -1952,32 +1957,32 @@ describe("action API contract", () => {
       `/settings/automation?rule=${automation.action.automation_rule_id}`,
     );
     for (const mutate of [
-      (v: any) => {
+      (v: Untyped) => {
         delete v.preview.after.permission_summary;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.rule_enabled = "true";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.action_label = "Other action";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.before.available = false;
         v.preview.after.available = false;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.local_time = "10:00";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.task_id = valid.id;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.automation_rule_id = valid.id;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.changes.script = "run";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.body = "unexpected";
       },
     ]) {
@@ -2117,25 +2122,25 @@ describe("action API contract", () => {
       record.body,
     );
     for (const mutate of [
-      (v: any) => {
+      (v: Untyped) => {
         delete v.preview.before.body;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.body = "truncated";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.client_id = valid.generation_id;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.task_id = valid.id;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.after.kind = "system_reference";
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.action.changes.confirm_activity_delete = true;
       },
-      (v: any) => {
+      (v: Untyped) => {
         v.preview.next_followup = {};
       },
     ]) {
@@ -3180,55 +3185,55 @@ describe("action API contract", () => {
     });
 
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.inbox_item_id = valid.id;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.expected_version = 1;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.task_id = valid.id;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.reason = "also resolve everything";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.through_created_at = "2026-09-18T12:00:00+00:00";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.inbox_read_all.through_created_at =
           "2026-09-18T11:59:58Z";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.inbox_read_all.candidate_count = 2;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.inbox_read_all.selection_fingerprint = "B".repeat(64);
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.before.snapshot_unread_count = 2;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.marked_count = 1_001;
         value.preview.before.snapshot_unread_count = 1_001;
         value.preview.inbox_read_all.candidate_count = 1_001;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.through_created_at = "2026-09-18T11:59:58Z";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.inbox_read_all.candidate_ids = [valid.id];
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.redirect = "https://example.com/steal";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.tasks = [];
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.invoice_pdf_result = { download_url: "file:///private" };
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.inbox_read_all_result = {
           through_created_at: readAllCutoff,
           marked_count: 3,
@@ -3265,22 +3270,22 @@ describe("action API contract", () => {
     });
 
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.result_id = valid.generation_id;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.result_version = 2;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.inbox_read_all_result.through_created_at = "2026-09-18T11:59:58Z";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.inbox_read_all_result.marked_count = 2;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.inbox_read_all_result.receipt_url = "https://example.com";
       },
-      (value: any) => {
+      (value: Untyped) => {
         delete value.inbox_read_all_result;
       },
     ]) {
@@ -3368,19 +3373,19 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(created).route).toBe("");
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.project_id = projectId;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.status = "archived";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.project_ids = ["not-a-uuid"];
       },
-      (value: any) => {
+      (value: Untyped) => {
         delete value.preview.before.title;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.manual_order = 1024;
       },
     ]) {
@@ -3538,19 +3543,19 @@ describe("action API contract", () => {
       `/content-calendar?item=${contentId}`,
     );
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.expected_task_version = 3;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.task_id = "00000000-0000-4000-8000-000000000095";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.content_item_version = 3;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.before.relation_state = "unlinked";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.reason = "unexpected";
       },
     ]) {
@@ -3559,19 +3564,19 @@ describe("action API contract", () => {
       expect(() => parseAiActionProposal(malformed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.project_id = projectId;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.action = "content_item.publish";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.status = "published";
       },
-      (value: any) => {
+      (value: Untyped) => {
         delete value.preview.before.title;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.manual_order = 1024;
       },
     ]) {
@@ -3637,20 +3642,20 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(updated).route).toBe(`/clients/${clientId}`);
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.task_id = clientId;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.action = "client.delete";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.email = "not-an-email";
         value.preview.after.email = "not-an-email";
       },
-      (value: any) => {
+      (value: Untyped) => {
         delete value.preview.before.name;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.notes = "hidden extra field";
       },
     ]) {
@@ -3712,16 +3717,16 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(unlinked).route).toBe(`/clients/${clientId}`);
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.task_id = clientId;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.actor_id = "00000000-0000-5000-8000-000000000001";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.actor_type = "agent";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.reason = "未披露变化";
       },
     ]) {
@@ -3730,13 +3735,13 @@ describe("action API contract", () => {
       expect(() => parseAiActionProposal(malformed)).toThrow();
     }
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         delete value.action.client_actor_link_id;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.before.actor_version = 3;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.reason = "不一致";
       },
     ]) {
@@ -3791,19 +3796,19 @@ describe("action API contract", () => {
     };
     expect(parseAiActionProposal(updated).route).toBe("");
     for (const mutate of [
-      (value: any) => {
+      (value: Untyped) => {
         value.action.client_id = actorId;
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.action = "person.delete";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.metadata = { token: "secret" };
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.preview.after.notes = "未披露字段";
       },
-      (value: any) => {
+      (value: Untyped) => {
         value.action.changes.status = "owner";
         value.preview.after.status = "owner";
       },

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -515,7 +516,7 @@ func (a *API) deleteProject(c *gin.Context) {
 	}
 
 	var deleted deletedProjectResponse
-	var movedAttachmentFiles []trashedArtifactFile
+	var movedAttachmentFiles []filestore.TrashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var err error
 		_, _, deleted, movedAttachmentFiles, err = a.deleteProjectInTransaction(tx, id, expectedVersion, requestIDFromContext(c), a.options.Now().UTC().Format(time.RFC3339Nano))

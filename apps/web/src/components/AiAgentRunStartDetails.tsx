@@ -60,8 +60,38 @@ export function AiAgentRunStartDetails({
               ? "、被要求返工或撤回"
               : ""}
             时也会取消，不会改用其他执行或自动重试。等待期间可随时取消；启动前仍会复核下方冻结的任务、Agent
-            与 Provider，任一变化即失败关闭。前置产出不会自动成为本次输入。
+            与 Provider，任一变化即失败关闭。
+            {preview.start_gate.input_slot
+              ? ""
+              : "前置产出不会自动成为本次输入。"}
           </p>
+          {preview.start_gate.input_slot ? (
+            <section aria-label="延后绑定的输入">
+              <h4>以前置产出作为输入 · 文件现在还不存在</h4>
+              <p>
+                前置任务验收通过后，它按约定写出的下列文件将作为这次执行的输入（最多{" "}
+                {preview.start_gate.input_slot.max_files} 个，单个不超过{" "}
+                {fileBytes(preview.start_gate.input_slot.max_file_bytes)}
+                ，合计不超过{" "}
+                {fileBytes(preview.start_gate.input_slot.max_total_bytes)}）：
+              </p>
+              <ul aria-label="约定的前置产出文件">
+                {preview.start_gate.input_slot.expected_files.map((file) => (
+                  <li key={file.name}>
+                    <code>{file.name}</code> · {file.mime}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                现在确认的只是这个安排。验收之后，你需要在执行过程里逐份核对文件的名称、大小与
+                SHA-256 并再次确认；未确认不启动、不读取、不发送。
+                {providerLeavesDevice
+                  ? "所选 Provider 是远程服务：届时文件正文将离开本机，发送后无法撤回。"
+                  : "所选 Provider 在本机：届时文件正文留在本机。"}
+                这样的执行失败后不能原样重试，只能按当前事实重新执行。
+              </p>
+            </section>
+          ) : null}
         </section>
       ) : null}
       {preview.restart ? (

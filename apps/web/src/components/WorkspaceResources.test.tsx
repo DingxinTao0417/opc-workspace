@@ -1319,6 +1319,27 @@ describe("AgentsTab", () => {
       expect(mocks.retryRun).not.toHaveBeenCalled();
     },
   );
+  it("offers a failed v7 Run a new execution and never a retry", () => {
+    const failed = {
+      ...pendingRun,
+      status: "failed" as const,
+      outputDeliveryStatus: "not_ready" as const,
+    };
+    mocks.runs.splice(0, mocks.runs.length, failed);
+    mocks.exactRun = {
+      ...detailFromSummary(failed, null),
+      executionContractVersion: 7,
+    };
+    renderAgentsTab();
+    fireEvent.click(screen.getByText("任务甲"));
+    expect(
+      screen.getByRole("button", { name: "按当前事实重新执行" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "重试" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.retryRun).not.toHaveBeenCalled();
+  });
   it("loads the exact Run before displaying a terminal result", () => {
     const resultText = "仅来自详情接口的正文";
     const submittedRun: AgentRunSummary = {

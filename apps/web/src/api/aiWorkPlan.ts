@@ -736,7 +736,7 @@ export function parseAiWorkPlan(
           return invalid();
         const source = previous.evidence;
         let requiredRun: string | undefined;
-        let restartOnly = false;
+        let restartOnly: boolean;
         if (
           source.status === "confirmed" &&
           ["agent_run.start", "agent_run.retry"].includes(

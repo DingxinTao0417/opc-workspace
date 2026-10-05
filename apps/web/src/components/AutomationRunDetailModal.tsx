@@ -1,3 +1,4 @@
+import "./AutomationRunDetailModal.css";
 import {
   AlarmClock,
   AlertCircle,
@@ -182,7 +183,7 @@ export function AutomationRunDetailModal({
     if (!retryRun.isPending) retryRun.reset();
     // The mutation object is stable for the mounted query client. Reset only
     // when opening a different audit trail.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resets only when another audit trail is opened; see above
   }, [runId]);
 
   const detail =

@@ -12,7 +12,7 @@ H5-F6（2026-09-21）：同一 Project 内，后继任务可以明确选择其�
 
 ## 定位与边界
 
-H4-I：项目详情标题栏新增“交给智能体”，仅带入本 Project 类型/ID，进入对话后显式追加草稿并重新选权限，不复制笔记/附件或自动执行；页面在途操作禁用入口。H4-AC 进一步让项目产出列表的单个 Task Artifact 可交给智能体复查，但只推荐 `work+outputs`，不开放项目附件正文、不自动验收或下载文件。详见 [AI 助手交接契约](ai-assistant.md#项目产出单项交给智能体h4-ac)。
+H4-I：项目详情标题栏新增“交给智能体”，仅带入本 Project 类型/ID，进入对话后显式追加草稿并重新选权限，不复制笔记/附件或自动执行；页面在途操作禁用入口。H4-AC 进一步让项目产出列表的单个 Task Artifact 可交给智能体复查，但只推荐 `work+outputs`，不开放项目附件正文、不自动验收或下载文件。详见 [AI 助手交接契约](ai-assistant.md#任务项目产出单项交给智能体h4-ac)。
 
 H5-E30（2026-09-21）允许本条有 `workspace_ui+work` 的智能体在已知真实项目笔记 ID 后请求“打开项目笔记”；Sidecar 重新核对未删除笔记并从数据库推导 Project ID，工具回执不含笔记正文/归属，当前流仅给本地 UI 附加 `parent_id`。用户点击确认卡才进入 `/projects/:projectId?note=:noteId` 并可返回原对话；不自动读取笔记详情给模型或修改项目。见 [精确记录导航](ai-assistant.md#智能体精确记录导航扩展h5-e302026-09-21)。
 
@@ -206,14 +206,14 @@ H5-C 不把 Project Attachment 变成通用 AI 文件系统，也不新增 Proje
 - 操作结果通过 /projects/:id 回到同一项目详情，相关工作台缓存同步失效；重复点击/响应丢失读取原审批结果，不再次执行。不把执行成功当作项目当前仍处于结果状态。
 - H2-P 接通已归档项目的永久删除。`project.delete` 只接受真实 Project ID/版本和空 changes；确认卡冻结任务、草稿发票、账本解除关联数，以及笔记、附件记录、本地附件文件和完成来源协调数，并要求独立勾选永久删除。确认时重新读取版本和完整影响；路线图/内容关联、非草稿发票、发票关联或已作废账本、活动 Agent Run 文件引用仍按原生规则阻止。
 - 人工 API 与 AI 审批共用 `project_delete_command.go`：可保留的 Task、草稿发票和账本只解除项目关联，笔记及活动附件记录随项目删除，附件文件先移入受控 trash；事务或审批失败恢复文件，提交后清理。删除无应用内撤销，成功回执保留已删除 ID/最后版本并导航 `/projects`，不伪造已删除详情。
-- 复用 schema 072 ai_action_proposals，无新增 Project 字段或迁移。能力、审批路由与回执契约见 [AI 助手模块](ai-assistant.md#项目操作h2-b) 和 [ADR-029](../adr/029-agent-workspace-capabilities.md)；不将 AI 并入 v0.1 人工闭环。
+- 复用 schema 072 ai_action_proposals，无新增 Project 字段或迁移。能力、审批路由与回执契约见 [AI 助手模块](ai-assistant.md#项目操作h2-b--h2-p) 和 [ADR-029](../adr/029-agent-workspace-capabilities.md)；不将 AI 并入 v0.1 人工闭环。
 - 代码：共享命令 [project_commands.go](../../services/sidecar/internal/api/project_commands.go) 与 [project_delete_command.go](../../services/sidecar/internal/api/project_delete_command.go)、项目建议 [ai_project_actions.go](../../services/sidecar/internal/api/ai_project_actions.go)、回归 [ai_project_actions_test.go](../../services/sidecar/internal/api/ai_project_actions_test.go)。
 
 ## 数据、API 与状态机
 
 ### 当前数据
 
-- 当前 schema v76 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存受控附件事实。附件新增/软删除通过 trigger 递增 Project 聚合版本，删除墓碑在父项目删除后仍保留；H5-C 不新增 Project 字段，只在应用层冻结受控引用并保护活动输入。
+- 当前 schema v79 的 `projects` 字段仍为 `id, name, description, client_id, status, start_date, due_date, amount_minor, color, version, archived_from_status, created_at, updated_at`；`project_notes` 保存版本化人工笔记；`project_attachments` 保存受控附件事实。附件新增/软删除通过 trigger 递增 Project 聚合版本，删除墓碑在父项目删除后仍保留；H5-C 不新增 Project 字段，只在应用层冻结受控引用并保护活动输入。
 - 当前允许状态：`planning / in_progress / paused / completed / archived`。
 - `version` 从 1 开始，每次资料编辑或状态流转递增；`archived_from_status` 只用于恢复归档前状态。
 - 进度和工时不是项目表字段，而是查询时分别从任务状态和任务 `actual_minutes` 派生。
@@ -305,7 +305,7 @@ Artifact 聚合沿用该 Project 数值 `ETag`，`meta.project_version` 与其�
 
 ## 分阶段实施
 
-1. **项目事实与 API（已实现）**：当前 schema v35 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31–v35 不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
+1. **项目事实与 API（已实现）**：当前 schema v79 保留 schema v3–v20 的 Project 结构与聚合 trigger，包含独立 `project_notes`、受控 `project_attachments`、follow-up Artifact、Task 阻塞/临期、Project 完成 Inbox 与 Client 生命周期活动协调；v31–v35 不改变 Project 表。Go model、CRUD、校验、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的乐观锁、状态流转、归档恢复和受约束硬删除均已实现。
 2. **前端基础纵切（已实现）**：真实新建/编辑、卡片列表、详情、加载/空/错误/重试、状态操作、归档恢复和删除确认。
 3. **任务与工时协作（当前纵切已实现）**：Task 新建/编辑、Tasks 筛选/批量目标和 Inbox 拆分共用有界分页 ProjectSelect，生产路径不再串行拉全项目；`project_name`、Task 事实版本、派生进度和 `actual_minutes` 已接通，Focus Core 已接入 Task 工时传播。项目详情复用父子任务树、平铺列表、组合筛选、顶层/子层分页和共享任务详情，并已接项目级 7 天/30 天/本月报告与终态历史；真实浏览器与大数据量性能仍待专项验证。
 4. **客户协作（基础范围已实现）**：Client CRUD、项目客户选择/改绑/解除、Project/Task 客户筛选已共用每页 20 条、250 ms 服务端搜索和稳定分页的 ClientSelect；当前选择保留、inactive 可见可选、取消信号、加载/空/错误重试/更多提示和 combobox 键盘语义已接通。双向聚合版本传播、人工活动、Project complete/reopen 系统活动、受控附件、显式 contact 关联，以及独立的本地回访计划/Inbox/Today 闭环均已交付；真实浏览器/窄屏/大数据量专项以及邮件/日历等其他来源和财务仍待验收或实现。

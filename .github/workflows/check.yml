@@ -1,0 +1,72 @@
+name: check
+
+# The same deterministic gate developers run locally: `pnpm check`.
+# It needs no secrets, no model provider and no network beyond dependency
+# downloads. Real-provider, installer and cross-platform acceptance are not
+# part of this workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: pnpm check (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      # The hosted runner's default TEMP is an 8.3 short-name path. The
+      # safe-directory tests reject a temporary directory that is not its own
+      # real path, so the gate runs with the runner's plain work directory.
+      - name: Use a real temporary directory
+        shell: pwsh
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/sidecar/go.mod
+          cache-dependency-path: services/sidecar/go.sum
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            apps/file-security-helper -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # format, docs, web (types, tests, build), Go (gofmt, tests, vet, sidecar
+      # build) and Rust (cargo check, tests) in the order of the root script.
+      - name: Run the full gate
+        run: pnpm check

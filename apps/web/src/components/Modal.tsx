@@ -25,6 +25,8 @@ export function Modal({
   panelClassName,
   bodyClassName,
   closeLabel = "关闭",
+  overlayName,
+  beneathOverlay,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,10 +38,18 @@ export function Modal({
   panelClassName?: string;
   bodyClassName?: string;
   closeLabel?: string;
+  /** A name another dialog can refer to with `beneathOverlay`. */
+  overlayName?: string;
+  /**
+   * Opens beneath the named dialog when that one is already open, instead of
+   * on top of it. Read once, when this dialog opens.
+   */
+  beneathOverlay?: string;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const placementRef = useRef({ name: overlayName, beneath: beneathOverlay });
   const modalId = useRef(Symbol("modal")).current;
   const [isTopmost, setIsTopmost] = useState(false);
   const titleId = useId();
@@ -47,6 +57,12 @@ export function Modal({
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // A layout effect, declared before the one that registers the dialog, so
+  // the placement is current when the dialog opens.
+  useLayoutEffect(() => {
+    placementRef.current = { name: overlayName, beneath: beneathOverlay };
+  }, [beneathOverlay, overlayName]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -61,7 +77,12 @@ export function Modal({
       setIsTopmost(next);
     };
     const unsubscribe = subscribeOverlayStack(updateTopmost);
-    const unregister = registerOverlay(modalId, root, previouslyFocused);
+    const unregister = registerOverlay(
+      modalId,
+      root,
+      previouslyFocused,
+      placementRef.current,
+    );
     updateTopmost();
     return () => {
       unsubscribe();

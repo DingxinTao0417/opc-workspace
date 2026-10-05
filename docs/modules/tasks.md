@@ -80,7 +80,7 @@ H3-C3（2026-09-21）：Task 删除影响统计与事务纳入 `agent_run_failed
 >
 > 版本边界：任务事实层、Actor/Assignment、T-18D D1/D2、Focus 工时回写、Inbox Task 关系/拆分编排、一次性 Reminder、六状态看板与跨列受控生命周期、共享服务端 Project 选择、显式 follow-up Artifact/Task 阻塞/Task 临期→Inbox、有门禁的父任务自动发起验收，以及 Windows 内置 Agent Run、受确认 AI 启动、可恢复产出登记和 H5-C 受控文件输入/单文件输出已交付。自动建 Reminder、任意文件系统或 Shell/browser/Git/terminal 自动访问、跨平台/external Runner 与多步自主编排属于后续纵切。
 
-导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD v10.12](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
+导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD](../opc-workspace-PRD.md) · [Actor 与分派](actors.md) · [数据管理](data-management.md)
 
 ## 定位与边界
 
@@ -599,7 +599,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - [Task output API](../../services/sidecar/internal/api/task_outputs.go)
 - [Inbox 来源投影服务](../../services/sidecar/internal/api/inbox_source_projections.go)
 - [Task 临期扫描服务](../../services/sidecar/internal/api/task_due_projections.go)
-- [受控 Artifact store](../../services/sidecar/internal/api/artifact_store.go)
+- [受控 Artifact store](../../services/sidecar/internal/api/filestore/artifact_store.go)
 - [Task 生命周期](../../services/sidecar/internal/api/task_workflow.go)
 - [父任务自动推进服务](../../services/sidecar/internal/api/task_parent_progress.go)
 - [Task API](../../services/sidecar/internal/api/tasks.go)

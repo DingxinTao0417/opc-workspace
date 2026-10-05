@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -106,7 +107,7 @@ func storageProbeTargets(options Options) []storageProbeTarget {
 	}
 	identityCheck := options.VolumeIdentityCheck
 	if identityCheck == nil {
-		identityCheck = storageVolumeIdentity
+		identityCheck = filestore.StorageVolumeIdentity
 	}
 	for index := range targets {
 		canonical, ok := canonicalStorageProbePath(targets[index].path)
@@ -138,7 +139,7 @@ func probeStorageTargets(options Options) ([]storageProbeTarget, map[string]stor
 	targets := storageProbeTargets(options)
 	checker := options.DiskSpaceCheck
 	if checker == nil {
-		checker = diskFreeBytes
+		checker = filestore.DiskFreeBytes
 	}
 	results := make(map[string]storageProbeResult, len(targets))
 	counts := make(map[string]int, len(targets))

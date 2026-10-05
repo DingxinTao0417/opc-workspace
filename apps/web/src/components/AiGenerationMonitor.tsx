@@ -19,16 +19,17 @@ export function AiGenerationMonitor() {
   const chat = useAiChatStream();
   const location = useLocation();
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const recoverGenerations = chat.recover;
   useEffect(() => {
-    void chat.recover();
-    const timer = window.setInterval(() => void chat.recover(), 3_000);
-    const recover = () => void chat.recover();
+    void recoverGenerations();
+    const timer = window.setInterval(() => void recoverGenerations(), 3_000);
+    const recover = () => void recoverGenerations();
     window.addEventListener("online", recover);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("online", recover);
     };
-  }, [chat.recover]);
+  }, [recoverGenerations]);
   const otherGenerations = chat.activeGenerations.filter(
     (item) => !item.origin && item.id !== chat.streaming?.generationId,
   );

@@ -4,6 +4,7 @@ import {
   decideAiWorkspaceAction,
 } from "./aiWorkspaceActions";
 import { financialMinorDisplay } from "./aiFinancialActions";
+import type { Untyped } from "../test/untyped";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("./client", async () => ({
   ...(await vi.importActual("./client")),
@@ -83,80 +84,80 @@ describe("financial proposal contract", () => {
   it.each([
     [
       "fraction",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.amount_minor = 1.25;
         p.preview.after.amount_minor = 1.25;
       },
     ],
     [
       "overflow",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.amount_minor = 9000000000000001;
       },
     ],
     [
       "changed amount",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.amount_minor = 1;
       },
     ],
     [
       "changed currency",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.currency = "USD";
       },
     ],
     [
       "bad date",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.occurred_on = "2026-02-30";
       },
     ],
     [
       "missing note",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.preview.before.notes;
       },
     ],
     [
       "null note",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.notes = null;
       },
     ],
     [
       "unknown field",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.invoice_id = entryId;
       },
     ],
     [
       "missing name",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.project_id = entryId;
       },
     ],
     [
       "wrong target",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.task_id = entryId;
       },
     ],
     [
       "unknown invoice target",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.invoice_id = entryId;
       },
     ],
     [
       "model supplied consent",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.confirm_financial_effects = true;
       },
     ],
     [
       "void via update",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.status = "voided";
         p.preview.after.status = "voided";
       },

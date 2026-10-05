@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -253,7 +254,7 @@ func freezeAgentRunFiles(
 	tx *gorm.DB,
 	task models.Task,
 	requests []agentRunInputFileRequest,
-	store *artifactStore,
+	store *filestore.ArtifactStore,
 ) ([]frozenAgentRunFileReference, []agentexec.FrozenFileInput, error) {
 	if err := validateAgentRunInputFileRequests(requests); err != nil {
 		return nil, nil, err
@@ -369,7 +370,7 @@ func loadAgentRunControlledFileRecord(
 }
 
 func readAgentRunControlledFile(
-	store *artifactStore,
+	store *filestore.ArtifactStore,
 	record agentRunControlledFileRecord,
 ) (agentexec.FrozenFileInput, error) {
 	if store == nil {
@@ -378,7 +379,7 @@ func readAgentRunControlledFile(
 			"Controlled Artifact storage is unavailable",
 		)
 	}
-	file, info, err := store.openObject(record.RelativePath)
+	file, info, err := store.OpenObject(record.RelativePath)
 	if err != nil {
 		return agentexec.FrozenFileInput{}, newProjectRequestError(
 			http.StatusConflict, agentRunFileIntegrityInvalidCode,
@@ -446,7 +447,7 @@ func resolveFrozenAgentRunFiles(
 	tx *gorm.DB,
 	task models.Task,
 	references []frozenAgentRunFileReference,
-	store *artifactStore,
+	store *filestore.ArtifactStore,
 ) ([]agentexec.FrozenFileInput, error) {
 	requests := make([]agentRunInputFileRequest, len(references))
 	for index, reference := range references {
@@ -719,12 +720,13 @@ func (a *API) agentRunCandidateEligibility(
 
 func activeAgentRunReferencesControlledFile(tx *gorm.DB, sourceKind, id string) (bool, error) {
 	type activeAgentRunSnapshot struct {
+		ID                       string
 		ExecutionContractVersion int64
 		InputSnapshotJSON        string
 	}
 	var snapshots []activeAgentRunSnapshot
 	if err := tx.Model(&models.AgentRun{}).
-		Select("execution_contract_version", "input_snapshot_json").
+		Select("id", "execution_contract_version", "input_snapshot_json").
 		Where("status IN ?", []string{"queued", "running"}).
 		Find(&snapshots).Error; err != nil {
 		return false, err
@@ -735,7 +737,11 @@ func activeAgentRunReferencesControlledFile(tx *gorm.DB, sourceKind, id string) 
 			if err != nil {
 				return false, err
 			}
-			for _, file := range snapshot.Files {
+			files, err := agentRunBoundInputFiles(tx, active.ID, snapshot)
+			if err != nil {
+				return false, err
+			}
+			for _, file := range files {
 				if (file.SourceKind == sourceKind || sourceKind == agentexec.FileSourceTaskArtifact && file.SourceKind == agentexec.FileSourceProjectTaskArtifact) && file.ID == id {
 					return true, nil
 				}
@@ -817,7 +823,7 @@ func activeAgentRunReferencesProjectAttachment(tx *gorm.DB, projectID string) (b
 // frozen proof is the deletion boundary until the successor becomes terminal.
 func activeAgentRunReferencesProjectTaskSource(tx *gorm.DB, taskID, projectID string) (bool, error) {
 	var active []models.AgentRun
-	if err := tx.Select("execution_contract_version", "input_snapshot_json").Where("status IN ?", []string{"queued", "running"}).Find(&active).Error; err != nil {
+	if err := tx.Select("id", "execution_contract_version", "input_snapshot_json").Where("status IN ?", []string{"queued", "running"}).Find(&active).Error; err != nil {
 		return false, err
 	}
 	for _, run := range active {
@@ -828,7 +834,11 @@ func activeAgentRunReferencesProjectTaskSource(tx *gorm.DB, taskID, projectID st
 		if err != nil {
 			return false, err
 		}
-		for _, file := range snapshot.Files {
+		files, err := agentRunBoundInputFiles(tx, run.ID, snapshot)
+		if err != nil {
+			return false, err
+		}
+		for _, file := range files {
 			if file.SourceTask != nil && (taskID != "" && file.SourceTask.TaskID == taskID || projectID != "" && file.SourceTask.ProjectID == projectID) {
 				return true, nil
 			}

@@ -21,6 +21,7 @@ import { useUiStore } from "../store/ui";
 import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { SettingsModal } from "./SettingsModal";
 import { applyTheme, ThemeController } from "./ThemeController";
+import type { Untyped } from "../test/untyped";
 
 const desktopApi = vi.hoisted(() => ({
   getRuntimeDiagnostics: vi.fn(),
@@ -94,7 +95,7 @@ const healthPayload = {
   schema: { version: 16 },
 };
 
-function settingsPayload(): any {
+function settingsPayload(): Untyped {
   return {
     data: {
       schema_version: 2,

@@ -15,12 +15,16 @@ import (
 )
 
 const (
-	maxBusinessImportBytes       = 16 * 1024 * 1024
-	importReplaceConfirmation    = "replace-empty-workspace"
-	importAppendConfirmation     = "append-to-existing-workspace"
-	importModeReplaceEmpty       = "replace_empty"
-	importModeAppend             = "append"
-	importBlockerTargetConflicts = "target_key_conflicts"
+	maxBusinessImportBytes    = 16 * 1024 * 1024
+	importReplaceConfirmation = "replace-empty-workspace"
+	importAppendConfirmation  = "append-to-existing-workspace"
+	// A package from an older schema is converted before it is applied, and
+	// the user confirms that with a phrase of its own.
+	importUpgradeReplaceConfirmation = "upgrade-and-replace-empty-workspace"
+	importUpgradeAppendConfirmation  = "upgrade-and-append-to-existing-workspace"
+	importModeReplaceEmpty           = "replace_empty"
+	importModeAppend                 = "append"
+	importBlockerTargetConflicts     = "target_key_conflicts"
 )
 
 type businessImportPreview struct {
@@ -33,9 +37,19 @@ type businessImportPreview struct {
 	TargetRows          int                           `json:"target_rows"`
 	KeyConflicts        int                           `json:"key_conflicts"`
 	ConflictTables      []businessImportTableConflict `json:"conflict_tables"`
-	CanApply            bool                          `json:"can_apply"`
-	ApplyMode           string                        `json:"apply_mode,omitempty"`
-	Blocker             string                        `json:"blocker,omitempty"`
+	UpgradeSteps        []businessImportUpgradeStep   `json:"upgrade_steps"`
+	// SemanticConflicts counts incoming rows that would break a UNIQUE index.
+	SemanticConflicts     int                              `json:"semantic_conflicts"`
+	SemanticConflictRules []businessImportSemanticConflict `json:"semantic_conflict_rules"`
+	// Resolutions lists the incoming rows that will not be written. When there
+	// are any, PlanDigest has to come back with the apply request.
+	Resolutions []businessImportResolution `json:"resolutions"`
+	PlanDigest  string                     `json:"plan_digest,omitempty"`
+	CanApply    bool                       `json:"can_apply"`
+	ApplyMode   string                     `json:"apply_mode,omitempty"`
+	Blocker     string                     `json:"blocker,omitempty"`
+	// RehearsalFailure is set with the apply_rehearsal_failed blocker.
+	RehearsalFailure *businessImportRehearsalFailure `json:"rehearsal_failure,omitempty"`
 }
 
 type businessImportTableConflict struct {
@@ -65,7 +79,7 @@ func (a *API) previewBusinessImport(c *gin.Context) {
 		writeBusinessImportError(c, err)
 		return
 	}
-	preview, err := a.validateBusinessImport(c, packageData)
+	preview, _, err := a.validateBusinessImport(c, &packageData)
 	if err != nil {
 		writeBusinessImportError(c, err)
 		return
@@ -75,7 +89,8 @@ func (a *API) previewBusinessImport(c *gin.Context) {
 
 func (a *API) applyBusinessImport(c *gin.Context) {
 	confirmation := strings.TrimSpace(c.GetHeader("X-Import-Confirmation"))
-	if confirmation != importReplaceConfirmation && confirmation != importAppendConfirmation {
+	if confirmation != importReplaceConfirmation && confirmation != importAppendConfirmation &&
+		confirmation != importUpgradeReplaceConfirmation && confirmation != importUpgradeAppendConfirmation {
 		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "Explicit business import confirmation is required")
 		return
 	}
@@ -95,7 +110,9 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 	defer a.backupStore.mu.Unlock()
 	unlockInvoicePDFs := a.lockInvoicePDFStore()
 	defer unlockInvoicePDFs()
-	preview, err := a.validateBusinessImport(c, packageData)
+	// Validation converts an older package to the current surface in place;
+	// everything below applies the converted rows.
+	preview, plan, err := a.validateBusinessImport(c, &packageData)
 	if err != nil {
 		writeBusinessImportError(c, err)
 		return
@@ -104,8 +121,11 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		writeBusinessImportBlocker(c, preview.Blocker)
 		return
 	}
-	if !validBusinessImportConfirmation(confirmation, preview.ApplyMode, false) {
+	if !validBusinessImportConfirmation(confirmation, preview.ApplyMode, false, businessImportRequiresUpgradeConfirmation(preview)) {
 		writeError(c, http.StatusPreconditionRequired, "IMPORT_CONFIRMATION_REQUIRED", "The confirmation does not match the current import mode")
+		return
+	}
+	if !confirmedBusinessImportPlan(c, preview.PlanDigest) {
 		return
 	}
 	if err := a.backupStore.requireCreateCapacity(a.db.WithContext(c.Request.Context()), a.options, 0); err != nil {
@@ -124,23 +144,30 @@ func (a *API) applyBusinessImport(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "IMPORT_BACKUP_FAILED", "A verified rollback backup could not be created; existing data was not changed")
 		return
 	}
-	if err := a.applyBusinessTables(c, packageData, preview.ApplyMode, nil); err != nil {
+	if err := a.applyBusinessTables(c, plan.apply, preview.ApplyMode, plan.verifyUntouched); err != nil {
 		if a.options.Logger != nil {
 			a.options.Logger.Printf("business import failed after rollback backup backup_id=%s: %v", backup.ID, err)
 		}
 		writeError(c, http.StatusUnprocessableEntity, "IMPORT_APPLY_FAILED", "Business data failed integrity validation and was not imported")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": businessImportResult{ImportedRows: preview.TotalRows, BackupID: backup.ID, ApplyMode: preview.ApplyMode}})
+	c.JSON(http.StatusOK, gin.H{"data": businessImportResult{ImportedRows: plan.appliedRows(), BackupID: backup.ID, ApplyMode: preview.ApplyMode}})
 }
 
-func validBusinessImportConfirmation(confirmation, applyMode string, withFiles bool) bool {
-	if withFiles {
-		return applyMode == importModeReplaceEmpty && confirmation == packageImportReplaceConfirmation ||
-			applyMode == importModeAppend && confirmation == packageImportAppendConfirmation
+// One mode, one phrase: the confirmation has to name both the apply mode and
+// whether the package is being upgraded from an older schema.
+func validBusinessImportConfirmation(confirmation, applyMode string, withFiles, upgrade bool) bool {
+	replace, appendPhrase := importReplaceConfirmation, importAppendConfirmation
+	switch {
+	case withFiles && upgrade:
+		replace, appendPhrase = packageImportUpgradeReplaceConfirmation, packageImportUpgradeAppendConfirmation
+	case withFiles:
+		replace, appendPhrase = packageImportReplaceConfirmation, packageImportAppendConfirmation
+	case upgrade:
+		replace, appendPhrase = importUpgradeReplaceConfirmation, importUpgradeAppendConfirmation
 	}
-	return applyMode == importModeReplaceEmpty && confirmation == importReplaceConfirmation ||
-		applyMode == importModeAppend && confirmation == importAppendConfirmation
+	return applyMode == importModeReplaceEmpty && confirmation == replace ||
+		applyMode == importModeAppend && confirmation == appendPhrase
 }
 
 func writeImportRollbackCapacityError(c *gin.Context, err error) {
@@ -157,8 +184,12 @@ func writeBusinessImportBlocker(c *gin.Context, blocker string) {
 		writeError(c, http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The source schema cannot be applied by this version")
 	case importBlockerTargetConflicts:
 		writeError(c, http.StatusConflict, "IMPORT_TARGET_CONFLICT", "Incoming business keys conflict with the current workspace")
+	case importBlockerSemanticConflicts:
+		writeError(c, http.StatusConflict, "IMPORT_TARGET_SEMANTIC_CONFLICT", "Incoming business rows would duplicate a unique value of the current workspace")
 	case "target_file_conflicts":
 		writeError(c, http.StatusConflict, "IMPORT_TARGET_FILE_CONFLICT", "Incoming controlled files conflict with the current workspace")
+	case importBlockerApplyRehearsal:
+		writeError(c, http.StatusUnprocessableEntity, "IMPORT_REHEARSAL_FAILED", "The current database rules would reject this import; nothing was changed and no backup was created")
 	default:
 		writeError(c, http.StatusConflict, "IMPORT_TARGET_CONFLICT", "The business import cannot be safely appended to the current workspace")
 	}
@@ -182,27 +213,59 @@ func decodeBusinessImport(c *gin.Context) (businessExportPackage, error) {
 	return packageData, nil
 }
 
-func (a *API) validateBusinessImport(c *gin.Context, packageData businessExportPackage) (businessImportPreview, error) {
+func (a *API) validateBusinessImport(c *gin.Context, packageData *businessExportPackage) (businessImportPreview, *businessImportPlan, error) {
 	return a.validateBusinessImportData(c, packageData, false)
 }
 
-func (a *API) validateBusinessImportWithFiles(c *gin.Context, packageData businessExportPackage) (businessImportPreview, error) {
+func (a *API) validateBusinessImportWithFiles(c *gin.Context, packageData *businessExportPackage) (businessImportPreview, *businessImportPlan, error) {
 	return a.validateBusinessImportData(c, packageData, true)
 }
 
-func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExportPackage, allowControlledFiles bool) (businessImportPreview, error) {
+// confirmedBusinessImportPlan checks that the apply request names the plan
+// its preview showed. A plan without resolutions needs no digest.
+func confirmedBusinessImportPlan(c *gin.Context, digest string) bool {
+	if digest == "" || strings.TrimSpace(c.GetHeader("X-Import-Plan-Digest")) == digest {
+		return true
+	}
+	writeError(c, http.StatusConflict, "IMPORT_PLAN_CHANGED", "The import plan changed or was not confirmed; preview the package again")
+	return false
+}
+
+// businessImportCrossTableValid re-runs the checks that span tables. A plan
+// that drops rows must leave a package the import can still replay.
+func businessImportCrossTableValid(packageData businessExportPackage) bool {
+	if !validAutomationImportGraph(packageData) || !validProjectCompletionImportSources(packageData) {
+		return false
+	}
+	artifactReplays, ok := taskArtifactImportReplayPlan(packageData)
+	return ok && validTaskArtifactAssignmentImportHistory(packageData, artifactReplays)
+}
+
+// validateBusinessImportData checks the package and, when it comes from an
+// older supported schema, replaces *source with the package converted to the
+// current portable surface. The caller applies what it finds there afterwards.
+func (a *API) validateBusinessImportData(c *gin.Context, source *businessExportPackage, allowControlledFiles bool) (businessImportPreview, *businessImportPlan, error) {
+	preview, plan, err := a.validateBusinessImportPlan(c, source, allowControlledFiles)
+	if err != nil {
+		return businessImportPreview{}, nil, err
+	}
+	return preview, plan, nil
+}
+
+func (a *API) validateBusinessImportPlan(c *gin.Context, source *businessExportPackage, allowControlledFiles bool) (businessImportPreview, *businessImportPlan, error) {
+	packageData := *source
 	if packageData.FormatVersion != businessExportFormatVersion || packageData.Source.APIVersion != Version || packageData.Source.SchemaVersion < 1 {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The export format, API, or schema version is not compatible"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_VERSION_UNSUPPORTED", "The export format, API, or schema version is not compatible"}
 	}
 	if !allowControlledFiles && (packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount != 0 || packageData.ArtifactFiles.ActiveBytes != 0) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import does not support workspaces with controlled files"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import does not support workspaces with controlled files"}
 	}
 	if allowControlledFiles && (!packageData.ArtifactFiles.Included || packageData.ArtifactFiles.ActiveCount < 0 || packageData.ArtifactFiles.ActiveBytes < 0) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "The controlled-file package summary is invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_PACKAGE_MANIFEST_INVALID", "The controlled-file package summary is invalid"}
 	}
 	counts, total, err := inspectBusinessImportEnvelope(packageData)
 	if err != nil {
-		return businessImportPreview{}, err
+		return businessImportPreview{}, nil, err
 	}
 	expectedExcludedTables, schemaCompatible := businessImportSchemaContract(
 		packageData.Source.SchemaVersion,
@@ -217,79 +280,125 @@ func (a *API) validateBusinessImportData(c *gin.Context, packageData businessExp
 			FormatVersion: packageData.FormatVersion, SchemaVersion: packageData.Source.SchemaVersion,
 			TargetSchemaVersion: a.options.SchemaVersion, ExportedAt: packageData.ExportedAt,
 			TableCounts: counts, TotalRows: total, ConflictTables: []businessImportTableConflict{},
-			CanApply: false, Blocker: blocker,
-		}, nil
+			UpgradeSteps:          []businessImportUpgradeStep{},
+			SemanticConflictRules: []businessImportSemanticConflict{},
+			Resolutions:           []businessImportResolution{},
+			CanApply:              false, Blocker: blocker,
+		}, nil, nil
 	}
 	if !equalStrings(packageData.ExcludedOperationalTables, expectedExcludedTables) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The operational-table exclusion manifest is invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The operational-table exclusion manifest is invalid"}
 	}
+	packageData, upgradeSteps, err := upgradeBusinessImportPackage(packageData, a.options.SchemaVersion)
+	if err != nil {
+		return businessImportPreview{}, nil, err
+	}
+	*source = packageData
 	if len(packageData.Tables) != len(businessExportTables) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The import table manifest is incomplete"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The import table manifest is incomplete"}
 	}
 
 	for index, spec := range businessExportTables {
 		table := packageData.Tables[index]
 		if table.Name != spec.Name {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The import table order or name is invalid"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_MANIFEST_INVALID", "The import table order or name is invalid"}
 		}
 		columns, err := tableColumns(a.db.WithContext(c), spec.Name)
 		if err != nil || !equalStrings(table.Columns, columns) {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_SCHEMA_MISMATCH", "The import table columns do not match the current schema"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_SCHEMA_MISMATCH", "The import table columns do not match the current schema"}
 		}
 		if !allowControlledFiles && tableContainsControlledFiles(table) {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import cannot restore controlled-file metadata"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_FILES_UNSUPPORTED", "JSON import cannot restore controlled-file metadata"}
 		}
 		if table.Name == "focus_sessions" && tableHasValuesOutside(table, "status", "completed", "cancelled", "interrupted") {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ACTIVE_FOCUS_UNSUPPORTED", "Stop or cancel the active Focus Session before exporting"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ACTIVE_FOCUS_UNSUPPORTED", "Stop or cancel the active Focus Session before exporting"}
 		}
 		if table.Name == "reminders" && tableHasInvalidReminderRecurrence(table) {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "A Reminder recurrence rule is invalid"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "A Reminder recurrence rule is invalid"}
 		}
 		if table.Name == "automation_rules" && tableHasInvalidAutomationRules(table) {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Automation preset configuration is invalid"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Automation preset configuration is invalid"}
 		}
 		if table.Name == "agent_adapters" && tableHasInvalidAgentAdapters(table) {
-			return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Agent Adapter manifest or diagnostic state is invalid"}
+			return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "An Agent Adapter manifest or diagnostic state is invalid"}
 		}
 	}
 	if !validAutomationImportGraph(packageData) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Automation import relationships are invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Automation import relationships are invalid"}
 	}
 	if !validProjectCompletionImportSources(packageData) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source deletion history is invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source deletion history is invalid"}
 	}
 	artifactReplays, ok := taskArtifactImportReplayPlan(packageData)
 	if !ok {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task Artifact Inbox source deletion history is invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task Artifact Inbox source deletion history is invalid"}
 	}
 	if !validTaskArtifactAssignmentImportHistory(packageData, artifactReplays) {
-		return businessImportPreview{}, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task assignment history is invalid"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task assignment history is invalid"}
 	}
 
-	report, err := buildBusinessImportConflictReport(a.db.WithContext(c), packageData)
+	var plan *businessImportPlan
+	err = a.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+		var planErr error
+		plan, planErr = planBusinessImport(tx, packageData)
+		if planErr != nil || len(plan.resolutions) == 0 || plan.report.KeyConflicts != 0 || businessImportCrossTableValid(plan.apply) {
+			return planErr
+		}
+		// What is left after dropping rows is not a package the import can
+		// replay, so nothing is dropped and every overlap stays a conflict.
+		report, reportErr := buildBusinessImportConflictReport(tx, packageData)
+		if reportErr != nil {
+			return reportErr
+		}
+		plan = &businessImportPlan{
+			apply: packageData, report: report,
+			resolutions: []businessImportResolution{}, semantic: []businessImportSemanticConflict{},
+		}
+		return nil
+	})
 	if err != nil {
 		var importErr *businessImportError
 		if errors.As(err, &importErr) {
-			return businessImportPreview{}, importErr
+			return businessImportPreview{}, nil, importErr
 		}
-		return businessImportPreview{}, &businessImportError{http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The target workspace could not be checked"}
+		return businessImportPreview{}, nil, &businessImportError{http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The target workspace could not be checked"}
 	}
 	preview := businessImportPreview{
 		FormatVersion: packageData.FormatVersion, SchemaVersion: packageData.Source.SchemaVersion,
 		TargetSchemaVersion: a.options.SchemaVersion, ExportedAt: packageData.ExportedAt,
-		TableCounts: counts, TotalRows: total, TargetRows: report.TargetRows,
-		KeyConflicts: report.KeyConflicts, ConflictTables: report.Tables,
+		TableCounts: counts, TotalRows: total, TargetRows: plan.report.TargetRows,
+		KeyConflicts: plan.report.KeyConflicts, ConflictTables: plan.report.Tables,
+		UpgradeSteps:      upgradeSteps,
+		SemanticConflicts: plan.semanticConflicts(), SemanticConflictRules: plan.semantic,
+		Resolutions: plan.resolutions,
 	}
-	if report.KeyConflicts != 0 {
+	if plan.report.KeyConflicts != 0 {
 		preview.Blocker = importBlockerTargetConflicts
-		return preview, nil
+		return preview, plan, nil
+	}
+	if preview.SemanticConflicts != 0 {
+		preview.Blocker = importBlockerSemanticConflicts
+		return preview, plan, nil
 	}
 	preview.CanApply = true
 	preview.ApplyMode = importModeReplaceEmpty
-	if report.TargetRows != 0 {
+	if plan.report.TargetRows != 0 {
 		preview.ApplyMode = importModeAppend
 	}
-	return preview, nil
+	if len(plan.resolutions) != 0 {
+		preview.PlanDigest = businessImportPlanDigest(preview)
+	}
+	// Everything above reads. The rehearsal writes the plan and rolls it back,
+	// so a rule of the database itself cannot first surface after the backup.
+	failure, err := a.rehearseBusinessImport(c, plan, preview.ApplyMode)
+	if err != nil {
+		return businessImportPreview{}, nil, &businessImportError{http.StatusInternalServerError, "IMPORT_PREFLIGHT_FAILED", "The import could not be rehearsed; nothing was changed"}
+	}
+	if failure != nil {
+		preview.CanApply, preview.ApplyMode, preview.PlanDigest = false, "", ""
+		preview.Blocker, preview.RehearsalFailure = importBlockerApplyRehearsal, failure
+	}
+	return preview, plan, nil
 }
 
 func inspectBusinessImportEnvelope(packageData businessExportPackage) (map[string]int, int, error) {
@@ -568,6 +677,12 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 				if err := restoreImportedProjectVersions(tx, tables["projects"]); err != nil {
 					return err
 				}
+				if err := restoreImportedClientVersions(tx, tables["clients"]); err != nil {
+					return err
+				}
+				if err := restoreImportedParentTaskVersions(tx, tables["tasks"]); err != nil {
+					return err
+				}
 				if err := authorizeHistoricalProjectCompletionImportSources(tx, tables["inbox_items"]); err != nil {
 					return err
 				}
@@ -684,7 +799,43 @@ func validateInvoicePaymentConsistency(db *gorm.DB) error {
 	return nil
 }
 
+// Inserting a row bumps the version and update time of the row it belongs to:
+// a Task, note, attachment or invoice touches its Project; a Project, activity,
+// attachment, contact link or follow-up touches its Client; a subtask touches
+// its parent Task. The exported values already include every one of those
+// changes, so they are put back once the children are in. Without this a row
+// would come out of an import different from the one that was exported, and
+// importing the same package again would see it as a conflict.
 func restoreImportedProjectVersions(tx *gorm.DB, table businessExportTable) error {
+	return restoreImportedRowVersions(tx, table, "project", nil)
+}
+
+func restoreImportedClientVersions(tx *gorm.DB, table businessExportTable) error {
+	return restoreImportedRowVersions(tx, table, "client", nil)
+}
+
+// Only parents are bumped by an insert, and a workspace has far more Tasks
+// than parents.
+func restoreImportedParentTaskVersions(tx *gorm.DB, table businessExportTable) error {
+	parentIndex := columnIndex(table.Columns, "parent_task_id")
+	if parentIndex < 0 {
+		return errors.New("task import columns are incomplete")
+	}
+	parents := make(map[string]struct{})
+	for _, row := range table.Rows {
+		if parent, ok := row[parentIndex].(string); ok && parent != "" {
+			parents[parent] = struct{}{}
+		}
+	}
+	if len(parents) == 0 {
+		return nil
+	}
+	return restoreImportedRowVersions(tx, table, "parent task", parents)
+}
+
+// restoreImportedRowVersions writes the exported version and update time back
+// to the imported rows of table, or to the ones named in only.
+func restoreImportedRowVersions(tx *gorm.DB, table businessExportTable, label string, only map[string]struct{}) error {
 	if len(table.Rows) == 0 {
 		return nil
 	}
@@ -692,21 +843,27 @@ func restoreImportedProjectVersions(tx *gorm.DB, table businessExportTable) erro
 	versionIndex := columnIndex(table.Columns, "version")
 	updatedAtIndex := columnIndex(table.Columns, "updated_at")
 	if idIndex < 0 || versionIndex < 0 || updatedAtIndex < 0 {
-		return errors.New("project import aggregate columns are incomplete")
+		return fmt.Errorf("%s import aggregate columns are incomplete", label)
 	}
+	statement := "UPDATE " + quoteIdentifier(table.Name) + " SET version = ?, updated_at = ? WHERE id = ?"
 	for _, row := range table.Rows {
 		id, ok := row[idIndex].(string)
+		if only != nil {
+			if _, wanted := only[id]; !wanted {
+				continue
+			}
+		}
 		version, versionOK := importInteger(row[versionIndex])
 		updatedAt, updatedAtOK := row[updatedAtIndex].(string)
 		if !ok || id == "" || !versionOK || version < 1 || !updatedAtOK || updatedAt == "" {
-			return errors.New("project import aggregate values are invalid")
+			return fmt.Errorf("%s import aggregate values are invalid", label)
 		}
-		result := tx.Exec("UPDATE projects SET version = ?, updated_at = ? WHERE id = ?", version, updatedAt, id)
+		result := tx.Exec(statement, version, updatedAt, id)
 		if result.Error != nil {
-			return fmt.Errorf("restore imported project aggregate: %w", result.Error)
+			return fmt.Errorf("restore imported %s aggregate: %w", label, result.Error)
 		}
 		if result.RowsAffected != 1 {
-			return errors.New("restore imported project aggregate did not match its project")
+			return fmt.Errorf("restore imported %s aggregate did not match its row", label)
 		}
 	}
 	return nil

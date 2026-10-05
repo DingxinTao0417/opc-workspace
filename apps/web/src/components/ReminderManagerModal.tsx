@@ -276,6 +276,9 @@ export function ReminderManagerModal({
     }
   }, [open]);
 
+  const resetCreate = createMutation.reset;
+  const resetUpdate = updateMutation.reset;
+  const resetCancel = cancelMutation.reset;
   useEffect(() => {
     initializedEditor.current = null;
     initializedDraft.current = null;
@@ -283,11 +286,11 @@ export function ReminderManagerModal({
     setValidationError(null);
     setCancelReason("");
     setConfirmingCancel(false);
-    createMutation.reset();
-    updateMutation.reset();
-    cancelMutation.reset();
+    resetCreate();
+    resetUpdate();
+    resetCancel();
     if (reminderId) setCreating(false);
-  }, [reminderId]);
+  }, [reminderId, resetCreate, resetUpdate, resetCancel]);
 
   useEffect(() => {
     setPage(1);
@@ -310,9 +313,9 @@ export function ReminderManagerModal({
     setValidationError(null);
     setCancelReason("");
     setConfirmingCancel(false);
-    updateMutation.reset();
-    cancelMutation.reset();
-  }, [creating, reminderId, selected]);
+    resetUpdate();
+    resetCancel();
+  }, [creating, reminderId, selected, resetUpdate, resetCancel]);
 
   useSettledPage({
     page,

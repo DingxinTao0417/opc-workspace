@@ -212,6 +212,10 @@ describe("ContentCalendarPage", () => {
     vi.useRealTimers();
   });
   beforeEach(() => {
+    // The page opens on the month of the local "today"; the fixtures live in
+    // September 2026, so pin the date instead of depending on the wall clock.
+    // Only Date is mocked here, real timers keep driving async utilities.
+    vi.setSystemTime(new Date(2026, 8, 15, 12));
     hooks.create.mockReset();
     hooks.createError = null;
     hooks.createPending = false;
@@ -563,6 +567,7 @@ describe("ContentCalendarPage", () => {
   });
 
   it("hands off only the visible monthly range, timezone and current status", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 15, 12));
     render(
@@ -1359,6 +1364,7 @@ describe("ContentCalendarPage", () => {
   });
 
   it("follows the new local month at midnight and refreshes the visible range", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
     render(
@@ -1387,6 +1393,7 @@ describe("ContentCalendarPage", () => {
   });
 
   it("keeps a manually selected month when local midnight passes", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
     render(

@@ -78,6 +78,8 @@ export function FinancialEntryFormModal({
   const [validationError, setValidationError] = useState<string | null>(null);
   const busy = createMutation.isPending || updateMutation.isPending;
 
+  const resetCreate = createMutation.reset;
+  const resetUpdate = updateMutation.reset;
   useEffect(() => {
     if (!open) return;
     setType(entry?.type ?? initialType);
@@ -90,9 +92,9 @@ export function FinancialEntryFormModal({
     setProjectId(entry?.projectId ?? "");
     setNotes(entry?.notes ?? "");
     setValidationError(null);
-    createMutation.reset();
-    updateMutation.reset();
-  }, [entry, initialType, open]);
+    resetCreate();
+    resetUpdate();
+  }, [entry, initialType, open, resetCreate, resetUpdate]);
 
   const mutationError = useMemo(
     () =>

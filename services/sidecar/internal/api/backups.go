@@ -22,6 +22,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 const (
@@ -36,7 +38,7 @@ const (
 type backupStore struct {
 	root         string
 	databasePath string
-	artifacts    *artifactStore
+	artifacts    *filestore.ArtifactStore
 	mu           sync.Mutex
 }
 
@@ -107,7 +109,7 @@ type createBackupRequest struct {
 	Note string `json:"note"`
 }
 
-func newBackupStore(root, databasePath string, artifacts *artifactStore) (*backupStore, error) {
+func newBackupStore(root, databasePath string, artifacts *filestore.ArtifactStore) (*backupStore, error) {
 	root = strings.TrimSpace(root)
 	databasePath = strings.TrimSpace(databasePath)
 	if root == "" || databasePath == "" {
@@ -129,16 +131,16 @@ func newBackupStore(root, databasePath string, artifacts *artifactStore) (*backu
 	}
 	absoluteRoot = filepath.Clean(absoluteRoot)
 	absoluteDatabase = filepath.Clean(absoluteDatabase)
-	if isFilesystemRoot(absoluteRoot) || sameFilesystemPath(absoluteRoot, absoluteDatabase) || pathContains(absoluteRoot, absoluteDatabase) {
+	if filestore.IsFilesystemRoot(absoluteRoot) || filestore.SameFilesystemPath(absoluteRoot, absoluteDatabase) || pathContains(absoluteRoot, absoluteDatabase) {
 		return nil, errors.New("backup root must be a dedicated directory")
 	}
-	if pathContains(absoluteRoot, artifacts.root) || pathContains(artifacts.root, absoluteRoot) {
+	if pathContains(absoluteRoot, artifacts.Root) || pathContains(artifacts.Root, absoluteRoot) {
 		return nil, errors.New("backup root and Artifact root must not overlap")
 	}
 	if err := os.MkdirAll(absoluteRoot, 0o700); err != nil {
 		return nil, fmt.Errorf("create backup root: %w", err)
 	}
-	if err := requireSafeDirectory(absoluteRoot); err != nil {
+	if err := filestore.RequireSafeDirectory(absoluteRoot); err != nil {
 		return nil, fmt.Errorf("validate backup root: %w", err)
 	}
 	databaseInfo, err := os.Lstat(absoluteDatabase)
@@ -363,7 +365,7 @@ func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options, additi
 	}
 	checker := options.DiskSpaceCheck
 	if checker == nil {
-		checker = diskFreeBytes
+		checker = filestore.DiskFreeBytes
 	}
 	available, total, err := checker(s.root)
 	if err != nil || total == 0 || available > total {
@@ -375,14 +377,14 @@ func (s *backupStore) requireCreateCapacity(db *gorm.DB, options Options, additi
 	return nil
 }
 
-func estimateBackupCreateCapacity(db *gorm.DB, databasePath string, artifacts *artifactStore, schemaVersion int) (uint64, error) {
+func estimateBackupCreateCapacity(db *gorm.DB, databasePath string, artifacts *filestore.ArtifactStore, schemaVersion int) (uint64, error) {
 	return estimateBackupCreateCapacityWithAdditional(db, databasePath, artifacts, schemaVersion, 0)
 }
 
 func estimateBackupCreateCapacityWithAdditional(
 	db *gorm.DB,
 	databasePath string,
-	artifacts *artifactStore,
+	artifacts *filestore.ArtifactStore,
 	schemaVersion int,
 	additionalPayloadBytes uint64,
 ) (uint64, error) {
@@ -392,7 +394,7 @@ func estimateBackupCreateCapacityWithAdditional(
 func estimateBackupCreateCapacityWithInvoicePDFs(
 	db *gorm.DB,
 	databasePath string,
-	artifacts *artifactStore,
+	artifacts *filestore.ArtifactStore,
 	invoicePDFRoot string,
 	schemaVersion int,
 	additionalPayloadBytes uint64,
@@ -442,7 +444,7 @@ func estimateBackupCreateCapacityWithInvoicePDFs(
 		}
 	}
 
-	markerPath := filepath.Join(artifacts.root, artifactStoreMarkerName)
+	markerPath := filepath.Join(artifacts.Root, filestore.ArtifactStoreMarkerName)
 	markerBytes, err := verifiedRegularFileSize(markerPath)
 	if err != nil {
 		return 0, errBackupCapacityUnavailable
@@ -564,17 +566,17 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 	if err := db.Raw("SELECT database_id, artifact_store_id FROM workspace_identity WHERE singleton = 1").Row().Scan(&databaseID, &storeID); err != nil {
 		return backupSummary{}, fmt.Errorf("read workspace identity: %w", err)
 	}
-	canonicalDatabaseID, err := canonicalArtifactDatabaseID(databaseID)
+	canonicalDatabaseID, err := filestore.CanonicalArtifactDatabaseID(databaseID)
 	if err != nil {
 		return backupSummary{}, err
 	}
 	databaseID = canonicalDatabaseID
-	canonicalStoreID, err := canonicalArtifactStoreID(storeID)
+	canonicalStoreID, err := filestore.CanonicalArtifactStoreID(storeID)
 	if err != nil {
 		return backupSummary{}, err
 	}
 	storeID = canonicalStoreID
-	if storeID != s.artifacts.storeID {
+	if storeID != s.artifacts.StoreID {
 		return backupSummary{}, errors.New("workspace and Artifact store identities differ")
 	}
 
@@ -592,12 +594,12 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 	}
 	databaseFile.Path = databaseRelative
 
-	expectedMarker, err := artifactStoreMarkerBytes(databaseID, storeID)
+	expectedMarker, err := filestore.ArtifactStoreMarkerBytes(databaseID, storeID)
 	if err != nil {
 		return backupSummary{}, err
 	}
-	markerRelative := "artifacts/" + artifactStoreMarkerName
-	markerSource := filepath.Join(s.artifacts.root, artifactStoreMarkerName)
+	markerRelative := "artifacts/" + filestore.ArtifactStoreMarkerName
+	markerSource := filepath.Join(s.artifacts.Root, filestore.ArtifactStoreMarkerName)
 	markerFile, err := copyVerifiedBackupFile(
 		markerSource,
 		filepath.Join(stagingPath, filepath.FromSlash(markerRelative)),
@@ -662,7 +664,7 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 		return backupSummary{}, err
 	}
 	for _, directory := range backupPackageSyncDirectories(stagingPath, manifest) {
-		if err := syncArtifactDirectory(directory); err != nil {
+		if err := filestore.SyncArtifactDirectory(directory); err != nil {
 			return backupSummary{}, fmt.Errorf("sync backup package: %w", err)
 		}
 	}
@@ -670,7 +672,7 @@ func (s *backupStore) createWithKind(db *gorm.DB, options Options, note, keyHash
 		return backupSummary{}, fmt.Errorf("publish backup package: %w", err)
 	}
 	finished = true
-	if err := syncArtifactDirectory(s.root); err != nil {
+	if err := filestore.SyncArtifactDirectory(s.root); err != nil {
 		return backupSummary{}, fmt.Errorf("sync backup root: %w", err)
 	}
 	return backupSummaryFromManifest(manifest, "verified", ""), nil
@@ -715,7 +717,7 @@ func (s *backupStore) list() ([]backupSummary, error) {
 }
 
 func (s *backupStore) verifyPackage(packagePath, expectedID string, maxSchemaVersion int) (backupManifest, error) {
-	if err := requireSafeDirectory(packagePath); err != nil {
+	if err := filestore.RequireSafeDirectory(packagePath); err != nil {
 		return backupManifest{}, err
 	}
 	manifest, err := readBackupManifest(packagePath)
@@ -749,7 +751,7 @@ func (s *backupStore) verifyPackage(packagePath, expectedID string, maxSchemaVer
 	if err != nil {
 		return backupManifest{}, err
 	}
-	expectedMarker, err := artifactStoreMarkerBytes(manifest.DatabaseID, manifest.ArtifactStoreID)
+	expectedMarker, err := filestore.ArtifactStoreMarkerBytes(manifest.DatabaseID, manifest.ArtifactStoreID)
 	if err != nil || string(marker) != string(expectedMarker) {
 		return backupManifest{}, errors.New("backup Artifact marker does not match manifest identity")
 	}
@@ -784,16 +786,16 @@ func validateBackupManifest(manifest backupManifest, expectedID string, maxSchem
 	if maxSchemaVersion > 0 && manifest.SchemaVersion > maxSchemaVersion {
 		return errors.New("backup schema is newer than this Sidecar")
 	}
-	if _, err := canonicalArtifactDatabaseID(manifest.DatabaseID); err != nil {
+	if _, err := filestore.CanonicalArtifactDatabaseID(manifest.DatabaseID); err != nil {
 		return err
 	}
-	if _, err := canonicalArtifactStoreID(manifest.ArtifactStoreID); err != nil {
+	if _, err := filestore.CanonicalArtifactStoreID(manifest.ArtifactStoreID); err != nil {
 		return err
 	}
 	if err := validateBackupFile(manifest.Database, "database/opc-workspace.db"); err != nil {
 		return err
 	}
-	if err := validateBackupFile(manifest.ArtifactMarker, "artifacts/"+artifactStoreMarkerName); err != nil {
+	if err := validateBackupFile(manifest.ArtifactMarker, "artifacts/"+filestore.ArtifactStoreMarkerName); err != nil {
 		return err
 	}
 	seen := make(map[string]struct{}, len(manifest.Artifacts))
@@ -1006,12 +1008,12 @@ func backupControlledFilePath(relative string) string {
 	return "artifacts/" + relative
 }
 
-func resolveControlledFileForBackup(artifacts *artifactStore, invoicePDFRoot string, row controlledFileBackupRow) (string, error) {
+func resolveControlledFileForBackup(artifacts *filestore.ArtifactStore, invoicePDFRoot string, row controlledFileBackupRow) (string, error) {
 	if !strings.HasPrefix(row.RelativePath, invoicePDFControlledPrefix) {
 		if artifacts == nil {
 			return "", errors.New("controlled Artifact store is unavailable")
 		}
-		return artifacts.resolveControlledFile(row.RelativePath)
+		return artifacts.ResolveControlledFile(row.RelativePath)
 	}
 	root := strings.TrimSpace(invoicePDFRoot)
 	if root == "" {
@@ -1022,19 +1024,19 @@ func resolveControlledFileForBackup(artifacts *artifactStore, invoicePDFRoot str
 		return "", err
 	}
 	absolute = filepath.Clean(absolute)
-	if isFilesystemRoot(absolute) || requireSafeDirectory(absolute) != nil {
+	if filestore.IsFilesystemRoot(absolute) || filestore.RequireSafeDirectory(absolute) != nil {
 		return "", errors.New("invoice PDF store is unsafe")
 	}
 	store := &invoicePDFStore{root: absolute}
 	return resolveControlledFileForStores(artifacts, store, row)
 }
 
-func resolveControlledFileForStores(artifacts *artifactStore, invoicePDFs *invoicePDFStore, row controlledFileBackupRow) (string, error) {
+func resolveControlledFileForStores(artifacts *filestore.ArtifactStore, invoicePDFs *invoicePDFStore, row controlledFileBackupRow) (string, error) {
 	if !strings.HasPrefix(row.RelativePath, invoicePDFControlledPrefix) {
 		if artifacts == nil {
 			return "", errors.New("controlled Artifact store is unavailable")
 		}
-		return artifacts.resolveControlledFile(row.RelativePath)
+		return artifacts.ResolveControlledFile(row.RelativePath)
 	}
 	if invoicePDFs == nil {
 		return "", errors.New("invoice PDF store is unavailable")
@@ -1044,7 +1046,7 @@ func resolveControlledFileForStores(artifacts *artifactStore, invoicePDFs *invoi
 	if err != nil {
 		return "", err
 	}
-	if err := requireSafeDirectory(filepath.Dir(path)); err != nil {
+	if err := filestore.RequireSafeDirectory(filepath.Dir(path)); err != nil {
 		return "", errors.New("invoice PDF owner directory is unsafe")
 	}
 	return path, nil
@@ -1105,7 +1107,7 @@ func writeBackupManifestAtomic(packagePath string, manifest backupManifest) erro
 	if err := replaceFileAtomically(temporaryPath, filepath.Join(packagePath, backupManifestName)); err != nil {
 		return fmt.Errorf("replace backup manifest: %w", err)
 	}
-	if err := syncArtifactDirectory(packagePath); err != nil {
+	if err := filestore.SyncArtifactDirectory(packagePath); err != nil {
 		return fmt.Errorf("sync backup package after manifest replacement: %w", err)
 	}
 	return nil
@@ -1268,7 +1270,7 @@ func backupPackageSyncDirectories(packagePath string, manifest backupManifest) [
 		directory := filepath.Dir(filepath.Join(packagePath, filepath.FromSlash(artifact.Path)))
 		for pathContains(packagePath, directory) {
 			seen[directory] = struct{}{}
-			if sameFilesystemPath(directory, packagePath) {
+			if filestore.SameFilesystemPath(directory, packagePath) {
 				break
 			}
 			directory = filepath.Dir(directory)

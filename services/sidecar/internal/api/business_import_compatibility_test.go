@@ -224,7 +224,16 @@ func TestBusinessImportSchema76KeepsContinuationAuthorizationNonportable(t *test
 	if len(backupPackageDirectories(t, backupDir)) != 0 {
 		t.Fatal("read-only or rejected preview created backup")
 	}
-	apply := performRequest(target, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+	// A package from an older schema needs the upgrade phrase; the ordinary
+	// one is refused before any backup is made.
+	refused := performRequest(target, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+	if refused.Code != http.StatusPreconditionRequired || responseErrorCode(t, refused.Body.Bytes()) != "IMPORT_CONFIRMATION_REQUIRED" {
+		t.Fatalf("v76 apply with the same-schema phrase=%d %s", refused.Code, refused.Body.String())
+	}
+	if len(backupPackageDirectories(t, backupDir)) != 0 {
+		t.Fatal("refused confirmation created backup")
+	}
+	apply := performRequest(target, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importUpgradeReplaceConfirmation})
 	if apply.Code != http.StatusOK {
 		t.Fatalf("v76 apply=%d %s", apply.Code, apply.Body.String())
 	}
@@ -313,12 +322,12 @@ func TestBusinessImportAcceptsFrozenV49DeletedProjectCompletionHistory(t *testin
 		{
 			name: "JSON", body: jsonBody,
 			previewPath: "/api/v1/imports/business-data/preview", applyPath: "/api/v1/imports/business-data",
-			confirmation: importAppendConfirmation, applyCode: "IMPORT_APPLY_FAILED",
+			confirmation: importUpgradeAppendConfirmation, applyCode: "IMPORT_APPLY_FAILED",
 		},
 		{
 			name: "ZIP", body: zipBody,
 			previewPath: "/api/v1/imports/business-package/preview", applyPath: "/api/v1/imports/business-package",
-			confirmation: packageImportAppendConfirmation, applyCode: "IMPORT_PACKAGE_APPLY_FAILED",
+			confirmation: packageImportUpgradeAppendConfirmation, applyCode: "IMPORT_PACKAGE_APPLY_FAILED",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -344,12 +353,12 @@ func TestBusinessImportAcceptsFrozenV49IntoEmptyWorkspace(t *testing.T) {
 		{
 			name: "JSON", body: jsonBody,
 			previewPath: "/api/v1/imports/business-data/preview", applyPath: "/api/v1/imports/business-data",
-			confirmation: importReplaceConfirmation,
+			confirmation: importUpgradeReplaceConfirmation,
 		},
 		{
 			name: "ZIP", body: zipBody,
 			previewPath: "/api/v1/imports/business-package/preview", applyPath: "/api/v1/imports/business-package",
-			confirmation: packageImportReplaceConfirmation,
+			confirmation: packageImportUpgradeReplaceConfirmation,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -513,7 +522,27 @@ func frozenBusinessExportV49(t *testing.T, source []byte) businessExportPackage 
 	}
 	packageData.Source.SchemaVersion = frozenBusinessImportSchemaV49
 	packageData.ExcludedOperationalTables = append([]string(nil), frozenBusinessExportV49ExcludedTables...)
+	stripPortableColumnAddedAfterExport(t, &packageData, "actors", "agent_adapter_id")
 	return packageData
+}
+
+// stripPortableColumnAddedAfterExport gives a relabelled current export the
+// shape a package really had before the column existed. The fixture must not
+// carry a value in that column.
+func stripPortableColumnAddedAfterExport(t *testing.T, packageData *businessExportPackage, tableName, column string) {
+	t.Helper()
+	table := automationImportTable(t, packageData, tableName)
+	index := columnIndex(table.Columns, column)
+	if index < 0 {
+		t.Fatalf("current %s export has no %s column", tableName, column)
+	}
+	table.Columns = append(table.Columns[:index:index], table.Columns[index+1:]...)
+	for row := range table.Rows {
+		if table.Rows[row][index] != nil {
+			t.Fatalf("fixture %s row %d has %s=%v, which a package from before the column cannot contain", tableName, row, column, table.Rows[row][index])
+		}
+		table.Rows[row] = append(table.Rows[row][:index:index], table.Rows[row][index+1:]...)
+	}
 }
 
 func frozenBusinessPackageV49(t *testing.T, sourceZIP []byte) businessExportPackage {

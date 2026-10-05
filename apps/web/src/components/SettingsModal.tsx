@@ -1,3 +1,4 @@
+import "./SettingsModal.css";
 import {
   Activity,
   AlertCircle,
@@ -427,6 +428,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       avatarPreviewUrl.current = null;
       cancelPreview();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the modal opens or the requested module changes
   }, [beginPreview, cancelPreview, open, requestedModule]);
 
   useEffect(() => {

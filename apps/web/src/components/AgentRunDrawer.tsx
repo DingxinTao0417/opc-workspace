@@ -1,3 +1,4 @@
+import "./AgentRunDrawer.css";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { aiWorkspaceHref } from "../lib/aiWorkspaceLinks";
@@ -19,11 +20,12 @@ import {
   agentRunProgressLabel,
 } from "../lib/agentRunProgress";
 import { taskSubmissionHref } from "../lib/taskSubmissionLocation";
-import { useUiStore } from "../store/ui";
+import { agentRunDrawerOverlay, useUiStore } from "../store/ui";
 import type { AgentRun } from "../types/models";
 import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 import { Modal } from "./Modal";
 import { useEffect, useState } from "react";
+import { AgentRunInputConfirmation } from "./AgentRunInputConfirmation";
 import { AgentRunRestartModal } from "./AgentRunRestartModal";
 import { canRestartAgentRun } from "../lib/agentRunRestart";
 import {
@@ -58,6 +60,7 @@ function RunTime({ value }: { value: string | null }) {
 function downloadResult(title: string, run: AgentRun) {
   if (run.resultText === null) return;
   const filename =
+    // eslint-disable-next-line no-control-regex -- replaces control characters on purpose
     title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").slice(0, 80) || "任务";
   const url = URL.createObjectURL(
     new Blob([run.resultText], { type: "text/plain;charset=utf-8" }),
@@ -110,6 +113,7 @@ export function AgentRunDrawer() {
       dismissible={!retryDelivery.isPending}
       title="执行过程"
       closeLabel="收起执行过程"
+      overlayName={agentRunDrawerOverlay}
       width="480px"
       panelClassName="agent-run-drawer"
       bodyClassName="agent-run-drawer-body"
@@ -301,19 +305,27 @@ export function AgentRunDrawer() {
               </dd>
             </div>
             {selectedRun.startGate ? (
-              <div>
+              <div className="agent-run-drawer-fact-wide">
                 <dt>启动条件</dt>
                 <dd>
                   {selectedRun.startGate.status === "waiting" ? (
                     <>
-                      等待前置执行的产出
-                      {selectedRun.startGate.require === "accepted"
-                        ? "被人工验收接受"
-                        : "登记为任务提交"}
+                      {selectedRun.startGate.inputSlot?.status ===
+                      "awaiting_confirmation"
+                        ? "前置产出已验收，等待你在下方确认输入文件"
+                        : `等待前置执行的产出${
+                            selectedRun.startGate.require === "accepted"
+                              ? "被人工验收接受"
+                              : "登记为任务提交"
+                          }`}
                       ，截止 <RunTime value={selectedRun.startGate.expiresAt} />
                     </>
                   ) : selectedRun.startGate.status === "released" ? (
-                    "前置条件已满足，已进入普通执行队列"
+                    selectedRun.startGate.inputSlot ? (
+                      "输入文件已由人工确认，已进入普通执行队列"
+                    ) : (
+                      "前置条件已满足，已进入普通执行队列"
+                    )
                   ) : (
                     agentRunLifecycle(selectedRun).detail
                   )}{" "}
@@ -359,6 +371,9 @@ export function AgentRunDrawer() {
               <dd>{deliveryStatusLabels[selectedRun.outputDeliveryStatus]}</dd>
             </div>
           </dl>
+          {selectedRun.startGate?.inputSlot ? (
+            <AgentRunInputConfirmation key={selectedRun.id} run={selectedRun} />
+          ) : null}
           {selectedRun.status === "running" && selectedRun.progress ? (
             <p
               className="agent-run-drawer-progress"

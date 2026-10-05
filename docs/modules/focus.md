@@ -63,7 +63,7 @@
 - Project 详情在任务区之后独立加载 7 天、30 天和本月报告，展示 completed-only 总时长、distinct Session 完成数、当前/区间最长连续天数及每日趋势。
 - 同一区块另以每页 6 条稳定分页展示 completed/cancelled/interrupted 终态历史；取消/中断仅显示审计“记录时长”，不进入报告或 Task 工时。
 - 报告与历史各自提供加载、空、错误、重试和分页状态，任一失败不阻塞 Project 主详情或另一卡；总页数回缩时前端收敛到有效页，归档 Project 保持只读可查。
-- 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型，本身不新增迁移；当前 schema v30–v35 的新增分别涉及 Task Submission、Client Activity、Reminder、Automation、Agent Adapter 与 Client Followup，不改变该 Focus 读模型。
+- 该纵切复用 schema v11 Focus 表、现有 Task/Project 外键和 API v1，仅增加可选查询参数与读模型，本身不新增迁移；schema v30–v35 的新增分别涉及 Task Submission、Client Activity、Reminder、Automation、Agent Adapter 与 Client Followup，不改变该 Focus 读模型。
 
 ### AI 独立轨道：查询与受确认的会话操作（H3-A1/A2，schema 072）
 
@@ -312,7 +312,7 @@ completed、cancelled 和 interrupted 是终态；matching 的重复 stop/cancel
 
 - D1 历史与周期报告增加可选 `project_id`，严格 canonical UUID/400/404、归档可读和当前 Task 项目归属语义已完成。
 - Project 详情已接 7 天/30 天/本月趋势、总时长、完成数、连续天数、终态历史分页，以及报告/历史独立加载、空、错误和重试。
-- 该读取不增加 schema migration；API 保持 v1，SQLite 当前为 schema v35，v30–v35 不改变 Focus 表或读取契约。
+- 该读取不增加 schema migration；API 保持 v1，交付时 SQLite 为 schema v35，v30–v35 不改变 Focus 表或读取契约。
 
 ### 后续增强
 

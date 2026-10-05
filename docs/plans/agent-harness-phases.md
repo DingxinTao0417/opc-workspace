@@ -2,6 +2,12 @@
 
 > 2026-09-23 起向前任务与验证记录见 [agent-harness-handoff.md](./agent-harness-handoff.md)。
 
+### 2026-10-04 AH-09 以前置产出作为后续 Run 的输入（ADR-033）
+
+- `agent_run.start` 在门控之外可声明 `start_after_input=predecessor_files`（仅 `accepted`、同项目、前置约定产出文件、只传一步）。第一段确认后 Run 以执行契约 v7 入队，只冻结声明；前置产出被验收后不自动放行，由人在执行抽屉核对文件与 Provider 并确认，确认记录为放行事件。产出不可用时以 `predecessor_output_unavailable` 取消；v7 不可原样重试；无迁移。
+- 验收：Go `TestAgentRunDeferredInputs*`、`TestAgentRunDeferredInputProposalBoundaries`、`TestAgentRunSnapshotContractsKeepTheirBytes`；前端解析、生命周期、确认卡、确认面板与抽屉测试；真实服务端响应与前端解析器交叉核对。真实 Provider 下的整条链路属专项验收（PRD 10.5.4 的 A9）。
+- 提示预算实测 OpenAI 64797 / Anthropic 64070 字节，余 739 字节；上限与测试未改。
+
 ### 2026-09-23 AH-07 跨 Run 条件式延后启动（ADR-030 首片）
 
 - `agent_run.start` 可附带前置 Run（不同任务、仍在进行）、`submitted/accepted` 条件与 1–24 小时时限；用户逐项确认完整快照与启动条件后，Run 以 `queued` 创建并追加 `agent_run_start_gated`。FIFO 与认领跳过门控未结束的 Run；事实提交唤醒与 30 秒扫描对账，满足则放行回到原准入/FIFO/身份复核，前置失败/取消/保留/未接受/不可用或超时则关闭并取消。最多 4 个等待中的门控；无范围授权、自动验收或重试；无 schema/scope/Runner wire 变化。

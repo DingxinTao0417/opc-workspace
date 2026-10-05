@@ -3,6 +3,7 @@ import {
   parseAiActionProposal,
   decideAiWorkspaceAction,
 } from "./aiWorkspaceActions";
+import type { Untyped } from "../test/untyped";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("./client", async () => ({
@@ -108,79 +109,79 @@ describe("invoice approval contract", () => {
   it.each([
     [
       "absent result",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.invoice_pdf_result;
       },
     ],
     [
       "wrong invoice",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.invoice_id = pdfResult.asset_id;
       },
     ],
     [
       "wrong asset",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.asset_id = id;
       },
     ],
     [
       "wrong version",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.generated_from_version = 2;
       },
     ],
     [
       "wrong hash",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.sha256 = "bad";
       },
     ],
     [
       "hidden path",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.relative_path = "x";
       },
     ],
     [
       "filename traversal",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.file_name = "../x.pdf";
       },
     ],
     [
       "unverified result",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.integrity_status = "missing";
       },
     ],
     [
       "unbounded file",
-      (p: any) => {
+      (p: Untyped) => {
         p.invoice_pdf_result.size_bytes = 52428801;
       },
     ],
     [
       "incomplete preview",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.preview.before.notes;
       },
     ],
     [
       "unshown replacement",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.pdf_replaced = false;
       },
     ],
     [
       "model consent",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.confirm_invoice_pdf = true;
       },
     ],
     [
       "premature result",
-      (p: any) => {
+      (p: Untyped) => {
         p.status = "pending";
       },
     ],
@@ -257,79 +258,79 @@ describe("invoice approval contract", () => {
   it.each([
     [
       "sent invoice",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.status = "sent";
       },
     ],
     [
       "missing PDF identity",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.preview.before.pdf_asset_id;
       },
     ],
     [
       "invented no-PDF claim",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.pdf_removed = false;
       },
     ],
     [
       "partial absent asset",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.pdf_asset_id = null;
       },
     ],
     [
       "hidden path",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.relative_path = "x.pdf";
       },
     ],
     [
       "missing notes",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.preview.before.notes;
       },
     ],
     [
       "changed notes",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.notes = "new";
       },
     ],
     [
       "model deletion consent",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.confirm_invoice_delete = true;
       },
     ],
     [
       "not deleted",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.invoice_deleted = false;
       },
     ],
     [
       "extra effects",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.status = "paid";
       },
     ],
     [
       "oversize PDF",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.pdf_size_bytes = 52428801;
       },
     ],
     [
       "future PDF version",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.pdf_generated_from_version = 4;
       },
     ],
     [
       "invalid hash",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.pdf_sha256 = "hash";
       },
     ],
@@ -426,97 +427,97 @@ describe("invoice approval contract", () => {
   it.each([
     [
       "fractional amount",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.amount_minor = 1.25;
       },
     ],
     [
       "overflow",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.amount_minor = 9000000000000001;
       },
     ],
     [
       "missing full notes",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.preview.before.notes;
       },
     ],
     [
       "overlong notes",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.notes = "😀".repeat(10001);
       },
     ],
     [
       "renamed client",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.client_name = "另一客户";
       },
     ],
     [
       "changed amount",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.amount_minor = 2500;
       },
     ],
     [
       "wrong paid date",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.paid_date = "2026-09-19";
       },
     ],
     [
       "nonexistent date",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.paid_date = p.preview.after.paid_date = "2026-02-30";
       },
     ],
     [
       "paid before issue",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.paid_date = p.preview.after.paid_date = "2026-08-30";
       },
     ],
     [
       "skip sent/viewed",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.before.status = "draft";
       },
     ],
     [
       "manual number",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.invoice_number = "manual";
       },
     ],
     [
       "wrong target",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.financial_entry_id = id;
       },
     ],
     [
       "missing version",
-      (p: any) => {
+      (p: Untyped) => {
         delete p.action.expected_version;
       },
     ],
     [
       "model consent",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.confirm_invoice_effects = true;
       },
     ],
     [
       "transition edits",
-      (p: any) => {
+      (p: Untyped) => {
         p.action.changes.notes = "not allowed";
       },
     ],
     [
       "extra preview",
-      (p: any) => {
+      (p: Untyped) => {
         p.preview.after.secret = "hidden effect";
       },
     ],

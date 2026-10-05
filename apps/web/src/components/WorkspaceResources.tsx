@@ -308,8 +308,10 @@ function LoadedAgentRunDetail({
     run.status === "failed" ||
     run.status === "cancelled" ||
     run.status === "interrupted";
+  // v7 inputs were confirmed for that Run alone (ADR-033): never retried.
   const retryable =
     terminal &&
+    run.executionContractVersion !== 7 &&
     (![4, 5, 6].includes(run.executionContractVersion ?? 0) ||
       (run.status !== "succeeded" && run.outputDeliveryStatus === "not_ready"));
 

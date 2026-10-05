@@ -1,5 +1,16 @@
 # AI 助手模块
 
+## 智能体提出“以前置产出作为输入”的 Agent 执行（2026-10-04，ADR-033）
+
+在下一节的延后启动之上，本条消息同时具备 `agent_files` 与 `agent_project_files` 授权时，模型可以为 `agent_run.start` 再附带 `start_after_input: "predecessor_files"`，表示“前置 Run 的文件产出被验收后，作为这次执行的输入”。服务端只在 `start_after` 为 `accepted`、两个任务同属一个项目、前置 Run 约定产出文件时接受，并拒绝与所选文件或返工字段同用；模型不提供文件名、ID 或哈希，约定的文件取自前置 Run 冻结的输出契约。
+
+- **确认卡**：在启动条件下显示「延后绑定的输入」——约定的文件名与 MIME、数量与大小上限、所选 Provider 是否离机，并写明文件现在还不存在、验收后须在执行过程里逐份再次确认、失败后不能原样重试。用户除延后启动同意外须另勾“以前置任务验收通过的文件产出作为输入”，决定请求带 `confirm_agent_predecessor_input`；缺失返回 422 `AGENT_PREDECESSOR_INPUT_CONFIRMATION_REQUIRED`。确认被拒时两项勾选都会清空。
+- **确认之后**：卡片显示「已确认 · 等待前置产出」，前置验收后变为「已确认 · 待确认输入文件」。这时执行仍未启动：第二次确认在该 Run 的执行抽屉里进行，由人核对真实文件后完成，模型没有任何工具可以代替这一步，系统提示也写明不可代确认。模型经 `workspace_agent_runs` 读到的 `start_gate.input_slot` 只有来源、状态与约定的文件名和类型，可以据此提醒用户去确认，读不到文件的 ID、哈希或来源批次。
+- **授权说明**：授权弹窗中「Agent 跨任务已验收文件（独立确认）」的说明已补充这项用途；自动续办的同名范围说明同步更新。续办期间提出的这类建议与其他建议一样等待人工确认。
+- **重新核对旧提案**：带 `start_after_input` 的历史提案在重新核对时同样要求 `agent_project_files`。
+
+契约与边界见 [本地 Agent：以前置 Run 已验收的文件产出为输入](local-agents.md#以前置-run-已验收的文件产出为输入2026-10-04adr-033) 与 [ADR-033](../adr/033-agent-run-predecessor-file-inputs.md)。真实 Provider 下的整条链路尚未做真机验收。
+
 ## 智能体提出“前置满足后再启动”的 Agent 执行（AH-07，2026-09-23）
 
 在本条 `work+outputs+actions+agent_execution` 授权下，模型可以为 `agent_run.start` 附带前置条件：先用 `workspace_agent_runs` 读到仍在进行的前置 Run（其结果会带只读 `start_gate`，便于看出哪些后续执行正在等待），再提出 `start_after_run_id`、`start_after`（`submitted`/`accepted`）与 `start_within_hours`（1–24）。确认卡展示后续执行的完整快照与启动条件，用户勾选“同意在条件满足后由系统启动这一次执行”后才创建等待中的 Run；卡片随后显示“已确认 · 等待前置执行”，前置不满足时显示“未启动 · …”。这不是范围授权：没有被逐项确认的 Run 永远不会启动，也不会自动验收或重试。契约见 [本地 Agent AH-07](local-agents.md#跨-run-条件式延后启动ah-072026-09-23adr-030-首片) 与 [ADR-030](../adr/030-agent-run-start-gates.md)。

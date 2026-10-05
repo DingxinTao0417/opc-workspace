@@ -135,7 +135,7 @@ describe("AutomationSettings", () => {
       permissions: ["读取 Agent 失败元数据", "创建本地诊断事项"],
     };
     const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
         if (url.includes("/automations/runs"))
           return response({

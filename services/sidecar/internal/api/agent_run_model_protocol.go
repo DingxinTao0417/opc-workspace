@@ -18,7 +18,8 @@ const agentRunExecutionContractVersionV6 int64 = 6
 type agentRunV6InputSnapshot agentRunV5InputSnapshot
 
 func isAgentRunModelContract(version int64) bool {
-	return version == agentRunExecutionContractVersionV5 || version == agentRunExecutionContractVersionV6
+	return version == agentRunExecutionContractVersionV5 || version == agentRunExecutionContractVersionV6 ||
+		version == agentRunExecutionContractVersionV7
 }
 
 func agentRunHasProjectTaskFiles(files []frozenAgentRunFileReference) bool {
@@ -68,6 +69,7 @@ func parseAgentRunV6Snapshot(raw string) (agentRunV6InputSnapshot, error) {
 		(snapshot.ProviderKind == "local" || snapshot.ProviderKind == "remote")) ||
 		(snapshot.ModelProtocol == agentexec.ModelProtocolAnthropicMessages && snapshot.MaxOutputTokens == agentexec.AnthropicMaxOutputTokens && snapshot.ProviderKind == "remote")
 	if err != nil || string(encoded) != raw || !validProtocol || !agentRunHasProjectTaskFiles(snapshot.Files) ||
+		snapshot.DeferredInputs != nil ||
 		snapshot.Task.Version < 1 || snapshot.Task.Status != "todo" && snapshot.Task.Status != "in_progress" {
 		return snapshot, agentRunIdentityChangedError()
 	}
@@ -81,6 +83,9 @@ func parseAgentRunV6Snapshot(raw string) (agentRunV6InputSnapshot, error) {
 }
 
 func parseAgentRunModelSnapshot(version int64, raw string) (agentRunV5InputSnapshot, error) {
+	if version == agentRunExecutionContractVersionV7 {
+		return parseAgentRunV7Snapshot(raw)
+	}
 	if version == agentRunExecutionContractVersionV6 {
 		snapshot, err := parseAgentRunV6Snapshot(raw)
 		return agentRunV5InputSnapshot(snapshot), err
@@ -101,6 +106,9 @@ type agentRunV5InputSnapshot struct {
 	Files           []frozenAgentRunFileReference `json:"files"`
 	OutputContract  agentexec.OutputContract      `json:"output_contract"`
 	Rework          *agentexec.ReworkContext      `json:"rework,omitempty"`
+	// DeferredInputs exists only in contract v7. It is omitted otherwise, so
+	// the durable bytes of v5 and v6 snapshots are unchanged.
+	DeferredInputs *agentRunDeferredInputs `json:"deferred_inputs,omitempty"`
 }
 
 func (snapshot agentRunV5InputSnapshot) fileSnapshot() agentRunV2InputSnapshot {
@@ -122,7 +130,7 @@ func parseAgentRunV5Snapshot(raw string) (agentRunV5InputSnapshot, error) {
 		return snapshot, agentRunIdentityChangedError()
 	}
 	encoded, err := json.Marshal(snapshot)
-	if err != nil || string(encoded) != raw || snapshot.Files == nil ||
+	if err != nil || string(encoded) != raw || snapshot.Files == nil || snapshot.DeferredInputs != nil ||
 		snapshot.ProviderKind != "remote" || snapshot.ModelProtocol != agentexec.ModelProtocolAnthropicMessages ||
 		snapshot.MaxOutputTokens != agentexec.AnthropicMaxOutputTokens || snapshot.Task.Version < 1 ||
 		snapshot.Task.Status != "todo" && snapshot.Task.Status != "in_progress" {

@@ -99,6 +99,9 @@ func buildAIActionRecheckContext(db *gorm.DB, sessionID, generationID, proposalI
 	if agentRunFileFieldsInArguments(json.RawMessage(source.ActionJSON)) && !policy.Allows("agent_files") {
 		return "", aiActionRecheckScopeRequired()
 	}
+	if agentRunDeferredInputInArguments(json.RawMessage(source.ActionJSON)) && !policy.Allows("agent_project_files") {
+		return "", aiActionRecheckScopeRequired()
+	}
 	if err := requireAIAgentRetryFileScope(db, policy, action); err != nil {
 		if errors.Is(err, harness.ErrPermissionDenied) {
 			return "", aiActionRecheckScopeRequired()

@@ -328,8 +328,24 @@ func TestAIChatCancelStopsUpstreamAndKeepsPartial(t *testing.T) {
 	if userTurns != 1 {
 		t.Fatalf("user turn persisted during streaming = %d, want 1", userTurns)
 	}
-	// give the flushed upstream delta a deterministic window to reach the stream loop
-	time.Sleep(500 * time.Millisecond)
+	// Cancel only after the flushed upstream delta has reached the stream loop.
+	// The live snapshot shows exactly what the loop has consumed so far.
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		live := performRequest(router, http.MethodGet, "/api/v1/ai/generations/"+generationID, nil, nil)
+		var snapshot struct {
+			Data struct {
+				Content string `json:"content"`
+			} `json:"data"`
+		}
+		if live.Code == http.StatusOK && json.Unmarshal(live.Body.Bytes(), &snapshot) == nil && snapshot.Data.Content == "部分" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("upstream delta never reached the stream loop: %d %s", live.Code, live.Body.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	cancelled := performRequest(router, http.MethodPost, "/api/v1/ai/generations/"+generationID+"/cancel", nil, nil)
 	if cancelled.Code != http.StatusAccepted {
 		t.Fatalf("cancel = %d: %s", cancelled.Code, cancelled.Body.String())

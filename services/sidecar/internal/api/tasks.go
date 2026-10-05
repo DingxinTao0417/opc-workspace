@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -132,12 +132,6 @@ type updateTaskRequest struct {
 	PlannedDate        nullableStringPatch `json:"planned_date"`
 	EstimatedMinutes   nullableIntPatch    `json:"estimated_minutes"`
 	ReviewPolicy       *string             `json:"review_policy"`
-}
-
-type pageMeta struct {
-	Page     int   `json:"page"`
-	PageSize int   `json:"page_size"`
-	Total    int64 `json:"total"`
 }
 
 type taskListFilters struct {
@@ -844,7 +838,7 @@ func (a *API) deleteTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var movedArtifactFiles []trashedArtifactFile
+	var movedArtifactFiles []filestore.TrashedArtifactFile
 	err := a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		deletedAt := a.options.Now().UTC().Format(time.RFC3339Nano)
 		_, _, moved, err := a.deleteTaskInTransaction(tx, id, expectedVersion, requestIDFromContext(c), deletedAt)
@@ -1073,19 +1067,6 @@ func taskID(c *gin.Context) (string, bool) {
 		return "", false
 	}
 	return parsed.String(), true
-}
-
-func queryInt(c *gin.Context, key string, fallback, minimum, maximum int) (int, bool) {
-	raw := strings.TrimSpace(c.Query(key))
-	if raw == "" {
-		return fallback, true
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value < minimum || value > maximum {
-		writeError(c, http.StatusBadRequest, "INVALID_PAGINATION", fmt.Sprintf("%s must be between %d and %d", key, minimum, maximum))
-		return 0, false
-	}
-	return value, true
 }
 
 func applyTaskSort(query *gorm.DB, raw string) (*gorm.DB, bool) {

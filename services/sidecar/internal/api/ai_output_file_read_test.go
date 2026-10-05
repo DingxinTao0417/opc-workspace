@@ -279,7 +279,7 @@ func TestAIOutputFileReadRejectsUnsafeOrCorruptFilesWithoutWrites(t *testing.T) 
 		{"binary extension", "data.png", []byte("text with binary extension"), nil},
 		{"oversize", "large.txt", []byte(strings.Repeat("a", 65537)), nil},
 		{"same size tamper", "changed.txt", []byte("original"), func(t *testing.T, f aiOutputFileReadFixture) {
-			path, err := f.router.artifactStore.resolveObject(*f.artifact.RelativePath)
+			path, err := f.router.artifactStore.ResolveObject(*f.artifact.RelativePath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +288,7 @@ func TestAIOutputFileReadRejectsUnsafeOrCorruptFilesWithoutWrites(t *testing.T) 
 			}
 		}},
 		{"size tamper", "size.txt", []byte("original"), func(t *testing.T, f aiOutputFileReadFixture) {
-			path, err := f.router.artifactStore.resolveObject(*f.artifact.RelativePath)
+			path, err := f.router.artifactStore.ResolveObject(*f.artifact.RelativePath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -297,7 +297,7 @@ func TestAIOutputFileReadRejectsUnsafeOrCorruptFilesWithoutWrites(t *testing.T) 
 			}
 		}},
 		{"missing", "missing.txt", []byte("missing file"), func(t *testing.T, f aiOutputFileReadFixture) {
-			path, err := f.router.artifactStore.resolveObject(*f.artifact.RelativePath)
+			path, err := f.router.artifactStore.ResolveObject(*f.artifact.RelativePath)
 			if err != nil {
 				t.Fatal(err)
 			}

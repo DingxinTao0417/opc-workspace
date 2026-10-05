@@ -1,3 +1,4 @@
+import "./AiWorkspaceActions.css";
 import { useEffect, useRef, useState } from "react";
 import { isTaskOutputAction } from "../api/aiTaskOutputActions";
 import { AiTaskOutputDetails } from "./AiTaskOutputDetails";
@@ -1409,6 +1410,14 @@ function ActionCard({
     proposal.preview.agent_run_start?.input_files?.some(
       (file) => file.source_kind === "project_task_artifact",
     ) ?? false;
+  // ADR-033: the Run will take the predecessor's accepted files later. That
+  // declaration is confirmed here; the files themselves are confirmed again
+  // in the execution drawer once they exist.
+  const agentRunTakesPredecessorInput = Boolean(
+    proposal.preview.agent_run_start?.start_gate?.input_slot,
+  );
+  const [confirmAgentPredecessorInput, setConfirmAgentPredecessorInput] =
+    useState(false);
   const [confirmAgentRework, setConfirmAgentRework] = useState(false);
   const [confirmAgentRestart, setConfirmAgentRestart] = useState(false);
   const agentRunHasRestart =
@@ -1584,45 +1593,58 @@ function ActionCard({
             : isAgentRunCancel
               ? decideAiAgentRunCancel(proposal, decision, confirmAgentCancel)
               : isAgentRunStart
-                ? agentRunHasProjectFiles
+                ? agentRunTakesPredecessorInput
                   ? decideAiAgentRun(
                       proposal,
                       decision,
                       confirmAgentExecution,
-                      confirmAgentFiles,
-                      agentRunHasRework ? confirmAgentRework : undefined,
-                      agentRunHasRestart ? confirmAgentRestart : undefined,
-                      confirmAgentProjectFiles,
+                      undefined,
+                      undefined,
+                      undefined,
+                      undefined,
+                      confirmAgentPredecessorInput,
                     )
-                  : agentRunHasRestart
+                  : agentRunHasProjectFiles
                     ? decideAiAgentRun(
                         proposal,
                         decision,
                         confirmAgentExecution,
-                        agentRunHasInputFiles ? confirmAgentFiles : undefined,
+                        confirmAgentFiles,
                         agentRunHasRework ? confirmAgentRework : undefined,
-                        confirmAgentRestart,
+                        agentRunHasRestart ? confirmAgentRestart : undefined,
+                        confirmAgentProjectFiles,
                       )
-                    : agentRunHasRework
+                    : agentRunHasRestart
                       ? decideAiAgentRun(
                           proposal,
                           decision,
                           confirmAgentExecution,
                           agentRunHasInputFiles ? confirmAgentFiles : undefined,
-                          confirmAgentRework,
+                          agentRunHasRework ? confirmAgentRework : undefined,
+                          confirmAgentRestart,
                         )
-                      : agentRunHasInputFiles
+                      : agentRunHasRework
                         ? decideAiAgentRun(
                             proposal,
                             decision,
                             confirmAgentExecution,
-                            confirmAgentFiles,
+                            agentRunHasInputFiles
+                              ? confirmAgentFiles
+                              : undefined,
+                            confirmAgentRework,
                           )
-                        : decideAiAgentRun(
-                            proposal,
-                            decision,
-                            confirmAgentExecution,
-                          )
+                        : agentRunHasInputFiles
+                          ? decideAiAgentRun(
+                              proposal,
+                              decision,
+                              confirmAgentExecution,
+                              confirmAgentFiles,
+                            )
+                          : decideAiAgentRun(
+                              proposal,
+                              decision,
+                              confirmAgentExecution,
+                            )
                 : deletingTask
                   ? decideAiTaskDelete(proposal, decision, confirmTaskDelete)
                   : isKnowledge
@@ -1816,6 +1838,10 @@ function ActionCard({
       ),
     onError: (reason, decision) => {
       setError(errorHint(reason, target));
+      if (agentRunTakesPredecessorInput) {
+        setConfirmAgentPredecessorInput(false);
+        setConfirmAgentExecution(false);
+      }
       if (agentRunHasProjectFiles) {
         setConfirmAgentProjectFiles(false);
         setConfirmAgentFiles(false);
@@ -1981,6 +2007,19 @@ function ActionCard({
                                 require: recordedAgentRun.start_gate.require,
                                 closeReason: recordedAgentRun.start_gate
                                   .close_reason as AgentRunStartGateCloseReason,
+                                ...(recordedAgentRun.start_gate.input_slot
+                                  ? {
+                                      inputSlot: {
+                                        source: "predecessor_files" as const,
+                                        status:
+                                          recordedAgentRun.start_gate.input_slot
+                                            .status,
+                                        expectedFiles:
+                                          recordedAgentRun.start_gate.input_slot
+                                            .expected_files,
+                                      },
+                                    }
+                                  : {}),
                               }
                             : undefined,
                       )
@@ -3011,6 +3050,19 @@ function ActionCard({
           ；这不代替执行或输入文件确认
         </label>
       ) : null}
+      {agentRunTakesPredecessorInput && undecided ? (
+        <label className="ai-action-consent">
+          <input
+            type="checkbox"
+            checked={confirmAgentPredecessorInput}
+            disabled={mutation.isPending}
+            onChange={(event) =>
+              setConfirmAgentPredecessorInput(event.target.checked)
+            }
+          />
+          我确认这次执行将以前置任务验收通过的文件产出作为输入；这些文件现在还不存在，验收后我需要在执行过程里逐份核对并再次确认，确认前不会启动、读取或发送
+        </label>
+      ) : null}
       {agentRunHasProjectFiles && undecided ? (
         <label className="ai-action-consent">
           <input
@@ -3493,6 +3545,8 @@ function ActionCard({
                 (isAgentRunRecovery && !confirmAgentRecovery) ||
                 (agentRunHasInputFiles && !confirmAgentFiles) ||
                 (agentRunHasProjectFiles && !confirmAgentProjectFiles) ||
+                (agentRunTakesPredecessorInput &&
+                  !confirmAgentPredecessorInput) ||
                 (agentRunHasRework && !confirmAgentRework) ||
                 (agentRunHasRestart && !confirmAgentRestart) ||
                 (isInvoice && !confirmInvoice) ||

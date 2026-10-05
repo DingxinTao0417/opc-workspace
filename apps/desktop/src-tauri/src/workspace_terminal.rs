@@ -1,5 +1,7 @@
 //! Explicit human PTY sessions, isolated from Agent Runtime and Sidecar tokens.
 use crate::developer_workspace::WorkspaceState;
+#[cfg(windows)]
+use crate::process_job::{JobAttachStep, ProcessJob};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::Serialize;
@@ -50,47 +52,19 @@ impl TerminalState {
     }
 }
 
-// Owned job handles are thread-safe; closing the last handle kills the exact
-// shell subtree, including on application crash. No process-name matching.
+// The job closes with the session and kills the exact shell subtree, also
+// when the application crashes. No process-name matching.
 #[cfg(windows)]
-struct ProcessJob(windows::Win32::Foundation::HANDLE);
-#[cfg(windows)]
-unsafe impl Send for ProcessJob {}
-#[cfg(windows)]
-impl ProcessJob {
-    fn attach(pid: u32) -> Result<Self, String> {
-        use windows::Win32::{
-            Foundation::CloseHandle,
-            System::{JobObjects::*, Threading::*},
-        };
-        unsafe {
-            let handle = CreateJobObjectW(None, None).map_err(|_| "无法创建终端进程组")?;
-            let job = Self(handle);
-            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                &limits as *const _ as *const _,
-                std::mem::size_of_val(&limits) as u32,
-            )
-            .map_err(|_| "无法配置终端进程组")?;
-            let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, pid)
-                .map_err(|_| "无法访问终端进程")?;
-            let result = AssignProcessToJobObject(handle, process);
-            let _ = CloseHandle(process);
-            result.map_err(|_| "无法托管终端进程树，已拒绝启动")?;
-            Ok(job)
+fn attach_terminal_job(pid: u32) -> Result<ProcessJob, String> {
+    ProcessJob::attach(pid).map_err(|error| {
+        match error.step {
+            JobAttachStep::Create => "无法创建终端进程组",
+            JobAttachStep::Configure => "无法配置终端进程组",
+            JobAttachStep::OpenProcess => "无法访问终端进程",
+            JobAttachStep::Assign => "无法托管终端进程树，已拒绝启动",
         }
-    }
-}
-#[cfg(windows)]
-impl Drop for ProcessJob {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = windows::Win32::Foundation::CloseHandle(self.0);
-        }
-    }
+        .to_owned()
+    })
 }
 
 #[tauri::command]
@@ -153,7 +127,7 @@ fn start_in_root(root: std::path::PathBuf, state: &TerminalState) -> Result<Stri
         let job = match child
             .process_id()
             .ok_or("无法识别终端进程".to_string())
-            .and_then(ProcessJob::attach)
+            .and_then(attach_terminal_job)
         {
             Ok(job) => job,
             Err(error) => {

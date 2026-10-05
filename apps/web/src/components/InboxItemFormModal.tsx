@@ -41,6 +41,7 @@ export function InboxItemFormModal({
   const [dueAt, setDueAt] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
     if (!open) {
       initialized.current = false;
@@ -53,8 +54,8 @@ export function InboxItemFormModal({
     setPriority("P2");
     setDueAt("");
     setValidationError(null);
-    mutation.reset();
-  }, [open]);
+    resetMutation();
+  }, [open, resetMutation]);
 
   const errorMessage = useMemo(
     () => validationError ?? createErrorMessage(mutation.error),

@@ -14,6 +14,7 @@ import {
   committedSettingsFromServer,
   legacySettingUpdates,
 } from "./bootstrap";
+import type { Untyped } from "../test/untyped";
 
 function testStorage(): Storage {
   const values = new Map<string, string>();
@@ -29,7 +30,7 @@ function testStorage(): Storage {
   };
 }
 
-function payload(storedKeys: string[] = []): any {
+function payload(storedKeys: string[] = []): Untyped {
   const stored = (key: string) => storedKeys.includes(key);
   const meta = (key: string) =>
     stored(key)

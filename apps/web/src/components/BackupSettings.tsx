@@ -13,7 +13,7 @@ import {
   Undo2,
   Upload,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client";
 import { requestApplicationRestart } from "../api/desktop";
 import {
@@ -37,10 +37,13 @@ import {
 import type {
   BackupSummary,
   BusinessImportPreview,
+  BusinessImportResolutionRule,
+  BusinessImportResult,
   BusinessPackageImportPreview,
   ScheduledBackupPolicy,
 } from "../types/models";
 import { dataBackupSettingsHandoff } from "../lib/aiIssueHandoff";
+import { useUiStore } from "../store/ui";
 import { AiIssueHandoffButton } from "./AiWorkbenchHandoff";
 
 function formatBytes(value: number): string {
@@ -69,22 +72,170 @@ type ImportPreview = BusinessImportPreview | BusinessPackageImportPreview;
 
 const importTableLabels: Record<string, string> = {
   actors: "人员",
+  agent_adapters: "Agent 适配器",
   app_settings: "设置",
+  automation_rules: "自动化规则",
+  automation_runs: "自动化运行记录",
   clients: "客户",
   client_activities: "客户动态",
+  client_actor_links: "客户联系人",
   client_attachments: "客户附件",
   client_followups: "客户回访",
   projects: "项目",
   project_attachments: "项目附件",
   project_notes: "项目笔记",
   tasks: "任务",
+  tags: "标签",
+  task_tags: "任务标签",
   task_artifacts: "任务产出",
+  task_assignments: "任务分派",
+  task_saved_views: "保存视图",
+  task_submissions: "提交记录",
   focus_sessions: "专注记录",
+  focus_session_intervals: "专注时段",
   inbox_items: "收件箱",
+  inbox_item_tasks: "收件箱转任务",
+  invoices: "发票",
+  invoice_pdf_assets: "发票 PDF",
+  financial_entries: "收支记录",
   reminders: "提醒",
   roadmap_milestones: "路线图",
+  roadmap_milestone_projects: "路线图项目",
   content_items: "内容日历",
+  content_item_tasks: "内容日历任务",
+  workflow_events: "历史事件",
+  workspace_avatars: "工作区头像",
 };
+
+const importUpgradeChangeLabels: Record<string, string> = {
+  add_column: "补入新列",
+};
+
+const importResolutionLabels: Record<BusinessImportResolutionRule, string> = {
+  keep_target: "保留目标现有内容",
+  skip_identical: "与目标完全相同，跳过",
+};
+
+/** Unique values a person can recognise; any other rule shows its index name. */
+const importUniqueValueLabels: Record<string, string> = {
+  "tags:sqlite_autoindex_tags_2": "名称",
+  "invoices:sqlite_autoindex_invoices_2": "发票号",
+  "task_saved_views:idx_task_saved_views_name": "名称",
+};
+
+const historicalReminder = (what: string, since: string) =>
+  `源数据里有“${what}”提醒的历史记录，而${since}。这类历史提醒目前还不能导入。`;
+
+/**
+ * Why the database would reject the rows, by the token its rule aborts with.
+ * An Inbox reminder is only accepted while its source is still in that state.
+ */
+const importRehearsalReasons: Record<string, string> = {
+  TASK_DUE_INBOX_SOURCE_NOT_CURRENT: historicalReminder(
+    "任务到期",
+    "对应任务之后已完成、取消或改期",
+  ),
+  INVALID_TASK_DUE_INBOX_SOURCE: historicalReminder(
+    "任务到期",
+    "对应任务之后已被删除，或记录本身不符合规则",
+  ),
+  TASK_BLOCKED_INBOX_SOURCE_NOT_CURRENT: historicalReminder(
+    "任务阻塞",
+    "对应任务之后已解除阻塞",
+  ),
+  INVALID_TASK_BLOCKED_INBOX_SOURCE: historicalReminder(
+    "任务阻塞",
+    "对应任务之后已被删除，或记录本身不符合规则",
+  ),
+  CONTENT_ITEM_INBOX_SOURCE_NOT_FOUND: historicalReminder(
+    "内容日历",
+    "对应内容之后已改变状态或版本",
+  ),
+  INVALID_CONTENT_ITEM_INBOX_SOURCE: historicalReminder(
+    "内容日历",
+    "对应内容之后已被删除，或记录本身不符合规则",
+  ),
+  ROADMAP_MILESTONE_INBOX_SOURCE_NOT_FOUND: historicalReminder(
+    "路线图里程碑",
+    "对应里程碑之后已改变状态或版本",
+  ),
+  INVALID_ROADMAP_MILESTONE_INBOX_SOURCE: historicalReminder(
+    "路线图里程碑",
+    "对应里程碑之后已被删除，或记录本身不符合规则",
+  ),
+  FOREIGN_KEY_CONSTRAINT: "源数据里有记录引用了并不存在的对象。",
+  UNIQUE_CONSTRAINT: "源数据里有记录会与已有内容的唯一值重复。",
+};
+
+/** The package comes from an older schema and is converted before it is applied. */
+function importNeedsUpgrade(preview: ImportPreview): boolean {
+  return preview.schemaVersion < preview.targetSchemaVersion;
+}
+
+function ImportUpgradeDetails({ preview }: { preview: ImportPreview }) {
+  if (
+    !importNeedsUpgrade(preview) ||
+    preview.blocker === "source_schema_older"
+  ) {
+    return null;
+  }
+  return (
+    <div className="settings-import-conflicts">
+      <small>
+        源数据来自 schema v{preview.schemaVersion}，会先在内存中转换为当前 v
+        {preview.targetSchemaVersion} 结构再校验，源文件不会被修改
+        {preview.upgradeSteps.length === 0
+          ? "；可导出数据的结构在这两个版本之间没有变化。"
+          : "。"}
+      </small>
+      {preview.upgradeSteps.length !== 0 ? (
+        <ul aria-label="升级转换步骤">
+          {preview.upgradeSteps.map((step) => (
+            <li
+              key={`${step.schemaVersion}:${step.table}:${step.change}:${step.column}`}
+            >
+              <span>{importTableLabels[step.table] ?? step.table}</span>
+              <span>
+                v{step.schemaVersion} ·{" "}
+                {importUpgradeChangeLabels[step.change] ?? step.change}{" "}
+                {step.column}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function ImportResolutionDetails({ preview }: { preview: ImportPreview }) {
+  // A blocked import writes nothing at all, so there is nothing to single out.
+  if (!preview.canApply || preview.resolutions.length === 0) return null;
+  const skippedFiles = "skippedFiles" in preview ? preview.skippedFiles : 0;
+  return (
+    <div className="settings-import-conflicts">
+      <small>
+        下列源数据不会写入，目标工作区的对应内容保持不变
+        {skippedFiles > 0
+          ? `；其中 ${skippedFiles} 个受控文件已在目标中，不会重复写入`
+          : ""}
+        。
+      </small>
+      <ul aria-label="不写入的源数据">
+        {preview.resolutions.map((resolution) => (
+          <li key={`${resolution.table}:${resolution.rule}`}>
+            <span>
+              {importTableLabels[resolution.table] ?? resolution.table}
+            </span>
+            <span>
+              {importResolutionLabels[resolution.rule]} · {resolution.rows} 行
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
   if (preview.blocker === "source_schema_older") {
@@ -92,7 +243,7 @@ function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
       <small className="settings-import-blocker">
         源数据为 schema v{preview.schemaVersion}，当前工作区为 v
         {preview.targetSchemaVersion}
-        。已识别为旧版本包，但尚未执行升级映射，数据没有改变。
+        。这个旧版本不在可升级导入的范围内；请先用较新版本的应用打开原工作区并重新导出。数据没有改变。
       </small>
     );
   }
@@ -114,12 +265,45 @@ function ImportBlockerDetails({ preview }: { preview: ImportPreview }) {
       </small>
     );
   }
+  if (preview.blocker === "apply_rehearsal_failed") {
+    const code = preview.rehearsalFailure?.code ?? "";
+    return (
+      <small className="settings-import-blocker">
+        按当前工作区的数据规则，这个包在写入时会被拒绝，所以不能导入。已在创建备份前阻断，数据没有改变。
+        {importRehearsalReasons[code] ?? "数据库拒绝了其中的记录。"}
+        规则代码 <code>{code}</code>
+      </small>
+    );
+  }
+  if (preview.blocker === "target_semantic_conflicts") {
+    return (
+      <div className="settings-import-conflicts">
+        <small className="settings-import-blocker">
+          源数据中有 {preview.semanticConflicts}{" "}
+          行会与当前工作区已有内容的唯一值重复（例如同名标签、相同发票号）。导入不会覆盖、合并或自动改名，已在创建备份前阻断，数据没有改变。
+        </small>
+        <ul aria-label="唯一值冲突清单">
+          {preview.semanticConflictRules.map((rule) => (
+            <li key={`${rule.table}:${rule.index}`}>
+              <span>{importTableLabels[rule.table] ?? rule.table}</span>
+              <span>
+                {importUniqueValueLabels[`${rule.table}:${rule.index}`] ??
+                  rule.index}{" "}
+                · 重复 {rule.conflicts}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   if (preview.blocker !== "target_key_conflicts") return null;
   return (
     <div className="settings-import-conflicts">
       <small className="settings-import-blocker">
         当前工作区已有 {preview.targetRows} 行业务事实；检测到{" "}
-        {preview.keyConflicts} 条主键重叠。冲突事实不会被覆盖、跳过或自动改名。
+        {preview.keyConflicts}{" "}
+        条主键重叠且内容不同。冲突事实不会被覆盖、跳过或自动改名。
       </small>
       <ul aria-label="导入冲突清单">
         {preview.conflictTables.map((table) => (
@@ -142,7 +326,7 @@ function ImportAppendDetails({ preview }: { preview: ImportPreview }) {
     <div className="settings-import-conflicts">
       <small>
         当前工作区已有 {preview.targetRows}
-        行业务事实，预检未发现主键重叠。本次只追加源数据，并保留目标名称、头像和设置等既有事实；只有未修改的默认自动化会接收源配置。应用前仍会创建完整回滚备份。
+        行业务事实，预检未发现主键重叠或唯一值重复。本次只追加源数据，并保留目标名称、头像和设置等既有事实；只有未修改的默认自动化会接收源配置。应用前仍会创建完整回滚备份。
       </small>
       <ul aria-label="目标工作区数据清单">
         {preview.conflictTables.map((table) => (
@@ -275,6 +459,15 @@ function backupErrorText(error: unknown): string {
     }
     if (error.code === "IMPORT_TARGET_CONFLICT") {
       return "预检后目标数据发生变化或仍有主键冲突；没有覆盖或追加任何业务事实。";
+    }
+    if (error.code === "IMPORT_TARGET_SEMANTIC_CONFLICT") {
+      return "预检后目标数据发生变化或仍有唯一值重复；没有覆盖或追加任何业务事实。";
+    }
+    if (error.code === "IMPORT_REHEARSAL_FAILED") {
+      return "按当前数据规则，这个包在写入时会被拒绝；没有创建备份或写入数据，请重新选择文件查看预检说明。";
+    }
+    if (error.code === "IMPORT_PLAN_CHANGED") {
+      return "预检之后目标数据或导入方案已变化；没有创建备份或写入数据，请重新选择文件并检查最新预检结果。";
     }
     if (error.code === "IMPORT_TARGET_FILE_CONFLICT") {
       return "受控存储中已有同名对象；没有覆盖文件或追加业务事实。";
@@ -441,10 +634,33 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
   const backupArchiveMutation = useDownloadBackupArchive();
   const exportMutation = useExportBusinessData();
   const packageExportMutation = useExportBusinessPackage();
+  // Applying an import remounts the app once its settings are re-read, which
+  // would lose a message kept here and send the dialog back to its first
+  // section. The outcome therefore lives in the UI store, and the dialog is
+  // told to stay on this section, before the refresh starts.
+  const importNotice = useUiStore((state) => state.dataImportNotice);
+  const setImportNotice = useUiStore((state) => state.setDataImportNotice);
+  const reportImport = (message: string) => {
+    setImportNotice(message);
+    const { settingsOpen, setSettingsOpen } = useUiStore.getState();
+    if (settingsOpen) setSettingsOpen(true, "data");
+  };
+  const importedRowsText = (result: BusinessImportResult) =>
+    `${result.applyMode === "append" ? "已完成追加导入，处理" : "已导入"} ${result.importedRows} 行源业务数据`;
   const importPreviewMutation = usePreviewBusinessDataImport();
-  const importApplyMutation = useApplyBusinessDataImport();
+  const importApplyMutation = useApplyBusinessDataImport({
+    onApplied: (result) =>
+      reportImport(
+        `${importedRowsText(result)}；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+      ),
+  });
   const packageImportPreviewMutation = usePreviewBusinessPackageImport();
-  const packageImportApplyMutation = useApplyBusinessPackageImport();
+  const packageImportApplyMutation = useApplyBusinessPackageImport({
+    onApplied: (result) =>
+      reportImport(
+        `${importedRowsText(result)}和 ${result.importedFiles} 个受控文件；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
+      ),
+  });
   const [importFile, setImportFile] = useState<File | null>(null);
   const [packageImportFile, setPackageImportFile] = useState<File | null>(null);
   const [note, setNote] = useState("");
@@ -460,7 +676,21 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     backupId: string;
     rollbackBackupId: string;
   } | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [localSuccess, setLocalSuccess] = useState<string | null>(null);
+  const success = localSuccess ?? importNotice;
+  const successRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    // The remount leaves the dialog at the top of this section, above the
+    // message that says what the import did.
+    if (importNotice) {
+      successRef.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [importNotice]);
+  // Every action replaces whatever the previous one reported.
+  const setSuccess = (message: string | null) => {
+    setLocalSuccess(message);
+    setImportNotice(null);
+  };
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const [restarting, setRestarting] = useState(false);
@@ -817,14 +1047,16 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
     setSuccess(null);
     importApplyMutation.reset();
     importApplyMutation.mutate(
-      { file: importFile, applyMode: importPreviewMutation.data.applyMode! },
       {
-        onSuccess: (result) => {
+        file: importFile,
+        applyMode: importPreviewMutation.data.applyMode!,
+        upgrade: importNeedsUpgrade(importPreviewMutation.data),
+        planDigest: importPreviewMutation.data.planDigest,
+      },
+      {
+        onSuccess: () => {
           setImportFile(null);
           importPreviewMutation.reset();
-          setSuccess(
-            `${result.applyMode === "append" ? "已完成追加导入，处理" : "已导入"} ${result.importedRows} 行源业务数据；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
-          );
         },
       },
     );
@@ -839,14 +1071,13 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       {
         file: packageImportFile,
         applyMode: packageImportPreviewMutation.data.applyMode!,
+        upgrade: importNeedsUpgrade(packageImportPreviewMutation.data),
+        planDigest: packageImportPreviewMutation.data.planDigest,
       },
       {
-        onSuccess: (result) => {
+        onSuccess: () => {
           setPackageImportFile(null);
           packageImportPreviewMutation.reset();
-          setSuccess(
-            `${result.applyMode === "append" ? "已完成追加导入，处理" : "已导入"} ${result.importedRows} 行源业务数据和 ${result.importedFiles} 个受控文件；导入前回滚备份为 ${result.backupId.slice(0, 8)}。`,
-          );
         },
       },
     );
@@ -1204,9 +1435,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
           <div>
             <strong>导入业务数据 JSON</strong>
             <span>
-              先预检官方导出文件；跨 schema
-              会标明升级方向，非空工作区会列出目标表和主键重叠；同 schema
-              且零主键冲突时可保留当前事实并安全追加。
+              先预检官方导出文件；受支持的旧版本包会列出升级转换步骤并单独确认，非空工作区会列出目标表、主键重叠和唯一值重复；零冲突时可保留当前事实并安全追加，完全相同的行会跳过。
             </span>
           </div>
         </div>
@@ -1239,6 +1468,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 schema v{importPreviewMutation.data.schemaVersion} · 共{" "}
                 {importPreviewMutation.data.totalRows} 行业务数据
               </p>
+              <ImportUpgradeDetails preview={importPreviewMutation.data} />
               {!importPreviewMutation.data.canApply ? (
                 <ImportBlockerDetails preview={importPreviewMutation.data} />
               ) : importPreviewMutation.data.applyMode === "append" ? (
@@ -1248,6 +1478,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                   应用前会自动创建并校验回滚备份；任一行失败则整批回滚。
                 </small>
               )}
+              <ImportResolutionDetails preview={importPreviewMutation.data} />
             </div>
             <div className="settings-backup-confirm-actions">
               <button
@@ -1272,7 +1503,12 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 ) : (
                   <Upload size={13} />
                 )}
-                {importApplyMutation.isPending ? "正在导入…" : "确认导入"}
+                {importApplyMutation.isPending
+                  ? "正在导入…"
+                  : importNeedsUpgrade(importPreviewMutation.data) &&
+                      importPreviewMutation.data.canApply
+                    ? "确认升级并导入"
+                    : "确认导入"}
               </button>
             </div>
           </div>
@@ -1286,7 +1522,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
             <strong>导入含文件业务包</strong>
             <span>
               选择官方 ZIP 后先校验清单、业务数据和全部文件；预检会分类 schema
-              方向、主键与文件冲突；同 schema 且零冲突时可安全追加。
+              方向、主键、唯一值与文件冲突；零冲突时可安全追加，已存在且完全相同的行和文件会跳过。
             </span>
           </div>
         </div>
@@ -1321,6 +1557,9 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 {packageImportPreviewMutation.data.fileCount} 个受控文件 ·{" "}
                 {formatBytes(packageImportPreviewMutation.data.fileBytes)}
               </p>
+              <ImportUpgradeDetails
+                preview={packageImportPreviewMutation.data}
+              />
               {!packageImportPreviewMutation.data.canApply ? (
                 <ImportBlockerDetails
                   preview={packageImportPreviewMutation.data}
@@ -1334,6 +1573,9 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                   应用前会自动创建并校验回滚备份；数据库或任一文件失败都会整批补偿。
                 </small>
               )}
+              <ImportResolutionDetails
+                preview={packageImportPreviewMutation.data}
+              />
             </div>
             <div className="settings-backup-confirm-actions">
               <button
@@ -1360,7 +1602,10 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
                 )}
                 {packageImportApplyMutation.isPending
                   ? "正在导入文件…"
-                  : "确认含文件导入"}
+                  : importNeedsUpgrade(packageImportPreviewMutation.data) &&
+                      packageImportPreviewMutation.data.canApply
+                    ? "确认升级并含文件导入"
+                    : "确认含文件导入"}
               </button>
             </div>
           </div>
@@ -1368,7 +1613,7 @@ export function BackupSettings({ storageSettings }: BackupSettingsProps = {}) {
       </div>
 
       {success ? (
-        <p className="settings-backup-success" role="status">
+        <p className="settings-backup-success" ref={successRef} role="status">
           <ShieldCheck size={14} />
           {success}
         </p>

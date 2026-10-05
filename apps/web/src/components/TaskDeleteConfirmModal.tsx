@@ -32,9 +32,10 @@ export function TaskDeleteConfirmModal({
 }) {
   const mutation = useDeleteTask();
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
-    mutation.reset();
-  }, [task?.id]);
+    resetMutation();
+  }, [task?.id, resetMutation]);
 
   const close = () => {
     if (mutation.isPending) return;

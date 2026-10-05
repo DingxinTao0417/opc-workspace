@@ -1274,6 +1274,7 @@ function sanitizedBrowserAddress(url: string): string | null {
   if (
     !address ||
     new TextEncoder().encode(address).byteLength > 2 * 1024 ||
+    // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
     /[\u0000-\u001f\u007f]/.test(address) ||
     encodedAsciiControl.test(address)
   )
@@ -1324,6 +1325,7 @@ export function browserPageTextHandoff(
   if (!url) return null;
   const normalizedText = capture.text
     .replace(/[\r\n\t]+/g, " ")
+    // eslint-disable-next-line no-control-regex -- replaces control characters on purpose
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "�")
     .trim();
   const boundedText = jsonSafeUtf8Prefix(normalizedText, 8 * 1024, 8 * 1024);
@@ -1351,6 +1353,7 @@ export function browserPageTextHandoff(
     if (seenLinks.has(linkUrl)) continue;
     const label = bounded(
       rawLink.label
+        // eslint-disable-next-line no-control-regex -- replaces control characters on purpose
         .replace(/[\u0000-\u001f\u007f]/g, " ")
         .replace(/\s+/g, " ")
         .trim(),
@@ -1371,6 +1374,7 @@ export function browserPageTextHandoff(
   const linksTruncated = capture.linksTruncated || boundedLinksTruncated;
   if (!boundedText.value.trim() && links.length === 0) return null;
   const title = bounded(
+    // eslint-disable-next-line no-control-regex -- replaces control characters on purpose
     capture.title.replace(/[\u0000-\u001f\u007f]/g, " ").trim(),
     512,
   );

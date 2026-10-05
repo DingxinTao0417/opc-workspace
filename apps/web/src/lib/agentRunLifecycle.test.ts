@@ -75,6 +75,61 @@ describe("agentRunLifecycle", () => {
     ).toBe("排队中");
   });
 
+  it("tells a Run that waits for files from one that waits for a person", () => {
+    const slot = (status: "awaiting_predecessor" | "awaiting_confirmation") =>
+      agentRunLifecycle({
+        status: "queued",
+        outputDeliveryStatus: "not_ready",
+        startGate: {
+          status: "waiting",
+          require: "accepted",
+          inputSlot: {
+            source: "predecessor_files",
+            status,
+            expectedFiles: [{ name: "research.md", mime: "text/markdown" }],
+          },
+        },
+      });
+    expect(slot("awaiting_predecessor")).toMatchObject({
+      phase: "pending",
+      label: "等待前置产出",
+      attention: false,
+      terminal: false,
+    });
+    const confirm = slot("awaiting_confirmation");
+    expect(confirm).toMatchObject({
+      phase: "pending",
+      label: "待确认输入文件",
+      attention: true,
+      terminal: false,
+    });
+    expect(confirm.detail).toContain("确认前不会启动、读取或发送");
+  });
+
+  it("says no file was sent when the accepted files went away", () => {
+    const result = agentRunLifecycle({
+      status: "cancelled",
+      outputDeliveryStatus: "not_ready",
+      startGate: {
+        status: "closed",
+        closeReason: "predecessor_output_unavailable",
+        require: "accepted",
+        inputSlot: {
+          source: "predecessor_files",
+          status: "closed",
+          expectedFiles: [{ name: "research.md", mime: "text/markdown" }],
+        },
+      },
+    });
+    expect(result).toMatchObject({
+      phase: "cancelled",
+      label: "未启动 · 前置条件未满足",
+      attention: true,
+      terminal: true,
+    });
+    expect(result.detail).toContain("没有发送任何文件");
+  });
+
   it.each([
     ["predecessor_failed", "未启动 · 前置条件未满足"],
     ["predecessor_not_accepted", "未启动 · 前置条件未满足"],

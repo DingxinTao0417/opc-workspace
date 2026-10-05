@@ -113,8 +113,7 @@ vi.mock("../api/hooks", () => ({
       data: id ? mocks.details[id] : undefined,
       isPending: Boolean(id) && mocks.detailPending,
       isFetching: Boolean(id) && mocks.detailFetching,
-      isSuccess:
-        Boolean(id) && !mocks.detailPending && !Boolean(mocks.detailError),
+      isSuccess: Boolean(id) && !mocks.detailPending && !mocks.detailError,
       isError: Boolean(mocks.detailError),
       error: id ? mocks.detailError : null,
       refetch: mocks.detailRefetch,

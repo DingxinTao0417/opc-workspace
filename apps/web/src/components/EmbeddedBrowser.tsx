@@ -262,6 +262,7 @@ export function EmbeddedBrowser({ hideTabs = false }: { hideTabs?: boolean }) {
   useEffect(() => {
     if (browserActionRequest || browserNavigationRequest)
       setActionOutcome(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the request ids
   }, [browserActionRequest?.id, browserNavigationRequest?.id]);
 
   useEffect(() => {

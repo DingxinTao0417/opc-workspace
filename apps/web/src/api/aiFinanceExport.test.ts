@@ -5,6 +5,7 @@ import {
   parseAiActionProposal,
 } from "./aiWorkspaceActions";
 import { downloadApprovedFinancialCSV, resetRuntimeConnection } from "./client";
+import type { Untyped } from "../test/untyped";
 
 function fixture() {
   return {
@@ -72,49 +73,49 @@ describe("finance export identity", () => {
     ).toBe("");
   });
   it.each([
-    (p: any) => {
+    (p: Untyped) => {
       delete p.action.changes.export_filters.currency;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.action.changes.export_filters.page = 1;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.action.changes.export_filters.date_from = "2026-02-30";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.action.changes.export_filters.date_to = "2028-01-01";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.action.expected_version = 1;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.action.task_id = p.id;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.currency = "USD";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.row_count = 10001;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.size_bytes = 16 * 1024 * 1024 + 1;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.sha256 = "bad";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.csv_columns = "notes";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.after.category = "other";
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.preview.tasks = [];
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.result_id = p.id;
     },
-    (p: any) => {
+    (p: Untyped) => {
       p.status = "confirmed";
       p.can_confirm = false;
     },

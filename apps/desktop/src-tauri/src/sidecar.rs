@@ -18,6 +18,8 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::desktop_log::{DesktopEvent, DesktopLogger};
+#[cfg(windows)]
+use crate::process_job::ProcessJob;
 
 const SIDECAR_NAME: &str = "opc-sidecar";
 const LOOPBACK_HOST: &str = "127.0.0.1";
@@ -158,6 +160,88 @@ impl SidecarChildControl for CommandChild {
     fn kill(self: Box<Self>) -> Result<(), String> {
         CommandChild::kill(*self).map_err(|error| error.to_string())
     }
+}
+
+/// A Sidecar process together with the Job Object that owns its process tree.
+///
+/// The job lives inside the control object on purpose. Shutdown takes the
+/// control out of the manager before it writes the graceful `shutdown`
+/// request; a job stored next to it would be dropped at that point and would
+/// kill the tree before the request is written. Here the job closes only when
+/// the control itself is dropped: after a confirmed exit, after a forced stop,
+/// or when the desktop process dies.
+#[cfg(windows)]
+struct GovernedChild<C: SidecarChildControl> {
+    child: C,
+    job: Option<ProcessJob>,
+}
+
+#[cfg(windows)]
+impl<C: SidecarChildControl> SidecarChildControl for GovernedChild<C> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.child.write(bytes)
+    }
+
+    fn kill(self: Box<Self>) -> Result<(), String> {
+        let GovernedChild { child, job } = *self;
+        if let Some(job) = &job {
+            // One call ends the Sidecar and everything it started. The exit
+            // code matches a single-process kill.
+            if job.terminate(1).is_ok() {
+                return Ok(());
+            }
+        }
+        Box::new(child).kill()
+    }
+}
+
+/// What process-tree governance the desktop obtained for one Sidecar process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SidecarGovernance {
+    /// The Sidecar and its descendants die with the desktop process.
+    Attached,
+    /// The process ended before it could be governed; the ordinary exit path
+    /// handles it.
+    ProcessExited,
+    /// The tree cannot be reclaimed. The Sidecar is stopped rather than left
+    /// running without governance.
+    Unavailable,
+    /// This platform has no governance; the Sidecar still exits when its
+    /// control pipe closes.
+    NotSupported,
+}
+
+#[cfg(windows)]
+fn govern_sidecar_child<C: SidecarChildControl + 'static>(
+    child: C,
+    pid: u32,
+) -> (Box<dyn SidecarChildControl>, SidecarGovernance) {
+    let (job, governance) = match ProcessJob::attach(pid) {
+        Ok(job) => (Some(job), SidecarGovernance::Attached),
+        Err(error) if error.process_exited => (None, SidecarGovernance::ProcessExited),
+        Err(_) => (None, SidecarGovernance::Unavailable),
+    };
+    (Box::new(GovernedChild { child, job }), governance)
+}
+
+#[cfg(not(windows))]
+fn govern_sidecar_child<C: SidecarChildControl + 'static>(
+    child: C,
+    _pid: u32,
+) -> (Box<dyn SidecarChildControl>, SidecarGovernance) {
+    (Box::new(child), SidecarGovernance::NotSupported)
+}
+
+/// Fails closed when the Sidecar's process tree cannot be governed, like the
+/// terminal and the agent executor do. Returns whether a forced stop is now
+/// waiting for the real exit.
+fn stop_ungoverned_sidecar(manager: &SidecarManager, generation: u64) -> bool {
+    manager.log_event(DesktopEvent::SidecarJobUnavailable);
+    begin_forced_stop(
+        manager,
+        generation,
+        "无法托管 Sidecar 进程树，已拒绝继续运行".to_owned(),
+    )
 }
 
 struct ManagedChild {
@@ -1026,12 +1110,17 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
             "http://tauri.localhost,https://tauri.localhost,tauri://localhost",
         );
 
-    let Some((mut events, generation)) = manager.spawn_and_register_child(|| {
+    // The job is attached inside the registration lock, straight after the
+    // spawn returns. The Sidecar starts no child of its own before it has
+    // taken the run lock and opened the database, and any agent executor it
+    // starts later sits in the Sidecar's own kill-on-close job as well.
+    let Some(((mut events, governance), generation)) = manager.spawn_and_register_child(|| {
         command
             .spawn()
             .map(|(events, child)| {
-                let child: Box<dyn SidecarChildControl> = Box::new(child);
-                (events, child)
+                let pid = child.pid();
+                let (child, governance) = govern_sidecar_child(child, pid);
+                ((events, governance), child)
             })
             .map_err(|error| format!("无法启动内置 Sidecar：{error}"))
     })?
@@ -1039,12 +1128,22 @@ fn spawn_bundled_sidecar(app: &AppHandle, manager: SidecarManager) -> Result<(),
         return Ok(());
     };
     manager.set_starting_if_current(generation, token.clone());
+    if governance == SidecarGovernance::Attached {
+        manager.log_event(DesktopEvent::SidecarJobAttached);
+    }
     let watcher_app = app.clone();
 
     tauri::async_runtime::spawn(async move {
         let mut reached_ready = false;
         let mut stopping_after_error = false;
         let mut forced_termination_deadline = None;
+        if governance == SidecarGovernance::Unavailable {
+            if stop_ungoverned_sidecar(&manager, generation) {
+                forced_termination_deadline =
+                    Some(tokio::time::Instant::now() + FORCED_TERMINATION_TIMEOUT);
+            }
+            stopping_after_error = true;
+        }
         let mut stream_closed_without_termination = false;
         let ready_deadline = tokio::time::Instant::now() + READY_HANDSHAKE_TIMEOUT;
         loop {
@@ -2182,5 +2281,146 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(state.writes, vec![b"shutdown\n".to_vec()]);
         assert_eq!(state.kill_calls, 0);
+    }
+
+    #[test]
+    fn ungoverned_sidecar_is_stopped_and_not_reported_as_exited() {
+        let manager = SidecarManager::new();
+        let (child_state, generation) = install_fake_child(&manager, None, None);
+
+        assert!(super::stop_ungoverned_sidecar(&manager, generation));
+
+        let status = manager.status();
+        assert_eq!(status.phase, SidecarPhase::Error);
+        assert!(
+            status
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("无法托管 Sidecar 进程树")
+                    && message.contains("正在等待真实退出确认"))
+        );
+        assert_eq!(
+            child_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .kill_calls,
+            1
+        );
+        // Only a real exit ends the generation; until then no new Sidecar
+        // may start.
+        assert!(manager.wait_for_exit(generation, Duration::ZERO).is_none());
+        assert!(
+            manager
+                .spawn_and_register_child(
+                    || -> Result<((), Box<dyn SidecarChildControl>), String> {
+                        panic!("a new Sidecar must not be spawned before the real exit")
+                    }
+                )
+                .is_err()
+        );
+        assert!(manager.mark_exited(generation, Some(1), None));
+    }
+
+    #[cfg(windows)]
+    mod governed {
+        use std::{
+            io::Write,
+            process::{Child, Stdio},
+        };
+
+        use super::super::{SidecarChildControl, SidecarGovernance, govern_sidecar_child};
+        use crate::process_job::tests::{Watched, fixture, reported_grandchild};
+
+        // A real process behind the control interface, in place of the
+        // plugin's child handle.
+        struct StdChild(Child);
+
+        impl SidecarChildControl for StdChild {
+            fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+                let stdin = self.0.stdin.as_mut().ok_or("stdin is closed")?;
+                stdin
+                    .write_all(bytes)
+                    .and_then(|()| stdin.flush())
+                    .map_err(|error| error.to_string())
+            }
+
+            fn kill(mut self: Box<Self>) -> Result<(), String> {
+                self.0.kill().map_err(|error| error.to_string())
+            }
+        }
+
+        #[test]
+        fn graceful_request_reaches_the_sidecar_before_the_job_closes() {
+            let child = fixture("graceful")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            let watched = Watched::open(pid);
+            let (mut control, governance) = govern_sidecar_child(StdChild(child), pid);
+            assert_eq!(governance, SidecarGovernance::Attached);
+
+            control.write(b"shutdown\n").unwrap();
+
+            assert!(watched.exited(), "the process ignored the request");
+            // Exit code 0 is the process leaving by itself; the job would
+            // have ended it with 1.
+            assert_eq!(watched.exit_code(), 0);
+            drop(control);
+        }
+
+        #[test]
+        fn forced_stop_ends_the_sidecar_and_its_descendants() {
+            let mut child = fixture("tree")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            let stdout = child.stdout.take().unwrap();
+            let watched = Watched::open(pid);
+            let (mut control, governance) = govern_sidecar_child(StdChild(child), pid);
+            assert_eq!(governance, SidecarGovernance::Attached);
+            control.write(b"go\n").unwrap();
+            let watched_grandchild = Watched::open(reported_grandchild(stdout));
+
+            control.kill().unwrap();
+
+            assert!(watched.exited(), "the Sidecar survived the forced stop");
+            assert_eq!(watched.exit_code(), 1);
+            assert!(
+                watched_grandchild.exited(),
+                "a descendant survived the forced stop"
+            );
+        }
+
+        #[test]
+        fn dropping_the_control_ends_a_tree_that_never_answers() {
+            let mut child = fixture("tree")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            let pid = child.id();
+            let stdout = child.stdout.take().unwrap();
+            let watched = Watched::open(pid);
+            let (mut control, _) = govern_sidecar_child(StdChild(child), pid);
+            control.write(b"go\n").unwrap();
+            let watched_grandchild = Watched::open(reported_grandchild(stdout));
+
+            // What the operating system does when the desktop process dies:
+            // the last handle to the job closes.
+            drop(control);
+
+            assert!(watched.exited(), "the Sidecar outlived the desktop");
+            assert!(
+                watched_grandchild.exited(),
+                "a descendant outlived the desktop"
+            );
+        }
     }
 }

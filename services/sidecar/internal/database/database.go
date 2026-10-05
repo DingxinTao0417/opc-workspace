@@ -32,7 +32,37 @@ func OpenBeforeDestructiveMigrations(path string) (*Store, *MigrationGate, error
 	return open(path, true)
 }
 
+// OpenAtSchemaVersion opens a database migrated only up to the given schema
+// version. The Sidecar itself always migrates to the latest schema; this
+// exists for compatibility tests that need a workspace exactly as an older
+// release left it, for example to produce a genuine historical export.
+func OpenAtSchemaVersion(path string, version int) (*Store, error) {
+	store, _, err := openWith(path, func(db *sql.DB) (int, *MigrationGate, error) {
+		migrations, err := loadMigrations()
+		if err != nil {
+			return 0, nil, err
+		}
+		limited := make([]migration, 0, len(migrations))
+		for _, item := range migrations {
+			if item.version <= version {
+				limited = append(limited, item)
+			}
+		}
+		if len(limited) == 0 || limited[len(limited)-1].version != version {
+			return 0, nil, fmt.Errorf("no embedded migration reaches schema version %d", version)
+		}
+		return applyMigrationSet(db, limited, false)
+	})
+	return store, err
+}
+
 func open(path string, stopBeforeDestructive bool) (*Store, *MigrationGate, error) {
+	return openWith(path, func(db *sql.DB) (int, *MigrationGate, error) {
+		return applyMigrations(db, stopBeforeDestructive)
+	})
+}
+
+func openWith(path string, migrate func(*sql.DB) (int, *MigrationGate, error)) (*Store, *MigrationGate, error) {
 	if path != ":memory:" {
 		parent := filepath.Dir(path)
 		if err := os.MkdirAll(parent, 0o700); err != nil {
@@ -68,7 +98,7 @@ func open(path string, stopBeforeDestructive bool) (*Store, *MigrationGate, erro
 		}
 	}
 
-	version, gate, err := applyMigrations(sqlDB, stopBeforeDestructive)
+	version, gate, err := migrate(sqlDB)
 	if err != nil {
 		_ = sqlDB.Close()
 		return nil, nil, err

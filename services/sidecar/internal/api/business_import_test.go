@@ -144,7 +144,8 @@ func TestBusinessImportPreviewsAndAtomicallyAppliesToEmptyWorkspace(t *testing.T
 	}
 }
 
-func TestBusinessImportRollsBackTamperedRelationships(t *testing.T) {
+// A broken relationship is found by the rehearsal, before the rollback backup.
+func TestBusinessImportRefusesTamperedRelationshipsBeforeTheBackup(t *testing.T) {
 	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t)
 	if err := sourceStore.DB.Exec("INSERT INTO projects(id, name) VALUES ('018f0000-0000-7000-8000-000000002020', 'Tampered Project')").Error; err != nil {
 		t.Fatal(err)
@@ -162,10 +163,14 @@ func TestBusinessImportRollsBackTamperedRelationships(t *testing.T) {
 		}
 	}
 	body, _ := json.Marshal(packageData)
-	targetRouter, targetStore, _, _ := newBackupTestAPI(t)
+	targetRouter, targetStore, _, backupDir := newBackupTestAPI(t)
+	assertImportRehearsalFailure(t, targetRouter, body, "FOREIGN_KEY_CONSTRAINT")
 	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
-	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_APPLY_FAILED" {
+	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_REHEARSAL_FAILED" {
 		t.Fatalf("tampered import = %d: %s", response.Code, response.Body.String())
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("a refused import created rollback backups: %v", backups)
 	}
 	var projects int64
 	if err := targetStore.DB.Table("projects").Count(&projects).Error; err != nil || projects != 0 {
@@ -173,7 +178,7 @@ func TestBusinessImportRollsBackTamperedRelationships(t *testing.T) {
 	}
 }
 
-func TestBusinessImportRollsBackPaidInvoiceWithoutMatchingEntry(t *testing.T) {
+func TestBusinessImportRefusesPaidInvoiceWithoutMatchingEntryBeforeTheBackup(t *testing.T) {
 	sourceRouter, _, _, _ := newBackupTestAPI(t)
 	client := createClientForTest(t, sourceRouter, `{"name":"付款一致性导入客户"}`, nil)
 	invoice := createInvoiceForTest(t, sourceRouter, fmt.Sprintf(
@@ -196,10 +201,16 @@ func TestBusinessImportRollsBackPaidInvoiceWithoutMatchingEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode inconsistent business package: %v", err)
 	}
-	targetRouter, targetStore, _, _ := newBackupTestAPI(t)
+	targetRouter, targetStore, _, backupDir := newBackupTestAPI(t)
+	if preview := previewBusinessImportForTest(t, targetRouter, body); preview.CanApply || preview.Blocker != importBlockerApplyRehearsal || preview.RehearsalFailure == nil {
+		t.Fatalf("inconsistent payment preview = %+v", preview)
+	}
 	response := performRequest(targetRouter, http.MethodPost, "/api/v1/imports/business-data", body, map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
-	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_APPLY_FAILED" {
+	if response.Code != http.StatusUnprocessableEntity || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_REHEARSAL_FAILED" {
 		t.Fatalf("inconsistent payment import = %d: %s", response.Code, response.Body.String())
+	}
+	if backups := backupPackageDirectories(t, backupDir); len(backups) != 0 {
+		t.Fatalf("a refused import created rollback backups: %v", backups)
 	}
 	for _, table := range []string{"invoices", "financial_entries"} {
 		var count int64

@@ -265,7 +265,22 @@ var businessExportExcludedTablesSchema77 = func() []string {
 	return result
 }()
 
+// Frozen schema 050/051 list. Schema 50 added the operational import
+// authorization table; schema 51 is the schema of the released v0.1.0, whose
+// exports declare exactly this manifest.
+var businessExportExcludedTablesSchema51 = append(
+	append([]string(nil), businessExportExcludedTablesSchema49...),
+	"business_import_project_completion_authorizations",
+)
+
 func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, bool) {
+	// Schema 51 is a released schema. Every later schema up to the current one
+	// either left the portable surface alone or changed it in a way that is
+	// registered as an upgrade step (see businessImportSurfaceChanges).
+	if sourceSchema == businessImportSchema51 &&
+		targetSchema > businessImportSchema51 && targetSchema <= businessImportSchema79 {
+		return businessExportExcludedTablesSchema51, true
+	}
 	// 79 only widens the excluded permission recommendation ledger.
 	if targetSchema == businessImportSchema79 && sourceSchema != targetSchema {
 		if sourceSchema == businessImportSchema78 {
@@ -354,9 +369,11 @@ func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, boo
 		}
 		return businessImportSchemaContract(sourceSchema, businessImportSchema67)
 	}
-	// 70/71 only widen excluded knowledge-base schema (PDF source type and
-	// chunk page columns) and add the excluded agent_runs execution ledger;
-	// the portable export surface is unchanged.
+	// 70/71 widen excluded knowledge-base schema (PDF source type and chunk
+	// page columns) and add the excluded agent_runs execution ledger, so the
+	// exclusion manifest of an older source is unchanged. 71 also adds the
+	// portable actors.agent_adapter_id column; that change is not part of this
+	// contract and is applied as an upgrade step (businessImportSurfaceChanges).
 	if targetSchema == businessImportSchema70 || targetSchema == businessImportSchema71 {
 		if sourceSchema >= businessImportSchema67 && sourceSchema <= businessImportSchema70 {
 			return businessExportExcludedTablesSchema67, true

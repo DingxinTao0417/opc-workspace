@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -138,7 +139,7 @@ func (a *API) createProjectAttachment(c *gin.Context) {
 	cleanupStaged := true
 	defer func() {
 		if cleanupStaged {
-			a.artifactStore.discardStagedFile(staged)
+			a.artifactStore.DiscardStagedFile(staged)
 		}
 	}()
 	name, err := cleanClientAttachmentName(metadata.Name)
@@ -148,7 +149,7 @@ func (a *API) createProjectAttachment(c *gin.Context) {
 	}
 	idempotencyKey, requestHash, ok := taskOutputCommandIdempotency(c, map[string]any{
 		"project_id": projectIDValue, "expected_version": expectedVersion,
-		"name": name, "size_bytes": staged.sizeBytes, "sha256": staged.sha256,
+		"name": name, "size_bytes": staged.SizeBytes, "sha256": staged.SHA256,
 	})
 	if !ok {
 		return
@@ -181,15 +182,15 @@ func (a *API) createProjectAttachment(c *gin.Context) {
 		if project.Version != expectedVersion {
 			return projectVersionConflict()
 		}
-		if err := a.artifactStore.commitStagedFile(staged); err != nil {
+		if err := a.artifactStore.CommitStagedFile(staged); err != nil {
 			return newProjectRequestError(http.StatusInternalServerError, "ATTACHMENT_STORAGE_ERROR", "The project attachment could not be committed to controlled storage")
 		}
 		committed = true
 		now := a.options.Now().UTC().Format(time.RFC3339Nano)
 		attachment := models.ProjectAttachment{
-			ID: strings.TrimPrefix(staged.relativePath, "objects/"), ProjectID: projectIDValue,
-			Name: name, RelativePath: staged.relativePath, MimeType: staged.mimeType,
-			SizeBytes: staged.sizeBytes, SHA256: staged.sha256, RecordedByActorID: models.BuiltinOwnerActorID,
+			ID: strings.TrimPrefix(staged.RelativePath, "objects/"), ProjectID: projectIDValue,
+			Name: name, RelativePath: staged.RelativePath, MimeType: staged.MIMEType,
+			SizeBytes: staged.SizeBytes, SHA256: staged.SHA256, RecordedByActorID: models.BuiltinOwnerActorID,
 			IntegrityStatus: "verified", IntegrityCheckedAt: now, CreatedAt: now,
 		}
 		if err := tx.Create(&attachment).Error; err != nil {
@@ -204,7 +205,7 @@ func (a *API) createProjectAttachment(c *gin.Context) {
 	})
 	if err != nil {
 		if committed {
-			_ = a.artifactStore.discardCommittedFile(staged.relativePath)
+			_ = a.artifactStore.DiscardCommittedFile(staged.RelativePath)
 		}
 		if writeProjectRequestError(c, mapProjectAttachmentConstraintError(err)) {
 			return
@@ -263,9 +264,9 @@ func (a *API) getProjectAttachmentContent(c *gin.Context) {
 		writeError(c, http.StatusServiceUnavailable, "ATTACHMENT_STORAGE_UNAVAILABLE", "Project attachment storage is unavailable")
 		return
 	}
-	file, info, err := a.artifactStore.openObject(row.RelativePath)
+	file, info, err := a.artifactStore.OpenObject(row.RelativePath)
 	if err != nil {
-		if errors.Is(err, errArtifactObjectMissing) {
+		if errors.Is(err, filestore.ErrArtifactObjectMissing) {
 			if !a.persistProjectAttachmentIntegrity(c, id, "missing") {
 				return
 			}
@@ -339,7 +340,7 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 	}
 	endpoint := fmt.Sprintf("DELETE /api/v1/project-attachments/%s", id)
 	replayed := false
-	var moved *trashedArtifactFile
+	var moved *filestore.TrashedArtifactFile
 	var response projectAttachmentResponse
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		replay, _, replayErr := replayTaskOutputCommand(tx, idempotencyKey, endpoint, requestHash, &response)
@@ -384,7 +385,7 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 			return err
 		}
 		fileMissing := false
-		trashed, err := a.artifactStore.moveObjectToTrash(row.RelativePath, row.ID)
+		trashed, err := a.artifactStore.MoveObjectToTrash(row.RelativePath, row.ID)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				fileMissing = true
@@ -417,7 +418,7 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 	})
 	if err != nil {
 		if moved != nil {
-			_ = a.artifactStore.restoreTrashedFile(*moved)
+			_ = a.artifactStore.RestoreTrashedFile(*moved)
 		}
 		if writeProjectRequestError(c, mapProjectAttachmentConstraintError(err)) {
 			return
@@ -426,7 +427,7 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 		return
 	}
 	if moved != nil {
-		a.artifactStore.purgeTrashedFile(*moved)
+		a.artifactStore.PurgeTrashedFile(*moved)
 	}
 	if replayed {
 		c.Header("Idempotency-Replayed", "true")
@@ -435,56 +436,56 @@ func (a *API) deleteProjectAttachment(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-func (a *API) readProjectAttachmentUpload(c *gin.Context) (createProjectAttachmentMetadata, stagedArtifactFile, error) {
+func (a *API) readProjectAttachmentUpload(c *gin.Context) (createProjectAttachmentMetadata, filestore.StagedArtifactFile, error) {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be multipart/form-data")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be multipart/form-data")
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxArtifactRequestBytes)
 	reader, err := c.Request.MultipartReader()
 	if err != nil {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "The multipart request is not valid")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "The multipart request is not valid")
 	}
 	part, err := reader.NextPart()
 	if err != nil || part.FormName() != "metadata" || part.FileName() != "" {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "The metadata text field must be the first multipart part")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "The metadata text field must be the first multipart part")
 	}
 	metadataBytes, err := io.ReadAll(io.LimitReader(part, maxClientAttachmentMetadataBytes+1))
 	if err != nil || part.Close() != nil {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, multipartRequestReadError(err)
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, multipartRequestReadError(err)
 	}
 	if len(metadataBytes) > maxClientAttachmentMetadataBytes {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusRequestEntityTooLarge, "REQUEST_TOO_LARGE", "Project attachment metadata cannot exceed 1 MiB")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusRequestEntityTooLarge, "REQUEST_TOO_LARGE", "Project attachment metadata cannot exceed 1 MiB")
 	}
 	var metadata createProjectAttachmentMetadata
 	if err := decodeStrictJSONBytes(metadataBytes, &metadata); err != nil {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_JSON", "The project attachment metadata is not valid JSON")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_JSON", "The project attachment metadata is not valid JSON")
 	}
 	part, err = reader.NextPart()
 	if err != nil || part.FormName() != "file" || part.FileName() == "" {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Exactly one file part must follow metadata")
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Exactly one file part must follow metadata")
 	}
 	if strings.TrimSpace(metadata.Name) == "" {
 		metadata.Name = part.FileName()
 	}
 	id := uuid.NewString()
-	staged, err := a.artifactStore.stageMultipartFile(part, id)
+	staged, err := a.artifactStore.StageMultipartFile(part, id)
 	if err != nil {
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, multipartFileStageError(err)
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, multipartFileStageError(err)
 	}
 	if err := part.Close(); err != nil {
-		a.artifactStore.discardStagedFile(staged)
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, multipartRequestReadError(err)
+		a.artifactStore.DiscardStagedFile(staged)
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, multipartRequestReadError(err)
 	}
 	extra, err := reader.NextPart()
 	if err == nil {
 		_ = extra.Close()
-		a.artifactStore.discardStagedFile(staged)
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Only one metadata field and one file are allowed")
+		a.artifactStore.DiscardStagedFile(staged)
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Only one metadata field and one file are allowed")
 	}
 	if !errors.Is(err, io.EOF) {
-		a.artifactStore.discardStagedFile(staged)
-		return createProjectAttachmentMetadata{}, stagedArtifactFile{}, multipartRequestReadError(err)
+		a.artifactStore.DiscardStagedFile(staged)
+		return createProjectAttachmentMetadata{}, filestore.StagedArtifactFile{}, multipartRequestReadError(err)
 	}
 	return metadata, staged, nil
 }
@@ -561,7 +562,7 @@ func recordProjectAttachmentDeletionTombstone(tx *gorm.DB, attachment models.Pro
 	}).Error
 }
 
-func (a *API) trashProjectAttachmentFiles(tx *gorm.DB, projectIDValue, deletedAt string) ([]trashedArtifactFile, error) {
+func (a *API) trashProjectAttachmentFiles(tx *gorm.DB, projectIDValue, deletedAt string) ([]filestore.TrashedArtifactFile, error) {
 	var attachments []models.ProjectAttachment
 	if err := tx.Select("id", "project_id", "relative_path", "size_bytes", "sha256").
 		Where("project_id = ? AND deleted_at IS NULL", projectIDValue).Order("id ASC").Find(&attachments).Error; err != nil {
@@ -573,12 +574,12 @@ func (a *API) trashProjectAttachmentFiles(tx *gorm.DB, projectIDValue, deletedAt
 	if a.artifactStore == nil {
 		return nil, newProjectRequestError(http.StatusServiceUnavailable, "ATTACHMENT_STORAGE_UNAVAILABLE", "Project attachment storage is unavailable")
 	}
-	moved := make([]trashedArtifactFile, 0, len(attachments))
+	moved := make([]filestore.TrashedArtifactFile, 0, len(attachments))
 	for _, attachment := range attachments {
 		if err := recordProjectAttachmentDeletionTombstone(tx, attachment, "project", deletedAt); err != nil {
 			return moved, err
 		}
-		entry, err := a.artifactStore.moveObjectToTrash(attachment.RelativePath, attachment.ID)
+		entry, err := a.artifactStore.MoveObjectToTrash(attachment.RelativePath, attachment.ID)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -590,13 +591,13 @@ func (a *API) trashProjectAttachmentFiles(tx *gorm.DB, projectIDValue, deletedAt
 	return moved, nil
 }
 
-func (a *API) restoreProjectAttachmentFiles(moved []trashedArtifactFile) error {
+func (a *API) restoreProjectAttachmentFiles(moved []filestore.TrashedArtifactFile) error {
 	if a.artifactStore == nil {
 		return nil
 	}
 	var restoreErr error
 	for index := len(moved) - 1; index >= 0; index-- {
-		restoreErr = errors.Join(restoreErr, a.artifactStore.restoreTrashedFile(moved[index]))
+		restoreErr = errors.Join(restoreErr, a.artifactStore.RestoreTrashedFile(moved[index]))
 	}
 	return restoreErr
 }

@@ -590,8 +590,14 @@ func TestFocusHeartbeatTickerIsSidecarOwnedAndDoesNotBumpVersion(t *testing.T) {
 	if err := router.Close(); err != nil {
 		t.Fatalf("close Router heartbeat: %v", err)
 	}
+	// Close joins the heartbeat goroutine. Once it has exited nothing can write
+	// another heartbeat, so the check below needs no waiting.
+	select {
+	case <-router.focusHeartbeatDone:
+	default:
+		t.Fatal("Router.Close returned while the heartbeat goroutine was still running")
+	}
 	clock.Add(30 * time.Second)
-	time.Sleep(20 * time.Millisecond)
 	if value := normalizeTimestamp(focusString(t, store, "SELECT last_heartbeat_at FROM focus_sessions WHERE id = ?", created.Session.ID)); value != "2026-03-05T08:00:30Z" {
 		t.Fatalf("closed Router continued heartbeat updates: %q", value)
 	}

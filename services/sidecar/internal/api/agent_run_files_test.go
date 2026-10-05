@@ -17,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/opc-workspace/opc-sidecar/internal/agentexec"
+	"github.com/opc-workspace/opc-sidecar/internal/api/apikit"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
@@ -24,7 +26,7 @@ import (
 
 type agentRunFileTestFixture struct {
 	aiAgentRunFixture
-	Artifacts *artifactStore
+	Artifacts *filestore.ArtifactStore
 }
 
 func newAgentRunFileTestFixture(t *testing.T) agentRunFileTestFixture {
@@ -80,17 +82,17 @@ func (fixture agentRunFileTestFixture) addTaskArtifactWithMutation(
 	t.Helper()
 	now := fixture.Service.options.Now().UTC().Format(time.RFC3339Nano)
 	artifactID := uuid.NewString()
-	staged, err := fixture.Artifacts.stageMultipartFileWithLimit(
-		bytes.NewReader(content), artifactID, maxArtifactFileBytes,
+	staged, err := fixture.Artifacts.StageMultipartFileWithLimit(
+		bytes.NewReader(content), artifactID, filestore.MaxArtifactFileBytes,
 	)
 	if err != nil {
 		t.Fatalf("stage Task Artifact: %v", err)
 	}
-	t.Cleanup(func() { fixture.Artifacts.discardStagedFile(staged) })
-	if err := fixture.Artifacts.commitStagedFile(staged); err != nil {
+	t.Cleanup(func() { fixture.Artifacts.DiscardStagedFile(staged) })
+	if err := fixture.Artifacts.CommitStagedFile(staged); err != nil {
 		t.Fatalf("commit Task Artifact: %v", err)
 	}
-	t.Cleanup(func() { _ = fixture.Artifacts.discardCommittedFile(staged.relativePath) })
+	t.Cleanup(func() { _ = fixture.Artifacts.DiscardCommittedFile(staged.RelativePath) })
 	var sequence int
 	if err := fixture.Store.DB.Model(&models.TaskSubmission{}).Where("task_id = ?", taskID).
 		Select("COALESCE(MAX(sequence), 0) + 1").Scan(&sequence).Error; err != nil {
@@ -104,7 +106,7 @@ func (fixture agentRunFileTestFixture) addTaskArtifactWithMutation(
 	if err := fixture.Store.DB.Create(&submission).Error; err != nil {
 		t.Fatalf("create Task Submission: %v", err)
 	}
-	relativePath, mimeType, sizeBytes, digest := staged.relativePath, staged.mimeType, staged.sizeBytes, staged.sha256
+	relativePath, mimeType, sizeBytes, digest := staged.RelativePath, staged.MIMEType, staged.SizeBytes, staged.SHA256
 	artifact := models.TaskArtifact{
 		ID: artifactID, TaskID: taskID, SubmissionID: submission.ID, Position: 1,
 		StorageKind: "file", Name: name, RelativePath: &relativePath, MimeType: &mimeType,
@@ -130,20 +132,20 @@ func (fixture agentRunFileTestFixture) addProjectAttachment(
 	t.Helper()
 	now := fixture.Service.options.Now().UTC().Format(time.RFC3339Nano)
 	id := uuid.NewString()
-	staged, err := fixture.Artifacts.stageMultipartFileWithLimit(
-		bytes.NewReader(content), id, maxArtifactFileBytes,
+	staged, err := fixture.Artifacts.StageMultipartFileWithLimit(
+		bytes.NewReader(content), id, filestore.MaxArtifactFileBytes,
 	)
 	if err != nil {
 		t.Fatalf("stage Project Attachment: %v", err)
 	}
-	t.Cleanup(func() { fixture.Artifacts.discardStagedFile(staged) })
-	if err := fixture.Artifacts.commitStagedFile(staged); err != nil {
+	t.Cleanup(func() { fixture.Artifacts.DiscardStagedFile(staged) })
+	if err := fixture.Artifacts.CommitStagedFile(staged); err != nil {
 		t.Fatalf("commit Project Attachment: %v", err)
 	}
-	t.Cleanup(func() { _ = fixture.Artifacts.discardCommittedFile(staged.relativePath) })
+	t.Cleanup(func() { _ = fixture.Artifacts.DiscardCommittedFile(staged.RelativePath) })
 	attachment := models.ProjectAttachment{
-		ID: id, ProjectID: projectID, Name: name, RelativePath: staged.relativePath,
-		MimeType: staged.mimeType, SizeBytes: staged.sizeBytes, SHA256: staged.sha256,
+		ID: id, ProjectID: projectID, Name: name, RelativePath: staged.RelativePath,
+		MimeType: staged.MIMEType, SizeBytes: staged.SizeBytes, SHA256: staged.SHA256,
 		RecordedByActorID: models.BuiltinOwnerActorID, IntegrityStatus: "verified",
 		IntegrityCheckedAt: now, CreatedAt: now,
 	}
@@ -316,7 +318,7 @@ func TestAgentRunV3MultiFileOutputDeliversOneReviewSubmission(t *testing.T) {
 		t.Fatalf("delivered Artifacts=%#v", artifacts)
 	}
 	for index, want := range []string{"# 结论\n可人工验收。", `{"source":"agent"}`} {
-		file, _, openErr := fixture.Artifacts.openObject(*artifacts[index].RelativePath)
+		file, _, openErr := fixture.Artifacts.OpenObject(*artifacts[index].RelativePath)
 		if openErr != nil {
 			t.Fatal(openErr)
 		}
@@ -497,7 +499,7 @@ func TestAgentRunControlledFilesRejectOwnershipIntegrityAndUnsafeBytes(t *testin
 		t.Fatal(err)
 	}
 	run := createRunningAgentRunFromPrepared(t, fixture, prepared)
-	objectPath, err := fixture.Artifacts.resolveObject(*valid.RelativePath)
+	objectPath, err := fixture.Artifacts.ResolveObject(*valid.RelativePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -916,7 +918,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 			artifact.RelativePath == nil {
 			t.Fatalf("file Artifact=%#v", artifact)
 		}
-		file, _, err := fixture.Artifacts.openObject(*artifact.RelativePath)
+		file, _, err := fixture.Artifacts.OpenObject(*artifact.RelativePath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -942,7 +944,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 		if err := delivery.finish(ambiguous); !errors.Is(err, ambiguous) {
 			t.Fatalf("ambiguous commit result=%v", err)
 		}
-		file, _, err := fixture.Artifacts.openObject(*artifact.RelativePath)
+		file, _, err := fixture.Artifacts.OpenObject(*artifact.RelativePath)
 		if err != nil {
 			t.Fatalf("database-referenced object was deleted: %v", err)
 		}
@@ -963,7 +965,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 			t.Fatal(err)
 		}
 		run := createRunningAgentRunFromPrepared(t, fixture, prepared)
-		before, err := os.ReadDir(fixture.Artifacts.objectsDir)
+		before, err := os.ReadDir(fixture.Artifacts.ObjectsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -988,7 +990,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 		if !errors.Is(err, errAgentRunOutputDeliveryPending) {
 			t.Fatalf("outer commit pending fallback=%v", err)
 		}
-		after, err := os.ReadDir(fixture.Artifacts.objectsDir)
+		after, err := os.ReadDir(fixture.Artifacts.ObjectsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1029,7 +1031,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 			t.Fatal(err)
 		}
 		run := createRunningAgentRunFromPrepared(t, fixture, prepared)
-		before, err := os.ReadDir(fixture.Artifacts.objectsDir)
+		before, err := os.ReadDir(fixture.Artifacts.ObjectsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1044,7 +1046,7 @@ func TestAgentRunFileOutputSubmissionAndPendingRecoveryCompensateObjects(t *test
 		if !errors.Is(err, errAgentRunOutputDeliveryPending) {
 			t.Fatalf("finalize pending error=%v", err)
 		}
-		after, err := os.ReadDir(fixture.Artifacts.objectsDir)
+		after, err := os.ReadDir(fixture.Artifacts.ObjectsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1211,7 +1213,11 @@ func TestActiveAgentRunDeletionGateRejectsUnknownAndInvalidV2Contracts(t *testin
 		},
 		{
 			name: "unknown execution contract version", status: "queued",
-			version: agentRunExecutionContractVersionV6 + 1,
+			version: agentRunExecutionContractVersionV7 + 1,
+		},
+		{
+			name: "v7 missing its input declaration", status: "queued",
+			version: agentRunExecutionContractVersionV7, wantStatus: http.StatusConflict,
 		},
 		{
 			name: "v5 missing frozen model protocol", status: "queued",
@@ -1259,7 +1265,7 @@ func TestActiveAgentRunDeletionGateRejectsUnknownAndInvalidV2Contracts(t *testin
 				t.Fatalf("corrupt active Run rows=%d err=%v", result.RowsAffected, result.Error)
 			}
 
-			file, _, err := fixture.Artifacts.openObject(*artifact.RelativePath)
+			file, _, err := fixture.Artifacts.OpenObject(*artifact.RelativePath)
 			if err != nil {
 				t.Fatalf("open Artifact before blocked delete: %v", err)
 			}
@@ -1287,7 +1293,7 @@ func TestActiveAgentRunDeletionGateRejectsUnknownAndInvalidV2Contracts(t *testin
 			if err := fixture.Store.DB.First(&current, "id = ?", artifact.ID).Error; err != nil || current.DeletedAt != nil {
 				t.Fatalf("blocked deletion mutated Artifact=%#v err=%v", current, err)
 			}
-			file, _, err = fixture.Artifacts.openObject(*artifact.RelativePath)
+			file, _, err = fixture.Artifacts.OpenObject(*artifact.RelativePath)
 			if err != nil {
 				t.Fatalf("blocked deletion moved or removed Artifact bytes: %v", err)
 			}
@@ -1389,7 +1395,7 @@ func TestAgentRunCreateIdempotencyIsScopedToCanonicalTask(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(requestIDMiddleware())
+	router.Use(apikit.RequestIDMiddleware())
 	router.POST("/api/v1/tasks/:id/agent-runs", fixture.Service.createAgentRun)
 	body := []byte(fmt.Sprintf(`{"provider_id":%q}`, fixture.Provider.ID))
 	headers := map[string]string{"Idempotency-Key": "agent-run-task-scope"}
@@ -1496,7 +1502,7 @@ func TestAgentRunAtomicAutoAssignRollsBackOnProviderConsentRace(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(requestIDMiddleware())
+	router.Use(apikit.RequestIDMiddleware())
 	router.POST("/api/v1/tasks/:id/agent-runs", fixture.Service.createAgentRun)
 	body := []byte(fmt.Sprintf(
 		`{"provider_id":%q,"auto_assign":{"actor_id":%q,"expected_task_version":%d},"input_files":[{"source_kind":"task_artifact","id":%q}],"confirm_file_access":true,"file_access_provider_confirmation":{"version":%d,"config_version":%d,"kind":%q}}`,
@@ -1546,7 +1552,7 @@ func TestAgentRunAtomicAutoAssignCreatesAssignmentAndRunTogether(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(requestIDMiddleware())
+	router.Use(apikit.RequestIDMiddleware())
 	router.POST("/api/v1/tasks/:id/agent-runs", fixture.Service.createAgentRun)
 	body := []byte(fmt.Sprintf(
 		`{"provider_id":%q,"auto_assign":{"actor_id":%q,"expected_task_version":%d}}`,

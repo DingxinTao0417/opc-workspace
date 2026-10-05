@@ -68,6 +68,8 @@ export function ProjectFormModal({
   const [validationError, setValidationError] = useState<string | null>(null);
   const busy = createMutation.isPending || updateMutation.isPending;
 
+  const resetCreate = createMutation.reset;
+  const resetUpdate = updateMutation.reset;
   useEffect(() => {
     if (!open) return;
     setName(project?.name ?? "");
@@ -78,9 +80,9 @@ export function ProjectFormModal({
     setAmount(amountToInput(project?.amountMinor ?? null));
     setColor(project?.color ?? projectColors[0]);
     setValidationError(null);
-    createMutation.reset();
-    updateMutation.reset();
-  }, [open, project]);
+    resetCreate();
+    resetUpdate();
+  }, [open, project, resetCreate, resetUpdate]);
 
   const errorMessage = useMemo(
     () =>

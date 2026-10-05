@@ -128,6 +128,10 @@ describe("RoadmapPage", () => {
   });
 
   beforeEach(() => {
+    // The page opens on the quarter of the local "today"; the fixtures live in
+    // 2026 Q3, so pin the date instead of depending on the wall clock.
+    // Only Date is mocked here, real timers keep driving async utilities.
+    vi.setSystemTime(new Date(2026, 8, 15, 12));
     hooks.update.mockReset();
     hooks.updateReset.mockReset();
     hooks.remove.mockReset();
@@ -171,6 +175,7 @@ describe("RoadmapPage", () => {
   });
 
   it("follows the next local quarter and resets pagination", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
     hooks.milestones.mockImplementation(
@@ -206,6 +211,7 @@ describe("RoadmapPage", () => {
   });
 
   it("keeps a manually selected quarter when local midnight crosses a quarter", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
     render(
@@ -230,6 +236,7 @@ describe("RoadmapPage", () => {
   });
 
   it("syncs a closed create date without overwriting an open draft", () => {
+    vi.useRealTimers();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 30, 23, 59, 59));
     render(

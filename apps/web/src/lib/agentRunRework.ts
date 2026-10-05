@@ -10,6 +10,7 @@ const keys = (value: Record<string, unknown>, expected: string[]) =>
   Object.keys(value).length === expected.length &&
   expected.every((key) => Object.hasOwn(value, key));
 const text = (value: unknown): value is string =>
+  // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
   typeof value === "string" && !/[\u0000\uD800-\uDFFF]/u.test(value);
 
 export function agentReworkErrorMessage(error: unknown): string | null {

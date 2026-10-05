@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,11 +12,14 @@ import { ApiError } from "../api/client";
 import type {
   BackupSummary,
   BusinessImportPreview,
+  BusinessImportResult,
   BusinessPackageImportPreview,
+  BusinessPackageImportResult,
   ScheduledBackupRestoreResult,
   ScheduledBackupPolicy,
 } from "../types/models";
 import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
+import { useUiStore } from "../store/ui";
 import { BackupSettings } from "./BackupSettings";
 
 const backup: BackupSummary = {
@@ -70,10 +74,16 @@ const mocks = vi.hoisted(() => ({
   importPreviewData: null as BusinessImportPreview | null,
   applyImport: vi.fn(),
   applyImportError: null as Error | null,
+  applyImportOptions: null as {
+    onApplied?: (result: BusinessImportResult) => void;
+  } | null,
   previewPackageImport: vi.fn(),
   packageImportPreviewData: null as BusinessPackageImportPreview | null,
   applyPackageImport: vi.fn(),
   applyPackageImportError: null as Error | null,
+  applyPackageImportOptions: null as {
+    onApplied?: (result: BusinessPackageImportResult) => void;
+  } | null,
   restartApplication: vi.fn(),
   navigate: vi.fn(),
   reset: vi.fn(),
@@ -196,12 +206,17 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
-  useApplyBusinessDataImport: () => ({
-    mutate: mocks.applyImport,
-    reset: mocks.reset,
-    isPending: false,
-    error: mocks.applyImportError,
-  }),
+  useApplyBusinessDataImport: (
+    options?: (typeof mocks)["applyImportOptions"],
+  ) => {
+    mocks.applyImportOptions = options ?? null;
+    return {
+      mutate: mocks.applyImport,
+      reset: mocks.reset,
+      isPending: false,
+      error: mocks.applyImportError,
+    };
+  },
   usePreviewBusinessPackageImport: () => ({
     mutate: mocks.previewPackageImport,
     reset: mocks.reset,
@@ -209,12 +224,17 @@ vi.mock("../api/hooks", () => ({
     isPending: false,
     error: null,
   }),
-  useApplyBusinessPackageImport: () => ({
-    mutate: mocks.applyPackageImport,
-    reset: mocks.reset,
-    isPending: false,
-    error: mocks.applyPackageImportError,
-  }),
+  useApplyBusinessPackageImport: (
+    options?: (typeof mocks)["applyPackageImportOptions"],
+  ) => {
+    mocks.applyPackageImportOptions = options ?? null;
+    return {
+      mutate: mocks.applyPackageImport,
+      reset: mocks.reset,
+      isPending: false,
+      error: mocks.applyPackageImportError,
+    };
+  },
 }));
 
 describe("BackupSettings", () => {
@@ -249,6 +269,12 @@ describe("BackupSettings", () => {
       targetRows: 0,
       keyConflicts: 0,
       conflictTables: [],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       canApply: true,
       applyMode: "replace_empty",
       blocker: null,
@@ -263,9 +289,16 @@ describe("BackupSettings", () => {
       targetRows: 0,
       keyConflicts: 0,
       conflictTables: [],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       fileCount: 3,
       fileBytes: 4096,
       fileConflicts: 0,
+      skippedFiles: 0,
       canApply: true,
       applyMode: "replace_empty",
       blocker: null,
@@ -297,6 +330,11 @@ describe("BackupSettings", () => {
     mocks.reset.mockClear();
     mocks.refetch.mockClear();
     useAiWorkbenchHandoff.setState({ pending: null, pendingIssue: null });
+    useUiStore.setState({
+      settingsOpen: false,
+      settingsModule: "general",
+      dataImportNotice: null,
+    });
   });
 
   it("hands data and backup settings to the agent without running maintenance actions", () => {
@@ -653,7 +691,12 @@ describe("BackupSettings", () => {
     expect(mocks.previewImport).toHaveBeenCalledWith(importFile);
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(mocks.applyImport).toHaveBeenCalledWith(
-      { file: importFile, applyMode: "replace_empty" },
+      {
+        file: importFile,
+        applyMode: "replace_empty",
+        upgrade: false,
+        planDigest: null,
+      },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
@@ -667,7 +710,12 @@ describe("BackupSettings", () => {
     expect(screen.getByText(/3 个受控文件/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "确认含文件导入" }));
     expect(mocks.applyPackageImport).toHaveBeenCalledWith(
-      { file: packageFile, applyMode: "replace_empty" },
+      {
+        file: packageFile,
+        applyMode: "replace_empty",
+        upgrade: false,
+        planDigest: null,
+      },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
 
@@ -699,6 +747,12 @@ describe("BackupSettings", () => {
           keyConflicts: 1,
         },
       ],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       canApply: false,
       applyMode: null,
       blocker: "target_key_conflicts",
@@ -741,6 +795,12 @@ describe("BackupSettings", () => {
           keyConflicts: 0,
         },
       ],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       canApply: true,
       applyMode: "append",
       blocker: null,
@@ -755,14 +815,14 @@ describe("BackupSettings", () => {
     });
 
     expect(screen.getByText(/当前工作区已有 2/)).toHaveTextContent(
-      "预检未发现主键重叠",
+      "预检未发现主键重叠或唯一值重复",
     );
     expect(
       screen.getByRole("list", { name: "目标工作区数据清单" }),
     ).toHaveTextContent("客户源 1 · 目标 2 · 重叠 0");
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(mocks.applyImport).toHaveBeenCalledWith(
-      { file, applyMode: "append" },
+      { file, applyMode: "append", upgrade: false, planDigest: null },
       expect.objectContaining({ onSuccess: expect.any(Function) }),
     );
   });
@@ -778,9 +838,16 @@ describe("BackupSettings", () => {
       targetRows: 0,
       keyConflicts: 0,
       conflictTables: [],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       fileCount: 1,
       fileBytes: 1024,
       fileConflicts: 0,
+      skippedFiles: 0,
       canApply: false,
       applyMode: null,
       blocker: "source_schema_older",
@@ -797,9 +864,304 @@ describe("BackupSettings", () => {
     expect(screen.getByText(/源数据为 schema v41/)).toHaveTextContent(
       "当前工作区为 v42",
     );
+    expect(screen.getByText(/源数据为 schema v41/)).toHaveTextContent(
+      "不在可升级导入的范围内",
+    );
+    expect(
+      screen.queryByRole("list", { name: "升级转换步骤" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "确认含文件导入" }),
     ).toBeDisabled();
+  });
+
+  it("lists the upgrade steps and the rows left out, then confirms the upgrade with the plan digest", () => {
+    const planDigest = "a".repeat(64);
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 51,
+      targetSchemaVersion: 79,
+      exportedAt: "2026-06-01T12:00:00Z",
+      tableCounts: { actors: 1, clients: 2, app_settings: 3 },
+      totalRows: 6,
+      targetRows: 5,
+      keyConflicts: 0,
+      conflictTables: [
+        { table: "clients", incomingRows: 2, targetRows: 2, keyConflicts: 0 },
+        {
+          table: "app_settings",
+          incomingRows: 3,
+          targetRows: 3,
+          keyConflicts: 0,
+        },
+      ],
+      upgradeSteps: [
+        {
+          schemaVersion: 71,
+          table: "actors",
+          change: "add_column",
+          column: "agent_adapter_id",
+        },
+      ],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [
+        { table: "clients", rule: "skip_identical", rows: 1 },
+        { table: "app_settings", rule: "keep_target", rows: 3 },
+      ],
+      planDigest,
+      rehearsalFailure: null,
+      canApply: true,
+      applyMode: "append",
+      blocker: null,
+    };
+    render(<BackupSettings />);
+    const file = new File(["{}"], "v0.1.json", { type: "application/json" });
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/源数据来自 schema v51/)).toHaveTextContent(
+      "转换为当前 v79 结构",
+    );
+    expect(
+      screen.getByRole("list", { name: "升级转换步骤" }),
+    ).toHaveTextContent("人员v71 · 补入新列 agent_adapter_id");
+    const leftOut = screen.getByRole("list", { name: "不写入的源数据" });
+    expect(leftOut).toHaveTextContent("客户与目标完全相同，跳过 · 1 行");
+    expect(leftOut).toHaveTextContent("设置保留目标现有内容 · 3 行");
+    expect(
+      screen.queryByRole("button", { name: "确认导入" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认升级并导入" }));
+    expect(mocks.applyImport).toHaveBeenCalledWith(
+      { file, applyMode: "append", upgrade: true, planDigest },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("says when an older package needs no structural conversion", () => {
+    mocks.importPreviewData = {
+      ...mocks.importPreviewData!,
+      schemaVersion: 77,
+      targetSchemaVersion: 79,
+    };
+    render(<BackupSettings />);
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: {
+        files: [new File(["{}"], "v77.json", { type: "application/json" })],
+      },
+    });
+
+    expect(screen.getByText(/源数据来自 schema v77/)).toHaveTextContent(
+      "结构在这两个版本之间没有变化",
+    );
+    expect(
+      screen.queryByRole("list", { name: "升级转换步骤" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: "不写入的源数据" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "确认升级并导入" }));
+    expect(mocks.applyImport).toHaveBeenCalledWith(
+      expect.objectContaining({ upgrade: true, planDigest: null }),
+      expect.anything(),
+    );
+  });
+
+  it("blocks unique-value conflicts with a per-rule inventory", () => {
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 79,
+      targetSchemaVersion: 79,
+      exportedAt: "2026-10-04T12:00:00Z",
+      tableCounts: { tags: 2, inbox_items: 1 },
+      totalRows: 3,
+      targetRows: 5,
+      keyConflicts: 0,
+      conflictTables: [
+        { table: "tags", incomingRows: 2, targetRows: 3, keyConflicts: 0 },
+        {
+          table: "inbox_items",
+          incomingRows: 1,
+          targetRows: 2,
+          keyConflicts: 0,
+        },
+      ],
+      upgradeSteps: [],
+      semanticConflicts: 3,
+      semanticConflictRules: [
+        { table: "tags", index: "sqlite_autoindex_tags_2", conflicts: 2 },
+        {
+          table: "inbox_items",
+          index: "ux_inbox_items_source_event_key",
+          conflicts: 1,
+        },
+      ],
+      resolutions: [{ table: "tags", rule: "skip_identical", rows: 1 }],
+      planDigest: null,
+      rehearsalFailure: null,
+      canApply: false,
+      applyMode: null,
+      blocker: "target_semantic_conflicts",
+    };
+    render(<BackupSettings />);
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: {
+        files: [new File(["{}"], "names.json", { type: "application/json" })],
+      },
+    });
+
+    expect(screen.getByText(/源数据中有 3 行会与/)).toHaveTextContent(
+      "已在创建备份前阻断",
+    );
+    const rules = screen.getByRole("list", { name: "唯一值冲突清单" });
+    expect(rules).toHaveTextContent("标签名称 · 重复 2");
+    expect(rules).toHaveTextContent(
+      "收件箱ux_inbox_items_source_event_key · 重复 1",
+    );
+    // Nothing is written at all, so no row is singled out as left out.
+    expect(
+      screen.queryByRole("list", { name: "不写入的源数据" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    expect(mocks.applyImport).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "TASK_DUE_INBOX_SOURCE_NOT_CURRENT",
+      "源数据里有“任务到期”提醒的历史记录，而对应任务之后已完成、取消或改期。这类历史提醒目前还不能导入。",
+    ],
+    [
+      "TASK_BLOCKED_INBOX_SOURCE_NOT_CURRENT",
+      "源数据里有“任务阻塞”提醒的历史记录，而对应任务之后已解除阻塞。",
+    ],
+    ["FOREIGN_KEY_CONSTRAINT", "源数据里有记录引用了并不存在的对象。"],
+    ["SOME_FUTURE_RULE", "数据库拒绝了其中的记录。"],
+  ])("explains an import the rehearsal refused with %s", (code, reason) => {
+    mocks.importPreviewData = {
+      formatVersion: 1,
+      schemaVersion: 79,
+      targetSchemaVersion: 79,
+      exportedAt: "2026-10-04T12:00:00Z",
+      tableCounts: { tasks: 1, inbox_items: 1 },
+      totalRows: 2,
+      targetRows: 0,
+      keyConflicts: 0,
+      conflictTables: [],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: { code },
+      canApply: false,
+      applyMode: null,
+      blocker: "apply_rehearsal_failed",
+    };
+    render(<BackupSettings />);
+
+    fireEvent.change(screen.getByLabelText("选择业务数据 JSON"), {
+      target: {
+        files: [new File(["{}"], "history.json", { type: "application/json" })],
+      },
+    });
+
+    const notice = screen.getByText(/这个包在写入时会被拒绝/);
+    expect(notice).toHaveTextContent("已在创建备份前阻断，数据没有改变");
+    expect(notice).toHaveTextContent(reason);
+    expect(notice).toHaveTextContent(`规则代码 ${code}`);
+    expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
+    expect(mocks.applyImport).not.toHaveBeenCalled();
+  });
+
+  it("reports the controlled files that a repeated package does not write again", () => {
+    mocks.packageImportPreviewData = {
+      ...mocks.packageImportPreviewData!,
+      targetRows: 2,
+      conflictTables: [
+        { table: "tasks", incomingRows: 2, targetRows: 2, keyConflicts: 0 },
+      ],
+      resolutions: [{ table: "tasks", rule: "skip_identical", rows: 2 }],
+      planDigest: "c".repeat(64),
+      skippedFiles: 3,
+      applyMode: "append",
+    };
+    render(<BackupSettings />);
+    const file = new File(["PK"], "again.zip", { type: "application/zip" });
+
+    fireEvent.change(screen.getByLabelText("选择含文件业务 ZIP"), {
+      target: { files: [file] },
+    });
+
+    expect(screen.getByText(/下列源数据不会写入/)).toHaveTextContent(
+      "其中 3 个受控文件已在目标中，不会重复写入",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "确认含文件导入" }));
+    expect(mocks.applyPackageImport).toHaveBeenCalledWith(
+      {
+        file,
+        applyMode: "append",
+        upgrade: false,
+        planDigest: "c".repeat(64),
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
+
+  it("keeps the import outcome and the data section across the remount an import causes", () => {
+    useUiStore.setState({ settingsOpen: true, settingsModule: "general" });
+    const { unmount } = render(<BackupSettings />);
+
+    act(() => {
+      mocks.applyImportOptions?.onApplied?.({
+        importedRows: 19,
+        backupId: "018f0000-0000-7000-8000-000000001799",
+        applyMode: "replace_empty",
+      });
+    });
+    // Re-reading the imported settings unmounts the whole app for a moment.
+    unmount();
+    render(<BackupSettings />);
+
+    expect(screen.getByText(/已导入 19 行源业务数据/)).toHaveTextContent(
+      "导入前回滚备份为 018f0000。",
+    );
+    expect(useUiStore.getState().settingsModule).toBe("data");
+
+    // The next action replaces what the import reported.
+    fireEvent.click(screen.getByRole("button", { name: "下载 JSON" }));
+    expect(screen.queryByText(/已导入 19 行/)).not.toBeInTheDocument();
+    expect(useUiStore.getState().dataImportNotice).toBeNull();
+  });
+
+  it("reports an appended controlled-file import and forgets it when settings close", () => {
+    render(<BackupSettings />);
+
+    act(() => {
+      mocks.applyPackageImportOptions?.onApplied?.({
+        importedRows: 7,
+        importedFiles: 2,
+        backupId: "018f0000-0000-7000-8000-000000001798",
+        applyMode: "append",
+      });
+    });
+
+    expect(screen.getByText(/已完成追加导入/)).toHaveTextContent(
+      "已完成追加导入，处理 7 行源业务数据和 2 个受控文件；导入前回滚备份为 018f0000。",
+    );
+    // Settings were not open, so nothing is opened on the user's behalf.
+    expect(useUiStore.getState().settingsOpen).toBe(false);
+
+    act(() => useUiStore.getState().setSettingsOpen(false));
+    expect(useUiStore.getState().dataImportNotice).toBeNull();
   });
 
   it("blocks a controlled-file target collision without exposing paths", () => {
@@ -813,9 +1175,16 @@ describe("BackupSettings", () => {
       targetRows: 0,
       keyConflicts: 0,
       conflictTables: [],
+      upgradeSteps: [],
+      semanticConflicts: 0,
+      semanticConflictRules: [],
+      resolutions: [],
+      planDigest: null,
+      rehearsalFailure: null,
       fileCount: 1,
       fileBytes: 1024,
       fileConflicts: 1,
+      skippedFiles: 0,
       canApply: false,
       applyMode: null,
       blocker: "target_file_conflicts",
@@ -901,6 +1270,20 @@ describe("BackupSettings", () => {
       status: 503,
       message:
         "暂时无法确认导入前回滚备份容量；现有数据没有改变，请检查本地存储后重试。",
+    },
+    {
+      source: "import",
+      code: "IMPORT_PLAN_CHANGED",
+      status: 409,
+      message:
+        "预检之后目标数据或导入方案已变化；没有创建备份或写入数据，请重新选择文件并检查最新预检结果。",
+    },
+    {
+      source: "package",
+      code: "IMPORT_TARGET_SEMANTIC_CONFLICT",
+      status: 409,
+      message:
+        "预检后目标数据发生变化或仍有唯一值重复；没有覆盖或追加任何业务事实。",
     },
   ])("shows actionable $code feedback", ({ source, code, status, message }) => {
     const error = new ApiError("private storage detail", {

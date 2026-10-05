@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -8,7 +8,11 @@ const repoRoot = dirname(scriptsDir);
 const webOnly = process.argv.includes("--web-only");
 const goCommand = process.platform === "win32" ? "go.exe" : "go";
 const pnpmCli = process.env.npm_execpath;
-const devDataDir = join(repoRoot, ".local", "dev-data");
+// OPC_DEV_DATA_DIR points the development run at another data directory, for
+// example one prepared by scripts/seed-volume.mjs.
+const devDataDir = process.env.OPC_DEV_DATA_DIR
+  ? resolve(process.env.OPC_DEV_DATA_DIR)
+  : join(repoRoot, ".local", "dev-data");
 const databasePath = join(devDataDir, "opc-workspace.db");
 const artifactDir = join(devDataDir, "artifacts");
 const invoiceDir = join(devDataDir, "invoices");
@@ -111,7 +115,7 @@ process.once("SIGINT", () => void shutdown(0));
 process.once("SIGTERM", () => void shutdown(0));
 
 async function main() {
-  assertCommand(goCommand, "Go 1.22+", ["version"]);
+  assertCommand(goCommand, "Go 1.24+", ["version"]);
   if (!pnpmCli) {
     throw new Error(
       "Run this script through pnpm (`pnpm dev` or `pnpm dev:web`).",

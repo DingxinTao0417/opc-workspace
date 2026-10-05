@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, ProjectStatus } from "../types/models";
 import { Modal } from "./Modal";
 import { ProjectSelect } from "./ProjectSelect";
+import type { Untyped } from "../test/untyped";
 
 const hooks = vi.hoisted(() => ({
   options: {
@@ -18,12 +19,12 @@ const hooks = vi.hoisted(() => ({
     isFetching: false,
     isPending: false,
     refetch: vi.fn(),
-  } as any,
+  } as Untyped,
   selected: {
     data: undefined,
     isError: false,
     isPending: false,
-  } as any,
+  } as Untyped,
   optionsHook: vi.fn(),
   selectedHook: vi.fn(),
 }));

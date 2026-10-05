@@ -140,6 +140,8 @@ export function InboxItemDetailModal({
   const draftOpen = editing || actionEditor !== null;
   const navigationDisabled = busy || draftOpen;
 
+  const resetUpdate = updateMutation.reset;
+  const resetCommand = commandMutation.reset;
   useEffect(() => {
     if (!itemId) {
       initializedFor.current = null;
@@ -161,9 +163,9 @@ export function InboxItemDetailModal({
     setValidationError(null);
     setConflictMessage(null);
     setDiscardConfirmOpen(false);
-    updateMutation.reset();
-    commandMutation.reset();
-  }, [item, itemId]);
+    resetUpdate();
+    resetCommand();
+  }, [item, itemId, resetUpdate, resetCommand]);
 
   useEffect(() => {
     const pending = pendingConflictRefresh.current;
@@ -171,6 +173,7 @@ export function InboxItemDetailModal({
     setObservedVersion(item.version);
     setConflictMessage(pending.successMessage);
     pendingConflictRefresh.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the item identity and version
   }, [item?.id, item?.version]);
 
   const operationError = useMemo(

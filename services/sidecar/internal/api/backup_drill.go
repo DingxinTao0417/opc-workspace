@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 )
 
@@ -86,7 +87,7 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 			err = errors.Join(err, fmt.Errorf("clean restore drill root: %w", cleanupErr))
 		}
 	}()
-	if err := requireSafeDirectory(temporaryRoot); err != nil {
+	if err := filestore.RequireSafeDirectory(temporaryRoot); err != nil {
 		return backupRestoreDrillResult{}, fmt.Errorf("validate restore drill root: %w", err)
 	}
 
@@ -110,7 +111,7 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 	}
 	if _, err := copyVerifiedBackupFile(
 		filepath.Join(packagePath, filepath.FromSlash(manifest.ArtifactMarker.Path)),
-		filepath.Join(artifactRoot, artifactStoreMarkerName),
+		filepath.Join(artifactRoot, filestore.ArtifactStoreMarkerName),
 		manifest.ArtifactMarker.SizeBytes,
 		manifest.ArtifactMarker.SHA256,
 	); err != nil {
@@ -156,12 +157,12 @@ func (s *backupStore) runRestoreDrill(packagePath string, manifest backupManifes
 		return backupRestoreDrillResult{}, err
 	}
 
-	artifacts, err := newArtifactStore(artifactRoot, manifest.DatabaseID, manifest.ArtifactStoreID)
+	artifacts, err := filestore.NewArtifactStore(artifactRoot, manifest.DatabaseID, manifest.ArtifactStoreID)
 	if err != nil {
 		return backupRestoreDrillResult{}, fmt.Errorf("open restore drill Artifact store: %w", err)
 	}
 	defer func() {
-		if closeErr := artifacts.close(); closeErr != nil {
+		if closeErr := artifacts.Close(); closeErr != nil {
 			err = errors.Join(err, fmt.Errorf("close restore drill Artifact store: %w", closeErr))
 		}
 	}()

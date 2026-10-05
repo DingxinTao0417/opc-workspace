@@ -75,7 +75,7 @@ func TestRuntimeDatabaseFailureFallsBackToDurableSafeJournalAndReplays(t *testin
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	api.recordRuntimeDatabaseFailure("runtime-request")
+	api.RecordRuntimeDatabaseFailure("runtime-request")
 	journalPath, err := startupIncidentJournalPath(logDir)
 	if err != nil {
 		t.Fatal(err)

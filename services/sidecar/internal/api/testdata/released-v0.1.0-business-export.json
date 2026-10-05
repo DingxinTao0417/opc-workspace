@@ -1,0 +1,947 @@
+{
+  "format_version": 1,
+  "exported_at": "2026-10-04T22:06:20.010756700Z",
+  "source": {
+    "app_version": "0.1.0",
+    "commit": "unknown",
+    "api_version": "v1",
+    "schema_version": 51
+  },
+  "artifact_files": {
+    "included": false,
+    "active_count": 0,
+    "active_bytes": 0
+  },
+  "excluded_operational_tables": [
+    "schema_migrations",
+    "workspace_identity",
+    "idempotency_keys",
+    "artifact_deletion_tombstones",
+    "client_attachment_deletion_tombstones",
+    "project_attachment_deletion_tombstones",
+    "workspace_avatar_deletion_tombstones",
+    "task_focus_totals",
+    "storage_capacity_samples",
+    "scheduled_backup_policy",
+    "invoice_number_sequences",
+    "automation_event_deliveries",
+    "business_import_project_completion_authorizations"
+  ],
+  "tables": [
+    {
+      "name": "clients",
+      "columns": [
+        "id",
+        "name",
+        "contact_name",
+        "email",
+        "phone",
+        "notes",
+        "status",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "rows": [
+        [
+          "2b728105-9bc5-46de-bde2-7b02e9e12493",
+          "星河设计工作室",
+          null,
+          null,
+          null,
+          null,
+          "active",
+          "2026-10-04T22:06:19.886668Z",
+          "2026-10-04T22:06:19.898Z",
+          2
+        ]
+      ]
+    },
+    {
+      "name": "client_activities",
+      "columns": [
+        "id",
+        "client_id",
+        "kind",
+        "title",
+        "body",
+        "occurred_at",
+        "created_by_actor_id",
+        "source_type",
+        "source_id",
+        "version",
+        "deleted_at",
+        "deleted_by_actor_id",
+        "delete_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "client_attachments",
+      "columns": [
+        "id",
+        "client_id",
+        "activity_id",
+        "name",
+        "relative_path",
+        "mime_type",
+        "size_bytes",
+        "sha256",
+        "recorded_by_actor_id",
+        "integrity_status",
+        "integrity_checked_at",
+        "deleted_at",
+        "deleted_by_actor_id",
+        "delete_reason",
+        "created_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "client_actor_links",
+      "columns": [
+        "id",
+        "client_id",
+        "actor_id",
+        "role",
+        "linked_by_actor_id",
+        "linked_at",
+        "unlinked_at",
+        "unlinked_by_actor_id",
+        "unlink_reason"
+      ],
+      "rows": []
+    },
+    {
+      "name": "client_followups",
+      "columns": [
+        "id",
+        "client_id",
+        "assigned_actor_id",
+        "scheduled_at",
+        "timezone",
+        "channel",
+        "purpose",
+        "notes",
+        "status",
+        "priority",
+        "completed_at",
+        "result",
+        "next_step",
+        "skipped_at",
+        "skip_reason",
+        "cancelled_at",
+        "cancel_reason",
+        "rescheduled_from_id",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "projects",
+      "columns": [
+        "id",
+        "name",
+        "description",
+        "client_id",
+        "status",
+        "start_date",
+        "due_date",
+        "amount_minor",
+        "color",
+        "created_at",
+        "updated_at",
+        "version",
+        "archived_from_status"
+      ],
+      "rows": [
+        [
+          "6a88e9d3-c726-40ce-bb4c-2854372918a5",
+          "官网改版",
+          "",
+          "2b728105-9bc5-46de-bde2-7b02e9e12493",
+          "planning",
+          null,
+          null,
+          null,
+          null,
+          "2026-10-04T22:06:19.8967984Z",
+          "2026-10-04T22:06:19.917Z",
+          2,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "content_items",
+      "columns": [
+        "id",
+        "title",
+        "platform",
+        "status",
+        "scheduled_at",
+        "scheduled_timezone",
+        "published_at",
+        "project_id",
+        "notes",
+        "external_link",
+        "manual_order",
+        "archived_from_status",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "content_item_tasks",
+      "columns": [
+        "content_item_id",
+        "task_id",
+        "is_required",
+        "linked_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "roadmap_milestones",
+      "columns": [
+        "id",
+        "title",
+        "description",
+        "year",
+        "quarter",
+        "target_date",
+        "status",
+        "manual_order",
+        "archived_from_status",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "roadmap_milestone_projects",
+      "columns": [
+        "milestone_id",
+        "project_id",
+        "linked_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "project_notes",
+      "columns": [
+        "id",
+        "project_id",
+        "title",
+        "body",
+        "occurred_at",
+        "created_by_actor_id",
+        "version",
+        "deleted_at",
+        "deleted_by_actor_id",
+        "delete_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "project_attachments",
+      "columns": [
+        "id",
+        "project_id",
+        "name",
+        "relative_path",
+        "mime_type",
+        "size_bytes",
+        "sha256",
+        "recorded_by_actor_id",
+        "integrity_status",
+        "integrity_checked_at",
+        "deleted_at",
+        "deleted_by_actor_id",
+        "delete_reason",
+        "created_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "tasks",
+      "columns": [
+        "id",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "project_id",
+        "due_date",
+        "planned_date",
+        "estimated_minutes",
+        "actual_minutes",
+        "manual_order",
+        "created_at",
+        "updated_at",
+        "completed_at",
+        "kind",
+        "parent_task_id",
+        "completion_criteria",
+        "version",
+        "review_policy",
+        "blocked_reason",
+        "blocked_at",
+        "blocked_from_status",
+        "submitted_at",
+        "reviewed_at",
+        "current_submission_id"
+      ],
+      "rows": [
+        [
+          "9f8f3c88-25ac-4414-a087-8127ecb29235",
+          "整理首页文案",
+          "",
+          "todo",
+          "P1",
+          "6a88e9d3-c726-40ce-bb4c-2854372918a5",
+          null,
+          null,
+          null,
+          0,
+          null,
+          "2026-10-04T22:06:19.9166039Z",
+          "2026-10-04T22:06:19.9166039Z",
+          null,
+          "work",
+          null,
+          "",
+          1,
+          "none",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          "dfd6ce19-ad3d-4ef8-adf4-9a1a280e975e",
+          "预约拍摄",
+          "",
+          "todo",
+          "P2",
+          null,
+          null,
+          null,
+          null,
+          0,
+          null,
+          "2026-10-04T22:06:19.9319464Z",
+          "2026-10-04T22:06:19.9319464Z",
+          null,
+          "work",
+          null,
+          "",
+          1,
+          "none",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "tags",
+      "columns": [
+        "id",
+        "name",
+        "color",
+        "created_at",
+        "version"
+      ],
+      "rows": [
+        [
+          "ad649100-0ff9-4ab8-8908-4a96ccfc2ab0",
+          "重要客户",
+          "#5E6AD2",
+          "2026-10-04T22:06:19.9012926Z",
+          1
+        ]
+      ]
+    },
+    {
+      "name": "task_tags",
+      "columns": [
+        "task_id",
+        "tag_id"
+      ],
+      "rows": [
+        [
+          "9f8f3c88-25ac-4414-a087-8127ecb29235",
+          "ad649100-0ff9-4ab8-8908-4a96ccfc2ab0"
+        ]
+      ]
+    },
+    {
+      "name": "invoices",
+      "columns": [
+        "id",
+        "invoice_number",
+        "client_id",
+        "project_id",
+        "amount_minor",
+        "currency",
+        "status",
+        "issue_date",
+        "due_date",
+        "paid_date",
+        "notes",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "invoice_pdf_assets",
+      "columns": [
+        "id",
+        "invoice_id",
+        "file_name",
+        "relative_path",
+        "mime_type",
+        "size_bytes",
+        "sha256",
+        "generated_from_version",
+        "generated_at",
+        "integrity_status",
+        "integrity_checked_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "financial_entries",
+      "columns": [
+        "id",
+        "type",
+        "amount_minor",
+        "currency",
+        "occurred_on",
+        "status",
+        "category",
+        "client_id",
+        "project_id",
+        "invoice_id",
+        "notes",
+        "created_by_actor_id",
+        "voided_at",
+        "voided_by_actor_id",
+        "void_reason",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "actors",
+      "columns": [
+        "id",
+        "type",
+        "display_name",
+        "status",
+        "is_builtin",
+        "notes",
+        "metadata_json",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": [
+        [
+          "00000000-0000-5000-8000-000000000001",
+          "owner",
+          "我",
+          "active",
+          1,
+          "",
+          "{}",
+          1,
+          "2026-10-04 22:06:19",
+          "2026-10-04 22:06:19"
+        ],
+        [
+          "00000000-0000-5000-8000-000000000002",
+          "system",
+          "系统",
+          "active",
+          1,
+          "",
+          "{}",
+          1,
+          "2026-10-04 22:06:19",
+          "2026-10-04 22:06:19"
+        ]
+      ]
+    },
+    {
+      "name": "task_assignments",
+      "columns": [
+        "id",
+        "task_id",
+        "actor_id",
+        "role",
+        "assigned_by_actor_id",
+        "assigned_at",
+        "unassigned_at",
+        "reason"
+      ],
+      "rows": []
+    },
+    {
+      "name": "workflow_events",
+      "columns": [
+        "id",
+        "aggregate_type",
+        "aggregate_id",
+        "action",
+        "actor_id",
+        "assignment_id",
+        "agent_run_id",
+        "request_id",
+        "previous_json",
+        "current_json",
+        "created_at",
+        "command_seq",
+        "submission_id",
+        "artifact_id"
+      ],
+      "rows": [
+        [
+          "1c57073a-5232-4a0b-b559-7b7d973c0a78",
+          "setting",
+          "workspace",
+          "settings_updated",
+          "00000000-0000-5000-8000-000000000001",
+          null,
+          null,
+          "acb1d55d-de8b-4160-9d37-656e9c127d42",
+          "{\"schema_version\":2,\"stored\":false,\"version\":0}",
+          "{\"schema_version\":2,\"stored\":true,\"version\":1}",
+          "2026-10-04T22:06:19.9955876Z",
+          1,
+          null,
+          null
+        ],
+        [
+          "5649a564-0bf9-43cc-be43-5b2e568b1ffa",
+          "inbox_item",
+          "31bbf6b5-eb99-4352-8317-e35f5e1f4675",
+          "created",
+          "00000000-0000-5000-8000-000000000001",
+          null,
+          null,
+          "bceeeb29-814e-4ac5-b4f9-3ac917b82c3b",
+          null,
+          "{\"dismiss_reason\":null,\"dismissed_at\":null,\"dismissed_by_actor_id\":null,\"due_at\":null,\"kind\":\"manual\",\"payload_json\":{},\"priority\":\"P2\",\"read_at\":null,\"resolution_mode\":null,\"resolution_policy\":\"manual\",\"resolution_reason\":null,\"resolved_at\":null,\"resolved_by_actor_id\":null,\"snoozed_until\":null,\"source_deleted_at\":null,\"source_entity_id\":null,\"source_entity_type\":\"manual\",\"source_event_key\":null,\"status\":\"open\",\"summary\":\"确认交付时间\",\"title\":\"回电给星河设计\",\"triaged_at\":null,\"version\":1}",
+          "2026-10-04T22:06:19.964145900Z",
+          1,
+          null,
+          null
+        ],
+        [
+          "e634a670-4fd0-4d34-a2f6-940b92609235",
+          "project",
+          "6a88e9d3-c726-40ce-bb4c-2854372918a5",
+          "project_created",
+          "00000000-0000-5000-8000-000000000001",
+          null,
+          null,
+          "8822c68f-2435-42ef-a67a-f7c3acf0b3d7",
+          null,
+          "{\"amount_minor\":null,\"archived_from_status\":null,\"client_id\":\"2b728105-9bc5-46de-bde2-7b02e9e12493\",\"color\":null,\"description\":\"\",\"due_date\":null,\"id\":\"6a88e9d3-c726-40ce-bb4c-2854372918a5\",\"name\":\"官网改版\",\"start_date\":null,\"status\":\"planning\",\"version\":1}",
+          "2026-10-04T22:06:19.8967984Z",
+          1,
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "task_submissions",
+      "columns": [
+        "id",
+        "task_id",
+        "sequence",
+        "status",
+        "summary",
+        "submitted_by_actor_id",
+        "submitted_at",
+        "reviewed_by_actor_id",
+        "reviewed_at",
+        "review_reason",
+        "withdrawn_by_actor_id",
+        "withdrawn_at",
+        "is_inferred",
+        "origin"
+      ],
+      "rows": []
+    },
+    {
+      "name": "task_artifacts",
+      "columns": [
+        "id",
+        "task_id",
+        "submission_id",
+        "position",
+        "storage_kind",
+        "name",
+        "content_text",
+        "reference_url",
+        "structured_json",
+        "relative_path",
+        "mime_type",
+        "size_bytes",
+        "sha256",
+        "requires_followup",
+        "produced_by_actor_id",
+        "recorded_by_actor_id",
+        "integrity_status",
+        "integrity_checked_at",
+        "deleted_at",
+        "deleted_by_actor_id",
+        "delete_reason",
+        "created_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "focus_sessions",
+      "columns": [
+        "id",
+        "task_id",
+        "started_at",
+        "ended_at",
+        "status",
+        "legacy_imported",
+        "planned_seconds",
+        "accumulated_seconds",
+        "last_resumed_at",
+        "last_heartbeat_at",
+        "end_reason",
+        "credited_minutes",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "focus_session_intervals",
+      "columns": [
+        "id",
+        "session_id",
+        "started_at",
+        "ended_at",
+        "duration_seconds",
+        "created_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "inbox_items",
+      "columns": [
+        "id",
+        "kind",
+        "title",
+        "summary",
+        "source_entity_type",
+        "source_entity_id",
+        "source_event_key",
+        "source_deleted_at",
+        "priority",
+        "status",
+        "resolution_policy",
+        "due_at",
+        "read_at",
+        "triaged_at",
+        "snoozed_until",
+        "resolved_by_actor_id",
+        "resolved_at",
+        "resolution_reason",
+        "resolution_mode",
+        "dismissed_by_actor_id",
+        "dismissed_at",
+        "dismiss_reason",
+        "payload_json",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": [
+        [
+          "31bbf6b5-eb99-4352-8317-e35f5e1f4675",
+          "manual",
+          "回电给星河设计",
+          "确认交付时间",
+          "manual",
+          null,
+          null,
+          null,
+          "P2",
+          "open",
+          "manual",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "{}",
+          1,
+          "2026-10-04T22:06:19.964145900Z",
+          "2026-10-04T22:06:19.964145900Z"
+        ]
+      ]
+    },
+    {
+      "name": "inbox_item_tasks",
+      "columns": [
+        "id",
+        "inbox_item_id",
+        "task_ref_id",
+        "task_id",
+        "task_title_snapshot",
+        "relation_type",
+        "is_required",
+        "position",
+        "linked_by_actor_id",
+        "linked_at",
+        "unlinked_by_actor_id",
+        "unlinked_at",
+        "unlink_reason"
+      ],
+      "rows": []
+    },
+    {
+      "name": "reminders",
+      "columns": [
+        "id",
+        "source_entity_type",
+        "source_entity_id",
+        "title",
+        "summary",
+        "priority",
+        "trigger_at",
+        "status",
+        "source_event_key",
+        "created_by_actor_id",
+        "fired_at",
+        "inbox_item_id",
+        "cancelled_by_actor_id",
+        "cancelled_at",
+        "cancel_reason",
+        "version",
+        "created_at",
+        "updated_at",
+        "series_id",
+        "recurrence_type",
+        "recurrence_interval",
+        "recurrence_timezone",
+        "occurrence_number",
+        "recurrence_anchor_day"
+      ],
+      "rows": []
+    },
+    {
+      "name": "automation_rules",
+      "columns": [
+        "id",
+        "preset_key",
+        "enabled",
+        "config_json",
+        "next_run_at",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": [
+        [
+          "00000000-0000-5000-8000-000000000101",
+          "project-completed-inbox",
+          0,
+          "{\"priority\":\"P1\"}",
+          null,
+          1,
+          "2026-10-04T22:06:19.799399900Z",
+          "2026-10-04T22:06:19.799399900Z"
+        ],
+        [
+          "00000000-0000-5000-8000-000000000102",
+          "daily-today-reminder",
+          0,
+          "{\"local_time\":\"09:00\",\"timezone\":\"UTC\"}",
+          null,
+          1,
+          "2026-10-04T22:06:19.799399900Z",
+          "2026-10-04T22:06:19.799399900Z"
+        ],
+        [
+          "00000000-0000-5000-8000-000000000103",
+          "weekly-review-reminder",
+          0,
+          "{\"local_time\":\"17:00\",\"timezone\":\"UTC\"}",
+          null,
+          1,
+          "2026-10-04T22:06:19.799399900Z",
+          "2026-10-04T22:06:19.799399900Z"
+        ],
+        [
+          "00000000-0000-5000-8000-000000000104",
+          "invoice-overdue-task",
+          0,
+          "{\"priority\":\"P1\"}",
+          null,
+          1,
+          "2026-10-04T22:06:19.799399900Z",
+          "2026-10-04T22:06:19.799399900Z"
+        ],
+        [
+          "00000000-0000-5000-8000-000000000105",
+          "agent-run-failed-inbox",
+          0,
+          "{\"priority\":\"P1\"}",
+          null,
+          1,
+          "2026-10-04T22:06:19.799399900Z",
+          "2026-10-04T22:06:19.799399900Z"
+        ]
+      ]
+    },
+    {
+      "name": "automation_runs",
+      "columns": [
+        "id",
+        "rule_id",
+        "rule_version",
+        "trigger_type",
+        "source_event_id",
+        "scheduled_for",
+        "logical_key",
+        "dedupe_key",
+        "status",
+        "attempt",
+        "retry_of_run_id",
+        "retryable",
+        "retry_at",
+        "caused_by_run_id",
+        "causal_depth",
+        "config_snapshot_json",
+        "action_snapshot_json",
+        "error_code",
+        "result_type",
+        "result_id",
+        "result_summary",
+        "started_at",
+        "ended_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "agent_adapters",
+      "columns": [
+        "id",
+        "adapter_key",
+        "kind",
+        "display_name",
+        "executable_ref",
+        "manifest_json",
+        "protocol_version",
+        "status",
+        "health_status",
+        "health_error_code",
+        "isolation_status",
+        "execution_ready",
+        "last_health_at",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": []
+    },
+    {
+      "name": "app_settings",
+      "columns": [
+        "key",
+        "value_json",
+        "schema_version",
+        "version",
+        "updated_by_actor_id",
+        "updated_at"
+      ],
+      "rows": [
+        [
+          "workspace",
+          "{\"display_name\":\"星河旧工作区\",\"avatar_ref\":null}",
+          2,
+          1,
+          "00000000-0000-5000-8000-000000000001",
+          "2026-10-04T22:06:19.9955876Z"
+        ]
+      ]
+    },
+    {
+      "name": "workspace_avatars",
+      "columns": [
+        "id",
+        "relative_path",
+        "extension",
+        "mime_type",
+        "size_bytes",
+        "sha256",
+        "integrity_status",
+        "integrity_checked_at",
+        "created_at",
+        "deleted_at",
+        "deletion_reason"
+      ],
+      "rows": []
+    },
+    {
+      "name": "task_saved_views",
+      "columns": [
+        "id",
+        "name",
+        "definition_json",
+        "schema_version",
+        "version",
+        "created_at",
+        "updated_at"
+      ],
+      "rows": [
+        [
+          "16cd4e3b-f23b-409f-b37a-d33affb147fd",
+          "本周重点",
+          "{\"q\":\"\",\"status\":\"todo\",\"priority\":\"\",\"kind\":\"\",\"project_id\":\"\",\"client_id\":\"\",\"tag_ids\":[],\"planned_date\":\"\",\"planned_from\":\"\",\"planned_to\":\"\",\"due_from\":\"\",\"due_to\":\"\",\"sort\":\"priority\"}",
+          1,
+          1,
+          "2026-10-04T22:06:19.9482139Z",
+          "2026-10-04T22:06:19.9482139Z"
+        ]
+      ]
+    }
+  ]
+}

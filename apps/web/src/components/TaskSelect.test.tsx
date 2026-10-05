@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task, TaskStatus } from "../types/models";
 import { TaskSelect } from "./TaskSelect";
+import type { Untyped } from "../test/untyped";
 
 const hooks = vi.hoisted(() => ({
   options: {
@@ -17,12 +18,12 @@ const hooks = vi.hoisted(() => ({
     isFetching: false,
     isPending: false,
     refetch: vi.fn(),
-  } as any,
+  } as Untyped,
   selected: {
     data: undefined,
     isError: false,
     isPending: false,
-  } as any,
+  } as Untyped,
   optionsHook: vi.fn(),
   selectedHook: vi.fn(),
 }));

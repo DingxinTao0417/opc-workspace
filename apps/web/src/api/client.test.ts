@@ -541,6 +541,54 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+/** The plan part of an import preview that converts nothing and writes every row. */
+const untouchedImportPlan = {
+  upgrade_steps: [],
+  semantic_conflicts: 0,
+  semantic_conflict_rules: [],
+  resolutions: [],
+};
+
+/**
+ * A released schema 51 package appended to a workspace that already holds one
+ * of its clients and its own settings. The digest is added by each test.
+ */
+const upgradedAppendPreview = {
+  format_version: 1,
+  schema_version: 51,
+  target_schema_version: 79,
+  exported_at: "2026-06-01T12:00:00Z",
+  table_counts: { actors: 1, clients: 2, app_settings: 3 },
+  total_rows: 6,
+  target_rows: 5,
+  key_conflicts: 0,
+  conflict_tables: [
+    { table: "clients", incoming_rows: 2, target_rows: 2, key_conflicts: 0 },
+    {
+      table: "app_settings",
+      incoming_rows: 3,
+      target_rows: 3,
+      key_conflicts: 0,
+    },
+  ],
+  upgrade_steps: [
+    {
+      schema_version: 71,
+      table: "actors",
+      change: "add_column",
+      column: "agent_adapter_id",
+    },
+  ],
+  semantic_conflicts: 0,
+  semantic_conflict_rules: [],
+  resolutions: [
+    { table: "clients", rule: "skip_identical", rows: 1 },
+    { table: "app_settings", rule: "keep_target", rows: 3 },
+  ],
+  can_apply: true,
+  apply_mode: "append",
+};
+
 describe("request correlation", () => {
   it("adds one canonical request ID to every Sidecar request", async () => {
     let requestId = "";
@@ -2810,9 +2858,11 @@ describe("verified local backups", () => {
               target_rows: 0,
               key_conflicts: 0,
               conflict_tables: [],
+              ...untouchedImportPlan,
               file_count: 1,
               file_bytes: 2048,
               file_conflicts: 0,
+              skipped_files: 0,
               can_apply: true,
               apply_mode: "replace_empty",
             },
@@ -2842,6 +2892,8 @@ describe("verified local backups", () => {
     const result = await applyBusinessPackageImport({
       file,
       applyMode: preview.applyMode!,
+      upgrade: false,
+      planDigest: preview.planDigest,
     });
 
     expect(preview).toMatchObject({
@@ -2873,6 +2925,11 @@ describe("verified local backups", () => {
         "X-Import-Confirmation",
       ),
     ).toBe("replace-empty-workspace-with-controlled-files");
+    expect(
+      new Headers(fetchMock.mock.calls[1][1]?.headers).has(
+        "X-Import-Plan-Digest",
+      ),
+    ).toBe(false);
   });
 
   it("strictly reads sanitized startup restore diagnostics", async () => {
@@ -2926,6 +2983,7 @@ describe("verified local backups", () => {
               target_rows: 0,
               key_conflicts: 0,
               conflict_tables: [],
+              ...untouchedImportPlan,
               can_apply: true,
               apply_mode: "replace_empty",
             },
@@ -2954,6 +3012,8 @@ describe("verified local backups", () => {
     const result = await applyBusinessDataImport({
       file,
       applyMode: preview.applyMode!,
+      upgrade: false,
+      planDigest: preview.planDigest,
     });
 
     expect(preview).toMatchObject({
@@ -3010,6 +3070,7 @@ describe("verified local backups", () => {
                     key_conflicts: 1,
                   },
                 ],
+                ...untouchedImportPlan,
                 can_apply: false,
                 blocker: "target_key_conflicts",
               },
@@ -3058,6 +3119,7 @@ describe("verified local backups", () => {
                   key_conflicts: 0,
                 },
               ],
+              ...untouchedImportPlan,
               can_apply: true,
               apply_mode: "append",
             },
@@ -3086,6 +3148,8 @@ describe("verified local backups", () => {
     const result = await applyBusinessDataImport({
       file,
       applyMode: preview.applyMode!,
+      upgrade: false,
+      planDigest: preview.planDigest,
     });
 
     expect(preview).toMatchObject({
@@ -3118,6 +3182,7 @@ describe("verified local backups", () => {
               target_rows: 0,
               key_conflicts: 0,
               conflict_tables: [],
+              ...untouchedImportPlan,
               can_apply: false,
               blocker: "source_schema_older",
             },
@@ -3145,6 +3210,7 @@ describe("verified local backups", () => {
                   key_conflicts: 1,
                 },
               ],
+              ...untouchedImportPlan,
               can_apply: false,
               blocker: "target_key_conflicts",
             },
@@ -3161,6 +3227,465 @@ describe("verified local backups", () => {
       schemaVersion: 41,
       targetSchemaVersion: 42,
       blocker: "source_schema_older",
+    });
+    await expect(previewBusinessDataImport(file)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("confirms an upgraded append with its own phrase and the plan digest", async () => {
+    const planDigest = "a".repeat(64);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            ...upgradedAppendPreview,
+            plan_digest: planDigest,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            imported_rows: 1,
+            backup_id: "018f0000-0000-7000-8000-000000001799",
+            apply_mode: "append",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["{}"], "v0.1.json", { type: "application/json" });
+
+    const preview = await previewBusinessDataImport(file);
+    await applyBusinessDataImport({
+      file,
+      applyMode: preview.applyMode!,
+      upgrade: preview.schemaVersion < preview.targetSchemaVersion,
+      planDigest: preview.planDigest,
+    });
+
+    expect(preview).toMatchObject({
+      schemaVersion: 51,
+      targetSchemaVersion: 79,
+      canApply: true,
+      applyMode: "append",
+      upgradeSteps: [
+        {
+          schemaVersion: 71,
+          table: "actors",
+          change: "add_column",
+          column: "agent_adapter_id",
+        },
+      ],
+      resolutions: [
+        { table: "clients", rule: "skip_identical", rows: 1 },
+        { table: "app_settings", rule: "keep_target", rows: 3 },
+      ],
+      planDigest,
+    });
+    const headers = new Headers(fetchMock.mock.calls[1][1]?.headers);
+    expect(headers.get("X-Import-Confirmation")).toBe(
+      "upgrade-and-append-to-existing-workspace",
+    );
+    expect(headers.get("X-Import-Plan-Digest")).toBe(planDigest);
+  });
+
+  it("confirms an upgraded controlled-file import and reports skipped files", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            format_version: 1,
+            schema_version: 77,
+            target_schema_version: 79,
+            exported_at: "2026-09-30T12:00:00Z",
+            table_counts: { task_artifacts: 2 },
+            total_rows: 2,
+            target_rows: 1,
+            key_conflicts: 0,
+            conflict_tables: [
+              {
+                table: "task_artifacts",
+                incoming_rows: 2,
+                target_rows: 1,
+                key_conflicts: 0,
+              },
+            ],
+            upgrade_steps: [],
+            semantic_conflicts: 0,
+            semantic_conflict_rules: [],
+            resolutions: [
+              { table: "task_artifacts", rule: "skip_identical", rows: 1 },
+            ],
+            plan_digest: "b".repeat(64),
+            file_count: 2,
+            file_bytes: 4096,
+            file_conflicts: 0,
+            skipped_files: 1,
+            can_apply: true,
+            apply_mode: "append",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            imported_rows: 1,
+            imported_files: 1,
+            backup_id: "018f0000-0000-7000-8000-000000001798",
+            apply_mode: "append",
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["PK"], "again.zip", { type: "application/zip" });
+
+    const preview = await previewBusinessPackageImport(file);
+    const result = await applyBusinessPackageImport({
+      file,
+      applyMode: preview.applyMode!,
+      upgrade: preview.schemaVersion < preview.targetSchemaVersion,
+      planDigest: preview.planDigest,
+    });
+
+    expect(preview).toMatchObject({
+      upgradeSteps: [],
+      skippedFiles: 1,
+      fileCount: 2,
+    });
+    expect(result.importedFiles).toBe(1);
+    const headers = new Headers(fetchMock.mock.calls[1][1]?.headers);
+    expect(headers.get("X-Import-Confirmation")).toBe(
+      "upgrade-and-append-to-existing-workspace-with-controlled-files",
+    );
+    expect(headers.get("X-Import-Plan-Digest")).toBe("b".repeat(64));
+  });
+
+  it("maps unique-value conflicts as their own blocker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            format_version: 1,
+            schema_version: 79,
+            target_schema_version: 79,
+            exported_at: "2026-10-04T12:00:00Z",
+            table_counts: { tags: 2, task_saved_views: 1 },
+            total_rows: 3,
+            target_rows: 4,
+            key_conflicts: 0,
+            conflict_tables: [
+              {
+                table: "tags",
+                incoming_rows: 2,
+                target_rows: 3,
+                key_conflicts: 0,
+              },
+              {
+                table: "task_saved_views",
+                incoming_rows: 1,
+                target_rows: 1,
+                key_conflicts: 0,
+              },
+            ],
+            upgrade_steps: [],
+            semantic_conflicts: 3,
+            semantic_conflict_rules: [
+              { table: "tags", index: "sqlite_autoindex_tags_2", conflicts: 2 },
+              {
+                table: "task_saved_views",
+                index: "idx_task_saved_views_name",
+                conflicts: 1,
+              },
+            ],
+            resolutions: [],
+            can_apply: false,
+            blocker: "target_semantic_conflicts",
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      previewBusinessDataImport(
+        new File(["{}"], "names.json", { type: "application/json" }),
+      ),
+    ).resolves.toMatchObject({
+      canApply: false,
+      blocker: "target_semantic_conflicts",
+      keyConflicts: 0,
+      semanticConflicts: 3,
+      semanticConflictRules: [
+        { table: "tags", index: "sqlite_autoindex_tags_2", conflicts: 2 },
+        {
+          table: "task_saved_views",
+          index: "idx_task_saved_views_name",
+          conflicts: 1,
+        },
+      ],
+      planDigest: null,
+    });
+  });
+
+  const rehearsedPreview = (extra: object = {}) => ({
+    format_version: 1,
+    schema_version: 79,
+    target_schema_version: 79,
+    exported_at: "2026-10-04T12:00:00Z",
+    table_counts: { tasks: 1, inbox_items: 1 },
+    total_rows: 2,
+    target_rows: 0,
+    key_conflicts: 0,
+    conflict_tables: [],
+    ...untouchedImportPlan,
+    can_apply: false,
+    blocker: "apply_rehearsal_failed",
+    rehearsal_failure: { code: "TASK_DUE_INBOX_SOURCE_NOT_CURRENT" },
+    ...extra,
+  });
+  const previewOf = (data: object) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ data })),
+    );
+    return previewBusinessDataImport(
+      new File(["{}"], "history.json", { type: "application/json" }),
+    );
+  };
+
+  it("reads the rule that made the rehearsal refuse an import", async () => {
+    await expect(previewOf(rehearsedPreview())).resolves.toMatchObject({
+      canApply: false,
+      applyMode: null,
+      blocker: "apply_rehearsal_failed",
+      rehearsalFailure: { code: "TASK_DUE_INBOX_SOURCE_NOT_CURRENT" },
+      planDigest: null,
+    });
+    await expect(
+      previewOf({
+        ...rehearsedPreview({
+          blocker: undefined,
+          rehearsal_failure: undefined,
+        }),
+        can_apply: true,
+        apply_mode: "replace_empty",
+      }),
+    ).resolves.toMatchObject({ canApply: true, rehearsalFailure: null });
+  });
+
+  it.each([
+    ["no rule", { rehearsal_failure: undefined }],
+    ["a rule on another blocker", { blocker: "target_key_conflicts" }],
+    [
+      "a message instead of a token",
+      { rehearsal_failure: { code: "constraint failed: tags.name" } },
+    ],
+    ["a lower-case token", { rehearsal_failure: { code: "task_due" } }],
+    [
+      "more than the token",
+      { rehearsal_failure: { code: "TASK_DUE_X", row: "任务标题" } },
+    ],
+    [
+      "an over-long token",
+      { rehearsal_failure: { code: `A_${"B".repeat(80)}` } },
+    ],
+    [
+      "a refusal that still names an apply mode",
+      { apply_mode: "replace_empty" },
+    ],
+    ["a refusal with a plan digest", { plan_digest: "a".repeat(64) }],
+    ["a refusal with key conflicts left", { key_conflicts: 1, target_rows: 1 }],
+  ])("rejects a rehearsal result with %s", async (_name, extra) => {
+    await expect(previewOf(rehearsedPreview(extra))).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
+    });
+  });
+
+  it("rejects a rule on a preview that can be applied", async () => {
+    await expect(
+      previewOf({
+        ...rehearsedPreview({ blocker: undefined }),
+        can_apply: true,
+        apply_mode: "replace_empty",
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("accepts a conflict that an Inbox source tombstone claims without an incoming row", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            format_version: 1,
+            schema_version: 79,
+            target_schema_version: 79,
+            exported_at: "2026-10-04T12:00:00Z",
+            table_counts: { inbox_items: 1 },
+            total_rows: 1,
+            target_rows: 1,
+            key_conflicts: 1,
+            conflict_tables: [
+              {
+                table: "projects",
+                incoming_rows: 0,
+                target_rows: 1,
+                key_conflicts: 1,
+              },
+            ],
+            ...untouchedImportPlan,
+            can_apply: false,
+            blocker: "target_key_conflicts",
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      previewBusinessDataImport(
+        new File(["{}"], "tombstone.json", { type: "application/json" }),
+      ),
+    ).resolves.toMatchObject({
+      blocker: "target_key_conflicts",
+      conflictTables: [{ table: "projects", incomingRows: 0, keyConflicts: 1 }],
+    });
+  });
+
+  it.each([
+    {
+      name: "a plan that leaves rows out without a digest",
+      change: { plan_digest: undefined },
+    },
+    {
+      name: "a digest that is not a SHA-256",
+      change: { plan_digest: "abc" },
+    },
+    {
+      name: "a digest on a plan that writes every row",
+      change: { resolutions: [] },
+    },
+    {
+      name: "an unknown resolution rule",
+      change: {
+        resolutions: [{ table: "clients", rule: "overwrite", rows: 1 }],
+      },
+    },
+    {
+      name: "an upgrade step outside the crossed versions",
+      change: {
+        upgrade_steps: [
+          {
+            schema_version: 51,
+            table: "actors",
+            change: "add_column",
+            column: "agent_adapter_id",
+          },
+        ],
+      },
+    },
+    {
+      name: "an applicable plan that still has unique-value conflicts",
+      change: {
+        semantic_conflicts: 1,
+        semantic_conflict_rules: [
+          { table: "tags", index: "sqlite_autoindex_tags_2", conflicts: 1 },
+        ],
+      },
+    },
+    {
+      name: "unique-value rules that do not add up",
+      change: { semantic_conflicts: 2 },
+    },
+    {
+      name: "a package newer than the workspace marked applicable",
+      change: { schema_version: 80, upgrade_steps: [] },
+    },
+    {
+      name: "a missing plan field",
+      change: { resolutions: undefined },
+    },
+  ])("rejects $name", async ({ change }) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          data: {
+            ...upgradedAppendPreview,
+            plan_digest: "a".repeat(64),
+            ...change,
+          },
+        }),
+      ),
+    );
+
+    await expect(
+      previewBusinessDataImport(
+        new File(["{}"], "invalid.json", { type: "application/json" }),
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
+  });
+
+  it("rejects upgrade steps on a same-schema package and a digest on a blocked one", async () => {
+    const sameSchema = {
+      format_version: 1,
+      schema_version: 79,
+      target_schema_version: 79,
+      exported_at: "2026-10-04T12:00:00Z",
+      table_counts: { tasks: 1 },
+      total_rows: 1,
+      target_rows: 0,
+      key_conflicts: 0,
+      conflict_tables: [],
+      ...untouchedImportPlan,
+      can_apply: true,
+      apply_mode: "replace_empty",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            ...sameSchema,
+            upgrade_steps: upgradedAppendPreview.upgrade_steps,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            ...upgradedAppendPreview,
+            plan_digest: "a".repeat(64),
+            can_apply: false,
+            apply_mode: undefined,
+            blocker: "target_key_conflicts",
+            key_conflicts: 1,
+            conflict_tables: [
+              {
+                table: "clients",
+                incoming_rows: 2,
+                target_rows: 2,
+                key_conflicts: 1,
+              },
+              {
+                table: "app_settings",
+                incoming_rows: 3,
+                target_rows: 3,
+                key_conflicts: 0,
+              },
+            ],
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["{}"], "invalid.json", {
+      type: "application/json",
+    });
+
+    await expect(previewBusinessDataImport(file)).rejects.toMatchObject({
+      code: "INVALID_RESPONSE",
     });
     await expect(previewBusinessDataImport(file)).rejects.toMatchObject({
       code: "INVALID_RESPONSE",

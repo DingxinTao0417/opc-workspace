@@ -1,3 +1,4 @@
+import "./IncomeRoutePage.css";
 import { Link, useSearchParams } from "react-router-dom";
 import { IncomePage } from "./IncomePage";
 import { parseFinanceReportLocation } from "../lib/financeLocation";

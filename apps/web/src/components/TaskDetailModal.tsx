@@ -7,7 +7,7 @@ import {
   parseTaskWorkspaceLocation,
 } from "../lib/aiWorkspaceLinks";
 import { useDeleteTask, useTaskQuery, useUpdateTask } from "../api/hooks";
-import { useUiStore } from "../store/ui";
+import { agentRunDrawerOverlay, useUiStore } from "../store/ui";
 import type {
   Task,
   TaskKind,
@@ -103,6 +103,11 @@ function mutationErrorMessage(error: unknown): string | null {
 export function TaskDetailModal() {
   const taskId = useUiStore((state) => state.taskDetailId);
   const setTaskId = useUiStore((state) => state.setTaskDetailId);
+  // A link to a Run opens the drawer first; this dialog loads its Task and
+  // would otherwise open on top of the Run the link points at.
+  const runDrawerTaskId = useUiStore(
+    (state) => state.agentRunDrawer?.taskId ?? null,
+  );
   const location = useLocation();
   const returnLocation =
     parseAgentRunLocation(location.pathname, location.search) ??
@@ -348,6 +353,11 @@ export function TaskDetailModal() {
 
   return (
     <Modal
+      beneathOverlay={
+        runDrawerTaskId !== null && runDrawerTaskId === taskId
+          ? agentRunDrawerOverlay
+          : undefined
+      }
       footer={
         <>
           <ReturnToAiChat

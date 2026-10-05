@@ -1,3526 +1,469 @@
-export type TaskStatus =
-  "todo" | "in_progress" | "blocked" | "waiting_review" | "done" | "cancelled";
-export type TaskPriority = "P0" | "P1" | "P2" | "P3";
-export type TaskKind = "work" | "review" | "followup" | "reminder";
-export type TaskReviewPolicy = "none" | "manual";
-export type TaskSubmissionStatus =
-  "pending_review" | "accepted" | "changes_requested" | "withdrawn";
-export type TaskSubmissionOrigin = "manual" | "child_rollup";
-export type TaskArtifactStorageKind = "text" | "link" | "structured" | "file";
-export type TaskArtifactIntegrityStatus =
-  "unverified" | "verified" | "missing" | "mismatch";
-export type TaskLifecycleAction =
-  "start" | "block" | "unblock" | "complete" | "cancel" | "reopen";
-export type ProjectStatus =
-  "planning" | "in_progress" | "paused" | "completed" | "archived";
-export type ClientStatus = "active" | "lead" | "inactive";
-export type ProjectTransitionAction =
-  "start" | "pause" | "resume" | "complete" | "reopen" | "archive" | "restore";
-export type ActorType = "owner" | "person" | "system" | "agent";
-export type ActorStatus = "active" | "inactive";
-export type AssignmentRole = "assignee" | "reviewer";
-
-export type AppSettingKey =
-  "workspace" | "general" | "appearance" | "focus" | "storage";
-
-export interface WorkspaceSettingValue {
-  displayName: string;
-  avatarRef: string | null;
-}
-
-export interface GeneralSettingValue {
-  defaultRoute: "today" | "tasks" | "projects" | "clients" | "focus";
-  showRightOverview: boolean;
-  reduceMotion: boolean;
-  closeToTray: boolean;
-}
-
-export interface AppearanceSettingValue {
-  theme: "light" | "dark";
-}
-
-export interface FocusSettingValue {
-  focusMinutes: number;
-  breakMinutes: number;
-  cycles: number;
-  autoStartBreak: boolean;
-  autoStartFocus: boolean;
-  soundEnabled: boolean;
-}
-
-export interface StorageSettingValue {
-  lowSpaceThresholdGiB: number;
-}
-
-interface AppSettingItemBase {
-  schemaVersion: 2;
-  version: number;
-  stored: boolean;
-  updatedByActorId: string | null;
-  updatedAt: string | null;
-}
-
-export type AppSettingItem = AppSettingItemBase &
-  (
-    | { key: "workspace"; value: WorkspaceSettingValue }
-    | { key: "general"; value: GeneralSettingValue }
-    | { key: "appearance"; value: AppearanceSettingValue }
-    | { key: "focus"; value: FocusSettingValue }
-    | { key: "storage"; value: StorageSettingValue }
-  );
-
-export interface AppSettingsResult {
-  schemaVersion: 2;
-  items: AppSettingItem[];
-}
-
-export type AppSettingUpdate =
-  | {
-      key: "workspace";
-      expectedVersion: number;
-      value: WorkspaceSettingValue;
-    }
-  | {
-      key: "general";
-      expectedVersion: number;
-      value: GeneralSettingValue;
-    }
-  | {
-      key: "appearance";
-      expectedVersion: number;
-      value: AppearanceSettingValue;
-    }
-  | {
-      key: "focus";
-      expectedVersion: number;
-      value: FocusSettingValue;
-    }
-  | {
-      key: "storage";
-      expectedVersion: number;
-      value: StorageSettingValue;
-    };
-
-export interface Actor {
-  id: string;
-  type: ActorType;
-  displayName: string;
-  status: ActorStatus;
-  isBuiltin: boolean;
-  notes: string;
-  metadata: Record<string, unknown>;
-  /** Read-only link; older API responses may omit it. */
-  agentAdapterId?: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ActorListParams {
-  page?: number;
-  pageSize?: number;
-  type?: ActorType;
-  status?: ActorStatus;
-  sort?: string;
-}
-
-export interface ActorListResult {
-  items: Actor[];
-  meta: PageMeta;
-}
-
-export interface ActorSummary {
-  id: string;
-  type: ActorType;
-  displayName: string;
-  status: ActorStatus;
-  isBuiltin: boolean;
-  version: number;
-}
-
-export interface TaskAssignment {
-  id: string;
-  taskId: string;
-  role: AssignmentRole;
-  actorId: string;
-  actor: ActorSummary;
-  assignedByActorId: string;
-  assignedByActor: ActorSummary;
-  assignedAt: string;
-  unassignedAt: string | null;
-  reason: string | null;
-  isActive: boolean;
-  inferred: boolean;
-}
-
-export interface TaskAssignmentListParams {
-  page?: number;
-  pageSize?: number;
-  role?: AssignmentRole;
-  sort?: string;
-}
-
-export interface TaskAssignmentListMeta extends PageMeta {
-  taskVersion: number;
-}
-
-export interface TaskAssignmentListResult {
-  active: Record<AssignmentRole, TaskAssignment | null>;
-  history: TaskAssignment[];
-  meta: TaskAssignmentListMeta;
-}
-
-export interface CreateTaskAssignmentInput {
-  role: AssignmentRole;
-  actorId: string;
-  expectedVersion: number;
-}
-
-export interface ReassignTaskAssignmentInput extends CreateTaskAssignmentInput {
-  reason: string;
-}
-
-export interface EndTaskAssignmentInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface TaskAssignmentMutationResult {
-  assignment: TaskAssignment;
-  task: Task;
-}
-
-export interface ReassignTaskAssignmentResult extends TaskAssignmentMutationResult {
-  previousAssignment: TaskAssignment;
-}
-
-export interface CreatePersonActorInput {
-  displayName: string;
-  notes?: string;
-  metadata?: Record<string, unknown>;
-  status?: ActorStatus;
-}
-
-export interface UpdateActorInput {
-  displayName?: string;
-  notes?: string;
-  metadata?: Record<string, unknown>;
-  status?: ActorStatus;
-  expectedVersion: number;
-}
-
-export interface Tag {
-  id: string;
-  name: string;
-  color: string;
-  version: number;
-  createdAt: string;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  description: string;
-  kind: TaskKind;
-  status: TaskStatus;
-  priority: TaskPriority;
-  projectId: string | null;
-  projectName?: string;
-  parentTaskId: string | null;
-  parentTaskTitle?: string;
-  completionCriteria: string;
-  reviewPolicy: TaskReviewPolicy;
-  blockedReason: string | null;
-  blockedAt: string | null;
-  blockedFromStatus: Extract<
-    TaskStatus,
-    "todo" | "in_progress" | "waiting_review"
-  > | null;
-  dueDate: string | null;
-  plannedDate: string | null;
-  estimatedMinutes: number | null;
-  actualMinutes: number;
-  manualOrder: number | null;
-  version: number;
-  subtaskTotal: number;
-  subtaskCompleted: number;
-  /** Added in schema v30; optional keeps durable v29 idempotency snapshots readable. */
-  subtaskCancelled?: number;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-  submittedAt: string | null;
-  reviewedAt: string | null;
-  currentSubmissionId: string | null;
-  tags: Tag[];
-}
-
-export interface TaskArtifactSummary {
-  id: string;
-  taskId: string;
-  submissionId: string;
-  submissionStatus: TaskSubmissionStatus;
-  position: number;
-  storageKind: TaskArtifactStorageKind;
-  name: string;
-  mimeType: string | null;
-  sizeBytes: number | null;
-  sha256: string | null;
-  requiresFollowup: boolean;
-  producedByActorId: string;
-  producedByActor: ActorSummary;
-  recordedByActorId: string;
-  recordedByActor: ActorSummary;
-  integrityStatus: TaskArtifactIntegrityStatus;
-  integrityCheckedAt: string | null;
-  deletedAt: string | null;
-  deletedByActorId: string | null;
-  deletedByActor: ActorSummary | null;
-  deleteReason: string | null;
-  createdAt: string;
-}
-
-export interface TaskArtifact extends TaskArtifactSummary {
-  contentText: string | null;
-  referenceUrl: string | null;
-  structuredJson: Record<string, unknown> | null;
-}
-
-export interface TaskSubmission {
-  id: string;
-  taskId: string;
-  sequence: number;
-  status: TaskSubmissionStatus;
-  origin: TaskSubmissionOrigin;
-  summary: string;
-  submittedByActorId: string;
-  submittedByActor: ActorSummary;
-  submittedAt: string;
-  reviewedByActorId: string | null;
-  reviewedByActor: ActorSummary | null;
-  reviewedAt: string | null;
-  reviewReason: string | null;
-  withdrawnByActorId: string | null;
-  withdrawnByActor: ActorSummary | null;
-  withdrawnAt: string | null;
-  isInferred: boolean;
-  artifacts: TaskArtifactSummary[];
-}
-
-export interface TaskSubmissionListParams {
-  page?: number;
-  pageSize?: number;
-}
-
-export interface TaskArtifactListParams {
-  page?: number;
-  pageSize?: number;
-  submissionId?: string;
-  includeDeleted?: boolean;
-}
-
-export interface TaskAggregateListMeta extends PageMeta {
-  taskVersion: number;
-}
-
-export interface TaskSubmissionListResult {
-  items: TaskSubmission[];
-  meta: TaskAggregateListMeta;
-}
-
-export interface TaskArtifactListResult {
-  items: TaskArtifactSummary[];
-  meta: TaskAggregateListMeta;
-}
-
-export interface ProjectArtifactItem {
-  artifact: TaskArtifactSummary;
-  task: {
-    id: string;
-    title: string;
-    status: TaskStatus;
-  };
-  submissionSequence: number;
-  followup: {
-    inboxItemId: string;
-    inboxItemVersion: number;
-    status: InboxItemStatus;
-    resolutionPolicy: InboxResolutionPolicy;
-    sourceDeletedAt: string | null;
-    progress: InboxTaskProgress;
-  } | null;
-}
-
-export interface ProjectArtifactListParams {
-  page?: number;
-  pageSize?: number;
-  includeDeleted?: boolean;
-}
-
-export interface ProjectArtifactListResult {
-  items: ProjectArtifactItem[];
-  meta: PageMeta & { projectVersion: number };
-}
-
-interface NewArtifactBase {
-  clientRef: string;
-  name: string;
-  requiresFollowup: boolean;
-}
-
-export type NewTaskArtifactInput =
-  | (NewArtifactBase & {
-      storageKind: "text";
-      contentText: string;
-    })
-  | (NewArtifactBase & {
-      storageKind: "link";
-      referenceUrl: string;
-    })
-  | (NewArtifactBase & {
-      storageKind: "structured";
-      structuredJson: Record<string, unknown>;
-    })
-  | (NewArtifactBase & {
-      storageKind: "file";
-      file: File;
-    });
-
-export interface SubmitTaskOutputInput {
-  summary: string;
-  artifacts: NewTaskArtifactInput[];
-  expectedVersion: number;
-}
-
-export interface SubmitTaskOutputResult {
-  task: Task;
-  submission: TaskSubmission;
-  artifacts: TaskArtifactSummary[];
-  event: TaskWorkflowEvent;
-}
-
-export type ReviewTaskSubmissionInput =
-  | {
-      decision: "accept";
-      expectedVersion: number;
-    }
-  | {
-      decision: "request_changes";
-      reason: string;
-      expectedVersion: number;
-    };
-
-export interface ReviewTaskSubmissionResult {
-  task: Task;
-  submission: TaskSubmission;
-  event: TaskWorkflowEvent;
-}
-
-export interface DeleteTaskArtifactInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface DeleteTaskArtifactResult {
-  task: Task;
-  artifact: TaskArtifactSummary;
-  event: TaskWorkflowEvent;
-}
-
-export interface TaskArtifactDownload {
-  blob: Blob;
-  fileName: string;
-  mimeType: string;
-}
-
-export interface TaskWorkflowEvent {
-  id: string;
-  action: string;
-  actor: ActorSummary | null;
-  assignmentId: string | null;
-  submissionId: string | null;
-  artifactId: string | null;
-  requestId: string | null;
-  commandSeq: number | null;
-  previous: Record<string, unknown> | null;
-  current: Record<string, unknown> | null;
-  reason: string | null;
-  createdAt: string;
-}
-
-export interface TaskEventListParams {
-  page?: number;
-  pageSize?: number;
-}
-
-export interface TaskEventListMeta extends PageMeta {
-  taskVersion: number;
-}
-
-export interface TaskEventListResult {
-  items: TaskWorkflowEvent[];
-  meta: TaskEventListMeta;
-}
-
-export type TaskLifecycleCommandInput =
-  | {
-      action: Exclude<TaskLifecycleAction, "block" | "cancel">;
-      expectedVersion: number;
-    }
-  | {
-      action: "block" | "cancel";
-      reason: string;
-      expectedVersion: number;
-    };
-
-export interface TaskLifecycleCommandResult {
-  task: Task;
-  event: TaskWorkflowEvent;
-}
-
-export interface HealthResponse {
-  status: string;
-  app: {
-    name: string;
-    version: string;
-    commit: string;
-  };
-  api: {
-    version: string;
-  };
-  schema: {
-    version: number;
-  };
-}
-
-export interface TodayStats {
-  date: string;
-  tasks: {
-    total: number;
-    completed: number;
-    remaining: number;
-    overdue: number;
-    dueSoon: number;
-    estimatedMinutes: number;
-    actualMinutes: number;
-  };
-  focus: {
-    sessions: number;
-    seconds: number;
-    minutes: number;
-  };
-}
-
-export interface InboxStats {
-  serverNow: string;
-  pending: number;
-  unread: number;
-  tracking: number;
-  blocked: number;
-  waitingReview: number;
-}
-
-export type FocusSessionStatus =
-  | "planned"
-  | "active"
-  | "paused"
-  | "recovery_pending"
-  | "completed"
-  | "cancelled"
-  | "interrupted";
-
-export type FocusSessionEndReason =
-  "user_stop" | "completed" | "cancelled" | "crash_recovery";
-
-export type FocusRecoveryAction =
-  "include_gap_resume" | "exclude_gap_resume" | "interrupt";
-
-export interface FocusSession {
-  id: string;
-  taskId: string | null;
-  taskTitle: string | null;
-  status: FocusSessionStatus;
-  plannedSeconds: number;
-  accumulatedSeconds: number;
-  startedAt: string;
-  endedAt: string | null;
-  lastResumedAt: string | null;
-  lastHeartbeatAt: string | null;
-  endReason: FocusSessionEndReason | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface FocusSessionSnapshot {
-  session: FocusSession | null;
-  serverNow: string;
-  receivedAtMs: number;
-}
-
-export type FocusSessionHistoryStatus =
-  "terminal" | "completed" | "cancelled" | "interrupted";
-
-export interface FocusSessionListParams {
-  page?: number;
-  pageSize?: number;
-  status?: FocusSessionHistoryStatus;
-  taskId?: string;
-  projectId?: string;
-}
-
-export interface FocusSessionListResult {
-  items: FocusSession[];
-  meta: PageMeta;
-}
-
-export interface FocusReportDay {
-  date: string;
-  sessions: number;
-  seconds: number;
-  minutes: number;
-}
-
-export interface FocusReportProject {
-  projectId: string | null;
-  projectName: string | null;
-  sessions: number;
-  seconds: number;
-  minutes: number;
-}
-
-export interface FocusReportHour {
-  hour: number;
-  sessions: number;
-  seconds: number;
-  minutes: number;
-}
-
-export interface FocusReportHeatmapCell {
-  weekday: number;
-  hour: number;
-  sessions: number;
-  seconds: number;
-  minutes: number;
-}
-
-export interface FocusReportTag {
-  tagId: string | null;
-  tagName: string | null;
-  tagColor: string | null;
-  sessions: number;
-  seconds: number;
-  minutes: number;
-}
-
-export interface FocusReport {
-  dateFrom: string;
-  dateTo: string;
-  timezone: string;
-  totals: {
-    sessions: number;
-    seconds: number;
-    minutes: number;
-  };
-  days: FocusReportDay[];
-  projects: FocusReportProject[];
-  hours: FocusReportHour[];
-  heatmap: FocusReportHeatmapCell[];
-  tags: FocusReportTag[];
-  currentStreakDays: number;
-  longestStreakDays: number;
-}
-
-export interface FocusReportParams {
-  dateFrom: string;
-  dateTo: string;
-  timezone: string;
-  projectId?: string;
-}
-
-export interface CreateFocusSessionInput {
-  taskId: string | null;
-  plannedSeconds: number;
-}
-
-export interface FocusSessionCommandInput {
-  id: string;
-  expectedVersion: number;
-}
-
-export interface RecoverFocusSessionInput extends FocusSessionCommandInput {
-  action: FocusRecoveryAction;
-}
-
-export interface NewTaskInput {
-  title: string;
-  description?: string;
-  kind?: TaskKind;
-  priority: TaskPriority;
-  projectId?: string | null;
-  parentTaskId?: string | null;
-  completionCriteria?: string;
-  reviewPolicy?: TaskReviewPolicy;
-  tagIds?: string[];
-  dueDate?: string | null;
-  plannedDate?: string | null;
-  estimatedMinutes?: number | null;
-  manualOrder?: number | null;
-}
-
-export interface UpdateTaskInput {
-  title: string;
-  description: string;
-  kind?: TaskKind;
-  priority: TaskPriority;
-  projectId?: string | null;
-  parentTaskId?: string | null;
-  completionCriteria?: string;
-  reviewPolicy?: TaskReviewPolicy;
-  tagIds?: string[];
-  dueDate: string | null;
-  plannedDate: string | null;
-  estimatedMinutes: number | null;
-  expectedVersion?: number;
-}
-
-export interface PageMeta {
-  page: number;
-  pageSize: number;
-  total: number;
-}
-
-export type SearchResourceType =
-  | "task"
-  | "project"
-  | "client"
-  | "inbox_item"
-  | "invoice"
-  | "roadmap_milestone"
-  | "content_item";
-
-export interface SearchResult {
-  resourceType: SearchResourceType;
-  resourceId: string;
-  title: string;
-  subtitle: string;
-  matchedFields: string[];
-  route: string;
-  status: string;
-  updatedAt: string;
-}
-
-export interface SearchListParams {
-  q: string;
-  types?: SearchResourceType[];
-  page?: number;
-  pageSize?: number;
-}
-
-export interface SearchListResult {
-  items: SearchResult[];
-  meta: PageMeta;
-}
-
-export interface TaskListResult {
-  items: Task[];
-  meta: PageMeta;
-}
-
-export interface TaskVersionItem {
-  id: string;
-  expectedVersion: number;
-}
-
-export type BatchUpdateTasksInput =
-  | {
-      action: "set_priority";
-      items: TaskVersionItem[];
-      priority: TaskPriority;
-    }
-  | {
-      action: "set_due_date";
-      items: TaskVersionItem[];
-      dueDate: string | null;
-    }
-  | {
-      action: "set_project";
-      items: TaskVersionItem[];
-      projectId: string | null;
-    }
-  | {
-      action: "set_planned_date";
-      items: TaskVersionItem[];
-      plannedDate: string | null;
-    }
-  | {
-      action: "add_tags" | "remove_tags";
-      items: TaskVersionItem[];
-      tagIds: string[];
-    }
-  | {
-      action: Exclude<TaskLifecycleAction, "block" | "cancel">;
-      items: TaskVersionItem[];
-    }
-  | {
-      action: "block" | "cancel";
-      items: TaskVersionItem[];
-      reason: string;
-    };
-
-export interface BatchUpdateTasksResult {
-  action: BatchUpdateTasksInput["action"];
-  changed: number;
-  tasks: Task[];
-}
-
-export interface ReorderTasksInput {
-  plannedDate: string | null;
-  mode: "manual" | "default";
-  items: TaskVersionItem[];
-}
-
-export interface ReorderTasksResult {
-  plannedDate: string | null;
-  mode: ReorderTasksInput["mode"];
-  changed: number;
-  tasks: Task[];
-}
-
-export interface TaskListParams {
-  page?: number;
-  pageSize?: number;
-  q?: string;
-  kind?: TaskKind;
-  status?: TaskStatus | "active";
-  priority?: TaskPriority;
-  projectId?: string;
-  clientId?: string;
-  tagIds?: string[];
-  plannedDate?: string;
-  plannedFrom?: string;
-  plannedTo?: string;
-  plannedState?: "scheduled" | "unscheduled";
-  dueFrom?: string;
-  dueTo?: string;
-  dueState?: "overdue" | "due_soon";
-  parentTaskId?: string;
-  rootOnly?: boolean;
-  sort?: string;
-}
-
-export interface TaskSavedViewDefinition {
-  q: string;
-  status: TaskStatus | "active" | "";
-  priority: TaskPriority | "";
-  kind: TaskKind | "";
-  projectId: string;
-  clientId: string;
-  tagIds: string[];
-  plannedDate: string;
-  plannedFrom: string;
-  plannedTo: string;
-  dueFrom: string;
-  dueTo: string;
-  sort: string;
-}
-
-export interface TaskSavedView {
-  id: string;
-  name: string;
-  definition: TaskSavedViewDefinition;
-  schemaVersion: number;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface CreateTaskSavedViewInput {
-  name: string;
-  definition: TaskSavedViewDefinition;
-}
-
-export interface UpdateTaskSavedViewInput {
-  expectedVersion: number;
-  name?: string;
-  definition?: TaskSavedViewDefinition;
-}
-
-export interface DeleteTaskSavedViewResult {
-  deletedId: string;
-}
-
-export interface TagListResult {
-  items: Tag[];
-  meta: PageMeta;
-}
-
-export interface TagListParams {
-  page?: number;
-  pageSize?: number;
-  query?: string;
-  sort?: string;
-}
-
-export interface TagInput {
-  name: string;
-  color: string;
-}
-
-export interface UpdateTagInput {
-  name?: string;
-  color?: string;
-  expectedVersion: number;
-}
-
-export interface DeleteTagResult {
-  deletedId: string;
-  detachedTasks: number;
-}
-
-export interface ProjectTaskSummary {
-  total: number;
-  completed: number;
-  inProgress: number;
-  remaining: number;
-  progressPercent: number;
-  actualMinutes: number;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-  clientId: string | null;
-  clientName: string | null;
-  status: ProjectStatus;
-  startDate: string | null;
-  dueDate: string | null;
-  amountMinor: number | null;
-  color: string | null;
-  version: number;
-  archivedFromStatus: Exclude<ProjectStatus, "archived"> | null;
-  createdAt: string;
-  updatedAt: string;
-  taskSummary: ProjectTaskSummary;
-  invoiceCount: number;
-  availableActions: ProjectTransitionAction[];
-}
-
-export interface ProjectListResult {
-  items: Project[];
-  meta: PageMeta;
-}
-
-export interface ProjectWorkflowEvent {
-  id: string;
-  action: string;
-  actor: ActorSummary | null;
-  requestId: string | null;
-  previous: Record<string, unknown> | null;
-  current: Record<string, unknown> | null;
-  createdAt: string;
-}
-
-export interface ProjectEventListParams {
-  page?: number;
-  pageSize?: number;
-}
-
-export interface ProjectEventListMeta extends PageMeta {
-  projectVersion: number;
-}
-
-export interface ProjectEventListResult {
-  items: ProjectWorkflowEvent[];
-  meta: ProjectEventListMeta;
-}
-
-export interface ProjectNoteActor {
-  id: string;
-  type: ActorType;
-  displayName: string;
-}
-
-export interface ProjectNote {
-  id: string;
-  projectId: string;
-  title: string;
-  body: string | null;
-  occurredAt: string;
-  createdBy: ProjectNoteActor;
-  version: number;
-  deletedAt: string | null;
-  deletedByActorId: string | null;
-  deleteReason: string | null;
-  createdAt: string;
-  updatedAt: string;
-  projectVersion: number;
-}
-
-export interface ProjectNoteListParams {
-  page?: number;
-  pageSize?: number;
-  includeDeleted?: boolean;
-}
-
-export interface ProjectNoteListResult {
-  items: ProjectNote[];
-  meta: PageMeta & { projectVersion: number };
-}
-
-export interface CreateProjectNoteInput {
-  title: string;
-  body: string;
-  occurredAt: string;
-}
-
-export interface UpdateProjectNoteInput {
-  title?: string;
-  body?: string;
-  occurredAt?: string;
-  expectedVersion: number;
-}
-
-export interface DeleteProjectNoteInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface ProjectListParams {
-  page?: number;
-  pageSize?: number;
-  query?: string;
-  status?: ProjectStatus;
-  clientId?: string;
-  includeArchived?: boolean;
-  sort?: string;
-}
-
-export interface ProjectInput {
-  name: string;
-  description: string;
-  clientId: string | null;
-  startDate: string | null;
-  dueDate: string | null;
-  amountMinor: number | null;
-  color: string | null;
-}
-
-export interface UpdateProjectInput extends ProjectInput {
-  expectedVersion: number;
-}
-
-export interface DeleteProjectResult {
-  deletedId: string;
-  detachedTasks: number;
-  detachedInvoices: number;
-  detachedFinancialEntries: number;
-}
-
-export type RoadmapMilestoneStatus =
-  "planned" | "active" | "achieved" | "archived";
-
-export interface RoadmapMilestoneProject {
-  id: string;
-  name: string;
-  status: ProjectStatus;
-}
-
-export interface RoadmapMilestoneTaskSummary {
-  total: number;
-  completed: number;
-  inProgress: number;
-  progressPercent: number;
-}
-
-export interface RoadmapMilestone {
-  id: string;
-  title: string;
-  description: string | null;
-  year: number;
-  quarter: 1 | 2 | 3 | 4;
-  targetDate: string;
-  status: RoadmapMilestoneStatus;
-  manualOrder: number;
-  archivedFromStatus: Exclude<RoadmapMilestoneStatus, "archived"> | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  projects: RoadmapMilestoneProject[];
-  taskSummary: RoadmapMilestoneTaskSummary;
-}
-
-export interface RoadmapMilestoneListParams {
-  page?: number;
-  pageSize?: number;
-  year?: number;
-  quarter?: 1 | 2 | 3 | 4;
-  status?: RoadmapMilestoneStatus;
-  projectId?: string;
-  includeArchived?: boolean;
-  sort?: "target_date";
-}
-
-export interface RoadmapMilestoneListResult {
-  items: RoadmapMilestone[];
-  meta: PageMeta;
-}
-
-export interface CreateRoadmapMilestoneInput {
-  title: string;
-  description: string | null;
-  year: number;
-  quarter: 1 | 2 | 3 | 4;
-  targetDate: string;
-  status?: Exclude<RoadmapMilestoneStatus, "archived">;
-  projectIds: string[];
-}
-
-export interface UpdateRoadmapMilestoneInput {
-  title?: string;
-  description?: string | null;
-  year?: number;
-  quarter?: 1 | 2 | 3 | 4;
-  targetDate?: string;
-  status?: Exclude<RoadmapMilestoneStatus, "archived">;
-  projectIds?: string[];
-  expectedVersion: number;
-}
-
-export interface DeleteRoadmapMilestoneResult {
-  deletedId: string;
-}
-
-export interface ReorderRoadmapMilestonesInput {
-  items: Array<{
-    id: string;
-    expectedVersion: number;
-  }>;
-}
-
-export type ContentItemStatus =
-  "draft" | "in_review" | "scheduled" | "published" | "cancelled" | "archived";
-
-export interface ContentItemTask {
-  id: string;
-  title: string;
-  status: TaskStatus;
-  isRequired: boolean;
-}
-
-export interface ContentItem {
-  id: string;
-  title: string;
-  platform: string;
-  status: ContentItemStatus;
-  scheduledAt: string | null;
-  scheduledTimezone: string | null;
-  publishedAt: string | null;
-  projectId: string | null;
-  notes: string | null;
-  externalLink: string | null;
-  manualOrder: number;
-  archivedFromStatus: Exclude<ContentItemStatus, "archived"> | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  tasks: ContentItemTask[];
-  requiredTaskTotal: number;
-  requiredTaskDone: number;
-}
-
-export interface ContentItemListParams {
-  page?: number;
-  pageSize?: number;
-  scheduledFrom?: string;
-  scheduledTo?: string;
-  scheduleState?: "scheduled" | "unscheduled";
-  platform?: string;
-  status?: ContentItemStatus;
-  projectId?: string;
-  includeArchived?: boolean;
-}
-
-export interface ContentItemListResult {
-  items: ContentItem[];
-  meta: PageMeta;
-}
-
-export interface CreateContentItemInput {
-  title: string;
-  platform: string;
-  status?: Exclude<ContentItemStatus, "published" | "archived">;
-  scheduledAt?: string | null;
-  scheduledTimezone?: string | null;
-  projectId?: string | null;
-  notes?: string | null;
-  externalLink?: string | null;
-}
-
-export interface UpdateContentItemInput {
-  title?: string;
-  platform?: string;
-  status?: Exclude<ContentItemStatus, "published">;
-  projectId?: string | null;
-  notes?: string | null;
-  externalLink?: string | null;
-  expectedVersion: number;
-}
-
-export interface ScheduleContentItemInput {
-  scheduledAt: string | null;
-  scheduledTimezone: string | null;
-  expectedVersion: number;
-}
-
-export interface PublishContentItemInput {
-  publishedAt?: string;
-  externalLink?: string | null;
-  expectedVersion: number;
-}
-
-export type FinancialEntryType = "income" | "expense";
-export type FinancialEntryStatus = "pending" | "confirmed" | "voided";
-
-export interface FinancialEntry {
-  id: string;
-  type: FinancialEntryType;
-  amountMinor: number;
-  currency: string;
-  occurredOn: string;
-  status: FinancialEntryStatus;
-  category: string;
-  clientId: string | null;
-  clientName: string | null;
-  projectId: string | null;
-  projectName: string | null;
-  invoiceId: string | null;
-  invoiceNumber: string | null;
-  notes: string;
-  createdByActorId: string;
-  voidedAt: string | null;
-  voidReason: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface FinancialEntryListParams {
-  page?: number;
-  pageSize?: number;
-  type?: FinancialEntryType;
-  status?: FinancialEntryStatus;
-  currency?: string;
-  category?: string;
-  clientId?: string;
-  projectId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  includeVoided?: boolean;
-  sort?: string;
-}
-
-export interface FinancialEntryListResult {
-  items: FinancialEntry[];
-  meta: PageMeta;
-}
-
-export interface FinancialEntryInput {
-  type: FinancialEntryType;
-  amountMinor: number;
-  currency: string;
-  occurredOn: string;
-  status: Exclude<FinancialEntryStatus, "voided">;
-  category: string;
-  clientId: string | null;
-  projectId: string | null;
-  notes: string;
-}
-
-export interface UpdateFinancialEntryInput extends Partial<FinancialEntryInput> {
-  expectedVersion: number;
-}
-
-export interface VoidFinancialEntryInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface IncomeStats {
-  currency: string;
-  dateFrom: string;
-  dateTo: string;
-  confirmedIncomeMinor: number;
-  confirmedExpenseMinor: number;
-  pendingIncomeMinor: number;
-  pendingExpenseMinor: number;
-  netCashFlowMinor: number;
-  confirmedIncomeCount: number;
-  averageIncomeMinor: number;
-  entryCount: number;
-}
-
-export interface IncomeStatsParams {
-  currency: string;
-  dateFrom: string;
-  dateTo: string;
-}
-
-export interface FinancialEntriesCSVDownload {
-  blob: Blob;
-  fileName: string;
-}
-
-export type InvoiceStatus = "draft" | "sent" | "viewed" | "paid" | "overdue";
-
-export type InvoiceTransitionAction =
-  "mark_sent" | "mark_viewed" | "mark_paid" | "mark_overdue";
-
-export interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  clientId: string;
-  clientName: string;
-  projectId: string | null;
-  projectName: string | null;
-  amountMinor: number;
-  currency: string;
-  status: InvoiceStatus;
-  issueDate: string;
-  dueDate: string;
-  paidDate: string | null;
-  notes: string;
-  financialEntryId: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface InvoicePdfMetadata {
-  invoiceId: string;
-  fileName: string;
-  mimeType: "application/pdf";
-  sizeBytes: number;
-  sha256: string;
-  generatedFromVersion: number;
-  generatedAt: string;
-  integrityStatus: "verified" | "missing" | "mismatch";
-  integrityCheckedAt: string;
-}
-
-export interface InvoicePdfDownload {
-  blob: Blob;
-  fileName: string;
-}
-
-export interface InvoiceListParams {
-  page?: number;
-  pageSize?: number;
-  q?: string;
-  status?: InvoiceStatus;
-  currency?: string;
-  clientId?: string;
-  projectId?: string;
-  issueFrom?: string;
-  issueTo?: string;
-  dueFrom?: string;
-  dueTo?: string;
-  sort?: string;
-}
-
-export interface InvoiceListResult {
-  items: Invoice[];
-  meta: PageMeta;
-}
-
-export interface InvoiceInput {
-  clientId: string;
-  projectId: string | null;
-  amountMinor: number;
-  currency: string;
-  issueDate: string;
-  dueDate: string;
-  notes: string;
-}
-
-export interface UpdateInvoiceInput extends Partial<InvoiceInput> {
-  expectedVersion: number;
-}
-
-export interface TransitionInvoiceInput {
-  action: InvoiceTransitionAction;
-  paidDate?: string;
-  expectedVersion: number;
-}
-
-export interface DeleteInvoiceResult {
-  deletedId: string;
-}
-
-export interface Client {
-  id: string;
-  name: string;
-  contactName: string | null;
-  email: string | null;
-  phone: string | null;
-  notes: string | null;
-  status: ClientStatus;
-  version: number;
-  projectCount: number;
-  latestActivityAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ClientListResult {
-  items: Client[];
-  meta: PageMeta;
-}
-
-export interface ClientListParams {
-  page?: number;
-  pageSize?: number;
-  q?: string;
-  status?: ClientStatus;
-  sort?: string;
-}
-
-export interface ClientInput {
-  name: string;
-  contactName: string | null;
-  email: string | null;
-  phone: string | null;
-  notes: string | null;
-  status: ClientStatus;
-}
-
-export interface UpdateClientInput {
-  name?: string;
-  contactName?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  notes?: string | null;
-  status?: ClientStatus;
-  expectedVersion: number;
-}
-
-export interface DeleteClientResult {
-  deletedId: string;
-  detachedProjects: number;
-}
-
-export type ClientFollowupStatus =
-  "planned" | "completed" | "skipped" | "cancelled";
-export type ClientFollowupPriority = "low" | "normal" | "high";
-
-export interface ClientFollowup {
-  id: string;
-  clientId: string;
-  clientName: string;
-  assignedActorId: string;
-  assignedActorName: string;
-  assignedActorType: ActorType;
-  scheduledAt: string;
-  timezone: string;
-  channel: string;
-  purpose: string;
-  notes: string | null;
-  status: ClientFollowupStatus;
-  priority: ClientFollowupPriority;
-  completedAt: string | null;
-  result: string | null;
-  nextStep: string | null;
-  skippedAt: string | null;
-  skipReason: string | null;
-  cancelledAt: string | null;
-  cancelReason: string | null;
-  rescheduledFromId: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  clientVersion: number;
-  nextFollowup: ClientFollowup | null;
-}
-
-export interface ClientFollowupListResult {
-  items: ClientFollowup[];
-  meta: PageMeta & { serverNow: string };
-}
-
-export interface ClientFollowupListParams {
-  page?: number;
-  pageSize?: number;
-  status?: ClientFollowupStatus;
-  dueState?: "overdue";
-  assignedActorId?: string;
-}
-
-export interface CreateClientFollowupInput {
-  clientId: string;
-  assignedActorId: string;
-  scheduledAt: string;
-  timezone: string;
-  channel: string;
-  purpose: string;
-  notes: string | null;
-  priority: ClientFollowupPriority;
-}
-
-export interface UpdateClientFollowupInput {
-  assignedActorId?: string;
-  scheduledAt?: string;
-  timezone?: string;
-  channel?: string;
-  purpose?: string;
-  notes?: string | null;
-  priority?: ClientFollowupPriority;
-  expectedVersion: number;
-}
-
-export interface CompleteClientFollowupInput {
-  result: string;
-  nextStep: string | null;
-  completedAt: string | null;
-  nextFollowup: ClientFollowupPlanInput | null;
-  expectedVersion: number;
-}
-
-export interface ClientFollowupPlanInput {
-  assignedActorId: string;
-  scheduledAt: string;
-  timezone: string;
-  channel: string;
-  purpose: string;
-  notes: string | null;
-  priority: ClientFollowupPriority;
-}
-
-export interface SkipClientFollowupInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface CancelClientFollowupInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface RescheduleClientFollowupInput {
-  assignedActorId: string;
-  scheduledAt: string;
-  timezone: string;
-  channel: string;
-  purpose: string;
-  notes: string | null;
-  priority: ClientFollowupPriority;
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface RescheduleClientFollowupResult {
-  previous: ClientFollowup;
-  next: ClientFollowup;
-}
-
-export type ClientActivityKind = "note" | "meeting" | "system_reference";
-
-export interface ClientActivityActor {
-  id: string;
-  type: ActorType;
-  displayName: string;
-}
-
-export interface ClientActivity {
-  id: string;
-  clientId: string;
-  kind: ClientActivityKind;
-  title: string;
-  body: string | null;
-  occurredAt: string;
-  createdBy: ClientActivityActor;
-  sourceType: string | null;
-  sourceId: string | null;
-  version: number;
-  deletedAt: string | null;
-  deletedByActorId: string | null;
-  deleteReason: string | null;
-  createdAt: string;
-  updatedAt: string;
-  clientVersion: number;
-}
-
-export interface ClientActivityListParams {
-  page?: number;
-  pageSize?: number;
-  kind?: ClientActivityKind;
-  includeDeleted?: boolean;
-}
-
-export interface ClientActivityListResult {
-  items: ClientActivity[];
-  meta: PageMeta & { clientVersion: number };
-}
-
-export interface RecentClientActivity extends ClientActivity {
-  clientName: string;
-  clientStatus: ClientStatus;
-}
-
-export interface RecentClientActivityListParams {
-  page?: number;
-  pageSize?: number;
-  kind?: ClientActivityKind;
-}
-
-export interface RecentClientActivityListResult {
-  items: RecentClientActivity[];
-  meta: PageMeta;
-}
-
-export interface CreateClientActivityInput {
-  kind: Exclude<ClientActivityKind, "system_reference">;
-  title: string;
-  body: string;
-  occurredAt: string;
-}
-
-export interface UpdateClientActivityInput {
-  kind?: Exclude<ClientActivityKind, "system_reference">;
-  title?: string;
-  body?: string;
-  occurredAt?: string;
-  expectedVersion: number;
-}
-
-export interface DeleteClientActivityInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export type ClientAttachmentIntegrityStatus =
-  "verified" | "missing" | "mismatch";
-
-export interface ClientAttachment {
-  id: string;
-  clientId: string;
-  activityId: string | null;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  sha256: string;
-  recordedBy: ClientActivityActor;
-  integrityStatus: ClientAttachmentIntegrityStatus;
-  integrityCheckedAt: string;
-  deletedAt: string | null;
-  deletedByActorId: string | null;
-  deleteReason: string | null;
-  createdAt: string;
-  clientVersion: number;
-}
-
-export interface ClientAttachmentListParams {
-  page?: number;
-  pageSize?: number;
-  activityId?: string;
-  includeDeleted?: boolean;
-}
-
-export interface ClientAttachmentListResult {
-  items: ClientAttachment[];
-  meta: PageMeta & { clientVersion: number };
-}
-
-export interface CreateClientAttachmentInput {
-  file: File;
-  name: string;
-  activityId?: string | null;
-  expectedVersion: number;
-}
-
-export interface DeleteClientAttachmentInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface ClientAttachmentDownload {
-  blob: Blob;
-  fileName: string;
-  mimeType: string;
-}
-
-export interface ProjectAttachment {
-  id: string;
-  projectId: string;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  sha256: string;
-  recordedBy: ClientActivityActor;
-  integrityStatus: ClientAttachmentIntegrityStatus;
-  integrityCheckedAt: string;
-  deletedAt: string | null;
-  deletedByActorId: string | null;
-  deleteReason: string | null;
-  createdAt: string;
-  projectVersion: number;
-}
-
-export interface ProjectAttachmentListParams {
-  page?: number;
-  pageSize?: number;
-  includeDeleted?: boolean;
-}
-
-export interface ProjectAttachmentListResult {
-  items: ProjectAttachment[];
-  meta: PageMeta & { projectVersion: number };
-}
-
-export interface CreateProjectAttachmentInput {
-  file: File;
-  name: string;
-  expectedVersion: number;
-}
-
-export interface DeleteProjectAttachmentInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export type ProjectAttachmentDownload = ClientAttachmentDownload;
-
-export interface ClientActorLinkActor {
-  id: string;
-  type: ActorType;
-  displayName: string;
-  status: ActorStatus;
-  version: number;
-}
-
-export interface ClientActorLink {
-  id: string;
-  clientId: string;
-  role: "contact";
-  actor: ClientActorLinkActor;
-  linkedBy: ClientActivityActor;
-  linkedAt: string;
-  unlinkedAt: string | null;
-  unlinkedBy: ClientActivityActor | null;
-  unlinkReason: string | null;
-  clientVersion: number;
-}
-
-export type ClientActorLinkListState = "active" | "unlinked" | "all";
-
-type ClientActorLinkListPageParams = {
-  page?: number;
-  pageSize?: number;
-};
-
-export type ClientActorLinkListParams = ClientActorLinkListPageParams &
-  (
-    | { state?: ClientActorLinkListState; includeUnlinked?: never }
-    | { state?: never; includeUnlinked?: boolean }
-  );
-
-export interface ClientActorLinkListResult {
-  items: ClientActorLink[];
-  meta: PageMeta & { clientVersion: number };
-}
-
-export type CreateClientActorLinkInput =
-  | {
-      actorId: string;
-      createPerson?: never;
-      expectedVersion: number;
-    }
-  | {
-      actorId?: never;
-      createPerson: { displayName: string; notes: string };
-      expectedVersion: number;
-    };
-
-export interface DeleteClientActorLinkInput {
-  reason: string;
-  expectedVersion: number;
-}
-
-export type InboxItemKind = "manual" | "reminder" | "event";
-export type InboxItemPriority = TaskPriority;
-export type InboxItemStatus = "open" | "tracking" | "resolved" | "dismissed";
-export type InboxItemView = "inbox" | "snoozed" | "archive";
-export type InboxItemRisk = "tracking" | "blocked" | "waiting_review";
-export type InboxResolutionPolicy = "manual" | "all_required_tasks_done";
-export type InboxResolutionMode = "manual" | "forced" | "automatic";
-export type InboxItemAction =
-  | "read"
-  | "edit"
-  | "snooze"
-  | "unsnooze"
-  | "resolve"
-  | "force-resolve"
-  | "dismiss"
-  | "reopen";
-
-export interface InboxItem {
-  id: string;
-  kind: InboxItemKind;
-  title: string;
-  summary: string;
-  sourceEntityType:
-    | "manual"
-    | "reminder"
-    | "task_artifact"
-    | "task"
-    | "task_due"
-    | "invoice_due"
-    | "client_followup"
-    | "content_item"
-    | "roadmap_milestone"
-    | "project_completion"
-    | "automation"
-    | "agent_run_failed"
-    | "system_maintenance";
-  sourceEntityId: string | null;
-  sourceEventKey: string | null;
-  sourceDeletedAt: string | null;
-  priority: InboxItemPriority;
-  status: InboxItemStatus;
-  resolutionPolicy: InboxResolutionPolicy;
-  dueAt: string | null;
-  readAt: string | null;
-  triagedAt: string | null;
-  snoozedUntil: string | null;
-  resolvedByActorId: string | null;
-  resolvedAt: string | null;
-  resolutionReason: string | null;
-  resolutionMode: InboxResolutionMode | null;
-  dismissedByActorId: string | null;
-  dismissedAt: string | null;
-  dismissReason: string | null;
-  payloadJson: Record<string, unknown>;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  availableActions: InboxItemAction[];
-}
-
-export interface InboxItemListParams {
-  view?: InboxItemView;
-  q?: string;
-  priority?: InboxItemPriority;
-  risk?: InboxItemRisk;
-  sourceEntityType?: InboxItem["sourceEntityType"];
-  page?: number;
-  pageSize?: number;
-}
-
-export interface InboxItemListMeta extends PageMeta {
-  unreadTotal: number;
-  snapshotAt: string;
-  serverNow: string;
-}
-
-export interface InboxItemListResult {
-  items: InboxItem[];
-  meta: InboxItemListMeta;
-}
-
-export type InboxTaskRelationType = "created" | "linked";
-
-export interface InboxTaskSummary {
-  id: string;
-  title: string;
-  status: TaskStatus;
-  priority: TaskPriority;
-  kind: TaskKind;
-  projectId: string | null;
-  projectName: string | null;
-  version: number;
-}
-
-export interface InboxItemTaskRelation {
-  id: string;
-  inboxItemId: string;
-  taskRefId: string;
-  taskId: string | null;
-  taskTitleSnapshot: string;
-  task: InboxTaskSummary | null;
-  relationType: InboxTaskRelationType;
-  isRequired: boolean;
-  position: number;
-  linkedByActorId: string;
-  linkedByActor: ActorSummary;
-  linkedAt: string;
-  unlinkedByActorId: string | null;
-  unlinkedByActor: ActorSummary | null;
-  unlinkedAt: string | null;
-  unlinkReason: string | null;
-  isActive: boolean;
-  taskDeleted: boolean;
-}
-
-export interface InboxTaskProgress {
-  activeTotal: number;
-  requiredTotal: number;
-  requiredDone: number;
-  requiredRemaining: number;
-  requiredBlocked: number;
-  requiredWaitingReview: number;
-  requiredCancelled: number;
-  percent: number | null;
-  allRequiredDone: boolean;
-}
-
-export interface InboxItemTaskListMeta extends PageMeta {
-  inboxItemVersion: number;
-  progress: InboxTaskProgress;
-}
-
-export interface InboxItemTaskListResult {
-  active: InboxItemTaskRelation[];
-  history: InboxItemTaskRelation[];
-  meta: InboxItemTaskListMeta;
-}
-
-export interface InboxItemTaskListParams {
-  page?: number;
-  pageSize?: number;
-}
-
-export interface InboxItemTaskMutationResult {
-  inboxItem: InboxItem;
-  relation: InboxItemTaskRelation;
-  progress: InboxTaskProgress;
-}
-
-export interface LinkInboxItemTaskInput {
-  inboxItemId: string;
-  taskId: string;
-  isRequired: boolean;
-  expectedVersion: number;
-}
-
-export interface UpdateInboxItemTaskRequirementInput extends LinkInboxItemTaskInput {}
-
-export interface UnlinkInboxItemTaskInput {
-  inboxItemId: string;
-  taskId: string;
-  reason: string;
-  expectedVersion: number;
-}
-
-export interface InboxSplitTaskInput {
-  key: string;
-  parentKey: string | null;
-  title: string;
-  description: string;
-  kind: TaskKind;
-  priority: TaskPriority;
-  projectId: string | null;
-  completionCriteria: string;
-  tagIds: string[];
-  dueDate: string | null;
-  plannedDate: string | null;
-  estimatedMinutes: number | null;
-  reviewPolicy: TaskReviewPolicy;
-  isRequired: boolean;
-  assigneeActorId: string;
-}
-
-export interface SplitInboxItemInput {
-  inboxItemId: string;
-  expectedVersion: number;
-  resolutionPolicy: InboxResolutionPolicy;
-  tasks: InboxSplitTaskInput[];
-}
-
-export interface InboxSplitTaskResult {
-  key: string;
-  task: Task;
-  assignments: TaskAssignment[];
-  relation: InboxItemTaskRelation;
-}
-
-export interface SplitInboxItemResult {
-  inboxItem: InboxItem;
-  created: InboxSplitTaskResult[];
-  progress: InboxTaskProgress;
-}
-
-export interface ForceResolveInboxItemInput {
-  id: string;
-  expectedVersion: number;
-  reason: string;
-  confirm: true;
-}
-
-export interface CreateInboxItemInput {
-  title: string;
-  summary: string;
-  priority: InboxItemPriority;
-  dueAt: string | null;
-}
-
-export interface UpdateInboxItemInput {
-  title?: string;
-  summary?: string;
-  priority?: InboxItemPriority;
-  dueAt?: string | null;
-  expectedVersion: number;
-}
-
-export type InboxItemCommandInput =
-  | {
-      action: "read" | "unsnooze" | "reopen";
-      id: string;
-      expectedVersion: number;
-    }
-  | {
-      action: "snooze";
-      id: string;
-      snoozedUntil: string;
-      expectedVersion: number;
-    }
-  | {
-      action: "resolve" | "dismiss";
-      id: string;
-      reason: string;
-      expectedVersion: number;
-    };
-
-export interface MarkAllInboxReadInput {
-  throughCreatedAt: string;
-}
-
-export interface MarkAllInboxReadResult {
-  throughCreatedAt: string;
-  markedCount: number;
-}
-
-export interface InboxWorkflowEvent {
-  id: string;
-  action: string;
-  actorId: string | null;
-  actor: ActorSummary | null;
-  requestId: string | null;
-  previous: Record<string, unknown> | null;
-  current: Record<string, unknown> | null;
-  reason: string | null;
-  createdAt: string;
-}
-
-export interface InboxEventListParams {
-  page?: number;
-  pageSize?: number;
-}
-
-export interface InboxEventListMeta extends PageMeta {
-  inboxItemVersion: number;
-}
-
-export interface InboxEventListResult {
-  items: InboxWorkflowEvent[];
-  meta: InboxEventListMeta;
-}
-
-export type ReminderStatus = "scheduled" | "fired" | "cancelled";
-export type ReminderAction = "edit" | "cancel";
-export type ReminderRecurrenceType =
-  "none" | "daily" | "weekly" | "weekdays" | "monthly";
-export type ReminderSort =
-  | "title"
-  | "status"
-  | "priority"
-  | "trigger_at"
-  | "created_at"
-  | "updated_at"
-  | "-title"
-  | "-status"
-  | "-priority"
-  | "-trigger_at"
-  | "-created_at"
-  | "-updated_at";
-
-export interface Reminder {
-  id: string;
-  sourceEntityType: "manual" | "automation";
-  sourceEntityId: string | null;
-  title: string;
-  summary: string;
-  priority: InboxItemPriority;
-  triggerAt: string;
-  status: ReminderStatus;
-  sourceEventKey: string;
-  createdByActorId: string;
-  seriesId: string;
-  recurrenceType: ReminderRecurrenceType;
-  recurrenceInterval: number;
-  recurrenceTimezone: string;
-  occurrenceNumber: number;
-  recurrenceAnchorDay: number;
-  firedAt: string | null;
-  inboxItemId: string | null;
-  cancelledByActorId: string | null;
-  cancelledAt: string | null;
-  cancelReason: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  availableActions: ReminderAction[];
-}
-
-export interface ReminderListParams {
-  status?: ReminderStatus;
-  q?: string;
-  sort?: ReminderSort;
-  page?: number;
-  pageSize?: number;
-}
-
-export interface ReminderListMeta extends PageMeta {
-  serverNow: string;
-}
-
-export interface ReminderListResult {
-  items: Reminder[];
-  meta: ReminderListMeta;
-}
-
-export interface CreateReminderInput {
-  title: string;
-  summary: string;
-  priority: InboxItemPriority;
-  triggerAt: string;
-  recurrenceType: ReminderRecurrenceType;
-  recurrenceInterval: number;
-  recurrenceTimezone: string;
-}
-
-export interface UpdateReminderInput {
-  title?: string;
-  summary?: string;
-  priority?: InboxItemPriority;
-  triggerAt?: string;
-  recurrenceType?: ReminderRecurrenceType;
-  recurrenceInterval?: number;
-  recurrenceTimezone?: string;
-  expectedVersion: number;
-}
-
-export interface CancelReminderInput {
-  id: string;
-  reason: string;
-  expectedVersion: number;
-}
-
-export type AutomationRuleStatus = "enabled" | "disabled" | "unavailable";
-export type AutomationTriggerType = "event" | "schedule";
-export type AutomationActionType = "inbox_item" | "task" | "reminder";
-export type AutomationRunStatus =
-  "succeeded" | "failed" | "skipped" | "cancelled";
-
-export interface AutomationConfig {
-  priority?: InboxItemPriority;
-  localTime?: string;
-  timezone?: string;
-}
-
-export interface AutomationRule {
-  id: string;
-  presetKey: string;
-  name: string;
-  description: string;
-  status: AutomationRuleStatus;
-  available: boolean;
-  unavailableReason: string;
-  triggerType: AutomationTriggerType;
-  triggerLabel: string;
-  actionType: AutomationActionType;
-  actionLabel: string;
-  config: AutomationConfig;
-  nextRunAt: string | null;
-  permissions: string[];
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AutomationPreview {
-  canEnable: boolean;
-  unavailableReason: string;
-  triggerSummary: string;
-  actionSummary: string;
-  config: AutomationConfig;
-  nextRunAt: string | null;
-  permissions: string[];
-}
-
-export interface AutomationRun {
-  id: string;
-  ruleId: string;
-  presetKey: string;
-  ruleName: string;
-  ruleVersion: number;
-  triggerType: AutomationTriggerType;
-  sourceEventId: string | null;
-  scheduledFor: string | null;
-  status: AutomationRunStatus;
-  attempt: number;
-  retryOfRunId: string | null;
-  retryable: boolean;
-  retryAt: string | null;
-  causedByRunId: string | null;
-  causalDepth: number;
-  configSnapshot: Record<string, unknown>;
-  actionSnapshot: Record<string, unknown>;
-  errorCode: string | null;
-  resultType: string | null;
-  resultId: string | null;
-  resultSummary: string;
-  startedAt: string;
-  endedAt: string;
-}
-
-export interface AutomationRunSource {
-  kind: AutomationTriggerType;
-  available: boolean;
-  eventId: string | null;
-  aggregateType: string | null;
-  aggregateId: string | null;
-  action: string | null;
-  occurredAt: string | null;
-  scheduledFor: string | null;
-}
-
-export interface AutomationRunAttemptSummary {
-  id: string;
-  status: AutomationRunStatus;
-  attempt: number;
-  retryOfRunId: string | null;
-  retryable: boolean;
-  retryAt: string | null;
-  errorCode: string | null;
-  resultType: string | null;
-  resultId: string | null;
-  resultSummary: string;
-  startedAt: string;
-  endedAt: string;
-}
-
-export interface AutomationRunDetail extends AutomationRun {
-  source: AutomationRunSource;
-  retryChain: AutomationRunAttemptSummary[];
-}
-
-export interface AutomationRunListParams {
-  ruleId?: string;
-  status?: AutomationRunStatus;
-  page?: number;
-  pageSize?: number;
-}
-
-export interface AutomationRunListResult {
-  items: AutomationRun[];
-  meta: PageMeta;
-}
-
-export type AgentAdapterStatus = "enabled" | "disabled";
-export type AgentAdapterHealthStatus =
-  "unknown" | "blocked" | "healthy" | "unhealthy";
-export type AgentAdapterIsolationStatus =
-  "unverified" | "verified" | "unsupported";
-
-export interface AgentAdapterManifest {
-  executionMode: "short_lived_process";
-  capabilities: string[];
-  requirements: string[];
-}
-
-export interface AgentAdapter {
-  id: string;
-  adapterKey: string;
-  kind: "builtin";
-  displayName: string;
-  protocolVersion: "opc-agent-pipe-v1";
-  manifest: AgentAdapterManifest;
-  status: AgentAdapterStatus;
-  healthStatus: AgentAdapterHealthStatus;
-  healthErrorCode: string | null;
-  isolationStatus: AgentAdapterIsolationStatus;
-  executionReady: boolean;
-  lastHealthAt: string | null;
-  readiness: {
-    canEnable: boolean;
-    unavailableCode: string;
-    requiredGates: string[];
-  };
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export type BackupVerificationStatus = "verified" | "unverified" | "invalid";
-export type BackupKind = "manual" | "scheduled" | "unknown";
-
-export interface BackupSummary {
-  id: string;
-  createdAt: string;
-  verifiedAt: string | null;
-  verificationStatus: BackupVerificationStatus;
-  note: string;
-  appVersion: string;
-  apiVersion: string;
-  schemaVersion: number;
-  artifactCount: number;
-  artifactBytes: number;
-  databaseBytes: number;
-  totalBytes: number;
-  error: string | null;
-  kind: BackupKind;
-}
-
-export interface CreateBackupInput {
-  note: string;
-}
-
-export interface BackupArchiveDownload {
-  blob: Blob;
-  fileName: string;
-  backupId: string;
-  formatVersion: 1;
-}
-
-export type ScheduledBackupStatus = "idle" | "succeeded" | "failed";
-
-export interface ScheduledBackupPolicy {
-  enabled: boolean;
-  localTime: string;
-  timezone: string;
-  retentionCount: number;
-  lastAttemptedDate: string | null;
-  lastAttemptAt: string | null;
-  lastSuccessAt: string | null;
-  lastBackupId: string | null;
-  lastStatus: ScheduledBackupStatus;
-  lastErrorCode: string | null;
-  version: number;
-  updatedAt: string;
-  nextRunAt: string | null;
-}
-
-export interface UpdateScheduledBackupPolicyInput {
-  enabled: boolean;
-  localTime: string;
-  timezone: string;
-  retentionCount: number;
-  expectedVersion: number;
-}
-
-export interface BackupRestoreDrillResult {
-  backupId: string;
-  drilledAt: string;
-  sourceSchemaVersion: number;
-  resultSchemaVersion: number;
-  artifactCount: number;
-  temporaryDataCleaned: boolean;
-}
-
-export interface ScheduledBackupRestoreResult {
-  backupId: string;
-  rollbackBackupId: string;
-  requestedAt: string;
-  restartRequired: true;
-}
-
-export interface BusinessDataExportDownload {
-  blob: Blob;
-  fileName: string;
-  formatVersion: 1;
-}
-
-export interface BusinessPackageDownload {
-  blob: Blob;
-  fileName: string;
-  formatVersion: 1;
-}
-
-export interface BusinessPackageImportPreview {
-  formatVersion: 1;
-  schemaVersion: number;
-  targetSchemaVersion: number;
-  exportedAt: string;
-  tableCounts: Record<string, number>;
-  totalRows: number;
-  targetRows: number;
-  keyConflicts: number;
-  conflictTables: BusinessImportTableConflict[];
-  fileCount: number;
-  fileBytes: number;
-  fileConflicts: number;
-  canApply: boolean;
-  applyMode: BusinessImportApplyMode | null;
-  blocker: BusinessImportBlocker | null;
-}
-
-export type BusinessImportBlocker =
-  | "target_key_conflicts"
-  | "target_file_conflicts"
-  | "source_schema_older"
-  | "source_schema_newer";
-
-export type BusinessImportApplyMode = "replace_empty" | "append";
-
-export interface BusinessImportTableConflict {
-  table: string;
-  incomingRows: number;
-  targetRows: number;
-  keyConflicts: number;
-}
-
-export interface BusinessPackageImportResult {
-  importedRows: number;
-  importedFiles: number;
-  backupId: string;
-  applyMode: BusinessImportApplyMode;
-}
-
-export interface RestoreDiagnostics {
-  status:
-    | "idle"
-    | "restart_required"
-    | "restored"
-    | "cleanup_required"
-    | "attention_required";
-  restartRequired: boolean;
-  appliedThisStartup: boolean;
-  cleanupRequired: boolean;
-  attentionRequired: boolean;
-  backupId: string | null;
-  rollbackBackupId: string | null;
-  requestedAt: string | null;
-  residualAppliedCount: number;
-  failedAttemptCount: number;
-  invalidEntryCount: number;
-}
-
-export interface BusinessImportPreview {
-  formatVersion: 1;
-  schemaVersion: number;
-  targetSchemaVersion: number;
-  exportedAt: string;
-  tableCounts: Record<string, number>;
-  totalRows: number;
-  targetRows: number;
-  keyConflicts: number;
-  conflictTables: BusinessImportTableConflict[];
-  canApply: boolean;
-  applyMode: BusinessImportApplyMode | null;
-  blocker: BusinessImportBlocker | null;
-}
-
-export interface BusinessImportResult {
-  importedRows: number;
-  backupId: string;
-  applyMode: BusinessImportApplyMode;
-}
-
-export interface DiagnosticPackageDownload {
-  blob: Blob;
-  fileName: string;
-  formatVersion: 1;
-}
-
-export type StorageCapacityStatus = "healthy" | "low" | "unavailable";
-
-export interface StorageCapacityLocation {
-  kind: "database" | "artifacts" | "backups";
-  status: StorageCapacityStatus;
-  availableBytes: number | null;
-  totalBytes: number | null;
-  sharedVolume: boolean;
-}
-
-export interface StorageCapacityResult {
-  checkedAt: string;
-  thresholdGiB: number;
-  locations: StorageCapacityLocation[];
-}
-
-export type StorageCapacityScope =
-  | "database"
-  | "artifacts"
-  | "backups"
-  | "database+artifacts"
-  | "database+backups"
-  | "artifacts+backups"
-  | "database+artifacts+backups";
-
-export interface StorageCapacityHistoryPoint {
-  scope: StorageCapacityScope;
-  checkedAt: string;
-  availableBytes: number;
-  totalBytes: number;
-  thresholdBytes: number;
-  status: "healthy" | "low";
-}
-
-export interface StorageCapacityHistoryResult {
-  from: string;
-  to: string;
-  points: StorageCapacityHistoryPoint[];
-}
-
-export type KnowledgeSourceType = "text" | "markdown" | "pdf";
-export type KnowledgeSourceStatus =
-  "pending" | "indexing" | "ready" | "stale" | "missing" | "failed" | "deleted";
-
-export interface KnowledgeSource {
-  id: string;
-  name: string;
-  title: string;
-  sourceType: KnowledgeSourceType;
-  importMode: "managed_copy";
-  mimeType: string;
-  sizeBytes: number;
-  contentSha256: string;
-  status: KnowledgeSourceStatus;
-  lastIndexedAt: string | null;
-  deletedAt: string | null;
-  deleteReason: string | null;
-  version: number;
-  createdAt: string;
-  updatedAt: string;
-  documentId: string | null;
-  documentVersion: number | null;
-  chunkCount: number;
-  latestJob: KnowledgeIndexJob | null;
-}
-
-export interface KnowledgeSourceListResult {
-  items: KnowledgeSource[];
-  meta: PageMeta;
-}
-
-export interface KnowledgeSourcesCSVDownload {
-  blob: Blob;
-  fileName: string;
-}
-
-export type KnowledgeIndexJobStatus =
-  "queued" | "running" | "succeeded" | "failed" | "cancelled";
-
-export interface KnowledgeIndexJob {
-  id: string;
-  sourceId: string;
-  operation: "import" | "reindex";
-  status: KnowledgeIndexJobStatus;
-  stage: "queued" | "extracting" | "chunking" | "indexing" | "complete";
-  progress: number;
-  attempt: number;
-  retryOfJobId: string | null;
-  errorCode: string | null;
-  cancelRequested: boolean;
-  startedAt: string | null;
-  completedAt: string | null;
-  createdAt: string;
-}
-
-export interface KnowledgeImportResult {
-  source: KnowledgeSource;
-  job: KnowledgeIndexJob;
-}
-
-export interface KnowledgeHighlight {
-  start: number;
-  end: number;
-}
-
-export interface KnowledgeSearchResult {
-  chunkId: string;
-  documentId: string;
-  sourceId: string;
-  sourceName: string;
-  sourceType: KnowledgeSourceType;
-  documentTitle: string;
-  documentVersion: number;
-  chunkIndex: number;
-  startChar: number;
-  endChar: number;
-  startLine: number;
-  endLine: number;
-  startPage: number;
-  endPage: number;
-  excerpt: string;
-  highlights: KnowledgeHighlight[];
-  rank: number;
-}
-
-export interface KnowledgeSearchResponse {
-  items: KnowledgeSearchResult[];
-  query: string;
-  sourceIds: string[];
-}
-
-export type AiProviderProtocol = "openai_chat" | "anthropic_messages";
-
-export type AiProviderKind = "remote" | "local";
-
-export type AiProviderStatus =
-  "unconfigured" | "checking" | "ready" | "unavailable" | "disabled";
-
-export interface AiProvider {
-  configVersion?: number;
-  id: string;
-  name: string;
-  kind: AiProviderKind;
-  protocol: AiProviderProtocol;
-  base_url: string;
-  model: string;
-  status: AiProviderStatus;
-  health_status: "unknown" | "healthy" | "unhealthy";
-  health_error_code: string | null;
-  has_key: boolean;
-  last_health_at: string | null;
-  version: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateAiProviderInput {
-  name: string;
-  kind: AiProviderKind;
-  protocol: AiProviderProtocol;
-  base_url: string;
-  model: string;
-}
-
-export interface UpdateAiProviderInput {
-  name?: string;
-  kind?: AiProviderKind;
-  protocol?: AiProviderProtocol;
-  base_url?: string;
-  model?: string;
-}
-
-export interface AiMemory {
-  id: string;
-  content: string;
-  source_message_id?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AiMemoryProposal {
-  id: string;
-  session_id: string;
-  session_title: string;
-  content: string;
-  tags: string[];
-  created_at: string;
-}
-
-export type AiBusinessContextType = "task" | "project" | "client";
-
-export interface AiBusinessContextSource {
-  type: AiBusinessContextType;
-  id: string;
-  version: number;
-  label: string;
-  fields: Record<string, unknown>;
-  truncated_fields: string[];
-}
-
-export interface AiBusinessContextProviderSnapshot {
-  id: string;
-  name: string;
-  kind: AiProviderKind;
-  version: number;
-}
-
-export interface AiKnowledgeContextSource {
-  source_id: string;
-  source_name: string;
-  source_version: number;
-  source_type: KnowledgeSourceType;
-  document_id: string;
-  document_title: string;
-  document_version: number;
-  chunk_id: string;
-  chunk_index: number;
-  start_char: number;
-  end_char: number;
-  start_line: number;
-  end_line: number;
-  start_page?: number;
-  end_page?: number;
-  content: string;
-}
-
-export type AiCitationStatus =
-  "not_requested" | "validated" | "no_evidence" | "missing" | "invalid";
-
-export interface AiCitation {
-  chunk_id: string;
-  source_id: string;
-  source_name: string;
-  source_type: KnowledgeSourceType;
-  source_version: number;
-  document_id: string;
-  document_title: string;
-  document_version: number;
-  chunk_index: number;
-  start_char: number;
-  end_char: number;
-  start_line: number;
-  end_line: number;
-  start_page?: number;
-  end_page?: number;
-}
-
-export type AiRunStepKind =
-  | "generation"
-  | "model_turn"
-  | "tool_call"
-  | "self_check"
-  | "citation_validation"
-  | "persistence";
-
-export type AiRunStepStatus = "running" | "succeeded" | "failed" | "cancelled";
-
-export interface AiRunStep {
-  id: string;
-  generationId: string;
-  sequence: number;
-  kind: AiRunStepKind;
-  status: AiRunStepStatus;
-  turnIndex: number | null;
-  toolName: string | null;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  inputBytes: number;
-  outputBytes: number;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  tokenSource: "provider" | null;
-  errorCode: string | null;
-}
-
-export interface AiRunStepListResult {
-  items: AiRunStep[];
-  meta: {
-    generationId: string;
-    status: "queued" | "streaming" | "completed" | "failed" | "cancelled";
-    total: number;
-    inputBytes: number;
-    outputBytes: number;
-    durationMs: number;
-    inputTokens: number | null;
-    outputTokens: number | null;
-    tokenSource: "provider" | null;
-  };
-}
-
-export interface AiUsageTotals {
-  totalGenerations: number;
-  completedGenerations: number;
-  failedGenerations: number;
-  cancelledGenerations: number;
-  activeGenerations: number;
-  providerUsageGenerations: number;
-  unknownUsageGenerations: number;
-  inputTokens: number;
-  outputTokens: number;
-  inputBytes: number;
-  outputBytes: number;
-  durationMs: number;
-}
-
-export interface AiProviderUsageSummary extends AiUsageTotals {
-  providerId: string;
-  providerName: string;
-  providerKind: AiProviderKind;
-  providerProtocol: AiProviderProtocol;
-  model: string;
-}
-
-export interface AiUsageTrendPoint extends AiUsageTotals {
-  day: string;
-}
-
-export interface AiUsageSummary {
-  scope: {
-    sessionId: string | null;
-    providerId: string | null;
-  };
-  totals: AiUsageTotals;
-  providers: AiProviderUsageSummary[];
-  trendDays: number;
-  trend: AiUsageTrendPoint[];
-}
-
-export type AiEvaluationStatus =
-  "queued" | "running" | "succeeded" | "failed" | "cancelled";
-
-export type AiEvaluationResultStatus = "passed" | "failed" | "error";
-export type AiEvaluationSuiteKey =
-  | "smoke"
-  | "full"
-  | "grounded"
-  | "no_evidence"
-  | "prompt_injection"
-  | "conflicting_sources";
-
-export interface AiEvaluationResult {
-  id: string;
-  runId: string;
-  sequence: number;
-  caseId: string;
-  language: "zh-CN" | "en";
-  category:
-    "grounded" | "no_evidence" | "prompt_injection" | "conflicting_sources";
-  status: AiEvaluationResultStatus;
-  failureCodes: string[];
-  citationStatus: Exclude<AiCitationStatus, "not_requested"> | null;
-  citationCount: number;
-  durationMs: number;
-  inputBytes: number;
-  outputBytes: number;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  tokenSource: "provider" | null;
-  errorCode: string | null;
-  createdAt: string;
-}
-
-export interface AiEvaluationRun {
-  providerConfigVersion?: number | null;
-  id: string;
-  providerId: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  providerProtocolSnapshot: "openai_chat";
-  providerVersion: number;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  status: AiEvaluationStatus;
-  totalCases: number;
-  completedCases: number;
-  passedCases: number;
-  failedCases: number;
-  errorCases: number;
-  currentCaseId: string | null;
-  cancelRequested: boolean;
-  errorCode: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  results: AiEvaluationResult[];
-}
-
-export interface AiEvaluationListResult {
-  items: AiEvaluationRun[];
-  meta: {
-    page: number;
-    pageSize: number;
-    total: number;
-  };
-}
-
-export interface AiEvaluationStatusCounts {
-  total: number;
-  queued: number;
-  running: number;
-  succeeded: number;
-  failed: number;
-  cancelled: number;
-}
-
-export interface AiEvaluationQualityGroup {
-  providerConfigVersion?: number | null;
-  providerId: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  providerVersionMin: number;
-  providerVersionMax: number;
-  runCount: number;
-  fullyPassedRuns: number;
-  totalCases: number;
-  passedCases: number;
-  failedCases: number;
-  passRateBps: number;
-  wilsonLowerBps: number;
-  wilsonUpperBps: number;
-  evidenceLevel: "single_run" | "limited_runs" | "repeated_runs";
-  readinessStatus:
-    "insufficient_evidence" | "needs_attention" | "review_candidate";
-  readinessReasons: Array<
-    | "OUTDATED_DATASET"
-    | "SUITE_NOT_ELIGIBLE"
-    | "RUN_COUNT_LOW"
-    | "PROVIDER_VERSION_MIXED"
-    | "OVERALL_LOWER_BOUND_LOW"
-    | "CATEGORY_LOWER_BOUND_LOW"
-    | "CRITICAL_FAILURE_PRESENT"
-  >;
-  lastCompletedAt: string;
-}
-
-export interface AiEvaluationTrendPoint {
-  providerConfigVersion?: number | null;
-  runId: string;
-  providerId: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  totalCases: number;
-  passedCases: number;
-  failedCases: number;
-  completedAt: string;
-}
-
-export interface AiEvaluationCategoryGroup {
-  providerConfigVersion?: number | null;
-  providerId: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  category: AiEvaluationResult["category"];
-  totalCases: number;
-  passedCases: number;
-  failedCases: number;
-  passRateBps: number;
-  wilsonLowerBps: number;
-  wilsonUpperBps: number;
-  lastCompletedAt: string;
-}
-
-export interface AiEvaluationFailureGroup {
-  providerConfigVersion?: number | null;
-  providerId: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  failureCode: string;
-  affectedCases: number;
-  occurrences: number;
-  lastCompletedAt: string;
-}
-
-export interface AiEvaluationSummary {
-  scope: { providerId: string | null };
-  uncertainty: {
-    method: "wilson_score";
-    confidenceLevelBps: 9500;
-    repeatedRunMinimum: 3;
-  };
-  readinessPolicy: {
-    mode: "advisory";
-    currentDatasetVersion: number;
-    requiredSuite: "full";
-    minimumCompletedRuns: 3;
-    minimumOverallLowerBps: 8000;
-    minimumCategoryLowerBps: 6000;
-    requiredCategories: AiEvaluationResult["category"][];
-    criticalFailureCodes: string[];
-  };
-  statusCounts: AiEvaluationStatusCounts;
-  groups: AiEvaluationQualityGroup[];
-  categories: AiEvaluationCategoryGroup[];
-  failureCodes: AiEvaluationFailureGroup[];
-  trend: AiEvaluationTrendPoint[];
-  trendLimit: number;
-}
-
-export type AiEvaluationReviewDecision =
-  "accepted_for_local_use" | "needs_more_evidence" | "rejected";
-
-export interface AiEvaluationReview {
-  providerConfigVersion?: number | null;
-  id: string;
-  providerIdSnapshot: string;
-  providerNameSnapshot: string;
-  providerModelSnapshot: string;
-  datasetVersion: number;
-  suiteKey: AiEvaluationSuiteKey;
-  providerVersionMin: number;
-  providerVersionMax: number;
-  groupLastCompletedAt: string;
-  runCount: number;
-  totalCases: number;
-  passedCases: number;
-  failedCases: number;
-  overallWilsonLowerBps: number;
-  minimumCategory: AiEvaluationResult["category"];
-  minimumCategoryWilsonLowerBps: number;
-  readinessStatus: AiEvaluationQualityGroup["readinessStatus"];
-  readinessReasons: AiEvaluationQualityGroup["readinessReasons"];
-  criticalFailureCodes: string[];
-  decision: AiEvaluationReviewDecision;
-  reason: string;
-  reviewedByActorId: string;
-  reviewedByActorNameSnapshot: string;
-  createdAt: string;
-}
-
-export interface CreateAiEvaluationReviewInput {
-  group: AiEvaluationQualityGroup;
-  decision: AiEvaluationReviewDecision;
-  reason: string;
-}
-
-export interface AiEvaluationReviewListResult {
-  items: AiEvaluationReview[];
-  meta: {
-    page: number;
-    pageSize: number;
-    total: number;
-  };
-}
-
-export interface AiBusinessContextPreview {
-  provider_id: string;
-  provider_name: string;
-  provider_kind: AiProviderKind;
-  provider_version: number;
-  leaves_device: boolean;
-  serialized_bytes: number;
-  sources: AiBusinessContextSource[];
-  knowledge: AiKnowledgeContextSource[];
-}
-
-export type AiWorkspaceScope =
-  | "work"
-  | "clients"
-  | "outputs"
-  | "output_files"
-  | "actions"
-  | "agent_execution"
-  | "agent_files"
-  | "agent_project_files"
-  | "workspace_ui"
-  | "workspace_browser"
-  | "knowledge"
-  | "knowledge_actions"
-  | "finance"
-  | "finance_actions"
-  | "invoice_actions"
-  | "finance_exports";
-
-export type AiWorkspaceRecordNavigationType =
-  | "task"
-  | "task_saved_view"
-  | "project"
-  | "client"
-  | "client_activity"
-  | "client_followup"
-  | "project_note"
-  | "financial_entry"
-  | "invoice"
-  | "inbox_item"
-  | "reminder"
-  | "roadmap_milestone"
-  | "content_item"
-  | "agent_run"
-  | "task_submission"
-  | "task_artifact";
-
-export interface AiWorkspaceGrant {
-  provider_version: number;
-  scopes: AiWorkspaceScope[];
-  knowledge_sources?: Array<{
-    source_id: string;
-    expected_source_version: number;
-  }>;
-}
-
-export interface AiBusinessContextSelection {
-  provider_version: number;
-  sources: Array<{
-    type: AiBusinessContextType;
-    id: string;
-    expected_version: number;
-  }>;
-  knowledge?: Array<{
-    source_id: string;
-    document_id: string;
-    chunk_id: string;
-    expected_source_version: number;
-    expected_document_version: number;
-  }>;
-}
-
-export interface AiSession {
-  id: string;
-  title: string;
-  persist: boolean;
-  compacted_message_count: number;
-  /** Absent when an older Sidecar does not report it; never guessed as 0. */
-  message_count?: number;
-  version: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AiMessageTaskRef {
-  task_id: string;
-  task_title_snapshot: string;
-}
-
-export interface AiGenerationOrigin {
-  kind: "plan_continuation";
-  continuation_id: string;
-  turn_index: number;
-  max_turns: number;
-}
-
-export interface AiMessage {
-  origin?: AiGenerationOrigin;
-  access_request?: { scopes: AiWorkspaceScope[] };
-  id: string;
-  session_id: string;
-  role: "user" | "assistant";
-  status: "completed" | "cancelled" | "failed";
-  content: string;
-  reasoning: string | null;
-  task_id: string | null;
-  task_title_snapshot: string | null;
-  generation_id: string | null;
-  context_provider: AiBusinessContextProviderSnapshot | null;
-  context_sources: AiBusinessContextSource[];
-  context_knowledge: AiKnowledgeContextSource[];
-  citation_status: AiCitationStatus;
-  citations: AiCitation[];
-  created_at: string;
-}
-
-export interface AiMessageListResult {
-  data: AiMessage[];
-  meta: {
-    has_more: boolean;
-    oldest_created_at?: string;
-    oldest_id?: string;
-  };
-}
-
-// Undefined evidence means unavailable, not a verified absence of sources.
-export interface AiCitationResult {
-  status: AiCitationStatus;
-  items: AiCitation[];
-}
-
-export interface AiChatStreamMeta {
-  protocol: string;
-  generation_id: string;
-  session_id: string;
-  model: string;
-  provider_id: string;
-  sse_protocol: string;
-}
-
-export interface AiRunProgress {
-  sequence: number;
-  kind:
-    | "model_turn"
-    | "tool_call"
-    | "self_check"
-    | "citation_validation"
-    | "persistence";
-  status: "running" | "succeeded" | "failed" | "cancelled";
-  turn_index?: number;
-  tool_name?: string;
-  started_at: string;
-  completed_at?: string;
-  duration_ms: number;
-  retry_count?: number;
-  retry_reason?: string;
-  trimmed_history_turns?: number;
-  compacted_tool_results?: number;
-}
-
-export type AiWorkspacePanel =
-  | "overview"
-  | "agents"
-  | "files"
-  | "review"
-  | "terminal"
-  | "browser"
-  | "managed";
-
-export interface AiProjectFileProposal {
-  id: string;
-  path: string;
-  baseSHA256: string;
-  content: string;
-}
-
-export type AiChatStreamEvent =
-  | { type: "meta"; meta: AiChatStreamMeta }
-  | {
-      type: "project_file_proposal";
-      generationId: string;
-      proposal: AiProjectFileProposal;
-    }
-  | { type: "progress"; generationId: string; step: AiRunProgress }
-  | {
-      type: "workspace_panel";
-      generationId: string;
-      panel: AiWorkspacePanel;
-    }
-  | {
-      type: "workspace_panels";
-      generationId: string;
-      panels: [AiWorkspacePanel, AiWorkspacePanel];
-      splitRatio?: number;
-    }
-  | {
-      type: "workspace_browser_navigation";
-      generationId: string;
-      url: string;
-    }
-  | {
-      type: "workspace_browser_action";
-      generationId: string;
-      action: "back" | "forward" | "reload" | "stop";
-    }
-  | {
-      type: "workspace_access_request";
-      generationId: string;
-      scopes: AiWorkspaceScope[];
-    }
-  | {
-      type: "workspace_plan_updated";
-      generationId: string;
-      version: number;
-      stepCount: number;
-    }
-  | {
-      type: "workspace_record_navigation";
-      generationId: string;
-      recordType: Exclude<
-        AiWorkspaceRecordNavigationType,
-        | "agent_run"
-        | "task_submission"
-        | "task_artifact"
-        | "project_note"
-        | "client_activity"
-        | "client_followup"
-      >;
-      recordId: string;
-    }
-  | {
-      type: "workspace_record_navigation";
-      generationId: string;
-      recordType: "agent_run" | "task_submission";
-      recordId: string;
-      taskId: string;
-    }
-  | {
-      type: "workspace_record_navigation";
-      generationId: string;
-      recordType: "task_artifact";
-      recordId: string;
-      taskId: string;
-      submissionId: string;
-    }
-  | {
-      type: "workspace_record_navigation";
-      generationId: string;
-      recordType: "project_note" | "client_activity" | "client_followup";
-      recordId: string;
-      parentId: string;
-    }
-  | { type: "delta"; generationId: string; text: string }
-  | { type: "reasoning"; generationId: string; text: string }
-  | {
-      type: "replace";
-      generationId: string;
-      text: string;
-      reasoning: string;
-    }
-  | { type: "done"; generationId: string; citationEvidence?: AiCitationResult }
-  | { type: "cancelled"; generationId: string; partialText: string }
-  | {
-      type: "error";
-      generationId: string;
-      error: string;
-      detail?: string;
-      partialText?: string;
-    };
-
-export type AgentRunStatus =
-  "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
-
-export type AgentRunOutputDeliveryStatus =
-  "not_ready" | "pending" | "submitted" | "retained";
-
-export type AgentRunProgressPhase =
-  "preparing" | "calling_model" | "registering_result";
-
-export interface AgentRunProgress {
-  phase: AgentRunProgressPhase;
-  elapsedMs: number;
-}
-
-export type AgentRunStartGateCloseReason =
-  | "predecessor_failed"
-  | "predecessor_cancelled"
-  | "predecessor_retained"
-  | "predecessor_not_accepted"
-  | "predecessor_unavailable"
-  | "expired"
-  | "run_not_queued";
-
-/** ADR-030 human-confirmed start precondition, projected by the Sidecar. */
-export interface AgentRunStartGate {
-  predecessorRunId: string;
-  require: "submitted" | "accepted";
-  expiresAt: string;
-  status: "waiting" | "released" | "closed";
-  closeReason?: AgentRunStartGateCloseReason;
-}
-
-export interface AgentRun {
-  id: string;
-  taskId: string;
-  assignmentId: string;
-  actorId: string;
-  adapterId: string;
-  createdByActorId: string;
-  parentRunId: string | null;
-  restartOfRunId?: string | null;
-  startGate?: AgentRunStartGate;
-  attempt: number;
-  status: AgentRunStatus;
-  /** Ephemeral, content-free stage metadata for native UI polling only. */
-  progress?: AgentRunProgress;
-  providerId: string;
-  model: string;
-  /** Server-frozen output shape; it never contains model-controlled paths or bodies. */
-  outputContract?: AgentRunOutputContract;
-  executionContractVersion?: number;
-  reworkContext?: AgentRunReworkContext;
-  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-  reworkInputFiles?: AgentRunReworkInputFile[];
-  modelProtocol?: "anthropic_messages" | "openai_chat";
-  maxOutputTokens?: 8192 | 0;
-  executionProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-  executionInputFiles?: AgentRunReworkInputFile[];
-  resultText: string | null;
-  resultBytes: number | null;
-  errorCode: string | null;
-  outputDeliveryStatus: AgentRunOutputDeliveryStatus;
-  outputDeliveryErrorCode: string | null;
-  submissionId: string | null;
-  artifactId: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-  createdAt: string;
-}
-
-export type AgentRunSummary = Omit<
-  AgentRun,
-  | "resultText"
-  | "reworkContext"
-  | "reworkProviderConfirmation"
-  | "reworkInputFiles"
-  | "modelProtocol"
-  | "maxOutputTokens"
-  | "executionProviderConfirmation"
-  | "executionInputFiles"
-> & {
-  taskTitle: string;
-};
-
-export interface AgentRunListParams {
-  page?: number;
-  pageSize?: number;
-  status?: AgentRunStatus;
-  outputDeliveryStatus?: AgentRunOutputDeliveryStatus;
-  attentionOnly?: boolean;
-  unplannedOnly?: boolean;
-}
-
-export interface AgentRunListMeta extends PageMeta {
-  activeTotal: number;
-  pendingDeliveryTotal: number;
-  succeededTotal: number;
-}
-
-export interface AgentRunListResult {
-  items: AgentRunSummary[];
-  meta: AgentRunListMeta;
-}
-
-export type AgentRunFileSourceKind =
-  "task_artifact" | "project_attachment" | "project_task_artifact";
-
-export interface AgentProjectFileSource {
-  project_id: string;
-  task_id: string;
-  task_title: string;
-  task_version: number;
-  submission_id: string;
-  submission_sequence: number;
-}
-
-export interface AgentRunFileCandidate {
-  sourceTask?: AgentProjectFileSource;
-  sourceKind: AgentRunFileSourceKind;
-  id: string;
-  name: string;
-  mime: string;
-  sizeBytes: number;
-  sha256: string;
-  eligible: boolean;
-  errorCode: string | null;
-  createdAt: string;
-}
-
-export interface AgentRunFileLimits {
-  maxFiles: number;
-  maxFileBytes: number;
-  maxTotalBytes: number;
-  maxResultBytes: number;
-}
-
-export interface AgentRunFileCandidatesResult {
-  items: AgentRunFileCandidate[];
-  limits: AgentRunFileLimits;
-}
-
-export interface AgentRunFileReference {
-  sourceTask?: AgentProjectFileSource;
-  sha256?: string;
-  sourceKind: AgentRunFileSourceKind;
-  id: string;
-}
-
-export interface AgentRunFileAccessProviderConfirmation {
-  version: number;
-  configVersion: number;
-  kind: AiProviderKind;
-}
-
-export interface AgentRunOutputFileContract {
-  name: string;
-  mime: string;
-}
-
-export type AgentRunOutputContract =
-  | { type: "text" }
-  | { type: "file"; name: string; mime: string }
-  | { type: "files"; files: AgentRunOutputFileContract[] };
-
-export interface AgentRunAutoAssign {
-  actorId: string;
-  expectedTaskVersion: number;
-}
-
-export interface CreateAgentRunOptions {
-  confirmProjectTaskFiles?: boolean;
-  restart?: AgentRunRestartRequest;
-  confirmRestart?: boolean;
-  restartPreviewHash?: string;
-  autoAssign?: AgentRunAutoAssign;
-  inputFiles?: AgentRunFileReference[];
-  outputContract?: AgentRunOutputContract;
-  confirmFileAccess?: boolean;
-  fileAccessProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-  rework?: AgentRunReworkRequest;
-  confirmReworkContext?: boolean;
-  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-}
-
-export interface AgentRunRestartRequest {
-  runId: string;
-  expectedTaskVersion: number;
-}
-
-export interface AgentRunRestartSource {
-  run_id: string;
-  task_id: string;
-  status: "failed" | "cancelled" | "interrupted" | "succeeded";
-  output_delivery_status: "not_ready" | "retained";
-  attempt: number;
-  task_version: number;
-  actor_id: string;
-  provider_id: string;
-  model: string;
-  completed_at: string;
-}
-
-export interface AgentRunReworkRequest {
-  submissionId: string;
-  artifactIds: string[];
-  expectedTaskVersion: number;
-}
-
-export interface AgentRunReworkContext {
-  submission_id: string;
-  sequence: number;
-  review_reason: string;
-  reviewed_at: string;
-  artifacts: {
-    id: string;
-    storage_kind: "text" | "link" | "structured";
-    name: string;
-    content: string;
-    sha256: string;
-  }[];
-}
-
-export interface AgentRunReworkInputFile {
-  source_task?: AgentProjectFileSource;
-  source_kind: AgentRunFileSourceKind;
-  id: string;
-  name: string;
-  mime: string;
-  size_bytes: number;
-  sha256: string;
-}
-
-export interface RetryAgentRunReworkOptions {
-  confirmProjectTaskFiles?: boolean;
-  confirmReworkContext?: boolean;
-  reworkProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-  confirmFileAccess?: boolean;
-  fileAccessProviderConfirmation?: AgentRunFileAccessProviderConfirmation;
-}
-
-export type ControlledFileScope =
-  | "artifact"
-  | "client_attachment"
-  | "project_attachment"
-  | "knowledge_document";
-
-export interface ControlledFile {
-  id: string;
-  scope: ControlledFileScope;
-  name: string;
-  mimeType: string | null;
-  sizeBytes: number | null;
-  sha256: string | null;
-  ownerLabel: string;
-  contentRoute: string;
-  updatedAt: string;
-}
-
-export interface ControlledFileListParams {
-  page?: number;
-  pageSize?: number;
-  scope?: ControlledFileScope;
-}
-
-export interface ControlledFileListResult {
-  items: ControlledFile[];
-  meta: PageMeta;
-}
+// The API model types are split by domain under ./models. This module keeps
+// the original import path and re-exports exactly the same public names.
+
+export {
+  type ActorType,
+  type ActorStatus,
+  type Actor,
+  type ActorListParams,
+  type ActorListResult,
+  type ActorSummary,
+  type CreatePersonActorInput,
+  type UpdateActorInput,
+} from "./models/actors";
+export {
+  type AgentAdapterStatus,
+  type AgentAdapterHealthStatus,
+  type AgentAdapterIsolationStatus,
+  type AgentAdapterManifest,
+  type AgentAdapter,
+} from "./models/agentAdapters";
+export {
+  type AgentRunStatus,
+  type AgentRunOutputDeliveryStatus,
+  type AgentRunProgressPhase,
+  type AgentRunProgress,
+  type AgentRunStartGateCloseReason,
+  type AgentRunStartGate,
+  type AgentRunInputSlotStatus,
+  type AgentRunStartGateInputSlot,
+  type AgentRunStartGateInputs,
+  type ConfirmAgentRunStartGateInputs,
+  type AgentRun,
+  type AgentRunSummary,
+  type AgentRunListParams,
+  type AgentRunListMeta,
+  type AgentRunListResult,
+  type AgentRunFileSourceKind,
+  type AgentProjectFileSource,
+  type AgentRunFileCandidate,
+  type AgentRunFileLimits,
+  type AgentRunFileCandidatesResult,
+  type AgentRunFileReference,
+  type AgentRunFileAccessProviderConfirmation,
+  type AgentRunOutputFileContract,
+  type AgentRunOutputContract,
+  type AgentRunAutoAssign,
+  type CreateAgentRunOptions,
+  type AgentRunRestartRequest,
+  type AgentRunRestartSource,
+  type AgentRunReworkRequest,
+  type AgentRunReworkContext,
+  type AgentRunReworkInputFile,
+  type RetryAgentRunReworkOptions,
+  type ControlledFileScope,
+  type ControlledFile,
+  type ControlledFileListParams,
+  type ControlledFileListResult,
+} from "./models/agentRuns";
+export {
+  type AiProviderProtocol,
+  type AiProviderKind,
+  type AiProviderStatus,
+  type AiProvider,
+  type CreateAiProviderInput,
+  type UpdateAiProviderInput,
+  type AiMemory,
+  type AiMemoryProposal,
+  type AiBusinessContextType,
+  type AiBusinessContextSource,
+  type AiBusinessContextProviderSnapshot,
+  type AiKnowledgeContextSource,
+  type AiCitationStatus,
+  type AiCitation,
+  type AiBusinessContextPreview,
+  type AiWorkspaceScope,
+  type AiWorkspaceRecordNavigationType,
+  type AiWorkspaceGrant,
+  type AiBusinessContextSelection,
+  type AiSession,
+  type AiMessageTaskRef,
+  type AiGenerationOrigin,
+  type AiMessage,
+  type AiMessageListResult,
+  type AiCitationResult,
+  type AiChatStreamMeta,
+  type AiRunProgress,
+  type AiWorkspacePanel,
+  type AiProjectFileProposal,
+  type AiChatStreamEvent,
+} from "./models/ai";
+export {
+  type AiEvaluationStatus,
+  type AiEvaluationResultStatus,
+  type AiEvaluationSuiteKey,
+  type AiEvaluationResult,
+  type AiEvaluationRun,
+  type AiEvaluationListResult,
+  type AiEvaluationStatusCounts,
+  type AiEvaluationQualityGroup,
+  type AiEvaluationTrendPoint,
+  type AiEvaluationCategoryGroup,
+  type AiEvaluationFailureGroup,
+  type AiEvaluationSummary,
+  type AiEvaluationReviewDecision,
+  type AiEvaluationReview,
+  type CreateAiEvaluationReviewInput,
+  type AiEvaluationReviewListResult,
+} from "./models/aiEvaluations";
+export {
+  type AiRunStepKind,
+  type AiRunStepStatus,
+  type AiRunStep,
+  type AiRunStepListResult,
+  type AiUsageTotals,
+  type AiProviderUsageSummary,
+  type AiUsageTrendPoint,
+  type AiUsageSummary,
+} from "./models/aiUsage";
+export {
+  type AutomationRuleStatus,
+  type AutomationTriggerType,
+  type AutomationActionType,
+  type AutomationRunStatus,
+  type AutomationConfig,
+  type AutomationRule,
+  type AutomationPreview,
+  type AutomationRun,
+  type AutomationRunSource,
+  type AutomationRunAttemptSummary,
+  type AutomationRunDetail,
+  type AutomationRunListParams,
+  type AutomationRunListResult,
+} from "./models/automations";
+export {
+  type BackupVerificationStatus,
+  type BackupKind,
+  type BackupSummary,
+  type CreateBackupInput,
+  type BackupArchiveDownload,
+  type ScheduledBackupStatus,
+  type ScheduledBackupPolicy,
+  type UpdateScheduledBackupPolicyInput,
+  type BackupRestoreDrillResult,
+  type ScheduledBackupRestoreResult,
+  type BusinessDataExportDownload,
+  type BusinessPackageDownload,
+  type BusinessPackageImportPreview,
+  type BusinessImportBlocker,
+  type BusinessImportApplyMode,
+  type BusinessImportTableConflict,
+  type BusinessImportUpgradeStep,
+  type BusinessImportSemanticConflict,
+  type BusinessImportResolutionRule,
+  type BusinessImportResolution,
+  type BusinessPackageImportResult,
+  type RestoreDiagnostics,
+  type BusinessImportPreview,
+  type BusinessImportResult,
+  type DiagnosticPackageDownload,
+  type StorageCapacityStatus,
+  type StorageCapacityLocation,
+  type StorageCapacityResult,
+  type StorageCapacityScope,
+  type StorageCapacityHistoryPoint,
+  type StorageCapacityHistoryResult,
+} from "./models/backups";
+export {
+  type ClientStatus,
+  type Client,
+  type ClientListResult,
+  type ClientListParams,
+  type ClientInput,
+  type UpdateClientInput,
+  type DeleteClientResult,
+  type ClientFollowupStatus,
+  type ClientFollowupPriority,
+  type ClientFollowup,
+  type ClientFollowupListResult,
+  type ClientFollowupListParams,
+  type CreateClientFollowupInput,
+  type UpdateClientFollowupInput,
+  type CompleteClientFollowupInput,
+  type ClientFollowupPlanInput,
+  type SkipClientFollowupInput,
+  type CancelClientFollowupInput,
+  type RescheduleClientFollowupInput,
+  type RescheduleClientFollowupResult,
+  type ClientActivityKind,
+  type ClientActivityActor,
+  type ClientActivity,
+  type ClientActivityListParams,
+  type ClientActivityListResult,
+  type RecentClientActivity,
+  type RecentClientActivityListParams,
+  type RecentClientActivityListResult,
+  type CreateClientActivityInput,
+  type UpdateClientActivityInput,
+  type DeleteClientActivityInput,
+  type ClientAttachmentIntegrityStatus,
+  type ClientAttachment,
+  type ClientAttachmentListParams,
+  type ClientAttachmentListResult,
+  type CreateClientAttachmentInput,
+  type DeleteClientAttachmentInput,
+  type ClientAttachmentDownload,
+  type ClientActorLinkActor,
+  type ClientActorLink,
+  type ClientActorLinkListState,
+  type ClientActorLinkListParams,
+  type ClientActorLinkListResult,
+  type CreateClientActorLinkInput,
+  type DeleteClientActorLinkInput,
+} from "./models/clients";
+export { type PageMeta } from "./models/common";
+export {
+  type ContentItemStatus,
+  type ContentItemTask,
+  type ContentItem,
+  type ContentItemListParams,
+  type ContentItemListResult,
+  type CreateContentItemInput,
+  type UpdateContentItemInput,
+  type ScheduleContentItemInput,
+  type PublishContentItemInput,
+} from "./models/content";
+export {
+  type FinancialEntryType,
+  type FinancialEntryStatus,
+  type FinancialEntry,
+  type FinancialEntryListParams,
+  type FinancialEntryListResult,
+  type FinancialEntryInput,
+  type UpdateFinancialEntryInput,
+  type VoidFinancialEntryInput,
+  type IncomeStats,
+  type IncomeStatsParams,
+  type FinancialEntriesCSVDownload,
+} from "./models/finance";
+export {
+  type FocusSettingValue,
+  type TodayStats,
+  type FocusSessionStatus,
+  type FocusSessionEndReason,
+  type FocusRecoveryAction,
+  type FocusSession,
+  type FocusSessionSnapshot,
+  type FocusSessionHistoryStatus,
+  type FocusSessionListParams,
+  type FocusSessionListResult,
+  type FocusReportDay,
+  type FocusReportProject,
+  type FocusReportHour,
+  type FocusReportHeatmapCell,
+  type FocusReportTag,
+  type FocusReport,
+  type FocusReportParams,
+  type CreateFocusSessionInput,
+  type FocusSessionCommandInput,
+  type RecoverFocusSessionInput,
+} from "./models/focus";
+export {
+  type InboxStats,
+  type InboxItemKind,
+  type InboxItemPriority,
+  type InboxItemStatus,
+  type InboxItemView,
+  type InboxItemRisk,
+  type InboxResolutionPolicy,
+  type InboxResolutionMode,
+  type InboxItemAction,
+  type InboxItem,
+  type InboxItemListParams,
+  type InboxItemListMeta,
+  type InboxItemListResult,
+  type InboxTaskRelationType,
+  type InboxTaskSummary,
+  type InboxItemTaskRelation,
+  type InboxTaskProgress,
+  type InboxItemTaskListMeta,
+  type InboxItemTaskListResult,
+  type InboxItemTaskListParams,
+  type InboxItemTaskMutationResult,
+  type LinkInboxItemTaskInput,
+  type UpdateInboxItemTaskRequirementInput,
+  type UnlinkInboxItemTaskInput,
+  type InboxSplitTaskInput,
+  type SplitInboxItemInput,
+  type InboxSplitTaskResult,
+  type SplitInboxItemResult,
+  type ForceResolveInboxItemInput,
+  type CreateInboxItemInput,
+  type UpdateInboxItemInput,
+  type InboxItemCommandInput,
+  type MarkAllInboxReadInput,
+  type MarkAllInboxReadResult,
+  type InboxWorkflowEvent,
+  type InboxEventListParams,
+  type InboxEventListMeta,
+  type InboxEventListResult,
+} from "./models/inbox";
+export {
+  type InvoiceStatus,
+  type InvoiceTransitionAction,
+  type Invoice,
+  type InvoicePdfMetadata,
+  type InvoicePdfDownload,
+  type InvoiceListParams,
+  type InvoiceListResult,
+  type InvoiceInput,
+  type UpdateInvoiceInput,
+  type TransitionInvoiceInput,
+  type DeleteInvoiceResult,
+} from "./models/invoices";
+export {
+  type KnowledgeSourceType,
+  type KnowledgeSourceStatus,
+  type KnowledgeSource,
+  type KnowledgeSourceListResult,
+  type KnowledgeSourcesCSVDownload,
+  type KnowledgeIndexJobStatus,
+  type KnowledgeIndexJob,
+  type KnowledgeImportResult,
+  type KnowledgeHighlight,
+  type KnowledgeSearchResult,
+  type KnowledgeSearchResponse,
+} from "./models/knowledge";
+export {
+  type ProjectStatus,
+  type ProjectTransitionAction,
+  type ProjectArtifactItem,
+  type ProjectArtifactListParams,
+  type ProjectArtifactListResult,
+  type ProjectTaskSummary,
+  type Project,
+  type ProjectListResult,
+  type ProjectWorkflowEvent,
+  type ProjectEventListParams,
+  type ProjectEventListMeta,
+  type ProjectEventListResult,
+  type ProjectNoteActor,
+  type ProjectNote,
+  type ProjectNoteListParams,
+  type ProjectNoteListResult,
+  type CreateProjectNoteInput,
+  type UpdateProjectNoteInput,
+  type DeleteProjectNoteInput,
+  type ProjectListParams,
+  type ProjectInput,
+  type UpdateProjectInput,
+  type DeleteProjectResult,
+  type ProjectAttachment,
+  type ProjectAttachmentListParams,
+  type ProjectAttachmentListResult,
+  type CreateProjectAttachmentInput,
+  type DeleteProjectAttachmentInput,
+  type ProjectAttachmentDownload,
+} from "./models/projects";
+export {
+  type ReminderStatus,
+  type ReminderAction,
+  type ReminderRecurrenceType,
+  type ReminderSort,
+  type Reminder,
+  type ReminderListParams,
+  type ReminderListMeta,
+  type ReminderListResult,
+  type CreateReminderInput,
+  type UpdateReminderInput,
+  type CancelReminderInput,
+} from "./models/reminders";
+export {
+  type RoadmapMilestoneStatus,
+  type RoadmapMilestoneProject,
+  type RoadmapMilestoneTaskSummary,
+  type RoadmapMilestone,
+  type RoadmapMilestoneListParams,
+  type RoadmapMilestoneListResult,
+  type CreateRoadmapMilestoneInput,
+  type UpdateRoadmapMilestoneInput,
+  type DeleteRoadmapMilestoneResult,
+  type ReorderRoadmapMilestonesInput,
+} from "./models/roadmap";
+export {
+  type SearchResourceType,
+  type SearchResult,
+  type SearchListParams,
+  type SearchListResult,
+} from "./models/search";
+export {
+  type AppSettingKey,
+  type WorkspaceSettingValue,
+  type GeneralSettingValue,
+  type AppearanceSettingValue,
+  type StorageSettingValue,
+  type AppSettingItem,
+  type AppSettingsResult,
+  type AppSettingUpdate,
+  type HealthResponse,
+} from "./models/settings";
+export {
+  type Tag,
+  type TagListResult,
+  type TagListParams,
+  type TagInput,
+  type UpdateTagInput,
+  type DeleteTagResult,
+} from "./models/tags";
+export {
+  type AssignmentRole,
+  type TaskAssignment,
+  type TaskAssignmentListParams,
+  type TaskAssignmentListMeta,
+  type TaskAssignmentListResult,
+  type CreateTaskAssignmentInput,
+  type ReassignTaskAssignmentInput,
+  type EndTaskAssignmentInput,
+  type TaskAssignmentMutationResult,
+  type ReassignTaskAssignmentResult,
+} from "./models/taskAssignments";
+export {
+  type TaskSubmissionStatus,
+  type TaskSubmissionOrigin,
+  type TaskArtifactStorageKind,
+  type TaskArtifactIntegrityStatus,
+  type TaskArtifactSummary,
+  type TaskArtifact,
+  type TaskSubmission,
+  type TaskSubmissionListParams,
+  type TaskArtifactListParams,
+  type TaskAggregateListMeta,
+  type TaskSubmissionListResult,
+  type TaskArtifactListResult,
+  type NewTaskArtifactInput,
+  type SubmitTaskOutputInput,
+  type SubmitTaskOutputResult,
+  type ReviewTaskSubmissionInput,
+  type ReviewTaskSubmissionResult,
+  type DeleteTaskArtifactInput,
+  type DeleteTaskArtifactResult,
+  type TaskArtifactDownload,
+} from "./models/taskOutputs";
+export {
+  type TaskStatus,
+  type TaskPriority,
+  type TaskKind,
+  type TaskReviewPolicy,
+  type TaskLifecycleAction,
+  type Task,
+  type TaskWorkflowEvent,
+  type TaskEventListParams,
+  type TaskEventListMeta,
+  type TaskEventListResult,
+  type TaskLifecycleCommandInput,
+  type TaskLifecycleCommandResult,
+  type NewTaskInput,
+  type UpdateTaskInput,
+  type TaskListResult,
+  type TaskVersionItem,
+  type BatchUpdateTasksInput,
+  type BatchUpdateTasksResult,
+  type ReorderTasksInput,
+  type ReorderTasksResult,
+  type TaskListParams,
+  type TaskSavedViewDefinition,
+  type TaskSavedView,
+  type CreateTaskSavedViewInput,
+  type UpdateTaskSavedViewInput,
+  type DeleteTaskSavedViewResult,
+} from "./models/tasks";

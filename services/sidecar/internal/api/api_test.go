@@ -58,8 +58,8 @@ func TestRouterBindsAndReleasesArtifactStoreLifecycle(t *testing.T) {
 	}
 	defer first.Close()
 	var boundStoreID string
-	if err := store.SQL.QueryRow("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Scan(&boundStoreID); err != nil || boundStoreID != first.artifactStore.storeID {
-		t.Fatalf("bound store id=%q want=%q err=%v", boundStoreID, first.artifactStore.storeID, err)
+	if err := store.SQL.QueryRow("SELECT artifact_store_id FROM workspace_identity WHERE singleton = 1").Scan(&boundStoreID); err != nil || boundStoreID != first.artifactStore.StoreID {
+		t.Fatalf("bound store id=%q want=%q err=%v", boundStoreID, first.artifactStore.StoreID, err)
 	}
 
 	secondOptions := options

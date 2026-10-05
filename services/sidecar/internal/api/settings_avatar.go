@@ -14,29 +14,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
-const maxWorkspaceAvatarRequestBytes int64 = maxWorkspaceAvatarBytes + maxArtifactManifestBytes
+const maxWorkspaceAvatarRequestBytes int64 = filestore.MaxWorkspaceAvatarBytes + maxArtifactManifestBytes
 
 type workspaceAvatarManifest struct {
 	Operation string                 `json:"operation"`
 	Updates   []settingUpdateRequest `json:"updates"`
 }
-
-type workspaceAvatarRow struct {
-	ID                 string  `gorm:"column:id"`
-	RelativePath       string  `gorm:"column:relative_path"`
-	Extension          string  `gorm:"column:extension"`
-	MimeType           string  `gorm:"column:mime_type"`
-	SizeBytes          int64   `gorm:"column:size_bytes"`
-	SHA256             string  `gorm:"column:sha256"`
-	IntegrityStatus    string  `gorm:"column:integrity_status"`
-	IntegrityCheckedAt string  `gorm:"column:integrity_checked_at"`
-	CreatedAt          string  `gorm:"column:created_at"`
-	DeletedAt          *string `gorm:"column:deleted_at"`
-}
-
-func (workspaceAvatarRow) TableName() string { return "workspace_avatars" }
 
 func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 	if a.artifactStore == nil {
@@ -52,7 +39,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 		return
 	}
 	if staged != nil {
-		defer a.artifactStore.discardStagedFile(*staged)
+		defer a.artifactStore.DiscardStagedFile(*staged)
 	}
 	prepared, err := prepareSettingUpdates(manifest.Updates)
 	if err != nil {
@@ -76,7 +63,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 		return
 	}
 	var nextRef *string
-	var nextAvatar *workspaceAvatarRow
+	var nextAvatar *filestore.WorkspaceAvatarRow
 	if manifest.Operation == "replace" {
 		if staged == nil {
 			writeError(c, http.StatusBadRequest, "INVALID_MULTIPART", "Avatar replacement requires exactly one file")
@@ -84,18 +71,18 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 		}
 		// The ID is chosen while parsing so the controlled relative path and row
 		// are inseparable. readWorkspaceAvatarRequest preserves it in the path.
-		parts := strings.Split(strings.TrimPrefix(staged.relativePath, "avatars/"), ".")
+		parts := strings.Split(strings.TrimPrefix(staged.RelativePath, "avatars/"), ".")
 		if len(parts) != 2 {
 			writeError(c, http.StatusInternalServerError, "AVATAR_STORAGE_ERROR", "The workspace avatar path is invalid")
 			return
 		}
 		avatarID := parts[0]
-		ref := staged.relativePath
+		ref := staged.RelativePath
 		nextRef = &ref
 		nowText := a.options.Now().UTC().Format(time.RFC3339Nano)
-		nextAvatar = &workspaceAvatarRow{
-			ID: avatarID, RelativePath: ref, Extension: extension, MimeType: staged.mimeType,
-			SizeBytes: staged.sizeBytes, SHA256: staged.sha256, IntegrityStatus: "verified",
+		nextAvatar = &filestore.WorkspaceAvatarRow{
+			ID: avatarID, RelativePath: ref, Extension: extension, MimeType: staged.MIMEType,
+			SizeBytes: staged.SizeBytes, SHA256: staged.SHA256, IntegrityStatus: "verified",
 			IntegrityCheckedAt: nowText, CreatedAt: nowText,
 		}
 	} else if manifest.Operation != "remove" {
@@ -119,7 +106,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 	}
 
 	if staged != nil {
-		if err := a.artifactStore.commitStagedWorkspaceAvatar(*staged); err != nil {
+		if err := a.artifactStore.CommitStagedWorkspaceAvatar(*staged); err != nil {
 			writeError(c, http.StatusInternalServerError, "AVATAR_STORAGE_ERROR", "The workspace avatar could not be committed")
 			return
 		}
@@ -127,10 +114,10 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 	}
 	nowText := a.options.Now().UTC().Format(time.RFC3339Nano)
 	requestID := requestIDFromContext(c)
-	var previousAvatar *workspaceAvatarRow
+	var previousAvatar *filestore.WorkspaceAvatarRow
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		if current.AvatarRef != nil {
-			var row workspaceAvatarRow
+			var row filestore.WorkspaceAvatarRow
 			if err := tx.Where("relative_path = ? AND deleted_at IS NULL", *current.AvatarRef).Take(&row).Error; err == nil {
 				previousAvatar = &row
 				if err := retireWorkspaceAvatar(tx, row, nowText, "replaced from workspace settings"); err != nil {
@@ -155,7 +142,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 	if err != nil {
 		if nextAvatar != nil {
 			if !workspaceAvatarCommitProven(a.db, nextAvatar.RelativePath) {
-				_ = a.artifactStore.removeWorkspaceAvatar(nextAvatar.RelativePath)
+				_ = a.artifactStore.RemoveWorkspaceAvatar(nextAvatar.RelativePath)
 			}
 		}
 		if writeProjectRequestError(c, err) {
@@ -165,7 +152,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 		return
 	}
 	if previousAvatar != nil {
-		if err := a.artifactStore.removeWorkspaceAvatar(previousAvatar.RelativePath); err != nil && a.options.Logger != nil {
+		if err := a.artifactStore.RemoveWorkspaceAvatar(previousAvatar.RelativePath); err != nil && a.options.Logger != nil {
 			a.options.Logger.Printf("workspace avatar cleanup deferred avatar_id=%s: %v", previousAvatar.ID, err)
 		}
 	}
@@ -177,7 +164,7 @@ func (a *API) commitSettingsWithAvatar(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": response})
 }
 
-func (a *API) readWorkspaceAvatarRequest(c *gin.Context) (workspaceAvatarManifest, *stagedArtifactFile, string, error) {
+func (a *API) readWorkspaceAvatarRequest(c *gin.Context) (workspaceAvatarManifest, *filestore.StagedArtifactFile, string, error) {
 	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
 	if err != nil || mediaType != "multipart/form-data" {
 		return workspaceAvatarManifest{}, nil, "", newProjectRequestError(http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", "Content-Type must be multipart/form-data")
@@ -224,22 +211,22 @@ func (a *API) readWorkspaceAvatarRequest(c *gin.Context) (workspaceAvatarManifes
 		return workspaceAvatarManifest{}, nil, "", newProjectRequestError(http.StatusBadRequest, "INVALID_MULTIPART", "Avatar replacement requires one file part")
 	}
 	avatarID := uuid.NewString()
-	staged, extension, err := a.artifactStore.stageWorkspaceAvatar(filePart, avatarID)
+	staged, extension, err := a.artifactStore.StageWorkspaceAvatar(filePart, avatarID)
 	closeErr = filePart.Close()
 	if err != nil || closeErr != nil {
 		if err == nil {
 			err = closeErr
 		}
-		if errors.Is(err, errArtifactFileTooLarge) {
+		if errors.Is(err, filestore.ErrArtifactFileTooLarge) {
 			return workspaceAvatarManifest{}, nil, "", newProjectRequestError(http.StatusRequestEntityTooLarge, "AVATAR_FILE_TOO_LARGE", "Avatar files cannot exceed 2 MiB")
 		}
-		if errors.Is(err, errArtifactFileEmpty) || strings.Contains(err.Error(), "must be PNG") {
+		if errors.Is(err, filestore.ErrArtifactFileEmpty) || strings.Contains(err.Error(), "must be PNG") {
 			return workspaceAvatarManifest{}, nil, "", newProjectRequestError(http.StatusUnprocessableEntity, "VALIDATION_ERROR", err.Error())
 		}
 		return workspaceAvatarManifest{}, nil, "", multipartRequestReadError(err)
 	}
 	if extra, err := reader.NextPart(); !errors.Is(err, io.EOF) {
-		a.artifactStore.discardStagedFile(staged)
+		a.artifactStore.DiscardStagedFile(staged)
 		if err == nil {
 			_ = extra.Close()
 		}
@@ -262,7 +249,7 @@ func (a *API) getWorkspaceAvatarContent(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "AVATAR_NOT_FOUND", "Workspace avatar is not configured")
 		return
 	}
-	var avatar workspaceAvatarRow
+	var avatar filestore.WorkspaceAvatarRow
 	if err := a.db.Where("relative_path = ? AND deleted_at IS NULL", *value.AvatarRef).Take(&avatar).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 		writeError(c, http.StatusGone, "AVATAR_MISSING", "Workspace avatar metadata is unavailable")
 		return
@@ -270,12 +257,12 @@ func (a *API) getWorkspaceAvatarContent(c *gin.Context) {
 		writeDatabaseError(c)
 		return
 	}
-	path, err := a.artifactStore.resolveWorkspaceAvatar(avatar.RelativePath)
+	path, err := a.artifactStore.ResolveWorkspaceAvatar(avatar.RelativePath)
 	if err != nil {
 		writeError(c, http.StatusConflict, "AVATAR_INVALID", "Workspace avatar storage facts are invalid")
 		return
 	}
-	matches, err := artifactFileMatches(path, avatar.SizeBytes, avatar.SHA256)
+	matches, err := filestore.ArtifactFileMatches(path, avatar.SizeBytes, avatar.SHA256)
 	if err != nil || !matches {
 		status := "mismatch"
 		code := "AVATAR_INVALID"
@@ -283,13 +270,13 @@ func (a *API) getWorkspaceAvatarContent(c *gin.Context) {
 		if errors.Is(err, os.ErrNotExist) {
 			status, code, message = "missing", "AVATAR_MISSING", "Workspace avatar file is missing"
 		}
-		_ = a.db.Model(&workspaceAvatarRow{}).Where("id = ?", avatar.ID).Updates(map[string]any{
+		_ = a.db.Model(&filestore.WorkspaceAvatarRow{}).Where("id = ?", avatar.ID).Updates(map[string]any{
 			"integrity_status": status, "integrity_checked_at": a.options.Now().UTC().Format(time.RFC3339Nano),
 		}).Error
 		writeError(c, http.StatusGone, code, message)
 		return
 	}
-	file, info, err := a.artifactStore.openWorkspaceAvatar(avatar.RelativePath)
+	file, info, err := a.artifactStore.OpenWorkspaceAvatar(avatar.RelativePath)
 	if err != nil {
 		writeError(c, http.StatusGone, "AVATAR_MISSING", "Workspace avatar file is unavailable")
 		return
@@ -317,14 +304,14 @@ func loadWorkspaceSettingValue(db *gorm.DB) (workspaceSettingValue, error) {
 	return value, nil
 }
 
-func retireWorkspaceAvatar(tx *gorm.DB, avatar workspaceAvatarRow, nowText, reason string) error {
+func retireWorkspaceAvatar(tx *gorm.DB, avatar filestore.WorkspaceAvatarRow, nowText, reason string) error {
 	if err := tx.Table("workspace_avatar_deletion_tombstones").Create(map[string]any{
 		"avatar_id": avatar.ID, "relative_path": avatar.RelativePath, "size_bytes": avatar.SizeBytes,
 		"sha256": avatar.SHA256, "reason": reason, "created_at": nowText,
 	}).Error; err != nil {
 		return fmt.Errorf("record workspace avatar tombstone: %w", err)
 	}
-	result := tx.Model(&workspaceAvatarRow{}).Where("id = ? AND deleted_at IS NULL", avatar.ID).Updates(map[string]any{
+	result := tx.Model(&filestore.WorkspaceAvatarRow{}).Where("id = ? AND deleted_at IS NULL", avatar.ID).Updates(map[string]any{
 		"deleted_at": nowText, "deletion_reason": reason,
 	})
 	if result.Error != nil || result.RowsAffected != 1 {

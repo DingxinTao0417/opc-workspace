@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 func TestPreMigrationRollbackRejectsInsufficientCapacityWithoutPublishing(t *testing.T) {
@@ -29,16 +31,16 @@ func TestPreMigrationRollbackRejectsInsufficientCapacityWithoutPublishing(t *tes
 	if !errors.Is(err, errBackupSpaceInsufficient) {
 		t.Fatalf("CreatePreMigrationBackup() error = %v, want insufficient capacity", err)
 	}
-	if !sameFilesystemPath(probedPath, backupDir) {
+	if !filestore.SameFilesystemPath(probedPath, backupDir) {
 		t.Fatalf("capacity probe path = %q, want backup root %q", probedPath, backupDir)
 	}
 	assertBackupRootEmpty(t, backupDir)
 
-	artifacts, reopenErr := openWorkspaceArtifactStore(store.DB, artifactDir, false)
+	artifacts, reopenErr := filestore.OpenWorkspaceArtifactStore(store.DB, artifactDir, false)
 	if reopenErr != nil {
 		t.Fatalf("capacity refusal retained Artifact lease: %v", reopenErr)
 	}
-	if closeErr := artifacts.close(); closeErr != nil {
+	if closeErr := artifacts.Close(); closeErr != nil {
 		t.Fatalf("close reopened Artifact store: %v", closeErr)
 	}
 }
@@ -63,7 +65,7 @@ func TestBusinessImportsRejectInsufficientRollbackCapacityWithoutSideEffects(t *
 		if response.Code != http.StatusInsufficientStorage || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_SPACE_INSUFFICIENT" {
 			t.Fatalf("JSON import capacity refusal = %d: %s", response.Code, response.Body.String())
 		}
-		if !sameFilesystemPath(probedPath, backupDir) {
+		if !filestore.SameFilesystemPath(probedPath, backupDir) {
 			t.Fatalf("JSON import probe path = %q, want %q", probedPath, backupDir)
 		}
 		assertBackupRootEmpty(t, backupDir)
@@ -85,7 +87,7 @@ func TestBusinessImportsRejectInsufficientRollbackCapacityWithoutSideEffects(t *
 		if response.Code != http.StatusInsufficientStorage || responseErrorCode(t, response.Body.Bytes()) != "IMPORT_BACKUP_SPACE_INSUFFICIENT" {
 			t.Fatalf("package import capacity refusal = %d: %s", response.Code, response.Body.String())
 		}
-		if !sameFilesystemPath(probedPath, backupDir) {
+		if !filestore.SameFilesystemPath(probedPath, backupDir) {
 			t.Fatalf("package import probe path = %q, want %q", probedPath, backupDir)
 		}
 		assertBackupRootEmpty(t, backupDir)
@@ -149,7 +151,7 @@ func TestRestoreCapacityIncludesRollbackAndPendingPackageWithoutIncident(t *test
 	if response.Code != http.StatusInsufficientStorage || responseErrorCode(t, response.Body.Bytes()) != "RESTORE_ROLLBACK_SPACE_INSUFFICIENT" {
 		t.Fatalf("restore capacity refusal = %d: %s", response.Code, response.Body.String())
 	}
-	if !sameFilesystemPath(probedPath, backupDir) {
+	if !filestore.SameFilesystemPath(probedPath, backupDir) {
 		t.Fatalf("restore probe path = %q, want %q", probedPath, backupDir)
 	}
 	entries, err := os.ReadDir(backupDir)

@@ -245,21 +245,21 @@ func TestArtifactStoreReconcilesClientAttachmentCrashWindows(t *testing.T) {
 	}
 	attachment := decodeClientAttachmentResponse(t, upload.Body.Bytes())
 	relative := "objects/" + attachment.ID
-	moved, err := router.artifactStore.moveObjectToTrash(relative, attachment.ID)
+	moved, err := router.artifactStore.MoveObjectToTrash(relative, attachment.ID)
 	if err != nil {
 		t.Fatalf("simulate pre-commit client attachment crash: %v", err)
 	}
-	if err := router.artifactStore.reconcile(store.DB); err != nil {
+	if err := router.artifactStore.Reconcile(store.DB); err != nil {
 		t.Fatalf("reconcile active client attachment: %v", err)
 	}
 	if content, err := os.ReadFile(filepath.Join(artifactRoot, "objects", attachment.ID)); err != nil || string(content) != "recover client file" {
 		t.Fatalf("active client attachment was not restored content=%q err=%v", content, err)
 	}
-	if _, err := os.Stat(moved.trashPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(moved.TrashPath); !os.IsNotExist(err) {
 		t.Fatalf("restored client attachment retained trash: %v", err)
 	}
 
-	moved, err = router.artifactStore.moveObjectToTrash(relative, attachment.ID)
+	moved, err = router.artifactStore.MoveObjectToTrash(relative, attachment.ID)
 	if err != nil {
 		t.Fatalf("simulate committed client attachment deletion: %v", err)
 	}
@@ -278,10 +278,10 @@ func TestArtifactStoreReconcilesClientAttachmentCrashWindows(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("commit client attachment deletion fixture: %v", err)
 	}
-	if err := router.artifactStore.reconcile(store.DB); err != nil {
+	if err := router.artifactStore.Reconcile(store.DB); err != nil {
 		t.Fatalf("reconcile committed client attachment deletion: %v", err)
 	}
-	if _, err := os.Stat(moved.trashPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(moved.TrashPath); !os.IsNotExist(err) {
 		t.Fatalf("committed client attachment trash was not purged: %v", err)
 	}
 }

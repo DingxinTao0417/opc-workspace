@@ -49,4 +49,21 @@ type AgentRunStartGate struct {
 	ExpiresAt        string  `json:"expires_at"`
 	Status           string  `json:"status"`
 	CloseReason      *string `json:"close_reason,omitempty"`
+	// InputSlot is set when the Run takes the predecessor's accepted files as
+	// its inputs (ADR-033). Such a gate is released only by a person who
+	// confirms the exact files; it carries metadata, never file content.
+	InputSlot *AgentRunStartGateInputSlot `json:"input_slot,omitempty"`
+}
+
+// AgentRunStartGateInputSlot describes the files a gated Run is waiting for.
+type AgentRunStartGateInputSlot struct {
+	Source        string                 `json:"source"`
+	Status        string                 `json:"status"`
+	ExpectedFiles []AgentRunExpectedFile `json:"expected_files"`
+}
+
+// AgentRunExpectedFile is one file the predecessor Run is contracted to write.
+type AgentRunExpectedFile struct {
+	Name string `json:"name"`
+	MIME string `json:"mime"`
 }

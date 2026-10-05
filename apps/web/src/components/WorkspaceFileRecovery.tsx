@@ -67,11 +67,13 @@ export function WorkspaceFileRecovery({ root }: { root: WorkspaceRoot }) {
   useEffect(() => {
     void load();
     return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- the counter is bumped on purpose so in-flight loads are discarded
       ++revision.current;
       release(held.current);
       held.current = null;
       lock.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloads only when another root is shown
   }, [root.id]);
   useEffect(() => {
     if (!preview) return;
@@ -85,6 +87,7 @@ export function WorkspaceFileRecovery({ root }: { root: WorkspaceRoot }) {
       Math.max(0, preview.expiresAt - Date.now()),
     );
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the timer is tied to the preview being shown
   }, [preview]);
   const select = async (
     record: WorkspaceFileRecoveryList["records"][number],

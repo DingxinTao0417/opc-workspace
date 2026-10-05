@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -72,7 +73,7 @@ func loadClientDeletionImpact(tx *gorm.DB, id string, expectedVersion int64) (mo
 	return client, impact, nil
 }
 
-func (a *API) deleteClientInTransaction(tx *gorm.DB, id string, expectedVersion int64, deletedAt string) (models.Client, clientDeletionImpact, deletedClientResponse, []trashedArtifactFile, error) {
+func (a *API) deleteClientInTransaction(tx *gorm.DB, id string, expectedVersion int64, deletedAt string) (models.Client, clientDeletionImpact, deletedClientResponse, []filestore.TrashedArtifactFile, error) {
 	client, impact, err := loadClientDeletionImpact(tx, id, expectedVersion)
 	if err != nil {
 		return client, impact, deletedClientResponse{}, nil, err
@@ -91,7 +92,7 @@ func (a *API) deleteClientInTransaction(tx *gorm.DB, id string, expectedVersion 
 	return client, impact, deletedClientResponse{DeletedID: id, DetachedProjects: impact.Projects}, moved, nil
 }
 
-func (a *API) finishClientDeletion(clientID string, moved []trashedArtifactFile, err error) {
+func (a *API) finishClientDeletion(clientID string, moved []filestore.TrashedArtifactFile, err error) {
 	if err != nil {
 		if restoreErr := a.restoreClientAttachmentFiles(moved); restoreErr != nil && a.options.Logger != nil {
 			a.options.Logger.Printf("Client attachment delete compensation failed client_id=%s error=%v", clientID, restoreErr)
@@ -100,7 +101,7 @@ func (a *API) finishClientDeletion(clientID string, moved []trashedArtifactFile,
 	}
 	if a.artifactStore != nil {
 		for _, file := range moved {
-			a.artifactStore.purgeTrashedFile(file)
+			a.artifactStore.PurgeTrashedFile(file)
 		}
 	}
 }

@@ -31,6 +31,7 @@ export function AiProjectFileContext({
         current.approval.providerVersion !== provider.version)
     )
       current.revoke();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the provider identity and version, not on the object
   }, [sessionId, provider?.id, provider?.version]);
   useEffect(() => () => useAiProjectFiles.getState().clear(), []);
   useEffect(() => {

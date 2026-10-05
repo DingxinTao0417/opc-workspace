@@ -180,14 +180,14 @@ func aiAgentFileTools(t *testing.T, f aiAgentRunFixture) (harness.Tool, harness.
 func seedAIAgentRunTaskFile(t *testing.T, f aiAgentRunFixture, name, body string) models.TaskArtifact {
 	t.Helper()
 	artifactID := uuid.NewString()
-	staged, err := f.Service.artifactStore.stageMultipartFileWithLimit(
+	staged, err := f.Service.artifactStore.StageMultipartFileWithLimit(
 		strings.NewReader(body), artifactID, int64(agentexec.MaxFileInputBytes),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Service.artifactStore.commitStagedFile(staged); err != nil {
-		f.Service.artifactStore.discardStagedFile(staged)
+	if err := f.Service.artifactStore.CommitStagedFile(staged); err != nil {
+		f.Service.artifactStore.DiscardStagedFile(staged)
 		t.Fatal(err)
 	}
 	checkedAt := f.Generation.CreatedAt
@@ -199,7 +199,7 @@ func seedAIAgentRunTaskFile(t *testing.T, f aiAgentRunFixture, name, body string
 	if err := f.Store.DB.Create(&submission).Error; err != nil {
 		t.Fatal(err)
 	}
-	relativePath, mimeType, sizeBytes, digest := staged.relativePath, staged.mimeType, staged.sizeBytes, staged.sha256
+	relativePath, mimeType, sizeBytes, digest := staged.RelativePath, staged.MIMEType, staged.SizeBytes, staged.SHA256
 	artifact := models.TaskArtifact{
 		ID: artifactID, TaskID: f.Task.ID, SubmissionID: submission.ID, Position: 1,
 		StorageKind: "file", Name: name, RelativePath: &relativePath, MimeType: &mimeType,
@@ -572,7 +572,7 @@ func TestAIAgentFileConfirmationRejectsControlledFileDrift(t *testing.T) {
 	if err := f.Store.DB.Model(&f.Generation).Update("status", "completed").Error; err != nil {
 		t.Fatal(err)
 	}
-	objectPath, err := f.Service.artifactStore.resolveObject(*artifact.RelativePath)
+	objectPath, err := f.Service.artifactStore.ResolveObject(*artifact.RelativePath)
 	if err != nil {
 		t.Fatal(err)
 	}

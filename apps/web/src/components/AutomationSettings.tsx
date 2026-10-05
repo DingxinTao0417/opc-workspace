@@ -1,3 +1,4 @@
+import "./AutomationSettings.css";
 import {
   AlertCircle,
   BellRing,
@@ -136,6 +137,7 @@ export function AutomationSettings({
     if (!selected) return;
     setDraft(selected.config);
     setFeedback(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resets the draft only when another rule or version is selected
   }, [selected?.id, selected?.version]);
 
   useEffect(() => {
@@ -150,7 +152,7 @@ export function AutomationSettings({
     return () => window.clearTimeout(timer);
     // The mutation object is intentionally excluded; only the selected draft
     // should schedule a new server-authoritative preview.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only the selected draft schedules a preview; see above
   }, [
     selected?.id,
     draft,

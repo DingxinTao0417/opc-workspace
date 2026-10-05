@@ -123,7 +123,7 @@ export function TaskSelect({
         new Set(excludeStatuses),
       ),
     // The stable keys avoid recalculating for equivalent inline arrays.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the joined keys stand in for the inline arrays
     [excludedIdKey, excludedStatusKey, optionsQuery.data?.items, value],
   );
 

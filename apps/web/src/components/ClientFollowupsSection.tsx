@@ -386,7 +386,7 @@ export function ClientFollowupsSection({
   const [nextPlanDraft, setNextPlanDraft] = useState<PlanDraft>(emptyPlanDraft);
   const [localError, setLocalError] = useState<string | null>(null);
   const items = query.data?.items ?? [];
-  const actors = actorsQuery.data ?? [];
+  const actors = useMemo(() => actorsQuery.data ?? [], [actorsQuery.data]);
   const totalPages = Math.max(
     1,
     Math.ceil((query.data?.meta.total ?? 0) / (query.data?.meta.pageSize ?? 6)),

@@ -450,7 +450,9 @@ describe("AiSessionRail", () => {
       "2",
     );
     expect(
-      screen.getByRole("button", { name: /续办队列/ }).querySelector(".nav-badge"),
+      screen
+        .getByRole("button", { name: /续办队列/ })
+        .querySelector(".nav-badge"),
     ).toHaveTextContent("2");
     expect(screen.getByRole("button", { name: "AI 助手设置" })).toHaveClass(
       "nav-item",

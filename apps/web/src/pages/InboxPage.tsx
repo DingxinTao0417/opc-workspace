@@ -1,3 +1,4 @@
+import "./InboxPage.css";
 import {
   Archive,
   BellRing,
@@ -232,7 +233,11 @@ export function InboxPage() {
   });
   const markAllMutation = useMarkAllInboxItemsRead();
   const transitioning = query.isPlaceholderData && query.isFetching;
-  const items = transitioning ? [] : (query.data?.items ?? []);
+  const loadedItems = query.data?.items;
+  const items = useMemo(
+    () => (transitioning ? [] : (loadedItems ?? [])),
+    [loadedItems, transitioning],
+  );
   const totalPages = Math.max(
     1,
     Math.ceil(

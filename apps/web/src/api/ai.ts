@@ -115,7 +115,7 @@ export async function streamAiChat(input: StreamAiChatInput): Promise<void> {
       }),
       signal: controller.signal,
     });
-  } catch (error) {
+  } catch {
     upstreamSignal?.removeEventListener("abort", abortFromUpstream);
     if (controller.signal.aborted) return;
     throw new ApiError("无法连接本地 Sidecar", { code: "NETWORK_ERROR" });
@@ -600,6 +600,7 @@ function parseAiStreamBlock(block: string): AiChatStreamEvent | null {
 }
 
 function isAiWorkspaceBrowserNavigationUrl(value: string): boolean {
+  // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
   if (!value || value.length > 4096 || /[\u0000-\u001f\u007f]/.test(value))
     return false;
   try {

@@ -29,7 +29,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import {
+  confirmAgentRunStartGateInputs,
   getAgentRun,
+  getAgentRunStartGateInputs,
   getTask,
   getTaskAgentRuns,
   retryAgentRunOutputDelivery,
@@ -38,7 +40,7 @@ import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import { useAgentRunFileApply } from "../store/agentRunFileApply";
 import { useUiStore } from "../store/ui";
 import { useAiChatStore } from "../store/aiChat";
-import type { AgentRun, Task } from "../types/models";
+import type { AgentRun, AgentRunStartGateInputs, Task } from "../types/models";
 import { AgentRunDrawer } from "./AgentRunDrawer";
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -46,6 +48,8 @@ vi.mock("../api/client", async (importOriginal) => ({
   getTask: vi.fn(),
   getTaskAgentRuns: vi.fn(),
   getAgentRun: vi.fn(),
+  getAgentRunStartGateInputs: vi.fn(),
+  confirmAgentRunStartGateInputs: vi.fn(),
   retryAgentRunOutputDelivery: vi.fn(),
 }));
 
@@ -543,6 +547,124 @@ describe("AgentRunDrawer", () => {
       ).toBe(_name === "waiting" ? "pending" : "cancelled");
     },
   );
+
+  it("asks for the predecessor's files in the drawer and follows the Run once confirmed", async () => {
+    const predecessorRunId = "018f0000-0000-7000-8000-000000000601";
+    const expectedFiles = [
+      { name: "research.md", mime: "text/markdown" as const },
+    ];
+    const slotRun = (slot: "awaiting_confirmation" | "bound"): AgentRun => ({
+      ...failedRun,
+      errorCode: null,
+      status: slot === "bound" ? "running" : "queued",
+      executionContractVersion: 7,
+      startedAt: slot === "bound" ? "2026-09-12T12:10:00Z" : null,
+      completedAt: null,
+      startGate: {
+        predecessorRunId,
+        require: "accepted",
+        expiresAt: "2026-09-12T14:00:00Z",
+        status: slot === "bound" ? "released" : "waiting",
+        inputSlot: { source: "predecessor_files", status: slot, expectedFiles },
+      },
+    });
+    const inputs = (
+      status: "awaiting_confirmation" | "bound",
+    ): AgentRunStartGateInputs => ({
+      runId: failedRun.id,
+      taskId: task.id,
+      status,
+      expiresAt: "2026-09-12T14:00:00Z",
+      predecessor: {
+        runId: predecessorRunId,
+        taskTitle: "完成调研",
+        attempt: 1,
+      },
+      expectedFiles,
+      provider: {
+        id: "provider-1",
+        name: "远程模型",
+        kind: "remote",
+        model: "deepseek-test",
+        version: 3,
+        configVersion: 7,
+        leavesDevice: true,
+      },
+      files: [
+        {
+          id: "018f0000-0000-7000-8000-000000000602",
+          source_kind: "project_task_artifact",
+          name: "research.md",
+          mime: "text/markdown",
+          size_bytes: 120,
+          sha256: "a".repeat(64),
+          source_task: {
+            project_id: "018f0000-0000-7000-8000-000000000603",
+            task_id: "018f0000-0000-7000-8000-000000000604",
+            task_title: "完成调研",
+            task_version: 4,
+            submission_id: "018f0000-0000-7000-8000-000000000605",
+            submission_sequence: 1,
+          },
+        },
+      ],
+      totalBytes: 120,
+      limits: { maxFiles: 4, maxFileBytes: 65_536, maxTotalBytes: 131_072 },
+      fingerprint: "c".repeat(64),
+    });
+    let current = slotRun("awaiting_confirmation");
+    vi.mocked(getTaskAgentRuns).mockImplementation(async () => [current]);
+    vi.mocked(getAgentRun).mockImplementation(async () => current);
+    vi.mocked(getAgentRunStartGateInputs).mockImplementation(async () =>
+      inputs(current.startGate!.inputSlot!.status as "bound"),
+    );
+    vi.mocked(confirmAgentRunStartGateInputs).mockImplementation(async () => {
+      current = slotRun("bound");
+      return inputs("bound");
+    });
+    renderDrawer(current.id);
+
+    const dialog = await screen.findByRole("dialog", { name: "执行过程" });
+    expect(
+      (await within(dialog).findAllByText("待确认输入文件")).length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(dialog).getByText(/前置产出已验收，等待你在下方确认输入文件/),
+    ).toBeVisible();
+    const panel = within(dialog).getByRole("region", { name: "前置产出输入" });
+    expect(
+      await within(panel).findByRole("list", { name: "前置产出文件" }),
+    ).toHaveTextContent("research.md");
+    const submit = within(panel).getByRole("button", {
+      name: "确认这些文件并启动执行",
+    });
+    expect(submit).toBeDisabled();
+    for (const name of [/我已逐份核对上列文件/, /我同意把这些文件的正文发送给/])
+      fireEvent.click(within(panel).getByRole("checkbox", { name }));
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(confirmAgentRunStartGateInputs).toHaveBeenCalledWith({
+        runId: failedRun.id,
+        taskId: task.id,
+        fingerprint: "c".repeat(64),
+        provider: { version: 3, configVersion: 7, kind: "remote" },
+      }),
+    );
+    expect(
+      await within(dialog).findByText(
+        /输入文件已由人工确认，已进入普通执行队列/,
+      ),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("region", { name: "前置产出输入" }),
+      ).toHaveTextContent("已确认下列 1 个文件"),
+    );
+    expect(
+      within(dialog).queryByRole("button", { name: "确认这些文件并启动执行" }),
+    ).not.toBeInTheDocument();
+  });
 
   it("selects a historical run and shows its error instead of another run's result", async () => {
     renderDrawer();

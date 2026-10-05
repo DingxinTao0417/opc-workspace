@@ -1,3 +1,4 @@
+import "./AiSessionRail.css";
 import {
   PanelLeftClose,
   CalendarClock,

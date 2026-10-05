@@ -1,3 +1,4 @@
+import "./AiWorkPlan.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -68,6 +69,7 @@ export function AiWorkPlan({
   );
   const continuationOwner = useMemo(
     () => ({}),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a fresh owner token whenever any of these change, on purpose
     [sessionId, version, live, onContinue, planUpdateVersion, focusRequest],
   );
   const continuationOwnerRef = useRef(continuationOwner);
@@ -234,9 +236,10 @@ export function AiWorkPlan({
   }
   // The terminal transition must refresh even when the last revision arrived
   // just before the final progress event or no plan existed on the first read.
+  const refetchPlan = query.refetch;
   useEffect(() => {
-    if (isWorkspaceIdentity(sessionId)) void query.refetch();
-  }, [sessionId, live]);
+    if (isWorkspaceIdentity(sessionId)) void refetchPlan();
+  }, [sessionId, live, refetchPlan]);
   if (!isWorkspaceIdentity(sessionId)) return null;
   if (query.isError)
     return (

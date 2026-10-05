@@ -35,6 +35,7 @@ const (
 var agentRunStartGateCloseReasons = map[string]struct{}{
 	"predecessor_failed": {}, "predecessor_cancelled": {}, "predecessor_retained": {},
 	"predecessor_not_accepted": {}, "predecessor_unavailable": {}, "expired": {}, "run_not_queued": {},
+	agentRunStartGateOutputUnavailable: {},
 }
 
 // SQL fragment for a row of `agent_runs` whose start gate is still open.
@@ -55,6 +56,8 @@ type agentRunStartGatePayload struct {
 	PredecessorRunID string `json:"predecessor_run_id"`
 	Require          string `json:"require"`
 	ExpiresAt        string `json:"expires_at"`
+	// InputSlot repeats the v7 declaration of the gated Run (ADR-033).
+	InputSlot *agentRunDeferredInputs `json:"input_slot,omitempty"`
 }
 
 type agentRunStartGateEventRow struct {
@@ -72,6 +75,7 @@ func validAgentRunStartAfter(value string) bool {
 // treating the Run as ungated.
 func readAgentRunStartGates(tx *gorm.DB, runIDs []string) (map[string]*models.AgentRunStartGate, error) {
 	gates := make(map[string]*models.AgentRunStartGate, len(runIDs))
+	slots := make(map[string]agentRunDeferredInputs)
 	if len(runIDs) == 0 {
 		return gates, nil
 	}
@@ -97,10 +101,25 @@ func readAgentRunStartGates(tx *gorm.DB, runIDs []string) (map[string]*models.Ag
 		if err != nil {
 			return nil, errors.New("invalid agent run start gate expiry")
 		}
-		gates[row.AggregateID] = &models.AgentRunStartGate{
+		gate := &models.AgentRunStartGate{
 			PredecessorRunID: payload.PredecessorRunID, Require: payload.Require,
 			ExpiresAt: expires.UTC().Format(time.RFC3339Nano), Status: agentRunStartGateWaiting,
 		}
+		if payload.InputSlot != nil {
+			if !validAgentRunDeferredInputs(*payload.InputSlot) || payload.InputSlot.PredecessorRunID != payload.PredecessorRunID ||
+				payload.Require != agentRunStartAfterAccepted {
+				return nil, errors.New("invalid agent run start gate input slot")
+			}
+			slots[row.AggregateID] = *payload.InputSlot
+			gate.InputSlot = &models.AgentRunStartGateInputSlot{
+				Source: payload.InputSlot.Source, Status: agentRunInputSlotAwaitingPredecessor,
+				ExpectedFiles: make([]models.AgentRunExpectedFile, len(payload.InputSlot.ExpectedFiles)),
+			}
+			for index, file := range payload.InputSlot.ExpectedFiles {
+				gate.InputSlot.ExpectedFiles[index] = models.AgentRunExpectedFile{Name: file.Name, MIME: file.MIME}
+			}
+		}
+		gates[row.AggregateID] = gate
 	}
 	for _, row := range rows {
 		gate := gates[row.AggregateID]
@@ -108,6 +127,13 @@ func readAgentRunStartGates(tx *gorm.DB, runIDs []string) (map[string]*models.Ag
 		case agentRunStartGateReleasedEvent:
 			if gate == nil || gate.Status != agentRunStartGateWaiting {
 				return nil, errors.New("invalid agent run start gate release")
+			}
+			if gate.InputSlot != nil {
+				// Only a recorded human confirmation releases a gate with a slot.
+				if _, err := decodeAgentRunStartGateBinding(row.CurrentJSON, slots[row.AggregateID]); err != nil {
+					return nil, err
+				}
+				gate.InputSlot.Status = agentRunInputSlotBound
 			}
 			gate.Status = agentRunStartGateReleased
 		case agentRunStartGateClosedEvent:
@@ -122,6 +148,23 @@ func readAgentRunStartGates(tx *gorm.DB, runIDs []string) (map[string]*models.Ag
 			}
 			reason := payload.Reason
 			gate.Status, gate.CloseReason = agentRunStartGateClosed, &reason
+			if gate.InputSlot != nil {
+				gate.InputSlot.Status = agentRunInputSlotClosed
+			}
+		}
+	}
+	// A waiting slot is either still waiting for the predecessor to be
+	// accepted, or waiting for a person to confirm the accepted files.
+	for _, gate := range gates {
+		if gate.InputSlot == nil || gate.Status != agentRunStartGateWaiting {
+			continue
+		}
+		predecessor, submissionStatus, err := readAgentRunStartGatePredecessor(tx, gate.PredecessorRunID)
+		if err != nil {
+			return nil, err
+		}
+		if decideAgentRunStartGate(predecessor, submissionStatus, gate.Require) == "release" {
+			gate.InputSlot.Status = agentRunInputSlotAwaitingConfirmation
 		}
 	}
 	return gates, nil
@@ -212,7 +255,7 @@ func readAgentRunStartGatePredecessor(tx *gorm.DB, runID string) (*models.AgentR
 // validateAgentRunStartGateRequest is shared by the proposal preview and the
 // confirmation transaction: a gate that is already satisfied, impossible or
 // over budget is refused before any Run exists.
-func validateAgentRunStartGateRequest(tx *gorm.DB, predecessorRunID, require string, hours int, targetTaskID string) (*models.AgentRun, error) {
+func validateAgentRunStartGateRequest(tx *gorm.DB, predecessorRunID, require string, hours int, targetTaskID string, slot *agentRunDeferredInputs) (*models.AgentRun, error) {
 	if !validCanonicalAgentRunID(predecessorRunID) || !validAgentRunStartAfter(require) || hours < 1 || hours > agentRunStartGateMaxHours {
 		return nil, newProjectRequestError(http.StatusUnprocessableEntity, agentRunStartGateInvalidCode,
 			"A start gate needs an exact predecessor Run, start_after submitted or accepted, and 1-24 hours")
@@ -224,6 +267,21 @@ func validateAgentRunStartGateRequest(tx *gorm.DB, predecessorRunID, require str
 	if predecessor != nil && predecessor.TaskID == targetTaskID {
 		return nil, newProjectRequestError(http.StatusUnprocessableEntity, agentRunStartGateInvalidCode,
 			"The predecessor Run must belong to a different Task")
+	}
+	if slot != nil {
+		// The declaration is derived again from the predecessor on every
+		// preview and at confirmation; one that no longer matches is refused.
+		var targetTask models.Task
+		if err := tx.Select("id", "project_id").Take(&targetTask, "id = ?", targetTaskID).Error; err != nil {
+			return nil, err
+		}
+		current, err := agentRunDeferredInputsFor(tx, targetTask, predecessorRunID, require)
+		if err != nil {
+			return nil, err
+		}
+		if !sameAgentRunDeferredInputs(current, *slot) {
+			return nil, agentRunDeferredInputsError("The output contract of the predecessor Run changed; propose the start again")
+		}
 	}
 	switch decision := decideAgentRunStartGate(predecessor, submissionStatus, require); decision {
 	case "wait":
@@ -247,17 +305,30 @@ func validateAgentRunStartGateRequest(tx *gorm.DB, predecessorRunID, require str
 
 // openAgentRunStartGate must run in the transaction that created the queued
 // Run, so the Run is never visible to the dispatcher without its gate.
-func openAgentRunStartGate(tx *gorm.DB, run models.AgentRun, predecessorRunID, require string, hours int, now time.Time) error {
+func openAgentRunStartGate(tx *gorm.DB, run models.AgentRun, predecessorRunID, require string, hours int, now time.Time, slot *agentRunDeferredInputs) error {
 	if run.Status != "queued" || run.OutputDeliveryStatus != agentRunOutputNotReady {
 		return errors.New("only a newly queued Run can be gated")
 	}
-	if _, err := validateAgentRunStartGateRequest(tx, predecessorRunID, require, hours, run.TaskID); err != nil {
+	// A slot and a v7 Run exist only together, and say the same thing.
+	if (slot != nil) != (run.ExecutionContractVersion == agentRunExecutionContractVersionV7) {
+		return errors.New("a start gate input slot requires a v7 Run")
+	}
+	if slot != nil {
+		snapshot, err := parseAgentRunV7Snapshot(run.InputSnapshotJSON)
+		if err != nil || !sameAgentRunDeferredInputs(*snapshot.DeferredInputs, *slot) {
+			return errors.New("the start gate input slot does not match the Run")
+		}
+	}
+	if _, err := validateAgentRunStartGateRequest(tx, predecessorRunID, require, hours, run.TaskID, slot); err != nil {
 		return err
 	}
 	at := now.UTC()
 	payload := map[string]any{
 		"predecessor_run_id": predecessorRunID, "require": require,
 		"expires_at": at.Add(time.Duration(hours) * time.Hour).Format(time.RFC3339Nano),
+	}
+	if slot != nil {
+		payload["input_slot"] = slot
 	}
 	return recordAgentRunWorkflowEvent(tx, agentRunStartGatedEvent, run.ID, payload, "", at.Format(time.RFC3339Nano))
 }
@@ -347,7 +418,8 @@ func (a *API) reconcileAgentRunStartGates(now time.Time) (agentRunStartGateOutco
 					return errors.New("agent run start gate projection changed")
 				}
 				var run models.AgentRun
-				if err := tx.Select("id, status, output_delivery_status").Take(&run, "id = ?", runID).Error; err != nil {
+				if err := tx.Select("id, task_id, status, output_delivery_status, execution_contract_version, input_snapshot_json").
+					Take(&run, "id = ?", runID).Error; err != nil {
 					return err
 				}
 				decision := "run_not_queued"
@@ -361,6 +433,13 @@ func (a *API) reconcileAgentRunStartGates(now time.Time) (agentRunStartGateOutco
 							return err
 						}
 						decision = decideAgentRunStartGate(predecessor, submissionStatus, gate.Require)
+						if decision == "release" && gate.InputSlot != nil {
+							// The condition is met, but the files still need a
+							// person. Keep waiting unless they are already gone.
+							if decision, err = decideAgentRunInputSlot(tx, run); err != nil {
+								return err
+							}
+						}
 					}
 				}
 				switch decision {
@@ -407,4 +486,29 @@ func (a *API) reconcileAgentRunStartGates(now time.Time) (agentRunStartGateOutco
 		}
 	}
 	return outcome, nil
+}
+
+// decideAgentRunInputSlot is reached once the predecessor is accepted. It
+// reads metadata only: "wait" while the accepted files are still valid inputs
+// for the gated Run, otherwise the reason to close the gate.
+func decideAgentRunInputSlot(tx *gorm.DB, run models.AgentRun) (string, error) {
+	snapshot, err := parseAgentRunV7Snapshot(run.InputSnapshotJSON)
+	if err != nil {
+		return agentRunStartGateOutputUnavailable, nil
+	}
+	var task models.Task
+	if err := tx.Select("id", "project_id").Take(&task, "id = ?", run.TaskID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return agentRunStartGateOutputUnavailable, nil
+		}
+		return "", err
+	}
+	if _, err := loadAgentRunPredecessorOutputRecords(tx, task, *snapshot.DeferredInputs); err != nil {
+		var requestErr *projectRequestError
+		if errors.As(err, &requestErr) {
+			return agentRunStartGateOutputUnavailable, nil
+		}
+		return "", err
+	}
+	return "wait", nil
 }

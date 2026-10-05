@@ -91,6 +91,7 @@ function validDeletionPdf(
     typeof before.pdf_file_name === "string" &&
     before.pdf_file_name.length >= 5 &&
     before.pdf_file_name.length <= 180 &&
+    // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
     !/[\\/\u0000-\u001f\u007f]/.test(before.pdf_file_name) &&
     before.pdf_file_name.endsWith(".pdf") &&
     typeof before.pdf_sha256 === "string" &&

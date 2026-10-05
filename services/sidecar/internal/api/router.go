@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/api/apikit"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/harness"
 	"github.com/opc-workspace/opc-sidecar/internal/keystore"
 	"gorm.io/gorm"
@@ -57,7 +59,7 @@ type API struct {
 	aiContinuations            *aiContinuationCoordinator
 	aiDelegations              *aiDelegationCoordinator
 	aiCompactions              *aiCompactionRegistry
-	artifactStore              *artifactStore
+	artifactStore              *filestore.ArtifactStore
 	invoicePDFStore            *invoicePDFStore
 	backupStore                *backupStore
 	maintenance                *sync.RWMutex
@@ -81,7 +83,7 @@ type API struct {
 
 type Router struct {
 	*gin.Engine
-	artifactStore                *artifactStore
+	artifactStore                *filestore.ArtifactStore
 	invoicePDFStore              *invoicePDFStore
 	focusHeartbeatCancel         context.CancelFunc
 	focusHeartbeatDone           chan struct{}
@@ -152,7 +154,7 @@ func (r *Router) Close() error {
 		}
 		var artifactErr, invoicePDFErr error
 		if r.artifactStore != nil {
-			artifactErr = r.artifactStore.close()
+			artifactErr = r.artifactStore.Close()
 		}
 		if r.invoicePDFStore != nil {
 			invoicePDFErr = r.invoicePDFStore.close()
@@ -163,7 +165,7 @@ func (r *Router) Close() error {
 }
 
 func NewRouter(db *gorm.DB, options Options) (*Router, error) {
-	if err := middlewareConfigurationError(options.SessionToken, options.DevMode, options.AllowedOrigins); err != nil {
+	if err := apikit.MiddlewareConfigurationError(options.SessionToken, options.DevMode, options.AllowedOrigins); err != nil {
 		return nil, err
 	}
 	if options.Logger == nil {
@@ -207,11 +209,11 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		return nil, err
 	}
 	router.Use(
-		requestIDMiddleware(),
-		originMiddleware(options.AllowedOrigins),
-		authMiddleware(options.SessionToken, options.DevMode),
-		accessLogMiddleware(options.Logger),
-		recoveryMiddleware(options.Logger),
+		apikit.RequestIDMiddleware(),
+		apikit.OriginMiddleware(options.AllowedOrigins),
+		apikit.AuthMiddleware(options.SessionToken, options.DevMode),
+		apikit.AccessLogMiddleware(options.Logger),
+		apikit.RecoveryMiddleware(options.Logger),
 	)
 	router.NoRoute(func(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "ROUTE_NOT_FOUND", "Route not found")
@@ -220,17 +222,17 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		writeError(c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed")
 	})
 
-	var artifacts *artifactStore
+	var artifacts *filestore.ArtifactStore
 	if options.ArtifactDir != "" {
 		var err error
-		artifacts, err = openWorkspaceArtifactStore(db, options.ArtifactDir, true)
+		artifacts, err = filestore.OpenWorkspaceArtifactStore(db, options.ArtifactDir, true)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if err := recoverFocusSessionsOnStartup(db, options.Now().UTC().Truncate(time.Second)); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover active Focus Sessions: %w", err)
 	}
@@ -240,7 +242,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		backups, err = newBackupStore(options.BackupDir, options.DatabasePath, artifacts)
 		if err != nil {
 			if artifacts != nil {
-				_ = artifacts.close()
+				_ = artifacts.Close()
 			}
 			return nil, err
 		}
@@ -257,7 +259,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		invoicePDFs, err = openInvoicePDFStore(db, options.InvoicePDFDir)
 		if err != nil {
 			if artifacts != nil {
-				_ = artifacts.close()
+				_ = artifacts.Close()
 			}
 			return nil, err
 		}
@@ -286,88 +288,88 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 	}
 	if err := recoverAIGenerationsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover AI generations: %w", err)
 	}
 	startupDelegations, err := recoverAIDelegationsOnStartup(db, options.Now().UTC())
 	if err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover AI delegations: %w", err)
 	}
 	if err := recoverAIContinuationsOnStartup(db, options.StartupRestore.Applied, options.Now()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("interrupt AI continuations: %w", err)
 	}
 	if err := recoverAIEvaluationRunsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover AI evaluation runs: %w", err)
 	}
 	if err := recoverKnowledgeIndexJobsOnStartup(db, options.Now().UTC()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover knowledge index jobs: %w", err)
 	}
 	queuedAgentRunIDs, err := service.recoverAgentRunsOnStartup(options.Now().UTC())
 	if err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("recover agent runs: %w", err)
 	}
 	if err := service.ensureAutomationRules(options.Now().UTC()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("initialize preset Automations: %w", err)
 	}
 	service.consumeAutomationEventDeliveriesBestEffort("startup-pending")
 	if err := service.projectDueAutomations(options.Now().UTC()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Automations: %w", err)
 	}
 	if err := service.projectDueReminders(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Reminders: %w", err)
 	}
 	if err := service.projectDueClientFollowups(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Client Followups: %w", err)
 	}
 	if err := service.projectDueTasks(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Tasks: %w", err)
 	}
 	if err := service.projectDueContentItems(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Content Items: %w", err)
 	}
 	if err := service.projectDueRoadmapMilestones(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Roadmap Milestones: %w", err)
 	}
 	if err := service.projectDueInvoiceSources(context.Background()); err != nil {
 		if artifacts != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 		}
 		return nil, fmt.Errorf("project due Invoices: %w", err)
 	}
@@ -427,6 +429,8 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 		v1.POST("/agent-runs/:id/cancel", service.cancelAgentRun)
 		v1.POST("/agent-runs/:id/retry", service.retryAgentRun)
 		v1.POST("/agent-runs/:id/output-delivery/retry", service.retryAgentRunOutputDelivery)
+		v1.GET("/agent-runs/:id/start-gate/inputs", service.getAgentRunStartGateInputs)
+		v1.POST("/agent-runs/:id/start-gate/inputs/confirm", service.confirmAgentRunStartGateInputs)
 		v1.GET("/files", service.listControlledFiles)
 		v1.GET("/ai/providers", service.listAIProviders)
 		v1.POST("/ai/providers", service.createAIProvider)
@@ -702,7 +706,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 						options.Logger.Printf("Focus Session heartbeat failed: %v", err)
 					}
 					if err != nil && !errors.Is(err, context.Canceled) {
-						service.recordRuntimeDatabaseFailure("focus-heartbeat")
+						service.RecordRuntimeDatabaseFailure("focus-heartbeat")
 					}
 				}
 			}
@@ -749,7 +753,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 						options.Logger.Printf("due source scan failed: %v", err)
 					}
 					if err != nil && !errors.Is(err, context.Canceled) {
-						service.recordRuntimeDatabaseFailure("due-source-scan")
+						service.RecordRuntimeDatabaseFailure("due-source-scan")
 					}
 				}
 			}
@@ -778,7 +782,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 						options.Logger.Printf("Automation event delivery scan failed: %v", err)
 					}
 					if err != nil && !errors.Is(err, context.Canceled) {
-						service.recordRuntimeDatabaseFailure("automation-event-delivery-scan")
+						service.RecordRuntimeDatabaseFailure("automation-event-delivery-scan")
 					}
 				}
 			}
@@ -846,7 +850,7 @@ func NewRouter(db *gorm.DB, options Options) (*Router, error) {
 func (a *API) health(c *gin.Context) {
 	sqlDB, err := a.db.DB()
 	if err != nil || sqlDB.PingContext(c.Request.Context()) != nil {
-		a.recordRuntimeDatabaseFailure(requestIDFromContext(c))
+		a.RecordRuntimeDatabaseFailure(requestIDFromContext(c))
 		writeError(c, http.StatusServiceUnavailable, "DATABASE_UNAVAILABLE", "The local database is unavailable")
 		return
 	}

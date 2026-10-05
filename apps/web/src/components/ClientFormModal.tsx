@@ -57,6 +57,8 @@ export function ClientFormModal({
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const busy = createMutation.isPending || updateMutation.isPending;
 
+  const resetCreate = createMutation.reset;
+  const resetUpdate = updateMutation.reset;
   useEffect(() => {
     if (!open) {
       initializedFor.current = null;
@@ -74,9 +76,9 @@ export function ClientFormModal({
     setObservedVersion(client?.version ?? 1);
     setValidationError(null);
     setConflictMessage(null);
-    createMutation.reset();
-    updateMutation.reset();
-  }, [client, open]);
+    resetCreate();
+    resetUpdate();
+  }, [client, open, resetCreate, resetUpdate]);
 
   const errorMessage = useMemo(
     () =>

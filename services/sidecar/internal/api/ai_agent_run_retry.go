@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
@@ -11,7 +12,7 @@ type aiAgentRunRetryPreview struct {
 	Attempt int    `json:"attempt"`
 }
 
-func prepareAIAgentRunRetry(tx *gorm.DB, input aiWorkspaceAction, store *artifactStore) (preparedAgentRun, models.AgentRun, error) {
+func prepareAIAgentRunRetry(tx *gorm.DB, input aiWorkspaceAction, store *filestore.ArtifactStore) (preparedAgentRun, models.AgentRun, error) {
 	// Reject cross-Task references and successful Runs before touching files.
 	var previous models.AgentRun
 	if err := tx.Select("id,task_id,status").First(&previous, "id=? AND task_id=?", input.AgentRunID, input.TaskID).Error; err != nil {
@@ -27,7 +28,7 @@ func prepareAIAgentRunRetry(tx *gorm.DB, input aiWorkspaceAction, store *artifac
 	return prepared, previous, err
 }
 
-func previewAIAgentRunRetry(tx *gorm.DB, input aiWorkspaceAction, store *artifactStore) (aiActionPreview, error) {
+func previewAIAgentRunRetry(tx *gorm.DB, input aiWorkspaceAction, store *filestore.ArtifactStore) (aiActionPreview, error) {
 	p := aiActionPreview{Before: map[string]any{}, After: map[string]any{}}
 	prepared, previous, err := prepareAIAgentRunRetry(tx, input, store)
 	if err != nil {

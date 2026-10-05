@@ -5,13 +5,14 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
 )
 
 // Both native and human-approved AI retries must preserve the original
 // execution identity and exact input bytes. Preparing does not create a Run.
-func prepareAgentRunRetry(tx *gorm.DB, runID string, store *artifactStore) (preparedAgentRun, models.AgentRun, error) {
+func prepareAgentRunRetry(tx *gorm.DB, runID string, store *filestore.ArtifactStore) (preparedAgentRun, models.AgentRun, error) {
 	var previous models.AgentRun
 	var prepared preparedAgentRun
 	if err := tx.First(&previous, "id=?", runID).Error; err != nil {
@@ -25,6 +26,12 @@ func prepareAgentRunRetry(tx *gorm.DB, runID string, store *artifactStore) (prep
 	}
 	if _, err := loadAgentRunRestartProof(tx, previous); err != nil {
 		return prepared, previous, err
+	}
+	// The inputs of a v7 Run were confirmed for that Run alone; a retry would
+	// send them again without anyone looking. Start a new execution instead.
+	if previous.ExecutionContractVersion == agentRunExecutionContractVersionV7 {
+		return prepared, previous, newProjectRequestError(409, "AGENT_RUN_NOT_RETRYABLE",
+			"A Run that took its predecessor's files cannot be retried as it was; start a new execution from current facts")
 	}
 	// A new rework start and retry are different intents. Even if a retained
 	// result left the Task version unchanged, never re-execute successful v4

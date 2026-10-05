@@ -138,7 +138,7 @@ export function TaskAgentRework({
       providerConfirmation,
     });
     // Changes to the encoded request, exact preview or Provider invalidate consent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the values that invalidate consent; see above
   }, [
     identity,
     available,

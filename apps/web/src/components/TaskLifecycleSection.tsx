@@ -148,12 +148,13 @@ export function TaskLifecycleSection({
     return () => onBusyChange?.(false);
   }, [mutation.isPending, onBusyChange]);
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
     setEditor(null);
     setConflict(null);
     setValidationError(null);
-    mutation.reset();
-  }, [task.id]);
+    resetMutation();
+  }, [task.id, resetMutation]);
 
   const beginAction = (action: TaskLifecycleAction) => {
     mutation.reset();

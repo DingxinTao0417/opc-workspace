@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/opc-workspace/opc-sidecar/internal/api/apikit"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 )
 
@@ -57,7 +58,7 @@ func TestAITaskReviewPolicyHarnessApprovalThenAgentSubmission(t *testing.T) {
 			cancel()
 			f.Service.agentRunLifecycleContext = stopped
 			approvals := gin.New()
-			approvals.Use(requestIDMiddleware())
+			approvals.Use(apikit.RequestIDMiddleware())
 			approvals.POST("/api/v1/ai/actions/:id/decision", f.Service.decideAIWorkspaceAction)
 
 			var observedVersion int64

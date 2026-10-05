@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 var testPNGAvatar = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
@@ -111,12 +113,12 @@ func TestWorkspaceAvatarStartupReconcileMarksMismatchAndQuarantinesOrphans(t *te
 	if err := os.WriteFile(avatarPath, []byte("tampered-avatar!"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	store := &artifactStore{
-		root:          artifactDir,
-		avatarsDir:    filepath.Join(artifactDir, "avatars"),
-		quarantineDir: filepath.Join(artifactDir, ".quarantine"),
+	store := &filestore.ArtifactStore{
+		Root:          artifactDir,
+		AvatarsDir:    filepath.Join(artifactDir, "avatars"),
+		QuarantineDir: filepath.Join(artifactDir, ".quarantine"),
 	}
-	if err := store.reconcileWorkspaceAvatars(databaseStore.DB); err != nil {
+	if err := store.ReconcileWorkspaceAvatars(databaseStore.DB); err != nil {
 		t.Fatalf("reconcile mismatched avatar: %v", err)
 	}
 	var status string
@@ -128,7 +130,7 @@ func TestWorkspaceAvatarStartupReconcileMarksMismatchAndQuarantinesOrphans(t *te
 	if err := os.WriteFile(orphanPath, testPNGAvatar, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.reconcileWorkspaceAvatars(databaseStore.DB); err != nil {
+	if err := store.ReconcileWorkspaceAvatars(databaseStore.DB); err != nil {
 		t.Fatalf("reconcile orphan avatar: %v", err)
 	}
 	if _, err := os.Lstat(orphanPath); !os.IsNotExist(err) {

@@ -61,6 +61,7 @@ export function validAgentRunRestartSource(
     typeof value.model === "string" &&
     !!value.model.trim() &&
     new TextEncoder().encode(value.model).length <= 255 &&
+    // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
     !/[\u0000\uD800-\uDFFF]/u.test(value.model) &&
     typeof value.completed_at === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(

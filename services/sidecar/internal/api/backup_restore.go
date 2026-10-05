@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"gorm.io/gorm"
 )
@@ -151,7 +152,7 @@ func (a *API) scheduleBackupRestore(c *gin.Context) {
 		writeError(c, http.StatusInternalServerError, "RESTORE_SCHEDULE_FAILED", "The current workspace identity could not be read")
 		return
 	}
-	if manifest.DatabaseID != currentDatabaseID || manifest.ArtifactStoreID != currentStoreID || currentStoreID != a.artifactStore.storeID {
+	if manifest.DatabaseID != currentDatabaseID || manifest.ArtifactStoreID != currentStoreID || currentStoreID != a.artifactStore.StoreID {
 		writeError(c, http.StatusConflict, "RESTORE_WORKSPACE_MISMATCH", "The backup belongs to a different workspace or Artifact store")
 		return
 	}
@@ -251,7 +252,7 @@ func (s *backupStore) publishPendingRestore(sourcePath string, manifest backupMa
 		return err
 	}
 	for _, directory := range append(backupPackageSyncDirectories(packagePath, manifest), stagingPath) {
-		if err := syncArtifactDirectory(directory); err != nil {
+		if err := filestore.SyncArtifactDirectory(directory); err != nil {
 			return err
 		}
 	}
@@ -259,7 +260,7 @@ func (s *backupStore) publishPendingRestore(sourcePath string, manifest backupMa
 		return err
 	}
 	published = true
-	return syncArtifactDirectory(s.root)
+	return filestore.SyncArtifactDirectory(s.root)
 }
 
 func copyBackupPackage(sourcePath, destinationPath string, manifest backupManifest) error {
@@ -295,7 +296,7 @@ func copyBackupPackage(sourcePath, destinationPath string, manifest backupManife
 		}
 	}
 	for _, directory := range backupPackageSyncDirectories(destinationPath, manifest) {
-		if err := syncArtifactDirectory(directory); err != nil {
+		if err := filestore.SyncArtifactDirectory(directory); err != nil {
 			return err
 		}
 	}
@@ -312,20 +313,20 @@ func backupManifestContainsInvoicePDFs(manifest backupManifest) bool {
 }
 
 func initializeInvoicePDFRestoreRoot(root, databaseID string) error {
-	if _, err := canonicalArtifactDatabaseID(databaseID); err != nil {
+	if _, err := filestore.CanonicalArtifactDatabaseID(databaseID); err != nil {
 		return err
 	}
-	if err := ensureArtifactRootDirectory(root); err != nil {
+	if err := filestore.EnsureArtifactRootDirectory(root); err != nil {
 		return err
 	}
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	for _, directory := range []string{filepath.Join(root, ".staging"), filepath.Join(root, ".trash")} {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			return err
 		}
-		if err := requireSafeDirectory(directory); err != nil {
+		if err := filestore.RequireSafeDirectory(directory); err != nil {
 			return err
 		}
 	}
@@ -344,15 +345,15 @@ func initializeInvoicePDFRestoreRoot(root, databaseID string) error {
 		return errors.Join(writeErr, closeErr)
 	}
 	for _, directory := range []string{filepath.Join(root, ".staging"), filepath.Join(root, ".trash"), root} {
-		if err := syncArtifactDirectory(directory); err != nil {
+		if err := filestore.SyncArtifactDirectory(directory); err != nil {
 			return err
 		}
 	}
-	return syncArtifactDirectory(filepath.Dir(root))
+	return filestore.SyncArtifactDirectory(filepath.Dir(root))
 }
 
 func verifyInvoicePDFStoreMarker(root, databaseID string) error {
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	markerPath := filepath.Join(root, backupInvoicePDFMarkerName)
@@ -374,7 +375,7 @@ func verifyLiveInvoicePDFRootForRestore(root, databaseID string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := requireSafeDirectory(root); err != nil {
+	if err := filestore.RequireSafeDirectory(root); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(root)
@@ -399,7 +400,7 @@ func loadPendingRestore(root string) (pendingRestorePlan, bool, error) {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return pendingRestorePlan{}, false, errors.New("pending restore path is not a regular directory")
 	}
-	if err := requireSafeDirectory(pendingPath); err != nil {
+	if err := filestore.RequireSafeDirectory(pendingPath); err != nil {
 		return pendingRestorePlan{}, false, err
 	}
 	var plan pendingRestorePlan
@@ -428,10 +429,10 @@ func validatePendingRestorePlan(plan pendingRestorePlan) error {
 	if _, err := time.Parse(time.RFC3339Nano, plan.RequestedAt); err != nil {
 		return errors.New("pending restore time is invalid")
 	}
-	if _, err := canonicalArtifactDatabaseID(plan.DatabaseID); err != nil {
+	if _, err := filestore.CanonicalArtifactDatabaseID(plan.DatabaseID); err != nil {
 		return err
 	}
-	if _, err := canonicalArtifactStoreID(plan.ArtifactStoreID); err != nil {
+	if _, err := filestore.CanonicalArtifactStoreID(plan.ArtifactStoreID); err != nil {
 		return err
 	}
 	return nil
@@ -548,22 +549,22 @@ func applyPendingRestoreWithProgress(backupRoot, databasePath, artifactRoot, inv
 		}
 		absoluteInvoicePDFs = filepath.Clean(absoluteInvoicePDFs)
 	}
-	if err := requireSafeDirectory(absoluteBackup); err != nil {
+	if err := filestore.RequireSafeDirectory(absoluteBackup); err != nil {
 		return StartupRestoreResult{}, err
 	}
-	if err := requireSafeDirectory(absoluteArtifacts); err != nil {
+	if err := filestore.RequireSafeDirectory(absoluteArtifacts); err != nil {
 		return StartupRestoreResult{}, err
 	}
 	if absoluteInvoicePDFs != "" {
-		if isFilesystemRoot(absoluteInvoicePDFs) {
+		if filestore.IsFilesystemRoot(absoluteInvoicePDFs) {
 			return StartupRestoreResult{}, errors.New("invoice PDF restore root cannot be a filesystem volume root")
 		}
-		if sameFilesystemPath(absoluteInvoicePDFs, absoluteDatabase) || pathContains(absoluteInvoicePDFs, absoluteDatabase) ||
+		if filestore.SameFilesystemPath(absoluteInvoicePDFs, absoluteDatabase) || pathContains(absoluteInvoicePDFs, absoluteDatabase) ||
 			pathContains(absoluteInvoicePDFs, absoluteArtifacts) || pathContains(absoluteArtifacts, absoluteInvoicePDFs) ||
 			pathContains(absoluteInvoicePDFs, absoluteBackup) || pathContains(absoluteBackup, absoluteInvoicePDFs) {
 			return StartupRestoreResult{}, errors.New("invoice PDF restore root overlaps another controlled path")
 		}
-		if err := requireSafeDirectory(absoluteInvoicePDFs); err != nil {
+		if err := filestore.RequireSafeDirectory(absoluteInvoicePDFs); err != nil {
 			return StartupRestoreResult{}, err
 		}
 	}
@@ -640,7 +641,7 @@ func applyPendingRestoreWithProgress(backupRoot, databasePath, artifactRoot, inv
 	if err := os.Rename(pendingPath, appliedPath); err != nil {
 		return StartupRestoreResult{}, err
 	}
-	commitSyncErr := syncArtifactDirectory(absoluteBackup)
+	commitSyncErr := filestore.SyncArtifactDirectory(absoluteBackup)
 	cleanupErr := cleanupSuccessfulRestore(paths, appliedPath, absoluteBackup)
 	warning := errors.Join(commitSyncErr, cleanupErr)
 	result := StartupRestoreResult{Applied: true, BackupID: plan.BackupID, RollbackBackupID: plan.RollbackBackupID, RequestedAt: plan.RequestedAt}
@@ -731,24 +732,24 @@ func prepareRestoreSwap(paths restoreSwapPaths, packagePath string, manifest bac
 		); err != nil {
 			return err
 		}
-		if err := syncArtifactDirectory(filepath.Dir(destination)); err != nil {
+		if err := filestore.SyncArtifactDirectory(filepath.Dir(destination)); err != nil {
 			return err
 		}
 	}
-	if err := syncArtifactDirectory(paths.objectsNew); err != nil {
+	if err := filestore.SyncArtifactDirectory(paths.objectsNew); err != nil {
 		return err
 	}
-	if err := syncArtifactDirectory(paths.avatarsNew); err != nil {
+	if err := filestore.SyncArtifactDirectory(paths.avatarsNew); err != nil {
 		return err
 	}
 	if paths.invoicePDFsNew != "" {
 		for _, directory := range []string{filepath.Join(paths.invoicePDFsNew, ".staging"), filepath.Join(paths.invoicePDFsNew, ".trash"), paths.invoicePDFsNew} {
-			if err := syncArtifactDirectory(directory); err != nil {
+			if err := filestore.SyncArtifactDirectory(directory); err != nil {
 				return err
 			}
 		}
 	}
-	return syncArtifactDirectory(filepath.Dir(paths.databaseNew))
+	return filestore.SyncArtifactDirectory(filepath.Dir(paths.databaseNew))
 }
 
 func applyRestoreSwap(paths restoreSwapPaths) error {
@@ -766,7 +767,7 @@ func applyRestoreSwap(paths restoreSwapPaths) error {
 		if err := os.Rename(paths.database, paths.databaseOld); err != nil {
 			return err
 		}
-		if err := syncArtifactDirectory(filepath.Dir(paths.database)); err != nil {
+		if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.database)); err != nil {
 			return err
 		}
 	}
@@ -787,7 +788,7 @@ func applyRestoreSwap(paths restoreSwapPaths) error {
 		if err := os.Rename(paths.objects, paths.objectsOld); err != nil {
 			return err
 		}
-		if err := syncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
+		if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
 			return err
 		}
 	}
@@ -801,7 +802,7 @@ func applyRestoreSwap(paths restoreSwapPaths) error {
 	} else if exists(paths.objectsNew) {
 		return errors.New("restore Artifact swap is ambiguous")
 	}
-	if err := syncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
+	if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
 		return err
 	}
 	if err := swapRestoreDirectory(paths.avatars, paths.avatarsNew, paths.avatarsOld, "workspace avatars"); err != nil {
@@ -812,7 +813,7 @@ func applyRestoreSwap(paths restoreSwapPaths) error {
 			return err
 		}
 	}
-	return syncArtifactDirectory(filepath.Dir(paths.database))
+	return filestore.SyncArtifactDirectory(filepath.Dir(paths.database))
 }
 
 func swapRestoreDirectory(live, prepared, previous, label string) error {
@@ -823,7 +824,7 @@ func swapRestoreDirectory(live, prepared, previous, label string) error {
 		if err := os.Rename(live, previous); err != nil {
 			return err
 		}
-		if err := syncArtifactDirectory(filepath.Dir(live)); err != nil {
+		if err := filestore.SyncArtifactDirectory(filepath.Dir(live)); err != nil {
 			return err
 		}
 	}
@@ -837,7 +838,7 @@ func swapRestoreDirectory(live, prepared, previous, label string) error {
 	} else if exists(prepared) {
 		return fmt.Errorf("restore %s swap is ambiguous", label)
 	}
-	return syncArtifactDirectory(filepath.Dir(live))
+	return filestore.SyncArtifactDirectory(filepath.Dir(live))
 }
 
 func verifyLiveRestore(databasePath, artifactRoot, invoicePDFRoot string, manifest backupManifest, maxSchema int) error {
@@ -853,7 +854,7 @@ func verifyLiveRestore(databasePath, artifactRoot, invoicePDFRoot string, manife
 		_ = store.Close()
 		return err
 	}
-	artifacts, err := newArtifactStore(artifactRoot, manifest.DatabaseID, manifest.ArtifactStoreID)
+	artifacts, err := filestore.NewArtifactStore(artifactRoot, manifest.DatabaseID, manifest.ArtifactStoreID)
 	if err != nil {
 		_ = store.Close()
 		return err
@@ -861,7 +862,7 @@ func verifyLiveRestore(databasePath, artifactRoot, invoicePDFRoot string, manife
 	var invoicePDFs *invoicePDFStore
 	if invoicePDFRoot != "" {
 		if err := verifyInvoicePDFStoreMarker(invoicePDFRoot, manifest.DatabaseID); err != nil {
-			_ = artifacts.close()
+			_ = artifacts.Close()
 			_ = store.Close()
 			return err
 		}
@@ -870,13 +871,13 @@ func verifyLiveRestore(databasePath, artifactRoot, invoicePDFRoot string, manife
 		}
 	}
 	verifyErr := verifyArtifactObjects(store.DB, artifacts, store.SchemaVersion, manifest.ArtifactCount, invoicePDFs)
-	closeArtifactErr := artifacts.close()
+	closeArtifactErr := artifacts.Close()
 	checkpointErr := store.Checkpoint()
 	closeStoreErr := store.Close()
 	return errors.Join(verifyErr, closeArtifactErr, checkpointErr, closeStoreErr)
 }
 
-func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion, expectedCount int, invoicePDFStores ...*invoicePDFStore) error {
+func verifyArtifactObjects(db *gorm.DB, artifacts *filestore.ArtifactStore, schemaVersion, expectedCount int, invoicePDFStores ...*invoicePDFStore) error {
 	rows, err := listActiveControlledFiles(db, schemaVersion)
 	if err != nil {
 		return err
@@ -906,11 +907,11 @@ func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion,
 			expectedInvoicePDFs[relative] = struct{}{}
 			continue
 		}
-		path, err := artifacts.resolveControlledFile(row.RelativePath)
+		path, err := artifacts.ResolveControlledFile(row.RelativePath)
 		if err != nil {
 			return err
 		}
-		matched, err := artifactFileMatches(path, row.SizeBytes, row.SHA256)
+		matched, err := filestore.ArtifactFileMatches(path, row.SizeBytes, row.SHA256)
 		if err != nil || !matched {
 			return errors.New("restored Artifact object failed integrity verification")
 		}
@@ -925,8 +926,8 @@ func verifyArtifactObjects(db *gorm.DB, artifacts *artifactStore, schemaVersion,
 	return nil
 }
 
-func verifyControlledFileDirectories(artifacts *artifactStore, expected map[string]struct{}) error {
-	for prefix, directory := range map[string]string{"objects": artifacts.objectsDir, "avatars": artifacts.avatarsDir} {
+func verifyControlledFileDirectories(artifacts *filestore.ArtifactStore, expected map[string]struct{}) error {
+	for prefix, directory := range map[string]string{"objects": artifacts.ObjectsDir, "avatars": artifacts.AvatarsDir} {
 		entries, err := os.ReadDir(directory)
 		if err != nil {
 			return err
@@ -947,7 +948,7 @@ func verifyInvoicePDFDirectories(store *invoicePDFStore, expected map[string]str
 	if store == nil {
 		return errors.New("invoice PDF store is unavailable")
 	}
-	if err := requireSafeDirectory(store.root); err != nil {
+	if err := filestore.RequireSafeDirectory(store.root); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(store.root)
@@ -957,7 +958,7 @@ func verifyInvoicePDFDirectories(store *invoicePDFStore, expected map[string]str
 	for _, entry := range entries {
 		name := entry.Name()
 		path := filepath.Join(store.root, name)
-		if name == backupInvoicePDFMarkerName || name == artifactStoreLockName {
+		if name == backupInvoicePDFMarkerName || name == filestore.ArtifactStoreLockName {
 			info, infoErr := entry.Info()
 			if infoErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 				return errors.New("invoice PDF store control file is unsafe")
@@ -973,7 +974,7 @@ func verifyInvoicePDFDirectories(store *invoicePDFStore, expected map[string]str
 		if !canonicalInvoicePDFUUID(name) || !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			return errors.New("invoice PDF store contains an unexpected entry")
 		}
-		if err := requireSafeDirectory(path); err != nil {
+		if err := filestore.RequireSafeDirectory(path); err != nil {
 			return err
 		}
 		files, err := os.ReadDir(path)
@@ -995,7 +996,7 @@ func verifyInvoicePDFDirectories(store *invoicePDFStore, expected map[string]str
 }
 
 func requireEmptySafeDirectory(path string) error {
-	if err := requireSafeDirectory(path); err != nil {
+	if err := filestore.RequireSafeDirectory(path); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(path)
@@ -1043,11 +1044,11 @@ func rollbackRestoreSwap(paths restoreSwapPaths) error {
 		}
 		result = errors.Join(result, os.Rename(paths.databaseOld+suffix, paths.database+suffix))
 	}
-	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.database)))
-	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.objects)))
-	result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.avatars)))
+	result = errors.Join(result, filestore.SyncArtifactDirectory(filepath.Dir(paths.database)))
+	result = errors.Join(result, filestore.SyncArtifactDirectory(filepath.Dir(paths.objects)))
+	result = errors.Join(result, filestore.SyncArtifactDirectory(filepath.Dir(paths.avatars)))
 	if paths.invoicePDFs != "" {
-		result = errors.Join(result, syncArtifactDirectory(filepath.Dir(paths.invoicePDFs)))
+		result = errors.Join(result, filestore.SyncArtifactDirectory(filepath.Dir(paths.invoicePDFs)))
 	}
 	return result
 }
@@ -1067,17 +1068,17 @@ func cleanupSuccessfulRestore(paths restoreSwapPaths, appliedPath, backupRoot st
 			result = errors.Join(result, err)
 		}
 	}
-	if err := syncArtifactDirectory(filepath.Dir(paths.database)); err != nil {
+	if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.database)); err != nil {
 		result = errors.Join(result, err)
 	}
-	if err := syncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
+	if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.objects)); err != nil {
 		result = errors.Join(result, err)
 	}
-	if err := syncArtifactDirectory(filepath.Dir(paths.avatars)); err != nil {
+	if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.avatars)); err != nil {
 		result = errors.Join(result, err)
 	}
 	if paths.invoicePDFs != "" {
-		if err := syncArtifactDirectory(filepath.Dir(paths.invoicePDFs)); err != nil {
+		if err := filestore.SyncArtifactDirectory(filepath.Dir(paths.invoicePDFs)); err != nil {
 			result = errors.Join(result, err)
 		}
 	}
@@ -1087,7 +1088,7 @@ func cleanupSuccessfulRestore(paths restoreSwapPaths, appliedPath, backupRoot st
 	if err := os.RemoveAll(appliedPath); err != nil {
 		return err
 	}
-	return syncArtifactDirectory(backupRoot)
+	return filestore.SyncArtifactDirectory(backupRoot)
 }
 
 func quarantineFailedRestorePlan(backupRoot, pendingPath, operationID string) error {
@@ -1095,7 +1096,7 @@ func quarantineFailedRestorePlan(backupRoot, pendingPath, operationID string) er
 	if err := os.Rename(pendingPath, failedPath); err != nil {
 		return err
 	}
-	return syncArtifactDirectory(backupRoot)
+	return filestore.SyncArtifactDirectory(backupRoot)
 }
 
 func exists(path string) bool {

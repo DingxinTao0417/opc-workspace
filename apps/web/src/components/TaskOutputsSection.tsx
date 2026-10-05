@@ -511,6 +511,7 @@ export function TaskOutputsSection({
     reviewMutation.reset();
     deleteMutation.reset();
     downloadMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resets the section only when another task is shown
   }, [task.id]);
 
   useEffect(() => {

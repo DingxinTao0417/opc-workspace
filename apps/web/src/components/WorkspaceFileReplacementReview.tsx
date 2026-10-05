@@ -171,6 +171,7 @@ function ScopedReplacementReview({ root, record, onClose }: ReviewProps) {
       active = false;
       clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the record identity, path and revision
   }, [root.id, record.id, record.path, revision]);
   return (
     <section aria-label="替换记录核对">
@@ -325,6 +326,7 @@ function RecoveryConditionCheck({
       active.current = false;
       clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleans up when another baseline or mode is shown
   }, [root.id, baseline.id, mode]);
   const check = async () => {
     if (locked.current) return;

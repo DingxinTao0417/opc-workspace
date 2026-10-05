@@ -10,10 +10,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ApiError } from "../api/client";
-import { useUiStore } from "../store/ui";
+import { agentRunDrawerOverlay, useUiStore } from "../store/ui";
 import { useAiChatStore } from "../store/aiChat";
 import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
 import type { Task } from "../types/models";
+import { Modal } from "./Modal";
 import { TaskDetailModal } from "./TaskDetailModal";
 
 const apiMocks = vi.hoisted(() => ({
@@ -383,6 +384,50 @@ describe("TaskDetailModal", () => {
     expect(screen.getByTestId("current-location")).toHaveTextContent("/tasks");
     expect(useUiStore.getState().taskDetailId).toBeNull();
   });
+
+  it.each([
+    ["the same Task", task.id, true],
+    ["another Task", "33333333-3333-4333-8333-3333333333bb", false],
+  ])(
+    "opens beneath a Run drawer that is open for %s only",
+    async (_name, drawerTaskId, beneath) => {
+      const run = "33333333-3333-4333-8333-3333333333aa";
+      // A link to a Run opens the drawer at once; the Task detail follows when
+      // its Task has loaded.
+      useUiStore.setState({
+        taskDetailId: null,
+        agentRunDrawer: { taskId: drawerTaskId, runId: run },
+      });
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      render(
+        <MemoryRouter initialEntries={[`/tasks/${task.id}?agent_run=${run}`]}>
+          <QueryClientProvider client={queryClient}>
+            <Modal
+              onClose={() => undefined}
+              open
+              overlayName={agentRunDrawerOverlay}
+              title="执行过程"
+            >
+              <button type="button">抽屉内操作</button>
+            </Modal>
+            <TaskDetailModal />
+          </QueryClientProvider>
+        </MemoryRouter>,
+      );
+      const field = await screen.findByLabelText("任务名称");
+      const detailRoot = field.closest('[data-overlay-root="true"]')!;
+      const drawerRoot = screen
+        .getByText("抽屉内操作")
+        .closest('[data-overlay-root="true"]')!;
+      await waitFor(() =>
+        expect(detailRoot.hasAttribute("inert")).toBe(beneath),
+      );
+      expect(drawerRoot.hasAttribute("inert")).toBe(!beneath);
+      useUiStore.setState({ agentRunDrawer: null });
+    },
+  );
 
   it("requires saving fact changes before a lifecycle command", async () => {
     renderModal();

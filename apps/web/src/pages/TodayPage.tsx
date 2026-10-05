@@ -286,6 +286,9 @@ export function TodayPage() {
   const dateNavigationLocked =
     orderMutationPending || sharedDraggingTask !== null;
   const riskSwitchDisabled = dateNavigationLocked;
+  const resetCrossPlan = crossPlanMutation.reset;
+  const resetMove = moveMutation.reset;
+  const resetOrder = resetOrderMutation.reset;
   const changeDate = useCallback(
     (nextDateKey: string): boolean => {
       if (dateNavigationLocked || !isValidLocalDateKey(nextDateKey)) {
@@ -296,19 +299,19 @@ export function TodayPage() {
       setRiskPage(1);
       setDragPreview(null);
       setSharedDraggingTask(null);
-      moveMutation.reset();
-      crossPlanMutation.reset();
-      resetOrderMutation.reset();
+      resetMove();
+      resetCrossPlan();
+      resetOrder();
       setDateKey(nextDateKey);
       setSearchParams(nextDateKey === todayKey ? {} : { date: nextDateKey });
       return true;
     },
     [
-      crossPlanMutation.reset,
+      resetCrossPlan,
       dateKey,
       dateNavigationLocked,
-      moveMutation.reset,
-      resetOrderMutation.reset,
+      resetMove,
+      resetOrder,
       setSearchParams,
       todayKey,
     ],
@@ -333,7 +336,8 @@ export function TodayPage() {
       setRiskFilter(routeRisk);
       setRiskPage(1);
     }
-  }, [searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the URL drives this state; local changes must not echo back
+  }, [searchParams, resetCrossPlan, resetMove, resetOrder]);
 
   useEffect(() => {
     const previousToday = previousTodayKey.current;

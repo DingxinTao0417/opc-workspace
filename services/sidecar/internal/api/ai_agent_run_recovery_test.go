@@ -56,7 +56,7 @@ func TestAIAgentRunRecoveryApprovalAtomicAndIdempotent(t *testing.T) {
 			wrong := []byte(fmt.Sprintf(`{"fingerprint":%q,"decision":"confirm","confirm_agent_execution":true}`, row.Fingerprint))
 			assertAPIError(t, performRequest(router, "POST", path, wrong, nil), 422, "AI_ACTION_DECISION_INVALID")
 			body := []byte(fmt.Sprintf(`{"fingerprint":%q,"decision":"confirm","confirm_agent_output_recovery":true}`, row.Fingerprint))
-			objects, err := os.ReadDir(f.Artifacts.objectsDir)
+			objects, err := os.ReadDir(f.Artifacts.ObjectsDir)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func TestAIAgentRunRecoveryApprovalAtomicAndIdempotent(t *testing.T) {
 			assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM task_artifacts", 0)
 			assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM ai_action_proposals WHERE id=? AND status='pending'", 1, row.ID)
 			assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM agent_runs WHERE id=? AND output_delivery_status='pending' AND output_delivery_pending_text=?", 1, run.ID, "PRIVATE RECOVERY BODY")
-			after, err := os.ReadDir(f.Artifacts.objectsDir)
+			after, err := os.ReadDir(f.Artifacts.ObjectsDir)
 			if err != nil || len(after) != len(objects) {
 				t.Fatalf("orphan recovery file: %v", err)
 			}
@@ -164,7 +164,7 @@ func TestAIAgentRunRecoveryApprovalCommitFailureKeepsPendingFile(t *testing.T) {
 	assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM ai_action_proposals WHERE id=? AND status='pending'", 1, row.ID)
 	assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM agent_runs WHERE id=? AND output_delivery_status='pending'", 1, run.ID)
 	assertDatabaseCount(t, f.Store, "SELECT COUNT(*) FROM task_artifacts", 0)
-	objects, err := os.ReadDir(f.Artifacts.objectsDir)
+	objects, err := os.ReadDir(f.Artifacts.ObjectsDir)
 	if err != nil || len(objects) != 0 {
 		t.Fatalf("orphan output files=%d err=%v", len(objects), err)
 	}

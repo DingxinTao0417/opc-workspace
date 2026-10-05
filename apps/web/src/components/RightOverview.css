@@ -1,0 +1,163 @@
+.ov-agent-run-row {
+  align-items: flex-start;
+}
+
+.ov-agent-family-entry {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-agent-family-entry > .ov-row {
+  width: 100%;
+}
+
+.ov-agent-family-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0 8px 6px 36px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ov-agent-family-controls [role="alert"] {
+  flex-basis: 100%;
+}
+
+.ov-agent-family-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 4px 36px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ov-agent-run-copy {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-agent-delegation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ov-scope-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.ov-scope {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.ov-scope-active {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.ov-empty {
+  padding: 8px 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.ov-detail {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--empty-bg);
+}
+
+.ov-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-text);
+  font-size: 11px;
+  padding: 0;
+}
+
+.ov-detail-title {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-detail-meta {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.ov-detail-error {
+  margin-top: 6px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.ov-detail-result {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-secondary);
+  font-size: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.app-shell-agent :is(.ov-empty, .ov-detail-meta, .ov-back, .ov-detail-result) {
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.app-shell-agent .ov-detail-title {
+  font-size: 14px;
+}
+
+.app-shell-agent .ov-scope-active {
+  border-color: var(--border-hover);
+  background: var(--agent-soft);
+  color: var(--text);
+}
+
+.app-shell-agent :is(.browser-address, .browser-tab) {
+  border-radius: 8px;
+}
+
+.app-shell-agent .browser-tabs-bar {
+  padding-bottom: 5px;
+  background: var(--agent-soft);
+}
+
+.app-shell-agent .browser-tab-active {
+  border-bottom: 1px solid var(--agent-line);
+}

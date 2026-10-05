@@ -314,20 +314,22 @@ export function WorkspaceChat({ panel }: { panel: WorkspacePanel }) {
   };
   const prepareContinuationRef = useRef(prepareContinuation);
   prepareContinuationRef.current = prepareContinuation;
+  const providerReady = !!activeProvider;
+  const streamActive = !!chat.streaming;
   const continuePlan = useMemo(
     () =>
-      !activeProvider || chat.streaming || creating
+      !providerReady || streamActive || creating
         ? undefined
         : (prompt: string, scopes: AiWorkspaceScope[]) => {
             if (continuationSourceRef.current.epoch !== continuationEpoch)
               return;
             prepareContinuationRef.current(prompt, scopes);
           },
-    [continuationEpoch, !!activeProvider, !!chat.streaming, creating],
+    [continuationEpoch, providerReady, streamActive, creating],
   );
   const continueActions = useMemo(
     () =>
-      !activeProvider || chat.streaming || creating
+      !providerReady || streamActive || creating
         ? undefined
         : (request: AiActionContinuation) => {
             if (
@@ -343,13 +345,7 @@ export function WorkspaceChat({ panel }: { panel: WorkspacePanel }) {
               request.recheckProposalId,
             );
           },
-    [
-      continuationEpoch,
-      panelSessionId,
-      !!activeProvider,
-      !!chat.streaming,
-      creating,
-    ],
+    [continuationEpoch, panelSessionId, providerReady, streamActive, creating],
   );
   return (
     <div className="ws-chat">

@@ -95,11 +95,12 @@ export function TaskBoardTransitionModal({
   const [reason, setReason] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const resetMutation = mutation.reset;
   useEffect(() => {
     setReason("");
     setValidationError(null);
-    mutation.reset();
-  }, [transition?.task.id, transition?.targetStatus]);
+    resetMutation();
+  }, [transition?.task.id, transition?.targetStatus, resetMutation]);
 
   const close = () => {
     if (mutation.isPending) return;

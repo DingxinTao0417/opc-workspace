@@ -65,6 +65,7 @@ export function InvoiceActions({
     onMenuOpenChange?.(false);
     transitionMutation.reset();
     deleteMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resets when the invoice changes; pending state and the callback must not retrigger it
   }, [invoice.id, invoice.version]);
 
   const openCommand = (action: InvoiceUserCommand) => {

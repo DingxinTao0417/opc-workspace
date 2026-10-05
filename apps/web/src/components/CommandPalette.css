@@ -1,0 +1,122 @@
+.command-panel {
+  top: 18%;
+  width: 580px;
+  transform: translateX(-50%);
+}
+
+.command-runtime-status {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+  color: var(--text-muted);
+}
+
+.command-runtime-status[data-state="online"] .command-runtime-icon {
+  color: var(--green-light);
+}
+
+.command-runtime-status[data-state="stale"],
+.command-runtime-status[data-state="unavailable"] {
+  background: color-mix(in srgb, var(--red) 7%, var(--panel));
+  color: var(--danger-text);
+}
+
+.command-runtime-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.command-runtime-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+
+.command-list {
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 7px;
+}
+
+.command-section-label {
+  padding: 7px 8px 4px;
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.command-item-active {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.command-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-muted);
+}
+
+.command-item-active .command-icon {
+  border-color: var(--accent-border);
+  color: var(--accent-light);
+}
+
+.command-label {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-hint {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.command-empty {
+  padding: 42px 16px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.command-search-error {
+  display: flex;
+  min-height: 92px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+  color: var(--danger-text);
+  font-size: 11px;
+}
+
+.command-footer {
+  display: flex;
+  gap: 14px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
+.command-footer kbd {
+  height: 16px;
+  min-width: 16px;
+  padding: 0 3px;
+  font-size: 8px;
+}

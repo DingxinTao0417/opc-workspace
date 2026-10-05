@@ -31,7 +31,10 @@ export interface AgentRunLifecycleInput {
   submissionId?: string | null;
   submissionStatus?: AgentRunSubmissionReviewStatus | null;
   /** ADR-030 start gate, already validated against the Run by the parser. */
-  startGate?: Pick<AgentRunStartGate, "status" | "closeReason" | "require">;
+  startGate?: Pick<
+    AgentRunStartGate,
+    "status" | "closeReason" | "require" | "inputSlot"
+  >;
 }
 
 const startGateClosedDetails: Record<AgentRunStartGateCloseReason, string> = {
@@ -42,6 +45,8 @@ const startGateClosedDetails: Record<AgentRunStartGateCloseReason, string> = {
   predecessor_not_accepted:
     "前置产出被要求返工或已撤回，未被验收接受，这次执行没有启动。",
   predecessor_unavailable: "前置执行记录无法确认，这次执行没有启动。",
+  predecessor_output_unavailable:
+    "前置产出在确认前已不可用（任务被重新打开、文件被删除或项目变化），这次执行没有启动，也没有发送任何文件。",
   expired: "在确认的时限内前置条件没有满足，这次执行没有启动。",
   run_not_queued: "这次执行已不在等待队列中。",
 };
@@ -132,6 +137,25 @@ export function agentRunLifecycle(
     delivery === "not_ready" &&
     startGate?.status === "waiting"
   ) {
+    // The predecessor is accepted; the only thing missing is a person.
+    if (startGate.inputSlot?.status === "awaiting_confirmation") {
+      return lifecycle(
+        "pending",
+        "待确认输入文件",
+        "前置产出已验收；需要你在执行过程里核对并确认把这些文件发送给执行模型，确认前不会启动、读取或发送。",
+        true,
+        false,
+      );
+    }
+    if (startGate.inputSlot) {
+      return lifecycle(
+        "pending",
+        "等待前置产出",
+        "已确认；前置执行的文件产出被人工验收接受后，还需要你逐份确认才会作为输入并启动，期间可以取消。",
+        false,
+        false,
+      );
+    }
     return lifecycle(
       "pending",
       "等待前置执行",

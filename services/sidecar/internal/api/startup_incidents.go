@@ -15,6 +15,8 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 type StartupIncidentKind string
@@ -129,7 +131,7 @@ func ReplayStartupIncidents(db *gorm.DB, logDir string, logger *log.Logger) erro
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove replayed startup incident journal: %w", err)
 	}
-	return syncArtifactDirectory(filepath.Dir(path))
+	return filestore.SyncArtifactDirectory(filepath.Dir(path))
 }
 
 func startupIncidentJournalPath(logDir string) (string, error) {
@@ -224,7 +226,7 @@ func writeStartupIncidentJournal(path string, journal startupIncidentJournal) er
 	if err := replaceFileAtomically(temporaryPath, path); err != nil {
 		return err
 	}
-	return syncArtifactDirectory(filepath.Dir(path))
+	return filestore.SyncArtifactDirectory(filepath.Dir(path))
 }
 
 func quarantineStartupIncidentJournal(path string) error {
@@ -237,5 +239,5 @@ func quarantineStartupIncidentJournal(path string) error {
 	if err := os.Rename(path, destination); err != nil {
 		return err
 	}
-	return syncArtifactDirectory(filepath.Dir(path))
+	return filestore.SyncArtifactDirectory(filepath.Dir(path))
 }

@@ -79,6 +79,7 @@ export function InvoiceFormModal({
     setValidationError(null);
     if (!createMutation.isPending) createMutation.reset();
     if (!updateMutation.isPending) updateMutation.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialises the form when it opens; pending state must not retrigger it
   }, [invoice, open]);
 
   const mutationError = useMemo(

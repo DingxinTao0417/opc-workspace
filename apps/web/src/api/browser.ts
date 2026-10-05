@@ -50,6 +50,7 @@ export const BROWSER_TAB_LIMIT = 12;
 export function normalizeBrowserAddress(input: string): string {
   const raw = input.trim();
   if (!raw || raw === "about:blank") return "about:blank";
+  // eslint-disable-next-line no-control-regex -- rejects control characters on purpose
   if (raw.length > 8192 || /[\u0000-\u001f\u007f]/.test(raw)) {
     throw new Error("请输入有效的 HTTP 或 HTTPS 网址");
   }

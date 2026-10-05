@@ -1,3 +1,4 @@
+import "./CommandPalette.css";
 import {
   AlertTriangle,
   BellRing,
@@ -259,17 +260,19 @@ export function CommandPalette() {
     setSettingsOpen(true, "diagnostics");
   }, [recordRecentCommand, setOpen, setSettingsOpen]);
 
+  const refetchHealth = healthQuery.refetch;
   const recheckHealth = useCallback(async () => {
     setHealthRecheckPending(true);
     inputRef.current?.focus();
     try {
-      await healthQuery.refetch();
+      await refetchHealth();
     } finally {
       inputRef.current?.focus();
       setHealthRecheckPending(false);
     }
-  }, [healthQuery.refetch]);
+  }, [refetchHealth]);
 
+  const refetchResources = resourcesQuery.refetch;
   useEffect(() => {
     const recoveredFromStaleFailure =
       staleHealthFailureRef.current &&
@@ -284,7 +287,7 @@ export function CommandPalette() {
       searchQuery === normalizedQuery &&
       !resourcesQuery.isFetching
     ) {
-      void resourcesQuery.refetch();
+      void refetchResources();
     }
   }, [
     healthQuery.data,
@@ -292,15 +295,18 @@ export function CommandPalette() {
     normalizedQuery,
     open,
     resourcesQuery.isFetching,
-    resourcesQuery.refetch,
+    refetchResources,
     searchQuery,
   ]);
 
-  const closeAndNavigate = (to: string, commandId?: string) => {
-    if (commandId) recordRecentCommand(commandId);
-    setOpen(false);
-    navigate(to);
-  };
+  const closeAndNavigate = useCallback(
+    (to: string, commandId?: string) => {
+      if (commandId) recordRecentCommand(commandId);
+      setOpen(false);
+      navigate(to);
+    },
+    [navigate, recordRecentCommand, setOpen],
+  );
 
   const commands = useMemo<Command[]>(() => {
     const pageCommands: Command[] = [
@@ -413,7 +419,13 @@ export function CommandPalette() {
       })),
     ];
     return pageCommands;
-  }, [navigate, recordRecentCommand, setNewTaskOpen, setOpen, setSettingsOpen]);
+  }, [
+    closeAndNavigate,
+    recordRecentCommand,
+    setNewTaskOpen,
+    setOpen,
+    setSettingsOpen,
+  ]);
 
   const resourceCommands = useMemo<Command[]>(() => {
     const resourceSource = hasHealthFacts

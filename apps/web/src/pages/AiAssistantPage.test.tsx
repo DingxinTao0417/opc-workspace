@@ -1799,7 +1799,11 @@ describe("AiAssistantPage", () => {
     fireEvent.change(selector, { target: { value: "session-2" } });
     expect(selector).toHaveValue("session-2");
     expect(screen.getAllByText("另一会话").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
+    // The compact controls only show below 960px; the page stylesheet hides
+    // them at jsdom's default width.
+    expect(
+      screen.getByRole("button", { name: "新建会话", hidden: true }),
+    ).toBeTruthy();
   });
 
   it("shows the suggestion chip for a task block and strips the raw block from display", () => {
@@ -1991,7 +1995,9 @@ describe("AiAssistantPage", () => {
     mockState.streaming = { sessionId: "session-1", text: "正在生成…" };
     const { unmount } = renderPage();
     expect(screen.getByRole("button", { name: "停止生成" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "新建会话" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "新建会话", hidden: true }),
+    ).toBeDisabled();
     expect(screen.getByLabelText("选择会话")).toBeDisabled();
     expect(screen.getByLabelText("选择 AI 供应商")).toBeDisabled();
     unmount();
@@ -2121,9 +2127,7 @@ describe("AiAssistantPage", () => {
       "Ollama · deepseek-chat · 本地",
     );
     expect(screen.getByPlaceholderText(/向 AI 助手提问/)).not.toBeDisabled();
-    expect(
-      screen.queryByText(/AI 生成内容仅供参考/),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/AI 生成内容仅供参考/)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/模型请求仅发送到本机回环端点/),
     ).not.toBeInTheDocument();

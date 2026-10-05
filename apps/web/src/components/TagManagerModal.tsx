@@ -148,12 +148,13 @@ export function TagManagerModal({
   const [color, setColor] = useState(initialColor);
   const error = mutationError(createMutation.error);
 
+  const resetCreate = createMutation.reset;
   useEffect(() => {
     if (!open) return;
     setName("");
     setColor(initialColor);
-    createMutation.reset();
-  }, [open]);
+    resetCreate();
+  }, [open, resetCreate]);
 
   const create = () => {
     const cleanName = name.trim();

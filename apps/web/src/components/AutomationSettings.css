@@ -1,0 +1,178 @@
+.automation-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.automation-settings .settings-content-header {
+  margin-bottom: 0;
+}
+
+.automation-rule-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.automation-rule-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.automation-rule-tab:hover,
+.automation-rule-tab[data-active="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text);
+}
+
+.automation-rule-tab > small[data-status="enabled"] {
+  color: var(--green);
+}
+
+.automation-rule-tab > small[data-status="unavailable"] {
+  color: var(--orange);
+}
+
+.automation-editor,
+.automation-history {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--panel);
+}
+
+.automation-flow {
+  display: grid;
+  margin-top: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.automation-schedule-fields {
+  display: grid;
+  margin-top: 12px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.automation-field {
+  display: flex;
+  margin-top: 12px;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.automation-schedule-fields .automation-field {
+  margin-top: 0;
+}
+
+.automation-timezone-field .button {
+  min-width: max-content;
+}
+
+.automation-preview {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-deep);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.automation-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-secondary);
+}
+
+.automation-preview ul {
+  display: flex;
+  margin: 8px 0 0;
+  padding: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+  list-style: none;
+}
+
+.automation-run-list {
+  display: flex;
+  margin-top: 12px;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.automation-run {
+  display: grid;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.automation-run-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.automation-run[data-status="failed"] .automation-run-icon {
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  color: var(--danger-text);
+}
+
+.automation-run-copy {
+  min-width: 0;
+}
+
+.automation-empty {
+  display: flex;
+  min-height: 100px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-xl);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  .automation-rule-tabs,
+  .automation-flow,
+  .automation-schedule-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .automation-run {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .automation-history-filters > span {
+    margin-left: 0;
+    padding-bottom: 0;
+  }
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	glebarezsqlite "github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 	"github.com/opc-workspace/opc-sidecar/internal/models"
 	"gorm.io/gorm"
@@ -144,7 +145,7 @@ func TestBackupAPICreatesListsReplaysAndVerifiesCompletePackage(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(packagePath, backupManifestName),
 		filepath.Join(packagePath, "database", "opc-workspace.db"),
-		filepath.Join(packagePath, "artifacts", artifactStoreMarkerName),
+		filepath.Join(packagePath, "artifacts", filestore.ArtifactStoreMarkerName),
 		filepath.Join(packagePath, "artifacts", "objects", artifactID),
 		filepath.Join(packagePath, "artifacts", "objects", clientAttachmentID),
 		filepath.Join(packagePath, "artifacts", "objects", projectAttachmentID),
@@ -286,7 +287,7 @@ func TestBackupCreateRejectsInsufficientCapacityWithoutSideEffects(t *testing.T)
 	if rejected.Code != http.StatusInsufficientStorage || responseErrorCode(t, rejected.Body.Bytes()) != "BACKUP_SPACE_INSUFFICIENT" {
 		t.Fatalf("insufficient backup capacity = %d: %s", rejected.Code, rejected.Body.String())
 	}
-	if len(probedPaths) != 1 || !sameFilesystemPath(probedPaths[0], backupDir) {
+	if len(probedPaths) != 1 || !filestore.SameFilesystemPath(probedPaths[0], backupDir) {
 		t.Fatalf("capacity probe paths=%q, want only backup root", probedPaths)
 	}
 	for _, privateValue := range []string{note, backupDir, databasePath, artifactDir} {
@@ -387,7 +388,7 @@ func TestBackupCreateRejectsUnavailableCapacityWithoutLeakingOrProjecting(t *tes
 			if rejected.Code != http.StatusServiceUnavailable || responseErrorCode(t, rejected.Body.Bytes()) != "BACKUP_CAPACITY_UNAVAILABLE" {
 				t.Fatalf("unavailable backup capacity = %d: %s", rejected.Code, rejected.Body.String())
 			}
-			if len(probedPaths) != 1 || !sameFilesystemPath(probedPaths[0], backupDir) {
+			if len(probedPaths) != 1 || !filestore.SameFilesystemPath(probedPaths[0], backupDir) {
 				t.Fatalf("capacity probe paths=%q, want only backup root", probedPaths)
 			}
 			for _, privateValue := range []string{note, backupDir, databasePath, "private probe", "C:\\secret", "123456789", "987654321"} {
@@ -438,7 +439,7 @@ func TestBackupCreateAcceptsExactCapacityAndReplayBypassesCapacityProbe(t *testi
 		t.Fatalf("exact-capacity backup = %d: %s", created.Code, created.Body.String())
 	}
 	summary := decodeBackupSummary(t, created.Body.Bytes())
-	if checks != 1 || !sameFilesystemPath(probedPath, backupDir) || summary.ArtifactBytes != int64(len(artifactBody)) {
+	if checks != 1 || !filestore.SameFilesystemPath(probedPath, backupDir) || summary.ArtifactBytes != int64(len(artifactBody)) {
 		t.Fatalf("exact-capacity probe checks=%d path=%q summary=%#v", checks, probedPath, summary)
 	}
 	snapshotPath := filepath.Join(backupDir, summary.ID, "database", "opc-workspace.db")

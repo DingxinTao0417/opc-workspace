@@ -1,8 +1,20 @@
 interface OverlayEntry {
   order: number;
+  name?: string;
   restoreTarget: HTMLElement | null;
   root: HTMLElement;
 }
+
+/** Where an overlay goes in the stack. By default it opens on top. */
+export interface OverlayPlacement {
+  /** A name other overlays can refer to. */
+  name?: string;
+  /** Open just beneath the overlay of this name, if that one is open. */
+  beneath?: string;
+}
+
+// The value of `.modal-root` and `.command-root` in styles.css.
+const overlayBaseLayer = 100;
 
 const openOverlays = new Map<symbol, OverlayEntry>();
 const overlayStackListeners = new Set<() => void>();
@@ -24,6 +36,32 @@ function topmostOverlayEntry(): [symbol, OverlayEntry] | null {
     }
   });
   return topmost;
+}
+
+function overlayOrderFor(placement?: OverlayPlacement): number {
+  const anchor = placement?.beneath
+    ? [...openOverlays.values()].find(
+        (entry) => entry.name === placement.beneath,
+      )
+    : undefined;
+  if (!anchor) return ++nextOverlayOrder;
+  // Halfway to the next overlay below the anchor: the anchor and everything
+  // opened above it stay above.
+  let below = anchor.order - 1;
+  openOverlays.forEach((entry) => {
+    if (entry.order < anchor.order && entry.order > below) below = entry.order;
+  });
+  return (anchor.order + below) / 2;
+}
+
+// Overlays share one CSS layer, so the browser paints them in DOM order. That
+// matches the stack only while every overlay opens on top; keep them in step.
+function paintOverlaysInStackOrder(): void {
+  [...openOverlays.values()]
+    .sort((left, right) => left.order - right.order)
+    .forEach((entry, index) => {
+      entry.root.style.zIndex = String(overlayBaseLayer + index);
+    });
 }
 
 function hasMeaningfulFocus(root?: HTMLElement): boolean {
@@ -99,21 +137,26 @@ export function registerOverlay(
   id: symbol,
   root: HTMLElement,
   restoreTarget: HTMLElement | null,
+  placement?: OverlayPlacement,
 ): () => void {
   if (openOverlays.size === 0) {
     unlockedBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
   }
-  const entry = {
-    order: ++nextOverlayOrder,
+  const entry: OverlayEntry = {
+    order: overlayOrderFor(placement),
+    ...(placement?.name ? { name: placement.name } : {}),
     restoreTarget,
     root,
   };
   openOverlays.set(id, entry);
+  paintOverlaysInStackOrder();
   notifyOverlayStack();
 
   return () => {
     if (!openOverlays.delete(id)) return;
+    root.style.zIndex = "";
+    paintOverlaysInStackOrder();
     pendingFocusRestores.push(entry);
     if (openOverlays.size === 0) {
       document.body.style.overflow = unlockedBodyOverflow ?? "";

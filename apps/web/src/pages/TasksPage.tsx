@@ -1,3 +1,4 @@
+import "./TasksPage.css";
 import {
   ChevronDown,
   ChevronRight,
@@ -290,6 +291,7 @@ export function TasksPage() {
     } else if (locatedTask) {
       setTaskDetailId(locatedTask.taskId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the located identities, not on the objects
   }, [
     locatedAgentRun?.runId,
     locatedAgentRun?.taskId,
@@ -456,14 +458,16 @@ export function TasksPage() {
     setPage,
   });
 
+  const resetBatch = batchMutation.reset;
+  const resetDrag = dragMutation.reset;
   useEffect(() => {
     setSelectedTasks({});
     setBatchConfirmationPending(false);
     setDragPreview({});
     setBoardTransition(null);
     setBoardTransitionNotice(null);
-    batchMutation.reset();
-    dragMutation.reset();
+    resetBatch();
+    resetDrag();
   }, [
     page,
     queryText,
@@ -480,6 +484,8 @@ export function TasksPage() {
     dueTo,
     sort,
     view,
+    resetBatch,
+    resetDrag,
   ]);
 
   const clearFilters = () => {
@@ -539,6 +545,7 @@ export function TasksPage() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the located view id and the retry counter
   }, [locatedSavedView?.viewId, savedViewRetry]);
 
   const toggleTag = (id: string) => {

@@ -266,7 +266,10 @@ export function TaskAssignmentsSection({
     setConflictReadyVersion(null);
   }, [task.id]);
 
-  const pages = assignmentsQuery.data?.pages ?? [];
+  const pages = useMemo(
+    () => assignmentsQuery.data?.pages ?? [],
+    [assignmentsQuery.data?.pages],
+  );
   const firstPage = pages[0];
   const active = firstPage?.active;
   const handoffContent = taskAssignmentHandoff(

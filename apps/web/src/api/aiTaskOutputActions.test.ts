@@ -4,6 +4,7 @@ import {
   decideAiTaskOutput,
   type AiActionProposal,
 } from "./aiWorkspaceActions";
+import type { Untyped } from "../test/untyped";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("./client", async () => ({
   ...(await vi.importActual("./client")),
@@ -118,38 +119,42 @@ describe("task output approval contract", () => {
   it.each([
     [
       "unknown actor override",
-      (p: any) => (p.action.changes.produced_by_actor_id = uuid(8)),
+      (p: Untyped) => (p.action.changes.produced_by_actor_id = uuid(8)),
     ],
-    ["model consent", (p: any) => (p.action.confirm_task_output = true)],
-    ["missing evidence", (p: any) => delete p.preview.task_output],
+    ["model consent", (p: Untyped) => (p.action.confirm_task_output = true)],
+    ["missing evidence", (p: Untyped) => delete p.preview.task_output],
     [
       "partial preview",
-      (p: any) => (p.preview.task_output.artifacts[0].content = "截断"),
+      (p: Untyped) => (p.preview.task_output.artifacts[0].content = "截断"),
     ],
     [
       "changed name",
-      (p: any) => (p.preview.task_output.artifacts[0].name = "其他"),
+      (p: Untyped) => (p.preview.task_output.artifacts[0].name = "其他"),
     ],
-    ["forged completion", (p: any) => (p.preview.after.status = "done")],
-    ["missing reviewer", (p: any) => p.preview.task_output.assignments.pop()],
+    ["forged completion", (p: Untyped) => (p.preview.after.status = "done")],
+    [
+      "missing reviewer",
+      (p: Untyped) => p.preview.task_output.assignments.pop(),
+    ],
     [
       "disabled producer",
-      (p: any) =>
+      (p: Untyped) =>
         (p.preview.task_output.assignments[0].actor_status = "inactive"),
     ],
     [
       "file write",
-      (p: any) => (p.action.changes.artifacts[0].storage_kind = "file"),
+      (p: Untyped) => (p.action.changes.artifacts[0].storage_kind = "file"),
     ],
     [
       "unexpected file path",
-      (p: any) =>
+      (p: Untyped) =>
         (p.preview.task_output.artifacts[0].relative_path = "objects/x"),
     ],
-    ["unknown preview", (p: any) => (p.preview.tasks = [])],
+    ["unknown preview", (p: Untyped) => (p.preview.tasks = [])],
     [
       "null followup",
-      (p: any) => (p.preview.task_output.artifacts[0].requires_followup = null),
+      (p: Untyped) =>
+        (p.preview.task_output.artifacts[0].requires_followup = null),
     ],
   ])("rejects %s", (_, change) => {
     const p = fixture();

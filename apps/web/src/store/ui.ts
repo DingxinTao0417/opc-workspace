@@ -99,6 +99,11 @@ interface UiState {
   localNavigationRequestRevision: number;
   settingsOpen: boolean;
   settingsModule: SettingsModule;
+  /**
+   * What the last business import did. Applying one re-reads the settings and
+   * remounts the app, so the settings page cannot keep this in its own state.
+   */
+  dataImportNotice: string | null;
   taskDetailId: string | null;
   agentRunDrawer: AgentRunDrawerState | null;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -131,6 +136,7 @@ interface UiState {
   ) => void;
   dismissWorkspaceRecordNavigation: (id: number) => void;
   setSettingsOpen: (open: boolean, module?: SettingsModule) => void;
+  setDataImportNotice: (notice: string | null) => void;
   setTaskDetailId: (id: string | null) => void;
   openAgentRunDrawer: (
     taskId: string,
@@ -139,6 +145,9 @@ interface UiState {
   ) => void;
   closeAgentRunDrawer: () => void;
 }
+
+/** The Run drawer's name in the overlay stack; its Task detail opens beneath it. */
+export const agentRunDrawerOverlay = "agent-run-drawer";
 
 export const useUiStore = create<UiState>((set) => ({
   commandPaletteOpen: false,
@@ -162,6 +171,7 @@ export const useUiStore = create<UiState>((set) => ({
   localNavigationRequestRevision: 0,
   settingsOpen: false,
   settingsModule: "general",
+  dataImportNotice: null,
   taskDetailId: null,
   agentRunDrawer: null,
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
@@ -290,7 +300,12 @@ export const useUiStore = create<UiState>((set) => ({
         : state,
     ),
   setSettingsOpen: (settingsOpen, settingsModule = "general") =>
-    set({ settingsOpen, settingsModule }),
+    set(
+      settingsOpen
+        ? { settingsOpen, settingsModule }
+        : { settingsOpen, settingsModule, dataImportNotice: null },
+    ),
+  setDataImportNotice: (dataImportNotice) => set({ dataImportNotice }),
   setTaskDetailId: (taskDetailId) => set({ taskDetailId }),
   openAgentRunDrawer: (taskId, runId = null, returnSession) =>
     set({

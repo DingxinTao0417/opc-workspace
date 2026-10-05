@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 func TestListStartupRestoreChoicesIsMetadataOnlyAndFailClosed(t *testing.T) {
@@ -35,7 +37,7 @@ func TestListStartupRestoreChoicesIsMetadataOnlyAndFailClosed(t *testing.T) {
 		"database_id":"018f0000-0000-7000-8000-00000000d001",
 		"artifact_store_id":"018f0000-0000-7000-8000-00000000e001",
 		"database":{"path":"database/opc-workspace.db","size_bytes":10,"sha256":"`+hashA+`"},
-		"artifact_marker":{"path":"artifacts/`+artifactStoreMarkerName+`","size_bytes":10,"sha256":"`+hashB+`"},
+		"artifact_marker":{"path":"artifacts/`+filestore.ArtifactStoreMarkerName+`","size_bytes":10,"sha256":"`+hashB+`"},
 		"artifacts":[],
 		"artifact_count":0,
 		"artifact_bytes":0,

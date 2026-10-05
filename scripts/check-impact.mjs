@@ -22,6 +22,11 @@ const LANES = [
     matches: (file) => file.endsWith(".md") || file.startsWith("docs/"),
   },
   {
+    id: "check:scripts",
+    command: "pnpm check:scripts",
+    matches: (file) => file.startsWith("scripts/"),
+  },
+  {
     id: "check:web",
     command: "pnpm check:web",
     matches: (file) => file.startsWith("apps/web/"),
@@ -44,6 +49,8 @@ const LANES = [
 // Files whose change can reach every surface: workspace wiring, shared scripts,
 // CI definitions and toolchain configuration.
 const HUB_PATTERNS = [
+  /^\.gitattributes$/,
+  /^\.editorconfig$/,
   /^package\.json$/,
   /^pnpm-workspace\.yaml$/,
   /^pnpm-lock\.yaml$/,
@@ -106,7 +113,7 @@ function changedFiles(base) {
   return [...files].filter((file) => file !== "<unresolved>").sort();
 }
 
-function selectLanes(files) {
+export function selectLanes(files) {
   const selected = new Map();
   const reasons = new Map();
   const unknown = [];
@@ -301,4 +308,9 @@ function main() {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
-main();
+// Importing this module (the lane-selection test does) must not print a report.
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  main();

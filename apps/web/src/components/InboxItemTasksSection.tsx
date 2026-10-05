@@ -271,7 +271,10 @@ export function InboxItemTasksSection({
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const pages = relationsQuery.data?.pages ?? [];
+  const pages = useMemo(
+    () => relationsQuery.data?.pages ?? [],
+    [relationsQuery.data?.pages],
+  );
   const active = useMemo(
     () => dedupeRelations(pages.flatMap((page) => page.active)),
     [pages],

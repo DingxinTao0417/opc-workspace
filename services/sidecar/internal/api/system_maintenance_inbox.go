@@ -215,7 +215,7 @@ func (a *API) projectBackupRestoreFailure(requestID string) error {
 	return a.projectSystemMaintenanceFailure(backupRestoreMaintenanceIncident, requestID)
 }
 
-func (a *API) recordRuntimeDatabaseFailure(requestID string) {
+func (a *API) RecordRuntimeDatabaseFailure(requestID string) {
 	if strings.TrimSpace(a.options.LogDir) == "" {
 		return
 	}

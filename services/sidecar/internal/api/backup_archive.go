@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/opc-workspace/opc-sidecar/internal/api/filestore"
 )
 
 const (
@@ -208,7 +210,7 @@ func requireBackupArchiveCapacity(root string, options Options, manifest backupM
 	}
 	checker := options.DiskSpaceCheck
 	if checker == nil {
-		checker = diskFreeBytes
+		checker = filestore.DiskFreeBytes
 	}
 	available, total, err := checker(root)
 	if err != nil || total == 0 || available > total {

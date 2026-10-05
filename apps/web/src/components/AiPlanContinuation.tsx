@@ -184,11 +184,12 @@ export function AiPlanContinuation({
   const consent = consentIdentity === identity;
   const setConsent = (confirmed: boolean) =>
     setConsentIdentity(confirmed ? identity : null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a fresh owner token per identity and per open, on purpose
   const owner = useMemo(() => ({}), [identity, open]);
   const ownerRef = useRef(owner);
   ownerRef.current = owner;
   useEffect(() => {
-    setConsent(false);
+    setConsentIdentity(null);
   }, [identity]);
   useEffect(
     () => () => {
@@ -198,7 +199,7 @@ export function AiPlanContinuation({
   );
   useEffect(() => {
     setOpen(false);
-    setConsent(false);
+    setConsentIdentity(null);
     setError("");
   }, [sessionId]);
   const lease = query.data;
@@ -668,6 +669,7 @@ export function AiAutomaticReply({
   const value = generation.data;
   useEffect(() => {
     if (value) invalidateSession(client, sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-runs when the generation id or status changes, not on every refetch
   }, [value?.id, value?.status, client, sessionId]);
   if (!generationId || knownGenerationIds.includes(generationId)) return null;
   if (generation.isError)

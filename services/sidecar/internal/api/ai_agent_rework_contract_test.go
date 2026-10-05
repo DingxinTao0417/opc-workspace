@@ -564,7 +564,7 @@ func TestAIAgentReworkFileDriftIsCheckedAtApprovalAndPrelaunch(t *testing.T) {
 					t.Fatalf("approve file rework=%d %s", response.Code, response.Body.String())
 				}
 			}
-			absolute, err := f.Service.artifactStore.resolveObject(*artifact.RelativePath)
+			absolute, err := f.Service.artifactStore.ResolveObject(*artifact.RelativePath)
 			if err != nil {
 				t.Fatal(err)
 			}

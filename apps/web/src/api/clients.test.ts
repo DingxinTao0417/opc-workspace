@@ -121,8 +121,7 @@ describe("client API contract", () => {
 
   it("uses stable-write headers and explicit confirmed deletion", async () => {
     const fetchMock = vi.fn(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = new URL(String(input), "http://local");
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
         if (init?.method === "DELETE") {
           return jsonResponse({
             data: { deleted_id: "client-1", detached_projects: 2 },

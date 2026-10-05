@@ -24,6 +24,7 @@ mod file_operation_security;
 mod file_recovery_record;
 mod global_shortcuts;
 mod host_shell;
+mod process_job;
 mod sidecar;
 mod startup_restore;
 mod workspace_file_snapshot;

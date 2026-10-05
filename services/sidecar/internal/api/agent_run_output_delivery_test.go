@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -609,6 +610,34 @@ func TestAgentRunFinalizationWaitsForMaintenanceWriterThenCommitsAtomically(t *t
 	assertDatabaseCount(t, fixture.Store, "SELECT COUNT(*) FROM task_artifacts WHERE task_id=?", 1, run.TaskID)
 }
 
+// waitForGoroutineIn returns once some goroutine has every named frame on its
+// stack. A goroutine blocked on a lock exposes no other signal, and guessing
+// how long it takes to get there is what this replaces.
+func waitForGoroutineIn(t *testing.T, frames ...string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	buffer := make([]byte, 4<<20)
+	for {
+		dump := string(buffer[:runtime.Stack(buffer, true)])
+		for _, goroutine := range strings.Split(dump, "\n\n") {
+			reached := true
+			for _, frame := range frames {
+				if !strings.Contains(goroutine, frame) {
+					reached = false
+					break
+				}
+			}
+			if reached {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no goroutine reached %v", frames)
+		}
+		runtime.Gosched()
+	}
+}
+
 func TestAgentRunRestoreBarrierCancelsWithoutWaitingAndPreventsFinalizationWrite(t *testing.T) {
 	fixture := newAIAgentRunFixture(t)
 	addAgentRunOwnerReviewer(t, fixture)
@@ -638,7 +667,9 @@ func TestAgentRunRestoreBarrierCancelsWithoutWaitingAndPreventsFinalizationWrite
 		fixture.Service.finalizeAgentRunObserved(run, "must not cross restore barrier", "", completedAt)
 		close(finalizeDone)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	// The finalizer has to be parked on the storage lease before restore starts,
+	// otherwise "cancels without waiting" is trivially true.
+	waitForGoroutineIn(t, "finalizeAgentRunOutcomeObservedContext", "withAgentRunStorageLease", "RWMutex).RLock")
 	fixture.Service.restorePending.Store(true)
 	cancelDone := make(chan struct{})
 	go func() {
