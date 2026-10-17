@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"fmt"
 	"sort"
@@ -43,8 +44,9 @@ type taskArtifactAssignmentImportEvents struct {
 }
 
 // Artifact replay Tasks can retain ended assignment history even after a Task
-// is reopened. Import restores only ended rows before their deferred Task
-// foreign keys exist; active rows keep the ordinary online insert guards.
+// is reopened; their whole assignment history is checked against the events.
+// Ended rows of every Task are restored before their deferred Task foreign keys
+// exist (see partitionHistoricalTaskAssignmentRows).
 func validTaskArtifactAssignmentImportHistory(
 	packageData businessExportPackage,
 	replays taskArtifactImportReplays,
@@ -53,9 +55,7 @@ func validTaskArtifactAssignmentImportHistory(
 	for _, table := range packageData.Tables {
 		tables[table.Name] = table
 	}
-	_, _, ok := partitionTaskArtifactHistoricalAssignmentRows(
-		tables["tasks"], tables["task_assignments"], replays.taskIDs,
-	)
+	_, _, ok := partitionHistoricalTaskAssignmentRows(tables["tasks"], tables["task_assignments"])
 	if !ok {
 		return false
 	}
@@ -69,10 +69,14 @@ func validTaskArtifactAssignmentImportHistory(
 		)
 }
 
-func partitionTaskArtifactHistoricalAssignmentRows(
+// Ended assignment rows are history, not new assignments. They are written
+// before their Task rows, while the deferred Task foreign keys are absent, so
+// the online guards that keep a finished Task from being assigned do not see a
+// Task yet. Active rows keep the ordinary insert guards; a finished Task can
+// never hold one.
+func partitionHistoricalTaskAssignmentRows(
 	tasksTable businessExportTable,
 	assignmentsTable businessExportTable,
-	protectedTaskIDs map[string]struct{},
 ) (businessExportTable, businessExportTable, bool) {
 	tasks, ok := automationImportRowsByID(tasksTable)
 	if !ok {
@@ -90,23 +94,10 @@ func partitionTaskArtifactHistoricalAssignmentRows(
 		return businessExportTable{}, businessExportTable{}, false
 	}
 	for _, row := range assignmentsTable.Rows {
-		taskID, taskIDOK := row[taskIDIndex].(string)
-		if !taskIDOK || strings.TrimSpace(taskID) == "" {
-			remaining.Rows = append(remaining.Rows, row)
-			continue
-		}
-		if _, protected := protectedTaskIDs[taskID]; !protected {
-			remaining.Rows = append(remaining.Rows, row)
-			continue
-		}
-		task, taskExists := tasks[taskID]
-		status, statusOK := task["status"].(string)
-		if !taskExists || !statusOK {
-			return businessExportTable{}, businessExportTable{}, false
-		}
 		unassignedAtValue := row[unassignedAtIndex]
 		if unassignedAtValue == nil {
-			if status == "done" || status == "cancelled" {
+			taskID, _ := row[taskIDIndex].(string)
+			if status, _ := tasks[taskID]["status"].(string); status == "done" || status == "cancelled" {
 				return businessExportTable{}, businessExportTable{}, false
 			}
 			remaining.Rows = append(remaining.Rows, row)
@@ -968,7 +959,10 @@ func activateHistoricalAssignmentActors(tx *gorm.DB, table businessExportTable) 
 	activated := make([]string, 0)
 	for _, id := range ids {
 		var status string
-		if err := tx.Table("actors").Select("status").Where("id = ?", id).Row().Scan(&status); err != nil {
+		if err := tx.Table("actors").Select("status").Where("id = ?", id).Row().Scan(&status); errors.Is(err, sql.ErrNoRows) {
+			// A missing Actor is left to the insert guards to name.
+			continue
+		} else if err != nil {
 			return nil, fmt.Errorf("read historical Task assignment actor: %w", err)
 		}
 		if status == "active" {

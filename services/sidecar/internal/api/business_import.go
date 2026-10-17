@@ -630,8 +630,8 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		if !ok {
 			return errors.New("Task Artifact import replay plan is invalid")
 		}
-		historicalAssignments, remainingAssignments, ok := partitionTaskArtifactHistoricalAssignmentRows(
-			tables["tasks"], tables["task_assignments"], artifactReplays.taskIDs,
+		historicalAssignments, remainingAssignments, ok := partitionHistoricalTaskAssignmentRows(
+			tables["tasks"], tables["task_assignments"],
 		)
 		if !ok {
 			return errors.New("Task assignment import history is invalid")
@@ -663,8 +663,10 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 			return err
 		}
 		// Ended assignment rows are history, not new active assignments. Insert
-		// them while their deferred Task foreign keys are absent so the online
-		// Task and Actor guards remain unchanged for active assignment imports.
+		// them while their deferred Task foreign keys are absent, with their
+		// deactivated Actors briefly active, so that neither a finished Task nor
+		// a deactivated person refuses its own history. The online Task and
+		// Actor guards remain unchanged for active assignment imports.
 		activatedActors, err := activateHistoricalAssignmentActors(tx, historicalAssignments)
 		if err != nil {
 			return err

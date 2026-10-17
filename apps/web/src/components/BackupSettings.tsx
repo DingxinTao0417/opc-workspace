@@ -150,7 +150,7 @@ const importRehearsalReasons: Record<string, string> = {
   INVALID_CONTENT_ITEM_INBOX_SOURCE: malformedReminder("内容日历"),
   INVALID_ROADMAP_MILESTONE_INBOX_SOURCE: malformedReminder("路线图里程碑"),
   TASK_NOT_ASSIGNABLE:
-    "源数据里有已完成或已取消的任务，并且保留着负责人的指派记录。这类历史指派目前还不能导入。",
+    "源数据里有一条指派记录属于当前工作区里已经结束的任务。导入不会改动已有任务，所以这个包写不进来。",
   FOREIGN_KEY_CONSTRAINT: "源数据里有记录引用了并不存在的对象。",
   UNIQUE_CONSTRAINT: "源数据里有记录会与已有内容的唯一值重复。",
 };

@@ -6,7 +6,7 @@ AI 独立轨道 schema 076 为加法迁移：新增会话所有的 `ai_work_plan
 
 > 当前代码基线：app v0.1.1 / API v1 / SQLite schema v80（数据管理核心事实仍由 v44 及更早迁移定义；后续 AI/Agent 操作态不进入便携业务包）
 >
-> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出、冲突预检、同 schema 零主键冲突追加，以及每日计划备份/启动补偿/只清理自动包的保留策略已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天容量样本保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择（恢复页跳过/指定已有备份）已交付；受支持旧 schema（49、51、63–79）业务包的升级导入、唯一值冲突只读预检、保留目标与跳过完全相同的行已交付（[ADR-032](../adr/032-business-import-upgrade-and-conflict-strategies.md)）；带有历史系统提醒（任务阻塞、任务到期、内容日历、路线图里程碑）的工作区的导入已交付（schema 80，[ADR-034](../adr/034-inbox-source-import-authorizations.md)）。覆盖或合并内容有分歧的行、UUID 重映射、外部目标和完整跨版本矩阵仍未实现；含有已完成或已取消、并且指派过负责人的 Task 的工作区目前无法导入（既有缺陷，见“仍未实现”）。
+> 事实边界：SQLite 初始化/迁移、开发/正式数据隔离、受控文件、T-04B 一致性备份完整闭环、业务 JSON/ZIP 安全导入导出、冲突预检、同 schema 零主键冲突追加，以及每日计划备份/启动补偿/只清理自动包的保留策略已经实现。三个受控逻辑位置的物理卷同卷去重、无路径手动容量检查、15 分钟容量样本、30 天容量样本保留与设置页 7 天趋势也已交付，API/数据库均不保存或返回路径和卷标识；启动前备份选择（恢复页跳过/指定已有备份）已交付；受支持旧 schema（49、51、63–79）业务包的升级导入、唯一值冲突只读预检、保留目标与跳过完全相同的行已交付（[ADR-032](../adr/032-business-import-upgrade-and-conflict-strategies.md)）；带有历史系统提醒（任务阻塞、任务到期、内容日历、路线图里程碑）的工作区的导入已交付（schema 80，[ADR-034](../adr/034-inbox-source-import-authorizations.md)）。已完成或已取消的任务的历史指派、已停用成员的历史指派也随包导入。覆盖或合并内容有分歧的行、UUID 重映射、外部目标和完整跨版本矩阵仍未实现。
 
 导航：[文档中心](../README.md) · [整体功能架构](../functional-architecture.md) · [PRD](../opc-workspace-PRD.md) · [任务](tasks.md) · [客户](clients.md) · [项目](projects.md) · [设置](settings.md) · [桌面平台](desktop-platform.md)
 
@@ -81,7 +81,8 @@ AI 独立轨道 schema 076 为加法迁移：新增会话所有的 `ai_work_plan
 ### 仍未实现
 
 - 覆盖或合并内容有分歧的行、跳过有分歧的行（[ADR-032](../adr/032-business-import-upgrade-and-conflict-strategies.md) 明确不提供）以及 UUID 重映射（本轮不做，需单独决策）；受支持旧 schema 的升级导入、唯一值冲突预检、保留目标与跳过完全相同的行已经实现；
-- **导入仍有的限制**（[ADR-034 已知限制](../adr/034-inbox-source-import-authorizations.md#已知限制)）：包记录某个来源已被删除而目标仍持有该来源时，追加导入不会删除目标里的东西，演练以 `TASK_BLOCKED_DELETED_SOURCE_COLLISION / TASK_DUE_DELETED_SOURCE_COLLISION / CONTENT_ITEM_DELETED_SOURCE_COLLISION / ROADMAP_MILESTONE_DELETED_SOURCE_COLLISION` 拒绝整个包。**已完成或已取消、并且指派过负责人的 Task 仍然无法导入**：schema 008 的 `trg_task_assignments_reject_terminal_insert` 拒绝为终态 Task 写入任何指派行（包括已结束的历史指派），导入只对参与产出回放的 Task 提前写入历史指派；演练以 `TASK_NOT_ASSIGNABLE` 在备份之前拒绝，含这类任务的工作区目前仍不能导入，尚未修复。
+- **导入仍有的限制**（[ADR-034 已知限制](../adr/034-inbox-source-import-authorizations.md#已知限制)）：包记录某个来源已被删除而目标仍持有该来源时，追加导入不会删除目标里的东西，演练以 `TASK_BLOCKED_DELETED_SOURCE_COLLISION / TASK_DUE_DELETED_SOURCE_COLLISION / CONTENT_ITEM_DELETED_SOURCE_COLLISION / ROADMAP_MILESTONE_DELETED_SOURCE_COLLISION` 拒绝整个包。
+- **已结束指派的导入**：`task_assignments` 中 `unassigned_at` 非空的行是历史，不是新的指派。导入在写入 Task 行之前、外键延迟检查期间写入全部这类行，并临时把其中已停用的 Actor 设为 active、写完后恢复（包与目标里都不存在的 Actor 不处理，仍由插入守卫以 `ASSIGNMENT_ACTOR_NOT_ACTIVE` 在演练中拒绝），因此 schema 008 的 `trg_task_assignments_reject_terminal_insert`（`TASK_NOT_ASSIGNABLE`）与 schema 007 的 `trg_task_assignments_require_active_actor_insert / trg_task_assignments_require_active_assigner_insert`（`ASSIGNMENT_ACTOR_NOT_ACTIVE / ASSIGNMENT_ASSIGNER_NOT_ACTIVE`）不再拒绝已完成或已取消的任务、已停用成员的历史指派。此前只有参与产出回放的 Task 走这条路径，其余 Task 的已结束指派在 Task 之后按在线规则写入，含这类数据的工作区无法导入。活动指派仍在 Task 之后按在线规则写入；包里已完成或已取消的 Task 若带有活动指派，返回 422 `IMPORT_ROW_INVALID`（`Task assignment history is invalid`），发生在演练与备份之前。参与产出回放的 Task 仍另做完整的指派历史核对，其余 Task 的已结束指派不做事件核对，只由列约束与写入顺序保证。追加导入时，若目标里已经有这个已结束的 Task，新写入的指派仍被 `TASK_NOT_ASSIGNABLE` 拒绝。不涉及迁移，schema 仍为 v80。
 - 选择外部备份包、路径对话框和跨版本恢复兼容矩阵；
 - 容量趋势的大数据量聚合与导出；物理卷身份/同卷去重、用户阈值配置、手动容量检查和 30 天本地历史已交付。诊断包生成失败仍只返回安全错误，不自动生成可能递归的诊断故障项；
 - 计划备份的外部目标、周期恢复抽检、增量备份、加密和云目标；本地每日计划与自动包保留已交付。
@@ -382,7 +383,7 @@ schema v44 与 API v1 已交付本机计划首个纵切：
 - [x] 应用前演练：会被数据库规则拒绝的导入在预检阶段返回 `apply_rehearsal_failed` 与规则标识，apply 返回 422 `IMPORT_REHEARSAL_FAILED` 且不创建回滚备份、不发布文件；演练不在目标留下任何行。
 - [x] 历史系统提醒的导入（schema 80）：来源之后变化或被删除的任务阻塞、任务到期、内容日历与路线图里程碑提醒随包导入，导入后与源逐列一致，可重复导入；包内缺少投影或删除事件、身份不符、来源存在性与删除标记矛盾时返回 422 `IMPORT_ROW_INVALID` 且不创建备份；授权只放行一次写入，事务结束时没有残留。
 - [x] 包记录来源已删除而目标仍持有该来源时，演练以 `*_DELETED_SOURCE_COLLISION` 拒绝，不创建备份、不改变目标。
-- [ ] 含有已完成或已取消、并且指派过负责人的 Task 的工作区的导入：已结束的指派行被 schema 008 的终态任务守卫拒绝，演练返回 `TASK_NOT_ASSIGNABLE`，尚未修复。
+- [x] 已结束指派的导入：指派后完成、指派后取消、改派后完成、完成后重新打开，以及指派结束后被停用的成员，用真实命令生成后导出、导入空白工作区，`actors`（内置 Actor 除外）、`tasks`、`task_assignments`、`workflow_events` 与源逐行一致，可重复导入；导入后已结束的 Task 仍不可指派，已停用的成员仍不可被指派；已结束的 Task 带活动指派的包返回 422 `IMPORT_ROW_INVALID` 且不创建备份。
 - [ ] 覆盖/合并有分歧的行与 UUID 重映射（ADR-032 不提供或暂不做）、外部备份目标、周期恢复抽检和完整跨版本恢复兼容矩阵。
 
 ## 相关代码/PRD链接
