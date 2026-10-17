@@ -29,7 +29,7 @@ func TestAIReliabilityMigrationPreservesHistoryAndGuardsIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 79 {
+	if store.SchemaVersion != 80 {
 		t.Fatalf("schema=%d", store.SchemaVersion)
 	}
 	var body string

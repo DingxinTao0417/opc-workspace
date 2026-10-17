@@ -32,6 +32,7 @@ const (
 	businessImportSchema77 = 77
 	businessImportSchema78 = 78
 	businessImportSchema79 = 79
+	businessImportSchema80 = 80
 )
 
 // Schema 50 only adds the operational import-authorization table and schema 51
@@ -265,6 +266,19 @@ var businessExportExcludedTablesSchema77 = func() []string {
 	return result
 }()
 
+// Frozen schema 078/079 list: only Project completion had an import
+// authorization table.
+var businessExportExcludedTablesSchema79 = func() []string {
+	result := make([]string, 0, len(businessExportExcludedTablesSchema77)+1)
+	for _, table := range businessExportExcludedTablesSchema77 {
+		result = append(result, table)
+		if table == "ai_messages" {
+			result = append(result, "ai_workspace_access_requests")
+		}
+	}
+	return result
+}()
+
 // Frozen schema 050/051 list. Schema 50 added the operational import
 // authorization table; schema 51 is the schema of the released v0.1.0, whose
 // exports declare exactly this manifest.
@@ -278,13 +292,21 @@ func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, boo
 	// either left the portable surface alone or changed it in a way that is
 	// registered as an upgrade step (see businessImportSurfaceChanges).
 	if sourceSchema == businessImportSchema51 &&
-		targetSchema > businessImportSchema51 && targetSchema <= businessImportSchema79 {
+		targetSchema > businessImportSchema51 && targetSchema <= businessImportSchema80 {
 		return businessExportExcludedTablesSchema51, true
+	}
+	// 80 adds only the excluded Inbox source import-authorization table and
+	// rebuilds four Inbox insert guards around it. Portable rows are unchanged.
+	if targetSchema == businessImportSchema80 && sourceSchema != targetSchema {
+		if sourceSchema == businessImportSchema79 {
+			return businessExportExcludedTablesSchema79, true
+		}
+		return businessImportSchemaContract(sourceSchema, businessImportSchema79)
 	}
 	// 79 only widens the excluded permission recommendation ledger.
 	if targetSchema == businessImportSchema79 && sourceSchema != targetSchema {
 		if sourceSchema == businessImportSchema78 {
-			return businessExportExcludedTables, true
+			return businessExportExcludedTablesSchema79, true
 		}
 		return businessImportSchemaContract(sourceSchema, businessImportSchema78)
 	}
@@ -341,6 +363,9 @@ func businessImportSchemaContract(sourceSchema, targetSchema int) ([]string, boo
 		return businessImportSchemaContract(sourceSchema, businessImportSchema71)
 	}
 	if sourceSchema == targetSchema {
+		if sourceSchema == businessImportSchema78 || sourceSchema == businessImportSchema79 {
+			return businessExportExcludedTablesSchema79, true
+		}
 		if sourceSchema == businessImportSchema77 {
 			return businessExportExcludedTablesSchema77, true
 		}

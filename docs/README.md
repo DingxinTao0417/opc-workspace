@@ -2,7 +2,7 @@
 
 本目录集中维护 opc-workspace 的产品范围、整体功能架构和模块级实现契约。
 
-> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 79。Windows x64 的 Tauri 原生链接、Rust 测试和未签名 NSIS/MSI 打包在 2026-10-04 复验通过；实机模型、真实故障与跨平台发布验收不由隔离自动化代替，执行记录见 [PRD 10.5](opc-workspace-PRD.md#105-当前验证矩阵)。各版本与实现切片的交付记录见[变更记录](changelog.md)；本页只维护阅读顺序、模块状态总览和产品边界。
+> 当前代码基线为 app v0.1.1 / API v1 / SQLite schema 80。Windows x64 的 Tauri 原生链接、Rust 测试和未签名 NSIS/MSI 打包在 2026-10-04 复验通过；实机模型、真实故障与跨平台发布验收不由隔离自动化代替，执行记录见 [PRD 10.5](opc-workspace-PRD.md#105-当前验证矩阵)。各版本与实现切片的交付记录见[变更记录](changelog.md)；本页只维护阅读顺序、模块状态总览和产品边界。
 
 ## 阅读顺序与事实优先级
 
@@ -122,6 +122,7 @@
 - [ADR-031：桌面受管 Sidecar 的进程树治理（Windows Job Object）](adr/031-desktop-sidecar-process-governance.md)
 - [ADR-032：业务数据导入的旧版本升级与冲突策略](adr/032-business-import-upgrade-and-conflict-strategies.md)
 - [ADR-033：门控 Run 以前置 Run 已验收的文件产出为输入（两段人工确认，执行契约 v7）](adr/033-agent-run-predecessor-file-inputs.md)
+- [ADR-034：历史系统提醒的导入授权（任务阻塞、任务到期、内容日历、路线图里程碑）](adr/034-inbox-source-import-authorizations.md)
 
 ## 核心术语
 

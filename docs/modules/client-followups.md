@@ -40,7 +40,7 @@
 
 ## AI 独立轨道：查询与回访操作确认（H3-B1–B2，已实现）
 
-- 回访切片在 app v0.1.1 / API v1 / schema 72 上交付，自身无迁移；其后至 schema 79 的迁移（审批长预览扩容、Agent Run 执行身份、可恢复产出登记、会话计划修订、后台续办和权限请求账本）都不修改回访表。`workspace_client_records` 在单次 `clients` 授权下查询活动和回访：列表 limit 1–20、offset 0–1000，支持 Client、状态、负责人、逾期过滤；detail 使用真实 ID，备注/结果/下一步/跳过或取消原因一次读取一个 field，Unicode 分页每次 1–4000 字。返回版本、UTC server_now、总数/下一页和包含记录 ID 的客户页面链接，未读页不是已知事实。
+- 回访切片在 app v0.1.1 / API v1 / schema 72 上交付，自身无迁移；其后至 schema 80 的迁移（审批长预览扩容、Agent Run 执行身份、可恢复产出登记、会话计划修订、后台续办、权限请求账本和提醒导入授权）都不修改回访表。`workspace_client_records` 在单次 `clients` 授权下查询活动和回访：列表 limit 1–20、offset 0–1000，支持 Client、状态、负责人、逾期过滤；detail 使用真实 ID，备注/结果/下一步/跳过或取消原因一次读取一个 field，Unicode 分页每次 1–4000 字。返回版本、UTC server_now、总数/下一页和包含记录 ID 的客户页面链接，未读页不是已知事实。
 - `work+clients+actions` 可提议 `client_followup.create/update/cancel/skip/complete/reschedule`，不提供模型执行入口。创建需真实客户、active owner/person、带偏移计划时刻、明确 IANA 时区、渠道和目的；备注可空，优先级 low/normal/high。修改不能换客户；取消和跳过必填 reason（1–1000 字）。计划允许过去时间，但会成为逾期待办。模型不能创建 Actor、伪造源身份或捏造沟通结果。
 - 人工确认与原生 API 共用 `client_followup_commands.go` 的事务入口，重验 planned、expected_version、客户启用和负责人规则；还比较持久预览中的客户/负责人名称与状态，避免关联资料变化却未递增 Followup version 时静默换目标。业务写入、旧到期 Inbox 归档、领域事件及审批决定同事务，任何事件失败整体回滚；已确认卡重放不重复执行。
 - 确认卡展示客户、负责人、UTC 时刻/IANA 时区、计划前后值和本地记录边界。无正文结果回执可用于后续对话但不继承权限；成功或不确定失败均取消旧 Client/Followup/Inbox/Actor/搜索请求并刷新事实。H4-D 链接通过 `?followup=<id>` 直接读取并定位该回访，不扫描或改写列表分页。

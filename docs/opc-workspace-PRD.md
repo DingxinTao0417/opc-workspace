@@ -5,7 +5,7 @@
 > 目标用户：独立创业者 / 自由职业者 / 一人公司经营者
 > 技术架构：Tauri 2.0 + React + Go Sidecar + SQLite
 > 文档日期：2026-10-04
-> 实现基线：app v0.1.1 / API v1 / SQLite schema v79
+> 实现基线：app v0.1.1 / API v1 / SQLite schema v80
 
 > 文档导航：[文档中心](README.md) · [整体功能架构](functional-architecture.md) · [模块文档](modules/README.md) · [变更记录](changelog.md)
 
@@ -410,7 +410,7 @@ schema v30 的父任务协调同样运行在触发命令的 SQLite 事务中。�
 
 **历史原型（已移除）**：`projects-linear.html`
 
-> **当前状态**：部分完成。当前 schema v79 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合。Project 列表已对默认及全部白名单排序追加 `id ASC`，并在同一只读事务中读取 Count 与当前页，供共享 `ProjectSelect` 稳定分页。schema v21 新增 Project Note，schema v22 新增 Project Attachment；schema v23–v25 已依次投影显式 `requires_followup` Artifact、所属 Task 阻塞事件和提前 24 小时 Task 临期，schema v28 已把 Project 完成周期投影为收尾 Inbox Item并协调父项目删除，schema v31 又把已关联 Client 的 Project 完成/重开事件投影为客户系统动态。Project Artifact 读模型现已同时返回 nullable follow-up Inbox 上下文和实时 required 进度，项目详情把产出放在任务区之后，显示跟进状态/阻塞/待验收/取消并深链 Inbox；后续拆分、owner/person 分派和 manual owner 验收继续复用 Inbox/Task 事实，不在 Project 新建写模型。Client CRUD、客户选择/改绑/解除和客户筛选已接通。Focus 完成会更新绑定 Task 工时并沿既有聚合链刷新 Project；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 completed-only 报告与终态 Session 历史。Project 写命令继续同事务追加不可变 Workflow Event；项目笔记、附件和 Focus 读模型不混入命令审计。schema v33 不改变 Project 表；schema v34、v35 与 v74–v75 也不改变 Project 表；用户显式启用的受限预设只在新完成事件后创建本地“检查开票”Inbox，不生成发票或收入事实。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
+> **当前状态**：部分完成。当前 schema v80 保留并验证了由 schema v3–v5 交付的 Project model、CRUD、分页/搜索/筛选、快照式创建幂等、覆盖聚合事实的 `If-Match` 乐观锁、受控状态流转、归档恢复、确认硬删除，以及真实卡片/详情/任务聚合。Project 列表已对默认及全部白名单排序追加 `id ASC`，并在同一只读事务中读取 Count 与当前页，供共享 `ProjectSelect` 稳定分页。schema v21 新增 Project Note，schema v22 新增 Project Attachment；schema v23–v25 已依次投影显式 `requires_followup` Artifact、所属 Task 阻塞事件和提前 24 小时 Task 临期，schema v28 已把 Project 完成周期投影为收尾 Inbox Item并协调父项目删除，schema v31 又把已关联 Client 的 Project 完成/重开事件投影为客户系统动态。Project Artifact 读模型现已同时返回 nullable follow-up Inbox 上下文和实时 required 进度，项目详情把产出放在任务区之后，显示跟进状态/阻塞/待验收/取消并深链 Inbox；后续拆分、owner/person 分派和 manual owner 验收继续复用 Inbox/Task 事实，不在 Project 新建写模型。Client CRUD、客户选择/改绑/解除和客户筛选已接通。Focus 完成会更新绑定 Task 工时并沿既有聚合链刷新 Project；项目详情还可按 Task 查询时当前项目归属查看 7 天/30 天/本月 completed-only 报告与终态 Session 历史。Project 写命令继续同事务追加不可变 Workflow Event；项目笔记、附件和 Focus 读模型不混入命令审计。schema v33 不改变 Project 表；schema v34、v35 与 v74–v75 也不改变 Project 表；用户显式启用的受限预设只在新完成事件后创建本地“检查开票”Inbox，不生成发票或收入事实。Task 六状态上线后 Project 仍只把 done 计为完成，cancelled 留在总数/剩余口径。
 
 项目采用卡片式网格布局，是任务的上层组织单位。
 
@@ -659,7 +659,7 @@ v0.1 人工编排阶段：
 - `task_output_submitted`：仅项目交付类任务或 owner 显式标记 `requires_followup` 的产出生成；普通子任务产出默认更新当前任务/收件箱，不递归创建新项。去重键必须包含 Artifact ID。
 - `task_due`：schema v25 已实现。非终态 Task 的截止时间进入未来 24 小时窗口时生成；同一 Task+截止时点稳定去重，投影时标记 due_soon/overdue，改期形成新的独立事实，已生成事项不随 Task 完成/取消/改期自动解决。
 - `task_blocked`：任务进入阻塞状态；schema v24 已实现，每次 block 按阻塞后的 Task version 形成独立事件，unblock 不自动替 owner 解决该事项。
-- `system_maintenance`：schema v26 已建立通用系统维护约束，当前已接备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和主动低空间监测；手动备份的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 是当前请求的准入拒绝，不投影 generic `backup:create` incident。版本化 API 非预期数据库错误、数据库健康检查、Focus 心跳及 Reminder/Task 到期扫描失败会先尽力投影 `database:runtime`；Sidecar 在 ready 前及每 5 分钟检查三个受控根，每轮读取 schema v29 引入并在当前 schema v79 延续的 `app_settings.storage`，任一可用空间低于默认 1 GiB、可配置 1–100 GiB 的阈值时投影 `storage:low_space`，持续低空间不重复提示，恢复后再跌破才开始新周期。若设置读取暂时失败，进程使用最近一次已验证值或默认值，不因数据库不可读而丢弃已知低空间事实；若 incident 投影失败，则把白名单 kind、稳定 UUID 和 UTC 时间写入并发安全 journal，下一次健康启动补偿。所有 Inbox payload 只含 component/operation/failure_code/occurred_at 和固定用户提示。同一 source id 仅允许一个 `open/tracking` incident，且 journal 稳定 ID 防止模糊清理重复；原错误码保持不变，阈值值、路径、盘符、精确容量和探测错误不进入 Inbox/journal。诊断包 v1 已能导出上述已投影系统维护事实的错误码级汇总。
+- `system_maintenance`：schema v26 已建立通用系统维护约束，当前已接备份创建/校验/恢复演练/恢复安排的操作性失败、数据库启动/迁移、Sidecar 启动、运行期数据库操作失败和主动低空间监测；手动备份的 `BACKUP_SPACE_INSUFFICIENT` / `BACKUP_CAPACITY_UNAVAILABLE` 是当前请求的准入拒绝，不投影 generic `backup:create` incident。版本化 API 非预期数据库错误、数据库健康检查、Focus 心跳及 Reminder/Task 到期扫描失败会先尽力投影 `database:runtime`；Sidecar 在 ready 前及每 5 分钟检查三个受控根，每轮读取 schema v29 引入并在当前 schema v80 延续的 `app_settings.storage`，任一可用空间低于默认 1 GiB、可配置 1–100 GiB 的阈值时投影 `storage:low_space`，持续低空间不重复提示，恢复后再跌破才开始新周期。若设置读取暂时失败，进程使用最近一次已验证值或默认值，不因数据库不可读而丢弃已知低空间事实；若 incident 投影失败，则把白名单 kind、稳定 UUID 和 UTC 时间写入并发安全 journal，下一次健康启动补偿。所有 Inbox payload 只含 component/operation/failure_code/occurred_at 和固定用户提示。同一 source id 仅允许一个 `open/tracking` incident，且 journal 稳定 ID 防止模糊清理重复；原错误码保持不变，阈值值、路径、盘符、精确容量和探测错误不进入 Inbox/journal。诊断包 v1 已能导出上述已投影系统维护事实的错误码级汇总。
 
 v0.2 本地 Agent 阶段：
 
@@ -1505,7 +1505,7 @@ Task Artifact 的已实现 schema 见本章 `task_artifacts` 主表。Agent Run 
 
 `automation_rules` 只保存稳定预设 ID/key、启用状态、严格配置 JSON、nullable 下一运行时间、版本和审计时间；名称、触发、动作与权限由代码目录所有，身份不可修改。`automation_runs` 保存规则及原版本、event/schedule 来源二选一、logical/dedupe key、1–3 attempt、重试关系、不可变终态、配置/动作快照、安全错误码、结果引用和 0–4 因果深度。事件首轮对 `rule_id + source_event_id` 唯一，计划首轮对 `rule_id + scheduled_for` 唯一，`logical_key + attempt` 全局唯一。
 
-当前 Automation Run 只持久化 `succeeded / failed / skipped / cancelled` 终态。来源事务先捕获事件投递，消费时动作、成功 Run 与审计同事务提交；动作失败回滚 action savepoint 后写 failed Run，基础设施异常保留待投递记录。daily/weekly 在 ready 前与每 15 秒扫描，按 IANA/DST 计算并折叠过期离线窗口。五个可用预设创建本地 Inbox/Reminder/Task，含 H3-C3 Agent 失败诊断（默认关闭、人工启用）。规则与 Automation Run 纳入业务 JSON/ZIP，严格验证稳定身份、配置、关系和空目标；当前导入兼容基线为 schema 79，AgentRun 仍被排除。
+当前 Automation Run 只持久化 `succeeded / failed / skipped / cancelled` 终态。来源事务先捕获事件投递，消费时动作、成功 Run 与审计同事务提交；动作失败回滚 action savepoint 后写 failed Run，基础设施异常保留待投递记录。daily/weekly 在 ready 前与每 15 秒扫描，按 IANA/DST 计算并折叠过期离线窗口。五个可用预设创建本地 Inbox/Reminder/Task，含 H3-C3 Agent 失败诊断（默认关闭、人工启用）。规则与 Automation Run 纳入业务 JSON/ZIP，严格验证稳定身份、配置、关系和空目标；当前导入兼容基线为 schema 80，AgentRun 仍被排除。
 
 **idempotency_keys 增量字段** - 幂等重放契约
 
@@ -1579,7 +1579,7 @@ schema v31 同样是普通非破坏性迁移：只为 `client_activities` 的 Pr
 
 ### 7.3 备份策略
 
-版本边界：手动一致性备份的创建/低空间准入、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除、每日计划/启动补偿/自动包保留，以及业务 JSON/含文件业务 ZIP 的空目标导入与零冲突追加已经交付；导入 preview 提供非空目标只读冲突清单（主键与唯一值）和 schema 方向分类。v0.3 的高级导入已交付受支持旧 schema（49、51、63–78）包的升级导入、保留目标与跳过完全相同的行（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md)）；不开放覆盖或合并内容有分歧的行与 UUID 重映射。容量准入覆盖手工、计划及导入/恢复/迁移回滚包。数据库打开前的白名单启动进度与全局启动故障恢复页已由桌面壳交付。v0.3 后续只增加外部目录、加密/云目标、周期可恢复性抽检和 CSV 映射。
+版本边界：手动一致性备份的创建/低空间准入、内部列表、完整校验、隔离恢复演练、恢复前自动回滚包、破坏性迁移前自动回滚包、下一次 Sidecar 启动原子替换、桌面一键安全重启、启动后恢复结果诊断、确认删除、每日计划/启动补偿/自动包保留，以及业务 JSON/含文件业务 ZIP 的空目标导入与零冲突追加已经交付；导入 preview 提供非空目标只读冲突清单（主键与唯一值）和 schema 方向分类。v0.3 的高级导入已交付受支持旧 schema（49、51、63–79）包的升级导入、保留目标与跳过完全相同的行（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md)），以及带有历史系统提醒的工作区的导入（[ADR-034](adr/034-inbox-source-import-authorizations.md)）；不开放覆盖或合并内容有分歧的行与 UUID 重映射。容量准入覆盖手工、计划及导入/恢复/迁移回滚包。数据库打开前的白名单启动进度与全局启动故障恢复页已由桌面壳交付。v0.3 后续只增加外部目录、加密/云目标、周期可恢复性抽检和 CSV 映射。
 
 1. **v0.1 一致性快照基础**
    - **已实现（手动）**：在维护写锁中使用 `VACUUM INTO` 创建一致性快照，不直接复制正在使用的 WAL 数据库文件；普通 API、Focus heartbeat 与 Reminder 扫描共享维护读锁
@@ -1610,10 +1610,11 @@ schema v31 同样是普通非破坏性迁移：只为 `client_activities` 的 Pr
 4. **v0.3 可配置备份与高级导入**
    - **已实现**：每日首次满足条件时执行、错过计划后的启动/周期补偿、IANA 时区、可配置 1–365 份保留策略和最近 30 份默认值；同一当地日失败不会后台刷屏重试，最近状态与安全错误码可见
    - **已实现**：计划包标记为 `scheduled`，保留只清理超限计划包；手工及内部回滚包不参与，pending restore 目标/回滚 ID 额外保护
-   - **已实现（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md)）**：旧版本业务包的升级导入。受支持的源 schema 为 49、51（已发布的 v0.1.0）与 63–78；可导出结构的变化登记为转换步骤并在预检中列出，升级使用独立确认词。由 v0.1.0 标签构建的 Sidecar 自己写出的 JSON 与含文件 ZIP 已作为冻结夹具纳入测试
+   - **已实现（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md)）**：旧版本业务包的升级导入。受支持的源 schema 为 49、51（已发布的 v0.1.0）与 63–79；可导出结构的变化登记为转换步骤并在预检中列出，升级使用独立确认词。由 v0.1.0 标签构建的 Sidecar 自己写出的 JSON 与含文件 ZIP 已作为冻结夹具纳入测试
    - **已实现（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md)）**：非空目标的冲突处置。预检对每个非主键唯一索引统计会重复的行并在备份前阻断；设置与头像、代码所有的 Agent 身份在目标已有时保留目标；主键相同且整行相同的行跳过，使同一个包可以重复导入。有处置时预检返回方案摘要，应用必须带回；覆盖、合并或跳过内容有分歧的行不提供，UUID 重映射本轮不做
    - **已实现（[ADR-032](adr/032-business-import-upgrade-and-conflict-strategies.md) S5）**：应用前演练。预检与应用都先在一个始终回滚的事务里把写入完整执行一遍；会被数据库规则拒绝的导入在创建回滚备份之前就被明确拒绝，并给出那条规则的标识
-   - **尚不支持**：带有历史提醒的工作区的导入。任务到期、任务阻塞、内容日历与路线图里程碑四种系统提醒，只要其来源之后发生了变化（完成、取消、改期、解除阻塞、改变状态或删除），所在的包就会被演练拒绝；放行需要把导入授权推广到这四种来源（一次迁移），尚未立项
+   - **已实现（[ADR-034](adr/034-inbox-source-import-authorizations.md)，schema 80）**：带有历史系统提醒的工作区的导入。任务到期、任务阻塞、内容日历与路线图里程碑四种系统提醒，在来源之后完成、取消、改期、解除阻塞、改名、改变状态或被删除时，原先会让整个包被拒绝；现在预检核对包内的投影与删除事件，应用时为每条提醒写一次性授权，由重建后的插入守卫放行。在线投影的规则不变
+   - **尚不支持**：含有已完成或已取消、并且指派过负责人的 Task 的工作区的导入。已结束的指派行会被 schema 008 的终态任务守卫拒绝，演练以 `TASK_NOT_ASSIGNABLE` 在备份前拒绝；这是验证 ADR-034 时发现的另一条既有规则，尚未修复。另外，包记录来源已删除而目标仍持有该来源时，追加导入整包被拒
    - 引导用户选择独立外部备份目录，用于防范应用数据目录或磁盘损坏
    - 增加任务、客户、财务等 CSV 导出/映射导入和冲突预览
    - 提供周期性可恢复性抽检、失败提醒和历史执行记录
@@ -1780,7 +1781,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 
 ## 10. 实施基线、开发流程与实现追踪
 
-> 状态截止：2026-10-04。当前版本（app v0.1.1 / API v1 / schema v79）是可运行、可扩展的 v0.1 基座，并已前置交付 v0.2 的受限预设自动化和 Windows 内置 Agent Runner 受控切片、v0.3 的计划备份首个纵切、v0.4 的收支与发票部分能力，以及独立轨道的 AI 助手与本地知识库。各模块的当前状态以[模块文档](modules/README.md)的状态总览为准。这不代表完整 v0.2、external 或跨平台 Agent Runtime、Focus 原生反馈、外部备份目录或冲突合并导入已经交付；真实 Provider、安装包和跨平台验收见 [10.5.4](#1054-真机验收清单acc-01全部待验收)。
+> 状态截止：2026-10-05。当前版本（app v0.1.1 / API v1 / schema v80）是可运行、可扩展的 v0.1 基座，并已前置交付 v0.2 的受限预设自动化和 Windows 内置 Agent Runner 受控切片、v0.3 的计划备份首个纵切、v0.4 的收支与发票部分能力，以及独立轨道的 AI 助手与本地知识库。各模块的当前状态以[模块文档](modules/README.md)的状态总览为准。这不代表完整 v0.2、external 或跨平台 Agent Runtime、Focus 原生反馈、外部备份目录或冲突合并导入已经交付；真实 Provider、安装包和跨平台验收见 [10.5.4](#1054-真机验收清单acc-01全部待验收)。
 
 ### 10.1 文档口径与状态定义
 
@@ -1798,7 +1799,7 @@ Tauri 桌面壳、React 前端和 Go Sidecar 使用同一个应用版本并作�
 | 前端         | React 18.3、TypeScript 5.9、Vite 7、React Router 6、TanStack Query 5、Zustand 5、Lucide、Tailwind CSS v4 构建能力；全局 `styles.css` 保留令牌、基础、外壳和首屏样式，页面与浮层独占的样式随其代码按需加载                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 桌面         | Tauri 2、Rust 1.85、系统 WebView、shell 与 single-instance 插件                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Sidecar      | Go 1.24+、Gin、GORM、纯 Go SQLite 驱动；构建时 `CGO_ENABLED=0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| API / Schema | API v1；SQLite schema v79                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| API / Schema | API v1；SQLite schema v80                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 数据默认值   | 开发数据库默认空白，不自动注入 demo 业务数据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 明确边界     | 当前代码不使用 Docker；已实现 Task/Actor/D1/D2、Project、Client、Focus、Inbox/Reminder/Task 编排、已登记来源投影、首个受限预设自动化纵切、运行期数据库故障、可配置低空间安全投影、基础备份闭环、业务 JSON/ZIP 空目标及兼容导入、脱敏诊断、数据库打开前白名单启动进度与启动恢复、AI5/AI6、回答级 citation、dataset v4 配置身份评测、ADR-025 运行可靠性/确认恢复、知识库 Actor/文本检索，以及 Windows builtin Agent Run/H5-A/H5-B/H5-C 受控文件输入与单 file/有界多文件输出、H5-D/H5-E1/H5-E2/H5-E3 会话计划、计划外 Run、计划外审批与当前验收入口；通用托盘最小闭环已接源码但原生链接未验收；未实现 Client 外部来源、Focus 专用原生反馈、复杂/原生通知、其他失败/恢复来源的一体化 Agent Inbox、external/跨平台、任意文件系统或 Shell/browser/Git/terminal 自动访问、任意数量或二进制文件输出/自治多步调度、自由规则、真实冲突策略/UUID 重映射、知识库变化检测或句子级 AI 引用支持验证；自动化没有 Shell/SQL/HTTP/外发能力，person 只做本地责任记录，线上账号、云同步和远程协作均不在当前范围 |
 
@@ -1870,7 +1871,7 @@ pnpm dev
 
 #### 10.3.4 SQLite 迁移约定
 
-迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v79，新增结构只能从 `080_*` 继续追加递增文件：
+迁移文件位于 `services/sidecar/internal/database/migrations/`，通过 Go `embed` 编入 Sidecar。当前 schema 为 v80，新增结构只能从 `081_*` 继续追加递增文件：
 
 1. 启动时创建并读取 `schema_migrations`。
 2. 按版本升序逐个事务执行迁移。
@@ -1878,7 +1879,7 @@ pnpm dev
 4. 数据库包含未知版本或同版本文件名不一致时拒绝启动。
 5. 每个迁移必须补充数据库测试，不得回写已发布迁移。
 
-当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–051 逐步增加核心业务、受控文件、来源 guards、财务、备份与导入；052–070 增加 AI/知识库、可靠性/评测与 PDF；071–075 增加 Agent Run、AI action proposal、冻结执行身份与可恢复产出登记。迁移文件头可声明连续组合的 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回；破坏性迁移还要求先生成并验证回滚包。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
+当前 `001_initial_schema.sql` 建立核心业务表和索引；002 清理旧固定 demo；003–051 逐步增加核心业务、受控文件、来源 guards、财务、备份与导入；052–070 增加 AI/知识库、可靠性/评测与 PDF；071–075 增加 Agent Run、AI action proposal、冻结执行身份与可恢复产出登记；076–079 增加会话计划修订、有界续办与权限请求账本；080 新增历史系统提醒的导入授权表并重建四个收件箱插入守卫（非破坏性，不改已有行，[ADR-034](adr/034-inbox-source-import-authorizations.md)）。迁移文件头可声明连续组合的 `-- migration: foreign_keys=off` 与 `-- migration: destructive`；迁移器在固定 `sql.Conn` 上于事务外关闭外键，事务内执行 SQL 与 `foreign_key_check`，提交/回滚后恢复外键，恢复失败与原错误一并返回；破坏性迁移还要求先生成并验证回滚包。数据库使用单物理连接，并启用外键、WAL 和 5000 ms `busy_timeout`；退出时执行 `wal_checkpoint(TRUNCATE)`。
 
 ### 10.4 当前基座任务清单
 
@@ -2156,7 +2157,7 @@ pnpm build:desktop
 
 ### 10.5 当前验证矩阵
 
-本节只记录实际执行过的检查。最近一次完整执行在 **2026-10-04**：Windows 11 x64 开发主机，Node v26.5.0、pnpm 11.21.0、Go 1.26.7、Rust 1.98.0（MSVC 工具链）。真实模型、真实设备和人工观察不计入确定性门禁，单独列在 10.5.4。
+本节只记录实际执行过的检查。最近一次完整执行在 **2026-10-05**：Windows 11 x64 开发主机，Node v26.5.0、pnpm 11.21.0、Go 1.26.7、Rust 1.98.0（MSVC 工具链）。真实模型、真实设备和人工观察不计入确定性门禁，单独列在 10.5.4。
 
 执行前提：
 
@@ -2164,27 +2165,27 @@ pnpm build:desktop
 - **临时目录**：`TEMP` / `TMP` 必须指向不经过 junction 或符号链接的真实目录。受控文件存储会拒绝经过重解析点的父目录，否则 Go 的 `t.TempDir()` 和 Rust 的临时目录用例会成批失败，并报“The system cannot find the path specified”。
 - **日期**：前端用例不得依赖运行当天的日期；按“今天”渲染的页面在测试里固定本地时钟。
 
-#### 10.5.1 确定性门禁（2026-10-04 实际执行）
+#### 10.5.1 确定性门禁（2026-10-05 实际执行）
 
-| 检查                    | 命令                                         | 结果 | 本轮数字                                                                                                                                                                                                                 |
-| ----------------------- | -------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 格式                    | `pnpm format:check`                          | 通过 | Prettier 全范围；gofmt 662 个 Go 文件；rustfmt 两个 crate                                                                                                                                                                |
-| 文档                    | `pnpm check:docs`                            | 通过 | 69 份 Markdown 的本地链接、713 个标题锚点、机器路径与冲突标记                                                                                                                                                            |
-| 门禁脚本测试            | `pnpm check:scripts`                         | 通过 | 6 项：`check:impact` 选层规则 3 项、临时目录预检 3 项                                                                                                                                                                    |
-| Web 类型                | `pnpm typecheck`                             | 通过 | `tsc -b`                                                                                                                                                                                                                 |
-| Web 静态检查            | `pnpm lint:web`                              | 通过 | ESLint 0 错误、0 告警（告警同样判失败）；保留 48 处写明原因的行内豁免：27 处 Hook 依赖、20 处控制字符正则、1 处测试夹具别名 `Untyped`                                                                                    |
-| Web 测试                | `pnpm test:web`                              | 通过 | 245 个文件 / 4,231 项；另在 `TZ=UTC` 下单独运行一次，结果相同                                                                                                                                                            |
-| Web 生产构建            | `pnpm build:web`                             | 通过 | 主入口 JS 470.65 kB（gzip 139.28 kB），框架 chunk 204.53 kB（gzip 66.21 kB），主 CSS 225.80 kB（gzip 36.20 kB）；无 500 kB chunk 警告。拆分前为主入口 1,956.20 kB（gzip 535.13 kB）、主 CSS 330.83 kB（gzip 50.42 kB）   |
-| 临时目录预检            | `pnpm check:temp`                            | 通过 | `check:go` 与 `check:rust` 的第一步；临时目录经过目录联接、符号链接或 8.3 短路径时直接失败并说明原因                                                                                                                     |
-| Go 测试                 | `go test -count=1 -timeout 30m ./...`        | 通过 | 12 个有测试的包、1,537 个顶层测试函数；`internal/api` 单包 475 秒（约 7.9 分钟），因此显式设置 30 分钟上限（默认 10 分钟）                                                                                               |
-| Go 测试连续三轮         | `go test -count=3 -timeout 90m ./...`        | 通过 | 12 个有测试的包全部通过，无偶发失败；`internal/api` 三轮共 1,532 秒，整体 25.6 分钟。不属于默认门禁；在阶段 6.3 完成后单独执行，其后新增的导入演练与浮层顺序用例都是同步用例，只由上一行的单轮全量测试覆盖，没有再跑三轮 |
-| Go 静态检查             | `go vet ./...`                               | 通过 | 无告警                                                                                                                                                                                                                   |
-| Sidecar 构建            | `pnpm build:sidecar`                         | 通过 | 当前平台 target triple                                                                                                                                                                                                   |
-| 桌面构建脚本测试        | `node --test scripts/build-desktop.test.mjs` | 通过 | 7 项                                                                                                                                                                                                                     |
-| Tauri / helper 编译检查 | `pnpm check:tauri`                           | 通过 | 桌面 crate 与 file-security-helper 的 `cargo check`                                                                                                                                                                      |
-| Rust 测试               | `pnpm test:rust`                             | 通过 | 桌面 crate 213 项通过、4 项忽略；file-security-helper 135 项通过、3 项忽略，另 4 项 CLI 集成测试                                                                                                                         |
-| 完整门禁                | `pnpm check`                                 | 通过 | 以上默认各层的组合，本机 633 秒（约 10.6 分钟）                                                                                                                                                                          |
-| 桌面打包                | `pnpm build`                                 | 通过 | 生成未签名的 `opc-workspace_0.1.1_x64-setup.exe`（NSIS，17.5 MiB）和 `opc-workspace_0.1.1_x64_zh-CN.msi`（23.6 MiB），本机 245 秒（约 4.1 分钟）；只证明当前源码可以打包，不等于安装验收                                 |
+| 检查                    | 命令                                         | 结果 | 本轮数字                                                                                                                                                                                                                                                  |
+| ----------------------- | -------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 格式                    | `pnpm format:check`                          | 通过 | Prettier 全范围；gofmt 665 个 Go 文件；rustfmt 两个 crate                                                                                                                                                                                                 |
+| 文档                    | `pnpm check:docs`                            | 通过 | 70 份 Markdown 的本地链接、635 个标题锚点（README 精简后）、机器路径与冲突标记                                                                                                                                                                            |
+| 门禁脚本测试            | `pnpm check:scripts`                         | 通过 | 6 项：`check:impact` 选层规则 3 项、临时目录预检 3 项                                                                                                                                                                                                     |
+| Web 类型                | `pnpm typecheck`                             | 通过 | `tsc -b`                                                                                                                                                                                                                                                  |
+| Web 静态检查            | `pnpm lint:web`                              | 通过 | ESLint 0 错误、0 告警（告警同样判失败）；保留 48 处写明原因的行内豁免：27 处 Hook 依赖、20 处控制字符正则、1 处测试夹具别名 `Untyped`                                                                                                                     |
+| Web 测试                | `pnpm test:web`                              | 通过 | 245 个文件 / 4,234 项；`TZ=UTC` 下的单独运行是 2026-10-04 做的，本轮没有重复                                                                                                                                                                              |
+| Web 生产构建            | `pnpm build:web`                             | 通过 | 主入口 JS 470.65 kB（gzip 139.27 kB），框架 chunk 204.53 kB（gzip 66.21 kB），主 CSS 225.80 kB（gzip 36.20 kB）；无 500 kB chunk 警告。拆分前为主入口 1,956.20 kB（gzip 535.13 kB）、主 CSS 330.83 kB（gzip 50.42 kB）                                    |
+| 临时目录预检            | `pnpm check:temp`                            | 通过 | `check:go` 与 `check:rust` 的第一步；临时目录经过目录联接、符号链接或 8.3 短路径时直接失败并说明原因                                                                                                                                                      |
+| Go 测试                 | `go test -count=1 -timeout 30m ./...`        | 通过 | 12 个有测试的包、1,545 个顶层测试函数；`internal/api` 单包 517 秒（约 8.6 分钟），因此显式设置 30 分钟上限（默认 10 分钟）                                                                                                                                |
+| Go 测试连续三轮         | `go test -count=3 -timeout 90m ./...`        | 通过 | 12 个有测试的包全部通过，无偶发失败；`internal/api` 三轮共 1,532 秒，整体 25.6 分钟。不属于默认门禁；这是 2026-10-04 阶段 6.3 完成后的结果，其后新增的导入演练、浮层顺序和历史提醒导入用例没有再跑全量三轮，历史提醒导入的新用例另外单独连续跑了 5 轮通过 |
+| Go 静态检查             | `go vet ./...`                               | 通过 | 无告警                                                                                                                                                                                                                                                    |
+| Sidecar 构建            | `pnpm build:sidecar`                         | 通过 | 当前平台 target triple                                                                                                                                                                                                                                    |
+| 桌面构建脚本测试        | `node --test scripts/build-desktop.test.mjs` | 通过 | 7 项                                                                                                                                                                                                                                                      |
+| Tauri / helper 编译检查 | `pnpm check:tauri`                           | 通过 | 桌面 crate 与 file-security-helper 的 `cargo check`                                                                                                                                                                                                       |
+| Rust 测试               | `pnpm test:rust`                             | 通过 | 桌面 crate 213 项通过、4 项忽略；file-security-helper 135 项通过、3 项忽略，另 4 项 CLI 集成测试                                                                                                                                                          |
+| 完整门禁                | `pnpm check`                                 | 通过 | 以上默认各层的组合，本机 653 秒（约 10.9 分钟）                                                                                                                                                                                                           |
+| 桌面打包                | `pnpm build`                                 | 通过 | 生成未签名的 `opc-workspace_0.1.1_x64-setup.exe`（NSIS，17.5 MiB）和 `opc-workspace_0.1.1_x64_zh-CN.msi`（23.6 MiB），本机 281 秒（约 4.7 分钟）；只证明当前源码可以打包，不等于安装验收                                                                  |
 
 持续集成工作流 `.github/workflows/check.yml` 在 GitHub 的 Windows runner 上执行同一条 `pnpm check`；它**尚未在 GitHub 上实际运行过**，首次运行的结果需要在推送后另行确认。
 
@@ -2435,7 +2436,7 @@ pnpm build:desktop
 - [ ] **E7 旧版本导出包的升级导入**
   - 前置条件：用已发布的 v0.1.0 安装包在真实设备上使用过一段时间的工作区（含客户、项目、任务、标签、附件或产出文件、已保存设置和头像），分别导出业务 JSON 与含文件 ZIP；当前版本的一个全新安装和一个已有数据的安装。
   - 操作步骤：在全新安装中选择 ZIP，核对预检显示的源/目标 schema 与升级步骤，点击“确认升级并导入”；逐页核对数据与文件；再次选择同一个 ZIP；在已有数据的安装中选择同一个 ZIP。
-  - 预期结果：预检列出 schema v51 到当前版本的转换步骤；导入后各页数据、附件正文和工作区名称与旧版本一致，导入结果提示停留在“数据与备份”；第二次导入列出逐表“不写入的源数据”且不重复创建数据或文件；已有数据的安装保留自己的设置与头像，并只追加不冲突的数据。如果旧工作区含有来源之后发生变化的系统提醒（任务到期、任务阻塞、内容日历、路线图里程碑），预检会直接显示“这个包在写入时会被拒绝”并给出规则代码，确认按钮不可用，也不会创建备份（尚不支持导入这类历史提醒）——如实记录是否遇到，以及界面给出的提示与规则代码。
+  - 预期结果：预检列出 schema v51 到当前版本的转换步骤；导入后各页数据、附件正文和工作区名称与旧版本一致，导入结果提示停留在“数据与备份”；第二次导入列出逐表“不写入的源数据”且不重复创建数据或文件；已有数据的安装保留自己的设置与头像，并只追加不冲突的数据。旧工作区里来源之后发生变化或已被删除的系统提醒（任务到期、任务阻塞、内容日历、路线图里程碑）应当原样导入，导入后在收件箱里抽查其中几条。如果旧工作区含有已完成或已取消、并且指派过负责人的任务，预检会显示“这个包在写入时会被拒绝”并给出规则代码 `TASK_NOT_ASSIGNABLE`，确认按钮不可用，也不会创建备份（尚不支持）——如实记录是否遇到，以及界面给出的提示与规则代码。
   - 证据形式：预检与结果截图；导入前后各页数据计数；附件打开截图；设置页备份列表中的导入前回滚备份。
 
 ##### F. macOS 与 Linux

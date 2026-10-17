@@ -28,7 +28,7 @@ func TestAIWorkPlanMigrationPreserves75AndImmutableRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 79 || store.SchemaVersion != 78 {
+	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 80 || store.SchemaVersion != 78 {
 		t.Fatalf("additive migration gated: %d %+v", store.SchemaVersion, gate)
 	}
 	const insert = `INSERT INTO ai_work_plan_revisions(session_id,version,generation_id,plan_json,created_at) VALUES (?,?,?,?, '2026-09-19T12:00:00Z')`

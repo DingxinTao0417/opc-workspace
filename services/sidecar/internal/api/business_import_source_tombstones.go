@@ -85,9 +85,9 @@ func validProjectCompletionImportSource(
 		_, projectExists := projects[sourceID]
 		return projectExists && rowVersion >= 1
 	}
-	if row["status"] != "resolved" && row["status"] != "dismissed" {
-		return false
-	}
+	// The deletion event below proves the reminder was resolved or dismissed
+	// when its Project was deleted. It can be reopened afterwards, so the
+	// status the row has now is not constrained.
 	deletedVersion, ok := validProjectCompletionSourceDeletedEvent(events, id, sourceID, sourceKey, payload, *deletedAt)
 	_, projectExists := projects[sourceID]
 	return ok && !projectExists && rowVersion >= deletedVersion &&

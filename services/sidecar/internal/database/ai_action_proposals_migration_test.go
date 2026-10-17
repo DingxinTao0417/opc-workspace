@@ -26,8 +26,8 @@ func TestAIActionProposalsMigrationPreserves71AndGuardsApprovalIdentity(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gated.SchemaVersion != 74 || gate == nil || gate.CurrentVersion != 74 || gate.TargetVersion != 79 ||
-		len(gate.PendingVersions) != 5 || gate.PendingVersions[0] != 75 || gate.PendingVersions[1] != 76 || gate.PendingVersions[2] != 77 || gate.PendingVersions[3] != 78 || gate.PendingVersions[4] != 79 {
+	if gated.SchemaVersion != 74 || gate == nil || gate.CurrentVersion != 74 || gate.TargetVersion != 80 ||
+		len(gate.PendingVersions) != 6 || gate.PendingVersions[0] != 75 || gate.PendingVersions[1] != 76 || gate.PendingVersions[2] != 77 || gate.PendingVersions[3] != 78 || gate.PendingVersions[4] != 79 || gate.PendingVersions[5] != 80 {
 		_ = gated.Close()
 		t.Fatalf("schema 075 destructive gate: store=%d gate=%#v", gated.SchemaVersion, gate)
 	}
@@ -46,8 +46,8 @@ func TestAIActionProposalsMigrationPreserves71AndGuardsApprovalIdentity(t *testi
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 79 {
-		t.Fatalf("authorized schema=%d, want 79", store.SchemaVersion)
+	if store.SchemaVersion != 80 {
+		t.Fatalf("authorized schema=%d, want 80", store.SchemaVersion)
 	}
 	if err := store.SQL.QueryRow("SELECT title FROM ai_sessions WHERE id='s'").Scan(&title); err != nil || title != "Keep this conversation" {
 		t.Fatalf("existing session=%q %v", title, err)

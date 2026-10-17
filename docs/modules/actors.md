@@ -128,7 +128,7 @@ H2-D 新增 workspace_task_assignments：单项查询使用实际 task_id、可�
 
 ## 数据与 API
 
-### 已实现数据（当前 schema 79；Actor 表自 schema 71 未变）
+### 已实现数据（当前 schema 80；Actor 表自 schema 71 未变）
 
 - `actors`：类型、展示名、状态、备注、受限 metadata、内置标记、version 与时间；schema 071 另有只读可空 `agent_adapter_id`。schema 074 不改 Actor 表，只把创建 Run 时观察到的 Actor/Assignment/Adapter 版本冻结在 `agent_runs`。
 - `task_assignments`：Task、Actor、role、分派/结束 Actor、原因、时间与 active 唯一性。

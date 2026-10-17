@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -12,40 +11,6 @@ import (
 
 	"github.com/opc-workspace/opc-sidecar/internal/database"
 )
-
-// blockedThenUnblockedExport returns the export of a workspace whose only Task
-// was blocked and later unblocked. Its Inbox keeps the "blocked" reminder,
-// which the database only accepts for a Task that is blocked right now.
-func blockedThenUnblockedExport(t *testing.T) []byte {
-	t.Helper()
-	router, store, _, _ := newBackupTestAPI(t)
-	created := performRequest(router, http.MethodPost, "/api/v1/tasks",
-		[]byte(`{"title":"阻塞过的任务","priority":"P2"}`), map[string]string{"Idempotency-Key": "rehearsal-task"})
-	if created.Code != http.StatusCreated {
-		t.Fatalf("create Task = %d: %s", created.Code, created.Body.String())
-	}
-	var envelope struct {
-		Data struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(created.Body.Bytes(), &envelope); err != nil {
-		t.Fatal(err)
-	}
-	path := "/api/v1/tasks/" + envelope.Data.ID
-	blocked := performRequest(router, http.MethodPost, path+"/block", []byte(`{"reason":"等待外部答复"}`),
-		map[string]string{"If-Match": created.Header().Get("ETag"), "Idempotency-Key": "rehearsal-block"})
-	if blocked.Code != http.StatusOK {
-		t.Fatalf("block = %d: %s", blocked.Code, blocked.Body.String())
-	}
-	unblocked := performRequest(router, http.MethodPost, path+"/unblock", []byte(`{}`),
-		map[string]string{"If-Match": blocked.Header().Get("ETag")})
-	if unblocked.Code != http.StatusOK {
-		t.Fatalf("unblock = %d: %s", unblocked.Code, unblocked.Body.String())
-	}
-	assertDatabaseCount(t, store, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = ?", 1, taskBlockedInboxSourceType)
-	return exportBusinessDataForTest(t, router)
-}
 
 func backupEntriesForTest(t *testing.T, backupDir string) int {
 	t.Helper()
@@ -65,45 +30,35 @@ func assertImportRehearsalFailure(t *testing.T, router http.Handler, body []byte
 	}
 }
 
-// A reminder of something that is no longer true cannot be written again. The
-// import used to find that out only after it had created its rollback backup.
-func TestBusinessImportRehearsalRefusesHistoricalRemindersBeforeTheBackup(t *testing.T) {
-	body := blockedThenUnblockedExport(t)
-	router, store, _, backupDir := newBackupTestAPI(t)
-	before := backupEntriesForTest(t, backupDir)
+// A package can record that a Task was deleted while the target still holds
+// that Task: the target imported an earlier export. An import never deletes, so
+// the reminder of the deleted Task cannot be written. Only the database knows,
+// and the rehearsal asks it before the rollback backup is made.
+func TestBusinessImportRehearsalRefusesADeletedSourceTheTargetStillHoldsBeforeTheBackup(t *testing.T) {
+	const taskID = "018f0000-0000-7000-8000-00000000d001"
+	source := newReminderHistoryWorkspace(t)
+	seedTaskForDueProjection(t, source.store, taskID, "在源里删除的任务", "todo", source.now.Add(time.Hour))
+	source.project()
+	source.resolveReminders(taskDueInboxSourceType, taskID)
+	source.send(http.MethodDelete, "/api/v1/tasks/"+taskID+"?confirm=true", "", 1, http.StatusNoContent)
+	body := exportBusinessDataForTest(t, source.router)
 
-	assertImportRehearsalFailure(t, router, body, "TASK_BLOCKED_INBOX_SOURCE_NOT_CURRENT")
+	router, store, _, backupDir := newBackupTestAPI(t, source.now)
+	seedTaskForDueProjection(t, store, taskID, "在源里删除的任务", "todo", source.now.Add(time.Hour))
+	tables := []string{"tasks", "inbox_items", "workflow_events", inboxSourceImportAuthorizationsTable}
+	before := tableSnapshotForTest(t, store, tables...)
+
+	assertImportRehearsalFailure(t, router, body, "TASK_DUE_DELETED_SOURCE_COLLISION")
 	applied := performRequest(router, http.MethodPost, "/api/v1/imports/business-data", body,
-		map[string]string{"X-Import-Confirmation": importReplaceConfirmation})
+		map[string]string{"X-Import-Confirmation": importAppendConfirmation})
 	assertAPIError(t, applied, http.StatusUnprocessableEntity, "IMPORT_REHEARSAL_FAILED")
 
-	if after := backupEntriesForTest(t, backupDir); after != before {
-		t.Fatalf("a refused import left %d backup entries, had %d", after, before)
+	if entries := backupEntriesForTest(t, backupDir); entries != 0 {
+		t.Fatalf("a refused import left %d backup entries", entries)
 	}
-	for _, table := range []string{"tasks", "inbox_items", "workflow_events", "business_import_project_completion_authorizations"} {
-		assertDatabaseCount(t, store, "SELECT COUNT(*) FROM "+table, 0)
+	if after := tableSnapshotForTest(t, store, tables...); !reflect.DeepEqual(before, after) {
+		t.Fatalf("a refused import changed the target:\n before %v\n after  %v", before, after)
 	}
-}
-
-// The same holds for a due reminder whose Task was rescheduled afterwards.
-func TestBusinessImportRehearsalNamesTheRuleThatRejectsADueReminder(t *testing.T) {
-	now := time.Date(2026, 8, 28, 12, 0, 0, 0, time.UTC)
-	sourceRouter, sourceStore, _, _ := newBackupTestAPI(t, now)
-	task := seedTaskForDueProjection(t, sourceStore, "018f0000-0000-7000-8000-00000000d001", "到期后改期的任务", "todo", now.Add(time.Hour))
-	projector := &API{db: sourceStore.DB, options: Options{Now: func() time.Time { return now }}}
-	if err := projector.projectDueTasks(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	assertDatabaseCount(t, sourceStore, "SELECT COUNT(*) FROM inbox_items WHERE source_entity_type = ?", 1, taskDueInboxSourceType)
-	rescheduled := performRequest(sourceRouter, http.MethodPatch, "/api/v1/tasks/"+task.ID,
-		[]byte(`{"due_date":"2026-09-30T12:00:00Z"}`), map[string]string{"If-Match": `"1"`})
-	if rescheduled.Code != http.StatusOK {
-		t.Fatalf("reschedule = %d: %s", rescheduled.Code, rescheduled.Body.String())
-	}
-	body := exportBusinessDataForTest(t, sourceRouter)
-
-	router, _, _, _ := newBackupTestAPI(t, now)
-	assertImportRehearsalFailure(t, router, body, "TASK_DUE_INBOX_SOURCE_NOT_CURRENT")
 }
 
 func tableSnapshotForTest(t *testing.T, store *database.Store, tables ...string) map[string][][]any {

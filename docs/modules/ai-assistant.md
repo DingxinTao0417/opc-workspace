@@ -1116,7 +1116,7 @@ H5-E15 的同一个 `workspace_request_record_navigation(record_type,record_id)`
 
 > 目标版本：待定（独立于 v0.1–v0.4）。Provider、流式会话、Harness/记忆、显式工作台/知识能力、受人工确认的领域命令、H5-A AI→Agent Run 启动、H5-B 可恢复产出登记、H5-C 受控文本文件输入与有界多文件输出、H5-D 持久计划，以及 H5-E1/E2/E3 续办和 H5-E4 受控工具入口已交付；H5-G1 增加另行授权的有界后台计划续办，H5-G12 仅为明确选择的安全等待态提供普通重启后重验。运行中未知请求、物理备份恢复、并发子代理、其他失败/恢复来源的一体化 Inbox、任意工具执行和真实模型/桌面专项仍待。
 >
-> 实现基线：API v1 / SQLite schema 79；`079_ai_access_request_complete_scopes.sql` 已在备份门禁后应用。回退必须使用升级前的完整回滚备份，下一条迁移从 `080_*` 开始。
+> 实现基线：API v1 / SQLite schema 80；`079_ai_access_request_complete_scopes.sql` 已在备份门禁后应用，其后的 080 属于数据管理的导入授权，不改 AI 表。回退必须使用升级前的完整回滚备份，下一条迁移从 `081_*` 开始。
 
 ## 定位与边界
 

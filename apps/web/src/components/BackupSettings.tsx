@@ -123,46 +123,34 @@ const importUniqueValueLabels: Record<string, string> = {
   "task_saved_views:idx_task_saved_views_name": "名称",
 };
 
-const historicalReminder = (what: string, since: string) =>
-  `源数据里有“${what}”提醒的历史记录，而${since}。这类历史提醒目前还不能导入。`;
+/** The package records a deletion that an import cannot carry out. */
+const deletedSourceStillHere = (reminder: string, source: string) =>
+  `源数据里的一条“${reminder}”提醒记录着对应${source}已被删除，但当前工作区里这个${source}还在。导入不会删除已有内容，所以这个包写不进来。`;
 
-/**
- * Why the database would reject the rows, by the token its rule aborts with.
- * An Inbox reminder is only accepted while its source is still in that state.
- */
+const malformedReminder = (reminder: string) =>
+  `源数据里的一条“${reminder}”提醒不符合规则：内容不完整，或与它的来源对不上。`;
+
+/** Why the database would reject the rows, by the token its rule aborts with. */
 const importRehearsalReasons: Record<string, string> = {
-  TASK_DUE_INBOX_SOURCE_NOT_CURRENT: historicalReminder(
-    "任务到期",
-    "对应任务之后已完成、取消或改期",
-  ),
-  INVALID_TASK_DUE_INBOX_SOURCE: historicalReminder(
-    "任务到期",
-    "对应任务之后已被删除，或记录本身不符合规则",
-  ),
-  TASK_BLOCKED_INBOX_SOURCE_NOT_CURRENT: historicalReminder(
+  TASK_BLOCKED_DELETED_SOURCE_COLLISION: deletedSourceStillHere(
     "任务阻塞",
-    "对应任务之后已解除阻塞",
+    "任务",
   ),
-  INVALID_TASK_BLOCKED_INBOX_SOURCE: historicalReminder(
-    "任务阻塞",
-    "对应任务之后已被删除，或记录本身不符合规则",
-  ),
-  CONTENT_ITEM_INBOX_SOURCE_NOT_FOUND: historicalReminder(
+  TASK_DUE_DELETED_SOURCE_COLLISION: deletedSourceStillHere("任务到期", "任务"),
+  CONTENT_ITEM_DELETED_SOURCE_COLLISION: deletedSourceStillHere(
     "内容日历",
-    "对应内容之后已改变状态或版本",
+    "内容",
   ),
-  INVALID_CONTENT_ITEM_INBOX_SOURCE: historicalReminder(
-    "内容日历",
-    "对应内容之后已被删除，或记录本身不符合规则",
-  ),
-  ROADMAP_MILESTONE_INBOX_SOURCE_NOT_FOUND: historicalReminder(
+  ROADMAP_MILESTONE_DELETED_SOURCE_COLLISION: deletedSourceStillHere(
     "路线图里程碑",
-    "对应里程碑之后已改变状态或版本",
+    "里程碑",
   ),
-  INVALID_ROADMAP_MILESTONE_INBOX_SOURCE: historicalReminder(
-    "路线图里程碑",
-    "对应里程碑之后已被删除，或记录本身不符合规则",
-  ),
+  INVALID_TASK_BLOCKED_INBOX_SOURCE: malformedReminder("任务阻塞"),
+  INVALID_TASK_DUE_INBOX_SOURCE: malformedReminder("任务到期"),
+  INVALID_CONTENT_ITEM_INBOX_SOURCE: malformedReminder("内容日历"),
+  INVALID_ROADMAP_MILESTONE_INBOX_SOURCE: malformedReminder("路线图里程碑"),
+  TASK_NOT_ASSIGNABLE:
+    "源数据里有已完成或已取消的任务，并且保留着负责人的指派记录。这类历史指派目前还不能导入。",
   FOREIGN_KEY_CONSTRAINT: "源数据里有记录引用了并不存在的对象。",
   UNIQUE_CONSTRAINT: "源数据里有记录会与已有内容的唯一值重复。",
 };

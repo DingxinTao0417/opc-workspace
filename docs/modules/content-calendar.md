@@ -54,7 +54,7 @@ AI 独立轨道增加 `workspace_content_items`，仅在本条消息授予 `work
 
 - `/content-calendar` 已替换为真实本地工作区：包含月格、无排期和已归档视图，可切换月份、按状态筛选月格、显示平台与准备任务进度，并从表单新建内容条目；加载、空和连接错误均有反馈状态。
 - schema v37 已新增空的 `content_items` 与 `content_item_tasks`：标题、平台、状态、计划/确认发布时间、计划 IANA 时区、Project、备注、外部链接文本、排序、归档来源、版本及准备任务的 required 关联均受 SQLite 约束；迁移不创建 demo 数据，业务导入导出覆盖两表。
-- schema v38 新增 `content_item` Inbox 来源契约：只接受与当前内容版本、状态、排期、时区一致的 `review_due`/`publish_due` payload，来源键固定为 `content:<id>:<event_type>:<version>`；来源身份不可变、同键唯一，活动来源会阻止永久删除内容。迁移不创建 Inbox Item。
+- schema v38 新增 `content_item` Inbox 来源契约：只接受与当前内容版本、状态、排期、时区一致的 `review_due`/`publish_due` payload，来源键固定为 `content:<id>:<event_type>:<version>`；来源身份不可变、同键唯一，活动来源会阻止永久删除内容。迁移不创建 Inbox Item。schema v80 起，业务导入在核对包内历史后可以写入内容之后已修改或删除的历史提醒（[ADR-034](../adr/034-inbox-source-import-authorizations.md)），在线投影仍只接受与当前内容一致的 payload。
 - Sidecar 启动补偿和统一 15 秒周期扫描已接入：`in_review` 在计划时刻生成 P2 审核事项，`scheduled` 生成 P1 发布事项；单批最多处理 100 条，查询排除已投影版本，连续扫描可推进积压。相同内容版本、事件类型重复扫描或重启不会重复创建。
 - 内容资料、状态、改期或准备 Task 关系引起版本变化时，同事务解决旧的活动 Inbox 来源；人工发布确认、取消/归档同样终结旧事项。归档内容永久删除时，终态来源先写入 `source_deleted_at` 并保留快照和 Inbox 审计事件。
 - Inbox 列表和详情已能严格解析 `content_item` 来源，显示审核/发布类型、计划时间、IANA 时区、内容版本及内容日历入口；来源被删除后保留解释快照但隐藏活动链接。

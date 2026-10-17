@@ -33,7 +33,7 @@ func TestAIContinuationMigrationPreserves76AndAddsBoundedLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 79 || store.SchemaVersion != 78 {
+	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 80 || store.SchemaVersion != 78 {
 		t.Fatalf("additive migration: schema=%d gate=%+v", store.SchemaVersion, gate)
 	}
 	store.Close()
@@ -303,7 +303,7 @@ func TestAIContinuationMigrationFailureRestoresOldMessageUniqueness(t *testing.T
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 79 || store.SchemaVersion != 78 {
+	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 80 || store.SchemaVersion != 78 {
 		t.Fatalf("retry after rollback failed: schema=%d gate=%+v", store.SchemaVersion, gate)
 	}
 }

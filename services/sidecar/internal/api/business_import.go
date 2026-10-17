@@ -329,6 +329,11 @@ func (a *API) validateBusinessImportPlan(c *gin.Context, source *businessExportP
 	if !validProjectCompletionImportSources(packageData) {
 		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source deletion history is invalid"}
 	}
+	// Checked against the whole package only: a plan that leaves out rows the
+	// target already holds still imports reminders whose history was proven here.
+	if !validInboxSourceImportHistory(packageData) {
+		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Inbox source projection history is invalid"}
+	}
 	artifactReplays, ok := taskArtifactImportReplayPlan(packageData)
 	if !ok {
 		return businessImportPreview{}, nil, &businessImportError{http.StatusUnprocessableEntity, "IMPORT_ROW_INVALID", "Task Artifact Inbox source deletion history is invalid"}
@@ -639,6 +644,13 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		if pendingProjectCompletionAuthorizations != 0 {
 			return fmt.Errorf("Project completion import authorizations were not empty: count=%d", pendingProjectCompletionAuthorizations)
 		}
+		pendingInboxSourceAuthorizations, err := pendingInboxSourceImportAuthorizations(tx)
+		if err != nil {
+			return fmt.Errorf("check Inbox source import authorizations: %w", err)
+		}
+		if pendingInboxSourceAuthorizations != 0 {
+			return fmt.Errorf("Inbox source import authorizations were not empty: count=%d", pendingInboxSourceAuthorizations)
+		}
 		tables["agent_adapters"] = normalizeImportedAgentAdapters(tables["agent_adapters"])
 		if err := importActorRows(tx, tables["actors"], applyMode == importModeAppend); err != nil {
 			return err
@@ -686,6 +698,9 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 				if err := authorizeHistoricalProjectCompletionImportSources(tx, tables["inbox_items"]); err != nil {
 					return err
 				}
+				if err := authorizeInboxSourceImportRows(tx, tables["inbox_items"]); err != nil {
+					return err
+				}
 			}
 			if name == "tasks" {
 				err = insertTaskImportRows(tx, tables[name])
@@ -729,6 +744,12 @@ func (a *API) applyBusinessTables(c *gin.Context, packageData businessExportPack
 		}
 		if pendingProjectCompletionAuthorizations != 0 {
 			return fmt.Errorf("Project completion import authorizations were not consumed: count=%d", pendingProjectCompletionAuthorizations)
+		}
+		if pendingInboxSourceAuthorizations, err = pendingInboxSourceImportAuthorizations(tx); err != nil {
+			return fmt.Errorf("check consumed Inbox source import authorizations: %w", err)
+		}
+		if pendingInboxSourceAuthorizations != 0 {
+			return fmt.Errorf("Inbox source import authorizations were not consumed: count=%d", pendingInboxSourceAuthorizations)
 		}
 		var foreignKeyFailures int
 		if err := tx.Raw("SELECT COUNT(*) FROM pragma_foreign_key_check").Row().Scan(&foreignKeyFailures); err != nil || foreignKeyFailures != 0 {

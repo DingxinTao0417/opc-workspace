@@ -54,8 +54,8 @@ func TestAIProviderUsageMigrationPreservesUnknownAndConstrainsExactCounts(t *tes
 		t.Fatalf("Open: %v", err)
 	}
 	defer store.Close()
-	if store.SchemaVersion != 79 {
-		t.Fatalf("SchemaVersion=%d, want 79", store.SchemaVersion)
+	if store.SchemaVersion != 80 {
+		t.Fatalf("SchemaVersion=%d, want 80", store.SchemaVersion)
 	}
 	var inputTokens, outputTokens *int
 	var tokenSource *string

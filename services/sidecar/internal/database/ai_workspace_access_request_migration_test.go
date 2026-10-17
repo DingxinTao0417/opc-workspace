@@ -36,7 +36,7 @@ func TestAICompleteAccessRequestMigrationPreservesHistoryAndGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 79 || !reflect.DeepEqual(gate.PendingVersions, []int{79}) {
+	if gate == nil || gate.CurrentVersion != 78 || gate.TargetVersion != 80 || !reflect.DeepEqual(gate.PendingVersions, []int{79, 80}) {
 		t.Fatalf("gate=%+v", gate)
 	}
 	gated.Close()

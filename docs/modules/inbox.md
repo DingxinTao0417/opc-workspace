@@ -380,7 +380,7 @@ T-11C 只编排用户显式提交的 Task 草稿，不自动生成任务内容�
 | `payload_json`                      | 必须是 JSON object；当前 UI 不编辑                                                                                                                                                                       |
 | `version / created_at / updated_at` | 乐观并发版本与 UTC 时间                                                                                                                                                                                  |
 
-schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23–v25 冻结 Task Artifact、Task 阻塞与 Task 临期来源；schema v26 增加系统维护来源；schema v28 增加 Project 完成周期来源、不可变快照和删除协调。均不重建表、不回填旧事实。其他 event 来源仍是受约束的未来空间。
+schema v13 不重建 `inbox_items`；schema v14 由 Reminder 调度器使用既有来源字段；schema v15 增加自动结清保护；schema v23–v25 冻结 Task Artifact、Task 阻塞与 Task 临期来源；schema v26 增加系统维护来源；schema v28 增加 Project 完成周期来源、不可变快照和删除协调。均不重建表、不回填旧事实。schema v80 重建 Task 阻塞、Task 临期、内容与路线图里程碑四种来源的插入守卫并新增操作态授权表：在线投影的规则不变，业务导入在核对包内的投影与删除事件之后可以写入来源已变化或已删除的历史提醒（[ADR-034](../adr/034-inbox-source-import-authorizations.md)）。其他 event 来源仍是受约束的未来空间。
 
 ### `inbox_item_tasks`（schema v13）
 

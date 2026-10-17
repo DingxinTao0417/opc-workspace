@@ -68,7 +68,7 @@ func historicalWorkspaceExport(t *testing.T, schema int) (businessExportPackage,
 			t.Fatalf("seed schema %d automation preset %s: %v", schema, preset.PresetKey, err)
 		}
 	}
-	excluded, ok := businessImportSchemaContract(schema, businessImportSchema79)
+	excluded, ok := businessImportSchemaContract(schema, businessImportSchema80)
 	if !ok {
 		t.Fatalf("schema %d has no import contract", schema)
 	}
@@ -202,7 +202,7 @@ func TestBusinessImportUpgradeMatchesMigratedExport(t *testing.T) {
 }
 
 func TestBusinessImportSchemaContractAcceptsOnlyKnownHistoricalSources(t *testing.T) {
-	excluded, ok := businessImportSchemaContract(releasedBusinessImportSchema, businessImportSchema79)
+	excluded, ok := businessImportSchemaContract(releasedBusinessImportSchema, businessImportSchema80)
 	if !ok || !equalStrings(excluded, businessExportExcludedTablesSchema51) {
 		t.Fatalf("released schema 51 contract = %v %v", excluded, ok)
 	}
@@ -210,8 +210,8 @@ func TestBusinessImportSchemaContractAcceptsOnlyKnownHistoricalSources(t *testin
 		businessExportExcludedTablesSchema51[len(businessExportExcludedTablesSchema51)-1] != "business_import_project_completion_authorizations" {
 		t.Fatalf("schema 51 exclusion manifest = %v", businessExportExcludedTablesSchema51)
 	}
-	for _, schema := range []int{48, 50, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 80} {
-		if _, ok := businessImportSchemaContract(schema, businessImportSchema79); ok {
+	for _, schema := range []int{48, 50, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 81} {
+		if _, ok := businessImportSchemaContract(schema, businessImportSchema80); ok {
 			t.Fatalf("schema %d has no frozen manifest and must stay unsupported", schema)
 		}
 	}

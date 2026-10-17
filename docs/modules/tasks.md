@@ -546,7 +546,7 @@ schema v13 的 `013_inbox_item_tasks.sql` 不改写 Task 表或 D2 文件契约�
 
 schema v23 的 `023_task_artifact_inbox_projection.sql` 不重建 Task/Submission/Artifact/Inbox 表，也不回填历史 `requires_followup`。它增加 Artifact 来源索引和 insert/update/delete guards：只允许存在且未删的 follow-up Artifact 建立规范来源；来源身份/payload 不可变；Artifact 软删或聚合硬删前必须先完成 Inbox 来源协调。
 
-schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻塞 Task。它以阻塞后的 Task version 区分每次 block，约束 `source_entity_type=task` 的事件键和最小快照，冻结来源身份；活动来源阻止 Task 硬删除，来源项终态后删除事务先写 `source_deleted_at` 与 Inbox 审计，再删除 Task。
+schema v24 的 `024_task_blocked_inbox_projection.sql` 不回填迁移前已阻塞 Task。它以阻塞后的 Task version 区分每次 block，约束 `source_entity_type=task` 的事件键和最小快照，冻结来源身份；活动来源阻止 Task 硬删除，来源项终态后删除事务先写 `source_deleted_at` 与 Inbox 审计，再删除 Task。schema v80 起，业务导入在核对包内历史后可以写入 Task 之后解除阻塞、被编辑或被删除的历史阻塞提醒，临期提醒同理（[ADR-034](../adr/034-inbox-source-import-authorizations.md)）；在线投影规则不变。
 
 schema v25 的 `025_task_due_inbox_projection.sql` 不回填迁移前已进入临期窗口的 Task。Sidecar ready 前及运行中每 15 秒扫描状态非终态且截止时间不晚于未来 24 小时的 Task，以 `task:<task-id>:due:<due-at>` 为稳定键；每批最多 100 条且排除已投影截止事实，积压可持续推进。改期形成新截止事实，已生成事项不随完成/取消/改期自动归档。活动来源阻止 Task 删除，来源项终态后复用统一删除协调保留快照。schema v26–v29 的系统维护、Workspace Avatar、Project 完成来源和存储设置迁移不改写 Task 表；schema v30 只给 `task_submissions` 增加 `origin` 并新增父任务推进规则，不改变 `tasks` 表字段或既有生命周期状态集合。
 

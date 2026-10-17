@@ -16,9 +16,9 @@ import (
 
 const frozenBusinessImportSchemaV49 = 49
 
-func TestBusinessImportSchemaContractAIOnly68To79(t *testing.T) {
-	for _, target := range []int{68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79} {
-		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79} {
+func TestBusinessImportSchemaContractOperationalOnly68To80(t *testing.T) {
+	for _, target := range []int{68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80} {
+		for _, source := range []int{49, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80} {
 			if source > target {
 				continue
 			}
@@ -37,6 +37,8 @@ func TestBusinessImportSchemaContractAIOnly68To79(t *testing.T) {
 				expected = businessExportExcludedTablesSchema76
 			} else if source == 77 {
 				expected = businessExportExcludedTablesSchema77
+			} else if source == 78 || source == 79 {
+				expected = businessExportExcludedTablesSchema79
 			}
 			actual, ok := businessImportSchemaContract(source, target)
 			if !ok || !equalStrings(actual, expected) {
@@ -57,7 +59,35 @@ func TestBusinessImportSchemaContractAIOnly68To79(t *testing.T) {
 		t.Fatal("access request schema downgrade accepted")
 	}
 	if _, ok := businessImportSchemaContract(79, 78); ok {
+		t.Fatal("permission ledger schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(80, 79); ok {
+		t.Fatal("Inbox source authorization schema downgrade accepted")
+	}
+	if _, ok := businessImportSchemaContract(81, 80); ok {
 		t.Fatal("future schema accepted")
+	}
+	// What schemas 78 and 79 exported, written out so it cannot follow a later list.
+	schema79 := []string{
+		"schema_migrations", "workspace_identity", "idempotency_keys",
+		"artifact_deletion_tombstones", "client_attachment_deletion_tombstones", "project_attachment_deletion_tombstones",
+		"workspace_avatar_deletion_tombstones", "task_focus_totals", "storage_capacity_samples",
+		"scheduled_backup_policy", "invoice_number_sequences", "automation_event_deliveries",
+		"business_import_project_completion_authorizations", "ai_providers", "ai_sessions",
+		"ai_generations", "ai_messages", "ai_workspace_access_requests",
+		"ai_memories", "ai_memory_entries", "ai_run_steps",
+		"ai_action_proposals", "ai_work_plan_revisions", "ai_continuations",
+		"ai_continuation_turns", "ai_evaluation_runs", "ai_evaluation_results",
+		"ai_evaluation_reviews", "knowledge_sources", "knowledge_documents",
+		"knowledge_chunks", "knowledge_index_jobs", "knowledge_chunks_fts",
+		"knowledge_chunks_fts_data", "knowledge_chunks_fts_idx", "knowledge_chunks_fts_content",
+		"knowledge_chunks_fts_docsize", "knowledge_chunks_fts_config", "agent_runs",
+	}
+	if !equalStrings(businessExportExcludedTablesSchema79, schema79) {
+		t.Fatalf("frozen schema 79 exclusions = %#v", businessExportExcludedTablesSchema79)
+	}
+	if len(businessExportExcludedTables) != len(schema79)+1 {
+		t.Fatalf("schema 80 excludes %d tables, want one more than schema 79", len(businessExportExcludedTables))
 	}
 }
 
@@ -73,7 +103,7 @@ func TestBusinessImportSchema77PackageUsesFrozenExclusionsAt78(t *testing.T) {
 	var envelope struct {
 		Data businessImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 77 || envelope.Data.TargetSchemaVersion != 79 {
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 77 || envelope.Data.TargetSchemaVersion != 80 {
 		t.Fatalf("schema77 compatibility=%+v err=%v", envelope.Data, err)
 	}
 }
@@ -164,7 +194,7 @@ func TestBusinessImportSchema76KeepsContinuationAuthorizationNonportable(t *test
 		t.Fatal("portable export contains authorization or turn data")
 	}
 	current := decodeBusinessImportJSON(t, exported.Body.Bytes())
-	if current.Source.SchemaVersion != 79 || !equalStrings(current.ExcludedOperationalTables, businessExportExcludedTables) {
+	if current.Source.SchemaVersion != 80 || !equalStrings(current.ExcludedOperationalTables, businessExportExcludedTables) {
 		t.Fatalf("current export contract=%+v", current.Source)
 	}
 	for _, name := range []string{"ai_continuations", "ai_continuation_turns"} {
@@ -217,7 +247,7 @@ func TestBusinessImportSchema76KeepsContinuationAuthorizationNonportable(t *test
 	var envelope struct {
 		Data businessImportPreview `json:"data"`
 	}
-	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 76 || envelope.Data.TargetSchemaVersion != 79 {
+	if err := json.Unmarshal(preview.Body.Bytes(), &envelope); err != nil || !envelope.Data.CanApply || envelope.Data.SchemaVersion != 76 || envelope.Data.TargetSchemaVersion != 80 {
 		t.Fatalf("v76 preview=%+v %v", envelope.Data, err)
 	}
 	assertDatabaseCount(t, targetStore, `SELECT COUNT(*) FROM clients`, 0)
@@ -403,7 +433,7 @@ func TestBusinessImportKeepsSchemasOutsideV49CompatibilityBlocked(t *testing.T) 
 		blocker string
 	}{
 		{version: 48, blocker: "source_schema_older"},
-		{version: 80, blocker: "source_schema_newer"},
+		{version: 81, blocker: "source_schema_newer"},
 	} {
 		for _, format := range []struct {
 			name         string

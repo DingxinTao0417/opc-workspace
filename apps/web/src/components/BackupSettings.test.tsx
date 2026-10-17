@@ -1035,14 +1035,25 @@ describe("BackupSettings", () => {
 
   it.each([
     [
-      "TASK_DUE_INBOX_SOURCE_NOT_CURRENT",
-      "源数据里有“任务到期”提醒的历史记录，而对应任务之后已完成、取消或改期。这类历史提醒目前还不能导入。",
+      "TASK_DUE_DELETED_SOURCE_COLLISION",
+      "源数据里的一条“任务到期”提醒记录着对应任务已被删除，但当前工作区里这个任务还在。导入不会删除已有内容，所以这个包写不进来。",
     ],
     [
-      "TASK_BLOCKED_INBOX_SOURCE_NOT_CURRENT",
-      "源数据里有“任务阻塞”提醒的历史记录，而对应任务之后已解除阻塞。",
+      "ROADMAP_MILESTONE_DELETED_SOURCE_COLLISION",
+      "源数据里的一条“路线图里程碑”提醒记录着对应里程碑已被删除，但当前工作区里这个里程碑还在。",
+    ],
+    [
+      "INVALID_TASK_BLOCKED_INBOX_SOURCE",
+      "源数据里的一条“任务阻塞”提醒不符合规则：内容不完整，或与它的来源对不上。",
+    ],
+    [
+      "TASK_NOT_ASSIGNABLE",
+      "源数据里有已完成或已取消的任务，并且保留着负责人的指派记录。这类历史指派目前还不能导入。",
     ],
     ["FOREIGN_KEY_CONSTRAINT", "源数据里有记录引用了并不存在的对象。"],
+    // A reminder whose source moved on is imported since schema 80; the rule
+    // that used to reject it has no explanation of its own any more.
+    ["TASK_DUE_INBOX_SOURCE_NOT_CURRENT", "数据库拒绝了其中的记录。"],
     ["SOME_FUTURE_RULE", "数据库拒绝了其中的记录。"],
   ])("explains an import the rehearsal refused with %s", (code, reason) => {
     mocks.importPreviewData = {
@@ -1077,6 +1088,7 @@ describe("BackupSettings", () => {
     expect(notice).toHaveTextContent("已在创建备份前阻断，数据没有改变");
     expect(notice).toHaveTextContent(reason);
     expect(notice).toHaveTextContent(`规则代码 ${code}`);
+    expect(notice).not.toHaveTextContent("历史提醒目前还不能导入");
     expect(screen.getByRole("button", { name: "确认导入" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "确认导入" }));
     expect(mocks.applyImport).not.toHaveBeenCalled();
