@@ -22,6 +22,22 @@ func TestWorkspacePromptMatchesActualCapabilitiesWithoutLegacyTaskBlocks(t *test
 	}
 }
 
+// A legacy reply can confirm exactly one task block. The prompt says so and
+// names the way to several cards, instead of letting the model emit several
+// blocks that invalidate the whole suggestion.
+func TestLegacyTaskPromptAllowsOneBlockAndPointsToProposals(t *testing.T) {
+	for _, prompt := range []string{SystemPrompt, SystemPromptForWorkspace(false)} {
+		for _, required := range []string{"每条回复最多输出一个任务建议块", "「工作台权限」", "「准备操作建议」"} {
+			if !strings.Contains(prompt, required) {
+				t.Fatalf("legacy task prompt is missing %q", required)
+			}
+		}
+	}
+	if strings.Contains(SystemPromptForWorkspace(true), "每条回复最多输出一个任务建议块") {
+		t.Fatal("the proposal prompt carries the legacy one-block rule")
+	}
+}
+
 func TestPromptSizeMatchesEncodedRequestAndEnforcesLimit(t *testing.T) {
 	history := []ChatMessage{{Role: "user", Content: "你好"}}
 	promptContext := PromptContext{Memories: []string{"偏好简洁回答"}}

@@ -94,6 +94,7 @@ import { workbenchHandoffDetails } from "../store/aiWorkbenchHandoff";
 import { ProjectSelect } from "../components/ProjectSelect";
 import { TaskSelect } from "../components/TaskSelect";
 import {
+  countAiTaskBlocks,
   parseAiMemorySuggestion,
   parseAiTaskSuggestion,
   stripAiSelfCheckBlock,
@@ -2472,8 +2473,14 @@ function AiMessageBlock({
   );
 }
 
+const MULTIPLE_TASK_BLOCKS_NOTICE =
+  "这条回复一次给出了多条任务建议，但这里每条回复只能确认一条，所以都没有创建。可以让助手逐条给出；或在输入框下方点「工作台权限」选择「准备操作建议」后重新发送，就能一次生成多张确认卡。";
+
 function displayAiReply(content: string, streaming = false): string {
   const display = stripAiTaskBlock(content).trim();
+  if (!streaming && countAiTaskBlocks(content) > 1) {
+    return `${display}${display ? "\n\n" : ""}${MULTIPLE_TASK_BLOCKS_NOTICE}`;
+  }
   if (
     !streaming &&
     ((/\[opc:task\]/i.test(content) && !parseAiTaskSuggestion(content)) ||

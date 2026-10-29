@@ -1864,6 +1864,31 @@ describe("AiAssistantPage", () => {
     expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
   });
 
+  it("explains that a reply with several task blocks confirms none of them", () => {
+    mockState.providers = [readyProvider];
+    mockState.sessions = [activeSession];
+    mockState.messagesPages = [
+      {
+        data: [
+          assistantMessage({
+            content:
+              '三个任务建议如下：\n\n[opc:task]{"title":"ISE537 作业","due":"2026-10-31"}[/opc:task]\n\n[opc:task]{"title":"ISE558 作业","due":"2026-10-30"}[/opc:task]',
+          }),
+        ],
+        meta: { has_more: false },
+      },
+    ];
+    renderPage();
+
+    expect(
+      screen.getByText(/每条回复只能确认一条，所以都没有创建/),
+    ).toBeTruthy();
+    expect(screen.getByText(/「准备操作建议」/)).toBeTruthy();
+    expect(screen.queryByText(/这条建议格式不完整/)).toBeNull();
+    expect(screen.queryByText(/建议任务：/)).toBeNull();
+    expect(screen.queryByText(/\[opc:task\]/)).toBeNull();
+  });
+
   it("confirms an edited suggestion using the atomic message task command", async () => {
     mockState.providers = [readyProvider];
     mockState.sessions = [activeSession];

@@ -10,6 +10,13 @@ export interface AiTaskSuggestion {
 const AI_TASK_BLOCK_PATTERN =
   /\[opc:task\]\s*([\s\S]*?)\s*(?:\[\/opc:task\]|\[opc:task\])/i;
 
+// countAiTaskBlocks lets the display layer tell several task blocks, which a
+// reply cannot confirm, apart from one malformed block.
+export function countAiTaskBlocks(content: string): number {
+  return [...content.matchAll(new RegExp(AI_TASK_BLOCK_PATTERN.source, "gi"))]
+    .length;
+}
+
 // parseAiTaskSuggestion extracts a single unambiguous task suggestion block
 // from an assistant reply. The block is model output and always treated as an
 // untrusted preview: malformed JSON or a missing/oversized title yields null
