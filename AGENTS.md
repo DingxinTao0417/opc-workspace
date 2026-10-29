@@ -8,6 +8,8 @@
 - 只读 Git 操作（status、diff、log、show、branch 查看、blame 等）可自由执行；任何非只读的 Git 操作（add、commit、push、stash、checkout/switch、reset/restore、clean、merge、rebase、tag、修改 remote 等）必须先向用户提出、经用户明确确认后才能执行。
 - 部署与修改远程仓库同样需要用户明确授权，未经确认不得执行。
 - 本地开发与桌面运行不使用 Docker。遵守 PRD 当前版本边界，不把 AI、知识库或其他后续版本能力提前混入当前版本。
+- `.local/dev-data/` 是 `pnpm dev` / `pnpm dev:web` 默认打开的数据目录。用户把开发版当日常工具，里面是真实在用的数据：不删除、不清空、不重置、不覆盖，也不要把 `--data-dir` 指向它；`git clean -x` 会连带删掉整个 `.local/`。
+- 需要别的数据时，用 `OPC_DEV_DATA_DIR` 把开发运行指向另一个目录（`scripts/seed-volume.mjs` 默认生成在 `.local/perf-data/<档位>`）。
 
 ## 文档是功能交付的一部分
 
