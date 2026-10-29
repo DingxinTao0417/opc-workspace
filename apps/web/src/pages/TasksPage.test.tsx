@@ -639,11 +639,6 @@ describe("TasksPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "按截止日视图" }));
 
     expect(lastPageQueryEnabled()).toBe(false);
-    expect(
-      screen.getByText(
-        "日程视图默认只包含活动任务；如需查看已完成或已取消的历史截止，请在筛选中选择状态。",
-      ),
-    ).toBeVisible();
     expect(screen.getByText("逾期交付")).toBeVisible();
     expect(screen.getByText("今天交付")).toBeVisible();
     expect(screen.queryByText("三天后交付")).toBeNull();
@@ -876,6 +871,102 @@ describe("TasksPage", () => {
       screen.getByText("任务已被其他操作更新，列表已刷新，请重新拖动。"),
     ).toBeVisible();
     expect(mocks.taskRefetch).not.toHaveBeenCalled();
+  });
+
+  it("reorders cards within a board column when sorting by manual order", () => {
+    mocks.taskItems = [
+      { ...task, id: "task-a", title: "卡片 A" },
+      { ...task, id: "task-b", title: "卡片 B" },
+    ];
+    render(<TasksPage />);
+    fireEvent.change(screen.getByLabelText("任务排序"), {
+      target: { value: "manual_order" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const transfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText("移动任务：卡片 A"), {
+      dataTransfer: transfer,
+    });
+    const cardB = screen
+      .getByRole("button", { name: "查看任务：卡片 B" })
+      .closest("article");
+    expect(cardB).not.toBeNull();
+    fireEvent.dragOver(cardB!, { dataTransfer: transfer });
+    fireEvent.drop(cardB!, { dataTransfer: transfer });
+
+    expect(mocks.drag).toHaveBeenCalledWith({
+      source: expect.objectContaining({ id: "task-a" }),
+      target: expect.objectContaining({ id: "task-b" }),
+      position: "after",
+    });
+    expect(mocks.lifecycle).not.toHaveBeenCalled();
+  });
+
+  it("explains cross-plan rejections instead of persisting board card order", () => {
+    mocks.taskItems = [
+      { ...task, id: "task-a", title: "卡片 A", plannedDate: "2026-08-27" },
+      { ...task, id: "task-b", title: "卡片 B", plannedDate: "2026-08-28" },
+    ];
+    render(<TasksPage />);
+    fireEvent.change(screen.getByLabelText("任务排序"), {
+      target: { value: "manual_order" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const transfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText("移动任务：卡片 A"), {
+      dataTransfer: transfer,
+    });
+    const cardB = screen
+      .getByRole("button", { name: "查看任务：卡片 B" })
+      .closest("article");
+    fireEvent.dragOver(cardB!, { dataTransfer: transfer });
+    fireEvent.drop(cardB!, { dataTransfer: transfer });
+
+    expect(mocks.drag).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "手动顺序按计划日期分组，这两张卡片的计划日期不同，不能列内排序。",
+      ),
+    ).toBeVisible();
+  });
+
+  it("ignores same-column card drops unless sorting by manual order", () => {
+    mocks.taskItems = [
+      { ...task, id: "task-a", title: "卡片 A" },
+      { ...task, id: "task-b", title: "卡片 B" },
+    ];
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const transfer = {
+      effectAllowed: "none",
+      dropEffect: "none",
+      setData: vi.fn(),
+    };
+    fireEvent.dragStart(screen.getByLabelText("移动任务：卡片 A"), {
+      dataTransfer: transfer,
+    });
+    const cardB = screen
+      .getByRole("button", { name: "查看任务：卡片 B" })
+      .closest("article");
+    fireEvent.dragOver(cardB!, { dataTransfer: transfer });
+    fireEvent.drop(cardB!, { dataTransfer: transfer });
+
+    expect(mocks.drag).not.toHaveBeenCalled();
+    expect(mocks.lifecycle).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("dialog", { name: "确认任务状态变更" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps manual review acceptance out of board dragging", () => {

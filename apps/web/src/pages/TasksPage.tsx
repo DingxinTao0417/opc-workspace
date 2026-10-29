@@ -706,6 +706,26 @@ export function TasksPage() {
     );
   };
 
+  const boardReorder = view === "board" && sort === "manual_order";
+
+  const reorderBoardCard = (
+    source: Task,
+    target: Task,
+    position: "before" | "after",
+  ) => {
+    setBoardTransitionNotice(null);
+    moveMutation.reset();
+    resetOrderMutation.reset();
+    dragMutation.reset();
+    if (source.plannedDate !== target.plannedDate) {
+      setBoardTransitionNotice(
+        "手动顺序按计划日期分组，这两张卡片的计划日期不同，不能列内排序。",
+      );
+      return;
+    }
+    dragMutation.mutate({ source, target, position });
+  };
+
   return (
     <div className="page">
       <PageHeader
@@ -1367,13 +1387,15 @@ export function TasksPage() {
 
       {taskDataReady && tasks.length > 0 && view === "board" ? (
         <>
-          {boardTransitionNotice ? (
+          {boardTransitionNotice || reorderError ? (
             <div className="task-order-banner" role="status">
-              <span>{boardTransitionNotice}</span>
+              <span>{boardTransitionNotice ?? reorderError}</span>
             </div>
           ) : null}
           <TaskBoard
+            allowReorder={boardReorder}
             live={writeReady}
+            onReorderDrop={reorderBoardCard}
             onSelectionChange={(task, selected) => {
               setBatchConfirmationPending(false);
               setSelectedTasks((current) => {
@@ -1443,7 +1465,6 @@ export function TasksPage() {
                   ) : (
                     <h2>{group.label}</h2>
                   )}
-                  <span title="当前页数量">本页 {groupedTasks.length}</span>
                 </div>
                 {!collapsed ? (
                   <TaskList
@@ -1527,11 +1548,6 @@ export function TasksPage() {
           />
         ) : (
           <div className="task-groups">
-            {status === "" ? (
-              <p className="task-order-banner">
-                日程视图默认只包含活动任务；如需查看已完成或已取消的历史截止，请在筛选中选择状态。
-              </p>
-            ) : null}
             {agendaGroups.map((group) => {
               const collapsed =
                 dayCollapsed[group.dayKey] ??

@@ -10631,6 +10631,11 @@ button.ov-row:hover {
   text-overflow: ellipsis;
 }
 
+.task-board-card.task-board-card-drop {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 2px var(--accent-bg);
+}
+
 .task-board-card-meta.task-due-overdue,
 .task-due-day-label.task-due-overdue {
   color: var(--danger-text);

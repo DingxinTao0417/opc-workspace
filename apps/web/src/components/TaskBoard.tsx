@@ -18,8 +18,14 @@ interface TaskBoardProps {
   live: boolean;
   selectedIds: Set<string>;
   selectionLimitReached?: boolean;
+  allowReorder?: boolean;
   onSelectionChange: (task: Task, selected: boolean) => void;
   onStatusDrop: (task: Task, status: TaskStatus) => void;
+  onReorderDrop?: (
+    source: Task,
+    target: Task,
+    position: "before" | "after",
+  ) => void;
 }
 
 export function TaskBoard({
@@ -27,12 +33,15 @@ export function TaskBoard({
   live,
   selectedIds,
   selectionLimitReached = false,
+  allowReorder = false,
   onSelectionChange,
   onStatusDrop,
+  onReorderDrop,
 }: TaskBoardProps) {
   const setTaskDetailId = useUiStore((state) => state.setTaskDetailId);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
+  const [dropCardId, setDropCardId] = useState<string | null>(null);
   const draggedTask = tasks.find((task) => task.id === draggedTaskId) ?? null;
   const now = Date.now();
 
@@ -64,6 +73,7 @@ export function TaskBoard({
               event.preventDefault();
               setDropStatus(null);
               setDraggedTaskId(null);
+              setDropCardId(null);
               if (!live || !draggedTask || draggedTask.status === column.status)
                 return;
               onStatusDrop(draggedTask, column.status);
@@ -81,8 +91,40 @@ export function TaskBoard({
               {columnTasks.length ? (
                 columnTasks.map((task) => {
                   const selected = selectedIds.has(task.id);
+                  const sameColumnReorder =
+                    allowReorder &&
+                    draggedTask !== null &&
+                    draggedTask.status === column.status &&
+                    draggedTask.id !== task.id;
                   return (
-                    <article className="task-board-card" key={task.id}>
+                    <article
+                      className={`task-board-card${dropCardId === task.id ? " task-board-card-drop" : ""}`}
+                      key={task.id}
+                      onDragOver={(event) => {
+                        if (!live || !sameColumnReorder) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.dataTransfer.dropEffect = "move";
+                        setDropCardId(task.id);
+                      }}
+                      onDrop={(event) => {
+                        if (!live || !sameColumnReorder) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const source = draggedTask!;
+                        const sourceIndex = columnTasks.findIndex(
+                          (item) => item.id === source.id,
+                        );
+                        const position =
+                          sourceIndex <
+                          columnTasks.findIndex((item) => item.id === task.id)
+                            ? "after"
+                            : "before";
+                        setDraggedTaskId(null);
+                        setDropCardId(null);
+                        onReorderDrop?.(source, task, position);
+                      }}
+                    >
                       <span
                         aria-label={`移动任务：${task.title}`}
                         className="task-board-drag-handle"
@@ -90,6 +132,7 @@ export function TaskBoard({
                         onDragEnd={() => {
                           setDraggedTaskId(null);
                           setDropStatus(null);
+                          setDropCardId(null);
                         }}
                         onDragStart={(event) => {
                           if (!live) {
@@ -101,7 +144,13 @@ export function TaskBoard({
                           setDraggedTaskId(task.id);
                         }}
                         role="img"
-                        title={live ? "拖到其他列变更状态" : "数据刷新后可移动"}
+                        title={
+                          live
+                            ? allowReorder
+                              ? "拖到其他列变更状态；同列内拖拽调整手动顺序"
+                              : "拖到其他列变更状态"
+                            : "数据刷新后可移动"
+                        }
                       >
                         <GripVertical aria-hidden="true" size={14} />
                       </span>
