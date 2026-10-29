@@ -1,5 +1,6 @@
 import { CalendarDays, FolderKanban, GripVertical } from "lucide-react";
 import { useState } from "react";
+import { formatTaskDue, taskDueState, taskDueStateClass } from "../lib/taskDue";
 import { useUiStore } from "../store/ui";
 import type { Task, TaskStatus } from "../types/models";
 
@@ -21,11 +22,6 @@ interface TaskBoardProps {
   onStatusDrop: (task: Task, status: TaskStatus) => void;
 }
 
-function dateLabel(value: string): string {
-  const [year, month, day] = value.split("-");
-  return year && month && day ? `${month}/${day}` : value;
-}
-
 export function TaskBoard({
   tasks,
   live,
@@ -38,6 +34,7 @@ export function TaskBoard({
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropStatus, setDropStatus] = useState<TaskStatus | null>(null);
   const draggedTask = tasks.find((task) => task.id === draggedTaskId) ?? null;
+  const now = Date.now();
 
   return (
     <div aria-label="任务看板" className="task-board">
@@ -143,9 +140,13 @@ export function TaskBoard({
                             {task.priority}
                           </span>
                           {task.dueDate ? (
-                            <span className="task-board-card-meta">
+                            <span
+                              className={`task-board-card-meta${taskDueStateClass(
+                                taskDueState(task, now),
+                              )}`}
+                            >
                               <CalendarDays size={12} />
-                              {dateLabel(task.dueDate)}
+                              {formatTaskDue(task.dueDate, now) ?? task.dueDate}
                             </span>
                           ) : null}
                           {task.tags.slice(0, 2).map((tag) => (

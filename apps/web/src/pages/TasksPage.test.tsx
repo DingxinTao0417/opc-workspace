@@ -9,7 +9,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserRouter } from "react-router-dom";
 import { ApiError } from "../api/client";
+import { formatDueDayHeader, formatTaskDue, localDayKey } from "../lib/taskDue";
 import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
+import { clearTaskViewMode } from "../store/taskViewMode";
 import { useUiStore } from "../store/ui";
 import type {
   Task,
@@ -42,6 +44,10 @@ const mocks = vi.hoisted(() => ({
   savedViews: [] as TaskSavedView[],
   placeholder: false,
   taskStatus: "todo" as TaskStatus,
+  agendaGroups: null as
+    { dayKey: string; overdue: boolean; tasks: Task[] }[] | null,
+  agendaPending: false,
+  agendaQueries: [] as { params: unknown; enabled: boolean }[],
 }));
 
 vi.mock("../api/client", async (importOriginal) => ({
@@ -148,6 +154,19 @@ vi.mock("../api/hooks", () => ({
       isPlaceholderData: mocks.placeholder,
       isSuccess: true,
       refetch: mocks.taskRefetch,
+    };
+  },
+  useTaskDueAgendaQuery: (params: unknown, enabled = true) => {
+    mocks.agendaQueries.push({ params, enabled });
+    return {
+      data: mocks.agendaGroups,
+      error: null,
+      isError: false,
+      isFetching: false,
+      isPending: mocks.agendaPending,
+      isPlaceholderData: false,
+      isSuccess: !mocks.agendaPending,
+      refetch: vi.fn(),
     };
   },
   useTaskSavedViewsQuery: () => ({
@@ -270,7 +289,11 @@ describe("TasksPage", () => {
     mocks.taskResponsePage = null;
     mocks.taskTotal = 101;
     mocks.savedViews = [];
+    mocks.agendaGroups = null;
+    mocks.agendaPending = false;
+    mocks.agendaQueries.length = 0;
     window.history.replaceState({}, "", "/tasks");
+    clearTaskViewMode();
     useAiWorkbenchHandoff.setState({
       pending: null,
       pendingIssue: null,
@@ -544,6 +567,104 @@ describe("TasksPage", () => {
       screen.getByRole("checkbox", { name: `选择任务：${task.title}` }),
     );
     expect(screen.getByText("已选 1 项")).toBeVisible();
+  });
+
+  it("colors overdue board due chips using local time", () => {
+    const due = new Date();
+    due.setDate(due.getDate() - 1);
+    due.setHours(18, 0, 0, 0);
+    mocks.taskItems = [
+      { ...task, status: "in_progress", dueDate: due.toISOString() },
+    ];
+    render(<TasksPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "看板视图" }));
+
+    const label = formatTaskDue(due.toISOString(), Date.now());
+    expect(label).not.toBeNull();
+    const chip = screen.getByText(label as string);
+    expect(chip.className).toContain("task-board-card-meta");
+    expect(chip.className).toContain("task-due-overdue");
+  });
+
+  it("renders the due-day agenda with per-day collapse and pauses list paging", () => {
+    const day = (offset: number, hour: number) => {
+      const date = new Date();
+      date.setDate(date.getDate() + offset);
+      date.setHours(hour, 0, 0, 0);
+      return date;
+    };
+    const key = (offset: number) => localDayKey(day(offset, 12).getTime());
+    mocks.agendaGroups = [
+      {
+        dayKey: key(-1),
+        overdue: true,
+        tasks: [
+          {
+            ...task,
+            id: "task-overdue",
+            title: "逾期交付",
+            status: "in_progress",
+            dueDate: day(-1, 18).toISOString(),
+          },
+        ],
+      },
+      {
+        dayKey: key(0),
+        overdue: false,
+        tasks: [
+          {
+            ...task,
+            id: "task-today",
+            title: "今天交付",
+            dueDate: day(0, 20).toISOString(),
+          },
+        ],
+      },
+      {
+        dayKey: key(3),
+        overdue: false,
+        tasks: [
+          {
+            ...task,
+            id: "task-later",
+            title: "三天后交付",
+            dueDate: day(3, 9).toISOString(),
+          },
+        ],
+      },
+    ];
+    render(<TasksPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "按截止日视图" }));
+
+    expect(lastPageQueryEnabled()).toBe(false);
+    expect(
+      screen.getByText(
+        "日程视图默认只包含活动任务；如需查看已完成或已取消的历史截止，请在筛选中选择状态。",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("逾期交付")).toBeVisible();
+    expect(screen.getByText("今天交付")).toBeVisible();
+    expect(screen.queryByText("三天后交付")).toBeNull();
+
+    const laterHeader = formatDueDayHeader(key(3), Date.now());
+    fireEvent.click(screen.getByRole("button", { name: laterHeader }));
+    expect(screen.getByText("三天后交付")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: laterHeader }));
+    expect(screen.queryByText("三天后交付")).toBeNull();
+  });
+
+  it("restores the last used view mode on a fresh mount", () => {
+    render(<TasksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "按截止日视图" }));
+    cleanup();
+
+    render(<TasksPage />);
+    expect(
+      screen.getByRole("button", { name: "按截止日视图" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("还没有带截止时间的任务")).toBeVisible();
   });
 
   it("hands exact selected Task identities to the agent without copying row content or granting access", () => {

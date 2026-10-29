@@ -121,7 +121,7 @@ Task 不拥有 Inbox 的分诊/解决事实、Agent Runtime、远程协作/通�
 - H5-B 把成功文本结果落为明确处置：`succeeded + submitted` 才通过共享 Task output 命令创建 Submission/Artifact 并进入 `waiting_review`；`succeeded + retained` 只在 Run 保存正文且不改变 Task；瞬时登记失败先尝试持久化为 `running + pending`，落库后由启动或显式 retry 幂等恢复登记而不重跑模型。完成事务与首次 pending 写入同时暂时失败时，Worker 只在进程存活期间以内存保留有界结果并重试；首次落库前不承诺崩溃恢复。普通人工/AI 代录与受信 Agent 交付使用不同的服务端归属规则，见下文。
 - H5-C 在同一 Run 生命周期上增加受控文件：仅当前 Task 的活动 file Artifact 和该 Task 当前 Project 的活动 Attachment 可作为输入；最多 4 个、单文件 64 KiB、总计 128 KiB，且必须是无 NUL 的 UTF-8。服务端在 prepare 与 prelaunch 两次复核身份、归属、大小和 SHA-256；持久快照只冻结来源引用、显示名、MIME、大小和哈希，不保存路径或正文。无文件且文本输出继续使用 v1；选择受控输入或文件输出才使用严格 v2。文件结果使用服务端生成名称并复用现有 Submission/Artifact 人工验收链；Run succeeded 仍不等于 Task done。
 
-- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。客户条件使用与 Project 表单/筛选共享的 `ClientSelect`。Project 关联使用 Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用的 `ProjectSelect`：两个选择器都固定每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留和完整反馈，不再串行拉取全部 Client 或 Project。列表 API 另提供仅供实时截止风险入口使用的 `due_state=overdue|due_soon`；Today 以该条件读取完整分页结果。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
+- Task 新建、详情、非生命周期编辑、确认删除、服务端分页/筛选/搜索/排序、原子批量事实/生命周期操作和计划组排序已接通真实 SQLite；任务页支持项目当前客户、精确计划日期、计划/截止日期范围、最多 20 个持久保存视图，且在单一精确日期的手动顺序列表中支持同状态拖拽。客户条件使用与 Project 表单/筛选共享的 `ClientSelect`。Project 关联使用 Task 新建/编辑、Tasks 项目筛选、批量目标项目和 Inbox 拆分任务共用的 `ProjectSelect`：两个选择器都固定每页 20 条、250 ms 服务端搜索、稳定分页、取消信号、当前选择保留和完整反馈，不再串行拉取全部 Client 或 Project。列表 API 另提供仅供实时截止风险入口使用的 `due_state=overdue|due_soon`；Today 以该条件读取完整分页结果。六状态看板复用同一服务端筛选、当前页分页、最多 100 项选择和详情入口，空列保持可见；跨列拖拽只映射既有生命周期命令并二次确认，不直接修改状态；看板卡片显示本机时区格式的截止日期，并按与服务端 24 小时 lead 同口径对逾期/临期着色（终态不着色）。任务页另有第三种显示模式「按截止日」：前端用同一列表 API 一次读取当前筛选下带截止时间的任务全集（`due_from/due_to` 兜底为开区间以在 SQL 层排除无截止任务，状态留空等价 `active`，按 `due_date` 排序），客户端按本机自然日分组升序渲染为可折叠日期组，逾期各天与今天默认展开、逾期组头红字；组内行复用共享列表、勾选与批量操作，不提供拖拽排序与分页；该模式不进保存视图，AI 交还返回统一落列表视图；列表/看板/按截止日的分段选择经本机浏览器存储 `opc-task-view-v1` 记忆，下次打开任务页恢复，AI 交还返回的显式视图优先，存储不可用时退内存、清除后回列表视图。格式化与逾期判定共享 `lib/taskDue.ts`。统一搜索结果使用 `/tasks/:taskId`，刷新可恢复同一详情，不存在资源保留明确错误反馈。
 - `todo / in_progress / blocked / waiting_review / done / cancelled` 六状态只通过显式命令变化；旧状态 PATCH 固定返回 410。
 - `review_policy` 可在新建时选择 `none / manual`；既有 Task 只在 `todo` 且没有任何 Submission 历史时允许切换。
 - Assignment 支持活动 assignee/reviewer、首次分派、改派、结束与分页历史。assignee 允许 active owner/person 或关联 enabled/execution_ready Adapter 的 active agent，reviewer 只允许 active owner。AI 独立轨道 H2-D 已接通相同三种责任命令的逐项人工审批及当前/历史查询，绑定 Task 版本、责任 ID 与完整预览；共享事务保留父任务待验收协调和历史，不启动 Agent。详见 [Actor 责任分派](actors.md#ai-独立轨道的责任分派h2-c2--h2-d)。
@@ -581,6 +581,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - 前端全量测试、typecheck、Web build、format check；Go 全包测试、database 重复测试和 `go vet`。
 - 任务页精确计划日期下的同状态拖拽、乐观顺序、完整计划组槽位重建和版本校验。
 - 任务页列表/看板切换、看板平铺查询、六列空状态、卡片详情直达、跨列命令映射/原因/确认/版本及人工验收门禁，以及与现有批量选择共用事实。
+- 任务页「按截止日」视图的本机自然日分组与升序、逾期/今天默认展开与其余日期折叠、状态留空等价活动的说明行、列表分页在该模式暂停，以及看板截止徽标的本机时区格式化与逾期/临期着色。
 - 任务页计划/截止日期范围序列化、合法范围分页请求、倒置范围查询门禁，以及 Sidecar 的合法/非法范围过滤。
 - Today 截止风险客户端序列化、Sidecar 固定时钟边界/终态排除/冲突拒绝、稳定分页，以及同一时钟下逾期/临期列表 `meta.total` 与 Today 统计严格一致。
 - 任务页 ClientSelect 的首批/搜索/上一页与下一页有界分页、查询键切换与卸载取消、跨页和失败选中保留、inactive、加载/空/错误重试/更多结果反馈、combobox 键盘交互及页面接线；客户端 `client_id` 序列化、保存视图恢复、Sidecar UUID 拒绝及 Task→Project→Client 正向过滤继续覆盖。
@@ -623,6 +624,7 @@ schema v30 的 `030_task_parent_progress.sql` 是非破坏性追加迁移：
 - [前端 Task output 组件](../../apps/web/src/components/TaskOutputsSection.tsx)
 - [前端 Task 专注记录组件](../../apps/web/src/components/TaskFocusHistorySection.tsx)
 - [任务列表页](../../apps/web/src/pages/TasksPage.tsx)
+- [截止日期格式化与逾期判定](../../apps/web/src/lib/taskDue.ts)
 - [任务看板](../../apps/web/src/components/TaskBoard.tsx)
 - [任务看板生命周期确认](../../apps/web/src/components/TaskBoardTransitionModal.tsx)
 - [任务保存视图控件](../../apps/web/src/components/TaskSavedViewsControl.tsx)

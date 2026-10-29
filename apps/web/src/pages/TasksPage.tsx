@@ -1,5 +1,6 @@
 import "./TasksPage.css";
 import {
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   Columns3,
@@ -20,6 +21,8 @@ import {
   useReorderTaskWithinPlanStatus,
   useResetTaskOrder,
   useTagOptionsQuery,
+  type TaskDueAgendaParams,
+  useTaskDueAgendaQuery,
   useTaskPageQuery,
 } from "../api/hooks";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
@@ -42,9 +45,15 @@ import {
   parseTaskSavedViewLocation,
   parseTaskWorkspaceLocation,
 } from "../lib/aiWorkspaceLinks";
+import { formatDueDayHeader, localDayKey } from "../lib/taskDue";
 import { useSettledPage } from "../lib/useSettledPage";
 import { useUiStore } from "../store/ui";
 import { useAiWorkbenchHandoff } from "../store/aiWorkbenchHandoff";
+import {
+  readTaskViewMode,
+  rememberTaskViewMode,
+  type TaskViewMode,
+} from "../store/taskViewMode";
 import type {
   BatchUpdateTasksInput,
   Task,
@@ -160,8 +169,8 @@ export function TasksPage() {
     name?: string;
   } | null>(null);
   const [savedViewRetry, setSavedViewRetry] = useState(0);
-  const [view, setView] = useState<"list" | "board">(
-    returnSelection?.view ?? "list",
+  const [view, setView] = useState<TaskViewMode>(
+    returnSelection?.view ?? readTaskViewMode(),
   );
   const [searchInput, setSearchInput] = useState(
     returnSelection?.definition.q ?? "",
@@ -206,6 +215,7 @@ export function TasksPage() {
   const [collapsedStatuses, setCollapsedStatuses] = useState<Set<TaskStatus>>(
     () => new Set(["cancelled"]),
   );
+  const [dayCollapsed, setDayCollapsed] = useState<Record<string, boolean>>({});
   const [page, setPage] = useState(returnSelection?.page ?? 1);
   const [selectedTasks, setSelectedTasks] = useState<Record<string, Task>>({});
   const [restoringSelection, setRestoringSelection] = useState(
@@ -380,7 +390,35 @@ export function TasksPage() {
       rootOnly: hierarchical,
       sort: sort || undefined,
     },
-    taskDataReady,
+    taskDataReady && view !== "agenda",
+  );
+  const agendaParams = useMemo<TaskDueAgendaParams>(
+    () => ({
+      q: queryText || undefined,
+      status: status || undefined,
+      priority: priority || undefined,
+      kind: kind || undefined,
+      projectId: projectId || undefined,
+      clientId: clientId || undefined,
+      tagIds,
+      dueFrom: dueFrom || undefined,
+      dueTo: dueTo || undefined,
+    }),
+    [
+      clientId,
+      dueFrom,
+      dueTo,
+      kind,
+      priority,
+      projectId,
+      queryText,
+      status,
+      tagIds,
+    ],
+  );
+  const agendaQuery = useTaskDueAgendaQuery(
+    agendaParams,
+    taskDataReady && view === "agenda",
   );
   const tagsQuery = useTagOptionsQuery(true);
   const batchMutation = useBatchUpdateTasks();
@@ -393,6 +431,13 @@ export function TasksPage() {
     1,
     Math.ceil(total / (query.data?.meta.pageSize ?? 50)),
   );
+  const agendaGroups = agendaQuery.data ?? [];
+  const agendaTotal = agendaGroups.reduce(
+    (sum, group) => sum + group.tasks.length,
+    0,
+  );
+  const todayMs = Date.now();
+  const todayKey = localDayKey(todayMs);
   const selectedItems = useMemo(
     () => Object.values(selectedTasks),
     [selectedTasks],
@@ -428,13 +473,17 @@ export function TasksPage() {
     );
   const allowReorder =
     view === "list" && sort === "manual_order" && onlyPlanFilter;
+  const visibleQueryReady =
+    view === "agenda"
+      ? agendaQuery.isSuccess &&
+        !agendaQuery.isPlaceholderData &&
+        !agendaQuery.isFetching
+      : query.isSuccess && !query.isPlaceholderData && !query.isFetching;
   const writeReady =
     taskDataReady &&
     !restoringSelection &&
     searchInput.trim() === queryText &&
-    query.isSuccess &&
-    !query.isPlaceholderData &&
-    !query.isFetching &&
+    visibleQueryReady &&
     !batchMutation.isPending &&
     !moveMutation.isPending &&
     !dragMutation.isPending &&
@@ -452,6 +501,7 @@ export function TasksPage() {
   useSettledPage({
     page,
     meta: taskDataReady ? query.data?.meta : undefined,
+    isBlocked: view === "agenda",
     isFetching: taskDataReady && query.isFetching,
     isPlaceholderData: query.isPlaceholderData,
     isSuccess: taskDataReady && query.isSuccess,
@@ -502,6 +552,12 @@ export function TasksPage() {
     setDueTo("");
     setSearchInput("");
     setQueryText("");
+    setPage(1);
+  };
+
+  const changeView = (next: TaskViewMode) => {
+    setView(next);
+    rememberTaskViewMode(next);
     setPage(1);
   };
 
@@ -672,13 +728,21 @@ export function TasksPage() {
               ? "视图链接无效"
               : !savedViewReady
                 ? "视图读取中"
-                : query.isPending
-                  ? filtersValid
-                    ? "读取中"
-                    : "筛选条件无效"
-                  : query.isSuccess && filtersValid
-                    ? `${total} ${hierarchical ? "个根任务" : "项"}${query.isFetching ? " · 更新中" : ""}`
-                    : "数据不可用"}
+                : view === "agenda"
+                  ? agendaQuery.isPending
+                    ? filtersValid
+                      ? "读取中"
+                      : "筛选条件无效"
+                    : agendaQuery.isSuccess && filtersValid
+                      ? `${agendaTotal} 项有截止${agendaQuery.isFetching ? " · 更新中" : ""}`
+                      : "数据不可用"
+                  : query.isPending
+                    ? filtersValid
+                      ? "读取中"
+                      : "筛选条件无效"
+                    : query.isSuccess && filtersValid
+                      ? `${total} ${hierarchical ? "个根任务" : "项"}${query.isFetching ? " · 更新中" : ""}`
+                      : "数据不可用"}
           </span>
         }
         title="任务"
@@ -789,8 +853,7 @@ export function TasksPage() {
             aria-pressed={view === "list"}
             className={view === "list" ? "segmented-active" : undefined}
             onClick={() => {
-              setView("list");
-              setPage(1);
+              changeView("list");
             }}
             type="button"
           >
@@ -801,12 +864,22 @@ export function TasksPage() {
             aria-pressed={view === "board"}
             className={view === "board" ? "segmented-active" : undefined}
             onClick={() => {
-              setView("board");
-              setPage(1);
+              changeView("board");
             }}
             type="button"
           >
             <Columns3 size={15} />
+          </button>
+          <button
+            aria-label="按截止日视图"
+            aria-pressed={view === "agenda"}
+            className={view === "agenda" ? "segmented-active" : undefined}
+            onClick={() => {
+              changeView("agenda");
+            }}
+            type="button"
+          >
+            <CalendarDays size={15} />
           </button>
         </div>
       </div>
@@ -1072,7 +1145,9 @@ export function TasksPage() {
                   ids: selectedItems.map((task) => task.id),
                   definition: savedViewDefinition,
                   page,
-                  view,
+                  // The agenda is a local display mode; AI handoff returns land
+                  // on the list view.
+                  view: view === "agenda" ? "list" : view,
                 });
               }}
             />
@@ -1422,7 +1497,108 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {taskDataReady && query.isSuccess && totalPages > 1 ? (
+      {taskDataReady && view === "agenda" ? (
+        agendaQuery.isError ? (
+          <ErrorState
+            message="无法读取截止日程；请确认本地服务已启动后重试。"
+            onRetry={() => void agendaQuery.refetch()}
+          />
+        ) : agendaQuery.isPending ? (
+          <SkeletonRows count={7} />
+        ) : agendaGroups.length === 0 ? (
+          <EmptyState
+            action={
+              hasFilters ? (
+                <button
+                  className="button button-secondary"
+                  onClick={clearFilters}
+                  type="button"
+                >
+                  清除筛选
+                </button>
+              ) : undefined
+            }
+            message={
+              hasFilters
+                ? "调整关键词或筛选条件后再试。"
+                : "当前没有带截止时间的任务；设置截止时间后会按天出现在这里。"
+            }
+            title={hasFilters ? "没有匹配的截止日程" : "还没有带截止时间的任务"}
+          />
+        ) : (
+          <div className="task-groups">
+            {status === "" ? (
+              <p className="task-order-banner">
+                日程视图默认只包含活动任务；如需查看已完成或已取消的历史截止，请在筛选中选择状态。
+              </p>
+            ) : null}
+            {agendaGroups.map((group) => {
+              const collapsed =
+                dayCollapsed[group.dayKey] ??
+                !(group.overdue || group.dayKey === todayKey);
+              return (
+                <section className="task-group" key={group.dayKey}>
+                  <div className="task-group-heading">
+                    <button
+                      aria-expanded={!collapsed}
+                      className="task-group-toggle"
+                      onClick={() =>
+                        setDayCollapsed((current) => ({
+                          ...current,
+                          [group.dayKey]: !collapsed,
+                        }))
+                      }
+                      type="button"
+                    >
+                      {collapsed ? (
+                        <ChevronRight size={13} />
+                      ) : (
+                        <ChevronDown size={13} />
+                      )}
+                      <h2
+                        className={`task-due-day-label${group.overdue ? " task-due-overdue" : ""}`}
+                      >
+                        {formatDueDayHeader(group.dayKey, todayMs)}
+                      </h2>
+                    </button>
+                    <span title="该日任务数量">{group.tasks.length}</span>
+                  </div>
+                  {!collapsed ? (
+                    <TaskList
+                      live={writeReady}
+                      onSelectionChange={(task, selected) => {
+                        setBatchConfirmationPending(false);
+                        setSelectedTasks((current) => {
+                          const next = { ...current };
+                          if (selected) {
+                            if (
+                              !next[task.id] &&
+                              Object.keys(next).length >= 100
+                            ) {
+                              return current;
+                            }
+                            next[task.id] = task;
+                          } else delete next[task.id];
+                          return next;
+                        });
+                      }}
+                      selectedIds={selectedIds}
+                      selectionLimitReached={selectedItems.length >= 100}
+                      showParent
+                      tasks={group.tasks}
+                    />
+                  ) : null}
+                </section>
+              );
+            })}
+          </div>
+        )
+      ) : null}
+
+      {taskDataReady &&
+      view !== "agenda" &&
+      query.isSuccess &&
+      totalPages > 1 ? (
         <nav aria-label="任务分页" className="pagination task-pagination">
           <button
             className="button button-secondary"

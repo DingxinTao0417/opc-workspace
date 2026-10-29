@@ -47,6 +47,7 @@ import {
   useSubmitTaskOutput,
   useReviewTaskSubmission,
   useSearchQuery,
+  useTaskDueAgendaQuery,
   useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useReorderActiveTasksWithinPlan,
@@ -583,6 +584,72 @@ describe("task queries", () => {
     expect(result.current.data?.today).toHaveLength(1);
     expect(result.current.data?.thisWeek).toHaveLength(1);
     expect(result.current.data?.unscheduled).toHaveLength(1);
+  });
+
+  it("groups the due agenda by local day with overdue flags", async () => {
+    const day = (offset: number, hour: number) => {
+      const date = new Date();
+      date.setDate(date.getDate() + offset);
+      date.setHours(hour, 0, 0, 0);
+      return date;
+    };
+    const key = (offset: number) => {
+      const date = new Date();
+      date.setDate(date.getDate() + offset);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+        2,
+        "0",
+      )}-${String(date.getDate()).padStart(2, "0")}`;
+    };
+    getAllTasksMock.mockResolvedValue([
+      { ...task, id: "task-overdue", dueDate: day(-1, 18).toISOString() },
+      { ...task, id: "task-today", dueDate: day(0, 20).toISOString() },
+      { ...task, id: "task-later-a", dueDate: day(3, 9).toISOString() },
+      { ...task, id: "task-later-b", dueDate: day(3, 15).toISOString() },
+      { ...task, id: "task-undated", dueDate: null },
+    ]);
+    const { result } = renderHook(() => useTaskDueAgendaQuery({}), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(getAllTasksMock).toHaveBeenCalledWith(
+      {
+        status: "active",
+        dueFrom: "1970-01-01",
+        dueTo: "9999-12-31",
+        sort: "due_date",
+      },
+      expect.any(AbortSignal),
+    );
+    expect(result.current.data).toEqual([
+      {
+        dayKey: key(-1),
+        overdue: true,
+        tasks: [expect.objectContaining({ id: "task-overdue" })],
+      },
+      {
+        dayKey: key(0),
+        overdue: false,
+        tasks: [expect.objectContaining({ id: "task-today" })],
+      },
+      {
+        dayKey: key(3),
+        overdue: false,
+        tasks: [
+          expect.objectContaining({ id: "task-later-a" }),
+          expect.objectContaining({ id: "task-later-b" }),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps the due agenda idle while disabled", () => {
+    const { result } = renderHook(() => useTaskDueAgendaQuery({}, false), {
+      wrapper: createWrapper(),
+    });
+    expect(result.current.isPending).toBe(true);
+    expect(getAllTasksMock).not.toHaveBeenCalled();
   });
 
   it("rejects a task duplicated across Today groups", async () => {

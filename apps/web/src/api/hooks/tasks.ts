@@ -26,6 +26,7 @@ import {
 } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
+import { localDayKey, taskDueDayKey } from "../../lib/taskDue";
 import {
   invalidateFocusReadModels,
   invalidateTaskAggregates,
@@ -152,6 +153,64 @@ export function useTodayTaskGroupsQuery(dateKey: string) {
       }
       return { overdue, today, thisWeek, unscheduled };
     },
+    retry: 2,
+    retryDelay: 500,
+    staleTime: 10_000,
+  });
+}
+
+export interface TaskDueDayGroup {
+  dayKey: string;
+  overdue: boolean;
+  tasks: Task[];
+}
+
+export type TaskDueAgendaParams = Omit<
+  TaskListParams,
+  "page" | "pageSize" | "sort" | "dueState"
+>;
+
+// Open-ended due range keeps undated tasks out of the agenda without a
+// dedicated server filter; substr(due_date,1,10) comparisons drop NULL rows.
+const AGENDA_DUE_FROM = "1970-01-01";
+const AGENDA_DUE_TO = "9999-12-31";
+
+export function useTaskDueAgendaQuery(
+  params: TaskDueAgendaParams,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...taskQueryKey, "due-agenda", params],
+    queryFn: async ({ signal }): Promise<TaskDueDayGroup[]> => {
+      const tasks = await getAllTasks(
+        {
+          ...params,
+          status: params.status || "active",
+          dueFrom: params.dueFrom || AGENDA_DUE_FROM,
+          dueTo: params.dueTo || AGENDA_DUE_TO,
+          sort: "due_date",
+        },
+        signal,
+      );
+      const todayKey = localDayKey(Date.now());
+      const groups = new Map<string, Task[]>();
+      for (const task of tasks) {
+        const dayKey = taskDueDayKey(task);
+        if (!dayKey) continue;
+        const bucket = groups.get(dayKey);
+        if (bucket) bucket.push(task);
+        else groups.set(dayKey, [task]);
+      }
+      return [...groups.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([dayKey, dayTasks]) => ({
+          dayKey,
+          overdue: dayKey < todayKey,
+          tasks: dayTasks,
+        }));
+    },
+    enabled,
+    placeholderData: keepPreviousData,
     retry: 2,
     retryDelay: 500,
     staleTime: 10_000,

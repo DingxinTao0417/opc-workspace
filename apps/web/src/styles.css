@@ -10631,6 +10631,16 @@ button.ov-row:hover {
   text-overflow: ellipsis;
 }
 
+.task-board-card-meta.task-due-overdue,
+.task-due-day-label.task-due-overdue {
+  color: var(--danger-text);
+}
+
+.task-board-card-meta.task-due-soon,
+.task-due-day-label.task-due-soon {
+  color: var(--orange);
+}
+
 .task-board-card-footer {
   flex-wrap: wrap;
 }
