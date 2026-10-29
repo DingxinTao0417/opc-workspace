@@ -884,7 +884,7 @@ H5-E28 当时解决“启用很多能力后，每次模型请求都携带完整�
 
 智能体左栏“续办队列”现在同时展示最新计划和不属于最新计划的可处理 Agent Run。H5-E2 只补齐发现与精确进入执行详情的断点，不把列表变成后台调度器，也不在队列中自动取消、重试、恢复登记或接受产出。
 
-- API：`GET /api/v1/agent-runs` 新增严格可选筛选 `attention=1` 与 `plan_link=unplanned`。前者只保留 queued/running/failed/interrupted，或 `output_delivery_status=pending|retained` 的 Run；后者通过 Proposal 的实际 `result_id`、所属 generation/session 与该会话最新 `ai_work_plan_revisions` 中的 `proposal_id` 关联排除计划内 Run。只参考最新修订，旧版本不会永久隐藏已经离开计划的执行。
+- API：`GET /api/v1/agent-runs` 新增严格可选筛选 `attention=1` 与 `plan_link=unplanned`。前者只保留 queued/running/failed/interrupted，或 `output_delivery_status=pending|retained` 的 Run；后者通过 Proposal 的实际 `result_id`、所属 generation/session 与该会话最新 `ai_work_plan_revisions` 中的 `proposal_id` 关联排除计划内 Run。只参考最新修订，旧版本不会永久隐藏已经离开计划的执行。没有匹配的 Run 时 `data` 固定为空数组 `[]`（2026-10-29 修正：此前返回 `null`，前端按格式无效处理，续办队列在没有独立执行时显示“续办队列读取不完整：无法读取独立执行”）。
 - 去重与分页：去重在服务端计数和分页之前完成，`meta.total` 是两个筛选共同作用后的精确数量；既有 `active_total/pending_delivery_total/succeeded_total` 仍是无视筛选的全局轮询计数。非法筛选返回稳定 400，不降级成未过滤全集。
 - 最小披露：列表仍只返回 Run/Task/执行身份、生命周期、交付状态、错误码和时间等 metadata，不返回 `result_text`、输入快照、恢复 staging、计划 JSON、Proposal 预览、文件或历史授权。点击某项后才用 Task+Run 双身份打开既有“执行过程”抽屉。
 - UI：续办角标等于计划关注数加独立执行总数；独立执行明确区分排队、运行、失败、中断、结果待登记和结果已保留。首页最多展示 50 项，更多项进入既有右侧执行页；打开详情不切换或发送会话，也不受当前聊天流式状态误阻断。H5-G52 后，统一 Inbox 还投影 `agent_run` metadata；计划内 Run 由统一来源显示，独立执行区继续只展示计划外 Run，角标按来源去重。

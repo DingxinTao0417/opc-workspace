@@ -189,7 +189,8 @@ func (a *API) listAgentRuns(c *gin.Context) {
 		}
 		return query
 	}
-	var items []agentRunSummaryResponse
+	// Scan leaves the slice nil when nothing matches; the clients need [].
+	items := make([]agentRunSummaryResponse, 0)
 	var total int64
 	var counts struct {
 		ActiveTotal          int64

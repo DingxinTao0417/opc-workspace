@@ -303,6 +303,30 @@ func TestListAgentRunsReturnsMetadataWithoutResultOrRecoveryPayload(t *testing.T
 	}
 }
 
+// A workspace with nothing to show still answers with a list: the clients
+// refuse a response whose data is not an array.
+func TestListAgentRunsReturnsAnEmptyArrayWhenNothingMatches(t *testing.T) {
+	fixture := newAIAgentRunFixture(t)
+	for _, path := range []string{
+		"/api/v1/agent-runs",
+		"/api/v1/agent-runs?page=1&page_size=50&attention=1&plan_link=unplanned",
+	} {
+		response := performRequest(fixture.Router, http.MethodGet, path, nil, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", path, response.Code, response.Body.String())
+		}
+		var envelope struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if string(envelope.Data) != "[]" {
+			t.Fatalf("%s data = %s, want []", path, envelope.Data)
+		}
+	}
+}
+
 func TestListAgentRunsCountsAndDeliveryFilterDiscoverOldPendingBeyondFirstPage(t *testing.T) {
 	fixture := newAIAgentRunFixture(t)
 	pendingRun := seedRunningAgentRun(t, fixture)
