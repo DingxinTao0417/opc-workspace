@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock3, Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { matchPath, useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../api/client";
@@ -21,7 +21,6 @@ import { ProjectSelect } from "./ProjectSelect";
 import { TaskAgentRunsSection } from "./TaskAgentRunsSection";
 import { TaskAssignmentsSection } from "./TaskAssignmentsSection";
 import { TaskEventsSection } from "./TaskEventsSection";
-import { TaskFocusHistorySection } from "./TaskFocusHistorySection";
 import { TaskLifecycleSection } from "./TaskLifecycleSection";
 import { TaskOutputsSection } from "./TaskOutputsSection";
 import { TaskSelect } from "./TaskSelect";
@@ -35,13 +34,6 @@ const priorities: { value: TaskPriority; label: string }[] = [
   { value: "P1", label: "高" },
   { value: "P2", label: "中" },
   { value: "P3", label: "低" },
-];
-
-const taskKinds: { value: TaskKind; label: string }[] = [
-  { value: "work", label: "工作" },
-  { value: "review", label: "复核" },
-  { value: "followup", label: "跟进" },
-  { value: "reminder", label: "提醒" },
 ];
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -65,17 +57,6 @@ function toRfc3339(value: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
-function formatUpdatedAt(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "未知";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function mutationErrorMessage(error: unknown): string | null {
@@ -149,7 +130,16 @@ export function TaskDetailModal() {
     error: boolean;
     total: number | null;
   }>({ loading: true, error: false, total: null });
+  const [historyOpen, setHistoryOpen] = useState(false);
   const task = query.data;
+  // Assignment, review and output records matter only to a reviewed Task. A
+  // Task that never asked for review has no submission history to lock its
+  // review policy.
+  const reviewed = task?.reviewPolicy === "manual";
+  const outputsVisible = reviewed || Boolean(task?.currentSubmissionId);
+  const historyState = outputsVisible
+    ? submissionHistoryState
+    : { loading: false, error: false, total: 0 };
   const taskWriteBusy = updateMutation.isPending || deleteMutation.isPending;
   const busy = taskWriteBusy || assignmentBusy || workflowBusy || outputBusy;
   const skipNextHydrate = useRef(false);
@@ -512,11 +502,6 @@ export function TaskDetailModal() {
             <span className={`task-status-pill task-status-${task.status}`}>
               {statusLabels[task.status]}
             </span>
-            <span>
-              <Clock3 size={12} />
-              已记录 {task.actualMinutes} 分钟
-            </span>
-            <span>更新于 {formatUpdatedAt(task.updatedAt)}</span>
             {task.subtaskTotal > 0 ? (
               <span>
                 子任务完成 {task.subtaskCompleted}/
@@ -547,47 +532,51 @@ export function TaskDetailModal() {
             task={task}
           />
 
-          <TaskAssignmentsSection
-            disabled={
-              taskWriteBusy ||
-              workflowBusy ||
-              outputBusy ||
-              confirmingDelete ||
-              versionConflict
-            }
-            onBusyChange={setAssignmentBusy}
-            onTaskUpdated={(updatedTask) => {
-              setDraftVersion((current) =>
-                Math.max(current, updatedTask.version),
-              );
-            }}
-            task={task}
-          />
+          {reviewed ? (
+            <TaskAssignmentsSection
+              disabled={
+                taskWriteBusy ||
+                workflowBusy ||
+                outputBusy ||
+                confirmingDelete ||
+                versionConflict
+              }
+              onBusyChange={setAssignmentBusy}
+              onTaskUpdated={(updatedTask) => {
+                setDraftVersion((current) =>
+                  Math.max(current, updatedTask.version),
+                );
+              }}
+              task={task}
+            />
+          ) : null}
 
           <TaskAgentRunsSection
             task={task}
             returnSession={returnSession}
             disabled={busy || taskDraftDirty || versionConflict}
           />
-          <TaskOutputsSection
-            disabled={
-              taskWriteBusy ||
-              assignmentBusy ||
-              workflowBusy ||
-              confirmingDelete ||
-              versionConflict
-            }
-            hasUnsavedFacts={taskDraftDirty}
-            onBusyChange={setOutputBusy}
-            onHistoryStateChange={setSubmissionHistoryState}
-            onRefreshTask={refreshTask}
-            onTaskUpdated={(updatedTask) => {
-              setDraftVersion((current) =>
-                Math.max(current, updatedTask.version),
-              );
-            }}
-            task={task}
-          />
+          {outputsVisible ? (
+            <TaskOutputsSection
+              disabled={
+                taskWriteBusy ||
+                assignmentBusy ||
+                workflowBusy ||
+                confirmingDelete ||
+                versionConflict
+              }
+              hasUnsavedFacts={taskDraftDirty}
+              onBusyChange={setOutputBusy}
+              onHistoryStateChange={setSubmissionHistoryState}
+              onRefreshTask={refreshTask}
+              onTaskUpdated={(updatedTask) => {
+                setDraftVersion((current) =>
+                  Math.max(current, updatedTask.version),
+                );
+              }}
+              task={task}
+            />
+          ) : null}
 
           <label className="form-field">
             <span>任务名称</span>
@@ -599,72 +588,7 @@ export function TaskDetailModal() {
             />
           </label>
 
-          <label className="form-field">
-            <span>完成标准</span>
-            <textarea
-              maxLength={10_000}
-              onChange={(event) => setCompletionCriteria(event.target.value)}
-              placeholder="写清楚完成后应达到的可验证结果…"
-              rows={3}
-              value={completionCriteria}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>验收策略</span>
-            <select
-              aria-label="验收策略"
-              disabled={
-                busy ||
-                task.status !== "todo" ||
-                task.currentSubmissionId !== null ||
-                submissionHistoryState.loading ||
-                submissionHistoryState.error ||
-                submissionHistoryState.total !== 0
-              }
-              onChange={(event) =>
-                setReviewPolicy(event.target.value as TaskReviewPolicy)
-              }
-              value={reviewPolicy}
-            >
-              <option value="none">无需验收 · 可直接完成</option>
-              <option value="manual">人工验收 · 提交产出后完成</option>
-            </select>
-            <small>
-              {submissionHistoryState.loading
-                ? "正在确认是否已有提交历史…"
-                : submissionHistoryState.error
-                  ? "提交历史暂不可用，验收策略已锁定。"
-                  : task.status !== "todo" ||
-                      task.currentSubmissionId !== null ||
-                      submissionHistoryState.total !== 0
-                    ? "只有待办且从未提交产出的任务可以修改验收策略。"
-                    : reviewPolicy === "manual"
-                      ? "需先设置负责人和所有者审核人，再提交产出。"
-                      : "适合无需单独检查产出的快速任务。"}
-            </small>
-          </label>
-
-          <label className="form-field">
-            <span>描述</span>
-            <textarea
-              maxLength={10_000}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="补充任务背景、要求或完成条件…"
-              rows={5}
-              value={description}
-            />
-          </label>
-
           <div className="form-grid">
-            <label className="form-field">
-              <span>计划日期</span>
-              <input
-                onChange={(event) => setPlannedDate(event.target.value)}
-                type="date"
-                value={plannedDate}
-              />
-            </label>
             <label className="form-field">
               <span>截止时间</span>
               <input
@@ -673,9 +597,6 @@ export function TaskDetailModal() {
                 value={dueDate}
               />
             </label>
-          </div>
-
-          <div className="form-grid">
             <div className="form-field">
               <span>项目</span>
               <ProjectSelect
@@ -689,65 +610,9 @@ export function TaskDetailModal() {
                 variant="form"
               />
             </div>
-            <div className="form-field">
-              <span>父任务</span>
-              <TaskSelect
-                ariaLabel="父任务"
-                emptyLabel="无父任务"
-                excludeIds={[task.id]}
-                onChange={setParentTaskId}
-                selectedTitle={
-                  parentTaskId === task.parentTaskId
-                    ? task.parentTaskTitle
-                    : undefined
-                }
-                value={parentTaskId}
-                variant="form"
-              />
-            </div>
           </div>
 
-          <div className="form-grid">
-            <label className="form-field">
-              <span>任务类型</span>
-              <select
-                onChange={(event) => setKind(event.target.value as TaskKind)}
-                value={kind}
-              >
-                {taskKinds.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>预计时长</span>
-              <div className="field-with-suffix">
-                <input
-                  aria-label="预计时长"
-                  min="0"
-                  onChange={(event) => setEstimatedMinutes(event.target.value)}
-                  step="1"
-                  type="number"
-                  value={estimatedMinutes}
-                />
-                <span>分钟</span>
-              </div>
-            </label>
-          </div>
-
-          <div className="form-field">
-            <span>标签</span>
-            <TaskTagPicker
-              disabled={busy}
-              enabled={Boolean(taskId)}
-              onChange={setTagIds}
-              selectedIds={tagIds}
-            />
-          </div>
-
-          <fieldset className="form-field form-field-last">
+          <fieldset className="form-field">
             <legend>优先级</legend>
             <div className="priority-segment">
               {priorities.map((item) => (
@@ -770,8 +635,110 @@ export function TaskDetailModal() {
             </div>
           </fieldset>
 
-          <TaskFocusHistorySection taskId={task.id} />
-          <TaskEventsSection taskId={task.id} />
+          <label className="form-field">
+            <span>描述</span>
+            <textarea
+              maxLength={10_000}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="补充任务背景、要求或完成条件…"
+              rows={4}
+              value={description}
+            />
+          </label>
+
+          <details className="form-more">
+            <summary>更多选项</summary>
+            <div className="form-grid">
+              <label className="form-field">
+                <span>计划日期</span>
+                <input
+                  onChange={(event) => setPlannedDate(event.target.value)}
+                  type="date"
+                  value={plannedDate}
+                />
+              </label>
+              <div className="form-field">
+                <span>父任务</span>
+                <TaskSelect
+                  ariaLabel="父任务"
+                  emptyLabel="无父任务"
+                  excludeIds={[task.id]}
+                  onChange={setParentTaskId}
+                  selectedTitle={
+                    parentTaskId === task.parentTaskId
+                      ? task.parentTaskTitle
+                      : undefined
+                  }
+                  value={parentTaskId}
+                  variant="form"
+                />
+              </div>
+            </div>
+
+            <div className="form-field">
+              <span>标签</span>
+              <TaskTagPicker
+                disabled={busy}
+                enabled={Boolean(taskId)}
+                onChange={setTagIds}
+                selectedIds={tagIds}
+              />
+            </div>
+
+            <label className="form-field">
+              <span>完成标准</span>
+              <textarea
+                maxLength={10_000}
+                onChange={(event) => setCompletionCriteria(event.target.value)}
+                placeholder="写清楚完成后应达到的可验证结果…"
+                rows={3}
+                value={completionCriteria}
+              />
+            </label>
+
+            <label className="form-field form-field-last">
+              <span>验收策略</span>
+              <select
+                aria-label="验收策略"
+                disabled={
+                  busy ||
+                  task.status !== "todo" ||
+                  task.currentSubmissionId !== null ||
+                  historyState.loading ||
+                  historyState.error ||
+                  historyState.total !== 0
+                }
+                onChange={(event) =>
+                  setReviewPolicy(event.target.value as TaskReviewPolicy)
+                }
+                value={reviewPolicy}
+              >
+                <option value="none">无需验收 · 可直接完成</option>
+                <option value="manual">人工验收 · 提交产出后完成</option>
+              </select>
+              <small>
+                {historyState.loading
+                  ? "正在确认是否已有提交历史…"
+                  : historyState.error
+                    ? "提交历史暂不可用，验收策略已锁定。"
+                    : task.status !== "todo" ||
+                        task.currentSubmissionId !== null ||
+                        historyState.total !== 0
+                      ? "只有待办且从未提交产出的任务可以修改验收策略。"
+                      : reviewPolicy === "manual"
+                        ? "交给本地 Agent 执行、需要你检查产出时选择；保存后会出现负责人、审核人和产出区。"
+                        : "适合无需单独检查产出的任务。"}
+              </small>
+            </label>
+          </details>
+
+          <details
+            className="form-more"
+            onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+          >
+            <summary>历史</summary>
+            {historyOpen ? <TaskEventsSection taskId={task.id} /> : null}
+          </details>
 
           {errorMessage ? (
             <div className="form-error" role="alert">

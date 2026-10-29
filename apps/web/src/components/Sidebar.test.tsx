@@ -147,14 +147,11 @@ describe("Sidebar navigation", () => {
     expect(screen.queryByText("后续")).toBeNull();
   });
 
-  it("omits the sidebar focus timer while retaining focus navigation", () => {
+  it("has neither a focus timer nor focus navigation", () => {
     const { container } = renderSidebar();
 
     expect(container.querySelector(".focus-mini-card")).toBeNull();
-    expect(screen.getByRole("link", { name: "专注" })).toHaveAttribute(
-      "href",
-      "/focus",
-    );
+    expect(screen.queryByRole("link", { name: "专注" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "打开设置" }),
     ).toBeInTheDocument();

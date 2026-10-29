@@ -7708,6 +7708,30 @@ button.ov-row:hover {
   font-weight: 550;
 }
 
+/* Optional fields and secondary records stay folded until asked for. */
+.form-more {
+  margin: 0 0 13px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.form-more > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 550;
+  list-style-position: inside;
+}
+
+.form-more > summary:hover {
+  color: var(--text);
+}
+
+.form-more[open] > summary {
+  margin-bottom: 12px;
+}
+
 .form-field input,
 .form-field select,
 .form-field textarea {

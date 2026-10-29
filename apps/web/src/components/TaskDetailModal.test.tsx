@@ -47,6 +47,32 @@ vi.mock("../api/client", async () => {
   return { ...actual, ...apiMocks };
 });
 
+// The Agent section hides itself until a local Agent is usable; its own tests
+// cover that. Here it only stands for the contract the modal hands it.
+vi.mock("./TaskAgentRunsSection", () => ({
+  TaskAgentRunsSection: ({
+    task,
+    returnSession,
+    disabled,
+  }: {
+    task: { id: string };
+    returnSession?: string | null;
+    disabled: boolean;
+  }) => (
+    <button
+      disabled={disabled}
+      onClick={() =>
+        useUiStore
+          .getState()
+          .openAgentRunDrawer(task.id, null, returnSession ?? undefined)
+      }
+      type="button"
+    >
+      查看执行过程
+    </button>
+  ),
+}));
+
 vi.mock("./TaskSelect", () => ({
   TaskSelect: ({
     ariaLabel,
@@ -319,9 +345,6 @@ describe("TaskDetailModal", () => {
     fireEvent.change(screen.getByLabelText("计划日期"), {
       target: { value: "2026-08-30" },
     });
-    fireEvent.change(screen.getByLabelText("预计时长"), {
-      target: { value: "90" },
-    });
     fireEvent.change(screen.getByLabelText("父任务"), {
       target: { value: "task-parent" },
     });
@@ -345,11 +368,34 @@ describe("TaskDetailModal", () => {
           projectId: "project-1",
           reviewPolicy: "manual",
           plannedDate: "2026-08-30",
-          estimatedMinutes: 90,
+          // No longer editable here; the stored estimate is kept as it was.
+          estimatedMinutes: 45,
         }),
       ),
     );
     await waitFor(() => expect(useUiStore.getState().taskDetailId).toBeNull());
+  });
+
+  it("shows a plain Task without review, assignment or focus records", async () => {
+    renderModal();
+
+    await screen.findByLabelText("任务名称");
+    expect(screen.queryByRole("heading", { name: "责任分派" })).toBeNull();
+    expect(screen.queryByText("产出与验收")).toBeNull();
+    expect(screen.queryByText("专注记录")).toBeNull();
+    expect(screen.queryByText(/已记录 \d+ 分钟/)).toBeNull();
+    expect(screen.queryByLabelText("任务类型")).toBeNull();
+    expect(screen.queryByLabelText("预计时长")).toBeNull();
+    expect(apiMocks.getTaskAssignments).not.toHaveBeenCalled();
+    expect(apiMocks.getTaskSubmissions).not.toHaveBeenCalled();
+    // Optional fields and the timeline are folded, and the timeline is not
+    // read until it is opened.
+    const more = screen.getByText("更多选项").closest("details");
+    expect(more?.open).toBe(false);
+    expect(more).toContainElement(screen.getByLabelText("验收策略"));
+    expect(screen.getByLabelText("验收策略")).toBeEnabled();
+    expect(screen.getByText("历史").closest("details")?.open).toBe(false);
+    expect(apiMocks.getTaskEvents).not.toHaveBeenCalled();
   });
 
   it("keeps an archived project fallback visible and unchanged when options fail", async () => {
@@ -532,12 +578,16 @@ describe("TaskDetailModal", () => {
   });
 
   it("keeps an unsaved task draft while an assignment write updates the task version", async () => {
+    // Assignment appears for a reviewed Task only.
+    const reviewedTask: Task = { ...task, reviewPolicy: "manual" };
     const updatedTask = {
-      ...task,
+      ...reviewedTask,
       version: task.version + 1,
       updatedAt: "2026-08-27T09:30:00Z",
     };
-    apiMocks.getTask.mockResolvedValueOnce(task).mockResolvedValue(updatedTask);
+    apiMocks.getTask
+      .mockResolvedValueOnce(reviewedTask)
+      .mockResolvedValue(updatedTask);
     apiMocks.getTaskAssignments
       .mockResolvedValueOnce({
         active: { assignee: null, reviewer: null },

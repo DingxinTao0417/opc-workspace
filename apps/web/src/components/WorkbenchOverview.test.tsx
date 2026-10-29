@@ -116,63 +116,15 @@ beforeEach(() => {
 });
 
 describe("WorkbenchOverview focus", () => {
-  it.each([
-    ["active", "暂停计时", "进行中", "pause"],
-    ["paused", "继续专注", "已暂停", "resume"],
-  ] as const)(
-    "uses the %s session snapshot for focus commands",
-    (status, action, label, mutation) => {
-      mocks.focus.mockReturnValue({
-        data: {
-          session: {
-            id: "focus-1",
-            version: 7,
-            taskTitle: "当前专注任务",
-            status,
-            plannedSeconds: 3000,
-          },
-        },
-        isError: false,
-        isPending: false,
-      });
-      render(
-        <MemoryRouter>
-          <WorkbenchOverview />
-        </MemoryRouter>,
-      );
-      expect(screen.getByText("当前专注任务")).toBeInTheDocument();
-      expect(screen.getByText(label)).toBeInTheDocument();
-      expect(screen.getByText("/ 3000s")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: action }));
-      expect(mocks[mutation]).toHaveBeenCalledWith({
-        id: "focus-1",
-        expectedVersion: 7,
-      });
-    },
-  );
-
-  it("shows focus read and command failures instead of pretending success", () => {
-    mocks.focus.mockReturnValue({
-      data: undefined,
-      isError: true,
-      isPending: false,
-      refetch: mocks.focusRefetch,
-    });
-    const view = render(
+  it("has no focus card and reads no focus session", () => {
+    const { container } = render(
       <MemoryRouter>
         <WorkbenchOverview />
       </MemoryRouter>,
     );
-    expect(screen.getByText("读取失败")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "重试读取" }));
-    expect(mocks.focusRefetch).toHaveBeenCalledTimes(1);
-    mocks.actionError = true;
-    view.rerender(
-      <MemoryRouter>
-        <WorkbenchOverview />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent("专注操作失败");
+    expect(container.querySelector(".focus-overview")).toBeNull();
+    expect(screen.queryByText("专注模式")).toBeNull();
+    expect(mocks.focus).not.toHaveBeenCalled();
   });
 });
 

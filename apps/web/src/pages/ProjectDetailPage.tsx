@@ -1,9 +1,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
-  CalendarDays,
   Edit3,
-  Info,
   List,
   ListTree,
   Plus,
@@ -29,7 +27,6 @@ import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { PageHeader } from "../components/PageHeader";
 import { ProjectFormModal } from "../components/ProjectFormModal";
 import { ProjectEventsSection } from "../components/ProjectEventsSection";
-import { ProjectFocusSection } from "../components/ProjectFocusSection";
 import { ProjectArtifactsSection } from "../components/ProjectArtifactsSection";
 import { ProjectAttachmentsSection } from "../components/ProjectAttachmentsSection";
 import { ProjectNotesSection } from "../components/ProjectNotesSection";
@@ -44,7 +41,6 @@ import { useUiStore } from "../store/ui";
 import type {
   ProjectStatus,
   ProjectTransitionAction,
-  TaskKind,
   TaskPriority,
   TaskStatus,
 } from "../types/models";
@@ -73,13 +69,6 @@ function formatAmount(value: number | null): string {
     style: "currency",
     currency: "CNY",
   }).format(value / 100);
-}
-
-function formatMinutes(value: number): string {
-  if (value <= 0) return "0 分钟";
-  const hours = Math.floor(value / 60);
-  const minutes = value % 60;
-  return hours ? `${hours} 小时 ${minutes} 分钟` : `${minutes} 分钟`;
 }
 
 function errorMessage(error: unknown): string | null {
@@ -123,13 +112,14 @@ export function ProjectDetailPage() {
   const [confirmAction, setConfirmAction] =
     useState<ProjectTransitionAction | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [taskView, setTaskView] = useState<"tree" | "flat">("tree");
   const [taskPage, setTaskPage] = useState(1);
   const [taskSearchInput, setTaskSearchInput] = useState("");
   const [taskQueryText, setTaskQueryText] = useState("");
   const [taskStatus, setTaskStatus] = useState<TaskStatus | "">("");
   const [taskPriority, setTaskPriority] = useState<TaskPriority | "">("");
-  const [taskKind, setTaskKind] = useState<TaskKind | "">("");
   const [taskTagId, setTaskTagId] = useState("");
   const [taskPlannedState, setTaskPlannedState] = useState<
     "scheduled" | "unscheduled" | ""
@@ -138,7 +128,6 @@ export function ProjectDetailPage() {
     taskQueryText ||
     taskStatus ||
     taskPriority ||
-    taskKind ||
     taskTagId ||
     taskPlannedState,
   );
@@ -152,7 +141,6 @@ export function ProjectDetailPage() {
     sort: hierarchicalTasks ? "manual_order" : undefined,
     status: taskStatus || undefined,
     priority: taskPriority || undefined,
-    kind: taskKind || undefined,
     tagIds: taskTagId ? [taskTagId] : undefined,
     plannedState: taskPlannedState || undefined,
   });
@@ -359,31 +347,22 @@ export function ProjectDetailPage() {
           <small>{project.taskSummary.remaining} 项未完成</small>
         </article>
         <article>
-          <span>已记录工时</span>
-          <strong>{formatMinutes(project.taskSummary.actualMinutes)}</strong>
-          <small>来自关联任务的当前累计</small>
+          <span>截止</span>
+          <strong>{project.dueDate ?? "未定"}</strong>
         </article>
-        <article>
-          <span>周期</span>
-          <strong>
-            {project.startDate ?? "未定"} → {project.dueDate ?? "未定"}
-          </strong>
-          <small>
-            <CalendarDays size={12} /> 纯日期按本地时区解释
-          </small>
-        </article>
-        <article>
-          <span>合同金额</span>
-          <strong>{formatAmount(project.amountMinor)}</strong>
-          <small>{project.clientName ?? "尚未关联客户"}</small>
-        </article>
+        {project.amountMinor !== null || project.clientName ? (
+          <article>
+            <span>合同金额</span>
+            <strong>{formatAmount(project.amountMinor)}</strong>
+            <small>{project.clientName ?? "尚未关联客户"}</small>
+          </article>
+        ) : null}
       </div>
 
       <section className="project-detail-section">
         <div className="project-detail-heading">
           <div>
             <h2>项目任务</h2>
-            <p>进度只从这里的真实任务状态派生，不单独保存百分比。</p>
           </div>
           <div className="project-task-heading-actions">
             <span>
@@ -496,23 +475,6 @@ export function ProjectDetailPage() {
             </select>
           </label>
           <label className="toolbar-select">
-            <span className="sr-only">项目任务类型</span>
-            <select
-              aria-label="项目任务类型"
-              onChange={(event) => {
-                setTaskKind(event.target.value as TaskKind | "");
-                setTaskPage(1);
-              }}
-              value={taskKind}
-            >
-              <option value="">全部类型</option>
-              <option value="work">工作</option>
-              <option value="review">审核</option>
-              <option value="followup">跟进</option>
-              <option value="reminder">提醒</option>
-            </select>
-          </label>
-          <label className="toolbar-select">
             <span className="sr-only">项目任务排期</span>
             <select
               aria-label="项目任务排期"
@@ -549,7 +511,6 @@ export function ProjectDetailPage() {
                     setTaskQueryText("");
                     setTaskStatus("");
                     setTaskPriority("");
-                    setTaskKind("");
                     setTaskTagId("");
                     setTaskPlannedState("");
                     setTaskPage(1);
@@ -616,15 +577,10 @@ export function ProjectDetailPage() {
         ) : null}
       </section>
 
-      <ProjectArtifactsSection projectId={project.id} />
-
-      <ProjectFocusSection projectId={project.id} />
-
       <section className="project-detail-section project-actions-section">
         <div className="project-detail-heading">
           <div>
             <h2>项目状态</h2>
-            <p>状态操作不会自动完成、恢复或删除关联任务。</p>
           </div>
           <span className="status-badge">{statusLabels[project.status]}</span>
         </div>
@@ -699,13 +655,30 @@ export function ProjectDetailPage() {
         selectedId={selectedNote?.id}
       />
 
-      <ProjectAttachmentsSection
-        archived={project.status === "archived"}
-        projectId={project.id}
-        projectVersion={project.version}
-      />
+      <details
+        className="form-more project-detail-more"
+        onToggle={(event) => setFilesOpen(event.currentTarget.open)}
+      >
+        <summary>文件：项目产出与附件</summary>
+        {filesOpen ? (
+          <>
+            <ProjectArtifactsSection projectId={project.id} />
+            <ProjectAttachmentsSection
+              archived={project.status === "archived"}
+              projectId={project.id}
+              projectVersion={project.version}
+            />
+          </>
+        ) : null}
+      </details>
 
-      <ProjectEventsSection projectId={project.id} />
+      <details
+        className="form-more project-detail-more"
+        onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+      >
+        <summary>历史</summary>
+        {historyOpen ? <ProjectEventsSection projectId={project.id} /> : null}
+      </details>
 
       {project.status === "archived" ? (
         <section className="project-detail-section project-danger-zone">
@@ -753,12 +726,6 @@ export function ProjectDetailPage() {
           )}
         </section>
       ) : null}
-
-      <section aria-label="项目财务范围" className="project-future-note">
-        <Info size={15} />
-        当前项目关联 {project.invoiceCount} 张发票；发票明细与本地账本请到对应
-        模块查看，项目内财务汇总尚未接入。
-      </section>
 
       <ProjectFormModal
         onClose={() => setEditing(false)}

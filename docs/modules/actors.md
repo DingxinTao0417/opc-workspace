@@ -1,5 +1,9 @@
 # Actor 与本地责任分派模块
 
+## 界面精简（2026-10-29）
+
+设置导航与命令面板不再提供「人员与责任」入口，Actor API 与已有 person 不变；任务详情的「责任分派」只在人工验收任务上出现（见[任务模块](tasks.md)）。
+
 H2-W9（2026-09-21）：AI 独立轨道现支持按 `task_ids` 精确批量读取 1–20 个已有 Task 的活动责任（单任务历史读取不变），并在一张 `task.batch_update` 卡中统一设置或结束负责人/审核人。每项冻结 Task 版本与 Actor 安全身份，确认重验资格、责任事实与预览，在原生 Assignment 事务中整批成功或回滚。原因必填，审核人仍仅 owner；person 不收到消息，agent 分派不启动 Run。无 schema/API 迁移，见 [AI 责任批量命令](ai-assistant.md#已有任务成组责任变更h2-w92026-09-21)。
 
 > 实现基线：app v0.1.1 / API v1 / SQLite schema 78。Actor/D2 分别由 schema v7/v9 引入；v20 Client–person 关联、v35 回访停用保护继续有效。schema 071 为 agent 增加可空 `agent_adapter_id`，schema 074 在 Agent Run 中冻结 Actor/Assignment/Adapter 等执行身份，schema 075 增加 Run 交付状态，schema 076 增加 AI 会话计划；后续 schema 077/078 不改 Actor 表。

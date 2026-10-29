@@ -510,39 +510,30 @@ describe("ProjectDetailPage", () => {
     });
   });
 
-  it("integrates project-scoped Focus after tasks and keeps it visible when archived", () => {
+  it("keeps the page to tasks, status and notes, with files and history folded", () => {
     project.status = "archived";
     project.availableActions = ["restore"];
-    renderPage();
-
-    const taskHeading = screen.getByRole("heading", { name: "项目任务" });
-    const focusHeading = screen.getByRole("heading", { name: "项目专注" });
-    const notesHeading = screen.getByRole("heading", { name: "项目笔记" });
-    expect(
-      taskHeading.compareDocumentPosition(focusHeading) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      focusHeading.compareDocumentPosition(notesHeading) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(focusReportInput).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: project.id }),
-    );
-    expect(focusHistoryInput).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: project.id, status: "terminal" }),
-    );
-  });
-
-  it("states the current Project financial scope without hiding delivered modules", () => {
     project.invoiceCount = 2;
     renderPage();
 
+    const taskHeading = screen.getByRole("heading", { name: "项目任务" });
+    const notesHeading = screen.getByRole("heading", { name: "项目笔记" });
     expect(
-      screen.getByRole("region", { name: "项目财务范围" }),
-    ).toHaveTextContent(
-      /当前项目关联 2 张发票；发票明细与本地账本请到对应\s*模块查看，项目内财务汇总尚未接入/,
-    );
+      taskHeading.compareDocumentPosition(notesHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Focus is not part of a project any more, and nothing is read for it.
+    expect(screen.queryByRole("heading", { name: "项目专注" })).toBeNull();
+    expect(focusReportInput).not.toHaveBeenCalled();
+    expect(focusHistoryInput).not.toHaveBeenCalled();
+    expect(screen.queryByText("已记录工时")).toBeNull();
+    // No placeholder about modules that are not part of a project.
+    expect(screen.queryByRole("region", { name: "项目财务范围" })).toBeNull();
+    // Files and history stay folded until asked for.
+    expect(screen.getByText("文件：项目产出与附件")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "项目附件" })).toBeNull();
+    fireEvent.click(screen.getByText("文件：项目产出与附件"));
+    expect(screen.getByText("历史")).toBeTruthy();
   });
 
   it("explains which linked business facts block permanent deletion", () => {
@@ -644,9 +635,7 @@ describe("ProjectDetailPage", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "项目任务优先级" }), {
       target: { value: "P1" },
     });
-    fireEvent.change(screen.getByRole("combobox", { name: "项目任务类型" }), {
-      target: { value: "work" },
-    });
+    expect(screen.queryByRole("combobox", { name: "项目任务类型" })).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "项目任务排期" }), {
       target: { value: "unscheduled" },
     });
@@ -682,7 +671,6 @@ describe("ProjectDetailPage", () => {
         rootOnly: false,
         status: "done",
         priority: "P1",
-        kind: "work",
         plannedState: "unscheduled",
         tagIds: ["tag-1"],
       }),

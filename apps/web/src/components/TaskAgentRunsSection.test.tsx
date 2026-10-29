@@ -1056,6 +1056,21 @@ describe("TaskAgentRunsSection", () => {
     });
   });
 
+  it("stays out of a Task that has no runs while no local Agent is usable", async () => {
+    vi.mocked(getAgentAdapters).mockResolvedValue([]);
+    vi.mocked(getTaskAgentRuns).mockResolvedValue([]);
+    const { container } = renderSection();
+    await waitFor(() => expect(getTaskAgentRuns).toHaveBeenCalled());
+    await waitFor(() => expect(getAgentAdapters).toHaveBeenCalled());
+    // Let both answers land before checking that nothing appeared.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.querySelector(".task-agent-runs")).toBeNull();
+    expect(screen.queryByText(/尚未登记内置 Agent/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "启动执行" })).toBeNull();
+  });
+
   it("blocks an unregistered environment without assigning or starting", async () => {
     vi.mocked(getAgentAdapters).mockResolvedValue([]);
     renderSection();

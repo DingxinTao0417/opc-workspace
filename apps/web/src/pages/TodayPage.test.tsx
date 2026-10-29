@@ -770,7 +770,7 @@ describe("TodayPage Inbox overview", () => {
     ).toBeVisible();
   });
 
-  it("runs versioned lifecycle shortcuts and starts a bound focus session", () => {
+  it("runs versioned lifecycle shortcuts without a focus shortcut", () => {
     const makeTask = (
       id: string,
       title: string,
@@ -857,13 +857,10 @@ describe("TodayPage Inbox overview", () => {
       screen.queryByRole("button", { name: "完成任务：等待验收的工作" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "开始专注：准备交付" }));
-    expect(mocks.createFocus).toHaveBeenCalledWith({
-      taskId: "todo",
-      plannedSeconds: 1_500,
-    });
-    // Session binding belongs to the shared mutation, not a late page callback.
-    expect(mocks.beginFocus).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "开始专注：准备交付" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.createFocus).not.toHaveBeenCalled();
   });
 
   it("switches the queried date and can return to today", () => {

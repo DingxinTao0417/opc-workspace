@@ -123,7 +123,8 @@ describe("RightFloatingCard", () => {
     expect(
       screen.getByText("87 运行 · 3 待登记 · 123 完成"),
     ).toBeInTheDocument();
-    expect(await screen.findByText(/专注 · 索引 1/)).toBeInTheDocument();
+    expect(await screen.findByText("索引 1")).toBeInTheDocument();
+    expect(screen.queryByText("专注会话")).toBeNull();
     expect(await screen.findByText("9 来源")).toBeInTheDocument();
   });
 

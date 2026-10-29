@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCreateTask } from "../api/hooks";
 import { ApiError } from "../api/client";
 import { useUiStore } from "../store/ui";
-import type { TaskKind, TaskPriority, TaskReviewPolicy } from "../types/models";
+import type { TaskPriority, TaskReviewPolicy } from "../types/models";
 import { Modal } from "./Modal";
 import { ProjectSelect } from "./ProjectSelect";
 import { TaskSelect } from "./TaskSelect";
@@ -13,13 +13,6 @@ const priorities: { value: TaskPriority; label: string }[] = [
   { value: "P1", label: "高" },
   { value: "P2", label: "中" },
   { value: "P3", label: "低" },
-];
-
-const taskKinds: { value: TaskKind; label: string }[] = [
-  { value: "work", label: "工作" },
-  { value: "review", label: "复核" },
-  { value: "followup", label: "跟进" },
-  { value: "reminder", label: "提醒" },
 ];
 
 function toRfc3339(value: string): string | null {
@@ -35,10 +28,8 @@ export function NewTaskModal() {
   const mutation = useCreateTask();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [kind, setKind] = useState<TaskKind>("work");
   const [plannedDate, setPlannedDate] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [estimatedMinutes, setEstimatedMinutes] = useState("50");
   const [priority, setPriority] = useState<TaskPriority>("P2");
   const [projectId, setProjectId] = useState("");
   const [parentTaskId, setParentTaskId] = useState("");
@@ -77,15 +68,6 @@ export function NewTaskModal() {
       setValidationError("任务名称需要 2–200 个字符。");
       return;
     }
-    const parsedMinutes =
-      estimatedMinutes.trim() === "" ? null : Number(estimatedMinutes);
-    if (
-      parsedMinutes !== null &&
-      (!Number.isInteger(parsedMinutes) || parsedMinutes < 0)
-    ) {
-      setValidationError("预计时长必须是大于或等于 0 的整数。");
-      return;
-    }
     const normalizedDueDate = toRfc3339(dueDate);
     if (dueDate && !normalizedDueDate) {
       setValidationError("截止时间格式无效，请重新选择。");
@@ -96,7 +78,9 @@ export function NewTaskModal() {
       {
         title: cleanTitle,
         description: description.trim(),
-        kind,
+        // Task kind and estimate are no longer asked for; a new Task is plain
+        // work without an estimate.
+        kind: "work",
         priority,
         projectId: projectId || null,
         parentTaskId: parentTaskId || null,
@@ -105,16 +89,14 @@ export function NewTaskModal() {
         tagIds,
         dueDate: normalizedDueDate,
         plannedDate: plannedDate || null,
-        estimatedMinutes: parsedMinutes,
+        estimatedMinutes: null,
       },
       {
         onSuccess: () => {
           setTitle("");
           setDescription("");
-          setKind("work");
           setPlannedDate("");
           setDueDate("");
-          setEstimatedMinutes("50");
           setPriority("P2");
           setProjectId("");
           setParentTaskId("");
@@ -165,6 +147,14 @@ export function NewTaskModal() {
           />
         </label>
         <div className="form-grid">
+          <label className="form-field">
+            <span>截止时间</span>
+            <input
+              onChange={(event) => setDueDate(event.target.value)}
+              type="datetime-local"
+              value={dueDate}
+            />
+          </label>
           <div className="form-field">
             <span>项目</span>
             <ProjectSelect
@@ -175,83 +165,7 @@ export function NewTaskModal() {
               variant="form"
             />
           </div>
-          <div className="form-field">
-            <span>父任务</span>
-            <TaskSelect
-              ariaLabel="父任务"
-              emptyLabel="无父任务"
-              onChange={setParentTaskId}
-              value={parentTaskId}
-              variant="form"
-            />
-          </div>
         </div>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>计划日期</span>
-            <input
-              onChange={(event) => setPlannedDate(event.target.value)}
-              type="date"
-              value={plannedDate}
-            />
-          </label>
-          <label className="form-field">
-            <span>截止时间</span>
-            <input
-              onChange={(event) => setDueDate(event.target.value)}
-              type="datetime-local"
-              value={dueDate}
-            />
-          </label>
-        </div>
-
-        <div className="form-grid">
-          <label className="form-field">
-            <span>任务类型</span>
-            <select
-              onChange={(event) => setKind(event.target.value as TaskKind)}
-              value={kind}
-            >
-              {taskKinds.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>预计时长</span>
-            <div className="field-with-suffix">
-              <input
-                min="0"
-                onChange={(event) => setEstimatedMinutes(event.target.value)}
-                step="1"
-                type="number"
-                value={estimatedMinutes}
-              />
-              <span>分钟</span>
-            </div>
-          </label>
-        </div>
-        <label className="form-field">
-          <span>验收策略</span>
-          <select
-            aria-label="验收策略"
-            onChange={(event) =>
-              setReviewPolicy(event.target.value as TaskReviewPolicy)
-            }
-            value={reviewPolicy}
-          >
-            <option value="none">无需验收 · 可直接完成</option>
-            <option value="manual">人工验收 · 提交产出后完成</option>
-          </select>
-          <small>
-            {reviewPolicy === "manual"
-              ? "创建后需设置负责人和所有者审核人，提交产出并验收。"
-              : "适合无需单独检查产出的快速任务。"}
-          </small>
-        </label>
         <fieldset className="form-field">
           <legend>优先级</legend>
           <div className="priority-segment">
@@ -274,42 +188,80 @@ export function NewTaskModal() {
             ))}
           </div>
         </fieldset>
-        <div className="form-field">
-          <span>标签</span>
-          <TaskTagPicker
-            disabled={mutation.isPending}
-            enabled={open}
-            onChange={setTagIds}
-            selectedIds={tagIds}
-          />
-        </div>
-        <label className="form-field form-field-last">
+        <label className="form-field">
           <span>描述</span>
           <textarea
             onChange={(event) => setDescription(event.target.value)}
             placeholder="补充任务细节…"
-            rows={4}
+            rows={3}
             value={description}
           />
         </label>
-        <label className="form-field form-field-last">
-          <span>完成标准</span>
-          <textarea
-            maxLength={10_000}
-            onChange={(event) => setCompletionCriteria(event.target.value)}
-            placeholder="写清楚完成后应达到的可验证结果…"
-            rows={3}
-            value={completionCriteria}
-          />
-        </label>
+        <details className="form-more">
+          <summary>更多选项</summary>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>计划日期</span>
+              <input
+                onChange={(event) => setPlannedDate(event.target.value)}
+                type="date"
+                value={plannedDate}
+              />
+            </label>
+            <div className="form-field">
+              <span>父任务</span>
+              <TaskSelect
+                ariaLabel="父任务"
+                emptyLabel="无父任务"
+                onChange={setParentTaskId}
+                value={parentTaskId}
+                variant="form"
+              />
+            </div>
+          </div>
+          <div className="form-field">
+            <span>标签</span>
+            <TaskTagPicker
+              disabled={mutation.isPending}
+              enabled={open}
+              onChange={setTagIds}
+              selectedIds={tagIds}
+            />
+          </div>
+          <label className="form-field">
+            <span>完成标准</span>
+            <textarea
+              maxLength={10_000}
+              onChange={(event) => setCompletionCriteria(event.target.value)}
+              placeholder="写清楚完成后应达到的可验证结果…"
+              rows={3}
+              value={completionCriteria}
+            />
+          </label>
+          <label className="form-field form-field-last">
+            <span>验收策略</span>
+            <select
+              aria-label="验收策略"
+              onChange={(event) =>
+                setReviewPolicy(event.target.value as TaskReviewPolicy)
+              }
+              value={reviewPolicy}
+            >
+              <option value="none">无需验收 · 可直接完成</option>
+              <option value="manual">人工验收 · 提交产出后完成</option>
+            </select>
+            <small>
+              {reviewPolicy === "manual"
+                ? "交给本地 Agent 执行、需要你检查产出时选择。"
+                : "适合无需单独检查产出的任务。"}
+            </small>
+          </label>
+        </details>
         {errorMessage ? (
           <div className="form-error" role="alert">
             {errorMessage}
           </div>
         ) : null}
-        <p className="form-note">
-          任务只会在本地 Sidecar 确认保存后出现在列表中。
-        </p>
       </form>
     </Modal>
   );

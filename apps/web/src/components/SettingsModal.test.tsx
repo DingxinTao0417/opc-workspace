@@ -279,9 +279,9 @@ describe("SettingsModal", () => {
   });
 
   it("saves focus settings and closes", async () => {
+    // The focus page is no longer in the navigation; it opens by module.
+    useUiStore.setState({ settingsOpen: true, settingsModule: "focus" });
     renderSettings();
-
-    fireEvent.click(screen.getByRole("button", { name: "专注" }));
     fireEvent.click(screen.getByRole("button", { name: "增加专注时长" }));
     fireEvent.click(screen.getByRole("switch", { name: "自动开始专注" }));
 
@@ -325,9 +325,9 @@ describe("SettingsModal", () => {
   });
 
   it("discards draft changes when cancelled", () => {
+    // The focus page is no longer in the navigation; it opens by module.
+    useUiStore.setState({ settingsOpen: true, settingsModule: "focus" });
     renderSettings();
-
-    fireEvent.click(screen.getByRole("button", { name: "专注" }));
     fireEvent.click(screen.getByRole("button", { name: "增加休息时长" }));
     expect(useSettingsStore.getState().preview?.focus.breakMinutes).toBe(10);
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -515,8 +515,9 @@ describe("SettingsModal", () => {
         throw new TypeError("network down");
       }),
     );
+    // The focus page is no longer in the navigation; it opens by module.
+    useUiStore.setState({ settingsOpen: true, settingsModule: "focus" });
     renderSettings();
-    fireEvent.click(screen.getByRole("button", { name: "专注" }));
     fireEvent.click(screen.getByRole("button", { name: "增加专注时长" }));
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
@@ -716,14 +717,17 @@ describe("SettingsModal", () => {
   });
 
   it("opens directly on a requested settings module", () => {
-    useUiStore.setState({ settingsOpen: true, settingsModule: "focus" });
+    useUiStore.setState({ settingsOpen: true, settingsModule: "appearance" });
     renderSettings();
 
-    expect(screen.getByRole("heading", { name: "专注" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "专注" })).toHaveAttribute(
+    expect(screen.getByRole("heading", { name: "外观" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "外观" })).toHaveAttribute(
       "data-active",
       "true",
     );
+    // Focus and people are not offered in the navigation.
+    expect(screen.queryByRole("button", { name: "专注" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "人员与责任" })).toBeNull();
   });
 
   it("previews and saves the low-space threshold beside real backup facts", async () => {
@@ -908,9 +912,9 @@ describe("SettingsModal", () => {
           ),
       ),
     );
+    // No longer in the navigation; the module still opens when asked for.
+    useUiStore.setState({ settingsOpen: true, settingsModule: "actors" });
     renderSettings();
-
-    fireEvent.click(screen.getByRole("button", { name: "人员与责任" }));
 
     expect(await screen.findByText("这里只记录责任归属")).toBeTruthy();
     expect(screen.getByText("人员资料通过模块内按钮单独保存")).toBeTruthy();

@@ -7,7 +7,6 @@ import {
   Copy,
   DatabaseBackup,
   Download,
-  Focus,
   FolderOpen,
   ImagePlus,
   Info,
@@ -23,7 +22,6 @@ import {
   Sun,
   Trash2,
   UserRound,
-  UsersRound,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -91,8 +89,6 @@ const modules: { id: SettingsModule; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "个人资料", icon: UserRound },
   { id: "general", label: "通用", icon: Settings2 },
   { id: "appearance", label: "外观", icon: Palette },
-  { id: "focus", label: "专注", icon: Focus },
-  { id: "actors", label: "人员与责任", icon: UsersRound },
   { id: "agent", label: "本地 Agent", icon: Bot },
   { id: "ai", label: "AI 助手", icon: Sparkles },
   { id: "automation", label: "自动化", icon: Zap },
@@ -203,7 +199,6 @@ const defaultRouteOptions: { value: DefaultRoute; label: string }[] = [
   { value: "tasks", label: "任务" },
   { value: "projects", label: "项目" },
   { value: "clients", label: "客户" },
-  { value: "focus", label: "专注" },
 ];
 
 interface StepperProps {

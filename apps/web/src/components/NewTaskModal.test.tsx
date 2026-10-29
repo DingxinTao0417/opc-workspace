@@ -119,4 +119,34 @@ describe("NewTaskModal", () => {
     );
     expect(createTask.mock.calls[0][0]).not.toHaveProperty("status");
   });
+
+  it("asks only for the core fields and folds the rest", () => {
+    render(<NewTaskModal />);
+
+    for (const label of ["任务名称", "截止时间", "项目", "描述"]) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+    expect(screen.queryByLabelText("任务类型")).toBeNull();
+    expect(screen.queryByLabelText("预计时长")).toBeNull();
+    const more = screen.getByText("更多选项").closest("details");
+    expect(more).not.toBeNull();
+    expect(more?.open).toBe(false);
+    expect(more).toContainElement(screen.getByLabelText("验收策略"));
+    expect(more).toContainElement(screen.getByLabelText("父任务"));
+
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "交作业" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "交作业",
+        kind: "work",
+        estimatedMinutes: null,
+        reviewPolicy: "none",
+      }),
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+  });
 });

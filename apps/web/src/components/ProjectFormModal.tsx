@@ -185,17 +185,57 @@ export function ProjectFormModal({
         </label>
 
         <label className="form-field">
+          <span>截止日期</span>
+          <input
+            onChange={(event) => setDueDate(event.target.value)}
+            type="date"
+            value={dueDate}
+          />
+        </label>
+
+        <label className="form-field">
           <span>描述</span>
           <textarea
             maxLength={10_000}
             onChange={(event) => setDescription(event.target.value)}
             placeholder="说明目标、范围和交付边界…"
-            rows={4}
+            rows={3}
             value={description}
           />
         </label>
 
-        <div className="form-grid">
+        <details className="form-more">
+          <summary>更多选项：客户、合同金额、开始日期、颜色</summary>
+          <div className="form-grid">
+            <div className="form-field">
+              <span>客户</span>
+              <ClientSelect
+                ariaLabel="客户"
+                emptyLabel="不关联客户"
+                onChange={setClientId}
+                selectedName={
+                  clientId === project?.clientId
+                    ? project.clientName
+                    : undefined
+                }
+                value={clientId}
+                variant="form"
+              />
+            </div>
+            <label className="form-field">
+              <span>合同金额</span>
+              <div className="field-with-suffix">
+                <input
+                  aria-label="合同金额"
+                  inputMode="decimal"
+                  onChange={(event) => setAmount(event.target.value)}
+                  placeholder="0.00"
+                  value={amount}
+                />
+                <span>元</span>
+              </div>
+            </label>
+          </div>
           <label className="form-field">
             <span>开始日期</span>
             <input
@@ -204,74 +244,33 @@ export function ProjectFormModal({
               value={startDate}
             />
           </label>
-          <label className="form-field">
-            <span>截止日期</span>
-            <input
-              onChange={(event) => setDueDate(event.target.value)}
-              type="date"
-              value={dueDate}
-            />
-          </label>
-        </div>
-
-        <div className="form-grid">
-          <div className="form-field">
-            <span>客户</span>
-            <ClientSelect
-              ariaLabel="客户"
-              emptyLabel="不关联客户"
-              onChange={setClientId}
-              selectedName={
-                clientId === project?.clientId ? project.clientName : undefined
-              }
-              value={clientId}
-              variant="form"
-            />
-          </div>
-          <label className="form-field">
-            <span>合同金额</span>
-            <div className="field-with-suffix">
-              <input
-                aria-label="合同金额"
-                inputMode="decimal"
-                onChange={(event) => setAmount(event.target.value)}
-                placeholder="0.00"
-                value={amount}
-              />
-              <span>元</span>
+          <fieldset className="form-field form-field-last">
+            <legend>颜色标记</legend>
+            <div className="project-color-picker">
+              {projectColors.map((item) => (
+                <button
+                  aria-label={`选择颜色 ${item}`}
+                  aria-pressed={color === item}
+                  className={
+                    color === item
+                      ? "project-color project-color-active"
+                      : "project-color"
+                  }
+                  key={item}
+                  onClick={() => setColor(item)}
+                  style={{ backgroundColor: item }}
+                  type="button"
+                />
+              ))}
             </div>
-          </label>
-        </div>
-
-        <fieldset className="form-field form-field-last">
-          <legend>颜色标记</legend>
-          <div className="project-color-picker">
-            {projectColors.map((item) => (
-              <button
-                aria-label={`选择颜色 ${item}`}
-                aria-pressed={color === item}
-                className={
-                  color === item
-                    ? "project-color project-color-active"
-                    : "project-color"
-                }
-                key={item}
-                onClick={() => setColor(item)}
-                style={{ backgroundColor: item }}
-                type="button"
-              />
-            ))}
-          </div>
-        </fieldset>
+          </fieldset>
+        </details>
 
         {errorMessage ? (
           <div className="form-error" role="alert">
             {errorMessage}
           </div>
         ) : null}
-        <p className="form-note">
-          金额仅作为项目合同信息保存在本地，不会生成收入或发票记录。
-        </p>
       </form>
     </Modal>
   );

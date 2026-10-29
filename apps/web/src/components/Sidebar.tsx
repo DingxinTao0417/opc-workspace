@@ -4,7 +4,6 @@ import {
   CheckSquare2,
   CircleDollarSign,
   FolderKanban,
-  Focus,
   Inbox,
   Map,
   PanelLeftClose,
@@ -63,10 +62,7 @@ const groups: { label: string; items: NavItem[] }[] = [
   },
   {
     label: "执行",
-    items: [
-      { label: "专注", to: "/focus", icon: Focus },
-      { label: "知识库", to: "/knowledge", icon: BookOpenText },
-    ],
+    items: [{ label: "知识库", to: "/knowledge", icon: BookOpenText }],
   },
   {
     label: "规划与内容",

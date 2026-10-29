@@ -844,6 +844,17 @@ export function TaskAgentRunsSection({
     },
   ];
 
+  // Without a usable local Agent and without any run on this Task there is
+  // nothing to act on, so the Task detail does not carry setup instructions.
+  if (
+    setup.problem &&
+    (runsQuery.data?.length ?? 0) === 0 &&
+    !restartRunId &&
+    !reworkRetryId
+  ) {
+    return null;
+  }
+
   return (
     <section className="task-section task-agent-runs">
       {restartRunId ? (

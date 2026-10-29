@@ -978,13 +978,16 @@ describe("CommandPalette", () => {
         <CommandPalette />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByRole("option", { name: /专注设置/ }));
+    fireEvent.click(screen.getByRole("option", { name: /外观设置/ }));
 
     expect(useUiStore.getState()).toMatchObject({
       commandPaletteOpen: false,
       settingsOpen: true,
-      settingsModule: "focus",
+      settingsModule: "appearance",
     });
+    // Focus and people are no longer offered.
+    expect(screen.queryByRole("option", { name: /专注设置/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /人员与责任设置/ })).toBeNull();
   });
 
   it("opens the data and backup settings module directly", () => {
@@ -1033,14 +1036,14 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input).toHaveAttribute(
       "aria-activedescendant",
-      "command-result-settings-focus",
+      "command-result-settings-agent",
     );
 
     fireEvent.keyDown(input, { key: "Enter" });
     expect(useUiStore.getState()).toMatchObject({
       commandPaletteOpen: false,
       settingsOpen: true,
-      settingsModule: "focus",
+      settingsModule: "agent",
     });
   });
 

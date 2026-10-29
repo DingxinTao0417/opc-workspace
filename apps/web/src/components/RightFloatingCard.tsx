@@ -1,7 +1,6 @@
 import "./RightFloatingCard.css";
 import { useQuery } from "@tanstack/react-query";
 import {
-  BellRing,
   BookOpenText,
   Bot,
   CheckSquare2,
@@ -16,7 +15,6 @@ import {
   useAgentRunsQuery,
   useAiEvaluationsQuery,
   useAiProvidersQuery,
-  useActiveFocusSessionQuery,
   useBackupsQuery,
   useHealthQuery,
 } from "../api/hooks";
@@ -36,7 +34,6 @@ export function RightFloatingCard({ inline = false }: { inline?: boolean }) {
   const healthQuery = useHealthQuery();
   const backupsQuery = useBackupsQuery();
   const agentRunsQuery = useAgentRunsQuery({ pageSize: 50 });
-  const focusQuery = useActiveFocusSessionQuery();
   const evaluationsQuery = useAiEvaluationsQuery();
   const providersQuery = useAiProvidersQuery();
   const knowledgeQuery = useQuery({
@@ -59,7 +56,6 @@ export function RightFloatingCard({ inline = false }: { inline?: boolean }) {
   const runningAgents = agentRunMeta?.activeTotal ?? 0;
   const pendingDeliveryAgents = agentRunMeta?.pendingDeliveryTotal ?? 0;
   const doneAgents = agentRunMeta?.succeededTotal ?? 0;
-  const focusSession = focusQuery.data?.session;
   const runningEvaluations = (evaluationsQuery.data?.items ?? []).filter(
     (evaluation) =>
       evaluation.status === "running" || evaluation.status === "queued",
@@ -68,7 +64,6 @@ export function RightFloatingCard({ inline = false }: { inline?: boolean }) {
     (source) => source.status === "indexing",
   ).length;
   const backgroundParts = [
-    focusSession ? "专注" : null,
     runningEvaluations > 0 ? `评测 ${runningEvaluations}` : null,
     indexingSources > 0 ? `索引 ${indexingSources}` : null,
   ].filter(Boolean);
@@ -144,19 +139,6 @@ export function RightFloatingCard({ inline = false }: { inline?: boolean }) {
           <span className="ov-label">运行中作业</span>
           <span className="ov-value">
             {backgroundParts.length > 0 ? backgroundParts.join(" · ") : "无"}
-          </span>
-        </div>
-        <div className="ov-row">
-          <span className="ov-row-icon" aria-hidden="true">
-            <BellRing size={16} />
-          </span>
-          <span className="ov-label">专注会话</span>
-          <span className="ov-value">
-            {focusQuery.isError
-              ? "读取失败"
-              : focusSession
-                ? focusSession.status
-                : "空闲"}
           </span>
         </div>
       </section>

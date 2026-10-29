@@ -26,8 +26,6 @@ import { ApiError } from "../api/client";
 import {
   useInboxStatsQuery,
   useInboxItemsQuery,
-  useActiveFocusSessionQuery,
-  useCreateFocusSession,
   useMoveTaskAcrossPlans,
   useMoveTaskWithinPlan,
   useResetTaskOrder,
@@ -36,8 +34,6 @@ import {
   useTodayTaskGroupsQuery,
   useTodayStatsQuery,
 } from "../api/hooks";
-import { useFocusCycleStore } from "../store/focus";
-import { useSettingsStore } from "../store/settings";
 import { useUiStore } from "../store/ui";
 import { EmptyState, ErrorState, SkeletonRows } from "../components/feedback";
 import { TaskDeleteConfirmModal } from "../components/TaskDeleteConfirmModal";
@@ -106,7 +102,6 @@ const quickActionMessages: Record<string, string> = {
   TASK_REVIEW_REQUIRED: "此任务必须走受控验收流程，不能直接完成。",
   TASK_TRANSITION_NOT_ALLOWED: "任务状态已经变化，请按最新状态重试。",
   VERSION_CONFLICT: "任务已经被更新，最新状态正在刷新，请重试。",
-  ACTIVE_FOCUS_SESSION_EXISTS: "已有专注会话，请先在右侧专注栏处理。",
 };
 
 function quickActionErrorText(error: unknown): string | null {
@@ -240,9 +235,7 @@ export function TodayPage() {
     },
     isToday,
   );
-  const focusQuery = useActiveFocusSessionQuery();
   const lifecycleMutation = useTaskLifecycleCommand();
-  const createFocusMutation = useCreateFocusSession();
   const moveMutation = useMoveTaskWithinPlan();
   const crossPlanMutation = useMoveTaskAcrossPlans();
   const resetOrderMutation = useResetTaskOrder();
@@ -250,8 +243,6 @@ export function TodayPage() {
     null,
   );
   const [dragPreview, setDragPreview] = useState<TodayTaskGroups | null>(null);
-  const focusMinutes = useSettingsStore((state) => state.focusMinutes);
-  const focusPhase = useFocusCycleStore((state) => state.phase);
 
   const riskTotal = riskTasksQuery.data?.meta.total ?? 0;
   const effectiveRiskPageSize = Math.max(
@@ -359,26 +350,16 @@ export function TodayPage() {
   const crossPlanWarning = crossPlanMutation.data?.orderWarnings.length
     ? `任务已改期；${crossPlanMutation.data.orderWarnings.join("、")}，当前已刷新为服务端实际顺序。`
     : null;
-  const quickActionError =
-    quickActionErrorText(lifecycleMutation.error) ??
-    quickActionErrorText(createFocusMutation.error);
+  const quickActionError = quickActionErrorText(lifecycleMutation.error);
   const quickActionPendingId = lifecycleMutation.isPending
     ? (lifecycleMutation.variables?.id ?? null)
-    : createFocusMutation.isPending
-      ? (createFocusMutation.variables?.taskId ?? null)
-      : null;
+    : null;
   const quickActionsDisabled =
     lifecycleMutation.isPending ||
-    createFocusMutation.isPending ||
     orderMutationPending ||
     (riskFilter !== null
       ? !riskListReady
       : taskGroupsQuery.isFetching || !reorderReady);
-  const focusActionDisabled =
-    !focusQuery.isSuccess ||
-    focusQuery.isFetching ||
-    Boolean(focusQuery.data?.session) ||
-    focusPhase !== "idle";
   const serverGroups = taskGroupsQuery.data ?? {
     overdue: [],
     today: [],
@@ -523,7 +504,6 @@ export function TodayPage() {
     event.dataTransfer.dropEffect = "move";
   };
   const runLifecycleAction = (task: Task, action: "start" | "complete") => {
-    createFocusMutation.reset();
     crossPlanMutation.reset();
     lifecycleMutation.reset();
     lifecycleMutation.mutate({
@@ -531,23 +511,10 @@ export function TodayPage() {
       input: { action, expectedVersion: task.version },
     });
   };
-  const startFocus = (task: Task) => {
-    lifecycleMutation.reset();
-    createFocusMutation.reset();
-    crossPlanMutation.reset();
-    if (focusActionDisabled) return;
-    createFocusMutation.mutate({
-      taskId: task.id,
-      plannedSeconds: focusMinutes * 60,
-    });
-  };
   const taskQuickActionProps = {
-    focusActionDisabled:
-      focusActionDisabled || (riskFilter !== null && !riskListReady),
     onDeleteTask: setDeletingTask,
     onEditTask: (task: Task) => setTaskDetailId(task.id),
     onCompleteTask: (task: Task) => runLifecycleAction(task, "complete"),
-    onStartFocus: startFocus,
     onStartTask: (task: Task) => runLifecycleAction(task, "start"),
     quickActionPendingId,
     quickActionsDisabled,
@@ -623,11 +590,7 @@ export function TodayPage() {
         <div className="page-actions">
           <AiIssueHandoffButton
             content={todayPlanningHandoff(dateKey, timeZone, riskFilter)}
-            disabled={
-              dateNavigationLocked ||
-              lifecycleMutation.isPending ||
-              createFocusMutation.isPending
-            }
+            disabled={dateNavigationLocked || lifecycleMutation.isPending}
             label="梳理今日安排"
           />
           <button
@@ -816,15 +779,10 @@ export function TodayPage() {
         </div>
       ) : null}
 
-      {lifecycleMutation.isPending ||
-      createFocusMutation.isPending ||
-      quickActionError ? (
+      {lifecycleMutation.isPending || quickActionError ? (
         <div className="task-order-banner today-order-status">
           {lifecycleMutation.isPending ? (
             <span role="status">正在更新任务状态…</span>
-          ) : null}
-          {createFocusMutation.isPending ? (
-            <span role="status">正在开始专注…</span>
           ) : null}
           {quickActionError ? (
             <span className="task-batch-error" role="alert">
