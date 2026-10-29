@@ -15,8 +15,12 @@ export interface GeneralSettingValue {
   closeToTray: boolean;
 }
 
+/** Interface zoom in percent; the desktop shell scales the main view. */
+export type AppearanceFontScale = 90 | 100 | 110 | 125;
+
 export interface AppearanceSettingValue {
   theme: "light" | "dark";
+  fontScale: AppearanceFontScale;
 }
 
 export interface StorageSettingValue {

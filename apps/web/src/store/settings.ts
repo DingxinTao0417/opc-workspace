@@ -40,6 +40,11 @@ export interface FocusSettings {
 
 export type AppearanceTheme = "light" | "dark";
 
+/** Interface zoom in percent, applied to the main view by the desktop shell. */
+export type FontScale = 90 | 100 | 110 | 125;
+
+export const FONT_SCALES: readonly FontScale[] = [90, 100, 110, 125];
+
 export type DefaultRoute = "today" | "tasks" | "projects" | "clients" | "focus";
 
 export interface GeneralSettings {
@@ -59,11 +64,13 @@ export interface SettingsPreview {
   general: GeneralSettings;
   profile: ProfileSettings;
   theme: AppearanceTheme;
+  fontScale: FontScale;
 }
 
 interface SettingsState
   extends FocusSettings, GeneralSettings, ProfileSettings {
   theme: AppearanceTheme;
+  fontScale: FontScale;
   preview: SettingsPreview | null;
   setSettings: (settings: Partial<FocusSettings>) => void;
   setGeneralSettings: (settings: Partial<GeneralSettings>) => void;
@@ -87,6 +94,8 @@ export const DEFAULT_FOCUS_SETTINGS: FocusSettings = {
 };
 
 export const DEFAULT_THEME: AppearanceTheme = "dark";
+
+export const DEFAULT_FONT_SCALE: FontScale = 100;
 
 export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   defaultRoute: "today",
@@ -122,6 +131,15 @@ export function sanitizeAppearanceTheme(
   fallback: AppearanceTheme = DEFAULT_THEME,
 ): AppearanceTheme {
   return value === "light" || value === "dark" ? value : fallback;
+}
+
+export function sanitizeFontScale(
+  value: unknown,
+  fallback: FontScale = DEFAULT_FONT_SCALE,
+): FontScale {
+  return FONT_SCALES.includes(value as FontScale)
+    ? (value as FontScale)
+    : fallback;
 }
 
 function sanitizeDefaultRoute(
@@ -239,6 +257,7 @@ export const useSettingsStore = create<SettingsState>()(
       ...DEFAULT_GENERAL_SETTINGS,
       ...DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      fontScale: DEFAULT_FONT_SCALE,
       preview: null,
       setSettings: (settings) =>
         set((state) => sanitizeFocusSettings(settings, state)),
@@ -262,6 +281,7 @@ export const useSettingsStore = create<SettingsState>()(
             ...sanitizeGeneralSettings(settings.general, state),
             ...nextProfile,
             theme: sanitizeAppearanceTheme(settings.theme, state.theme),
+            fontScale: sanitizeFontScale(settings.fontScale, state.fontScale),
             preview: null,
           };
         }),
@@ -272,6 +292,7 @@ export const useSettingsStore = create<SettingsState>()(
             general: pickGeneralSettings(state),
             profile: pickProfileSettings(state),
             theme: state.theme,
+            fontScale: state.fontScale,
           },
         })),
       setPreview: (settings) =>
@@ -293,6 +314,10 @@ export const useSettingsStore = create<SettingsState>()(
               settings.theme,
               state.preview?.theme ?? state.theme,
             ),
+            fontScale: sanitizeFontScale(
+              settings.fontScale,
+              state.preview?.fontScale ?? state.fontScale,
+            ),
           },
         })),
       commitPreview: () =>
@@ -303,6 +328,7 @@ export const useSettingsStore = create<SettingsState>()(
                 ...state.preview.general,
                 ...state.preview.profile,
                 theme: state.preview.theme,
+                fontScale: state.preview.fontScale,
                 preview: null,
               }
             : state,
@@ -314,6 +340,7 @@ export const useSettingsStore = create<SettingsState>()(
           ...DEFAULT_GENERAL_SETTINGS,
           ...DEFAULT_PROFILE_SETTINGS,
           theme: DEFAULT_THEME,
+          fontScale: DEFAULT_FONT_SCALE,
           preview: null,
         }),
     }),
@@ -403,6 +430,7 @@ export function readLegacySettingsSnapshot(
     general: DEFAULT_GENERAL_SETTINGS,
     profile: DEFAULT_PROFILE_SETTINGS,
     theme: DEFAULT_THEME,
+    fontScale: DEFAULT_FONT_SCALE,
   };
   try {
     const raw = storage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
@@ -420,6 +448,8 @@ export function readLegacySettingsSnapshot(
       general: sanitizeGeneralSettings(state),
       profile: sanitizeProfileSettings(state),
       theme: sanitizeAppearanceTheme((state as Record<string, unknown>).theme),
+      // The legacy cache predates the font scale.
+      fontScale: DEFAULT_FONT_SCALE,
     };
   } catch {
     return fallback;

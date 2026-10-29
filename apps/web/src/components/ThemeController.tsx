@@ -1,4 +1,5 @@
-import { useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
+import { setInterfaceZoom } from "../api/desktop";
 import { type AppearanceTheme, useSettingsStore } from "../store/settings";
 
 export function applyTheme(theme: AppearanceTheme) {
@@ -17,6 +18,9 @@ export function ThemeController() {
   const reduceMotion = useSettingsStore(
     (state) => state.preview?.general.reduceMotion ?? state.reduceMotion,
   );
+  const fontScale = useSettingsStore(
+    (state) => state.preview?.fontScale ?? state.fontScale,
+  );
 
   useLayoutEffect(() => {
     applyTheme(theme);
@@ -25,6 +29,12 @@ export function ThemeController() {
   useLayoutEffect(() => {
     applyReduceMotion(reduceMotion);
   }, [reduceMotion]);
+
+  useEffect(() => {
+    // A refused or unavailable zoom leaves the view as it is; the stored
+    // preference is unaffected.
+    void setInterfaceZoom(fontScale).catch(() => undefined);
+  }, [fontScale]);
 
   return null;
 }

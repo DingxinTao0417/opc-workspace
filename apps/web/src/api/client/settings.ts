@@ -82,12 +82,16 @@ function normalizeAppSettingValue(key: AppSettingKey, value: unknown) {
     }
     case "appearance":
       if (
-        !hasExactKeys(value, ["theme"]) ||
-        (value.theme !== "light" && value.theme !== "dark")
+        !hasExactKeys(value, ["theme", "font_scale"]) ||
+        (value.theme !== "light" && value.theme !== "dark") ||
+        (value.font_scale !== 90 &&
+          value.font_scale !== 100 &&
+          value.font_scale !== 110 &&
+          value.font_scale !== 125)
       ) {
         return invalidResponse("外观设置响应值无效");
       }
-      return { theme: value.theme };
+      return { theme: value.theme, fontScale: value.font_scale };
     case "focus": {
       if (
         !hasExactKeys(value, [
@@ -286,7 +290,13 @@ function serializeAppSettingUpdate(update: AppSettingUpdate) {
         },
       };
     case "appearance":
-      return { ...base, value: { theme: update.value.theme } };
+      return {
+        ...base,
+        value: {
+          theme: update.value.theme,
+          font_scale: update.value.fontScale,
+        },
+      };
     case "focus":
       return {
         ...base,

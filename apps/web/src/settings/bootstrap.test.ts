@@ -69,7 +69,7 @@ function payload(storedKeys: string[] = []): Untyped {
         },
         {
           key: "appearance",
-          value: { theme: "dark" },
+          value: { theme: "dark", font_scale: 100 },
           schema_version: 2,
           ...meta("appearance"),
         },
@@ -106,6 +106,7 @@ const legacy: LegacySettingsSnapshot = {
     avatarDataUrl: "data:image/png;base64,AA==",
   },
   theme: "light",
+  fontScale: 100,
 };
 
 describe("settings bootstrap", () => {
@@ -138,7 +139,7 @@ describe("settings bootstrap", () => {
       {
         key: "appearance",
         expectedVersion: 0,
-        value: { theme: "light" },
+        value: { theme: "light", fontScale: 100 },
       },
       {
         key: "focus",
@@ -161,6 +162,7 @@ describe("settings bootstrap", () => {
       },
       general: DEFAULT_GENERAL_SETTINGS,
       theme: "dark",
+      fontScale: 100,
       focus: DEFAULT_FOCUS_SETTINGS,
     });
   });
@@ -220,7 +222,7 @@ describe("settings bootstrap", () => {
           reduce_motion: false,
           close_to_tray: true,
         };
-        migrated.data.items[2].value = { theme: "light" };
+        migrated.data.items[2].value = { theme: "light", font_scale: 100 };
         migrated.data.items[3].value = {
           focus_minutes: 25,
           break_minutes: 5,

@@ -24,6 +24,7 @@ mod file_operation_security;
 mod file_recovery_record;
 mod global_shortcuts;
 mod host_shell;
+mod interface_zoom;
 mod process_job;
 mod sidecar;
 mod startup_restore;
@@ -47,6 +48,7 @@ use global_shortcuts::{
     DesktopShortcutRegistry, desktop_shortcut_status, handle_global_shortcut,
     register_global_shortcuts,
 };
+use interface_zoom::set_interface_zoom;
 use sidecar::{
     SidecarManager, initialize_sidecar, open_log_directory, restart_application, sidecar_status,
 };
@@ -111,6 +113,7 @@ pub fn run() {
                 desktop_shortcut_status,
                 desktop_capabilities,
                 set_close_to_tray_enabled,
+                set_interface_zoom,
                 open_external_browser,
                 close_external_browser,
                 browser_snapshot,

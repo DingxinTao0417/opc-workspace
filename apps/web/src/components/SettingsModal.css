@@ -104,6 +104,66 @@
   padding: 16px;
 }
 
+.settings-font-scale-group {
+  margin-top: 12px;
+  padding: 16px;
+}
+
+.settings-font-scale-group > h4 {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.font-scale-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.font-scale-option {
+  display: flex;
+  min-height: 76px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.font-scale-option:hover {
+  border-color: var(--border-hover);
+  background: var(--panel-hover);
+  color: var(--text);
+}
+
+.font-scale-option[data-selected="true"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent-light);
+}
+
+.font-scale-sample {
+  font-weight: 600;
+  line-height: 1;
+}
+
+.font-scale-option small {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
 .settings-avatar-row {
   display: flex;
   align-items: center;
@@ -817,6 +877,10 @@
 
   .appearance-options {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .font-scale-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .settings-select-row,

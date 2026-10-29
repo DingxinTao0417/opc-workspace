@@ -1,6 +1,7 @@
 import { act, cleanup, render } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_FONT_SCALE,
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
   DEFAULT_PROFILE_SETTINGS,
@@ -9,6 +10,12 @@ import {
 } from "../store/settings";
 import { ThemeController } from "./ThemeController";
 
+const desktop = vi.hoisted(() => ({
+  setInterfaceZoom: vi.fn(async () => true),
+}));
+
+vi.mock("../api/desktop", () => desktop);
+
 describe("ThemeController", () => {
   beforeEach(() => {
     useSettingsStore.setState({
@@ -16,8 +23,10 @@ describe("ThemeController", () => {
       ...DEFAULT_GENERAL_SETTINGS,
       ...DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      fontScale: DEFAULT_FONT_SCALE,
       preview: null,
     });
+    desktop.setInterfaceZoom.mockClear();
   });
 
   afterEach(() => {
@@ -58,19 +67,32 @@ describe("ThemeController", () => {
         general: { ...DEFAULT_GENERAL_SETTINGS, reduceMotion: true },
         profile: DEFAULT_PROFILE_SETTINGS,
         theme: "light",
+        fontScale: 125,
       });
     });
 
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.documentElement.dataset.reduceMotion).toBe("true");
+    expect(desktop.setInterfaceZoom).toHaveBeenLastCalledWith(125);
     expect(useSettingsStore.getState()).toMatchObject({
       theme: "dark",
       reduceMotion: false,
+      fontScale: 100,
     });
 
     act(() => useSettingsStore.getState().cancelPreview());
 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(document.documentElement.dataset.reduceMotion).toBe("false");
+    expect(desktop.setInterfaceZoom).toHaveBeenLastCalledWith(100);
+  });
+
+  it("scales the interface to the saved font size", () => {
+    render(<ThemeController />);
+    expect(desktop.setInterfaceZoom).toHaveBeenLastCalledWith(100);
+
+    act(() => useSettingsStore.setState({ fontScale: 110 }));
+
+    expect(desktop.setInterfaceZoom).toHaveBeenLastCalledWith(110);
   });
 });

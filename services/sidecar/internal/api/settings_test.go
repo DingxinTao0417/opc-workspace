@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -81,7 +82,7 @@ func TestSettingsGetReturnsUnstoredServiceDefaults(t *testing.T) {
 	if string(settingItemForTest(t, response, "workspace").Value) != `{"display_name":"opc-workspace","avatar_ref":null}` {
 		t.Fatalf("workspace default = %s", settingItemForTest(t, response, "workspace").Value)
 	}
-	if string(settingItemForTest(t, response, "appearance").Value) != `{"theme":"dark"}` {
+	if string(settingItemForTest(t, response, "appearance").Value) != `{"theme":"dark","font_scale":100}` {
 		t.Fatalf("appearance default = %s", settingItemForTest(t, response, "appearance").Value)
 	}
 	if string(settingItemForTest(t, response, "general").Value) != `{"default_route":"today","show_right_overview":true,"reduce_motion":false,"close_to_tray":true}` {
@@ -161,7 +162,7 @@ func TestSettingsPatchUpdatesWithOptimisticVersion(t *testing.T) {
 		t.Fatalf("update appearance = %d: %s", update.Code, update.Body.String())
 	}
 	item := settingItemForTest(t, decodeSettingsResponseForTest(t, update.Body.Bytes()), "appearance")
-	if item.Version != 2 || string(item.Value) != `{"theme":"light"}` {
+	if item.Version != 2 || string(item.Value) != `{"theme":"light","font_scale":100}` {
 		t.Fatalf("updated appearance = %#v", item)
 	}
 	conflict := performRequest(router, http.MethodPatch, "/api/v1/settings", []byte(`{"updates":[{"key":"appearance","expected_version":1,"value":{"theme":"dark"}}]}`), nil)
@@ -203,6 +204,31 @@ func TestSettingsPatchRollsBackWholeBatchOnConflict(t *testing.T) {
 	}
 }
 
+// The font scale joined the appearance setting without a schema change: a row
+// written before it reads as 100, and a chosen step is kept.
+func TestSettingsAppearanceFontScale(t *testing.T) {
+	router, store := newSettingsTestAPI(t)
+	if err := store.DB.Exec(`INSERT INTO app_settings(key, schema_version, value_json, version, updated_by_actor_id, updated_at)
+		VALUES ('appearance', 2, '{"theme":"light"}', 1, ?, '2026-10-01T00:00:00Z')`, models.BuiltinOwnerActorID).Error; err != nil {
+		t.Fatal(err)
+	}
+	read := performRequest(router, http.MethodGet, "/api/v1/settings", nil, nil)
+	if item := settingItemForTest(t, decodeSettingsResponseForTest(t, read.Body.Bytes()), "appearance"); string(item.Value) != `{"theme":"light","font_scale":100}` {
+		t.Fatalf("stored appearance without a scale = %s", item.Value)
+	}
+	for version, scale := range []int{90, 110, 125, 100} {
+		body := fmt.Sprintf(`{"updates":[{"key":"appearance","expected_version":%d,"value":{"theme":"light","font_scale":%d}}]}`, version+1, scale)
+		update := performRequest(router, http.MethodPatch, "/api/v1/settings", []byte(body), nil)
+		if update.Code != http.StatusOK {
+			t.Fatalf("font_scale %d = %d: %s", scale, update.Code, update.Body.String())
+		}
+		item := settingItemForTest(t, decodeSettingsResponseForTest(t, update.Body.Bytes()), "appearance")
+		if want := fmt.Sprintf(`{"theme":"light","font_scale":%d}`, scale); string(item.Value) != want {
+			t.Fatalf("font_scale %d stored as %s", scale, item.Value)
+		}
+	}
+}
+
 func TestSettingsPatchRejectsUnknownSensitiveAndInvalidValues(t *testing.T) {
 	router, _ := newSettingsTestAPI(t)
 	tests := []struct {
@@ -222,6 +248,9 @@ func TestSettingsPatchRejectsUnknownSensitiveAndInvalidValues(t *testing.T) {
 		{name: "invalid focus bound", body: `{"updates":[{"key":"focus","expected_version":0,"value":{"focus_minutes":3,"break_minutes":5,"cycles":4,"auto_start_break":true,"auto_start_focus":false,"sound_enabled":true}}]}`},
 		{name: "invalid storage threshold", body: `{"updates":[{"key":"storage","expected_version":0,"value":{"low_space_threshold_gib":0}}]}`},
 		{name: "unknown top field", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark"}}],"token":"secret"}`},
+		{name: "unsupported font scale", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark","font_scale":150}}]}`},
+		{name: "null font scale", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark","font_scale":null}}]}`},
+		{name: "fractional font scale", body: `{"updates":[{"key":"appearance","expected_version":0,"value":{"theme":"dark","font_scale":1.1}}]}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

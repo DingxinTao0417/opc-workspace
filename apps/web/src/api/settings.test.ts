@@ -41,7 +41,7 @@ const validPayload = (): Untyped => ({
       },
       {
         key: "appearance",
-        value: { theme: "dark" },
+        value: { theme: "dark", font_scale: 100 },
         schema_version: 2,
         version: 0,
         stored: false,
@@ -311,7 +311,7 @@ describe("settings API", () => {
             {
               key: "appearance",
               expected_version: 0,
-              value: { theme: "light" },
+              value: { theme: "light", font_scale: 110 },
             },
             {
               key: "focus",
@@ -342,7 +342,11 @@ describe("settings API", () => {
     await expect(getAppSettings()).resolves.toMatchObject({ schemaVersion: 2 });
     await expect(
       updateAppSettings([
-        { key: "appearance", expectedVersion: 0, value: { theme: "light" } },
+        {
+          key: "appearance",
+          expectedVersion: 0,
+          value: { theme: "light", fontScale: 110 },
+        },
         {
           key: "focus",
           expectedVersion: 1,

@@ -70,7 +70,7 @@ function storedSettingsPayload() {
         },
         {
           key: "appearance",
-          value: { theme: "light" },
+          value: { theme: "light", font_scale: 110 },
           ...metadata,
         },
         {
@@ -160,6 +160,7 @@ describe("SettingsBootstrap", () => {
       focusMinutes: 25,
       cycles: 3,
       theme: "light",
+      fontScale: 110,
     });
     expect(desktopApi.setCloseToTrayEnabled).toHaveBeenCalledWith(false);
   });

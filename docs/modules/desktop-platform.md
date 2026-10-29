@@ -543,6 +543,7 @@ H5-E35 为智能体请求的当前 Chromium 标签动作补充本地回执：只
 - desktop_shortcut_status：只返回两个固定原生快捷键的 `registered / unavailable` 状态。
 - desktop_capabilities：只返回托盘、原生通知、自启、原生文件对话框和离线更新的 `available / unavailable / not_implemented` 白名单枚举；当前只有托盘可在初始化成功后为 available。
 - set_close_to_tray_enabled：只接受 `enabled: bool`，更新当前进程内的关闭决策；持久事实仍由 SQLite `app_settings.general.close_to_tray` 拥有，启动与设置预览负责同步。
+- set_interface_zoom（2026-10-29）：只接受 `percent: u16` 且必须是 90、100、110、125 之一，把调用它的可信主 WebView 缩放到对应比例；持久事实由 `app_settings.appearance.font_scale` 拥有，启动与设置预览负责同步。不影响内嵌浏览器子视图的页面缩放。
 - open_external_browser / close_external_browser：保留的独立原生窗口接口；右侧浏览器已经改用下述原生多标签命令，不再调用它们。
 - browser_snapshot / browser_create_tab / browser_activate_tab / browser_close_tab / browser_navigate / browser_action / browser_capture_page_text / browser_set_layout：Windows 智能体右侧内嵌浏览器，契约见下一节。
 

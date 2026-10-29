@@ -125,7 +125,7 @@ function settingsPayload(): Untyped {
         },
         {
           key: "appearance",
-          value: { theme: "dark" },
+          value: { theme: "dark", font_scale: 100 },
           schema_version: 2,
           version: 1,
           stored: true,
@@ -264,6 +264,7 @@ describe("SettingsModal", () => {
       ...DEFAULT_GENERAL_SETTINGS,
       ...DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      fontScale: 100,
       preview: null,
     });
     useUiStore.setState({ settingsOpen: true, settingsModule: "general" });
@@ -351,6 +352,45 @@ describe("SettingsModal", () => {
       expect(useSettingsStore.getState().theme).toBe("light"),
     );
     expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("previews and saves the font size with the theme", async () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "外观" }));
+    const group = screen.getByRole("radiogroup", { name: "字体大小" });
+    expect(screen.getByRole("radio", { name: /标准/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(group.querySelectorAll('[role="radio"]')).toHaveLength(4);
+    fireEvent.click(screen.getByRole("radio", { name: /^大/ }));
+    expect(useSettingsStore.getState()).toMatchObject({
+      fontScale: 100,
+      preview: { fontScale: 110 },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(useSettingsStore.getState().fontScale).toBe(110),
+    );
+    expect(useSettingsStore.getState().preview).toBeNull();
+  });
+
+  it("restores the saved font size when preview is cancelled", () => {
+    renderSettings();
+
+    fireEvent.click(screen.getByRole("button", { name: "外观" }));
+    fireEvent.click(screen.getByRole("radio", { name: /特大/ }));
+    expect(useSettingsStore.getState().preview?.fontScale).toBe(125);
+
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    expect(useSettingsStore.getState()).toMatchObject({
+      fontScale: 100,
+      preview: null,
+    });
   });
 
   it("restores the persisted theme when preview is cancelled", () => {
@@ -934,6 +974,7 @@ describe("SettingsModal", () => {
       general: DEFAULT_GENERAL_SETTINGS,
       profile: DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      fontScale: 100,
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "打开任务" }));

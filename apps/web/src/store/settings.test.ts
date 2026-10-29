@@ -139,13 +139,16 @@ describe("focus settings", () => {
       general: { ...DEFAULT_GENERAL_SETTINGS, showRightOverview: false },
       profile: { ...DEFAULT_PROFILE_SETTINGS, displayName: "Dingxin Tao" },
       theme: "light",
+      fontScale: 125,
     });
 
     expect(useSettingsStore.getState()).toMatchObject({
       focusMinutes: 50,
       showRightOverview: true,
       theme: "dark",
+      fontScale: 100,
       preview: {
+        fontScale: 125,
         focus: { focusMinutes: 65 },
         general: { showRightOverview: false },
         profile: { displayName: "Dingxin Tao" },
@@ -160,6 +163,7 @@ describe("focus settings", () => {
       showRightOverview: false,
       displayName: "Dingxin Tao",
       theme: "light",
+      fontScale: 125,
       preview: null,
     });
   });
@@ -206,6 +210,7 @@ describe("focus settings", () => {
         avatarDataUrl: "data:image/png;base64,AA==",
       },
       theme: "light",
+      fontScale: 100,
     });
     clearLegacySettings(storage);
     expect(storage.getItem(LEGACY_SETTINGS_STORAGE_KEY)).toBeNull();
@@ -248,6 +253,7 @@ describe("focus settings", () => {
         avatarDataUrl: null,
       },
       theme: "light",
+      fontScale: 110,
     });
 
     expect(useSettingsStore.getState()).toMatchObject({
@@ -255,6 +261,7 @@ describe("focus settings", () => {
       defaultRoute: "projects",
       displayName: "Server Workspace",
       theme: "light",
+      fontScale: 110,
       preview: null,
     });
   });

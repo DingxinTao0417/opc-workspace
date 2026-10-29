@@ -377,6 +377,7 @@ describe("FocusPage", () => {
       general: DEFAULT_GENERAL_SETTINGS,
       profile: DEFAULT_PROFILE_SETTINGS,
       theme: DEFAULT_THEME,
+      fontScale: 100,
     });
     mocks.taskQuery.data = [
       { id: "task-1", title: "整理交付", status: "todo" },

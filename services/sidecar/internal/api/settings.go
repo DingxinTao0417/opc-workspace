@@ -40,7 +40,15 @@ type generalSettingValue struct {
 
 type appearanceSettingValue struct {
 	Theme string `json:"theme"`
+	// FontScale is the interface zoom in percent. It was added without a
+	// schema change: a stored value without it reads as 100.
+	FontScale int `json:"font_scale"`
 }
+
+// appearanceFontScales are the offered interface zoom steps, in percent.
+var appearanceFontScales = map[int]struct{}{90: {}, 100: {}, 110: {}, 125: {}}
+
+const defaultAppearanceFontScale = 100
 
 type focusSettingValue struct {
 	FocusMinutes   int  `json:"focus_minutes"`
@@ -317,18 +325,29 @@ func normalizeSettingValue(key string, raw json.RawMessage) (string, error) {
 		}
 		return marshalSettingObject(value)
 	case "appearance":
-		var value appearanceSettingValue
-		if err := decodeSettingObject(trimmed, &value); err != nil {
+		var input struct {
+			Theme     string `json:"theme"`
+			FontScale *int   `json:"font_scale"`
+		}
+		if err := decodeSettingObject(trimmed, &input); err != nil {
 			return "", err
 		}
 		if err := requireSettingFields(trimmed, "theme"); err != nil {
 			return "", err
 		}
-		if err := requireNonNullSettingFields(trimmed, "theme"); err != nil {
+		// font_scale may be absent (older rows) but never null.
+		if err := requireNonNullSettingFields(trimmed, "theme", "font_scale"); err != nil {
 			return "", err
 		}
-		if value.Theme != "light" && value.Theme != "dark" {
+		if input.Theme != "light" && input.Theme != "dark" {
 			return "", errors.New("theme must be light or dark")
+		}
+		value := appearanceSettingValue{Theme: input.Theme, FontScale: defaultAppearanceFontScale}
+		if input.FontScale != nil {
+			if _, ok := appearanceFontScales[*input.FontScale]; !ok {
+				return "", errors.New("font_scale must be 90, 100, 110 or 125")
+			}
+			value.FontScale = *input.FontScale
 		}
 		return marshalSettingObject(value)
 	case "focus":
@@ -427,7 +446,7 @@ func defaultSettingValue(key string) string {
 	case "general":
 		value = generalSettingValue{DefaultRoute: "today", ShowRightOverview: true, ReduceMotion: false, CloseToTray: true}
 	case "appearance":
-		value = appearanceSettingValue{Theme: "dark"}
+		value = appearanceSettingValue{Theme: "dark", FontScale: defaultAppearanceFontScale}
 	case "focus":
 		value = focusSettingValue{FocusMinutes: 50, BreakMinutes: 5, Cycles: 4, AutoStartBreak: true, AutoStartFocus: false, SoundEnabled: true}
 	case "storage":

@@ -191,6 +191,21 @@ export async function setCloseToTrayEnabled(
   return true;
 }
 
+/**
+ * Scales the trusted main view to the chosen font size, in percent. Outside
+ * the desktop shell the preference is only stored.
+ */
+export async function setInterfaceZoom(
+  percent: number,
+  invokeCommand?: InvokeCommand,
+): Promise<boolean> {
+  if (!invokeCommand && !isDesktopRuntime()) return false;
+  const invoke =
+    invokeCommand ?? (await import("@tauri-apps/api/core")).invoke<unknown>;
+  await invoke("set_interface_zoom", { percent });
+  return true;
+}
+
 export async function openExternalBrowserWindow(
   url: string,
   invokeCommand?: InvokeCommand,

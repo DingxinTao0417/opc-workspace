@@ -51,6 +51,7 @@ import {
   DEFAULT_FOCUS_SETTINGS,
   DEFAULT_GENERAL_SETTINGS,
   DEFAULT_PROFILE_SETTINGS,
+  DEFAULT_FONT_SCALE,
   DEFAULT_THEME,
   getAppearanceTheme,
   getFocusSettings,
@@ -60,6 +61,7 @@ import {
   sanitizeGeneralSettings,
   sanitizeProfileSettings,
   type AppearanceTheme,
+  type FontScale,
   type DefaultRoute,
   type FocusSettings,
   type GeneralSettings,
@@ -194,6 +196,13 @@ function groupStorageCapacityPoints(points: StorageCapacityHistoryPoint[]) {
   return [...groups.entries()];
 }
 
+const fontScaleOptions: { value: FontScale; label: string }[] = [
+  { value: 90, label: "小" },
+  { value: 100, label: "标准" },
+  { value: 110, label: "大" },
+  { value: 125, label: "特大" },
+];
+
 const defaultRouteOptions: { value: DefaultRoute; label: string }[] = [
   { value: "today", label: "今日工作台" },
   { value: "tasks", label: "任务" },
@@ -317,6 +326,8 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     DEFAULT_PROFILE_SETTINGS,
   );
   const [themeDraft, setThemeDraft] = useState<AppearanceTheme>(DEFAULT_THEME);
+  const [fontScaleDraft, setFontScaleDraft] =
+    useState<FontScale>(DEFAULT_FONT_SCALE);
   const [storageThresholdDraft, setStorageThresholdDraft] = useState(
     DEFAULT_LOW_SPACE_THRESHOLD_GIB,
   );
@@ -405,6 +416,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setGeneralDraft(getGeneralSettings());
     setProfileDraft(getProfileSettings());
     setThemeDraft(currentTheme);
+    setFontScaleDraft(useSettingsStore.getState().fontScale);
     setAvatarError(null);
     setAvatarFile(null);
     setAvatarOperation("unchanged");
@@ -443,7 +455,8 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     general: GeneralSettings,
     profile: ProfileSettings,
     theme: AppearanceTheme,
-  ) => setPreview({ focus, general, profile, theme });
+    fontScale: FontScale = fontScaleDraft,
+  ) => setPreview({ focus, general, profile, theme, fontScale });
 
   const queueCloseToTrayPreview = (enabled: boolean) => {
     closeToTrayPreviewQueue.current = closeToTrayPreviewQueue.current
@@ -609,6 +622,17 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     previewSettings(focusDraft, generalDraft, profileDraft, theme);
   };
 
+  const previewFontScale = (fontScale: FontScale) => {
+    setFontScaleDraft(fontScale);
+    previewSettings(
+      focusDraft,
+      generalDraft,
+      profileDraft,
+      themeDraft,
+      fontScale,
+    );
+  };
+
   const restoreDefaults = () => {
     if (activeModule === "data") {
       setStorageThresholdDraft(DEFAULT_LOW_SPACE_THRESHOLD_GIB);
@@ -623,6 +647,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
     setGeneralDraft(DEFAULT_GENERAL_SETTINGS);
     setProfileDraft(DEFAULT_PROFILE_SETTINGS);
     setThemeDraft(DEFAULT_THEME);
+    setFontScaleDraft(DEFAULT_FONT_SCALE);
     setStorageThresholdDraft(DEFAULT_LOW_SPACE_THRESHOLD_GIB);
     setAvatarError(null);
     setAvatarFile(null);
@@ -638,6 +663,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
       DEFAULT_GENERAL_SETTINGS,
       DEFAULT_PROFILE_SETTINGS,
       DEFAULT_THEME,
+      DEFAULT_FONT_SCALE,
     );
     queueCloseToTrayPreview(DEFAULT_GENERAL_SETTINGS.closeToTray);
     navigate(`/${DEFAULT_GENERAL_SETTINGS.defaultRoute}`);
@@ -679,11 +705,12 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         value: nextGeneral,
       });
     }
-    if (!sameValue({ theme: themeDraft }, currentAppearance.value)) {
+    const nextAppearance = { theme: themeDraft, fontScale: fontScaleDraft };
+    if (!sameValue(nextAppearance, currentAppearance.value)) {
       updates.push({
         key: "appearance",
         expectedVersion: currentAppearance.version,
-        value: { theme: themeDraft },
+        value: nextAppearance,
       });
     }
     if (!sameValue(nextFocus, currentFocus.value)) {
@@ -898,7 +925,7 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
         <>
           <header className="settings-content-header">
             <h3>外观</h3>
-            <p>选择工作区的颜色主题，点击选项可立即预览。</p>
+            <p>选择工作区的颜色主题和字体大小，点击选项可立即预览。</p>
           </header>
           <div className="settings-group settings-appearance-group">
             <div
@@ -937,6 +964,39 @@ export function SettingsModal({ onSettingsSaved }: SettingsModalProps) {
             </div>
             <p className="settings-inline-note">
               点击后立即预览但不会写入本地；保存后生效，取消则恢复原主题。
+            </p>
+          </div>
+          <div className="settings-group settings-font-scale-group">
+            <h4>字体大小</h4>
+            <div
+              aria-label="字体大小"
+              className="font-scale-options"
+              role="radiogroup"
+            >
+              {fontScaleOptions.map((option) => (
+                <button
+                  aria-checked={fontScaleDraft === option.value}
+                  className="font-scale-option"
+                  data-selected={fontScaleDraft === option.value}
+                  key={option.value}
+                  onClick={() => previewFontScale(option.value)}
+                  role="radio"
+                  type="button"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="font-scale-sample"
+                    style={{ fontSize: `${option.value * 0.14}px` }}
+                  >
+                    Aa
+                  </span>
+                  <span>{option.label}</span>
+                  <small>{option.value}%</small>
+                </button>
+              ))}
+            </div>
+            <p className="settings-inline-note">
+              文字与界面一起等比缩放，内嵌浏览器的网页不受影响。浏览器开发模式只保存偏好，不会缩放。
             </p>
           </div>
         </>

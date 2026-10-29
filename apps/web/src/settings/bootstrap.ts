@@ -32,6 +32,7 @@ export function committedSettingsFromServer(
     },
     general: getAppSetting(settings, "general").value,
     theme: getAppSetting(settings, "appearance").value.theme,
+    fontScale: getAppSetting(settings, "appearance").value.fontScale,
     focus: getAppSetting(settings, "focus").value,
   };
 }
@@ -119,7 +120,7 @@ export function legacySettingUpdates(
     updates.push({
       key: "appearance",
       expectedVersion: 0,
-      value: { theme: legacy.theme },
+      value: { theme: legacy.theme, fontScale: legacy.fontScale },
     });
   }
   const focus = getAppSetting(settings, "focus");
